@@ -365,8 +365,28 @@ Rubraview treats collections of media as first-class citizens:
 - **Quick Collections & Bookmarks**:
   - `Insert` or `Ctrl+D`: Instant addition of active image to "Favorites" or temporary scratchpad playlist.
   - Bookmark persistence: Remembers the last viewed file index and timestamp within long playlists.
+### 3.13 Interactive Image Editing & Adjustment Panel
+Rubraview incorporates a streamlined, non-destructive editing workbench accessible via hotkey `E` or the `[ ✏ Edit ]` Metro tile:
+- **Real-Time Dual-Layer Architecture**:
+  - *Preview Layer (Direct2D GPU Shaders)*: Sliders for exposure, contrast, tone curves, and filters modify Direct2D effect parameters directly. This yields instant 60–144 FPS visual feedback with 0% CPU pixel recalculation.
+  - *Commit Layer (C23 Core Engine)*: When the user clicks "Apply" (`Enter`) or "Save Copy" (`Ctrl+S`), the core engine executes the exact math on the persistent `rv_pixbuf_t` buffer.
+- **Color & Tone Controls**:
+  - Sliders: Exposure ($\pm 3.0\,EV$), Brightness ($\pm 100$), Contrast ($\pm 100$), Saturation ($\pm 100$), Color Temperature (Warm/Cool), Tint (Green/Magenta).
+- **Interactive Color Graph & Tone Curves (`rv_curves`)**:
+  - Direct2D-rendered spline curve widget with interactive control points.
+  - Channel selection: Composite RGB, Red, Green, Blue, or Luminance.
+  - Live 256-bin histogram background behind the curve.
+  - Levels controls: Black Point, Midtone (Gamma), White Point sliders.
+- **Threshold & Luminance-Based Auto-Crop**:
+  - **Auto Border Trim**: Scans image edges and crops away uniform white ($\text{Lum} \ge 245$) or black ($\text{Lum} \le 15$) margins, ideal for cleaning scanned manga pages, documents, and screen captures.
+  - **Manual Rectangle Crop**: Draggable bounding box overlay with aspect-ratio locks (Free, 1:1, 4:3, 16:9, Original).
+- **Spatial Filters & Resizing**:
+  - **Gaussian Blur & Box Blur**: Adjustable radius ($\sigma = 0.5$ to $50.0\text{ px}$).
+  - **Unsharp Mask (Sharpen)**: Adjustable Amount ($0\sim 300\%$), Radius ($0.5\sim 10.0\text{ px}$), and Threshold ($0\sim 255$) to sharpen edges without amplifying photographic sensor grain.
+  - **Resize**: Target pixel width/height with aspect ratio lock, or percentage scaling ($10\%\sim 500\%$) using Lanczos-3, Bicubic, Bilinear, or Nearest Neighbor.
 
 ---
+
 
 ## 4. Canvas & Rendering Pipeline
 
@@ -456,23 +476,67 @@ typedef struct rv_pixbuf {
 } rv_pixbuf_t;
 ```
 
-### 6.1 Color Adjustments
-- **Brightness & Exposure**: Linear scaling in non-linear sRGB creates color distortion. Rubraview converts sRGB to linear RGB via a lookup table (LUT), applies exposure scale $C_{linear}' = C_{linear} \cdot 2^{EV}$, and converts back.
-- **Contrast**: $C' = (C - 0.5) \cdot \text{factor} + 0.5$.
-- **Hue & Saturation**: RGB to HSL transform, delta adjustment, and HSL to RGB reconstitution.
+### 6.1 Color & Tone Adjustments
+- **Linearized Exposure Math**:
+  - Processing color directly in non-linear sRGB creates hue shifting and muddy midtones. Rubraview converts 8-bit sRGB to linear float via a 256-entry lookup table (LUT):
+    $$C_{linear} = \text{LUT}_{srgb\_to\_linear}[C_{srgb}]$$
+  - Exposure scaling is applied in linear space:
+    $$C_{linear}' = C_{linear} \cdot 2^{EV}$$
+  - Result is converted back to sRGB via a fast inverse table.
+- **Contrast & Gamma**:
+  - Contrast: $C' = \text{clamp}((C - 0.5) \cdot \text{factor} + 0.5, 0.0, 1.0)$ where $\text{factor} = \tan((contrast + 100) \cdot \frac{\pi}{400})$.
+  - Gamma correction: $C' = C^{1/\gamma}$ for midtone compression or expansion.
+- **HSL / HSV Color Balance**:
+  - RGB to HSL transform allows isolating Hue, Saturation, and Lightness independently.
+  - Temperature & Tint: Modifies Red/Blue balance (Kelvin shift) and Green/Magenta balance.
 
-### 6.2 Resampling Filters
+### 6.2 Tone Curves & Histogram Pipeline
+- **Spline-Based Tone Curve (`rv_curves`)**:
+  - Supports Monotone Cubic Spline (Fritsch-Carlson) interpolation through user control points $(x_0, y_0), \dots, (x_k, y_k)$, guaranteeing no overshoot or unnatural oscillations.
+  - Generates a 256-entry transformation LUT applied with $O(1)$ per pixel:
+    $$\text{pixel}_{out} = \text{LUT}_{curve}[\text{pixel}_{in}]$$
+  - Multi-channel support: Master (RGB), Red, Green, Blue, or Luminance channel.
+- **Histogram & Levels Generator**:
+  - Computes 256-bin histograms for R, G, B, and Luminance channels in a single vectorized pass.
+  - Levels Tool calculates Black Point $B$, Midtone $\gamma$, and White Point $W$:
+    $$V_{out} = 255 \cdot \left(\text{clamp}\left(\frac{V_{in} - B}{W - B}, 0, 1\right)\right)^{1/\gamma}$$
+
+### 6.3 Threshold & Luminance-Based Auto-Crop Engine
+- **Border Trim / Scan Margin Auto-Crop (`rv_crop_autotrim`)**:
+  - Scans pixel luminance $Y = 0.2126R + 0.7152G + 0.0722B$ along image borders.
+  - Identifies bounding boxes of meaningful content by advancing inward from Top, Bottom, Left, and Right until scanlines deviate from the background threshold:
+    - *White Margins* (scanned manga / documents): Scanlines where $> 98\%$ of pixels have $Y \ge T_{white}$ (default 245).
+    - *Black Margins* (letterboxed screenshots / video stills): Scanlines where $> 98\%$ of pixels have $Y \le T_{black}$ (default 15).
+  - Produces a non-destructive cropped sub-buffer `rv_pixbuf_sub()` or rewrites the buffer in-place.
+- **Arbitrary Rectangular Crop**:
+  - Sub-pixel coordinate bounding box $[x, y, w, h]$ with optional aspect-ratio constraints (1:1, 4:3, 16:9, 16:10, Original).
+
+### 6.4 Spatial Filtering & Edge Enhancement
+Convolutions are executed over separable 1D kernels where possible to reduce complexity from $O(W \cdot H \cdot K^2)$ to $O(W \cdot H \cdot 2K)$:
+- **Gaussian Blur**:
+  - Separable 1D kernel $G(x) = \frac{1}{\sqrt{2\pi}\sigma} e^{-\frac{x^2}{2\sigma^2}}$ truncated at radius $r = \lceil 3\sigma \rceil$.
+  - Multi-threaded horizontal pass writes to temporary row buffer, followed by vertical pass writing to destination.
+- **Box Blur**:
+  - Moving-average accumulator filter with $O(1)$ complexity per pixel independent of radius, providing lightning-fast previews.
+- **Unsharp Mask (Sharpening)**:
+  - High-pass edge amplification:
+    $$\text{Diff} = \text{Original} - \text{Gaussian}(\text{Original}, \sigma)$$
+    $$\text{Output} = \begin{cases} \text{Original} + \text{Amount} \cdot \text{Diff} & \text{if } |\text{Diff}| \ge \text{Threshold} \\ \text{Original} & \text{otherwise} \end{cases}$$
+  - The threshold parameter prevents amplifying smooth surfaces or image sensor noise.
+- **Laplacian Edge Sharpening**:
+  - 3x3 convolution with kernel $\begin{bmatrix} 0 & -1 & 0 \\ -1 & 5 & -1 \\ 0 & -1 & 0 \end{bmatrix}$ for instant micro-contrast enhancement.
+
+### 6.5 Resampling Engine
 High-quality resizing is essential for both display and batch export:
-1. **Nearest Neighbor**: Fast preview and pixel-art rendering.
-2. **Bilinear**: Standard 2x2 interpolation.
-3. **Bicubic**: Catmull-Rom cubic spline filtering (sharp edges without ringing).
-4. **Lanczos-3**: Windowed sinc filter ($\text{sinc}(x) \cdot \text{sinc}(x/3)$) with radius $r=3$, delivering optimal sharpness for downsampling large photographs.
-
-### 6.3 Spatial Filtering
-Convolutions are executed over separable kernels where possible ($O(K)$ per pixel instead of $O(K^2)$):
-- **Gaussian Blur**: Separable 1D horizontal pass followed by 1D vertical pass.
-- **Unsharp Mask (Sharpening)**: $\text{Sharpened} = \text{Original} + \alpha \cdot (\text{Original} - \text{Blurred})$.
-- **Edge Detection**: Sobel or Laplacian 3x3 convolution matrix.
+1. **Nearest Neighbor**: Fast preview and pixel-perfect retro/sprite art rendering ($O(1)$ per target pixel).
+2. **Bilinear**: Standard 2x2 area-weighted interpolation.
+3. **Bicubic**: Catmull-Rom cubic spline filtering ($\alpha = -0.5$) with 4x4 sample window:
+   $$W(x) = \begin{cases} 1.5|x|^3 - 2.5|x|^2 + 1 & \text{for } |x| \le 1 \\ -0.5|x|^3 + 2.5|x|^2 - 4|x| + 2 & \text{for } 1 < |x| \le 2 \\ 0 & \text{otherwise} \end{cases}$$
+4. **Lanczos-3**: Windowed sinc filter with radius $r=3$:
+   $$L(x) = \begin{cases} \text{sinc}(x) \cdot \text{sinc}(x/3) & \text{for } -3 < x < 3 \\ 0 & \text{otherwise} \end{cases}$$
+   Delivers the gold standard in sharp, artifact-free downsampling of large photographs.
+5. **Multi-Threaded Tiled Resampling**:
+   - The destination image is divided into horizontal stripes (e.g. 64 scanlines each) dispatched to the `proven` worker thread pool, maximizing cache locality and utilizing all CPU cores during batch exports.
 
 ---
 
