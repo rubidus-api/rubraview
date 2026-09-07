@@ -1,22 +1,22 @@
 CC ?= gcc
 CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
+LDFLAGS ?= -lm
 
-SRCS_CORE = src/core/pixbuf.c
+SRCS_CORE = src/core/pixbuf.c src/core/color.c
 SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/src/proven/memory.c \
               vendor/proven/src/proven/panic.c \
               vendor/proven/platform/proven_sys_mem.c
 
-TEST_SRCS = tests/test_pixbuf.c
-TEST_BINS = build/tests/test_pixbuf
+TEST_BINS = build/tests/test_pixbuf build/tests/test_color
 
 .PHONY: all test check clean win64
 
 all: test
 
-$(TEST_BINS): $(TEST_SRCS) $(SRCS_CORE) $(SRCS_PROVEN)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PROVEN)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="

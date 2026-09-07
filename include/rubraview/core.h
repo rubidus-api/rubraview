@@ -50,6 +50,32 @@ uint8_t *rv_pixbuf_at(const rv_pixbuf_t *pb, int32_t x, int32_t y);
  */
 void rv_pixbuf_clear(rv_pixbuf_t *pb, uint32_t color_hex);
 
+/**
+ * Return bytes per pixel for a given pixel format.
+ */
+int32_t rv_bytes_per_pixel(rv_pixel_format_t fmt);
+
+/**
+ * Deep clone a pixel buffer into the specified memory arena.
+ */
+rv_pixbuf_t rv_pixbuf_clone(proven_arena_t *arena, const rv_pixbuf_t *src);
+
+/**
+ * Create a non-owning subview into a rectangular region of src.
+ * Shares the underlying pixel buffer with an adjusted pointer and parent stride.
+ */
+rv_pixbuf_t rv_pixbuf_subview(const rv_pixbuf_t *src, int32_t x, int32_t y, int32_t w, int32_t h);
+
+/**
+ * Extract a rectangular subregion into a tightly packed newly allocated pixbuf in arena.
+ */
+rv_pixbuf_t rv_pixbuf_crop(proven_arena_t *arena, const rv_pixbuf_t *src, int32_t x, int32_t y, int32_t w, int32_t h);
+
+/**
+ * Convert a pixel buffer between formats (RGBA8, BGRA8, GRAY8) into arena.
+ */
+rv_pixbuf_t rv_pixbuf_convert(proven_arena_t *arena, const rv_pixbuf_t *src, rv_pixel_format_t dst_format);
+
 #ifdef __cplusplus
 }
 #endif
