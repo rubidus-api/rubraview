@@ -157,6 +157,14 @@ Users can filter the active sequence without moving files:
   - `Space`: Pause / Resume auto-advance.
   - User interaction (mouse hover, pinch zoom, pan) temporarily freezes the advance timer until the viewport is released.
 
+#### 3.2.6 Mixed Media Slideshow & Playlist Synchronization
+When a sequence contains a heterogeneous mix of still images, animated images (GIF, Animated WebP, APNG), audio tracks, and video clips:
+- **Still Images**: Play strictly for the user-configured slide show interval ($T_{slide}$, e.g. 3.0s or granular 0.1s~300s).
+- **Video Files (`.mp4`, `.mkv`, `.webm`, `.avi`, `.wmv`, etc.)**: The slide show **plays the video in its entirety from start to finish** ($0:00 \rightarrow T_{duration}$), and advances to the next playlist item only after the video finishes playback.
+- **Animated Images (GIF / WebP / APNG)**: Advance only after completing at least one full animation cycle ($\max(T_{slide}, T_{cycle})$), ensuring animations are not abruptly cut off.
+- **Playlist Loop Synchronicity**:
+  - The playlist loop policy (`Loop All`, `Play Once`, `Repeat Single Item`) applies uniformly across both images and video files. When `Loop All` is active, reaching the end of the folder or playlist seamlessly cycles back to the first media item.
+
 ### 3.3 Intelligent Multi-Page & Book Reading Layouts
 For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview implements an intelligent layout engine (`rv_layout_engine`):
 
@@ -495,6 +503,33 @@ To keep `rubraview.exe` completely standalone, FFmpeg shared libraries are resol
   - Normalizes arbitrary sample rates (8 kHz up to 192 kHz) to the system mixer rate (typically 48 kHz 32-bit float).
 - **Buffer Ring & Underrun Prevention**:
   - Decoded audio samples populate an internal circular ring buffer (`prv_ring_t`). A high-priority event-driven audio thread feeds WASAPI buffers smoothly with zero pops or audio stuttering.
+
+### 5.5 A-B Looping Subsystem (Section Repeat)
+A-B Looping is a core multimedia feature in Rubraview for studying video clips, analyzing motion, or repeating animated sequences:
+- **Intuitive Point Setting & Release**:
+  - **Set Point A**: Pressing `[` or `A` locks the current playback timestamp as the loop start point ($T_A$).
+  - **Set Point B**: Pressing `]` or `B` locks the current playback timestamp as the loop end point ($T_B$, where $T_B > T_A$). Playback immediately begins looping between $T_A$ and $T_B$.
+  - **Clear Loop**: Pressing `\` or `C` (or the `[Clear Loop]` Metro tile) instantly clears the loop markers and resumes continuous full-length playback.
+- **Low-Latency Loop Engine**:
+  - When the playback clock reaches $T_B$, the decoder immediately flushes audio/video packet queues and performs a precise seek back to $T_A$ (`av_seek_frame` with forward demuxing), maintaining uninterrupted audio/video synchronicity with minimal latency.
+- **Seekbar Timeline Visualization**:
+  - The seek scrubber HUD draws prominent high-contrast brackets (`[ A` and `B ]`) and shades the active loop region, displaying the exact timestamps (e.g. `[01:14.200 - 01:28.500]`).
+
+### 5.6 Video Viewport Fit Modes & Interactive Real-Time Wheel Zoom
+Video playback in Rubraview adheres to the exact same canvas principles as still images:
+- **Deterministic Video Fit Modes**:
+  - `RV_FIT_WINDOW`: Scales video proportionally to fit completely inside the window; letterbox/pillarbox as necessary (Default).
+  - `RV_FIT_WIDTH`: Matches video width to window width; if video height exceeds window, user can vertically scroll/pan.
+  - `RV_FIT_HEIGHT`: Matches video height to window height; if video width exceeds window, user can horizontally scroll/pan.
+  - `RV_FIT_STRETCH`: Stretches video to fill the entire window surface, ignoring aspect ratio.
+  - `RV_FIT_ACTUAL_SIZE`: 1:1 original pixel mapping (1 video pixel = 1 monitor pixel).
+  - `RV_FIT_SMART`: If video dimensions exceed window, scale down to fit inside; if smaller, display at 100% original size to prevent blurry upscaling.
+- **Live Wheel Zoom & Drag Pan During Active Playback**:
+  - Users can zoom in and out of a video using the mouse wheel (or touch pinch gesture) **in real time while the video is playing**.
+  - When zoomed in, clicking and dragging with the mouse (or touch drag) pans the video viewport freely across the active video surface without pausing playback.
+  - Zoom and pan operations modify only the Direct2D affine transformation matrix $\mathbf{M}$ on the GPU, incurring 0% CPU decoding overhead.
+- **Strict Window Stability Invariant**:
+  - Starting a video, changing videos, toggling fit modes, or zooming in/out **NEVER resizes or repositions the outer application window**.
 
 ---
 
