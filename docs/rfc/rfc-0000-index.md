@@ -6,4 +6,4 @@ Routine accepted behavior belongs in root `SPEC.md`. Accepted decisions belong i
 
 | RFC | Title | Status | Summary | Detail |
 |---|---|---|---|---|
-| RFC-0001 | Rubraview Architecture and Multimedia Pipeline | Accepted | Layered WinAPI/Direct2D architecture, WIC native codecs, dynamic FFmpeg video bridge, and portable C23 core engine. | docs/rfc/rfc-0001-rubraview-architecture.md |
+| RFC-0001 | Rubraview Architecture and Multimedia Pipeline | Accepted | Layered WinAPI/Direct2D architecture, WIC native codecs, dynamic FFmpeg video bridge, multi-page/book modes, fit options, slide show, and batch engine. | docs/rfc/rfc-0001-rubraview-architecture.md |
