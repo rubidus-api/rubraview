@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+fail() {
+  printf '%s\n' "project-check: $*" >&2
+  exit 1
+}
+
+if [ -x scripts/check-tools.sh ]; then
+  scripts/check-tools.sh
+fi
+
+has_git=0
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  has_git=1
+  git status --short >/dev/null
+  git diff --check
+else
+  printf '%s\n' "project-check: note: no git metadata; version-control checks skipped"
+fi
+
+# The default context (AGENTS.md + CONTEXT.md) must stay within budget.
+if [ -x scripts/context-budget.sh ]; then
+  scripts/context-budget.sh || fail "default context over budget"
+fi
+
+if command -v rg >/dev/null 2>&1; then
+  private_pattern='(/ho''me/|/Us''ers/|/m''nt/|ssh -''i|BEGIN[[:space:]][A-Z0-9[:space:]]*PRI''VATE[[:space:]]KEY)'
+  # data: URI 로 박은 글꼴·이미지(base64)는 그 알파벳 탓에 경로처럼 보인다 --- 오탐이다
+  hits=$(rg -n "$private_pattern" . --glob '!.git/**' | grep -v ';base64,' || true)
+  [ -z "$hits" ] || { printf '%s\n' "$hits"; fail "private path or key-like pattern found"; }
+fi
+
+# 작업공간 공용 검사가 있으면 함께 돌린다 --- 추적 파일과(인자를 주면) 빌드 산출물에서
+# 이 기계의 절대 경로와 인증서 꼴을 찾는다. 없으면 조용히 건너뛴다.
+# 그 자리에서 옳은 문자열은 저장소 뿌리의 .privacy-allow 에 한 줄씩 적는다.
+privacy="$(cd "$(dirname "$0")/.." && pwd)/../usr/bin/check-privacy"
+if [ "$has_git" -eq 1 ] && [ -x "$privacy" ]; then
+  "$privacy" || fail "local paths or credentials in the repository"
+fi
+
+if command -v find >/dev/null 2>&1; then
+  for script in $(find scripts -type f -name '*.sh' 2>/dev/null | sort); do
+    first=$(sed -n '1p' "$script")
+    case "$first" in
+      *bash*) command -v bash >/dev/null 2>&1 || fail "bash is required for $script"; bash -n "$script" ;;
+      *) sh -n "$script" ;;
+    esac
+  done
+fi
+
+printf '%s\n' "project-check: ok"
