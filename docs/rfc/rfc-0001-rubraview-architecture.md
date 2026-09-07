@@ -14,11 +14,14 @@ Modern Windows image and media viewers often suffer from two extremes:
 1. **Bloated Electron/C++ frameworks**: Excessive memory footprints (hundreds of megabytes), sluggish startup times, and complex dependency graphs.
 2. **Outdated legacy GDI viewers**: CPU-bound software rendering (`StretchBlt`) causing jittery 20-30 FPS zooming and panning on 4K/8K displays, lack of modern codec support, and brittle monolithic codebases.
 
-**Rubraview** (`rubraview`) resolves these issues by delivering a lightweight, zero-bloat, high-performance multimedia viewer and batch image processing tool designed with:
+**Rubraview** (`rubraview`) resolves these issues by delivering a lightweight, zero-bloat, high-performance multimedia viewer, comic reader, and batch image processing tool designed with:
 - **Pure C23 Foundation**: Structured upon memory arenas, string slices, and dynamic arrays provided by a vendored snapshot of `proven_c_lib`.
 - **Zero-Dependency Native Image Subsystem**: Leveraging the **Windows Imaging Component (WIC)** for decoding/encoding JPEG, PNG, WebP, GIF, TIFF, BMP, and ICO without linking external image libraries (`libpng`, `libjpeg`, etc.).
 - **Hardware-Accelerated Canvas**: Utilizing **Direct2D (D2D1) / Direct3D 11** for butter-smooth 60–144 FPS pan, sub-pixel zoom, and real-time shader-based image adjustments (exposure, contrast, saturation, blur, sharpen).
 - **Universal Multimedia Engine**: An isolated Platform Abstraction Layer (PAL) with an **FFmpeg C API (`libavcodec`, `libavformat`, `libswscale`)** dynamic bridge, providing playback, frame-accurate seeking, and frame capture across any video format.
+- **Touch-Friendly & Remote-Desktop Optimized UI**: High-contrast, Metro-style square tile controls designed for effortless thumb tapping on mobile devices over Remote Desktop (RDP), free of laggy animations.
+- **Direct Comic Archive Ingestion**: Seamless streaming of `.cbz`, `.cbr`, and `.cb7` archives directly into memory without disk extraction.
+- **Intelligent Aspect-Ratio & Spread Adaptation**: Context-aware book/dual-page engine that intelligently detects pre-merged 2-page scans and automatically adapts between landscape and portrait window orientations.
 - **Dual-Mode Headless Core**: Image filters, geometric transformations, and batch pipelines exist in portable C23 modules that run and test natively on Linux hosts while compiling to native Windows binaries via MinGW-w64 on the `linux-build` build environment.
 
 ---
@@ -31,7 +34,9 @@ Rubraview is strictly organized into four decoupled layers:
 +-------------------------------------------------------------------------+
 |                       Application Layer (GUI / CLI)                     |
 |  - Win32 Window Procedure (WndProc), Raw Message Pump                   |
-|  - Custom Dark UI Controls (Toolbar, Canvas Viewport, Filmstrip)        |
+|  - Metro-Style Square Tile Touch UI (Large Finger-Tappable Controls)    |
+|  - Keyboard-First Command Dispatcher (100% Keyboard Operable)           |
+|  - Multi-touch Gestures (Pinch-to-zoom, Drag-to-pan via WM_GESTURE)     |
 |  - Modal Dialogs (Batch Processor, Settings, Exif Inspector, Playlist)  |
 |  - Headless CLI Driver (`rubraview.exe --batch ...`)                    |
 +-------------------------------------------------------------------------+
@@ -40,8 +45,8 @@ Rubraview is strictly organized into four decoupled layers:
 +-------------------------------------------------------------------------+
 |                  Presentation & Rendering Layer (Direct2D)              |
 |  - ID2D1Factory, ID2D1HwndRenderTarget / ID2D1DeviceContext             |
-|  - Sub-pixel Pan/Zoom Viewport Matrix Transformations                   |
-|  - Multi-Page Viewport Compositor (Single, Dual, Book / Spread)         |
+|  - Sub-pixel Pan/Zoom Viewport Matrix Transformations (Fixed Window)    |
+|  - Intelligent Multi-Page Compositor (Single, Dual, Book / Manga)       |
 |  - Direct2D Built-in Effect Graph (Real-time Shader Adjustments)        |
 |  - DirectWrite Font Rendering for On-Screen Display (OSD) & Exif Info   |
 +-------------------------------------------------------------------------+
@@ -51,8 +56,9 @@ Rubraview is strictly organized into four decoupled layers:
 |                  Platform Abstraction Layer (PAL)                       |
 |  - `rv_image_io`: WIC Decoder/Encoder (Windows) / Portable Host Stubs   |
 |  - `rv_video_io`: FFmpeg Decoder Bridge (libav* dynamic loader)         |
-|  - `rv_sysio`: Native directory enumeration & file watching             |
-|  - `rv_threadpool`: Multi-threaded job dispatching                      |
+|  - `rv_archive_io`: In-memory CBZ (ZIP), CBR (RAR), CB7 (7z) Streams    |
+|  - `rv_sysio`: Native directory enumeration & natural alphanumeric sort |
+|  - `rv_threadpool`: Pre-caching worker threads & batch job dispatching  |
 +-------------------------------------------------------------------------+
                                    |
                                    v
@@ -62,6 +68,7 @@ Rubraview is strictly organized into four decoupled layers:
 |  - Color Space Math: sRGB <-> Linear, HSL, Exposure, Contrast, Gamma    |
 |  - Spatial Filters: Gaussian Blur, Laplacian Sharpen, 3x3/5x5 Kernel    |
 |  - Resampling Kernels: Nearest, Bilinear, Bicubic (Catmull-Rom), Lanczos|
+|  - Layout Engine (`rv_layout_engine`): Intelligent Spread & AR Matcher  |
 |  - Batch Execution Engine: Job Queue, Worker Scheduling, Multi-file I/O |
 |  - Playlist & Collection Manager: Mixed Media Sequences, RVLIST / M3U8  |
 +-------------------------------------------------------------------------+
@@ -77,23 +84,29 @@ Rubraview is strictly organized into four decoupled layers:
 
 ### Invariants:
 1. **Core Independence**: Code inside `src/core/` MUST NOT include `<windows.h>`, `<d2d1.h>`, or any OS-specific header. It must compile on both Linux `gcc`/`clang` and Windows MinGW-w64.
-2. **Codec Decoupling**: The GUI layer interacts only with the abstract `rv_pixbuf_t` and `rv_video_stream_t` interfaces, never directly calling WIC or FFmpeg COM/C APIs.
-3. **Memory Ownership**: All temporary buffers allocated during single-frame rendering or batch conversions are managed via `prv_arena_t` instances, ensuring zero heap fragmentation and deterministic teardown.
+2. **Window Stability Invariant**: The desktop window size is strictly owned and controlled by the user or OS window manager. Loading an image or altering zoom levels **MUST NEVER change the window dimensions**.
+3. **Codec Decoupling**: The GUI layer interacts only with abstract pixel buffers (`rv_pixbuf_t`), video streams (`rv_video_stream_t`), and archive streams (`rv_archive_t`).
+4. **Memory Ownership**: All temporary buffers allocated during single-frame rendering, archive decompression, or batch conversions are managed via `prv_arena_t` instances, ensuring zero heap fragmentation and deterministic teardown.
 
 ---
 
 ## 3. Detailed Functional Specifications & Viewing Modes
 
-This section defines the core user-facing and processing features of Rubraview.
+This section defines the user-facing and processing features of Rubraview.
 
 ### 3.1 Image Viewing & Navigation Subsystem
-- **Core Viewport**: Interactive virtual canvas supporting continuous pan (mouse drag), sub-pixel zoom centered at mouse cursor (mouse wheel / touchpad gesture), and keyboard navigation (`Arrow keys`, `PageUp`/`PageDown`, `Space`/`Backspace`, `Home`/`End`).
+- **Interactive Viewport**:
+  - Continuous drag panning when an image is zoomed in.
+  - Sub-pixel zoom centered precisely at mouse cursor position or multi-touch pinch centroid.
+  - Smooth 60–144 Hz refresh rate without screen tearing.
 - **File & Directory Traversal**:
   - Automatically indexes sibling media files when an image is opened.
-  - Asynchronous background pre-caching: Decodes the next and previous 2 images into memory arenas in worker threads, achieving instantaneous zero-latency page flips.
   - Natural alphanumeric sorting (e.g. `img1.jpg`, `img2.jpg`, `img10.jpg`), sort by date modified, or sort by file size.
+- **Asynchronous Pre-caching Pipeline**:
+  - Background worker thread decodes the next 2 images and previous 1 image into memory arenas ahead of time.
+  - Page-flip navigation operates with instantaneous 0ms perceived latency.
 - **Filmstrip & Thumbnail Bar**:
-  - Collapsible bottom filmstrip showing thumbnails rendered asynchronously via WIC low-resolution thumbnail extraction.
+  - Collapsible bottom filmstrip showing thumbnails extracted asynchronously via WIC low-resolution decoders.
 - **On-Screen Display (OSD)**:
   - Non-intrusive DirectWrite overlay displaying file name, resolution, file size, zoom percentage, current index / total count, and color bit-depth. Automatically fades out after 2 seconds of inactivity.
 
@@ -108,10 +121,10 @@ This section defines the core user-facing and processing features of Rubraview.
   - Direct2D hardware-accelerated transitions: Instant cut, Cross-fade (alpha blend), Slide left/right, Zoom-in fade.
 - **Interactive Control**:
   - `Space`: Pause / Resume.
-  - Mouse hover or zoom interaction temporarily pauses the auto-advance timer until the user returns to the default viewport state.
+  - Mouse hover, zoom, or pan interaction temporarily pauses the auto-advance timer until the user returns to the default viewport state.
 
-### 3.3 Multi-Page & Book Reading Layouts
-For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview provides three layout topologies:
+### 3.3 Intelligent Multi-Page & Book Reading Layouts
+For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview implements an intelligent layout engine (`rv_layout_engine`):
 
 ```
 1. Single Page Mode:
@@ -141,19 +154,29 @@ For viewing comic books, manga, scanned documents, and multi-page albums, Rubrav
    +-----------+-----------+
    |  [Page 3] |  [Page 2] | (Right-to-Left: Manga)
    +-----------+-----------+
+
+4. Pre-merged Spread Handling:
+   If an image is already scanned as a wide 2-page spread (AR >= 1.15):
+   +-----------------------+
+   |  [ Page 4 & Page 5 ]  |  <-- Rendered full-width alone;
+   +-----------------------+      NOT paired with Page 6!
 ```
 
-1. **Single Page Mode (`RV_PAGE_LAYOUT_SINGLE`)**: Standard single-image centered viewport.
+1. **Single Page Mode (`RV_PAGE_LAYOUT_SINGLE`)**: Standard centered view.
 2. **Dual Page Mode (`RV_PAGE_LAYOUT_DUAL`)**:
-   - Renders two consecutive images side-by-side separated by a configurable gutter (0 to 16 pixels).
+   - Renders two consecutive images side-by-side with a configurable gutter (0 to 16 pixels).
    - Page flip advances by 2 pages.
-   - Dual-page auto-activation: Optionally activated only when the window aspect ratio is wider than 1.4:1.
 3. **Book / Manga Mode (`RV_PAGE_LAYOUT_BOOK`)**:
-   - **Cover Page Exception**: Page 1 (cover) is displayed as a single page (or right-aligned in RTL mode). Starting from page 2, pages are paired as two-page spreads (2–3, 4–5, 6–7).
+   - **Cover Page 1 Exception**: Page 1 (cover) is displayed as a standalone single page. Starting from page 2, pages are paired as two-page spreads (2–3, 4–5, 6–7).
    - **Reading Direction Toggle**:
      - *Left-to-Right (LTR)*: Page $N$ on Left, Page $N+1$ on Right (standard Western books, comics).
      - *Right-to-Left (RTL)*: Page $N$ on Right, Page $N+1$ on Left (Japanese/Korean manga, Eastern reading order).
-   - **Wide Spread Detection**: If a single image has an aspect ratio $\ge 1.2$ (a pre-scanned two-page spread), the layout compositor automatically displays it across the full dual width as a single item without pairing it with the next page.
+4. **Intelligent Pre-merged Spread Detection**:
+   - In manga and comic book releases, some chapters contain pre-stitched two-page spreads (aspect ratio $W/H \ge 1.15$).
+   - The layout engine detects $AR \ge 1.15$ and automatically displays the spread as a single full-width item without pairing it with the next page, preventing misalignment of all subsequent page pairings.
+5. **Intelligent Window Orientation Adaptation**:
+   - The engine continuously monitors the window aspect ratio $AR_{win} = W_{win} / H_{win}$.
+   - **Portrait Window Auto-Collapse**: When viewed on a smartphone held vertically over Remote Desktop ($AR_{win} < 1.0$), displaying two portrait pages side-by-side creates tiny, unreadable postage-stamp images. The layout engine dynamically collapses Book/Dual mode into **Single Page Fit-to-Width** mode. When the user rotates the device to landscape ($AR_{win} \ge 1.3$), it automatically resumes side-by-side dual spreads.
 
 ### 3.4 Viewport Fit & Alignment Modes
 Rubraview implements six deterministic viewport fitting modes (`rv_fit_mode_t`):
@@ -168,6 +191,7 @@ Rubraview implements six deterministic viewport fitting modes (`rv_fit_mode_t`):
 | **Smart Fit** | `RV_FIT_SMART` | If image dimensions $> W_{win}$ or $> H_{win}$, scale down to fit inside; if image is smaller than window, display at 100% original size to prevent blurry upscaling. |
 
 - **Fit Lock**: User can toggle "Lock Fit Mode" (`L` key) so that navigating between images of disparate resolutions maintains the chosen fit mode instead of resetting zoom.
+- **Window Stability Invariant**: Under no circumstance will changing fit mode or loading an image alter the host window's position or size.
 
 ### 3.5 Low-Resolution & Pixel Art Rendering Modes
 High-resolution photos require smooth interpolation, but low-resolution retro game assets, sprites, icons, and pixel art become blurry and degraded when subjected to standard bilinear filtering. Rubraview provides dedicated scaling engines:
@@ -182,10 +206,83 @@ High-resolution photos require smooth interpolation, but low-resolution retro ga
 3. **Pixel Grid Overlay**:
    - When viewing pixel art zoomed in beyond $400\%$, an optional 1-pixel hairline grid overlay (`G` key) can be drawn over pixel boundaries to assist developers and artists in inspecting individual pixel values and coordinates.
 
-### 3.6 Geometric Transforms & Rotation
+### 3.6 Touch-Friendly Metro Tile Interface & Remote Desktop (RDP) Optimization
+When accessing a Windows PC from a mobile phone via Remote Desktop Protocol (Microsoft Remote Desktop, Chrome Remote Desktop, Moonlight), desktop UI controls with small dropdowns or thin bars become frustrating and error-prone.
+
+```
++-------------------------------------------------------------------------+
+|                                                                         |
+|                          [ Main Canvas Area ]                           |
+|                                                                         |
++-------------------------------------------------------------------------+
+|  Touch Overlay Bar (Metro Square Tiles, Auto-hide or Pin):              |
+|  +--------+ +--------+ +--------+ +--------+ +--------+ +--------+      |
+|  |   ◀    | |   ▶    | |   ⟳    | |   📖   | |   ⊡    | |   ⚙    |      |
+|  |  Prev  | |  Next  | | Rotate | |  Book  | |  Fit   | |  Menu  |      |
+|  +--------+ +--------+ +--------+ +--------+ +--------+ +--------+      |
+|   (64x64)    (64x64)    (64x64)    (64x64)    (64x64)    (64x64)        |
++-------------------------------------------------------------------------+
+```
+
+1. **Square Tile Touch Targets**:
+   - Function buttons are shaped as geometric square tiles with a minimum touch surface of $48\times 48\text{ px}$ (default $64\times 64\text{ px}$).
+   - Generous touch margins prevent accidental mis-taps with thumbs.
+   - Design inspired by the clean, flat geometry of Windows 8 Metro UI.
+2. **Zero Ornamental Lag / RDP Network Optimization**:
+   - RDP connections suffer severe frame drops and bandwidth spikes when rendering smooth gradient animations, continuous alpha fading, or motion blur.
+   - Rubraview intentionally avoids ornamental UI animations. UI tile overlays toggle states instantly (0ms cut), and button feedback uses simple high-contrast border state changes.
+3. **Multi-Touch Gestures**:
+   - Native `WM_GESTURE` handling:
+     - `GID_ZOOM`: Two-finger pinch-to-zoom centered on gesture midpoint.
+     - `GID_PAN`: Two-finger drag to pan viewport.
+     - Single-finger swipe left/right for page flips.
+
+### 3.7 Keyboard-First Control Matrix
+Rubraview is fully operable via keyboard without ever touching a mouse:
+
+| Action | Primary Hotkey | Alternative |
+| :--- | :--- | :--- |
+| **Next Page / Frame** | `Right Arrow` | `PageDown`, `Space`, `Enter` |
+| **Previous Page / Frame** | `Left Arrow` | `PageUp`, `Backspace` |
+| **First / Last Page** | `Home` | `End` |
+| **Zoom In / Out** | `+` (or `=`) | `-` (or `_`) |
+| **Reset Zoom (100%)** | `0` | `Ctrl+0` |
+| **Pan Viewport** | `Ctrl + Arrow keys` | Drag with mouse / touch |
+| **Fit Mode: Window** | `1` | Menu tile |
+| **Fit Mode: Width** | `2` | Menu tile |
+| **Fit Mode: Height** | `3` | Menu tile |
+| **Fit Mode: Original 1:1**| `4` | Menu tile |
+| **Fit Mode: Smart Fit** | `5` | Menu tile |
+| **Toggle Fit Lock** | `L` | Menu tile |
+| **Toggle Book / Manga** | `B` | Menu tile |
+| **Toggle Dual Page** | `D` | Menu tile |
+| **Switch LTR / RTL** | `T` | Menu tile |
+| **Rotate 90° CW / CCW** | `R` | `Shift+R` |
+| **Flip Horizontal / Vert** | `H` | `V` |
+| **Toggle Fullscreen** | `F11` | `F` |
+| **Toggle Slide Show** | `S` | Menu tile |
+| **Toggle Pixel Grid** | `G` | Menu tile |
+| **Toggle Metro Tile Bar**| `M` | `Esc` |
+| **Quick Export / Save As**| `Ctrl+Shift+S`| `Ctrl+E` |
+| **Open Batch Dialog** | `Ctrl+B` | Menu tile |
+| **Previous / Next Archive**| `[` | `]` |
+
+### 3.8 Comic Archive Container Subsystem (CBZ, CBR, CB7)
+To support digital comic books and manga packages directly without prior manual extraction:
+
+1. **Direct In-Memory Streaming**:
+   - Supported extensions: `.cbz` (ZIP), `.cbr` (RAR), `.cb7` (7z).
+   - The PAL archive reader (`rv_archive_io`) opens the archive file header, extracts the file manifest, filters for supported image mime types, and naturally sorts the internal page entries.
+   - Individual page files are decompressed directly into memory arenas (`prv_arena_t`) on demand. **Zero temporary files are created on disk**.
+2. **Archive Pre-caching**:
+   - Consecutive compressed streams are decompressed in worker threads ahead of time, ensuring reading comics from `.cbz` feels identical to reading uncompressed folders.
+3. **Seamless Folder Navigation Across Archives**:
+   - Pressing `[` or `]` navigates to the previous or next archive in the parent directory (e.g. automatically opening `Volume 02.cbz` after reaching the last page of `Volume 01.cbz`).
+
+### 3.9 Geometric Transforms & Rotation
 - **Rotation Operations**:
-  - Rotate $90^\circ$ Clockwise (`R` or `Ctrl+.]`)
-  - Rotate $90^\circ$ Counter-Clockwise (`L` or `Ctrl+[,`)
+  - Rotate $90^\circ$ Clockwise (`R`)
+  - Rotate $90^\circ$ Counter-Clockwise (`Shift+R`)
   - Rotate $180^\circ$
 - **Flip Operations**:
   - Horizontal Mirror Flip (`H`)
@@ -197,7 +294,7 @@ High-resolution photos require smooth interpolation, but low-resolution retro ga
 - **Lossless JPEG Transform**:
   - Capability to write $90^\circ/180^\circ$ rotations and flips back to disk losslessly by rearranging DCT coefficient blocks without decoding and re-compressing pixel arrays.
 
-### 3.7 Single Image Conversion & Quick Export
+### 3.10 Single Image Conversion & Quick Export
 - **Export Capabilities**:
   - Quick Save As (`Ctrl+Shift+S`) or Quick Export (`Ctrl+E`).
   - Supported Target Formats: JPEG, PNG, WebP (lossy/lossless), GIF, BMP, TIFF, ICO.
@@ -209,7 +306,7 @@ High-resolution photos require smooth interpolation, but low-resolution retro ga
 - **Metadata Handling**:
   - Toggle to keep or strip EXIF, XMP, and GPS location metadata for privacy-sensitive exporting.
 
-### 3.8 Batch Processing Subsystem
+### 3.11 Batch Processing Subsystem
 A robust batch engine designed for bulk media processing:
 - **Input Pipeline**:
   - Multiple file selection, directory tree scanning (with optional recursive subfolder traversal), or drag-and-drop ingestion.
@@ -224,7 +321,7 @@ A robust batch engine designed for bulk media processing:
   - Work-stealing thread pool utilizing hardware thread count.
   - Bounded memory footprint via per-thread arena allocators (`prv_arena_t`) that reset completely between processed files.
 
-### 3.9 Playlist & Collection Management
+### 3.12 Playlist & Collection Management
 Rubraview treats collections of media as first-class citizens:
 - **File Formats**:
   - Native `.rvlist`: Human-readable, UTF-8 formatted JSON or plaintext list with relative file paths and playback parameters.
@@ -352,11 +449,13 @@ Rubraview rejects arbitrary `malloc()`/`free()` allocations in favor of structur
 
 1. **Frame Scratch Arenas**:
    UI redraws, temporary scaling buffers, and thumbnail decoding use a transient frame arena that resets once per event cycle.
-2. **Batch Task Arenas**:
+2. **Archive Stream Arenas**:
+   Decompressed image buffers from CBZ/CBR/CB7 archives are allocated within dedicated file-level arenas that release memory immediately when navigated away.
+3. **Batch Task Arenas**:
    Worker threads allocate input and output pixel buffers within dedicated thread-local arenas.
-3. **String Safety**:
+4. **String Safety**:
    File paths, EXIF keys, and UI labels are managed using `u8str_t` (immutable UTF-8 slices) from `proven_c_lib`, preventing buffer overruns and null-termination ambiguities.
-4. **Dynamic Collections**:
+5. **Dynamic Collections**:
    Directory file listings, playlist queues, and batch job lists use `prv_dynarray_t` for typed, amortized growth with boundary safety.
 
 ---
@@ -370,7 +469,9 @@ rubraview/
 ├── include/
 │   ├── rubraview/
 │   │   ├── core.h           // Portable pixbuf, color, filters, resample
+│   │   ├── layout.h         // Layout engine: AR matching & spread rules
 │   │   ├── pal.h            // Platform abstraction interfaces
+│   │   ├── archive.h        // CBZ, CBR, CB7 virtual archive streams
 │   │   ├── batch.h          // Batch job queue & worker declarations
 │   │   └── playlist.h       // Playlist and collection interfaces
 ├── src/
@@ -379,6 +480,8 @@ rubraview/
 │   │   ├── color.c
 │   │   ├── filters.c
 │   │   ├── resample.c
+│   │   ├── layout.c
+│   │   ├── archive.c
 │   │   ├── batch.c
 │   │   └── playlist.c
 │   ├── pal/
@@ -386,19 +489,24 @@ rubraview/
 │   │   │   ├── pal_wic.c
 │   │   │   ├── pal_d2d.c
 │   │   │   ├── pal_ffmpeg.c
+│   │   │   ├── pal_archive_win.c
 │   │   │   └── pal_fs_win.c
 │   │   └── host/            // Linux host test implementations
 │   │       ├── pal_mock_io.c
+│   │       ├── pal_archive_posix.c
 │   │       └── pal_fs_posix.c
 │   └── app/                 // GUI entry & WinProc
 │       ├── main_win.c
 │       ├── view_modes.c
+│       ├── touch_tile_ui.c
 │       └── cli_batch.c
 └── tests/                   // Executed natively on Linux
     ├── test_pixbuf.c
     ├── test_color.c
     ├── test_resample.c
     ├── test_filters.c
+    ├── test_layout.c
+    ├── test_archive.c
     ├── test_batch.c
     └── test_playlist.c
 ```
@@ -434,8 +542,11 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
 ## 10. Security & Safety Model
 
 1. **Untrusted Codec Safety**: Media viewers frequently process malicious or malformed image/video payloads. WIC operates with Microsoft-maintained memory bounds, and FFmpeg decoding can be isolated to a separate worker thread or child process.
-2. **Buffer Bounds Checking**: All image resamplers and convolution kernels strictly validate coordinate bounds. Coordinates outside $[0, W-1] \times [0, H-1]$ are clamped or mirrored, preventing out-of-bounds memory accesses.
-3. **No Dynamic Code Execution**: The application links no scripting runtimes and executes zero unverified dynamic code.
+2. **Archive Decompression Safety (Zip-Bomb Prevention)**:
+   - Archive extraction limits uncompressed stream size per image (e.g. maximum 512 MB per frame buffer).
+   - Never extracts files onto disk; streams decompressed bytes directly into bounded memory arenas.
+3. **Buffer Bounds Checking**: All image resamplers and convolution kernels strictly validate coordinate bounds. Coordinates outside $[0, W-1] \times [0, H-1]$ are clamped or mirrored, preventing out-of-bounds memory accesses.
+4. **No Dynamic Code Execution**: The application links no scripting runtimes and executes zero unverified dynamic code.
 
 ---
 
@@ -445,15 +556,18 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
   - Pixel buffer structures (`rv_pixbuf`), memory arena integration.
   - Image resampling kernels (Nearest, Bilinear, Bicubic, Lanczos-3).
   - Spatial filters (Blur, Sharpen) and color adjustments.
+  - Intelligent layout engine (`rv_layout_engine`) for pre-merged spreads and AR matching.
+  - Archive streaming engine (`rv_archive_io`) for CBZ, CBR, CB7.
   - Playlist data structures and parsers.
   - Comprehensive unit test suite running on Linux host.
 - **Milestone 2 (Windows Canvas & WIC Decoder)**:
-  - Win32 main window and message pump.
+  - Win32 main window and message pump with fixed-window stability guarantee.
   - Direct2D render target initialization, sub-pixel pan/zoom matrix.
   - Viewport fit modes (Fit Window, Fit Width, Fit Height, Smart Fit, 1:1 Actual).
   - Multi-page layouts (Single, Dual, Book / Manga with LTR/RTL).
   - WIC loader for JPEG/PNG/WebP/TIFF into D2D bitmaps.
-- **Milestone 3 (Interactive Features & Slide Show)**:
+- **Milestone 3 (Touch Metro Tile UI & Slide Show)**:
+  - Metro-style square tile touch overlay bar optimized for Remote Desktop.
   - Fullscreen slide show engine with auto-advance and Direct2D transition effects.
   - Non-destructive rotation, flip, and EXIF orientation handling.
   - Single-image export and format transcoding dialog.
@@ -464,7 +578,7 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
   - Seamless mixed-media playlist integration.
 - **Milestone 5 (Batch Engine & UI Polish)**:
   - Multi-threaded batch processor and headless CLI mode.
-  - UI toolbar, filmstrip thumbnail gallery, and inspector sidebar.
+  - Filmstrip thumbnail gallery and inspector sidebar.
 - **Milestone 6 (Distribution & Packaging)**:
   - Remote `linux-build` production cross-build.
   - Release packaging staging (`build/dist/`).
