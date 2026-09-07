@@ -110,18 +110,51 @@ This section defines the user-facing and processing features of Rubraview.
 - **On-Screen Display (OSD)**:
   - Non-intrusive DirectWrite overlay displaying file name, resolution, file size, zoom percentage, current index / total count, and color bit-depth. Automatically fades out after 2 seconds of inactivity.
 
-### 3.2 Slide Show Engine
-- **Autonomous Playback**:
-  - Configurable advance interval (1 to 60 seconds, default: 3.0s).
-  - Looping modes: Loop all, Play once and stop, Random / Shuffle.
+### 3.2 Advanced Slide Show & Sequence Playback Engine
+Rubraview features a high-precision, highly configurable slide show engine suitable for both relaxed photo presentations and high-speed rapid frame inspection.
+
+#### 3.2.1 High-Resolution Sub-Second Timer (0.1s Granularity)
+- **Granular Interval Control**:
+  - Configurable advance delay from **0.1 seconds to 300.0 seconds** in exact **0.1-second increments** (e.g. 0.1s, 0.2s, 0.5s, 1.0s, 3.0s, 5.0s).
+  - Hotkeys: `[` / `]` adjust interval by $\pm 0.5\text{s}$; `Shift + [` / `Shift + ]` adjust interval by $\pm 0.1\text{s}$.
+- **Hardware Timer Precision**:
+  - Implemented via Windows Multimedia Timers (`CreateTimerQueueTimer` or high-resolution `QueryPerformanceCounter` polling) to avoid standard Win32 `WM_TIMER` jitter (~15.6ms inaccuracy), ensuring precise 10.0 FPS pacing at the 0.1s interval.
+- **High-Speed Stress Caching**:
+  - When the interval is set below 0.5s (up to 10 FPS), the pre-caching engine expands its lookahead ring buffer to 6–10 frames in RAM arenas (`prv_arena_t`), preventing disk I/O bottlenecks and stutter.
+
+#### 3.2.2 Ingestion Scopes & Source Selection
+The slide show can operate over diverse file targets:
+1. **Current Folder (Default)**: Automatically includes all viewable media files in the active directory.
+2. **Recursive Subfolder Traversal**: Optionally aggregates media from all nested subdirectories.
+3. **Active Playlist Mode**: Plays through the currently loaded playlist (`.rvlist`, `.m3u8`).
+4. **Selected / Marked Files Only**: Operates strictly on user-selected items (files checked in the filmstrip, tagged via `Space`, or multi-selected via standard file dialog).
+
+#### 3.2.3 Multi-Criteria Sorting Engine
+Before starting the presentation, the playback sequence can be sorted by:
+- **File Name (Natural Alphanumeric - Default)**: Standard natural sorting (e.g. `1.jpg`, `2.jpg`, `10.jpg`, not alphabetical `1, 10, 2`). Ascending or Descending.
+- **Date Modified / Created**: Chronological order (Newest first or Oldest first).
+- **File Size**: Sorted by byte length (Smallest first or Largest first).
+- **Random Shuffle**: Cryptographically uniform Fisher-Yates shuffle with seed preservation (allows `Previous` key to accurately step back through the shuffled history without re-randomizing).
+
+#### 3.2.4 File Extension & Media Type Filtering
+Users can filter the active sequence without moving files:
+- **Preset Filters**:
+  - *All Supported Media* (Images + Videos + Archives)
+  - *Images Only* (JPEG, PNG, WebP, GIF, BMP, TIFF, ICO)
+  - *Videos Only* (MP4, MKV, WebM, MOV, AVI, FLV, TS)
+  - *Comic Archives Only* (CBZ, CBR, CB7)
+- **Custom Pattern Whitelist**:
+  - User-defined glob filters (e.g. `*.png;*.webp` to exclude low-res JPEGs, or `*_4k.*`).
+
+#### 3.2.5 Presentation Controls & Transitions
 - **Fullscreen Presentation**:
   - Borderless fullscreen mode (`F11` or `Enter`) maximizing display real estate.
   - Automatic mouse cursor hiding after 1.5 seconds of mouse stillness.
-- **Transition Effects**:
-  - Direct2D hardware-accelerated transitions: Instant cut, Cross-fade (alpha blend), Slide left/right, Zoom-in fade.
+- **Hardware-Accelerated Transitions**:
+  - Direct2D transitions: Instant cut (0ms, recommended for intervals $< 0.5\text{s}$), Cross-fade (alpha blend), Slide left/right, Zoom-in fade.
 - **Interactive Control**:
-  - `Space`: Pause / Resume.
-  - Mouse hover, zoom, or pan interaction temporarily pauses the auto-advance timer until the user returns to the default viewport state.
+  - `Space`: Pause / Resume auto-advance.
+  - User interaction (mouse hover, pinch zoom, pan) temporarily freezes the advance timer until the viewport is released.
 
 ### 3.3 Intelligent Multi-Page & Book Reading Layouts
 For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview implements an intelligent layout engine (`rv_layout_engine`):
