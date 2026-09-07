@@ -55,7 +55,8 @@ Rubraview is strictly organized into four decoupled layers:
 +-------------------------------------------------------------------------+
 |                  Platform Abstraction Layer (PAL)                       |
 |  - `rv_image_io`: WIC Decoder/Encoder (Windows) / Portable Host Stubs   |
-|  - `rv_video_io`: FFmpeg Decoder Bridge (libav* dynamic loader)         |
+|  - `rv_video_io`: FFmpeg Video Bridge (libav* dynamic loader)          |
+|  - `rv_audio_io`: WASAPI Audio Renderer (Windows) / Host Mock Sink     |
 |  - `rv_archive_io`: In-memory CBZ (ZIP), CBR (RAR), CB7 (7z) Streams    |
 |  - `rv_sysio`: Native directory enumeration & natural alphanumeric sort |
 |  - `rv_threadpool`: Pre-caching worker threads & batch job dispatching  |
@@ -385,8 +386,24 @@ Rubraview incorporates a streamlined, non-destructive editing workbench accessib
   - **Unsharp Mask (Sharpen)**: Adjustable Amount ($0\sim 300\%$), Radius ($0.5\sim 10.0\text{ px}$), and Threshold ($0\sim 255$) to sharpen edges without amplifying photographic sensor grain.
   - **Resize**: Target pixel width/height with aspect ratio lock, or percentage scaling ($10\%\sim 500\%$) using Lanczos-3, Bicubic, Bilinear, or Nearest Neighbor.
 
----
+### 3.14 Audio Playback, Music Player Mode & Background Music (BGM)
+Rubraview seamlessly handles pure audio files as first-class media items, bridging image viewing and music playback:
+- **Audio Format Compatibility**:
+  - Uncompressed / Lossless: WAV, FLAC, AIFF, APE.
+  - Compressed: MP3, AAC, M4A, OGG / OGA (Vorbis/Opus), WMA (v1/v2/Pro).
+  - Legacy Streaming: RealAudio (`.ra`, `.ram` via Cook / ATRAC / 14.4 / 28.8 codecs).
+- **Embedded Cover Art Extraction**:
+  - Automatically extracts embedded album artwork from audio tags (ID3v2 APIC, FLAC Vorbis comments, MP4 `covr`, WMA metadata).
+  - The extracted cover is decoded into an `rv_pixbuf_t` and presented prominently on the Direct2D canvas as a high-resolution square album cover with an optional blurred background backdrop.
+- **Dynamic Waveform Visualizer**:
+  - When an audio file contains no embedded cover art, the canvas renders a clean, real-time audio waveform visualizer or 32-band spectrum analyzer computed from the decoded PCM audio buffer.
+  - On-Screen Display (OSD) presents Track Title, Artist, Album, Year, Duration, Bitrate (kbps), and Sample Rate (Hz).
+- **Dedicated Audio HUD & Controls**:
+  - Minimalist floating or docked touch tile controls: Play / Pause (`Space`), Seek scrubber (`Left`/`Right` arrow $\pm 5\text{s}$, `Ctrl + Left/Right` $\pm 30\text{s}$), Volume slider (`Up`/`Down` arrow $\pm 5\%$), Mute (`M`).
+- **Slide Show Background Music (BGM Mode)**:
+  - Users can attach an audio track or background playlist to an ongoing image slide show. The audio stream plays continuously while images auto-advance according to their configured interval.
 
+---
 
 ## 4. Canvas & Rendering Pipeline
 
@@ -423,34 +440,61 @@ Rendering high-resolution photographs (24MP to 100MP) in legacy GDI requires con
 
 ---
 
-## 5. Multimedia & Video Playback Subsystem
+## 5. Multimedia, Video & Audio Playback Subsystem
 
-### 5.1 FFmpeg C API Integration
-To fulfill the requirement of viewing all video and multimedia formats without depending on brittle OS codec installations, Rubraview utilizes FFmpeg (`libavcodec`, `libavformat`, `libavutil`, `libswscale`).
+Rubraview incorporates a unified multimedia playback engine capable of streaming, demuxing, and decoding virtually any media format through an isolated FFmpeg Platform Abstraction Layer (PAL), coupled with a native Windows WASAPI audio presentation pipeline.
+
+### 5.1 Comprehensive Multimedia Format Compatibility Matrix
+
+| Category | Supported Containers & Extensions | Supported Codecs & Standards |
+| :--- | :--- | :--- |
+| **Modern Video** | `.mp4`, `.m4v`, `.mkv`, `.webm`, `.mov` | H.264 (AVC), H.265 (HEVC), VP8, VP9, AV1, Apple ProRes |
+| **Broadcast & Legacy Video** | `.avi`, `.mpg`, `.mpeg`, `.ts`, `.m2ts`, `.vob`, `.3gp` | MPEG-1 Video, MPEG-2 Video, DivX, XviD, H.263, DV |
+| **Windows Media** | `.wmv`, `.asf` | WMV1 (7), WMV2 (8), WMV3 (9), VC-1 Advanced Profile |
+| **RealNetworks Media** | `.rm`, `.rmvb` | RealVideo 1.0 (RV10), 2.0 (RV20), 3.0 (RV30), 4.0 (RV40) |
+| **Lossless Audio** | `.wav`, `.flac`, `.aiff`, `.ape` | Uncompressed Linear PCM (8/16/24/32-bit), FLAC, Monkey's Audio |
+| **Compressed Audio** | `.mp3`, `.aac`, `.m4a`, `.wma` | MPEG Layer III, AAC-LC/HE-AAC, WMA v1, WMA v2, WMA Pro |
+| **Ogg Open Media** | `.ogg`, `.oga`, `.ogv`, `.opus` | Ogg Vorbis, Opus Audio, Speex, Theora Video |
+| **RealAudio** | `.ra`, `.ram` | RealAudio 1.0 (14.4), 2.0 (28.8), Cooker (Cook), ATRAC3 |
 
 ### 5.2 Dynamic Loading & Graceful Fallback
-Rather than hard-linking FFmpeg DLLs (which would prevent the application from launching if DLLs are missing), Rubraview implements a dynamic loader:
-1. At startup, the video PAL checks for `avcodec-*.dll` and `avformat-*.dll` in the application directory or system path.
-2. If present, it resolves function pointers dynamically (`avformat_open_input`, `avcodec_send_packet`, `avcodec_receive_frame`, `sws_scale`).
-3. If absent, Rubraview operates in pure image-viewer mode, or falls back to basic Windows Media Foundation (`IMFSourceReader`) for elementary MP4 files.
+To keep `rubraview.exe` completely standalone, FFmpeg shared libraries are resolved dynamically at runtime:
+1. The PAL loader checks for `avformat-*.dll`, `avcodec-*.dll`, `avutil-*.dll`, `swscale-*.dll`, and `swresample-*.dll` in the executable directory and system path.
+2. If found, all demuxer, decoder, resampler, and color-space conversion function pointers are bound dynamically.
+3. If absent:
+   - Audio and video playback graceful degradation: Pure image viewer mode remains 100% operational.
+   - For basic MP4 video and WAV/MP3 audio, the engine provides an optional native fallback using Windows Media Foundation (`IMFSourceReader`) and Direct2D.
 
-### 5.3 Frame Extraction & Synchronization Pipeline
+### 5.3 Video Demuxing, Decoding & Presentation Pipeline
 ```
 [ Video File ] ---> avformat_open_input() / av_read_frame()
-                            | (Compressed Packets)
-                            v
-                    avcodec_send_packet()
-                    avcodec_receive_frame()
-                            | (Raw YUV420P / NV12 Frame)
-                            v
-                    sws_scale() (or GPU Pixel Shader)
-                            | (32-bit BGRA Pixel Buffer)
-                            v
-                    Direct2D Bitmap Upload & Presentation (Audio-Clock Sync)
+                            | (Demuxed A/V Packets)
+            +---------------+---------------+
+            | (Video Packets)               | (Audio Packets)
+            v                               v
+    avcodec_send_packet()           avcodec_send_packet()
+    avcodec_receive_frame()         avcodec_receive_frame()
+            | (YUV420P / NV12)              | (Raw PCM Audio)
+            v                               v
+    sws_scale() (or GPU Shader)     swr_convert() (Resample to 48kHz Float)
+            | (32-bit BGRA Pixels)          |
+            v                               v
+    Direct2D Bitmap Upload & Draw   WASAPI IAudioRenderClient (Audio Clock)
 ```
 
-- **Frame Stepping**: The decoder preserves frame timestamps (`pts`). Backward and forward step buttons seek to keyframes (`av_seek_frame`) and decode forward to the exact frame target.
-- **Still Frame Capture**: The active decoded video frame can be cloned directly into an `rv_pixbuf_t`, allowing video stills to enter the image adjustment and filtering pipeline.
+- **Audio-Clock Master Synchronization**: The audio stream serves as the master clock. Video frames are displayed or dropped based on their Presentation Timestamp ($PTS$) relative to the current WASAPI hardware audio clock position ($\Delta t = PTS_{video} - T_{audio}$).
+- **Precision Seeking & Frame Stepping**: Backward and forward step hotkeys (`.` and `,`) seek to the nearest preceding keyframe (`av_seek_frame`) and decode forward to the exact requested frame index.
+- **Still Frame Capture**: Clicking `Ctrl+C` or the Capture tile instantly captures the current video frame as a full-resolution `rv_pixbuf_t` and pushes it into the clipboard or the Image Adjustment Workbench.
+
+### 5.4 Audio Playback & Native WASAPI Audio Engine
+- **Low-Latency Audio Rendering**:
+  - Rubraview connects to the Windows Audio Session API (WASAPI) in **Shared Mode** (`IAudioClient`, `IAudioRenderClient`).
+  - Zero external audio libraries: Uses pure Windows native COM interfaces without DirectSound or waveOut latency.
+- **Channel Mapping & Audio Resampling**:
+  - `libswresample` converts multi-channel audio (e.g. 5.1/7.1 surround in MKV/TS files) down to standard stereo or 2.1 channels matching the user's active audio endpoint.
+  - Normalizes arbitrary sample rates (8 kHz up to 192 kHz) to the system mixer rate (typically 48 kHz 32-bit float).
+- **Buffer Ring & Underrun Prevention**:
+  - Decoded audio samples populate an internal circular ring buffer (`prv_ring_t`). A high-priority event-driven audio thread feeds WASAPI buffers smoothly with zero pops or audio stuttering.
 
 ---
 
