@@ -718,18 +718,44 @@ High-quality resizing is essential for both display and batch export:
 
 ## 7. Memory Model & proven_c_lib Integration
 
-Rubraview rejects arbitrary `malloc()`/`free()` allocations in favor of structured memory arenas:
+Rubraview rejects arbitrary, fragmented `malloc()`/`free()` allocations in favor of structured memory arenas and string slices provided by `proven_c_lib`:
 
+### 7.1 Structured Memory Arenas (`prv_arena_t`)
 1. **Frame Scratch Arenas**:
-   UI redraws, temporary scaling buffers, and thumbnail decoding use a transient frame arena that resets once per event cycle.
+   UI redraws, temporary scaling buffers, and thumbnail decoding use a transient frame arena that resets once per event cycle (`proven_arena_reset()`).
 2. **Archive Stream Arenas**:
    Decompressed image buffers from CBZ/CBR/CB7 archives are allocated within dedicated file-level arenas that release memory immediately when navigated away.
 3. **Batch Task Arenas**:
-   Worker threads allocate input and output pixel buffers within dedicated thread-local arenas.
-4. **String Safety**:
-   File paths, EXIF keys, and UI labels are managed using `u8str_t` (immutable UTF-8 slices) from `proven_c_lib`, preventing buffer overruns and null-termination ambiguities.
-5. **Dynamic Collections**:
-   Directory file listings, playlist queues, and batch job lists use `prv_dynarray_t` for typed, amortized growth with boundary safety.
+   Worker threads allocate input and output pixel buffers within dedicated thread-local arenas, eliminating inter-thread contention.
+
+### 7.2 UTF-8 String Slice Architecture (`u8str_t`) for Paths & Collections
+Standard C null-terminated strings (`char*`) introduce heavy memory allocation overheads and buffer overrun risks when manipulating thousands of filenames. Rubraview standardizes all internal filenames, directory paths, metadata tags, and playlist entries on `proven_c_lib`'s **`u8str_t` string slices** (`{ const char *ptr; proven_size_t len; }`):
+
+1. **Zero-Copy Path Deconstruction ($O(1)$ Time, 0 Bytes Allocated)**:
+   - Extracting directory (`dirname`), filename (`basename`), extension (`ext`), and stem (`stem`) requires zero memory allocation and zero buffer copying:
+     ```c
+     // Path: "D:/Manga/Chapter01/page_042.webp"
+     u8str_t dir  = rv_path_dirname(path);   // "D:/Manga/Chapter01"
+     u8str_t base = rv_path_basename(path);  // "page_042.webp"
+     u8str_t ext  = rv_path_ext(path);       // ".webp"
+     u8str_t stem = rv_path_stem(path);      // "page_042"
+     ```
+   - In a collection of 50,000 images, filtering extensions or building playlist indices executes with **zero heap churn**.
+
+2. **$O(1)$ Early-Out String Comparisons & Extension Matching**:
+   - String equality `u8str_eq(a, b)` checks `a.len == b.len` first; if lengths differ, it rejects immediately in $O(1)$ without scanning characters.
+   - Extension validation (e.g. checking whether a file matches `.png`, `.jpg`, `.mp4`) executes with minimal CPU cycles.
+
+3. **The Null-Terminated Allocation Invariant (경계 널 종료 보장 규칙)**:
+   - When a full filesystem path is initially allocated into a `prv_arena_t` (e.g. during directory enumeration or file dialog return), Rubraview strictly allocates `len + 1` bytes and writes a `\0` terminator at `ptr[len]`.
+   - **POSIX Advantage (Linux / macOS)**: Slices can be passed directly to native OS calls (`fopen(path.ptr, "rb")`, `stat(path.ptr, ...)`) with zero copying or conversion.
+   - **Windows Advantage**: Win32 PAL performs stack-buffered UTF-8 to UTF-16 conversion (`WCHAR wpath[MAX_PATH]`) strictly at the final OS call boundary (`CreateFileW`).
+
+4. **Natural UTF-8 Standardization**:
+   - Internal paths, archive table-of-contents, playlists, and EXIF keys are universally encoded in UTF-8, eliminating code-page and mojibake issues with Korean, Japanese, and accented characters across Windows, Linux, and macOS.
+
+### 7.3 Dynamic Collections (`prv_dynarray_t`)
+- Directory file listings, playlist queues, and batch job lists use `prv_dynarray_t` for typed, amortized growth backed by arenas with strict boundary safety.
 
 ---
 

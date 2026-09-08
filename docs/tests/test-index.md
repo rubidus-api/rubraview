@@ -11,3 +11,4 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T002 | R104, R121 | Verify sRGB <-> Linear RGB LUT, curves, levels, and color adjust | `make test` | tests/test_color.c | active |
 | T003 | R104, R124 | Verify image resampling kernels (Bilinear, Bicubic, Lanczos) | `make test` | tests/test_resample.c | active |
 | T004 | R104, R123 | Verify spatial convolution (Gaussian blur, unsharp mask) | `make test` | tests/test_filters.c | active |
+| T005 | R134 | Verify `u8str_t` zero-copy path deconstruction and null-term invariant | `make test` | tests/test_path.c | active |

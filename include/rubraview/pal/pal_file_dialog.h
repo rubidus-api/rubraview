@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "proven.h"
+#include "rubraview/core.h"
 
 #ifdef __cplusplus
 extern "C" {
