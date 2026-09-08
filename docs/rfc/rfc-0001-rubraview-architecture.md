@@ -248,36 +248,92 @@ High-resolution photos require smooth interpolation, but low-resolution retro ga
 3. **Pixel Grid Overlay**:
    - When viewing pixel art zoomed in beyond $400\%$, an optional 1-pixel hairline grid overlay (`G` key) can be drawn over pixel boundaries to assist developers and artists in inspecting individual pixel values and coordinates.
 
-### 3.6 Touch-Friendly Metro Tile Interface & Remote Desktop (RDP) Optimization
-When accessing a Windows PC from a mobile phone via Remote Desktop Protocol (Microsoft Remote Desktop, Chrome Remote Desktop, Moonlight), desktop UI controls with small dropdowns or thin bars become frustrating and error-prone.
+### 3.6 Floating Semi-Transparent Anchor Points & Dual-Box UI Architecture
+When accessing a Windows PC from a mobile phone via Remote Desktop Protocol (Microsoft Remote Desktop, Chrome Remote Desktop, Moonlight) or interacting on touchscreens, traditional desktop dropdown menus and thin title bars become frustrating and error-prone. Rubraview introduces a modern, high-contrast, semi-transparent **Dual Floating Box UI** based on flat Metro square tiles:
 
 ```
-+-------------------------------------------------------------------------+
-|                                                                         |
-|                          [ Main Canvas Area ]                           |
-|                                                                         |
-+-------------------------------------------------------------------------+
-|  Touch Overlay Bar (Metro Square Tiles, Auto-hide or Pin):              |
-|  +--------+ +--------+ +--------+ +--------+ +--------+ +--------+      |
-|  |   ◀    | |   ▶    | |   ⟳    | |   📖   | |   ⊡    | |   ⚙    |      |
-|  |  Prev  | |  Next  | | Rotate | |  Book  | |  Fit   | |  Menu  |      |
-|  +--------+ +--------+ +--------+ +--------+ +--------+ +--------+      |
-|   (64x64)    (64x64)    (64x64)    (64x64)    (64x64)    (64x64)        |
-+-------------------------------------------------------------------------+
++-----------------------------------------------------------------------------------+
+|  [Main Canvas Area]                                                               |
+|                                                                                   |
+|   +---------------+ (Draggable Menu Anchor)                                       |
+|   |  [ ☰ Menu ]   | -> Expands on hover/click to In-Window Hierarchical Menu Box   |
+|   +---------------+    (Strictly stays inside window bounds)                      |
+|                                                                                   |
+|                                                                                   |
+|                                                                                   |
+|                                             +--------------------+                |
+|                                             |  [ ⏯ Tools ] [📌]  | (Toolbox Anchor)|
+|                                             +--------------------+                |
+|                                             |  ▲ Pinned / Hover                   |
+|                                             |  Can be dragged outside as          |
+|                                             |  independent Win32 tool window!     |
++-----------------------------------------------------------------------------------+
 ```
 
-1. **Square Tile Touch Targets**:
-   - Function buttons are shaped as geometric square tiles with a minimum touch surface of $48\times 48\text{ px}$ (default $64\times 64\text{ px}$).
-   - Generous touch margins prevent accidental mis-taps with thumbs.
-   - Design inspired by the clean, flat geometry of Windows 8 Metro UI.
-2. **Zero Ornamental Lag / RDP Network Optimization**:
-   - RDP connections suffer severe frame drops and bandwidth spikes when rendering smooth gradient animations, continuous alpha fading, or motion blur.
-   - Rubraview intentionally avoids ornamental UI animations. UI tile overlays toggle states instantly (0ms cut), and button feedback uses simple high-contrast border state changes.
-3. **Multi-Touch Gestures**:
-   - Native `WM_GESTURE` handling:
-     - `GID_ZOOM`: Two-finger pinch-to-zoom centered on gesture midpoint.
-     - `GID_PAN`: Two-finger drag to pan viewport.
-     - Single-finger swipe left/right for page flips.
+#### 3.6.1 The Toolbox (`rv_toolbox`): Playback, Navigation & Detachable Window
+The **Toolbox** manages real-time media manipulation and playback operations:
+- **Core Tool Set**:
+  - Media Controls: Previous (`◀◀`), Next (`▶▶`), Play/Pause (`⏯`), Step Backward/Forward (`,`/`.`), Stop (`⏹`).
+  - Video & Audio: A-B Section Repeat (`[ A-B ]`), Clear Loop (`\`), Volume / Mute (`🔊`).
+  - Viewport Controls: Zoom In (`+`), Zoom Out (`-`), Zoom 100% Reset (`1:1`), Rotate 90° (`⟳`), Flip (`⇄`).
+  - Window Presentation: Fullscreen Borderless Toggle (`⛶`).
+- **Pin Feature (`Pin` Toggle `📌`)**:
+  - When pinned (`pinned = true`), the expanded toolbox **stays permanently visible and interactive**, disabling the auto-collapse idle timer.
+  - Hovering over individual tool tiles while pinned provides instant tactile feedback without the toolbox disappearing or flickering.
+- **Detachable Floating Window Mode (창 바깥 분리 - Independent Win32 Window)**:
+  - **In-Window Mode**: When positioned inside the host window, the toolbox renders as a Direct2D hardware-accelerated semi-transparent overlay directly on the canvas.
+  - **Detached Mode (`rv_toolbox_window`)**:
+    - When the user drags the toolbox across the outer window perimeter (or clicks a `[ Detach ↗ ]` tile), it seamlessly transitions into an independent top-level Win32 tool window (`WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_LAYERED`).
+    - The detached window can float anywhere across the multi-monitor desktop workspace, remaining on top of other applications (`HWND_TOPMOST` optional toggle).
+    - Dragging the detached window back over the main canvas surface docks it back into the in-window Direct2D overlay mode.
+
+#### 3.6.2 The Menu Box (`rv_menubox`): In-Window Hierarchical Settings & Navigation
+The **Menu Box** manages deep configurations, layout switching, image filters, and batch pipelines:
+- **Strict In-Window Boundary Invariant**:
+  - Unlike the Toolbox, the Menu Box **strictly remains inside the client area of the main application window**.
+  - Its coordinates are clamped at all times: $0 \le X \le W_{win} - W_{menu}$ and $0 \le Y \le H_{win} - H_{menu}$.
+  - It never spawns an external Win32 desktop window, ensuring full touch containment on constrained mobile RDP views.
+- **Hierarchical Multi-Level Navigation (다단계 메트로 메뉴 탐색)**:
+  - The menu expands into a grid of semi-transparent Metro square tiles ($48\times 48\text{ px}$ to $64\times 64\text{ px}$).
+  - Multi-level drill-down structure:
+    - **Level 0 (Root Categories)**:
+      - `[ 📖 Layout ]`: Single, Dual Side-by-Side, Book / Manga (LTR / RTL), Pre-merged Spread Detection.
+      - `[ ⊡ Fit & Zoom ]`: Fit Window, Fit Width, Fit Height, Stretch, 1:1 Actual, Smart Fit, Nearest Neighbor, Pixel Grid.
+      - `[ 🎨 Adjust & Filter ]`: Exposure EV, Contrast, Saturation, Gamma, Tone Curves, Levels, Gaussian Blur, Unsharp Mask, Auto-Trim Margins.
+      - `[ ⏱ Slideshow ]`: Timer interval (0.1s~300.0s), Sort criteria (Name, Date, Size, Shuffle), Extension filters, Loop policies.
+      - `[ 📑 Playlist & Bookmarks ]`: Load `.rvlist`/`.m3u8`, Save Playlist, Add Bookmark, Recent File History.
+      - `[ ⚙ Batch Export ]`: Multi-threaded batch processor launcher, Single-image quick transcoding.
+      - `[ ⌨ Settings ]`: Keymap bindings (`keymap.ini`), RDP optimization presets, UI tile sizing.
+    - **Level 1+ (Sub-menus)**:
+      - Clicking a root category smoothly transitions the grid into that category's action tiles.
+      - The top-left tile dynamically transforms into a prominent `[ ◀ Back ]` tile, allowing one-click return to the previous menu level.
+      - A lightweight breadcrumb string (e.g. `Menu > Adjust > Tone Curves`) is displayed at the top border.
+
+#### 3.6.3 Draggable Floating Anchors & Hover/Click Expansion
+- **Compact Anchor State**:
+  - When collapsed, both the Toolbox and Menu Box appear as unobtrusive, semi-transparent compact anchor tiles (e.g. $40\times 40\text{ px}$, 60% alpha) with clean glyphs (`[ ⏯ ]` and `[ ☰ ]`).
+  - Users can click/touch and drag the anchor handle to any preferred position on screen. Positions are saved and restored across application launches.
+- **Hover & Click Expansion Semantics**:
+  - **Hover Expansion**: Moving the cursor over an anchor instantly unfolds the semi-transparent Metro tile grid.
+  - **Idle Auto-Collapse**: If unpinned, moving the cursor away from the expanded grid collapses it back to the compact anchor after a 500ms grace delay.
+  - **Click-to-Lock**: Tapping or clicking an anchor locks the menu open until an outside tap, `Esc` key, or close tile is pressed.
+
+#### 3.6.4 Metro Square Tile Specifications, Semi-Transparency & RDP Performance
+- **Square Tile Dimensions**:
+  - Minimum touch target: $48\times 48\text{ px}$ (touch-friendly on high-DPI smartphones).
+  - Standard desktop target: $64\times 64\text{ px}$ with 8px gutters between tiles.
+  - Generous hit-test padding eliminates mis-clicks and accidental activations when using touch remote desktop.
+- **Semi-Transparent Backdrop**:
+  - Rendered with 80%–85% dark slate background (`#1A1A1AE0`) and crisp 1px high-contrast borders (`#FFFFFF30`), allowing the underlying media to remain partially visible while ensuring text/icon legibility.
+- **Zero Ornamental Lag / RDP Network Optimization**:
+  - RDP networks experience heavy latency spikes and frame drops when streaming continuous alpha fading, smooth sliding transitions, or motion blur.
+  - Rubraview intentionally avoids heavy procedural animations. Tile transitions use instantaneous cuts (0ms) or single-frame state flips, maintaining 60 FPS remote responsiveness over constrained cellular connections.
+
+#### 3.6.5 Multi-Touch Gestures
+- Handled natively via Win32 `WM_GESTURE`:
+  - `GID_ZOOM`: Two-finger pinch-to-zoom centered on gesture midpoint.
+  - `GID_PAN`: Two-finger drag to pan viewport.
+  - Single-finger horizontal swipe for page navigation.
 
 ### 3.7 Keyboard-First Control Matrix
 Rubraview is fully operable via keyboard without ever touching a mouse:
