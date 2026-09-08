@@ -145,6 +145,57 @@ int main(void) {
     }
     printf("  [PASS] Empty/NULL input handled without crashing\n");
 
+    /* Test 10: A page marked to stand alone (a tagged cover, §3.8.5)
+       never pairs, and pagination resumes cleanly after it — the same
+       treatment a pre-merged spread gets, but from metadata rather than
+       from the aspect ratio. */
+    {
+        rubraview_page_info_t pages[5] = { NORMAL, NORMAL, NORMAL, NORMAL, NORMAL };
+        pages[2].force_standalone = true; /* an inner cover mid-volume */
+
+        rubraview_layout_opts_t opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_DUAL, RUBRAVIEW_READING_LTR);
+        rubraview_layout_result_t r = rubraview_layout_compute(&arena, pages, 5, 1000, 700, opts);
+
+        /* pair(0,1), the cover alone, then pair(3,4). */
+        assert(r.count == 3);
+        assert(r.spreads[0].left_index == 0 && r.spreads[0].right_index == 1);
+        assert(r.spreads[1].left_index == 2 && r.spreads[1].right_index == -1); /* the cover, alone */
+        assert(!r.spreads[1].is_premerged_spread); /* it is not wide, just tagged */
+        assert(r.spreads[2].left_index == 3 && r.spreads[2].right_index == 4);
+    }
+    printf("  [PASS] A metadata-tagged cover stands alone and pagination resumes after it\n");
+
+    /* Test 11: A page before a tagged cover cannot pair into it either,
+       which is what keeps every later spread aligned. */
+    {
+        rubraview_page_info_t pages[3] = { NORMAL, NORMAL, NORMAL };
+        pages[1].force_standalone = true;
+
+        rubraview_layout_opts_t opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_DUAL, RUBRAVIEW_READING_LTR);
+        rubraview_layout_result_t r = rubraview_layout_compute(&arena, pages, 3, 1000, 700, opts);
+
+        assert(r.count == 3);
+        for (size_t i = 0; i < r.count; ++i) assert(r.spreads[i].right_index == -1);
+    }
+    printf("  [PASS] A tagged cover also stops the page before it from pairing\n");
+
+    /* Test 12: Splitting bisects a genuinely wide scan but shows a
+       tagged cover whole — a cover is one page, not two halves. */
+    {
+        rubraview_page_info_t pages[2] = { WIDE, NORMAL };
+        pages[1].force_standalone = true;
+
+        rubraview_layout_opts_t opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_DUAL, RUBRAVIEW_READING_LTR);
+        opts.auto_split_wide_spreads = true;
+        rubraview_layout_result_t r = rubraview_layout_compute(&arena, pages, 2, 1000, 700, opts);
+
+        assert(r.count == 3); /* two halves of the wide page, then the cover */
+        assert(r.spreads[0].left_half == RUBRAVIEW_SPREAD_LEFT_HALF);
+        assert(r.spreads[1].left_half == RUBRAVIEW_SPREAD_RIGHT_HALF);
+        assert(r.spreads[2].left_index == 1 && r.spreads[2].left_half == RUBRAVIEW_SPREAD_WHOLE);
+    }
+    printf("  [PASS] Splitting bisects a wide scan but shows a tagged cover whole\n");
+
     free(raw_mem);
     printf("[test_layout] All tests passed successfully!\n");
     return 0;

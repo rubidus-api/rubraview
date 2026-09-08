@@ -32,6 +32,7 @@
 #include "rubraview/compositor.h"
 #include "rubraview/transform.h"
 #include "rubraview/slideshow.h"
+#include "rubraview/glob.h"
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
@@ -39,6 +40,11 @@
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/default_keymap.h"
+#include "rubraview/pagesource.h"
+#include "rubraview/precache.h"
+#include "rubraview/history.h"
+#include "rubraview/comicinfo.h"
+#include "proven/job.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_image.h"
@@ -53,6 +59,13 @@
 #define GUTTER 8.0
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
+#define ARCHIVE_FILTER "*.cbz;*.zip"
+#define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
+#define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
+#define PAGE_CACHE_BUDGET (512u * 1024u * 1024u)   /* §7.4's default budget */
+#define ESTIMATED_PAGE_BYTES (12u * 1024u * 1024u)
+#define PRECACHE_WORKERS 2
+#define HISTORY_MAX_ENTRIES 512
 #define TOOLBOX_TILES 8
 #define MENU_MAX_TILES 12
 
@@ -137,8 +150,22 @@ typedef struct app_state {
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
 
-    rubraview_sibling_index_t siblings;
+    /* Pages come from a folder or a CBZ through the same source (§3.8.1). */
+    rubraview_page_source_t source;
+    u8str_t                 source_dir;   /* the directory the source lives in */
+    u8str_t                 archive_bytes;/* the CBZ held in memory, empty for a folder */
     app_page_t *pages;
+
+    /* M4 */
+    proven_job_sys_t       *jobs;
+    rubraview_lru_cache_t   page_cache;
+    rubraview_precache_t    precache;
+    rubraview_history_t     history;
+    u8str_t                 history_path;
+    rubraview_config_mode_t config_mode;
+    rubraview_page_info_t  *comic_page_flags; /* §3.8.5 cover marks, applied on every relayout */
+    bool                    resume_offer;   /* §3.17.1: the prompt is showing */
+    int32_t                 resume_page;
 
     rubraview_layout_opts_t layout_opts;
     rubraview_layout_result_t layout;
@@ -178,11 +205,22 @@ typedef struct app_state {
 
 static void open_path(app_state_t *app, u8str_t path);
 
+static void update_precache(app_state_t *app);
+
+static size_t page_count(const app_state_t *app) {
+    return app->source.page_count;
+}
+
+static u8str_t page_display_name(const app_state_t *app, size_t index) {
+    if (index >= app->source.page_count) return (u8str_t){ .ptr = "", .len = 0 };
+    return app->source.pages[index].name;
+}
+
 /* ---- page loading ---- */
 
 static void unload_all_pages(app_state_t *app) {
     if (!app->pages) return;
-    for (size_t i = 0; i < app->siblings.count; ++i) {
+    for (size_t i = 0; i < page_count(app); ++i) {
         if (app->pages[i].texture) {
             rubraview_pal_texture_destroy(app->pages[i].texture);
         }
@@ -191,12 +229,23 @@ static void unload_all_pages(app_state_t *app) {
 }
 
 static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
-    if (index < 0 || (size_t)index >= app->siblings.count) return NULL;
+    if (index < 0 || (size_t)index >= page_count(app)) return NULL;
     app_page_t *page = &app->pages[index];
     if (page->loaded || page->failed) return page;
 
-    rubraview_image_load_result_t loaded =
-        rubraview_pal_image_load_texture(app->renderer, app->siblings.paths[index], true);
+    rubraview_page_bytes_t bytes = rubraview_page_source_read(app->arena, &app->source,
+                                                              (size_t)index, MAX_PAGE_BYTES);
+    if (!bytes.ok) {
+        page->failed = true;
+        return page;
+    }
+
+    /* A folder page is opened by path; an archive page is decoded from
+       the bytes the source produced, which never touched the disk. */
+    rubraview_image_load_result_t loaded = bytes.from_disk
+        ? rubraview_pal_image_load_texture(app->renderer, app->source.pages[index].path, true)
+        : rubraview_pal_image_load_texture_from_memory(app->renderer,
+                                                       (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
     if (!loaded.ok) {
         page->failed = true;
         return page;
@@ -212,14 +261,14 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
 /* ---- layout ---- */
 
 static void rebuild_layout(app_state_t *app) {
-    if (app->siblings.count == 0) return;
+    if (page_count(app) == 0) return;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, app->siblings.count * sizeof(rubraview_page_info_t));
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, page_count(app) * sizeof(rubraview_page_info_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_page_info_t *infos = (rubraview_page_info_t*)(void*)res.value.ptr;
 
     double fallback_w = 800.0, fallback_h = 1200.0;
-    for (size_t i = 0; i < app->siblings.count; ++i) {
+    for (size_t i = 0; i < page_count(app); ++i) {
         if (app->pages[i].loaded) {
             fallback_w = (double)app->pages[i].width;
             fallback_h = (double)app->pages[i].height;
@@ -227,18 +276,20 @@ static void rebuild_layout(app_state_t *app) {
         }
     }
 
-    for (size_t i = 0; i < app->siblings.count; ++i) {
+    for (size_t i = 0; i < page_count(app); ++i) {
         double w = app->pages[i].loaded ? (double)app->pages[i].width : fallback_w;
         double h = app->pages[i].loaded ? (double)app->pages[i].height : fallback_h;
         /* Pagination sees the page as the reader does, so a rotated
            portrait page is treated as the landscape it now presents. */
         rubraview_orientation_apply_size(app->orientation, w, h, &infos[i].width, &infos[i].height);
+        /* §3.8.5: a page the archive tagged as a cover never pairs. */
+        infos[i].force_standalone = app->comic_page_flags ? app->comic_page_flags[i].force_standalone : false;
     }
 
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
 
-    app->layout = rubraview_layout_compute(app->arena, infos, app->siblings.count,
+    app->layout = rubraview_layout_compute(app->arena, infos, page_count(app),
                                            (double)win_w, (double)win_h, app->layout_opts);
     if (app->spread_index >= app->layout.count && app->layout.count > 0) {
         app->spread_index = app->layout.count - 1;
@@ -290,12 +341,25 @@ static void go_to_spread(app_state_t *app, size_t index) {
     if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
 }
 
+static void open_sibling_archive(app_state_t *app, bool forward);
+
 static void next_spread(app_state_t *app) {
-    if (app->spread_index + 1 < app->layout.count) go_to_spread(app, app->spread_index + 1);
+    if (app->spread_index + 1 < app->layout.count) {
+        go_to_spread(app, app->spread_index + 1);
+        update_precache(app);
+        return;
+    }
+    /* §3.8.1 point 4: past the last page, continue into the next volume. */
+    open_sibling_archive(app, true);
 }
 
 static void prev_spread(app_state_t *app) {
-    if (app->spread_index > 0) go_to_spread(app, app->spread_index - 1);
+    if (app->spread_index > 0) {
+        go_to_spread(app, app->spread_index - 1);
+        update_precache(app);
+        return;
+    }
+    open_sibling_archive(app, false);
 }
 
 static bool action_is(u8str_t action, const char *name) {
@@ -375,8 +439,8 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
 static void picker_open(app_state_t *app) {
     u8str_t dir = app->picker_dir;
     if (dir.len == 0) {
-        if (app->siblings.count > 0) {
-            dir = rubraview_path_dirname(app->siblings.paths[app->siblings.current]);
+        if (app->source_dir.len > 0) {
+            dir = app->source_dir;
         } else {
             dir = U8(".");
         }
@@ -444,9 +508,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* §3.7.2: ascend to the parent directory, shown in the picker so
            the reader can choose what to open next. */
         u8str_t here = app->picker_dir;
-        if (here.len == 0 && app->siblings.count > 0) {
-            here = rubraview_path_dirname(app->siblings.paths[app->siblings.current]);
-        }
+        if (here.len == 0) here = app->source_dir;
         u8str_t parent = rubraview_path_dirname(here);
         if (parent.len > 0) {
             picker_navigate(app, parent);
@@ -517,6 +579,18 @@ static void handle_action(app_state_t *app, u8str_t action) {
             app->picker_open = false;
         } else {
             picker_open(app);
+        }
+    } else if (action_is(action, "next_archive")) {
+        open_sibling_archive(app, true);
+    } else if (action_is(action, "prev_archive")) {
+        open_sibling_archive(app, false);
+    } else if (action_is(action, "resume_accept")) {
+        /* §3.17.1: the prompt is answered by opening the remembered page. */
+        if (app->resume_offer) {
+            app->resume_offer = false;
+            size_t target = spread_index_for_page(app, app->resume_page);
+            go_to_spread(app, target);
+            update_precache(app);
         }
     } else if (action_is(action, "toggle_slideshow")) {
         toggle_slideshow(app);
@@ -620,7 +694,7 @@ static rubraview_pointer_context_t pointer_context(const app_state_t *app) {
     return (rubraview_pointer_context_t){
         .window_width = (double)win_w,
         .reading_direction = app->layout_opts.direction,
-        .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || app->siblings.count > 1,
+        .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || page_count(app) > 1,
         .zoomed_in = app->zoom > 1.001,
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
     };
@@ -828,7 +902,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
        low-resolution thumbnail decoding arrives with the asynchronous
        pre-cache worker in M4 (RV-044), where async decode belongs. */
-    if (app->filmstrip.visible && app->siblings.count > 0) {
+    if (app->filmstrip.visible && page_count(app) > 0) {
         double strip_h = FILMSTRIP_THUMB * rubraview_pal_window_dpi_scale(app->window);
         rubraview_pal_rect_t strip = { 0.0, win_h - strip_h, win_w, strip_h };
         rubraview_pal_render_fill_rect(app->renderer, strip, COLOR_BAR_FILL, 0.0);
@@ -840,7 +914,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_rect_t cell = { x, strip.y + 4.0, app->filmstrip.thumb_extent - 8.0, strip_h - 8.0 };
             rubraview_pal_render_stroke_rect(app->renderer, cell, COLOR_BOX_BORDER, 1.0, 0.0);
 
-            if (index < app->siblings.count && app->pages[index].loaded) {
+            if (index < page_count(app) && app->pages[index].loaded) {
                 rubraview_mat3x2_t fit = rubraview_mat3x2_multiply(
                     rubraview_mat3x2_scale(cell.width / (double)app->pages[index].width,
                                            cell.height / (double)app->pages[index].height),
@@ -873,8 +947,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
 
         int32_t page = current_page_index(app);
-        if (page >= 0 && (size_t)page < app->siblings.count) {
-            u8str_t name = rubraview_path_basename(app->siblings.paths[page]);
+        if (page >= 0 && (size_t)page < page_count(app)) {
+            u8str_t name = page_display_name(app, (size_t)page);
             rubraview_pal_rect_t title = { 12.0, 0.0, win_w * 0.6, app->titlebar.height };
             rubraview_pal_render_draw_text(app->renderer, name, title,
                                            app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -899,15 +973,32 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         }
     }
 
+    /* §3.17.1: an unobtrusive prompt offering the remembered page. */
+    if (app->resume_offer) {
+        double bar_h = 40.0 * rubraview_pal_window_dpi_scale(app->window);
+        rubraview_pal_rect_t prompt = { win_w * 0.25, win_h * 0.5 - bar_h * 0.5, win_w * 0.5, bar_h };
+        rubraview_pal_render_fill_rect(app->renderer, prompt, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, prompt, COLOR_BOX_BORDER, 1.0, 3.0);
+
+        char line[128];
+        int written = snprintf(line, sizeof(line), "Resume page %d / %zu  (Enter)",
+                               app->resume_page + 1, page_count(app));
+        if (written > 0) {
+            rubraview_pal_render_draw_text(app->renderer,
+                                           (u8str_t){ .ptr = line, .len = (size_t)written },
+                                           prompt, bar_h * 0.4, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+
     /* OSD (§3.1), skipped once it has faded out entirely. */
     if (rubraview_osd_opacity(&app->osd) > 0.01) {
         int32_t page = current_page_index(app);
-        if (page >= 0 && (size_t)page < app->siblings.count && app->pages[page].loaded) {
+        if (page >= 0 && (size_t)page < page_count(app) && app->pages[page].loaded) {
             char line[192];
-            u8str_t name = rubraview_path_basename(app->siblings.paths[page]);
+            u8str_t name = page_display_name(app, (size_t)page);
             u8str_t text = rubraview_osd_format(line, sizeof(line), name,
                                                 app->pages[page].width, app->pages[page].height,
-                                                app->zoom * 100.0, (size_t)page, app->siblings.count);
+                                                app->zoom * 100.0, (size_t)page, page_count(app));
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
@@ -958,7 +1049,7 @@ static void render_frame(app_state_t *app) {
 
         for (size_t i = 0; i < comp.count; ++i) {
             const rubraview_draw_command_t *cmd = &comp.commands[i];
-            if (cmd->page_index < 0 || (size_t)cmd->page_index >= app->siblings.count) continue;
+            if (cmd->page_index < 0 || (size_t)cmd->page_index >= page_count(app)) continue;
             app_page_t *page = &app->pages[cmd->page_index];
             if (!page->loaded) continue;
 
@@ -1052,39 +1143,209 @@ static void build_slides(app_state_t *app) {
     rubraview_slideshow_pause(&app->slideshow);
 }
 
-static void open_path(app_state_t *app, u8str_t path) {
-    rubraview_fs_entry_t entry;
-    if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;
+/* Decoding for the pre-cache worker: the ring calls this off the main
+   thread for pages it wants ready before the reader reaches them. */
+static void precache_decode(void *ctx, size_t page_index) {
+    app_state_t *app = (app_state_t*)ctx;
+    ensure_page_loaded(app, (int32_t)page_index);
+}
 
-    u8str_t dir = entry.is_directory ? entry.path : rubraview_path_dirname(entry.path);
+static void release_evicted(app_state_t *app, const uint64_t *evicted, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        size_t index = (size_t)evicted[i];
+        if (index >= page_count(app)) continue;
+        if (!app->pages[index].texture) continue;
+        /* §7.4: the budget decided this page has to go. */
+        rubraview_pal_texture_destroy(app->pages[index].texture);
+        app->pages[index] = (app_page_t){0};
+    }
+}
+
+/* Keeps the ring in step with the page on screen, and lets the budget
+   reclaim whatever fell out of it. */
+static void update_precache(app_state_t *app) {
+    if (page_count(app) == 0) return;
+
+    int32_t current = current_page_index(app);
+    if (current < 0) return;
+
+    rubraview_precache_set_interval(&app->precache,
+                                    app->slideshow_running ? app->slideshow.interval_seconds : 0.0,
+                                    0.5);
+
+    uint64_t evicted[32];
+    size_t evicted_count = 0;
+    rubraview_precache_update(&app->precache, (size_t)current, precache_decode, app,
+                              evicted, sizeof(evicted) / sizeof(evicted[0]), &evicted_count);
+    /* §7.4: give back the textures the budget decided it could not keep. */
+    release_evicted(app, evicted, evicted_count);
+}
+
+/* ---- reading history (§3.17) ---- */
+
+static void history_load(app_state_t *app) {
+    /* §3.17.2: a settings.ini beside the executable means portable mode,
+       and then nothing at all is written to the host machine. */
+    bool portable = rubraview_pal_fs_exists(U8("settings.ini"));
+    app->config_mode = rubraview_config_mode_for(portable);
+
+    u8str_t appdata = U8(".");
+#ifdef _WIN32
+    char appdata_utf8[1024];
+    DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
+    if (written > 0 && written < sizeof(appdata_utf8)) {
+        appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
+    }
+#endif
+
+    app->history_path = rubraview_config_path(app->arena, app->config_mode,
+                                              U8("."), appdata, U8("history.ini"));
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
+    app->history = rubraview_history_parse(app->arena, text);
+}
+
+static void history_remember(app_state_t *app) {
+    if (app->source_dir.len == 0 || page_count(app) == 0) return;
+
+    int32_t current = current_page_index(app);
+    if (current < 0) return;
+
+    /* An archive is remembered by its own path; a folder by the folder. */
+    u8str_t key = app->source.archive_path.len > 0 ? app->source.archive_path : app->source_dir;
+    rubraview_history_record(app->arena, &app->history, key, current, (int32_t)page_count(app),
+                             (int64_t)rubraview_pal_time_now_seconds());
+    rubraview_history_prune(&app->history, HISTORY_MAX_ENTRIES);
+}
+
+/* ---- opening ---- */
+
+static bool open_archive(app_state_t *app, u8str_t archive_path) {
+    u8str_t bytes = rubraview_pal_fs_read_file(app->arena, archive_path, MAX_ARCHIVE_BYTES);
+    if (bytes.len == 0) return false;
+
+    app->archive_bytes = bytes;
+    app->source = rubraview_page_source_from_archive(app->arena,
+                                                     (const uint8_t*)bytes.ptr, bytes.len,
+                                                     archive_path, U8(IMAGE_FILTER),
+                                                     RUBRAVIEW_CODEPAGE_AUTO, MAX_PAGE_BYTES);
+    app->source_dir = rubraview_path_dirname(archive_path);
+    return app->source.page_count > 0;
+}
+
+static bool open_folder(app_state_t *app, u8str_t dir) {
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
-    if (listing.count == 0) return;
+    if (listing.count == 0) return false;
 
-    app->siblings = rubraview_fs_index_siblings(app->arena, &listing,
-                                                entry.is_directory ? (u8str_t){ .ptr = "", .len = 0 } : entry.path,
-                                                U8(IMAGE_FILTER),
-                                                RUBRAVIEW_SORT_NAME_NATURAL, true);
-    if (app->siblings.count == 0) return;
+    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER),
+                                                     RUBRAVIEW_SORT_NAME_NATURAL, true);
+    app->source_dir = dir;
+    return app->source.page_count > 0;
+}
 
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, app->siblings.count * sizeof(app_page_t));
+/* Finishes opening whichever source was just built: allocate the page
+   table, apply any ComicInfo, lay out, and start the ring. */
+static void finish_open(app_state_t *app, size_t start_page) {
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, page_count(app) * sizeof(app_page_t));
     if (!proven_is_ok(res.err)) {
-        app->siblings.count = 0;
+        app->source.page_count = 0;
         return;
     }
     app->pages = (app_page_t*)(void*)res.value.ptr;
-    memset(app->pages, 0, app->siblings.count * sizeof(app_page_t));
+    memset(app->pages, 0, page_count(app) * sizeof(app_page_t));
 
-    ensure_page_loaded(app, (int32_t)app->siblings.current);
+    app->page_cache = rubraview_lru_create(app->arena, page_count(app) + 8, PAGE_CACHE_BUDGET);
+    app->precache = rubraview_precache_create(app->jobs, &app->page_cache,
+                                              page_count(app), ESTIMATED_PAGE_BYTES);
+
+    if (start_page >= page_count(app)) start_page = 0;
+    ensure_page_loaded(app, (int32_t)start_page);
     rebuild_layout(app);
-    app->spread_index = spread_index_for_page(app, (int32_t)app->siblings.current);
+
+    /* §3.8.5: let the archive's own manifest set the reading direction
+       and mark its covers before the first spread is chosen. */
+    if (app->source.has_comicinfo) {
+        rubraview_comicinfo_t info = rubraview_comicinfo_parse(app->arena, app->source.comicinfo_xml);
+        proven_result_mem_mut_t infos_res =
+            proven_arena_alloc(app->arena, page_count(app) * sizeof(rubraview_page_info_t));
+        if (proven_is_ok(infos_res.err)) {
+            rubraview_page_info_t *infos = (rubraview_page_info_t*)(void*)infos_res.value.ptr;
+            memset(infos, 0, page_count(app) * sizeof(rubraview_page_info_t));
+            rubraview_comicinfo_apply(&info, &app->layout_opts, infos, page_count(app));
+            app->comic_page_flags = infos;
+            rebuild_layout(app);
+        }
+    }
+
+    app->spread_index = spread_index_for_page(app, (int32_t)start_page);
 
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double scale = rubraview_pal_window_dpi_scale(app->window);
-    app->filmstrip = rubraview_filmstrip_create(app->siblings.count,
-                                                FILMSTRIP_THUMB * scale, (double)win_w);
-    rubraview_filmstrip_reveal(&app->filmstrip, app->siblings.current);
+    app->filmstrip = rubraview_filmstrip_create(page_count(app), FILMSTRIP_THUMB * scale, (double)win_w);
+    rubraview_filmstrip_reveal(&app->filmstrip, start_page);
     build_slides(app);
+    update_precache(app);
+}
+
+static void open_path(app_state_t *app, u8str_t path) {
+    rubraview_fs_entry_t entry;
+    if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;
+
+    /* Remember where the reader was in whatever was open before. */
+    history_remember(app);
+
+    bool opened = false;
+    u8str_t key = entry.path;
+
+    if (entry.is_directory) {
+        opened = open_folder(app, entry.path);
+        key = entry.path;
+    } else if (rubraview_glob_match_list(rubraview_path_basename(entry.path), U8(ARCHIVE_FILTER))) {
+        opened = open_archive(app, entry.path);
+    } else {
+        opened = open_folder(app, rubraview_path_dirname(entry.path));
+        key = rubraview_path_dirname(entry.path);
+    }
+    if (!opened) return;
+
+    /* §3.17.1: reopening something read before starts where it stopped,
+       rather than dropping the reader back on page one. */
+    size_t start_page = 0;
+    const rubraview_history_entry_t *seen = rubraview_history_find(&app->history, key);
+    if (seen && rubraview_history_should_offer_resume(seen)) {
+        app->resume_offer = true;
+        app->resume_page = seen->page;
+        if ((size_t)seen->page < app->source.page_count) start_page = (size_t)seen->page;
+    } else {
+        app->resume_offer = false;
+    }
+
+    /* A file that was opened directly wins over the remembered spot. */
+    if (!entry.is_directory && app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER) {
+        for (size_t i = 0; i < app->source.page_count; ++i) {
+            if (app->source.pages[i].path.len == entry.path.len &&
+                memcmp(app->source.pages[i].path.ptr, entry.path.ptr, entry.path.len) == 0) {
+                start_page = i;
+                app->resume_offer = false;
+                break;
+            }
+        }
+    }
+
+    finish_open(app, start_page);
+}
+
+/* §3.8.1 point 4: reaching the end of a volume continues into the next
+   archive in the same directory. */
+static void open_sibling_archive(app_state_t *app, bool forward) {
+    if (app->source.archive_path.len == 0 || app->source_dir.len == 0) return;
+
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, app->source_dir);
+    u8str_t next = rubraview_page_source_sibling_archive(app->arena, &listing,
+                                                          app->source.archive_path, forward);
+    if (next.len == 0) return;
+    open_path(app, next);
 }
 
 #ifdef _WIN32
@@ -1136,6 +1397,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     double dpi = rubraview_pal_window_dpi_scale(app.window);
     load_keymap(&app);
+
+    /* §3.1: pages decode on worker threads so a flip does not wait for
+       the disk. A pool that fails to start is not fatal — the ring then
+       decodes inline, which is slower but correct. */
+    proven_allocator_t job_alloc = proven_arena_as_allocator(&arena);
+    if (proven_job_system_init(job_alloc, PRECACHE_WORKERS, 64, &app.jobs) != PROVEN_OK) {
+        app.jobs = NULL;
+    }
+    history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, TOOLBOX_TILES);
@@ -1308,6 +1578,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
         render_frame(&app);
         rubraview_pal_time_sleep_ms(4);
+    }
+
+    /* §3.17.1: remember where the reader stopped before shutting down. */
+    history_remember(&app);
+    if (app.history_path.len > 0 && app.history.count > 0) {
+        u8str_t text = rubraview_history_serialize(&arena, &app.history);
+        rubraview_pal_fs_write_file(app.history_path, text);
+    }
+
+    if (app.jobs) {
+        proven_job_system_close(app.jobs);
+        proven_job_system_destroy(app.jobs);
+        app.jobs = NULL;
     }
 
     unload_all_pages(&app);

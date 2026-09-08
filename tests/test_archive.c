@@ -1,4 +1,5 @@
 #include "rubraview/archive.h"
+#include "miniz.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -10,7 +11,7 @@ static void put_u32(uint8_t *p, uint32_t v) {
     p[2] = (uint8_t)((v >> 16) & 0xFF); p[3] = (uint8_t)((v >> 24) & 0xFF);
 }
 
-typedef struct { const char *name; const char *content; bool utf8_flag; } test_zip_entry_t;
+typedef struct { const char *name; const char *content; bool utf8_flag; bool deflate; } test_zip_entry_t;
 
 /* Builds a minimal, valid STORED-only ZIP into `out`, returning its total
    byte length. This is a from-scratch encoder written only to exercise
@@ -21,24 +22,54 @@ static size_t build_zip(uint8_t *out, size_t out_cap, const test_zip_entry_t *en
     uint32_t local_offsets[8];
     assert(count <= 8);
 
+    /* Compressed sizes are recorded as each entry is written so the
+       central directory can repeat them. */
+    static uint32_t compressed_sizes[8];
+
     for (size_t i = 0; i < count; ++i) {
         local_offsets[i] = (uint32_t)pos;
         size_t name_len = strlen(entries[i].name);
         size_t content_len = strlen(entries[i].content);
 
+        /* Deflate the payload with miniz's raw (headerless) stream, which
+           is what a ZIP entry carries. */
+        unsigned char deflated[4096];
+        size_t deflated_len = 0;
+        if (entries[i].deflate) {
+            mz_stream stream = {0};
+            stream.next_in = (const unsigned char*)entries[i].content;
+            stream.avail_in = (unsigned int)content_len;
+            stream.next_out = deflated;
+            stream.avail_out = (unsigned int)sizeof(deflated);
+            int init = mz_deflateInit2(&stream, MZ_DEFAULT_COMPRESSION, MZ_DEFLATED,
+                                       -MZ_DEFAULT_WINDOW_BITS, 9, MZ_DEFAULT_STRATEGY);
+            assert(init == MZ_OK);
+            int done = mz_deflate(&stream, MZ_FINISH);
+            assert(done == MZ_STREAM_END);
+            deflated_len = stream.total_out;
+            mz_deflateEnd(&stream);
+        }
+
+        size_t stored_len = entries[i].deflate ? deflated_len : content_len;
+        compressed_sizes[i] = (uint32_t)stored_len;
+
         put_u32(out + pos, 0x04034b50u); pos += 4;
         put_u16(out + pos, 20); pos += 2;
         put_u16(out + pos, entries[i].utf8_flag ? 0x0800 : 0); pos += 2;
-        put_u16(out + pos, 0); pos += 2; /* method: STORED */
+        put_u16(out + pos, entries[i].deflate ? 8 : 0); pos += 2; /* method */
         put_u16(out + pos, 0); pos += 2;
         put_u16(out + pos, 0); pos += 2;
         put_u32(out + pos, 0); pos += 4; /* crc32, unchecked by the reader */
-        put_u32(out + pos, (uint32_t)content_len); pos += 4;
+        put_u32(out + pos, (uint32_t)stored_len); pos += 4;
         put_u32(out + pos, (uint32_t)content_len); pos += 4;
         put_u16(out + pos, (uint16_t)name_len); pos += 2;
         put_u16(out + pos, 0); pos += 2;
         memcpy(out + pos, entries[i].name, name_len); pos += name_len;
-        memcpy(out + pos, entries[i].content, content_len); pos += content_len;
+        if (entries[i].deflate) {
+            memcpy(out + pos, deflated, deflated_len); pos += deflated_len;
+        } else {
+            memcpy(out + pos, entries[i].content, content_len); pos += content_len;
+        }
     }
 
     size_t cd_start = pos;
@@ -50,11 +81,11 @@ static size_t build_zip(uint8_t *out, size_t out_cap, const test_zip_entry_t *en
         put_u16(out + pos, 20); pos += 2;
         put_u16(out + pos, 20); pos += 2;
         put_u16(out + pos, entries[i].utf8_flag ? 0x0800 : 0); pos += 2;
-        put_u16(out + pos, 0); pos += 2; /* method: STORED */
+        put_u16(out + pos, entries[i].deflate ? 8 : 0); pos += 2; /* method */
         put_u16(out + pos, 0); pos += 2;
         put_u16(out + pos, 0); pos += 2;
         put_u32(out + pos, 0); pos += 4;
-        put_u32(out + pos, (uint32_t)content_len); pos += 4;
+        put_u32(out + pos, compressed_sizes[i]); pos += 4;
         put_u32(out + pos, (uint32_t)content_len); pos += 4;
         put_u16(out + pos, (uint16_t)name_len); pos += 2;
         put_u16(out + pos, 0); pos += 2;
@@ -227,6 +258,75 @@ int main(void) {
         assert(r.value.entry_count == 0);
     }
     printf("  [PASS] Empty archive (zero entries) opens cleanly\n");
+
+    /* Test 9: A DEFLATE entry inflates back to its exact contents
+       (RV-051, owner decision D-2). The payload is deliberately
+       repetitive so it really does compress. */
+    {
+        uint8_t zip_buf[8192];
+        const char *page_text =
+            "PAGE DATA PAGE DATA PAGE DATA PAGE DATA PAGE DATA PAGE DATA "
+            "PAGE DATA PAGE DATA PAGE DATA PAGE DATA PAGE DATA PAGE DATA";
+        test_zip_entry_t src[] = {
+            { .name = "page01.jpg", .content = page_text, .utf8_flag = true, .deflate = true },
+            { .name = "page02.jpg", .content = "stored page", .utf8_flag = true, .deflate = false },
+        };
+        size_t zip_len = build_zip(zip_buf, sizeof(zip_buf), src, 2);
+
+        rubraview_zip_result_t r = rubraview_zip_open(&arena, zip_buf, zip_len);
+        assert(r.err == RUBRAVIEW_ZIP_OK);
+        assert(r.value.entries[0].compression_method == 8);
+        assert(r.value.entries[0].compressed_size < r.value.entries[0].uncompressed_size);
+
+        rubraview_zip_data_result_t inflated = rubraview_zip_read_entry(&arena, &r.value, 0, UINT32_MAX);
+        assert(inflated.err == RUBRAVIEW_ZIP_OK);
+        assert(str_eq(inflated.data, page_text));
+
+        /* The same call still returns a zero-copy view for a stored entry. */
+        rubraview_zip_data_result_t stored = rubraview_zip_read_entry(&arena, &r.value, 1, UINT32_MAX);
+        assert(stored.err == RUBRAVIEW_ZIP_OK);
+        assert(str_eq(stored.data, "stored page"));
+        assert(stored.data.ptr >= (const char*)zip_buf && stored.data.ptr < (const char*)zip_buf + zip_len);
+    }
+    printf("  [PASS] DEFLATE entries inflate exactly; stored entries stay zero-copy\n");
+
+    /* Test 10: §10.2 — the size cap is applied to a compressed entry
+       before anything is allocated, so a small archive claiming a huge
+       payload costs nothing. */
+    {
+        uint8_t zip_buf[8192];
+        test_zip_entry_t src[] = {
+            { .name = "big.jpg", .content = "0123456789ABCDEF", .utf8_flag = false, .deflate = true },
+        };
+        size_t zip_len = build_zip(zip_buf, sizeof(zip_buf), src, 1);
+        rubraview_zip_result_t r = rubraview_zip_open(&arena, zip_buf, zip_len);
+
+        rubraview_zip_data_result_t capped = rubraview_zip_read_entry(&arena, &r.value, 0, 4);
+        assert(capped.err == RUBRAVIEW_ZIP_ERR_TOO_LARGE);
+    }
+    printf("  [PASS] Size cap rejects an oversized compressed entry before allocating\n");
+
+    /* Test 11: A corrupted compressed stream is reported, not accepted.
+       The reader must never hand back a half-inflated page. */
+    {
+        uint8_t zip_buf[8192];
+        const char *text = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        test_zip_entry_t src[] = {
+            { .name = "broken.jpg", .content = text, .utf8_flag = false, .deflate = true },
+        };
+        size_t zip_len = build_zip(zip_buf, sizeof(zip_buf), src, 1);
+
+        /* Corrupt a byte inside the compressed payload: it sits after the
+           30-byte local header and the 10-character name. */
+        size_t payload = 30 + strlen("broken.jpg");
+        zip_buf[payload + 2] ^= 0xFF;
+
+        rubraview_zip_result_t r = rubraview_zip_open(&arena, zip_buf, zip_len);
+        assert(r.err == RUBRAVIEW_ZIP_OK);
+        rubraview_zip_data_result_t broken = rubraview_zip_read_entry(&arena, &r.value, 0, UINT32_MAX);
+        assert(broken.err == RUBRAVIEW_ZIP_ERR_CORRUPT_STREAM);
+    }
+    printf("  [PASS] A corrupted deflate stream is rejected, never half-inflated\n");
 
     free(raw_mem);
     printf("[test_archive] All tests passed successfully!\n");

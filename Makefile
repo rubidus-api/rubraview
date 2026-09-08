@@ -1,16 +1,30 @@
 CC ?= gcc
 CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
-LDFLAGS ?= -lm
+LDFLAGS ?= -lm -lpthread
 
 SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/default_keymap.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c
+# miniz is third-party and does not build clean under this project's
+# -Werror -pedantic settings, so it is compiled separately with warnings
+# off. It is still instrumented by the sanitisers on the host build:
+# inflate runs on hostile input (§10.2), which is exactly where ASan
+# earns its place. Only decompression is enabled — the ZIP container is
+# parsed by rubraview's own reader (§3.8.1).
+MINIZ_DEFINES = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS \
+                -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
+MINIZ_INCLUDE = -Ivendor/miniz
+MINIZ_OBJ = build/miniz.o
+MINIZ_OBJ_WIN = build/miniz-win.o
+
 SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/src/proven/memory.c \
               vendor/proven/src/proven/panic.c \
-              vendor/proven/platform/proven_sys_mem.c
+              vendor/proven/src/proven/job.c \
+              vendor/proven/platform/proven_sys_mem.c \
+              vendor/proven/platform/proven_sys_thread.c
 
 # Portable logic layered on the PAL; compiled into both builds.
 SRCS_PAL_COMMON = src/pal/pal_fs_common.c
@@ -35,15 +49,19 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation
 
 .PHONY: all test check clean win64
 
 all: test
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN)
+$(MINIZ_OBJ): vendor/miniz/miniz.c
+	@mkdir -p build
+	$(CC) -std=c11 -O2 -w $(MINIZ_DEFINES) $(MINIZ_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
+
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(MINIZ_OBJ)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -59,12 +77,17 @@ check:
 
 MINGW_CC ?= x86_64-w64-mingw32-gcc
 
-win64:
+$(MINIZ_OBJ_WIN): vendor/miniz/miniz.c
+	@mkdir -p build
+	$(MINGW_CC) -std=c11 -O2 -w $(MINIZ_DEFINES) $(MINIZ_INCLUDE) -c $< -o $@
+
+win64: $(MINIZ_OBJ_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
+		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) \
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
-		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) \
+		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(MINIZ_OBJ_WIN) \
 		-ld2d1 -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 \
 		-o dist/rubraview.exe
 	@echo "Linked: dist/rubraview.exe"

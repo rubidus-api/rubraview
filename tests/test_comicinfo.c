@@ -114,6 +114,61 @@ int main(void) {
     }
     printf("  [PASS] Page buffer grows correctly past initial capacity\n");
 
+    /* Test 8: §3.8.5 point 2 — a manga archive switches the reader to
+       Book mode, right to left, with no key press. */
+    {
+        rubraview_comicinfo_t info = rubraview_comicinfo_parse(&arena,
+            lit("<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>"));
+
+        rubraview_layout_opts_t opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_READING_LTR);
+        rubraview_comicinfo_apply(&info, &opts, NULL, 0);
+        assert(opts.mode == RUBRAVIEW_PAGE_LAYOUT_BOOK);
+        assert(opts.direction == RUBRAVIEW_READING_RTL);
+    }
+    printf("  [PASS] Manga RTL metadata switches the layout to Book mode, right to left\n");
+
+    /* Test 9: metadata that says nothing changes nothing. */
+    {
+        rubraview_comicinfo_t plain = rubraview_comicinfo_parse(&arena, lit("<ComicInfo><Title>x</Title></ComicInfo>"));
+        rubraview_layout_opts_t opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_DUAL, RUBRAVIEW_READING_LTR);
+        rubraview_comicinfo_apply(&plain, &opts, NULL, 0);
+        assert(opts.mode == RUBRAVIEW_PAGE_LAYOUT_DUAL);
+        assert(opts.direction == RUBRAVIEW_READING_LTR);
+    }
+    printf("  [PASS] Metadata with no <Manga> tag leaves the layout untouched\n");
+
+    /* Test 10: §3.8.5 point 3 — pages tagged as covers are marked to
+       stand alone, whatever their number, and other pages are not. */
+    {
+        rubraview_comicinfo_t info = rubraview_comicinfo_parse(&arena, lit(
+            "<ComicInfo><Pages>"
+            "<Page Image=\"0\" Type=\"FrontCover\" />"
+            "<Page Image=\"1\" Type=\"Story\" />"
+            "<Page Image=\"5\" Type=\"InnerCover\" />"
+            "</Pages></ComicInfo>"));
+
+        rubraview_page_info_t pages[8] = {0};
+        for (int i = 0; i < 8; ++i) { pages[i].width = 800; pages[i].height = 1200; }
+
+        rubraview_comicinfo_apply(&info, NULL, pages, 8);
+        assert(pages[0].force_standalone);
+        assert(!pages[1].force_standalone);
+        assert(pages[5].force_standalone);
+        assert(!pages[7].force_standalone);
+    }
+    printf("  [PASS] FrontCover and InnerCover pages are marked to stand alone\n");
+
+    /* Test 11: a Page index outside the archive is ignored rather than
+       writing past the array. */
+    {
+        rubraview_comicinfo_t info = rubraview_comicinfo_parse(&arena, lit(
+            "<ComicInfo><Pages><Page Image=\"99\" Type=\"FrontCover\" /></Pages></ComicInfo>"));
+        rubraview_page_info_t pages[2] = {0};
+        rubraview_comicinfo_apply(&info, NULL, pages, 2);
+        assert(!pages[0].force_standalone && !pages[1].force_standalone);
+    }
+    printf("  [PASS] An out-of-range Page index is ignored, not written past the array\n");
+
     free(raw_mem);
     printf("[test_comicinfo] All tests passed successfully!\n");
     return 0;
