@@ -2,13 +2,13 @@ CC ?= gcc
 CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
 LDFLAGS ?= -lm
 
-SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c
+SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c
 SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/src/proven/memory.c \
               vendor/proven/src/proven/panic.c \
               vendor/proven/platform/proven_sys_mem.c
 
-TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path
+TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_sort
 
 .PHONY: all test check clean win64
 

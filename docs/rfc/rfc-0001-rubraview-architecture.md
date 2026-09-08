@@ -131,11 +131,22 @@ The slide show can operate over diverse file targets:
 4. **Selected / Marked Files Only**: Operates strictly on user-selected items (files checked in the filmstrip, tagged via `Space`, or multi-selected via standard file dialog).
 
 #### 3.2.3 Multi-Criteria Sorting Engine
-Before starting the presentation, the playback sequence can be sorted by:
-- **File Name (Natural Alphanumeric - Default)**: Standard natural sorting (e.g. `1.jpg`, `2.jpg`, `10.jpg`, not alphabetical `1, 10, 2`). Ascending or Descending.
-- **Date Modified / Created**: Chronological order (Newest first or Oldest first).
-- **File Size**: Sorted by byte length (Smallest first or Largest first).
-- **Random Shuffle**: Cryptographically uniform Fisher-Yates shuffle with seed preservation (allows `Previous` key to accurately step back through the shuffled history without re-randomizing).
+Before starting the presentation or browsing directory collections, the file sequence can be organized by two distinct name-sorting modes, as well as metadata-based sorting:
+1. **Name: Natural / Logical Alphanumeric (`RV_SORT_NAME_NATURAL` - Default)**:
+   - Evaluates contiguous digit sequences as single integrated numeric quantities rather than raw ASCII code points.
+   - Specifically handles bracketed and indexed sequences: `(1)`, `(2)`, ..., `(9)`, `(10)`, ..., `(99)`, `(100)` are sorted in strict numerical order ($1 < 2 < 9 < 10 < 99 < 100$).
+   - Prevents the classic sorting bug where `(10)` and `(100)` are sorted ahead of `(2)`.
+   - Supports arbitrary digit placement: beginning (`1.jpg`), middle (`chapter_1_page_10.png`), inside parentheses/brackets (`img (10).jpg`, `[05].png`), and mixed delimiters.
+   - Arbitrary precision: handles numbers with more than 64 bits without integer overflow by comparing significant digit spans.
+   - Resolves leading zero ties deterministically (e.g. `1` vs `01`).
+2. **Name: Strict Lexicographical / Ordinal (`RV_SORT_NAME_LEXICAL`)**:
+   - Compares characters strictly byte-by-byte according to Unicode/ASCII code points (`'('` < `'0'` < `'1'` < `'2'`).
+   - Results in literal ordinal sequence: `(1)` < `(10)` < `(100)` < `(2)` < `(20)` < `(9)`.
+   - Essential for programmers, command-line scripting alignment, exact matching with raw POSIX `ls`, and database consistency where byte order is required.
+3. **Date Modified / Created (`RV_SORT_DATE_MODIFIED` / `RV_SORT_DATE_CREATED`)**: Chronological order (Newest first or Oldest first).
+4. **File Size (`RV_SORT_FILE_SIZE`)**: Sorted by byte length (Smallest first or Largest first).
+5. **Random Shuffle (`RV_SORT_RANDOM`)**: Cryptographically uniform Fisher-Yates shuffle with seed preservation (allows `Previous` key to accurately step back through the shuffled history without re-randomizing).
+- **Ascending / Descending Toggle**: Every sorting mode supports an instantaneous Ascending $\leftrightarrow$ Descending direction flip. Both `RV_SORT_NAME_NATURAL` and `RV_SORT_NAME_LEXICAL` are exposed as distinct selectable options in the In-Window Menu Box, the In-App Metro Picker sort chips, and CLI arguments (`--sort=natural` vs `--sort=lexical`).
 
 #### 3.2.4 File Extension & Media Type Filtering
 Users can filter the active sequence without moving files:
@@ -335,47 +346,153 @@ The **Menu Box** manages deep configurations, layout switching, image filters, a
   - `GID_PAN`: Two-finger drag to pan viewport.
   - Single-finger horizontal swipe for page navigation.
 
-### 3.7 Keyboard-First Control Matrix
-Rubraview is fully operable via keyboard without ever touching a mouse:
+### 3.7 Unified Keyboard, Mouse & Touch Control Matrix
+Rubraview is designed with a **keyboard-first, touch-optimized philosophy**: 100% of viewer actions can be performed via keyboard alone without touching a mouse, while also offering fluid mouse gestures and touch controls.
 
-| Action | Primary Hotkey | Alternative |
-| :--- | :--- | :--- |
-| **Next Page / Frame** | `Right Arrow` | `PageDown`, `Space`, `Enter` |
-| **Previous Page / Frame** | `Left Arrow` | `PageUp`, `Backspace` |
-| **First / Last Page** | `Home` | `End` |
-| **Zoom In / Out** | `+` (or `=`) | `-` (or `_`) |
-| **Reset Zoom (100%)** | `0` | `Ctrl+0` |
-| **Pan Viewport** | `Ctrl + Arrow keys` | Drag with mouse / touch |
-| **Fit Mode: Window** | `1` | Menu tile |
-| **Fit Mode: Width** | `2` | Menu tile |
-| **Fit Mode: Height** | `3` | Menu tile |
-| **Fit Mode: Original 1:1**| `4` | Menu tile |
-| **Fit Mode: Smart Fit** | `5` | Menu tile |
-| **Toggle Fit Lock** | `L` | Menu tile |
-| **Toggle Book / Manga** | `B` | Menu tile |
-| **Toggle Dual Page** | `D` | Menu tile |
-| **Switch LTR / RTL** | `T` | Menu tile |
-| **Rotate 90° CW / CCW** | `R` | `Shift+R` |
-| **Flip Horizontal / Vert** | `H` | `V` |
-| **Toggle Fullscreen** | `F11` | `F` |
-| **Toggle Slide Show** | `S` | Menu tile |
-| **Toggle Pixel Grid** | `G` | Menu tile |
-| **Toggle Metro Tile Bar**| `M` | `Esc` |
-| **Quick Export / Save As**| `Ctrl+Shift+S`| `Ctrl+E` |
-| **Open Batch Dialog** | `Ctrl+B` | Menu tile |
-| **Previous / Next Archive**| `[` | `]` |
+#### 3.7.1 Context-Aware Keymap Dispatching
+To prevent key collisions while keeping shortcuts intuitive, the input dispatcher evaluates the active viewing context:
+- **Image / Comic Mode**: Standard page flipping, fit mode switching, and layout toggling.
+- **Video & Audio Mode**: Play/Pause, precision frame stepping, seek, and A-B section repeat.
+- **Slideshow Active**: Timer interval adjustment ($\pm 0.5\text{s}$ / $\pm 0.1\text{s}$).
+- **Modal / File Dialog Active**: Traversal, selection, and cancellation.
 
-### 3.8 Comic Archive Container Subsystem (CBZ, CBR, CB7)
-To support digital comic books and manga packages directly without prior manual extraction:
+#### 3.7.2 Comprehensive Keyboard Hotkey Reference
 
-1. **Direct In-Memory Streaming**:
-   - Supported extensions: `.cbz` (ZIP), `.cbr` (RAR), `.cb7` (7z).
-   - The PAL archive reader (`rv_archive_io`) opens the archive file header, extracts the file manifest, filters for supported image mime types, and naturally sorts the internal page entries.
-   - Individual page files are decompressed directly into memory arenas (`prv_arena_t`) on demand. **Zero temporary files are created on disk**.
-2. **Archive Pre-caching**:
-   - Consecutive compressed streams are decompressed in worker threads ahead of time, ensuring reading comics from `.cbz` feels identical to reading uncompressed folders.
-3. **Seamless Folder Navigation Across Archives**:
-   - Pressing `[` or `]` navigates to the previous or next archive in the parent directory (e.g. automatically opening `Volume 02.cbz` after reaching the last page of `Volume 01.cbz`).
+| Category | Action | Primary Key | Alternative / Modifier | Context / Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Navigation** | Next Page / Frame | `Right Arrow` | `PageDown`, `Space`, `J`, `D` | Advance 1 page |
+| | Previous Page / Frame | `Left Arrow` | `PageUp`, `Shift+Space`, `K`, `A` | Step back 1 page |
+| | First / Last Page | `Home` / `End` | `Ctrl+Home` / `Ctrl+End` | Jump to beginning / end |
+| | Skip 10 Pages | `Shift + Right` / `Left` | `Ctrl + PageDown` / `PageUp` | Rapid chapter skimming |
+| | Up / Exit to Folder | `Backspace` | `Alt + Up` | Ascend to parent directory/archive |
+| | Next / Previous Archive | `Ctrl + ]` / `Ctrl + [` | `Ctrl+PageDown` / `PageUp` | Next/prev CBZ/ZIP in directory |
+| **Zoom & Fit** | Sub-pixel Zoom In / Out | `+` (or `=`) / `-` (or `_`) | `Num +` / `Num -` | Step zoom $\pm 10\%$ at center |
+| | Real-Time Live Zoom | `Ctrl + Mouse Wheel` | Touch Pinch | Continuous cursor-centered zoom |
+| | Reset Zoom to 100% (1:1) | `4` | `0`, `Ctrl + 0`, `Middle Click` | 1:1 original pixel mapping |
+| | Fit to Window (Inside) | `1` | Menu tile | Scales proportionally to fit window |
+| | Fit to Width | `2` | Menu tile | Webtoon & vertical document mode |
+| | Fit to Height | `3` | Menu tile | Panoramic landscape mode |
+| | Stretch to Fill | `Ctrl + 1` | Menu tile | Ignore aspect ratio |
+| | Smart Fit | `5` | Menu tile | Downscale only if larger than window |
+| | Toggle Fit Lock | `L` | Menu tile | Retain zoom/fit mode across files |
+| | Pan Viewport (Zoomed) | `Alt + Arrow keys` | `W`, `A`, `S`, `D` | Smooth canvas panning |
+| | Rotate 90° CW / CCW | `R` / `Shift + R` | Menu tile | Direct2D instantaneous transform |
+| | Flip Horizontal / Vert | `H` / `V` | Menu tile | Mirror canvas |
+| | Toggle Pixel Grid | `G` | Menu tile | 1px hairline grid at $\ge 400\%$ zoom |
+| **Book & Manga** | Toggle Page Layout | `B` | Menu tile | Cycle Single $\rightarrow$ Dual $\rightarrow$ Book |
+| | Toggle Reading Order | `M` | Menu tile | LTR (Western) $\leftrightarrow$ RTL (Manga) |
+| | Pre-merged Spread Auto | `Shift + B` | Menu tile | Auto full-width for $AR \ge 1.15$ |
+| **Media Playback** | Play / Pause | `Space` | `P`, `Toolbox ⏯` | Active in video/audio mode |
+| | Frame Step Forward | `.` (Period) | `Ctrl + Right` | Frame-accurate step forward |
+| | Frame Step Backward | `,` (Comma) | `Ctrl + Left` | Frame-accurate step backward |
+| | Seek Forward / Back 5s | `Right` / `Left` | `Toolbox ⏩/⏪` | Active during video playback |
+| | Seek Forward / Back 30s | `Ctrl + Right` / `Left` | — | Coarse timestamp seek |
+| | Fine Seek $\pm 1\text{s}$ | `Shift + Right` / `Left` | — | 1-second precision scrub |
+| | Set Loop Point A | `[` | `Toolbox [A]` | Marks section loop start $T_A$ |
+| | Set Loop Point B | `]` | `Toolbox [B]` | Marks section loop end $T_B$ |
+| | Clear A-B Loop | `\` | `Ctrl + \`, `Esc` | Releases section repeat |
+| | Adjust Volume $\pm 5\%$ | `Up Arrow` / `Down Arrow`| `Mouse Wheel` over volume | 0% to 100% WASAPI volume |
+| | Mute / Unmute Audio | `Shift + M` | `Toolbox 🔇` | Toggles hardware audio output |
+| | Playback Speed $\pm 0.25\text{x}$ | `}` / `{` | Menu tile | 0.25x to 4.0x dynamic pitch-shift |
+| | Capture Current Frame | `Ctrl + C` | `Ctrl + S` | Copies full-res frame to clipboard |
+| **Slideshow** | Start / Stop Slideshow | `S` | `F5` | Automated sequence presentation |
+| | Coarse Interval ($\pm 0.5\text{s}$)| `[` / `]` | Menu tile | Active when Slideshow is running |
+| | Fine Interval ($\pm 0.1\text{s}$) | `Shift + [` / `Shift + ]` | Menu tile | 0.1s to 300.0s interval control |
+| **UI & Windows** | Toggle Borderless Fullscreen | `F` | `F11`, `Alt + Enter`, `Double Click` | Zero-margin fullscreen canvas |
+| | Toggle In-Window Menu Box | `Tab` | `F1`, Anchor `[ ☰ ]` | Hierarchical Metro settings menu |
+| | Toggle Toolbox / Pin | `T` | `F2`, Anchor `[ ⏯ ]` | Playback toolbox & pin status |
+| | Open File Dialog | `O` | `Ctrl + O` | In-App Metro Picker or Win32 COM |
+| | Open Folder / Directory | `Ctrl + Shift + O` | Menu tile | Traverses directory |
+| | Toggle Thumbnail Filmstrip | `F4` | Menu tile | Collapsible bottom thumbnail bar |
+| | Toggle OSD Info Overlay | `I` | Menu tile | Resolution, EXIF, Bit depth, Zoom |
+| | Open Color/Tone Curves | `E` | Menu tile | Exposure, Contrast, Spline curves |
+| | Open Batch Converter | `Ctrl + B` | Menu tile | Multi-threaded export queue |
+| | Close Modal / Cancel / Exit | `Esc` | — | Closes menu $\rightarrow$ Exits fullscreen $\rightarrow$ Quit |
+
+#### 3.7.3 Mouse Controls & Hit-Testing Zones
+1. **Left Click & Drag**:
+   - When zoomed in beyond fit: Drags/pans the canvas viewport in sub-pixel coordinates.
+   - When comic mode is active:
+     - Click **Left 30%** of screen: Previous Page (LTR) / Next Page (RTL).
+     - Click **Right 30%** of screen: Next Page (LTR) / Previous Page (RTL).
+     - Click **Center 40%** of screen: Toggles floating anchor points and OSD overlay.
+2. **Double Click**: Toggles borderless fullscreen mode.
+3. **Right Click**: Opens the Metro context menu at the cursor position.
+4. **Middle Click (Wheel Click)**: Toggles instantaneously between 1:1 original resolution (100%) and Fit to Window.
+5. **Mouse Wheel**:
+   - Plain Wheel: Next / Previous image (or vertical scroll when in Fit to Width mode).
+   - `Ctrl + Mouse Wheel`: Real-time continuous sub-pixel zoom centered exactly at mouse cursor position.
+   - `Shift + Mouse Wheel`: Horizontal canvas pan or 10-page fast skip.
+6. **Side Buttons (XButton1 / XButton2)**: Previous / Next page.
+
+#### 3.7.4 Touch & Pen Gestures (`WM_GESTURE` / Pointer Input)
+- **Single Tap**: Toggles floating anchors and OSD info overlay.
+- **Two-Finger Drag (`GID_PAN`)**: Fluid sub-pixel panning across canvas.
+- **Pinch-to-Zoom (`GID_ZOOM`)**: Continuous zoom centered at the touch centroid.
+- **Horizontal Swipe**: Fast swipe left/right triggers next/previous page flip with inertial feel.
+- **Long Press (Press & Hold)**: Opens context menu.
+
+#### 3.7.5 Plain-Text Keymap Configuration (`keymap.ini`)
+Every action identifier in Rubraview is bound via an external, human-readable configuration file (`keymap.ini`). Users can customize shortcuts without rebuilding the executable:
+```ini
+[navigation]
+next_page = Right, PageDown, Space, J, D
+prev_page = Left, PageUp, Shift+Space, K, A
+skip_forward = Shift+Right
+skip_backward = Shift+Left
+
+[media]
+play_pause = Space, P
+frame_step_fwd = Period
+frame_step_back = Comma
+set_loop_a = BracketLeft
+set_loop_b = BracketRight
+clear_loop = Backslash
+```
+
+### 3.8 Comic Archive Container Subsystem & VFS Streaming (CBZ, CBR, CB7)
+To provide frictionless digital comic and manga viewing without disk clutter:
+
+#### 3.8.1 Virtual File System (VFS) Streaming Architecture
+Unlike legacy comic viewers that unpack entire multi-gigabyte archives into the `%TEMP%` directory on disk, Rubraview implements a true **In-Memory Virtual File System (VFS)**:
+1. **Zero-Disk Extraction Invariant**:
+   - The engine **NEVER writes temporary image files to disk**.
+   - Preserves SSD write endurance, avoids disk space exhaustion, and eliminates orphaned temp files on crash.
+2. **$O(1)$ Central Directory Header Indexing**:
+   - Upon opening a `.cbz` (ZIP), `.cbr` (RAR), or `.cb7` (7z) file, the VFS parser reads only the archive's central directory metadata located at the end of the file.
+   - Extracts filenames, compression methods, uncompressed sizes, and stream byte offsets in under **5 milliseconds**, regardless of whether the archive is 50MB or 10GB.
+   - Pages are naturally sorted using natural alphanumeric ordering (`01.jpg`, `02.jpg`, `10.jpg`).
+3. **On-Demand Chunk Streaming**:
+   - When a specific page $N$ is requested, the VFS seeks directly to that page's compressed byte offset in the archive file.
+   - The compressed chunk is decompressed directly into a memory arena (`prv_arena_t`) and fed into WIC / Direct2D.
+   - Memory usage is bounded strictly to the active viewing spread and pre-cache ring buffer (typically 30–60 MB RAM total).
+4. **Consecutive Archive Traversal**:
+   - Reaching the last page of an archive (or pressing `Ctrl + ]`) seamlessly opens the next archive in the parent directory (e.g. `Vol 01.cbz` $\rightarrow$ `Vol 02.cbz`), creating a continuous reading experience.
+
+#### 3.8.2 Solid vs. Non-Solid Streaming Architecture (7z / CB7 & RAR / CBR)
+A key architectural question arises regarding **7z (`.7z`, `.cb7`)** files:
+Unlike ZIP archives where every file is compressed independently (Non-solid), 7-Zip by default creates **Solid archives**, concatenating multiple files into a single unified LZMA/LZMA2 stream to maximize compression ratio across similar images.
+
+Rubraview successfully enables **Zero-Disk VFS Streaming for 7z** through a dual-mode decoding strategy:
+
+1. **Non-Solid 7z (Individual File Streams)**:
+   - When an archive is packed with solid compression disabled (`-ms=off`), each image has an isolated stream offset.
+   - Operates identically to ZIP: true $O(1)$ random access to any page index in 5ms.
+2. **Solid 7z (Progressive Sequential Streaming Decoder)**:
+   - **Header Indexing ($O(1)$)**: The 7z metadata header at the end of the archive is indexed immediately upon open, providing the complete file list and solid block boundaries without decoding image payloads.
+   - **Persistent Worker Decoder Context**: Because comic and image browsing is inherently sequential ($1\text{p} \rightarrow 2\text{p} \rightarrow 3\text{p}$), the background worker thread keeps a persistent `CLzmaDec` / `CSzArEx` decoder state alive.
+   - When Page 1 finishes decoding, the decoder pauses at that exact dictionary state. When the user flips to Page 2, the decoder resumes seamlessly from the current dictionary offset rather than re-decoding from the beginning.
+   - Lookahead pre-caching ensures that the next 2–3 pages are already decompressed in `prv_arena_t` memory, delivering the **identical 0ms instantaneous page-flip experience as uncompressed folders**.
+3. **Handling Arbitrary Random Jumps in Solid Archives**:
+   - If the user suddenly jumps from Page 1 to Page 150 via the slider:
+     - The decoder identifies the solid block containing Page 150.
+     - Performs a high-speed payload skip (discarding uncompressed bytes without generating Direct2D textures or pixel buffers).
+     - Modern CPU LZMA decoding throughput reaches 60–120 MB/s, allowing even a 100-page skip across typical manga scans to resolve in ~0.1 to 0.3 seconds.
+   - **Zero Disk Extraction Guaranteed**: Even during deep random jumps in solid archives, no intermediate files are written to `%TEMP%` or storage. All buffers cycle strictly within `prv_arena_t` memory arenas.
+4. **Pure C23 Implementation via Official LZMA SDK**:
+   - Built on Igor Pavlov's official **7-Zip C LZMA SDK (`7zDec.c`, `LzmaDec.c`, `Bra86.c`)**.
+   - Written in 100% pure ANSI C / C23 with Public Domain / permissive licensing.
+   - The SDK's memory allocator interface (`ISzAlloc`) is wired directly to `proven_arena_t`, ensuring zero heap fragmentation and instant teardown upon closing the archive.
 
 ### 3.9 Geometric Transforms & Rotation
 - **Rotation Operations**:
@@ -497,12 +614,60 @@ typedef struct rv_dialog_result {
 - Supports multi-file selection (`FOS_ALLOWMULTISELECT`), directory picking (`FOS_PICKFOLDERS`), and custom filter specifications.
 - Translates native wide-character UTF-16 paths into clean, bounded UTF-8 slices (`u8str_t`) backed by `proven_arena_t`.
 
-#### 3.15.2 Future Swappable In-App Metro Tile File Picker (`rv_file_dialog_custom`)
-- Standard OS dialogs often feature small, non-scalable list views with microscopic scrollbars, making them cumbersome to navigate over Remote Desktop on smartphones.
-- Rubraview reserves a clean pathway for an **In-App Metro File Picker**:
-  - Renders directly on the hardware-accelerated canvas using large square tiles for folder and file navigation.
-  - Live thumbnail previews generated directly inside the file selection grid.
-  - Zero external GUI toolkit dependency: 100% pure C23, identical behavior across Windows, Linux, and macOS.
+#### 3.15.2 In-App Metro Tile File Picker (`rv_file_dialog_metro`)
+Standard OS file dialogs (such as Win32 `IFileOpenDialog`) are designed primarily for high-precision mouse input on desktop monitors. When accessed over mobile Remote Desktop (RDP) on small smartphone screens, their 12px list fonts, tiny folder tree controls, and microscopic scrollbars become frustrating and error-prone to operate with thumbs.
+
+Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rv_file_dialog_metro`)** that renders directly onto the Direct2D canvas:
+
+```
++-----------------------------------------------------------------------------------+
+|  [ C: ]  [ D: ]  [ 📁 Pictures ]  [ 📁 Downloads ]  [ 📚 Comics ]  [ 🕒 Recent ]  |
+|  [ ⮤ Up ]  C:  >  Comics  >  Berserk  >  [ Vol_01.cbz ]                           |
+|  Filter: [ All Media ] [ Images ] [ Videos ] [ Archives ] | Sort: [ Name 🔤 ]     |
++-----------------------------------------------------------------------------------+
+|  +--------------+  +--------------+  +--------------+  +--------------+           |
+|  |  📁 Folder   |  | [Thumbnail]  |  | [Thumbnail]  |  | [Thumbnail]  |           |
+|  |  Chapter 01  |  |  Cover.jpg   |  |  Page_001.png|  |  Vol_02.cbz  |           |
+|  |  (42 items)  |  |  2.4 MB [4K] |  |  1.8 MB [HD] |  |  180 MB [CBZ]|           |
+|  +--------------+  +--------------+  +--------------+  +--------------+           |
+|  +--------------+  +--------------+  +--------------+  +--------------+           |
+|  | [Thumbnail]  |  | [Thumbnail]  |  | [Thumbnail]  |  | [Thumbnail]  |           |
+|  |  Page_002.png|  |  Page_003.png|  |  Teaser.mp4  |  |  Anim.gif    |           |
+|  |  1.9 MB [HD] |  |  2.1 MB [HD] |  |  45 MB [MOV] |  |  8.2 MB [GIF]|           |
+|  +--------------+  +--------------+  +--------------+  +--------------+           |
++-----------------------------------------------------------------------------------+
+|  Selected: [ 3 files (24.2 MB) ]  |  [ 📂 Open ]  [ ⏯ Slideshow ]  [ ❌ Cancel ]  |
++-----------------------------------------------------------------------------------+
+```
+
+##### 1. Three-Tier Visual Layout Architecture
+1. **Top Navigation & Breadcrumb Header**:
+   - **Quick-Access Drive & Directory Chips**: Large square/rectangular chips for mounted drives (`C:`, `D:`) and standard media libraries (`Pictures`, `Downloads`, `Comics`, `Recent`).
+   - **Breadcrumb Navigation Path**: Every segment in the directory path (`C: > Comics > Berserk`) is rendered as a standalone touchable Metro tile. Tapping any parent segment navigates there directly. An `[ ⮤ Up ]` tile ascends one directory level.
+   - **Filter & View Tiles**:
+     - Media filter chips: `[ All Media ]`, `[ Images Only ]`, `[ Videos Only ]`, `[ Comic Archives ]`.
+     - Sorting chips: `[ Name 🔤 ]`, `[ Date 📅 ]`, `[ Size ⚖ ]`.
+     - Tile size toggle: Large Grid ($160\times 160\text{ px}$), Medium Grid ($96\times 96\text{ px}$), or Touch List ($48\text{ px}$ row height).
+2. **Central Metro Tile Grid Viewport**:
+   - **Virtual Scrolling**: Even in directories containing 10,000+ media files, the renderer only allocates and draws tiles currently visible within the screen viewport (typically 12–30 tiles), maintaining a solid 60 FPS refresh rate and sub-millisecond touch response.
+   - **Folder Tiles**: Display a prominent folder glyph, folder name, and total item count (`📁 Volume 01 (184 items)`).
+   - **Media Tiles**:
+     - Asynchronous WIC low-resolution thumbnail rendering with an in-memory thumbnail LRU cache (`rv_thumb_cache`) in memory arenas.
+     - Filename rendered in DirectWrite with clean middle-ellipsis truncation (e.g. `Scans_2026...001.jpg`).
+     - Overlay badge indicators: File format (`[CBZ]`, `[GIF]`, `[MP4]`), resolution class (`[4K]`, `[FHD]`), and file size.
+   - **Interactive Archive Ingestion**:
+     - Tapping a `.cbz` / `.zip` archive offers two actions: direct opening in the viewer, or **virtual folder exploration**, allowing users to browse individual comic pages inside the archive as thumbnails before opening!
+3. **Bottom Action & Multi-Select Bar**:
+   - In single-file mode: Double-tapping any tile instantly opens the file and dismisses the picker.
+   - In multi-select mode:
+     - Tapping the top-right selection checkbox on any tile marks it with a high-contrast accent border and checkmark.
+     - Bottom bar displays selection metrics: `Selected: 5 files (340 MB)`.
+     - Action buttons: `[ 📂 Open Selected ]`, `[ ⏯ Play as Slideshow ]`, `[ 📑 Create Playlist ]`, `[ ❌ Cancel (Esc) ]`.
+
+##### 2. Mobile RDP & Touchscreen Optimizations
+- **Minimum Hit Target**: All buttons, chips, and tiles enforce a minimum hit target of $48\times 48\text{ px}$ (default $64\times 64\text{ px}$ to $160\times 160\text{ px}$), ensuring effortless tapping with human thumbs.
+- **Zero-Latency RDP Palette**: Uses flat, solid and semi-transparent Metro colors with zero ornamental animation loops or continuous alpha fades, minimizing Remote Desktop frame-encode bandwidth.
+- **Swappable PAL Integration**: The In-App Metro Picker conforms directly to the `rv_pal_file_dialog` interface contract (`rv_file_dialog_metro`). Users can configure their default picker (`use_native_dialog = true/false` in `settings.ini`) or swap between them on the fly.
 
 #### 3.15.3 Cross-Platform Native Backends
 - **macOS**: Bridges to `NSOpenPanel` / `NSSavePanel` via a lightweight C runtime wrapper.
