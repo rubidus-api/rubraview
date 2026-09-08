@@ -32,3 +32,9 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T023 | R112, R134 | Verify PAL directory enumeration, null-term invariant, sibling filtering/ordering | `make test` | tests/test_pal_fs.c | active |
 | T024 | R109, R110 | Verify multi-page compositor: gutter placement, split halves, zoom/pan | `make test` | tests/test_compositor.c | active |
 | T025 | R101, R102, R117, R147 | Windows canvas smoke check: window opens frameless, image decodes and renders, keys navigate, window size never changes on its own | `make win64` then run `dist/rubraview.exe <image>` on Windows | docs/tests/cases/T025-windows-smoke.md | manual |
+| T026 | R113 | Verify non-destructive rotation/flip: corner mapping, axis swap, mirrored clockwise rule | `make test` | tests/test_transform.c | active |
+| T027 | R120 | Verify click zones, wheel/modifier semantics, side buttons, swipe threshold | `make test` | tests/test_ui_input.c | active |
+| T028 | R129, R130, R131 | Verify tile grid geometry, anchor clamping, detach/dock, pin, menu hierarchy and breadcrumb | `make test` | tests/test_ui_box.c | active |
+| T029 | R116, R147 | Verify OSD fade and status line, hover titlebar timing and button hit zones, transitions, cursor auto-hide | `make test` | tests/test_ui_chrome.c | active |
+| T030 | R133, R138 | Verify virtual scrolling, filmstrip budget interaction, picker breadcrumbs/type-ahead/multi-select | `make test` | tests/test_ui_browse.c | active |
+| T031 | R116, R120, R129 | Windows reading-UI smoke check: floating boxes, OSD, hover titlebar, slide show, rotation, filmstrip | `make win64` then run `dist/rubraview.exe <image>` on Windows | docs/tests/cases/T031-windows-ui-smoke.md | manual |

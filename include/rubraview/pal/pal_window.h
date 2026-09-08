@@ -102,6 +102,16 @@ void *rubraview_pal_window_native_handle(const rubraview_window_t *window);
 void rubraview_pal_window_set_fullscreen(rubraview_window_t *window, bool enabled);
 bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window);
 
+/** §3.2.5: hide the pointer during fullscreen presentation. Idempotent. */
+void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible);
+
+/** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */
+void rubraview_pal_window_begin_drag(rubraview_window_t *window);
+
+/** §3.21.3: the minimize and maximize/restore controls. */
+void rubraview_pal_window_minimize(rubraview_window_t *window);
+void rubraview_pal_window_toggle_maximize(rubraview_window_t *window);
+
 bool rubraview_pal_window_should_close(const rubraview_window_t *window);
 void rubraview_pal_window_request_close(rubraview_window_t *window);
 

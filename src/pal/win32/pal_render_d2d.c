@@ -2,7 +2,17 @@
 #define COBJMACROS
 #include <windows.h>
 #include <d2d1.h>
+#include <dwrite.h>
 #include <string.h>
+
+/*
+ * MinGW declares IID_IDWriteFactory with DEFINE_GUID but its import
+ * library does not export it, so the value is defined here for this
+ * translation unit. The bytes are exactly those in the toolchain's own
+ * dwrite.h declaration (b859ee5a-d838-4b5b-a2e8-1adc7d93db48).
+ */
+static const GUID RUBRAVIEW_IID_IDWriteFactory =
+    { 0xb859ee5a, 0xd838, 0x4b5b, { 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48 } };
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 
@@ -17,6 +27,7 @@ struct rubraview_renderer {
     proven_arena_t *arena;
     ID2D1Factory *factory;
     ID2D1HwndRenderTarget *target;
+    IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
     HWND hwnd;
     int32_t width, height;
     bool drawing;
@@ -104,6 +115,13 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
         return NULL;
     }
 
+    /* Text is chrome, not the canvas: if DirectWrite cannot start the
+       viewer still shows images, just without the OSD and tile captions. */
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &RUBRAVIEW_IID_IDWriteFactory,
+                                   (IUnknown**)&r->dwrite))) {
+        r->dwrite = NULL;
+    }
+
     return r;
 }
 
@@ -112,6 +130,10 @@ void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     if (renderer->target) {
         ID2D1HwndRenderTarget_Release(renderer->target);
         renderer->target = NULL;
+    }
+    if (renderer->dwrite) {
+        IDWriteFactory_Release(renderer->dwrite);
+        renderer->dwrite = NULL;
     }
     if (renderer->factory) {
         ID2D1Factory_Release(renderer->factory);
@@ -308,6 +330,136 @@ void rubraview_pal_texture_destroy(rubraview_texture_t *texture) {
     if (texture->owner) {
         texture_recycle(texture->owner, texture);
     }
+}
+
+/* ---- UI chrome primitives (M3) ---- */
+
+static D2D1_COLOR_F argb_to_color(uint32_t argb) {
+    return (D2D1_COLOR_F){
+        .r = (float)((argb >> 16) & 0xFF) / 255.0f,
+        .g = (float)((argb >> 8) & 0xFF) / 255.0f,
+        .b = (float)(argb & 0xFF) / 255.0f,
+        .a = (float)((argb >> 24) & 0xFF) / 255.0f,
+    };
+}
+
+static D2D1_RECT_F to_d2d_rect(rubraview_pal_rect_t r) {
+    return (D2D1_RECT_F){
+        .left = (FLOAT)r.x, .top = (FLOAT)r.y,
+        .right = (FLOAT)(r.x + r.width), .bottom = (FLOAT)(r.y + r.height),
+    };
+}
+
+/* Chrome is drawn in client pixels, so the viewport transform must not
+   apply to it. */
+static void set_identity(ID2D1RenderTarget *rt) {
+    D2D1_MATRIX_3X2_F identity = to_d2d_matrix(rubraview_mat3x2_identity());
+    ID2D1RenderTarget_SetTransform(rt, &identity);
+}
+
+void rubraview_pal_render_fill_rect(rubraview_renderer_t *renderer,
+                                    rubraview_pal_rect_t rect,
+                                    uint32_t argb,
+                                    double corner_radius) {
+    if (!renderer || !renderer->target) return;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) || !brush) return;
+
+    set_identity(rt);
+    if (corner_radius > 0.0) {
+        D2D1_ROUNDED_RECT rr = {
+            .rect = to_d2d_rect(rect),
+            .radiusX = (FLOAT)corner_radius,
+            .radiusY = (FLOAT)corner_radius,
+        };
+        ID2D1RenderTarget_FillRoundedRectangle(rt, &rr, (ID2D1Brush*)brush);
+    } else {
+        D2D1_RECT_F r = to_d2d_rect(rect);
+        ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush*)brush);
+    }
+
+    ID2D1SolidColorBrush_Release(brush);
+}
+
+void rubraview_pal_render_stroke_rect(rubraview_renderer_t *renderer,
+                                      rubraview_pal_rect_t rect,
+                                      uint32_t argb,
+                                      double stroke_width,
+                                      double corner_radius) {
+    if (!renderer || !renderer->target) return;
+    if (stroke_width <= 0.0) stroke_width = 1.0;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) || !brush) return;
+
+    set_identity(rt);
+    if (corner_radius > 0.0) {
+        D2D1_ROUNDED_RECT rr = {
+            .rect = to_d2d_rect(rect),
+            .radiusX = (FLOAT)corner_radius,
+            .radiusY = (FLOAT)corner_radius,
+        };
+        ID2D1RenderTarget_DrawRoundedRectangle(rt, &rr, (ID2D1Brush*)brush, (FLOAT)stroke_width, NULL);
+    } else {
+        D2D1_RECT_F r = to_d2d_rect(rect);
+        ID2D1RenderTarget_DrawRectangle(rt, &r, (ID2D1Brush*)brush, (FLOAT)stroke_width, NULL);
+    }
+
+    ID2D1SolidColorBrush_Release(brush);
+}
+
+bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
+                                    u8str_t text,
+                                    rubraview_pal_rect_t rect,
+                                    double font_size,
+                                    uint32_t argb,
+                                    rubraview_text_align_t align) {
+    if (!renderer || !renderer->target || !renderer->dwrite) return false;
+    if (text.len == 0 || text.len > 4096) return false;
+    if (font_size <= 0.0) font_size = 14.0;
+
+    /* UTF-8 to UTF-16 at the API boundary only (§7.2.3). */
+    WCHAR wide[4096];
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len,
+                                       wide, (int)(sizeof(wide) / sizeof(wide[0])));
+    if (wide_len <= 0) return false;
+
+    IDWriteTextFormat *format = NULL;
+    HRESULT hr = IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe UI", NULL,
+                                                 DWRITE_FONT_WEIGHT_NORMAL,
+                                                 DWRITE_FONT_STYLE_NORMAL,
+                                                 DWRITE_FONT_STRETCH_NORMAL,
+                                                 (FLOAT)font_size, L"", &format);
+    if (FAILED(hr) || !format) return false;
+
+    DWRITE_TEXT_ALIGNMENT text_align = DWRITE_TEXT_ALIGNMENT_LEADING;
+    if (align == RUBRAVIEW_TEXT_CENTER) text_align = DWRITE_TEXT_ALIGNMENT_CENTER;
+    else if (align == RUBRAVIEW_TEXT_RIGHT) text_align = DWRITE_TEXT_ALIGNMENT_TRAILING;
+    IDWriteTextFormat_SetTextAlignment(format, text_align);
+    IDWriteTextFormat_SetParagraphAlignment(format, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) || !brush) {
+        IDWriteTextFormat_Release(format);
+        return false;
+    }
+
+    set_identity(rt);
+    D2D1_RECT_F layout = to_d2d_rect(rect);
+    ID2D1RenderTarget_DrawText(rt, wide, (UINT32)wide_len, (IDWriteTextFormat*)format, &layout,
+                               (ID2D1Brush*)brush, D2D1_DRAW_TEXT_OPTIONS_NONE,
+                               DWRITE_MEASURING_MODE_NATURAL);
+
+    ID2D1SolidColorBrush_Release(brush);
+    IDWriteTextFormat_Release(format);
+    return true;
 }
 
 #endif /* _WIN32 */
