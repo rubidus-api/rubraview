@@ -12,6 +12,13 @@ extern "C" {
 
 typedef proven_arena_t prv_arena_t;
 
+typedef struct u8str {
+    const char   *ptr;
+    proven_size_t len;
+} u8str_t;
+
+#define U8(lit) ((u8str_t){ .ptr = ("" lit), .len = sizeof("" lit) - 1 })
+
 typedef enum rv_pixel_format {
     RV_PIXFMT_RGBA8 = 0,   /* Standard 32-bit RGBA (8 bits per channel) */
     RV_PIXFMT_BGRA8,       /* Direct2D/WIC native layout */
