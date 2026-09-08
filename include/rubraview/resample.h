@@ -10,12 +10,12 @@
 extern "C" {
 #endif
 
-typedef enum rv_resample_filter {
-    RV_FILTER_NEAREST = 0,   /* Fast nearest neighbor (pixel-art integer scale) */
-    RV_FILTER_BILINEAR,      /* 2x2 area-weighted bilinear interpolation */
-    RV_FILTER_BICUBIC,       /* Catmull-Rom cubic spline interpolation */
-    RV_FILTER_LANCZOS3,      /* High-fidelity 3-lobe windowed sinc filter */
-} rv_resample_filter_t;
+typedef enum rubraview_resample_filter {
+    RUBRAVIEW_FILTER_NEAREST = 0,   /* Fast nearest neighbor (pixel-art integer scale) */
+    RUBRAVIEW_FILTER_BILINEAR,      /* 2x2 area-weighted bilinear interpolation */
+    RUBRAVIEW_FILTER_BICUBIC,       /* Catmull-Rom cubic spline interpolation */
+    RUBRAVIEW_FILTER_LANCZOS3,      /* High-fidelity 3-lobe windowed sinc filter */
+} rubraview_resample_filter_t;
 
 /**
  * Resample a source pixel buffer to arbitrary target dimensions (dst_width x dst_height)
@@ -24,11 +24,11 @@ typedef enum rv_resample_filter {
  * Allocates the destination pixbuf within the provided arena.
  * Clamps coordinates at boundaries to prevent edge artifacts.
  */
-rv_pixbuf_t rv_pixbuf_resample(proven_arena_t *arena,
-                               const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_pixbuf_resample(proven_arena_t *arena,
+                               const rubraview_pixbuf_t *src,
                                int32_t dst_width,
                                int32_t dst_height,
-                               rv_resample_filter_t filter);
+                               rubraview_resample_filter_t filter);
 
 #ifdef __cplusplus
 }

@@ -20,13 +20,13 @@ static u8str_t win32_wstr_to_u8str(proven_arena_t *arena, const WCHAR *wstr) {
     };
 }
 
-rv_file_dialog_result_t rv_pal_file_dialog_open(proven_arena_t *arena, const rv_file_dialog_opts_t *opts) {
-    if (!arena) return (rv_file_dialog_result_t){0};
+rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts) {
+    if (!arena) return (rubraview_file_dialog_result_t){0};
 
     IFileOpenDialog *pfd = NULL;
     HRESULT hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
                                   &IID_IFileOpenDialog, (void**)&pfd);
-    if (FAILED(hr)) return (rv_file_dialog_result_t){0};
+    if (FAILED(hr)) return (rubraview_file_dialog_result_t){0};
 
     FILEOPENDIALOGOPTIONS fos = 0;
     IFileDialog_GetOptions(pfd, &fos);
@@ -52,10 +52,10 @@ rv_file_dialog_result_t rv_pal_file_dialog_open(proven_arena_t *arena, const rv_
     hr = IFileDialog_Show(pfd, parent);
     if (FAILED(hr)) {
         IFileDialog_Release(pfd);
-        return (rv_file_dialog_result_t){ .accepted = false };
+        return (rubraview_file_dialog_result_t){ .accepted = false };
     }
 
-    rv_file_dialog_result_t result = { .accepted = true };
+    rubraview_file_dialog_result_t result = { .accepted = true };
 
     if (opts && opts->allow_multi) {
         IShellItemArray *pItems = NULL;
@@ -107,13 +107,13 @@ rv_file_dialog_result_t rv_pal_file_dialog_open(proven_arena_t *arena, const rv_
     return result;
 }
 
-rv_file_dialog_result_t rv_pal_file_dialog_save(proven_arena_t *arena, const rv_file_dialog_opts_t *opts) {
-    if (!arena) return (rv_file_dialog_result_t){0};
+rubraview_file_dialog_result_t rubraview_pal_file_dialog_save(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts) {
+    if (!arena) return (rubraview_file_dialog_result_t){0};
 
     IFileSaveDialog *pfd = NULL;
     HRESULT hr = CoCreateInstance(&CLSID_FileSaveDialog, NULL, CLSCTX_INPROC_SERVER,
                                   &IID_IFileSaveDialog, (void**)&pfd);
-    if (FAILED(hr)) return (rv_file_dialog_result_t){0};
+    if (FAILED(hr)) return (rubraview_file_dialog_result_t){0};
 
     FILEOPENDIALOGOPTIONS fos = 0;
     IFileDialog_GetOptions(pfd, &fos);
@@ -124,10 +124,10 @@ rv_file_dialog_result_t rv_pal_file_dialog_save(proven_arena_t *arena, const rv_
     hr = IFileDialog_Show(pfd, parent);
     if (FAILED(hr)) {
         IFileDialog_Release(pfd);
-        return (rv_file_dialog_result_t){ .accepted = false };
+        return (rubraview_file_dialog_result_t){ .accepted = false };
     }
 
-    rv_file_dialog_result_t result = { .accepted = true };
+    rubraview_file_dialog_result_t result = { .accepted = true };
     IShellItem *pItem = NULL;
     hr = IFileDialog_GetResult(pfd, &pItem);
     if (SUCCEEDED(hr)) {
@@ -149,15 +149,15 @@ rv_file_dialog_result_t rv_pal_file_dialog_save(proven_arena_t *arena, const rv_
     return result;
 }
 
-rv_file_dialog_result_t rv_pal_file_dialog_pick_folder(proven_arena_t *arena, const rv_file_dialog_opts_t *opts) {
-    rv_file_dialog_opts_t folder_opts;
+rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts) {
+    rubraview_file_dialog_opts_t folder_opts;
     if (opts) {
         folder_opts = *opts;
     } else {
-        folder_opts = (rv_file_dialog_opts_t){0};
+        folder_opts = (rubraview_file_dialog_opts_t){0};
     }
     folder_opts.folder_mode = true;
     folder_opts.allow_multi = false;
-    return rv_pal_file_dialog_open(arena, &folder_opts);
+    return rubraview_pal_file_dialog_open(arena, &folder_opts);
 }
 #endif /* _WIN32 */

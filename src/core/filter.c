@@ -17,18 +17,18 @@ static inline uint8_t clamp_u8(int val) {
     return (uint8_t)val;
 }
 
-static inline uint8_t get_pixel_lum(const uint8_t *px, rv_pixel_format_t fmt) {
-    if (fmt == RV_PIXFMT_GRAY8) return px[0];
-    bool is_bgra = (fmt == RV_PIXFMT_BGRA8);
+static inline uint8_t get_pixel_lum(const uint8_t *px, rubraview_pixel_format_t fmt) {
+    if (fmt == RUBRAVIEW_PIXFMT_GRAY8) return px[0];
+    bool is_bgra = (fmt == RUBRAVIEW_PIXFMT_BGRA8);
     uint32_t r = is_bgra ? px[2] : px[0];
     uint32_t g = px[1];
     uint32_t b = is_bgra ? px[0] : px[2];
     return (uint8_t)((2126 * r + 7152 * g + 722 * b + 5000) / 10000);
 }
 
-rv_pixbuf_t rv_filter_gaussian_blur(proven_arena_t *arena, const rv_pixbuf_t *src, float sigma) {
-    if (!rv_pixbuf_is_valid(src) || arena == NULL) return (rv_pixbuf_t){0};
-    if (sigma <= 0.1f) return rv_pixbuf_clone(arena, src);
+rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, float sigma) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+    if (sigma <= 0.1f) return rubraview_pixbuf_clone(arena, src);
 
     int32_t radius = (int32_t)ceilf(3.0f * sigma);
     if (radius < 1) radius = 1;
@@ -49,11 +49,11 @@ rv_pixbuf_t rv_filter_gaussian_blur(proven_arena_t *arena, const rv_pixbuf_t *sr
 
     int32_t w = src->width;
     int32_t h = src->height;
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
 
-    rv_pixbuf_t tmp = rv_pixbuf_create(arena, w, h, src->format);
-    rv_pixbuf_t dst = rv_pixbuf_create(arena, w, h, src->format);
-    if (!rv_pixbuf_is_valid(&tmp) || !rv_pixbuf_is_valid(&dst)) return (rv_pixbuf_t){0};
+    rubraview_pixbuf_t tmp = rubraview_pixbuf_create(arena, w, h, src->format);
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, w, h, src->format);
+    if (!rubraview_pixbuf_is_valid(&tmp) || !rubraview_pixbuf_is_valid(&dst)) return (rubraview_pixbuf_t){0};
 
     /* Pass 1: Horizontal blur from src -> tmp */
     for (int32_t y = 0; y < h; ++y) {
@@ -107,9 +107,9 @@ rv_pixbuf_t rv_filter_gaussian_blur(proven_arena_t *arena, const rv_pixbuf_t *sr
     return dst;
 }
 
-rv_pixbuf_t rv_filter_box_blur(proven_arena_t *arena, const rv_pixbuf_t *src, int32_t radius) {
-    if (!rv_pixbuf_is_valid(src) || arena == NULL) return (rv_pixbuf_t){0};
-    if (radius <= 0) return rv_pixbuf_clone(arena, src);
+rubraview_pixbuf_t rubraview_filter_box_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, int32_t radius) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+    if (radius <= 0) return rubraview_pixbuf_clone(arena, src);
     if (radius > MAX_KERNEL_RADIUS) radius = MAX_KERNEL_RADIUS;
 
     int32_t klen = 2 * radius + 1;
@@ -117,11 +117,11 @@ rv_pixbuf_t rv_filter_box_blur(proven_arena_t *arena, const rv_pixbuf_t *src, in
 
     int32_t w = src->width;
     int32_t h = src->height;
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
 
-    rv_pixbuf_t tmp = rv_pixbuf_create(arena, w, h, src->format);
-    rv_pixbuf_t dst = rv_pixbuf_create(arena, w, h, src->format);
-    if (!rv_pixbuf_is_valid(&tmp) || !rv_pixbuf_is_valid(&dst)) return (rv_pixbuf_t){0};
+    rubraview_pixbuf_t tmp = rubraview_pixbuf_create(arena, w, h, src->format);
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, w, h, src->format);
+    if (!rubraview_pixbuf_is_valid(&tmp) || !rubraview_pixbuf_is_valid(&dst)) return (rubraview_pixbuf_t){0};
 
     /* Horizontal pass */
     for (int32_t y = 0; y < h; ++y) {
@@ -167,20 +167,20 @@ rv_pixbuf_t rv_filter_box_blur(proven_arena_t *arena, const rv_pixbuf_t *src, in
     return dst;
 }
 
-rv_pixbuf_t rv_filter_unsharp_mask(proven_arena_t *arena,
-                                   const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_filter_unsharp_mask(proven_arena_t *arena,
+                                   const rubraview_pixbuf_t *src,
                                    float sigma,
                                    float amount,
                                    uint8_t threshold) {
-    if (!rv_pixbuf_is_valid(src) || arena == NULL) return (rv_pixbuf_t){0};
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
 
-    rv_pixbuf_t blur = rv_filter_gaussian_blur(arena, src, sigma);
-    if (!rv_pixbuf_is_valid(&blur)) return (rv_pixbuf_t){0};
+    rubraview_pixbuf_t blur = rubraview_filter_gaussian_blur(arena, src, sigma);
+    if (!rubraview_pixbuf_is_valid(&blur)) return (rubraview_pixbuf_t){0};
 
-    rv_pixbuf_t dst = rv_pixbuf_create(arena, src->width, src->height, src->format);
-    if (!rv_pixbuf_is_valid(&dst)) return (rv_pixbuf_t){0};
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, src->width, src->height, src->format);
+    if (!rubraview_pixbuf_is_valid(&dst)) return (rubraview_pixbuf_t){0};
 
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     int32_t color_channels = (bpp == 4) ? 3 : 1;
 
     for (int32_t y = 0; y < src->height; ++y) {
@@ -210,13 +210,13 @@ rv_pixbuf_t rv_filter_unsharp_mask(proven_arena_t *arena,
     return dst;
 }
 
-rv_pixbuf_t rv_filter_autotrim(proven_arena_t *arena,
-                               const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
+                               const rubraview_pixbuf_t *src,
                                uint8_t bg_threshold,
                                bool detect_white) {
-    if (!rv_pixbuf_is_valid(src) || arena == NULL) return (rv_pixbuf_t){0};
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
 
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     int32_t top = 0;
     int32_t bottom = src->height - 1;
     int32_t left = 0;
@@ -289,8 +289,8 @@ rv_pixbuf_t rv_filter_autotrim(proven_arena_t *arena,
     int32_t crop_w = right - left + 1;
     int32_t crop_h = bottom - top + 1;
     if (crop_w <= 0 || crop_h <= 0) {
-        return rv_pixbuf_clone(arena, src);
+        return rubraview_pixbuf_clone(arena, src);
     }
 
-    return rv_pixbuf_crop(arena, src, left, top, crop_w, crop_h);
+    return rubraview_pixbuf_crop(arena, src, left, top, crop_w, crop_h);
 }

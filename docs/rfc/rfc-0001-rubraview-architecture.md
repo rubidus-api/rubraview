@@ -54,22 +54,22 @@ Rubraview is strictly organized into four decoupled layers:
                                    v
 +-------------------------------------------------------------------------+
 |                  Platform Abstraction Layer (PAL)                       |
-|  - `rv_image_io`: WIC Decoder/Encoder (Windows) / Portable Host Stubs   |
-|  - `rv_video_io`: FFmpeg Video Bridge (libav* dynamic loader)          |
-|  - `rv_audio_io`: WASAPI Audio Renderer (Windows) / Host Mock Sink     |
-|  - `rv_archive_io`: In-memory CBZ (ZIP), CBR (RAR), CB7 (7z) Streams    |
-|  - `rv_sysio`: Native directory enumeration & natural alphanumeric sort |
-|  - `rv_threadpool`: Pre-caching worker threads & batch job dispatching  |
+|  - `rubraview_image_io`: WIC Decoder/Encoder (Windows) / Portable Host Stubs   |
+|  - `rubraview_video_io`: FFmpeg Video Bridge (libav* dynamic loader)          |
+|  - `rubraview_audio_io`: WASAPI Audio Renderer (Windows) / Host Mock Sink     |
+|  - `rubraview_archive_io`: In-memory CBZ (ZIP), CBR (RAR), CB7 (7z) Streams    |
+|  - `rubraview_sysio`: Native directory enumeration & natural alphanumeric sort |
+|  - `rubraview_threadpool`: Pre-caching worker threads & batch job dispatching  |
 +-------------------------------------------------------------------------+
                                    |
                                    v
 +-------------------------------------------------------------------------+
 |                  Core Engine (Pure C23, Portable)                       |
-|  - Pixel Buffers (`rv_pixbuf_t`): 8-bit RGBA, 16-bit Float, Grayscale    |
+|  - Pixel Buffers (`rubraview_pixbuf_t`): 8-bit RGBA, 16-bit Float, Grayscale    |
 |  - Color Space Math: sRGB <-> Linear, HSL, Exposure, Contrast, Gamma    |
 |  - Spatial Filters: Gaussian Blur, Laplacian Sharpen, 3x3/5x5 Kernel    |
 |  - Resampling Kernels: Nearest, Bilinear, Bicubic (Catmull-Rom), Lanczos|
-|  - Layout Engine (`rv_layout_engine`): Intelligent Spread & AR Matcher  |
+|  - Layout Engine (`rubraview_layout_engine`): Intelligent Spread & AR Matcher  |
 |  - Batch Execution Engine: Job Queue, Worker Scheduling, Multi-file I/O |
 |  - Playlist & Collection Manager: Mixed Media Sequences, RVLIST / M3U8  |
 +-------------------------------------------------------------------------+
@@ -86,7 +86,7 @@ Rubraview is strictly organized into four decoupled layers:
 ### Invariants:
 1. **Core Independence**: Code inside `src/core/` MUST NOT include `<windows.h>`, `<d2d1.h>`, or any OS-specific header. It must compile on both Linux `gcc`/`clang` and Windows MinGW-w64.
 2. **Window Stability Invariant**: The desktop window size is strictly owned and controlled by the user or OS window manager. Loading an image or altering zoom levels **MUST NEVER change the window dimensions**.
-3. **Codec Decoupling**: The GUI layer interacts only with abstract pixel buffers (`rv_pixbuf_t`), video streams (`rv_video_stream_t`), and archive streams (`rv_archive_t`).
+3. **Codec Decoupling**: The GUI layer interacts only with abstract pixel buffers (`rubraview_pixbuf_t`), video streams (`rubraview_video_stream_t`), and archive streams (`rubraview_archive_t`).
 4. **Memory Ownership**: All temporary buffers allocated during single-frame rendering, archive decompression, or batch conversions are managed via `prv_arena_t` instances, ensuring zero heap fragmentation and deterministic teardown.
 
 ---
@@ -132,21 +132,21 @@ The slide show can operate over diverse file targets:
 
 #### 3.2.3 Multi-Criteria Sorting Engine
 Before starting the presentation or browsing directory collections, the file sequence can be organized by two distinct name-sorting modes, as well as metadata-based sorting:
-1. **Name: Natural / Logical Alphanumeric (`RV_SORT_NAME_NATURAL` - Default)**:
+1. **Name: Natural / Logical Alphanumeric (`RUBRAVIEW_SORT_NAME_NATURAL` - Default)**:
    - Evaluates contiguous digit sequences as single integrated numeric quantities rather than raw ASCII code points.
    - Specifically handles bracketed and indexed sequences: `(1)`, `(2)`, ..., `(9)`, `(10)`, ..., `(99)`, `(100)` are sorted in strict numerical order ($1 < 2 < 9 < 10 < 99 < 100$).
    - Prevents the classic sorting bug where `(10)` and `(100)` are sorted ahead of `(2)`.
    - Supports arbitrary digit placement: beginning (`1.jpg`), middle (`chapter_1_page_10.png`), inside parentheses/brackets (`img (10).jpg`, `[05].png`), and mixed delimiters.
    - Arbitrary precision: handles numbers with more than 64 bits without integer overflow by comparing significant digit spans.
    - Resolves leading zero ties deterministically (e.g. `1` vs `01`).
-2. **Name: Strict Lexicographical / Ordinal (`RV_SORT_NAME_LEXICAL`)**:
+2. **Name: Strict Lexicographical / Ordinal (`RUBRAVIEW_SORT_NAME_LEXICAL`)**:
    - Compares characters strictly byte-by-byte according to Unicode/ASCII code points (`'('` < `'0'` < `'1'` < `'2'`).
    - Results in literal ordinal sequence: `(1)` < `(10)` < `(100)` < `(2)` < `(20)` < `(9)`.
    - Essential for programmers, command-line scripting alignment, exact matching with raw POSIX `ls`, and database consistency where byte order is required.
-3. **Date Modified / Created (`RV_SORT_DATE_MODIFIED` / `RV_SORT_DATE_CREATED`)**: Chronological order (Newest first or Oldest first).
-4. **File Size (`RV_SORT_FILE_SIZE`)**: Sorted by byte length (Smallest first or Largest first).
-5. **Random Shuffle (`RV_SORT_RANDOM`)**: Cryptographically uniform Fisher-Yates shuffle with seed preservation (allows `Previous` key to accurately step back through the shuffled history without re-randomizing).
-- **Ascending / Descending Toggle**: Every sorting mode supports an instantaneous Ascending $\leftrightarrow$ Descending direction flip. Both `RV_SORT_NAME_NATURAL` and `RV_SORT_NAME_LEXICAL` are exposed as distinct selectable options in the In-Window Menu Box, the In-App Metro Picker sort chips, and CLI arguments (`--sort=natural` vs `--sort=lexical`).
+3. **Date Modified / Created (`RUBRAVIEW_SORT_DATE_MODIFIED` / `RUBRAVIEW_SORT_DATE_CREATED`)**: Chronological order (Newest first or Oldest first).
+4. **File Size (`RUBRAVIEW_SORT_FILE_SIZE`)**: Sorted by byte length (Smallest first or Largest first).
+5. **Random Shuffle (`RUBRAVIEW_SORT_RANDOM`)**: Cryptographically uniform Fisher-Yates shuffle with seed preservation (allows `Previous` key to accurately step back through the shuffled history without re-randomizing).
+- **Ascending / Descending Toggle**: Every sorting mode supports an instantaneous Ascending $\leftrightarrow$ Descending direction flip. Both `RUBRAVIEW_SORT_NAME_NATURAL` and `RUBRAVIEW_SORT_NAME_LEXICAL` are exposed as distinct selectable options in the In-Window Menu Box, the In-App Metro Picker sort chips, and CLI arguments (`--sort=natural` vs `--sort=lexical`).
 
 #### 3.2.4 File Extension & Media Type Filtering
 Users can filter the active sequence without moving files:
@@ -177,7 +177,7 @@ When a sequence contains a heterogeneous mix of still images, animated images (G
   - The playlist loop policy (`Loop All`, `Play Once`, `Repeat Single Item`) applies uniformly across both images and video files. When `Loop All` is active, reaching the end of the folder or playlist seamlessly cycles back to the first media item.
 
 ### 3.3 Intelligent Multi-Page & Book Reading Layouts
-For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview implements an intelligent layout engine (`rv_layout_engine`):
+For viewing comic books, manga, scanned documents, and multi-page albums, Rubraview implements an intelligent layout engine (`rubraview_layout_engine`):
 
 ```
 1. Single Page Mode:
@@ -215,11 +215,11 @@ For viewing comic books, manga, scanned documents, and multi-page albums, Rubrav
    +-----------------------+      NOT paired with Page 6!
 ```
 
-1. **Single Page Mode (`RV_PAGE_LAYOUT_SINGLE`)**: Standard centered view.
-2. **Dual Page Mode (`RV_PAGE_LAYOUT_DUAL`)**:
+1. **Single Page Mode (`RUBRAVIEW_PAGE_LAYOUT_SINGLE`)**: Standard centered view.
+2. **Dual Page Mode (`RUBRAVIEW_PAGE_LAYOUT_DUAL`)**:
    - Renders two consecutive images side-by-side with a configurable gutter (0 to 16 pixels).
    - Page flip advances by 2 pages.
-3. **Book / Manga Mode (`RV_PAGE_LAYOUT_BOOK`)**:
+3. **Book / Manga Mode (`RUBRAVIEW_PAGE_LAYOUT_BOOK`)**:
    - **Cover Page 1 Exception**: Page 1 (cover) is displayed as a standalone single page. Starting from page 2, pages are paired as two-page spreads (2–3, 4–5, 6–7).
    - **Reading Direction Toggle**:
      - *Left-to-Right (LTR)*: Page $N$ on Left, Page $N+1$ on Right (standard Western books, comics).
@@ -232,16 +232,16 @@ For viewing comic books, manga, scanned documents, and multi-page albums, Rubrav
    - **Portrait Window Auto-Collapse**: When viewed on a smartphone held vertically over Remote Desktop ($AR_{win} < 1.0$), displaying two portrait pages side-by-side creates tiny, unreadable postage-stamp images. The layout engine dynamically collapses Book/Dual mode into **Single Page Fit-to-Width** mode. When the user rotates the device to landscape ($AR_{win} \ge 1.3$), it automatically resumes side-by-side dual spreads.
 
 ### 3.4 Viewport Fit & Alignment Modes
-Rubraview implements six deterministic viewport fitting modes (`rv_fit_mode_t`):
+Rubraview implements six deterministic viewport fitting modes (`rubraview_fit_mode_t`):
 
 | Fit Mode | Identifier | Description & Use Case |
 | :--- | :--- | :--- |
-| **Fit to Window (Inside)** | `RV_FIT_WINDOW` | Scales image proportionally so the entire image fits within the window. Letterboxes/pillarboxes as necessary. Default mode. |
-| **Fit to Width** | `RV_FIT_WIDTH` | Scales image width to window width ($\text{scale} = W_{win} / W_{img}$). Image height extends beyond screen; scrollable vertically. Ideal for webtoons and vertical documents. |
-| **Fit to Height** | `RV_FIT_HEIGHT` | Scales image height to window height ($\text{scale} = H_{win} / H_{img}$). Image width extends beyond screen; scrollable horizontally. Ideal for wide panoramic photos. |
-| **Stretch to Fill** | `RV_FIT_STRETCH` | Scales width and height independently to fill the exact window dimensions, ignoring aspect ratio. |
-| **Original Size (100%)** | `RV_FIT_ACTUAL_SIZE` | 1:1 pixel mapping ($\text{scale} = 1.0$). One image pixel equals exactly one screen pixel. |
-| **Smart Fit** | `RV_FIT_SMART` | If image dimensions $> W_{win}$ or $> H_{win}$, scale down to fit inside; if image is smaller than window, display at 100% original size to prevent blurry upscaling. |
+| **Fit to Window (Inside)** | `RUBRAVIEW_FIT_WINDOW` | Scales image proportionally so the entire image fits within the window. Letterboxes/pillarboxes as necessary. Default mode. |
+| **Fit to Width** | `RUBRAVIEW_FIT_WIDTH` | Scales image width to window width ($\text{scale} = W_{win} / W_{img}$). Image height extends beyond screen; scrollable vertically. Ideal for webtoons and vertical documents. |
+| **Fit to Height** | `RUBRAVIEW_FIT_HEIGHT` | Scales image height to window height ($\text{scale} = H_{win} / H_{img}$). Image width extends beyond screen; scrollable horizontally. Ideal for wide panoramic photos. |
+| **Stretch to Fill** | `RUBRAVIEW_FIT_STRETCH` | Scales width and height independently to fill the exact window dimensions, ignoring aspect ratio. |
+| **Original Size (100%)** | `RUBRAVIEW_FIT_ACTUAL_SIZE` | 1:1 pixel mapping ($\text{scale} = 1.0$). One image pixel equals exactly one screen pixel. |
+| **Smart Fit** | `RUBRAVIEW_FIT_SMART` | If image dimensions $> W_{win}$ or $> H_{win}$, scale down to fit inside; if image is smaller than window, display at 100% original size to prevent blurry upscaling. |
 
 - **Fit Lock**: User can toggle "Lock Fit Mode" (`L` key) so that navigating between images of disparate resolutions maintains the chosen fit mode instead of resetting zoom.
 - **Window Stability Invariant**: Under no circumstance will changing fit mode or loading an image alter the host window's position or size.
@@ -281,7 +281,7 @@ When accessing a Windows PC from a mobile phone via Remote Desktop Protocol (Mic
 +-----------------------------------------------------------------------------------+
 ```
 
-#### 3.6.1 The Toolbox (`rv_toolbox`): Playback, Navigation & Detachable Window
+#### 3.6.1 The Toolbox (`rubraview_toolbox`): Playback, Navigation & Detachable Window
 The **Toolbox** manages real-time media manipulation and playback operations:
 - **Core Tool Set**:
   - Media Controls: Previous (`◀◀`), Next (`▶▶`), Play/Pause (`⏯`), Step Backward/Forward (`,`/`.`), Stop (`⏹`).
@@ -293,12 +293,12 @@ The **Toolbox** manages real-time media manipulation and playback operations:
   - Hovering over individual tool tiles while pinned provides instant tactile feedback without the toolbox disappearing or flickering.
 - **Detachable Floating Window Mode (창 바깥 분리 - Independent Win32 Window)**:
   - **In-Window Mode**: When positioned inside the host window, the toolbox renders as a Direct2D hardware-accelerated semi-transparent overlay directly on the canvas.
-  - **Detached Mode (`rv_toolbox_window`)**:
+  - **Detached Mode (`rubraview_toolbox_window`)**:
     - When the user drags the toolbox across the outer window perimeter (or clicks a `[ Detach ↗ ]` tile), it seamlessly transitions into an independent top-level Win32 tool window (`WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_LAYERED`).
     - The detached window can float anywhere across the multi-monitor desktop workspace, remaining on top of other applications (`HWND_TOPMOST` optional toggle).
     - Dragging the detached window back over the main canvas surface docks it back into the in-window Direct2D overlay mode.
 
-#### 3.6.2 The Menu Box (`rv_menubox`): In-Window Hierarchical Settings & Navigation
+#### 3.6.2 The Menu Box (`rubraview_menubox`): In-Window Hierarchical Settings & Navigation
 The **Menu Box** manages deep configurations, layout switching, image filters, and batch pipelines:
 - **Strict In-Window Boundary Invariant**:
   - Unlike the Toolbox, the Menu Box **strictly remains inside the client area of the main application window**.
@@ -551,10 +551,10 @@ Rubraview treats collections of media as first-class citizens:
 Rubraview incorporates a streamlined, non-destructive editing workbench accessible via hotkey `E` or the `[ ✏ Edit ]` Metro tile:
 - **Real-Time Dual-Layer Architecture**:
   - *Preview Layer (Direct2D GPU Shaders)*: Sliders for exposure, contrast, tone curves, and filters modify Direct2D effect parameters directly. This yields instant 60–144 FPS visual feedback with 0% CPU pixel recalculation.
-  - *Commit Layer (C23 Core Engine)*: When the user clicks "Apply" (`Enter`) or "Save Copy" (`Ctrl+S`), the core engine executes the exact math on the persistent `rv_pixbuf_t` buffer.
+  - *Commit Layer (C23 Core Engine)*: When the user clicks "Apply" (`Enter`) or "Save Copy" (`Ctrl+S`), the core engine executes the exact math on the persistent `rubraview_pixbuf_t` buffer.
 - **Color & Tone Controls**:
   - Sliders: Exposure ($\pm 3.0\,EV$), Brightness ($\pm 100$), Contrast ($\pm 100$), Saturation ($\pm 100$), Color Temperature (Warm/Cool), Tint (Green/Magenta).
-- **Interactive Color Graph & Tone Curves (`rv_curves`)**:
+- **Interactive Color Graph & Tone Curves (`rubraview_curves`)**:
   - Direct2D-rendered spline curve widget with interactive control points.
   - Channel selection: Composite RGB, Red, Green, Blue, or Luminance.
   - Live 256-bin histogram background behind the curve.
@@ -575,7 +575,7 @@ Rubraview seamlessly handles pure audio files as first-class media items, bridgi
   - Legacy Streaming: RealAudio (`.ra`, `.ram` via Cook / ATRAC / 14.4 / 28.8 codecs).
 - **Embedded Cover Art Extraction**:
   - Automatically extracts embedded album artwork from audio tags (ID3v2 APIC, FLAC Vorbis comments, MP4 `covr`, WMA metadata).
-  - The extracted cover is decoded into an `rv_pixbuf_t` and presented prominently on the Direct2D canvas as a high-resolution square album cover with an optional blurred background backdrop.
+  - The extracted cover is decoded into an `rubraview_pixbuf_t` and presented prominently on the Direct2D canvas as a high-resolution square album cover with an optional blurred background backdrop.
 - **Dynamic Waveform Visualizer**:
   - When an audio file contains no embedded cover art, the canvas renders a clean, real-time audio waveform visualizer or 32-band spectrum analyzer computed from the decoded PCM audio buffer.
   - On-Screen Display (OSD) presents Track Title, Artist, Album, Year, Duration, Bitrate (kbps), and Sample Rate (Hz).
@@ -584,40 +584,40 @@ Rubraview seamlessly handles pure audio files as first-class media items, bridgi
 - **Slide Show Background Music (BGM Mode)**:
   - Users can attach an audio track or background playlist to an ongoing image slide show. The audio stream plays continuously while images auto-advance according to their configured interval.
 
-### 3.15 Independent File Selection & Dialog Subsystem (`rv_file_dialog`)
-To ensure that Rubraview remains portable across desktop operating systems and friendly to touchscreens and Remote Desktop sessions, file selection is decoupled into an independent abstraction layer (`rv_file_dialog`):
+### 3.15 Independent File Selection & Dialog Subsystem (`rubraview_file_dialog`)
+To ensure that Rubraview remains portable across desktop operating systems and friendly to touchscreens and Remote Desktop sessions, file selection is decoupled into an independent abstraction layer (`rubraview_file_dialog`):
 
 ```c
-typedef struct rv_file_filter {
+typedef struct rubraview_file_filter {
     const char *name;     // e.g. "Image Files (*.jpg;*.png;*.webp)"
     const char *pattern;  // e.g. "*.jpg;*.png;*.webp;*.gif"
-} rv_file_filter_t;
+} rubraview_file_filter_t;
 
-typedef struct rv_file_dialog_opts {
+typedef struct rubraview_file_dialog_opts {
     const char             *title;
     const char             *default_dir;
-    const rv_file_filter_t *filters;
+    const rubraview_file_filter_t *filters;
     size_t                  filter_count;
     bool                    allow_multi;
     bool                    folder_mode;
-} rv_file_dialog_opts_t;
+} rubraview_file_dialog_opts_t;
 
-typedef struct rv_dialog_result {
+typedef struct rubraview_dialog_result {
     u8str_t *paths;       // Array of selected UTF-8 paths allocated in caller arena
     size_t   count;
     bool     accepted;
-} rv_dialog_result_t;
+} rubraview_dialog_result_t;
 ```
 
-#### 3.15.1 Initial Windows Implementation (`rv_file_dialog_win32`)
+#### 3.15.1 Initial Windows Implementation (`rubraview_file_dialog_win32`)
 - Utilizes the modern COM `IFileOpenDialog` and `IFileSaveDialog` interfaces (with a fallback to `GetOpenFileNameW` where needed).
 - Supports multi-file selection (`FOS_ALLOWMULTISELECT`), directory picking (`FOS_PICKFOLDERS`), and custom filter specifications.
 - Translates native wide-character UTF-16 paths into clean, bounded UTF-8 slices (`u8str_t`) backed by `proven_arena_t`.
 
-#### 3.15.2 In-App Metro Tile File Picker (`rv_file_dialog_metro`)
+#### 3.15.2 In-App Metro Tile File Picker (`rubraview_file_dialog_metro`)
 Standard OS file dialogs (such as Win32 `IFileOpenDialog`) are designed primarily for high-precision mouse input on desktop monitors. When accessed over mobile Remote Desktop (RDP) on small smartphone screens, their 12px list fonts, tiny folder tree controls, and microscopic scrollbars become frustrating and error-prone to operate with thumbs.
 
-Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rv_file_dialog_metro`)** that renders directly onto the Direct2D canvas:
+Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rubraview_file_dialog_metro`)** that renders directly onto the Direct2D canvas:
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -652,7 +652,7 @@ Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rv_
    - **Virtual Scrolling**: Even in directories containing 10,000+ media files, the renderer only allocates and draws tiles currently visible within the screen viewport (typically 12–30 tiles), maintaining a solid 60 FPS refresh rate and sub-millisecond touch response.
    - **Folder Tiles**: Display a prominent folder glyph, folder name, and total item count (`📁 Volume 01 (184 items)`).
    - **Media Tiles**:
-     - Asynchronous WIC low-resolution thumbnail rendering with an in-memory thumbnail LRU cache (`rv_thumb_cache`) in memory arenas.
+     - Asynchronous WIC low-resolution thumbnail rendering with an in-memory thumbnail LRU cache (`rubraview_thumb_cache`) in memory arenas.
      - Filename rendered in DirectWrite with clean middle-ellipsis truncation (e.g. `Scans_2026...001.jpg`).
      - Overlay badge indicators: File format (`[CBZ]`, `[GIF]`, `[MP4]`), resolution class (`[4K]`, `[FHD]`), and file size.
    - **Interactive Archive Ingestion**:
@@ -667,7 +667,7 @@ Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rv_
 ##### 2. Mobile RDP & Touchscreen Optimizations
 - **Minimum Hit Target**: All buttons, chips, and tiles enforce a minimum hit target of $48\times 48\text{ px}$ (default $64\times 64\text{ px}$ to $160\times 160\text{ px}$), ensuring effortless tapping with human thumbs.
 - **Zero-Latency RDP Palette**: Uses flat, solid and semi-transparent Metro colors with zero ornamental animation loops or continuous alpha fades, minimizing Remote Desktop frame-encode bandwidth.
-- **Swappable PAL Integration**: The In-App Metro Picker conforms directly to the `rv_pal_file_dialog` interface contract (`rv_file_dialog_metro`). Users can configure their default picker (`use_native_dialog = true/false` in `settings.ini`) or swap between them on the fly.
+- **Swappable PAL Integration**: The In-App Metro Picker conforms directly to the `rubraview_pal_file_dialog` interface contract (`rubraview_file_dialog_metro`). Users can configure their default picker (`use_native_dialog = true/false` in `settings.ini`) or swap between them on the fly.
 
 #### 3.15.3 Cross-Platform Native Backends
 - **macOS**: Bridges to `NSOpenPanel` / `NSSavePanel` via a lightweight C runtime wrapper.
@@ -754,7 +754,7 @@ To keep `rubraview.exe` completely standalone, FFmpeg shared libraries are resol
 
 - **Audio-Clock Master Synchronization**: The audio stream serves as the master clock. Video frames are displayed or dropped based on their Presentation Timestamp ($PTS$) relative to the current WASAPI hardware audio clock position ($\Delta t = PTS_{video} - T_{audio}$).
 - **Precision Seeking & Frame Stepping**: Backward and forward step hotkeys (`.` and `,`) seek to the nearest preceding keyframe (`av_seek_frame`) and decode forward to the exact requested frame index.
-- **Still Frame Capture**: Clicking `Ctrl+C` or the Capture tile instantly captures the current video frame as a full-resolution `rv_pixbuf_t` and pushes it into the clipboard or the Image Adjustment Workbench.
+- **Still Frame Capture**: Clicking `Ctrl+C` or the Capture tile instantly captures the current video frame as a full-resolution `rubraview_pixbuf_t` and pushes it into the clipboard or the Image Adjustment Workbench.
 
 ### 5.4 Audio Playback & Native WASAPI Audio Engine
 - **Low-Latency Audio Rendering**:
@@ -780,12 +780,12 @@ A-B Looping is a core multimedia feature in Rubraview for studying video clips, 
 ### 5.6 Video Viewport Fit Modes & Interactive Real-Time Wheel Zoom
 Video playback in Rubraview adheres to the exact same canvas principles as still images:
 - **Deterministic Video Fit Modes**:
-  - `RV_FIT_WINDOW`: Scales video proportionally to fit completely inside the window; letterbox/pillarbox as necessary (Default).
-  - `RV_FIT_WIDTH`: Matches video width to window width; if video height exceeds window, user can vertically scroll/pan.
-  - `RV_FIT_HEIGHT`: Matches video height to window height; if video width exceeds window, user can horizontally scroll/pan.
-  - `RV_FIT_STRETCH`: Stretches video to fill the entire window surface, ignoring aspect ratio.
-  - `RV_FIT_ACTUAL_SIZE`: 1:1 original pixel mapping (1 video pixel = 1 monitor pixel).
-  - `RV_FIT_SMART`: If video dimensions exceed window, scale down to fit inside; if smaller, display at 100% original size to prevent blurry upscaling.
+  - `RUBRAVIEW_FIT_WINDOW`: Scales video proportionally to fit completely inside the window; letterbox/pillarbox as necessary (Default).
+  - `RUBRAVIEW_FIT_WIDTH`: Matches video width to window width; if video height exceeds window, user can vertically scroll/pan.
+  - `RUBRAVIEW_FIT_HEIGHT`: Matches video height to window height; if video width exceeds window, user can horizontally scroll/pan.
+  - `RUBRAVIEW_FIT_STRETCH`: Stretches video to fill the entire window surface, ignoring aspect ratio.
+  - `RUBRAVIEW_FIT_ACTUAL_SIZE`: 1:1 original pixel mapping (1 video pixel = 1 monitor pixel).
+  - `RUBRAVIEW_FIT_SMART`: If video dimensions exceed window, scale down to fit inside; if smaller, display at 100% original size to prevent blurry upscaling.
 - **Live Wheel Zoom & Drag Pan During Active Playback**:
   - Users can zoom in and out of a video using the mouse wheel (or touch pinch gesture) **in real time while the video is playing**.
   - When zoomed in, clicking and dragging with the mouse (or touch drag) pans the video viewport freely across the active video surface without pausing playback.
@@ -800,21 +800,21 @@ Video playback in Rubraview adheres to the exact same canvas principles as still
 The portable core engine operates on a standardized, cache-friendly pixel buffer:
 
 ```c
-typedef enum rv_pixel_format {
-    RV_PIXFMT_RGBA8 = 0,   // Standard 32-bit sRGB
-    RV_PIXFMT_BGRA8,       // Direct2D/WIC native layout
-    RV_PIXFMT_GRAY8,       // 8-bit luminance
-    RV_PIXFMT_RGBA16F,     // High-dynamic-range floating point
-} rv_pixel_format_t;
+typedef enum rubraview_pixel_format {
+    RUBRAVIEW_PIXFMT_RGBA8 = 0,   // Standard 32-bit sRGB
+    RUBRAVIEW_PIXFMT_BGRA8,       // Direct2D/WIC native layout
+    RUBRAVIEW_PIXFMT_GRAY8,       // 8-bit luminance
+    RUBRAVIEW_PIXFMT_RGBA16F,     // High-dynamic-range floating point
+} rubraview_pixel_format_t;
 
-typedef struct rv_pixbuf {
+typedef struct rubraview_pixbuf {
     uint8_t           *pixels;
     int32_t            width;
     int32_t            height;
     int32_t            stride;       // Bytes per scanline
-    rv_pixel_format_t  format;
+    rubraview_pixel_format_t  format;
     proven_arena_t    *arena;        // Owning arena (or NULL for external view)
-} rv_pixbuf_t;
+} rubraview_pixbuf_t;
 ```
 
 ### 6.1 Color & Tone Adjustments
@@ -832,7 +832,7 @@ typedef struct rv_pixbuf {
   - Temperature & Tint: Modifies Red/Blue balance (Kelvin shift) and Green/Magenta balance.
 
 ### 6.2 Tone Curves & Histogram Pipeline
-- **Spline-Based Tone Curve (`rv_curves`)**:
+- **Spline-Based Tone Curve (`rubraview_curves`)**:
   - Supports Monotone Cubic Spline (Fritsch-Carlson) interpolation through user control points $(x_0, y_0), \dots, (x_k, y_k)$, guaranteeing no overshoot or unnatural oscillations.
   - Generates a 256-entry transformation LUT applied with $O(1)$ per pixel:
     $$\text{pixel}_{out} = \text{LUT}_{curve}[\text{pixel}_{in}]$$
@@ -843,12 +843,12 @@ typedef struct rv_pixbuf {
     $$V_{out} = 255 \cdot \left(\text{clamp}\left(\frac{V_{in} - B}{W - B}, 0, 1\right)\right)^{1/\gamma}$$
 
 ### 6.3 Threshold & Luminance-Based Auto-Crop Engine
-- **Border Trim / Scan Margin Auto-Crop (`rv_crop_autotrim`)**:
+- **Border Trim / Scan Margin Auto-Crop (`rubraview_crop_autotrim`)**:
   - Scans pixel luminance $Y = 0.2126R + 0.7152G + 0.0722B$ along image borders.
   - Identifies bounding boxes of meaningful content by advancing inward from Top, Bottom, Left, and Right until scanlines deviate from the background threshold:
     - *White Margins* (scanned manga / documents): Scanlines where $> 98\%$ of pixels have $Y \ge T_{white}$ (default 245).
     - *Black Margins* (letterboxed screenshots / video stills): Scanlines where $> 98\%$ of pixels have $Y \le T_{black}$ (default 15).
-  - Produces a non-destructive cropped sub-buffer `rv_pixbuf_sub()` or rewrites the buffer in-place.
+  - Produces a non-destructive cropped sub-buffer `rubraview_pixbuf_sub()` or rewrites the buffer in-place.
 - **Arbitrary Rectangular Crop**:
   - Sub-pixel coordinate bounding box $[x, y, w, h]$ with optional aspect-ratio constraints (1:1, 4:3, 16:9, 16:10, Original).
 
@@ -900,10 +900,10 @@ Standard C null-terminated strings (`char*`) introduce heavy memory allocation o
    - Extracting directory (`dirname`), filename (`basename`), extension (`ext`), and stem (`stem`) requires zero memory allocation and zero buffer copying:
      ```c
      // Path: "D:/Manga/Chapter01/page_042.webp"
-     u8str_t dir  = rv_path_dirname(path);   // "D:/Manga/Chapter01"
-     u8str_t base = rv_path_basename(path);  // "page_042.webp"
-     u8str_t ext  = rv_path_ext(path);       // ".webp"
-     u8str_t stem = rv_path_stem(path);      // "page_042"
+     u8str_t dir  = rubraview_path_dirname(path);   // "D:/Manga/Chapter01"
+     u8str_t base = rubraview_path_basename(path);  // "page_042.webp"
+     u8str_t ext  = rubraview_path_ext(path);       // ".webp"
+     u8str_t stem = rubraview_path_stem(path);      // "page_042"
      ```
    - In a collection of 50,000 images, filtering extensions or building playlist indices executes with **zero heap churn**.
 
@@ -940,15 +940,15 @@ To guarantee that Rubraview remains **pure C23** and can expand smoothly from Wi
 
 | Subsystem | PAL Interface Header | Windows (Initial Target) | Linux (Expansion Target) | macOS (Expansion Target) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Windowing & Events** | `rv_pal_window.h` | Win32 `WndProc`, Raw Input | Wayland (`xdg-shell`) / X11 | Cocoa / AppKit (`NSWindow`) |
-| **2D & Canvas Render** | `rv_pal_render.h` | Direct2D 1.1+ / Direct3D 11 | Vulkan / OpenGL / Cairo | Metal / Quartz |
-| **Native Image Codecs**| `rv_pal_image.h` | WIC (Windows Imaging Component)| libspng / libjpeg-turbo / FFmpeg| ImageIO / CoreGraphics |
-| **Audio Output** | `rv_pal_audio.h` | WASAPI (Shared Mode) | PipeWire / PulseAudio / ALSA | CoreAudio (`AudioQueue`) |
-| **Video & Multimedia** | `rv_pal_ffmpeg.h` | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge |
-| **File Open/Save Dialog**| `rv_pal_file_dialog.h`| COM `IFileOpenDialog` (Native) | In-App Metro Picker / Portal | In-App Metro Picker / `NSOpenPanel` |
-| **Filesystem & Traversal**| `rv_pal_fs.h` | Win32 `FindFirstFileW` / Shell | POSIX `opendir` / `readdir` | POSIX `opendir` / `readdir` |
-| **High-Precision Clock**| `rv_pal_time.h` | `QueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)`| `mach_absolute_time` |
-| **Threading & Concurrency**| `rv_pal_thread.h` | Win32 Threads / ThreadPool | POSIX Threads (`pthread`) | POSIX Threads (`pthread`) |
+| **Windowing & Events** | `rubraview_pal_window.h` | Win32 `WndProc`, Raw Input | Wayland (`xdg-shell`) / X11 | Cocoa / AppKit (`NSWindow`) |
+| **2D & Canvas Render** | `rubraview_pal_render.h` | Direct2D 1.1+ / Direct3D 11 | Vulkan / OpenGL / Cairo | Metal / Quartz |
+| **Native Image Codecs**| `rubraview_pal_image.h` | WIC (Windows Imaging Component)| libspng / libjpeg-turbo / FFmpeg| ImageIO / CoreGraphics |
+| **Audio Output** | `rubraview_pal_audio.h` | WASAPI (Shared Mode) | PipeWire / PulseAudio / ALSA | CoreAudio (`AudioQueue`) |
+| **Video & Multimedia** | `rubraview_pal_ffmpeg.h` | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge |
+| **File Open/Save Dialog**| `rubraview_pal_file_dialog.h`| COM `IFileOpenDialog` (Native) | In-App Metro Picker / Portal | In-App Metro Picker / `NSOpenPanel` |
+| **Filesystem & Traversal**| `rubraview_pal_fs.h` | Win32 `FindFirstFileW` / Shell | POSIX `opendir` / `readdir` | POSIX `opendir` / `readdir` |
+| **High-Precision Clock**| `rubraview_pal_time.h` | `QueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)`| `mach_absolute_time` |
+| **Threading & Concurrency**| `rubraview_pal_thread.h` | Win32 Threads / ThreadPool | POSIX Threads (`pthread`) | POSIX Threads (`pthread`) |
 
 ### 8.3 Directory & Header Organization
 
@@ -1057,11 +1057,11 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
 ## 11. Implementation Roadmap & Milestones
 
 - **Milestone 1 (Foundations & Core Engine)**:
-  - Pixel buffer structures (`rv_pixbuf`), memory arena integration.
+  - Pixel buffer structures (`rubraview_pixbuf`), memory arena integration.
   - Image resampling kernels (Nearest, Bilinear, Bicubic, Lanczos-3).
   - Spatial filters (Blur, Sharpen) and color adjustments.
-  - Intelligent layout engine (`rv_layout_engine`) for pre-merged spreads and AR matching.
-  - Archive streaming engine (`rv_archive_io`) for CBZ, CBR, CB7.
+  - Intelligent layout engine (`rubraview_layout_engine`) for pre-merged spreads and AR matching.
+  - Archive streaming engine (`rubraview_archive_io`) for CBZ, CBR, CB7.
   - Playlist data structures and parsers.
   - Comprehensive unit test suite running on Linux host.
 - **Milestone 2 (Windows Canvas & WIC Decoder)**:
@@ -1076,7 +1076,7 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
   - Non-destructive rotation, flip, and EXIF orientation handling.
   - Single-image export and format transcoding dialog.
 - **Milestone 4 (Video Playback Engine)**:
-  - Dynamic FFmpeg loader (`rv_ffmpeg_load()`).
+  - Dynamic FFmpeg loader (`rubraview_ffmpeg_load()`).
   - Audio/video demux and decode loop.
   - Video presentation to D2D bitmap with frame stepping and capture.
   - Seamless mixed-media playlist integration.
