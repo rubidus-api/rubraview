@@ -88,6 +88,7 @@ Rubraview is strictly organized into four decoupled layers:
 2. **Window Stability Invariant**: The desktop window size is strictly owned and controlled by the user or OS window manager. Loading an image or altering zoom levels **MUST NEVER change the window dimensions**.
 3. **Codec Decoupling**: The GUI layer interacts only with abstract pixel buffers (`rubraview_pixbuf_t`), video streams (`rubraview_video_stream_t`), and archive streams (`rubraview_archive_t`).
 4. **Memory Ownership**: All temporary buffers allocated during single-frame rendering, archive decompression, or batch conversions are managed via `prv_arena_t` instances, ensuring zero heap fragmentation and deterministic teardown.
+5. **Zero-Margin Chrome Invariant**: The main application window operates strictly without permanent OS titlebars or window border outlines (`WM_NCCALCSIZE`). 100% of the window surface is dedicated to media rendering, with an auto-hiding hover titlebar appearing only when the cursor approaches the top edge.
 
 ---
 
@@ -936,6 +937,60 @@ Rubraview provides zero-installer, portable shell registration options executabl
 2. **Multi-Resolution Windows Icons (`.ico`)**:
    - ICO files pack multiple resolution mipmaps ($16\times 16, 32\times 32, 48\times 48, 64\times 64, 128\times 128, 256\times 256\text{ px}$).
    - Rubraview defaults to displaying the highest available resolution frame, with sub-page hotkeys allowing instant inspection of each individual icon mipmap layer.
+
+### 3.21 Frameless Borderless Window Architecture & Auto-Hiding Hover Titlebar Subsystem
+Traditional desktop media viewers waste significant display real estate with fixed OS titlebars (30–40 px) and window border outlines (8 px). Rubraview adopts a **100% borderless, zero-margin canvas presentation** paired with an intelligent **hover-activated auto-hiding titlebar**:
+
+#### 3.21.1 Zero-Margin Borderless Window Mechanics (`WM_NCCALCSIZE`)
+1. **Complete Non-Client Area Stripping**:
+   - To eliminate standard OS caption bars and border outlines without sacrificing native window management capabilities, Rubraview intercepts Win32 `WM_NCCALCSIZE`:
+     - Returning `0` when `wParam == TRUE` expands the client rendering surface across the entirety of the window rectangle, completely eliminating traditional OS caption bars, thick borders, and corner padding.
+     - 100% of physical window pixels are directly addressable by the Direct2D canvas.
+2. **Subtle Native DWM Drop Shadow**:
+   - Rubraview engages DWM frame composition via `DwmExtendFrameIntoClientArea(hWnd, &(MARGINS){0, 0, 1, 0})`, maintaining clean OS drop shadows against the desktop without visual border clutter.
+3. **Invisible Border Resize Hit-Testing (`WM_NCHITTEST`)**:
+   - Even without visible borders, users must be able to resize window edges intuitively.
+   - Rubraview inspects mouse coordinates in `WM_NCHITTEST`:
+     - Within 6 pixels of Left / Right / Top / Bottom boundaries, the window procedure returns `HTLEFT`, `HTRIGHT`, `HTTOP`, `HTBOTTOM`, `HTTOPLEFT`, `HTTOPRIGHT`, `HTBOTTOMLEFT`, or `HTBOTTOMRIGHT`.
+     - The OS automatically swaps the cursor to standard resize double-arrows and manages smooth native window resizing.
+4. **Taskbar-Aware Window Maximization (`WM_GETMINMAXINFO`)**:
+   - Ordinary borderless windows frequently obscure the Windows Taskbar when maximized.
+   - Rubraview intercepts `WM_GETMINMAXINFO` and queries `MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST)` and `GetMonitorInfoW()`:
+     - Constrains `ptMaxSize` and `ptMaxPosition` strictly to `MONITORINFO.rcWork` (the screen area excluding the Windows Taskbar).
+     - Maximizing the window docks it cleanly into the active display workspace without covering the taskbar.
+     - In true Fullscreen Mode (`F11` / `F`), it expands to cover the full `MONITORINFO.rcMonitor` including the taskbar.
+
+#### 3.21.2 Hover-Activated Auto-Hiding Titlebar (Top-Zone Slide/Fade HUD)
+To provide window titles and control buttons without consuming persistent screen space:
+1. **Top-Zone Hover Detection**:
+   - The titlebar remains completely invisible (0% opacity, 0px canvas intrusion) during ordinary reading and media playback.
+   - When the user hovers the mouse within the top trigger zone ($Y \le 12\text{ px}$ from the top edge), the titlebar slides down or fades in smoothly over the Direct2D canvas.
+   - Registers Win32 `TrackMouseEvent(&tme)` with `TME_LEAVE | TME_HOVER`.
+   - When the cursor exits the titlebar region, a 500ms grace period elapses before the titlebar smoothly transitions out of view.
+2. **Titlebar Visual & Interaction Layout**:
+   - **Form Factor**: Height $36\text{ px}$ (scales dynamically with DPI: $36\text{ px} \times \text{DPI}/96$).
+   - **Backdrop**: Semi-transparent dark acrylic/Metro surface (`rgba(20, 20, 20, 0.88)`) with subtle bottom separator line.
+   - **Left / Center Zone (Title & Metrics)**:
+     - DirectWrite typography displaying the application name, current filename, page index (`[ 42 / 184 ]`), zoom scale, and resolution class.
+   - **Window Dragging**:
+     - Clicking and dragging any empty space on the titlebar initiates window movement via `WM_SYSCOMMAND` + `SC_MOVE + 2` (or returning `HTCAPTION` from hit-testing).
+     - Double-clicking the titlebar toggles between Maximized and Restored window states.
+     - Full support for Windows Aero Snap (`Win + Up/Down/Left/Right`).
+
+#### 3.21.3 Top-Right Window State Control Button Matrix
+The rightmost zone of the hover titlebar hosts a clean, high-contrast Metro vector button cluster:
+1. **`[ 🗕 ]` Minimize Button**:
+   - Hit target: $40\times 36\text{ px}$.
+   - Triggers `ShowWindow(hWnd, SW_MINIMIZE)`.
+2. **`[ 🗖 ]` / `[ 🗗 ]` Maximize / Restore Toggle Button**:
+   - Dynamic glyph switching:
+     - Displays `🗖` (single square) in normal windowed mode $\rightarrow$ triggers `ShowWindow(hWnd, SW_MAXIMIZE)`.
+     - Displays `🗗` (overlapping squares) when maximized $\rightarrow$ triggers `ShowWindow(hWnd, SW_RESTORE)`.
+3. **`[ ⛶ ]` True Borderless Fullscreen Button**:
+   - Toggles true fullscreen mode covering the entire monitor including the taskbar (hotkey `F11` / `F`).
+4. **`[ ✕ ]` Close Button**:
+   - Hover accent: Metro Crimson Red (`#E81123`) background with crisp white glyph.
+   - Dispatches `PostMessage(hWnd, WM_CLOSE, 0, 0)` for graceful application teardown.
 
 ---
 
