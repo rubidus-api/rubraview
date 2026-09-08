@@ -37,6 +37,8 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_MOUSE_UP,
     RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE,
     RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL,
+    RUBRAVIEW_WINDOW_EVENT_GESTURE_ZOOM, /* §3.6.5 GID_ZOOM: two-finger pinch */
+    RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN,  /* §3.6.5 GID_PAN: two-finger drag */
 } rubraview_window_event_kind_t;
 
 typedef enum rubraview_mouse_button {
@@ -68,6 +70,12 @@ typedef struct rubraview_window_event {
         rubraview_mouse_button_t button;
         uint32_t modifiers;          /* rubraview_key_mod_t bitmask held during the event */
     } mouse;
+
+    struct {
+        double scale_ratio;   /* pinch: >1 spreading apart, <1 pinching together; 1.0 for a pan */
+        double dx, dy;        /* pan: movement since the previous gesture message, in pixels */
+        double center_x, center_y; /* the gesture centroid, in client coordinates */
+    } gesture;
 } rubraview_window_event_t;
 
 typedef struct rubraview_window_config {
