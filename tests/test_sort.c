@@ -95,11 +95,82 @@ static void test_path_array_sorting(void) {
     printf("  [PASS] Array sorting via RUBRAVIEW_SORT_NAME_LEXICAL (ascending)\n");
 }
 
+static void test_multi_criteria_sort(void) {
+    /* Date modified, ascending. */
+    rubraview_sort_item_t by_date[3] = {
+        { .name = U8("c.jpg"), .mtime = 300, .ctime = 300, .size_bytes = 10 },
+        { .name = U8("a.jpg"), .mtime = 100, .ctime = 100, .size_bytes = 30 },
+        { .name = U8("b.jpg"), .mtime = 200, .ctime = 200, .size_bytes = 20 },
+    };
+    rubraview_sort_items(by_date, 3, RUBRAVIEW_SORT_DATE_MODIFIED, true, NULL);
+    assert(by_date[0].mtime == 100 && by_date[1].mtime == 200 && by_date[2].mtime == 300);
+    printf("  [PASS] Multi-criteria sort by RUBRAVIEW_SORT_DATE_MODIFIED (ascending)\n");
+
+    /* File size, descending. */
+    rubraview_sort_item_t by_size[3] = {
+        { .name = U8("c.jpg"), .mtime = 0, .ctime = 0, .size_bytes = 10 },
+        { .name = U8("a.jpg"), .mtime = 0, .ctime = 0, .size_bytes = 30 },
+        { .name = U8("b.jpg"), .mtime = 0, .ctime = 0, .size_bytes = 20 },
+    };
+    rubraview_sort_items(by_size, 3, RUBRAVIEW_SORT_FILE_SIZE, false, NULL);
+    assert(by_size[0].size_bytes == 30 && by_size[1].size_bytes == 20 && by_size[2].size_bytes == 10);
+    printf("  [PASS] Multi-criteria sort by RUBRAVIEW_SORT_FILE_SIZE (descending)\n");
+
+    /* Date created is independent of date modified. */
+    rubraview_sort_item_t by_ctime[2] = {
+        { .name = U8("newer_created.jpg"), .mtime = 999, .ctime = 50, .size_bytes = 0 },
+        { .name = U8("older_created.jpg"), .mtime = 1, .ctime = 100, .size_bytes = 0 },
+    };
+    rubraview_sort_items(by_ctime, 2, RUBRAVIEW_SORT_DATE_CREATED, true, NULL);
+    assert(strcmp(by_ctime[0].name.ptr, "newer_created.jpg") == 0);
+    printf("  [PASS] RUBRAVIEW_SORT_DATE_CREATED sorts independently of mtime\n");
+
+    /* Seeded shuffle: same seed -> identical permutation every time
+       (seed preservation for the slideshow "Previous" key). */
+    rubraview_sort_item_t base[8];
+    for (int i = 0; i < 8; ++i) {
+        base[i] = (rubraview_sort_item_t){ .name = { .ptr = NULL, .len = 0 }, .mtime = i, .ctime = 0, .size_bytes = 0 };
+    }
+    rubraview_sort_item_t run_a[8], run_b[8];
+    memcpy(run_a, base, sizeof(base));
+    memcpy(run_b, base, sizeof(base));
+
+    rubraview_shuffle_state_t seed = { .seed = 0xC0FFEEULL };
+    rubraview_sort_items(run_a, 8, RUBRAVIEW_SORT_RANDOM, true, &seed);
+    rubraview_sort_items(run_b, 8, RUBRAVIEW_SORT_RANDOM, true, &seed);
+    for (int i = 0; i < 8; ++i) {
+        assert(run_a[i].mtime == run_b[i].mtime);
+    }
+    printf("  [PASS] Seeded shuffle reproduces the identical permutation from the same seed\n");
+
+    /* A different seed (very likely) produces a different order. */
+    rubraview_sort_item_t run_c[8];
+    memcpy(run_c, base, sizeof(base));
+    rubraview_shuffle_state_t other_seed = { .seed = 0x1234ULL };
+    rubraview_sort_items(run_c, 8, RUBRAVIEW_SORT_RANDOM, true, &other_seed);
+    bool any_different = false;
+    for (int i = 0; i < 8; ++i) {
+        if (run_c[i].mtime != run_a[i].mtime) { any_different = true; break; }
+    }
+    assert(any_different);
+
+    /* The shuffle is a true permutation: every original element appears
+       exactly once (no duplication, nothing lost). */
+    bool seen[8] = {0};
+    for (int i = 0; i < 8; ++i) {
+        assert(run_a[i].mtime >= 0 && run_a[i].mtime < 8);
+        assert(!seen[run_a[i].mtime]);
+        seen[run_a[i].mtime] = true;
+    }
+    printf("  [PASS] Different seeds diverge; shuffle output is a true permutation\n");
+}
+
 int main(void) {
     printf("[test_sort] Starting sorting algorithm unit tests...\n");
     test_natural_comparison();
     test_lexical_comparison();
     test_path_array_sorting();
+    test_multi_criteria_sort();
     printf("[test_sort] All tests passed successfully!\n");
     return 0;
 }
