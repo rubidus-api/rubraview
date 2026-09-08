@@ -992,6 +992,81 @@ The rightmost zone of the hover titlebar hosts a clean, high-contrast Metro vect
    - Hover accent: Metro Crimson Red (`#E81123`) background with crisp white glyph.
    - Dispatches `PostMessage(hWnd, WM_CLOSE, 0, 0)` for graceful application teardown.
 
+### 3.22 Dedicated Tab-Styled Settings Window Subsystem (`rubraview_settings_dialog`)
+To provide deep, user-friendly configuration across all multimedia viewing, comic reading, audio playback, and rendering behaviors without cluttering the main canvas, Rubraview incorporates an independent, tab-styled **Settings Window**:
+
+#### 3.22.1 Window Architecture & Lifecycle
+1. **Invocation & Modality**:
+   - Hotkeys: `F10` or `Ctrl + ,` (Universal settings shortcut).
+   - Menu & Titlebar Trigger: Selecting `[ ⚙ Settings ]` in the In-Window Menu Box or Hover Titlebar.
+   - Dedicated Win32 Window: Spawns a dedicated, standalone top-level window (`WS_POPUPWINDOW | WS_CAPTION | WS_SYSMENU` or modern Metro frameless dialog) centered over the parent viewer window.
+   - Modality: Runs as an interactive dialog; changes can be previewed immediately via `[ Apply ]` without closing the window.
+2. **Persistence & Serialization**:
+   - Writes directly to `settings.ini` using standard UTF-8 INI serialization:
+     - If running in **Portable Mode** (`settings.ini` adjacent to `rubraview.exe`), saves exclusively to the local executable directory.
+     - Otherwise, saves to `%APPDATA%\rubraview\settings.ini`.
+   - Action Bar: `[ OK ]` (Save and Close), `[ Cancel ]` (Discard pending changes), `[ Apply ]` (Save and immediately update canvas/engine without closing), `[ Reset to Defaults ]` (Restore factory settings).
+
+#### 3.22.2 Tabbed Category Architecture
+The Settings Window features an intuitive tab strip (Horizontal Metro tab bar or vertical sidebar tab list):
+
+1. **Tab 1: General (일반)**:
+   - *Startup Behavior*: Open blank canvas, re-open last viewed file, or open last viewed directory/playlist.
+   - *Single Instance*: Toggle single-instance window reuse (`single_instance = true/false`).
+   - *Window & Chrome*: Enable/disable frameless borderless mode, hover titlebar trigger sensitivity ($Y \le 12\text{ px}$) and hide delay ($500\text{ms}$).
+   - *Windows Shell Integration*: Buttons for `[ Register Shell Associations ]` and `[ Unregister ]` (`HKCU\Software\Classes`).
+   - *Portable Status*: Visual badge indicating whether Portable Mode is active.
+
+2. **Tab 2: Viewer & Layout (뷰어 & 레이아웃)**:
+   - *Default Fit Mode*: Fit to Window, Fit to Width, Fit to Height, Smart Fit, 1:1 Actual Size, Stretch.
+   - *Default Page Layout*: Single Page, Dual Page, Book/Manga (LTR/RTL), Webtoon Continuous Vertical Strip.
+   - *Spread Options*: Smart 2-Page Spread Auto-Splitting toggle ($AR \ge 1.15$), Spread gutter spacing ($0\sim 32\text{ px}$), gutter background color.
+   - *Orientation Adaptation*: Portrait window auto-collapse toggle ($AR_{win} < 1.0$).
+   - *Zoom & Resampling*: Default zoom step factor ($5\%\sim 50\%$), interpolation filter (Nearest, Bilinear, Bicubic Catmull-Rom, Lanczos-3).
+   - *Pixel Art Mode*: Pixel Grid overlay threshold toggle ($> 400\%$).
+
+3. **Tab 3: Files & Comic Archives (파일, 정렬 & 만화책)**:
+   - *Default Sorting Mode*: Natural Numeric (`(1)` < `(2)` < `(10)` < `(100)`) vs Strict Lexical (`(1)` < `(10)` < `(2)`) vs Date vs Size; Ascending / Descending default.
+   - *Archive Codepage Fallback*: Auto-detect, CP949 (Korean), Shift-JIS (Japanese), GBK (Simplified Chinese), Big5 (Traditional Chinese), UTF-8 override.
+   - *Comic Metadata*: Automatic `ComicInfo.xml` ingestion and `<Manga>` reading direction auto-switch toggle.
+   - *Reading History*: Last-read page position tracking toggle & auto-resume prompt on archive open.
+   - *1~9 Quick Folder Curation*: Configuration paths for target folders `dir_1` through `dir_9`, Curation action mode (`move` vs `copy`).
+   - *Deletion Safety*: Recycle Bin deletion (`Delete`) with session undo vs Permanent purge confirmation prompt.
+
+4. **Tab 4: Music & Audio (음악 플레이어 & 오디오)**:
+   - *Playback Engine*: Gapless playback toggle and volume crossfade duration slider ($0.0\text{s}\sim 5.0\text{s}$).
+   - *Lyrics & Karaoke*: External `.lrc` and ID3 `USLT`/`SYLT` auto-discovery, font size, active lyric highlight color.
+   - *Spectrum Visualizer*: 64-band FFT Metro bar style vs Oscilloscope waveform path, visualizer FPS limiter ($60 / 120 / 144\text{ FPS}$).
+   - *Audio DSP & Equalizer*: 10-band Graphic Equalizer preset manager (Flat, Rock, Pop, Jazz, Classic, Bass Boost) and custom EQ sliders ($\pm 12\,\text{dB}$).
+   - *Volume Leveling*: ReplayGain mode (Track Gain, Album Gain, Off) & pre-amp boost slider.
+   - *BGM Arbiter*: Background music auto-pause during video playback toggle.
+   - *WASAPI Settings*: Audio buffer latency slider ($20\text{ms}\sim 100\text{ms}$).
+
+5. **Tab 5: Video & Subtitles (동영상 & 자막)**:
+   - *Hardware Acceleration*: D3D11VA / DXVA2 GPU hardware decoding toggle with software fallback diagnostic display.
+   - *Subtitle Styling*: Subtitle font selector, font size, text color, outline width ($2\text{ px}$), drop shadow toggle.
+   - *Subtitle Language*: Default preferred audio track and subtitle language tags (`kor`, `eng`, `jpn`).
+   - *A-B Looping*: Loop timestamp step adjustment ($0.1\text{s}\sim 1.0\text{s}$).
+   - *Video Viewport*: Enable/disable real-time mouse wheel zoom during active video playback.
+
+6. **Tab 6: Display, HiDPI & Color Management (디스플레이, HiDPI & 색상 관리)**:
+   - *High-DPI Awareness*: Per-Monitor V2 DPI scaling behavior and Metro touch tile base size ($48\text{px}, 64\text{px}, 96\text{px}$).
+   - *Color Management*: Ingest embedded ICC profiles (Display P3, Adobe RGB, ProPhoto RGB) via WIC and transform to sRGB or monitor hardware ICC profile (`GetICMProfileW`).
+   - *UI Themes*: Dark Metro theme accent color picker (Crimson Red, Cobalt Blue, Emerald Green, Amber, Metro Teal, Purple).
+
+7. **Tab 7: Cache, Memory & Privacy (캐시, 메모리 & 프라이버시)**:
+   - *Memory Cap*: Hard Memory Budget Cap slider ($256\text{ MB}\sim 4096\text{ MB}$, default $512\text{ MB}$) with live memory usage meter.
+   - *Two-Tier Eviction*: Automatic LRU VRAM texture and decoded pixbuf eviction policy.
+   - *Pre-caching Ring*: Lookahead frame count configuration (default: forward 2, backward 1; high-speed slideshow: 6–10).
+   - *Privacy Clean*: Global default toggle to automatically scrub GPS coordinates, camera serial numbers, and author tags during export and batch conversion.
+   - *Maintenance Actions*: `[ Clear Thumbnail Cache ]` and `[ Reset Reading History ]` buttons.
+
+8. **Tab 8: Keyboard & Shortcuts (단축키 설정)**:
+   - *Interactive Keymap Table*: Visual table listing all actions (Navigation, Zoom, View Modes, Video, Audio, Bookmarks) and their assigned hotkeys.
+   - *In-Place Key Binding*: Click an action, press a new key combination to rebind.
+   - *Conflict Detection*: Highlights duplicate shortcut assignments in real time.
+   - *Export / Import*: Save or reload custom keymaps (`keymap.ini`), `[ Reset to Default Keymap ]` button.
+
 ---
 
 ## 4. Canvas & Rendering Pipeline
