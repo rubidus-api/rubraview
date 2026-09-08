@@ -33,8 +33,42 @@ int rubraview_str_natcmp(u8str_t a, u8str_t b);
 
 /**
  * Sort an array of u8str_t paths/names in-place according to the chosen mode.
+ * RUBRAVIEW_SORT_RANDOM here uses the C library's global rand() (a simple,
+ * one-shot shuffle for callers who don't need reproducible history); for
+ * date, size, or a reproducible seeded shuffle, use rubraview_sort_items.
  */
 void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mode, bool ascending);
+
+/**
+ * RV-031: the full multi-criteria sort (§3.2.3), carrying the metadata
+ * that name-only sorting cannot: modification/creation time and file
+ * size. The caller populates these from its own directory listing (this
+ * module has no filesystem access).
+ */
+typedef struct rubraview_sort_item {
+    u8str_t  name;
+    int64_t  mtime;      /* used by RUBRAVIEW_SORT_DATE_MODIFIED */
+    int64_t  ctime;      /* used by RUBRAVIEW_SORT_DATE_CREATED */
+    uint64_t size_bytes; /* used by RUBRAVIEW_SORT_FILE_SIZE */
+} rubraview_sort_item_t;
+
+/**
+ * A shuffle seed, held by the caller across a slideshow session so that
+ * `Previous` can step back through the shuffled order without
+ * re-randomizing (§3.2.3 point 5: "seed preservation"). The same seed and
+ * item count always reproduce the same permutation.
+ */
+typedef struct rubraview_shuffle_state {
+    uint64_t seed;
+} rubraview_shuffle_state_t;
+
+/**
+ * Sort an array of items in-place. For RUBRAVIEW_SORT_RANDOM, `shuffle`
+ * drives a deterministic Fisher-Yates permutation (seed 0 if `shuffle` is
+ * NULL) instead of the global rand() — `ascending` is ignored in that
+ * mode. For every other mode, `shuffle` is ignored.
+ */
+void rubraview_sort_items(rubraview_sort_item_t *items, size_t count, rubraview_sort_mode_t mode, bool ascending, const rubraview_shuffle_state_t *shuffle);
 
 #ifdef __cplusplus
 }
