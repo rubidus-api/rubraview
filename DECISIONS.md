@@ -41,3 +41,19 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: Decouple the Core Engine (pixel math, resampling, convolution, batch queue) from Win32 APIs. The test suite compiles and runs natively on Linux host (`make test`). Windows binaries cross-compile using MinGW-w64 on `linux-build` (`make win64`).
 - Consequences: Enables continuous integration and AddressSanitizer testing directly on Linux; prevents regression in image processing algorithms.
 - Supersedes: None
+
+## 2026-09-08: Roadmap Decisions D-1..D-7 (RFC-0001 §11.4)
+
+- Status: Accepted
+- Context: RFC-0001 §11 was rewritten into milestones M0–M9 with a traceability table; seven choices could not be made by the plan itself.
+- Decision:
+  - D-1 Windows x86_64 only until 1.0; §8 multi-platform PAL stays as intent; PAL headers carry no Win32 types.
+  - D-2 `deflate` for CBZ via vendored `miniz` (MIT).
+  - D-3 CB7 via the vendored 7-Zip LZMA SDK (public domain); CBR is post-1.0.
+  - D-4 No Windows Media Foundation fallback; FFmpeg is the only decode path.
+  - D-5 Lossless JPEG rotation via vendored `libjpeg-turbo` coefficient transforms (BSD-3-Clause + IJG + zlib); WIC remains the only pixel codec.
+  - D-6 Music player is post-1.0; 1.0 plays audio files with album art from the playlist (RV-084).
+  - D-7 `-Werror` is added to the build now (RV-009).
+  - Rule: a vendored C library is admitted when its licence is redistributable alongside MIT, it is wrapped in one `rubraview_` module, and it has a `docs/resources/` ledger entry (RFC-0001 §8.1).
+- Consequences: three third-party sources will enter `vendor/` with licence texts shipped; one decode path for media; the 1.0 scope is a Windows image/comic viewer with video playback.
+- Supersedes: None (refines 2026-09-07 "Direct2D and WIC" — WIC stays the only *pixel* codec; DCT-domain transforms are not pixel decoding).

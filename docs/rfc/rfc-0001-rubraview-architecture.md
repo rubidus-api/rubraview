@@ -3,7 +3,7 @@
 - Status: Accepted
 - Author: Antigravity Agent
 - Date: 2026-09-07
-- Revised: 2026-09-08 (§8.3 marked against the tree, §11 rewritten)
+- Revised: 2026-09-08 (§8.3 marked against the tree, §11 rewritten; D-1..D-7 decided by the owner the same day — §5.2, §8.1, §11.4 updated)
 - Target Stack: C23, WinAPI, Direct2D, WIC, FFmpeg, proven_c_lib
 - Distribution: Windows x86_64 Desktop Executable (`rubraview.exe`)
 
@@ -1151,7 +1151,7 @@ To keep `rubraview.exe` completely standalone, FFmpeg shared libraries are resol
 2. If found, all demuxer, decoder, resampler, and color-space conversion function pointers are bound dynamically.
 3. If absent:
    - Audio and video playback graceful degradation: Pure image viewer mode remains 100% operational.
-   - For basic MP4 video and WAV/MP3 audio, the engine provides an optional native fallback using Windows Media Foundation (`IMFSourceReader`) and Direct2D.
+   - No second decoder path exists (D-4, 2026-09-08): without the FFmpeg DLLs the OSD reports the missing bridge and video/audio files are skipped. Windows Media Foundation is not used.
 
 ### 5.3 Video Demuxing, Decoding & Presentation Pipeline
 ```
@@ -1372,6 +1372,7 @@ To guarantee that Rubraview remains **pure C23** and can expand smoothly from Wi
 2. **proven_c_lib as Sole Base Foundation**:
    - Dynamic memory management, string slicing, dynamic arrays, sorting, and assertions are strictly provided by vendored `proven_c_lib` (`prv_arena_t`, `u8str_t`, `prv_dynarray_t`, `prv_panic`).
    - Zero uncontrolled standard library allocations (`malloc`/`free` calls are prohibited in `src/core/`).
+   - **Vendored permissive C libraries count as foundation for one job each** (D-2/D-3/D-5, 2026-09-08): `miniz` (inflate), the 7-Zip LZMA SDK (7z), and `libjpeg-turbo` (DCT-domain lossless transforms only). Each lives under `vendor/`, is recorded in `docs/resources/`, must be redistributable alongside the MIT licence, is wrapped behind one `rubraview_` module, and is never called from outside that module. Its allocator is routed to `prv_arena_t` where the library allows it.
 
 ### 8.2 Subsystem Abstraction Matrix across Platforms
 
@@ -1542,7 +1543,7 @@ and therefore no longer covered what §3 specifies.*
 - Shipped: `pixbuf` (RV-001), `color` (RV-002), `resample` (RV-003), `filter` (RV-004),
   `path` (RV-007), `sort` (RV-008), ASan/UBSan test harness (RV-006).
 - Evidence: `make test` — 6 test binaries, all pass under `-fsanitize=address,undefined`.
-- Gap against §8.4: the Makefile does not yet pass `-Werror` (RV-009).
+- Gap against §8.4: the Makefile does not yet pass `-Werror`; RV-009 is the first M1 item (D-7). Measured 2026-09-08: the tree builds warning-free with `-Werror` and all 6 tests pass.
 
 **M1 — Portable core, remainder (all H)**
 - Goal: every algorithm §3 needs that has no OS dependency exists, is tested, and is
@@ -1616,9 +1617,9 @@ and therefore no longer covered what §3 specifies.*
   history, resume prompt, portable-mode hierarchy (§3.17) · RV-049 animated GIF/WebP/APNG
   frame engine, multi-page TIFF and ICO sub-frames (§3.20) · RV-050 wide-gamut ICC
   transform through `IWICColorTransform` (§4.3).
-- After D-2 / D-3 (§11.4): RV-051 `deflate` for CBZ · RV-052 CB7 via LZMA SDK,
-  solid-stream persistent decoder · RV-053 CBR.
-- Depends on: M3; RV-051–053 on the named decisions.
+- RV-051 `deflate` for CBZ via vendored `miniz` (D-2) · RV-052 CB7 via the LZMA SDK,
+  solid-stream persistent decoder (D-3). RV-053 CBR is post-1.0 (D-3, §11.5).
+- Depends on: M3; RV-051 on the `miniz` ledger entry, RV-052 on the LZMA SDK ledger entry.
 - Done means: a 1 GB stored-entry `.cbz` opens with the index built in under 5 ms
   (measured, §3.8.1); no file appears under `%TEMP%` during reading; reopening the
   archive offers the last page; memory stays under the configured cap while flipping
@@ -1636,7 +1637,9 @@ and therefore no longer covered what §3 specifies.*
   embedded streams, sync offset (§3.16.1) · RV-060 multi-track audio/subtitle switching
   (§3.16.2) · RV-061 mixed-media slide show and playlist loop policy (§3.2.6, §3.12)
   wired to RV-032 · RV-062 D3D11VA zero-copy path with software fallback (§5.7).
-- After D-4: RV-063 Windows Media Foundation fallback.
+- RV-084 audio-only files (§5.1 audio rows) play from the playlist and slide show with
+  embedded album art shown — the D-6 minimum; everything else of §3.14 is post-1.0.
+  RV-063 (Windows Media Foundation fallback) is withdrawn (D-4).
 - Depends on: M3 (toolbox, keymap), M4 (RV-044 for pre-buffering).
 - Done means: an MKV with two audio tracks and an embedded subtitle plays in sync,
   `.`/`,` step single frames, `[`/`]`/`\` loop and release, and with the FFmpeg DLLs
@@ -1652,7 +1655,9 @@ and therefore no longer covered what §3 specifies.*
   RV-067 multi-threaded tiled resampling on `job.h` (§6.5.5) · RV-017 batch engine and
   `--batch` CLI on RV-033 with per-thread arenas (§3.11 execution engine) · RV-068
   batch dialog (§3.11 UI).
-- After D-5: RV-069 lossless JPEG rotation (§3.9).
+- RV-069 lossless JPEG rotation and flip through vendored `libjpeg-turbo` coefficient
+  read/write (`jpeg_read_coefficients` / `jpeg_write_coefficients`, the `jpegtran`
+  path) — no pixel decode, WIC stays the only pixel codec (D-5).
 - Depends on: M3; RV-017 on M1 (RV-033) and RV-044 (job pool).
 - Done means: `rubraview.exe --batch --resize=50% --format=webp <dir>` converts a
   directory with no window; the same directory converted through the dialog yields
@@ -1670,16 +1675,16 @@ and therefore no longer covered what §3 specifies.*
   0; dragging three files from Explorer plays them as a temporary playlist;
   `--unregister-shell` leaves no `Rubraview.*` ProgID in `HKCU\Software\Classes`.
 
-**M8 — Music player (W; scope pending D-6)**
+**M8 — Music player (W; post-1.0 by D-6)**
 - RV-075 audio-only playback, gapless pre-buffer, crossfade (§3.14.1) · RV-076 album
   art extraction, blurred backdrop, track OSD (§3.14.2.1, §3.14.2.4) · RV-077 1024-point
   FFT, 64-band analyser, oscilloscope (§3.14.2.2–3.14.2.3) · RV-078 `.lrc`, `SYLT`/`USLT`
   synced lyrics (§3.14.3) · RV-079 `.cue` virtual tracks (§3.14.4) · RV-080 10-band EQ,
   ReplayGain, night mode (§3.14.5) · RV-081 mini-player window and BGM arbiter
   (§3.14.6).
-- Depends on: M5 (RV-055 audio engine). The FFT, EQ, `.lrc` and `.cue` parsers are H
-  and can be built and tested on Linux before the Windows wiring.
-- Done means: decided with D-6.
+- Depends on: M5 (RV-055 audio engine, RV-084 minimum). The FFT, EQ, `.lrc` and `.cue`
+  parsers are H and can be built and tested on Linux before the Windows wiring.
+- Done means: not part of 1.0; defined when M8 is scheduled.
 
 **M9 — Settings window and release (W)**
 - RV-082 tab-styled settings window, all eight tabs, `Apply` without closing, keymap
@@ -1709,20 +1714,20 @@ and therefore no longer covered what §3 specifies.*
 | 3.7.1–3.7.2 | Context-aware keymap, hotkey table | M1 · M3 | RV-030, RV-038 | H+W |
 | 3.7.3–3.7.4 | Mouse zones, touch and pen | M3 | RV-037 | W |
 | 3.7.5 | `keymap.ini` | M1 · M3 | RV-023, RV-030, RV-038 | H+W |
-| 3.8.1 | ZIP VFS, O(1) index, streaming, traversal | M1 · M4 | RV-025, RV-045, RV-051 (D-2) | H+W |
-| 3.8.2 | 7z solid/non-solid, RAR | M4 | RV-052 (D-3), RV-053 (D-3) | H+W |
+| 3.8.1 | ZIP VFS, O(1) index, streaming, traversal | M1 · M4 | RV-025, RV-045, RV-051 | H+W |
+| 3.8.2 | 7z solid/non-solid, RAR | M4 · post-1.0 | RV-052, RV-053 (post-1.0) | H+W |
 | 3.8.3 | Filename encoding detection and override | M1 · M4 | RV-026, RV-046 | H+W |
 | 3.8.4 | NFC normalisation | M1 | RV-024 | H |
 | 3.8.5 | `ComicInfo.xml` | M1 · M4 | RV-027, RV-047 | H+W |
-| 3.9 | Rotation, EXIF orientation, lossless JPEG | M1 · M3 · M6 | RV-029, RV-041, RV-069 (D-5) | H+W |
+| 3.9 | Rotation, EXIF orientation, lossless JPEG | M1 · M3 · M6 | RV-029, RV-041, RV-069 | H+W |
 | 3.10 | Quick export, privacy clean | M1 · M6 | RV-029, RV-066, RV-018 | H+W |
 | 3.11 | Batch pipeline, action chain, execution | M1 · M6 | RV-033, RV-017, RV-068 | H+W |
 | 3.12 | Playlists, collections, bookmarks | M1 · M5 | RV-005, RV-061 | H+W |
 | 3.13 | Adjustment panel, curves, crop | M0 · M6 | RV-002, RV-004, RV-064, RV-065 | H+W |
-| 3.14 | Music player | M8 | RV-075 – RV-081 (D-6) | H+W |
+| 3.14 | Music player | M5 (minimum) · M8 post-1.0 | RV-084, RV-075 – RV-081 | H+W |
 | 3.15.1 | Win32 file dialog | M3 | RV-043 | W |
 | 3.15.2 | In-app Metro picker | M3 | RV-043 | W |
-| 3.15.3 | macOS / Linux dialog backends | — | (D-1) | — |
+| 3.15.3 | macOS / Linux dialog backends | post-1.0 (D-1) | — | — |
 | 3.15.4 | Type-ahead, native IME search bar | M3 | RV-043 | W |
 | 3.16.1 | Subtitle formats, rendering, sync | M5 | RV-059 | W |
 | 3.16.2 | Multi-track switching | M5 | RV-060 | W |
@@ -1736,8 +1741,8 @@ and therefore no longer covered what §3 specifies.*
 | 4.1 | D2D interop, viewport matrix, compositor, effect graph | M1 · M2 · M6 | RV-022, RV-011, RV-012, RV-064 | H+W |
 | 4.2 | Per-Monitor V2 HiDPI | M2 | RV-010 | W |
 | 4.3 | Wide colour gamut | M4 | RV-050 | W |
-| 5.1 | Format matrix | M5 | RV-016, RV-054 | W |
-| 5.2 | Dynamic loading, fallback | M5 | RV-016, RV-063 (D-4) | W |
+| 5.1 | Format matrix | M5 | RV-016, RV-054, RV-084 | W |
+| 5.2 | Dynamic loading, no fallback | M5 | RV-016 (RV-063 withdrawn) | W |
 | 5.3 | Demux, decode, sync, seek, capture | M5 | RV-054, RV-056 | W |
 | 5.4 | WASAPI audio engine | M5 | RV-055 | W |
 | 5.5 | A-B looping | M5 | RV-057 | W |
@@ -1750,9 +1755,9 @@ and therefore no longer covered what §3 specifies.*
 | 9 | Build pipeline | M0 · M2 | RV-006, RV-019 | H+W |
 | 10 | Security model | M1 · M4 | RV-025 (size caps), RV-028 | H |
 
-### 11.4 Open Decisions (owner)
+### 11.4 Owner Decisions (all decided 2026-09-08)
 
-Each item blocks the ids named after it. Nothing below is assumed by the milestones.
+The options are kept for the record; the **Decided** line is what the milestones assume. Vendored libraries are admitted under the §8.1 rule added the same day: permissive licence redistributable with MIT, one module each, ledger entry in `docs/resources/`.
 
 - **D-1 Multi-platform PAL.** §8 plans Linux and macOS back ends; all four accepted
   decisions and the distribution line say Windows x86_64. Options: (a) record §8 as a
@@ -1760,36 +1765,48 @@ Each item blocks the ids named after it. Nothing below is assumed by the milesto
   Windows-only until 1.0; (c) remove §8.2's non-Windows columns. Blocks: nothing in
   M0–M9; determines whether `include/rubraview/pal/*.h` grow host implementations
   beyond test mocks.
+  **Decided: (b).** Windows-only until 1.0; §8 stays as intent; PAL headers carry no Win32 types.
 - **D-2 `deflate` for CBZ.** §3.8.1 needs an inflater; §8.1 forbids non-`proven`
   dependencies in `src/core/`, and `proven` has none. Options: (a) vendor a permissive
   single-file inflater (`miniz`, `stb`-style) under `vendor/` with a
   `docs/resources/` ledger entry; (b) write a bounded C23 inflater in-house;
   (c) `stored`-only CBZ until (a) or (b). Blocks: RV-051.
+  **Decided: (a)** — vendor `miniz` (MIT). An in-house inflater would need its own fuzzing history to satisfy §10.
 - **D-3 CB7 and CBR.** §3.8.2 names the public-domain LZMA SDK for 7z (vendoring still
   needs the ledger). RAR has no pure-C permissively licensed reader that the author of
   this revision could confirm; `libarchive`'s RAR reader is C/BSD but is a large
   dependency, and the official UnRAR source is C++. Options for CBR: (a) `libarchive`
   subset; (b) shell out to an external unrar the user installs; (c) drop CBR from 1.0.
   Blocks: RV-052, RV-053.
+  **Decided:** CB7 via the LZMA SDK (public domain) in M4; **CBR is post-1.0** — no pure-C permissively licensed reader was found, and `libarchive`/external `unrar` conflict with the zero-dependency rule.
 - **D-4 Windows Media Foundation fallback.** §5.2 offers WMF when FFmpeg is absent;
   DECISIONS 2026-09-07 chose FFmpeg *because* WMF is insufficient. Options: (a) keep as
   a limited MP4/MP3 fallback; (b) drop it — no FFmpeg means image viewer only.
   Blocks: RV-063.
+  **Decided: (b)** — dropped; §5.2 amended. One decode path, one test surface.
 - **D-5 Lossless JPEG rotation.** §3.9 requires DCT-domain rearrangement, which WIC
   does not offer. The metadata strip in §3.10 is a plain marker walk and is scheduled
   (RV-029) regardless. Options: (a) vendor `libjpeg-turbo` for `jpegtran`-class
   transforms; (b) in-house DCT block transposer; (c) drop lossless rotation, keep
   non-destructive view rotation only. Blocks: RV-069.
+  **Decided: (a)** — vendor `libjpeg-turbo` (BSD-3-Clause + IJG + zlib, all redistributable with MIT) for the coefficient-transform path only; in-house DCT-domain code was judged too large (entropy decode/encode, block transposition, subsampling edges). Pixel decoding stays WIC-only. Licence texts ship with the binary.
 - **D-6 Music player scope.** §3.14 is a second product (gapless engine, FFT, lyrics,
   cue, EQ, mini-player). Options: (a) in 1.0 as M8; (b) after 1.0; (c) reduce to
   "audio files play in the playlist with album art" and fold into M5. Blocks:
   RV-075–RV-081.
+  **Decided: (b) with (c)'s minimum** — audio files play with album art in M5 (RV-084); the rest of §3.14 is post-1.0.
 - **D-7 `-Werror`.** §8.4 promises `-Werror`; the Makefile does not pass it. Options:
   (a) add it now (RV-009, cheap while the tree is small); (b) keep warnings advisory.
+  **Decided: (a)** — measured warning-free on 2026-09-08.
 
 ### 11.5 Explicitly Not Scheduled
 
-Listed so that silence is not read as "planned":
+Listed so that silence is not read as "planned". **Post-1.0** items keep their ids and
+their §3 text but have no milestone:
+
+- CBR reader (RV-053) — D-3.
+- Music player beyond the M5 minimum (RV-075–RV-081, M8) — D-6.
+- Windows Media Foundation fallback (RV-063) — withdrawn, not post-1.0 — D-4.
 
 - Linux and macOS native back ends (§3.15.3, §8.2 non-Windows columns) — awaiting D-1.
 - T3 multi-platform smoke builds (§8.4) — awaiting D-1.
@@ -1800,6 +1817,6 @@ Listed so that silence is not read as "planned":
 
 ### 11.6 Backlog Mirror
 
-`BACKLOGS.md` carries one line per id above under `## Ready` (M1) and `## Later`
-(M2–M9), and the D-items under `## Blocked`. When this section and `BACKLOGS.md`
+`BACKLOGS.md` carries one line per id above under `## Ready` (M1), `## Later`
+(M2–M7, M9) and `## Post-1.0` (M8, RV-053); `## Blocked` is empty since D-1..D-7 were decided. When this section and `BACKLOGS.md`
 disagree, this section is the source: correct it here first, then the backlog line.
