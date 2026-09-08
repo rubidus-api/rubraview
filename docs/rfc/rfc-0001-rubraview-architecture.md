@@ -494,6 +494,39 @@ Rubraview successfully enables **Zero-Disk VFS Streaming for 7z** through a dual
    - Written in 100% pure ANSI C / C23 with Public Domain / permissive licensing.
    - The SDK's memory allocator interface (`ISzAlloc`) is wired directly to `proven_arena_t`, ensuring zero heap fragmentation and instant teardown upon closing the archive.
 
+#### 3.8.3 Archive Filename Encodings & User Override Options
+A notorious issue in comic and manga archives across East Asia is that legacy ZIP archivers frequently encode internal filenames using non-UTF-8 local code pages (e.g., Korean CP949 / EUC-KR, Japanese Shift-JIS / CP932, Simplified Chinese GBK / CP936, or Traditional Chinese Big5 / CP950) without setting ZIP General Purpose Flag Bit 11 (the UTF-8 flag).
+
+Rubraview resolves this through a resilient two-tier encoding strategy:
+1. **Intelligent Auto-Detection Pipeline**:
+   - Step 1: Check ZIP General Purpose Bit 11. If set, parse filenames strictly as UTF-8.
+   - Step 2: If unset or absent, validate byte stream against strict UTF-8 rules. If the byte sequence conforms to valid UTF-8, retain UTF-8.
+   - Step 3: If invalid UTF-8 sequences are encountered, automatically fall back to the host operating system's active ANSI/OEM code page (e.g. CP949 on Korean Windows, Shift-JIS on Japanese Windows, CP1252 on Western Windows).
+2. **Explicit User Override Options**:
+   - Users can manually force an encoding from the Menu Box (`Menu > Archive > Filename Encoding`) or In-App File Picker:
+     - `Auto-Detect (Default)`
+     - `UTF-8`
+     - `Korean (CP949 / EUC-KR)`
+     - `Japanese (Shift-JIS / CP932)`
+     - `Simplified Chinese (GBK / CP936)`
+     - `Traditional Chinese (Big5 / CP950)`
+     - `Western European (CP1252 / ISO-8859-1)`
+   - The selected encoding is transcoded into clean `u8str_t` (UTF-8) within a temporary scratch arena upon indexing, guaranteeing that all internal sorting, natural number grouping, and DirectWrite text rendering operate on 100% valid UTF-8.
+
+#### 3.8.4 macOS Unicode NFC / NFD Decomposed Hangul & Accent Normalization
+Files and comic archives created on macOS (HFS+ / APFS) store filenames in **Normalization Form D (NFD, Decomposed)**. For instance, the Korean syllable `한` (U+D55C) is physically split into three separate Jamo code points: `ㅎ` (Lead, U+1112) + `ㅏ` (Vowel, U+1161) + `ㄴ` (Trail, U+11AB). When transferred to Windows or Linux, these filenames appear broken into disjoint letters (`ㅎ ㅏ ㄴ`), string searches fail to match, and natural sorting is corrupted.
+
+Rubraview implements a zero-allocation, high-performance C23 Unicode **NFC (Normalization Form C) Folding Pass**:
+1. **Algorithmic Hangul Syllable Composition (Unicode §3.12)**:
+   - Evaluates consecutive Jamo sequences in $O(N)$ single-pass:
+     $$S = \text{SBase} + (L \times \text{VCount} + V) \times \text{TCount} + T$$
+     Where $\text{SBase} = \text{0xAC00}$, $\text{VCount} = 21$, $\text{TCount} = 28$.
+   - Executes purely via integer arithmetic with zero external Unicode library dependencies and sub-microsecond latency.
+2. **Latin & Diacritical Combining Mark Composition**:
+   - Re-combines common base characters with following combining diacritical marks (U+0300..U+036F) into standard precomposed NFC characters.
+3. **Application Invariant**:
+   - All filenames enumerated from local filesystems and all entry paths parsed from archive VFS streams are automatically normalized to NFC before being passed to `rubraview_sort_paths`, the OSD title renderer, or bookmark history.
+
 ### 3.9 Geometric Transforms & Rotation
 - **Rotation Operations**:
   - Rotate $90^\circ$ Clockwise (`R`)
@@ -673,6 +706,59 @@ Rubraview implements a native, touch-first **In-App Metro Tile File Picker (`rub
 - **macOS**: Bridges to `NSOpenPanel` / `NSSavePanel` via a lightweight C runtime wrapper.
 - **Linux**: Interacts with the FreeDesktop `org.freedesktop.portal.FileChooser` DBus portal or Zenity, falling back gracefully to the In-App Metro Picker.
 
+#### 3.15.4 Quick Search & Hybrid Native IME Text Input Bar
+To allow rapid filtering through thousands of files without reinventing a complex East Asian Input Method Editor (IME) text stack in pure Direct2D:
+1. **Type-Ahead First-Letter Jump**:
+   - Pressing alphanumeric keys in the tile grid immediately scrolls and jumps focus to the first matching filename without opening a text box.
+2. **Hybrid Native IME Search Bar**:
+   - Tapping the `[ 🔍 Search ]` tile reveals an input bar. Rather than managing complex composition states (Windows Imm32 / TSF) inside Direct2D, Rubraview instantiates a lightweight, transparent Win32 child `EDIT` control (`CreateWindowExW(0, L"EDIT", ...)`).
+   - Windows natively handles Hangul (한글 자음/모음 조합), Japanese (Kana/Kanji), and Chinese composition effortlessly.
+   - On `EN_CHANGE` notifications, the virtual grid dynamically re-filters items with middle-substring and regex matching in real time, dismissing the child edit control when `Enter` or `Esc` is pressed.
+
+### 3.16 Video Subtitle Pipeline & Multi-Track Audio/Subtitle Selection
+To deliver a complete multimedia viewing experience matching dedicated video players:
+
+#### 3.16.1 Subtitle Formats & Auto-Discovery
+1. **External Subtitles**:
+   - Automatically detects subtitle files sharing the base filename in the active directory:
+     - SubRip (`.srt`)
+     - SAMI (`.smi`) with language class parsing (`<SYNC Start=...>`)
+     - WebVTT (`.vtt`)
+     - Advanced SubStation Alpha (`.ass` / `.ssa`)
+2. **Container-Embedded Subtitle Streams**:
+   - Demuxes embedded text streams from MKV and MP4 containers (`subrip`, `ass`, `mov_text`) via the FFmpeg PAL bridge.
+3. **High-Contrast DirectWrite Rendering**:
+   - Subtitles are rendered on the Direct2D canvas above the video frame using DirectWrite glyph runs with a 2-pixel black outline and subtle drop shadow, guaranteeing 100% legibility over dark or bright movie scenes.
+4. **Interactive Timing Synchronization**:
+   - Hotkeys `Z` and `X` adjust subtitle synchronization offset in $\pm 0.5\text{s}$ steps (e.g. `OSD: Subtitle Sync: +0.5s`).
+
+#### 3.16.2 Multi-Track Stream Switching UI
+- Modern anime and international movies often contain multiple audio tracks (e.g. Japanese 5.1, Korean Stereo, English Commentary) and multi-lingual subtitles.
+- **Menu Box / Toolbox Integration**:
+  - `[ 🎙 Audio Track ]`: Pops out a list of available audio streams (`#1: Japanese (FLAC 5.1)`, `#2: Korean (AAC 2.0)`). Switching streams rebinds the WASAPI audio resampler seamlessly without stopping video playback.
+  - `[ 💬 Subtitles ]`: Lists available internal and external subtitles (`#1: Korean (SMI)`, `#2: English (SRT)`, `Off`).
+
+### 3.17 Reading Session Persistence, Last-Read Resume & Portable Mode
+
+#### 3.17.1 Automatic Last-Read Page Bookmarks (Resume Reading)
+When reading long manga series or multi-volume comic archives, users should never lose their place:
+- **Per-Archive Reading Position Tracker**:
+  - Automatically records the current page index upon closing or switching files:
+    ```ini
+    [history]
+    C:\Comics\OnePiece_Vol100.cbz = page:58, total:192, time:1725792000
+    ```
+- **Frictionless Resume Prompt**:
+  - When re-opening an archive with an active reading history, Rubraview displays an unobtrusive Metro tile notification: `[ 📖 Resume Page 58 / 192 (Enter) ]`, auto-resuming on `Enter` or dismissing to Page 1 on `Esc`.
+
+#### 3.17.2 Configuration Storage Hierarchy & Portable Mode
+Many users run comic viewers from portable USB drives or external SSDs without installation:
+1. **Portable Mode Priority**:
+   - Upon startup, Rubraview checks for the existence of `settings.ini` in the same directory as `rubraview.exe`.
+   - If present, **Portable Mode** is engaged: all configuration (`settings.ini`), reading bookmarks (`bookmarks.ini`), and recent files (`history.ini`) are stored exclusively in the application directory. No files or registry entries are written to the host computer.
+2. **Standard AppData Fallback**:
+   - If `settings.ini` is not found alongside the executable, settings are saved to `%APPDATA%\rubraview\settings.ini`, conforming to Windows application standards.
+
 ---
 
 ## 4. Canvas & Rendering Pipeline
@@ -790,8 +876,16 @@ Video playback in Rubraview adheres to the exact same canvas principles as still
   - Users can zoom in and out of a video using the mouse wheel (or touch pinch gesture) **in real time while the video is playing**.
   - When zoomed in, clicking and dragging with the mouse (or touch drag) pans the video viewport freely across the active video surface without pausing playback.
   - Zoom and pan operations modify only the Direct2D affine transformation matrix $\mathbf{M}$ on the GPU, incurring 0% CPU decoding overhead.
-- **Strict Window Stability Invariant**:
-  - Starting a video, changing videos, toggling fit modes, or zooming in/out **NEVER resizes or repositions the outer application window**.
+### 5.7 GPU Hardware-Accelerated Video Decoding (D3D11VA / DXVA2)
+To achieve smooth, stutter-free playback of 4K and 8K 60fps high-bitrate video (HEVC / H.265, VP9, AV1) with low CPU usage and minimal battery consumption:
+1. **FFmpeg Hardware Device Context**:
+   - The FFmpeg bridge initializes `AV_HWDEVICE_TYPE_D3D11VA` linked to the active `ID3D11Device`.
+   - Compressed video packets are decoded directly into Direct3D 11 video memory textures (`DXGI_FORMAT_NV12` or `DXGI_FORMAT_P010` for 10-bit HDR).
+2. **Zero-Copy Direct2D Presentation**:
+   - The decoded `ID3D11Texture2D` is wrapped as a Direct2D bitmap via `ID2D1DeviceContext::CreateBitmapFromDxgiSurface`.
+   - Eliminates CPU round-trips (`sws_scale` or `memcpy` from system RAM to VRAM): video frames flow entirely inside GPU VRAM directly to the Direct2D canvas.
+3. **Graceful Fallback to CPU Software Decoder**:
+   - If hardware acceleration is unsupported by the GPU driver or codec profile, the bridge falls back cleanly to multi-threaded CPU software decoding (`avcodec_send_packet` / `avcodec_receive_frame`).
 
 ---
 
@@ -921,6 +1015,17 @@ Standard C null-terminated strings (`char*`) introduce heavy memory allocation o
 
 ### 7.3 Dynamic Collections (`prv_dynarray_t`)
 - Directory file listings, playlist queues, and batch job lists use `prv_dynarray_t` for typed, amortized growth backed by arenas with strict boundary safety.
+
+### 7.4 Hard Memory Budget Cap & Two-Tier LRU Cache Eviction Policy
+To prevent out-of-memory crashes and resource hogging when viewing 100-megapixel scans or high-speed slideshows:
+1. **Hard Memory Budget Cap**:
+   - Rubraview enforces a configurable memory budget cap (default: **512 MB**, adjustable from 256 MB to 4,096 MB in `settings.ini`).
+2. **Two-Tier LRU Cache Eviction**:
+   - **Tier 1: VRAM Texture Cache (`ID2D1Bitmap`)**: GPU textures outside the active viewport and immediate $\pm 2$ pre-cache ring are evicted immediately, reclaiming VRAM.
+   - **Tier 2: Decoded Pixbuf Cache (`rubraview_pixbuf_t` in Arenas)**:
+     - All cached pages are tracked in an LRU queue with their allocated byte sizes.
+     - When total cached memory exceeds the configured budget cap, the oldest cached pages are evicted and their memory arenas are reset.
+   - Ensures memory consumption remains strictly bounded and deterministic under all browsing loads.
 
 ---
 
