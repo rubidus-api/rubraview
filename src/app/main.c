@@ -21,6 +21,7 @@
 #endif
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rubraview/core.h"
@@ -36,6 +37,7 @@
 #include "rubraview/ui_menu.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
+#include "rubraview/picker.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_image.h"
@@ -51,7 +53,7 @@
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
 #define TOOLBOX_TILES 8
-#define MENU_ROOT_TILES 4
+#define MENU_MAX_TILES 12
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
 #define COLOR_CANVAS      0xFF101010u
@@ -73,6 +75,7 @@ static const char *const DEFAULT_KEYMAP =
     "toggle_filmstrip = F4\n"
     "toggle_menu = Tab, F1\n"
     "toggle_toolbox = T, F2\n"
+    "open_picker = O\n"
     "quit = Escape\n"
     "\n"
     "[navigation]\n"
@@ -98,6 +101,58 @@ static const char *const DEFAULT_KEYMAP =
     "\n"
     "[slideshow]\n"
     "toggle_slideshow = S, F5\n";
+
+/*
+ * The Menu Box's category tree (§3.6.2). Children are contiguous, which
+ * is what rubraview_menu_tree_t indexes; every leaf names an action the
+ * keyboard can already reach, so the tiles and the keymap stay in step.
+ */
+enum {
+    MENU_ROOT_LAYOUT = 0, MENU_ROOT_FIT, MENU_ROOT_VIEW, MENU_ROOT_SHOW,
+    MENU_ROOT_COUNT,
+};
+
+/* U8() builds a compound literal, which is not a constant initializer at
+   file scope; a brace initializer with sizeof for the length is, and it
+   still avoids hand-counting any lengths. */
+#define MENU_STR(lit) { .ptr = (lit), .len = sizeof(lit) - 1 }
+
+static const rubraview_menu_item_t MENU_ITEMS[] = {
+    /* 0 */ { .label = MENU_STR("Layout"), .action = MENU_STR(""), .first_child = 4, .child_count = 3 },
+    /* 1 */ { .label = MENU_STR("Fit"),    .action = MENU_STR(""), .first_child = 7, .child_count = 5 },
+    /* 2 */ { .label = MENU_STR("View"),   .action = MENU_STR(""), .first_child = 12, .child_count = 4 },
+    /* 3 */ { .label = MENU_STR("Show"),   .action = MENU_STR(""), .first_child = 16, .child_count = 3 },
+
+    /* Layout (4..6) */
+    { .label = MENU_STR("Single"), .action = MENU_STR("layout_single"), .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Dual"),   .action = MENU_STR("layout_dual"),   .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Book"),   .action = MENU_STR("layout_book"),   .first_child = -1, .child_count = 0 },
+
+    /* Fit (7..11) */
+    { .label = MENU_STR("Window"), .action = MENU_STR("fit_window"),  .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Width"),  .action = MENU_STR("fit_width"),   .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Height"), .action = MENU_STR("fit_height"),  .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("1:1"),    .action = MENU_STR("actual_size"), .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Smart"),  .action = MENU_STR("smart_fit"),   .first_child = -1, .child_count = 0 },
+
+    /* View (12..15) */
+    { .label = MENU_STR("Rotate"), .action = MENU_STR("rotate_cw"),         .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Flip H"), .action = MENU_STR("flip_horizontal"),   .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Crisp"),  .action = MENU_STR("toggle_nearest"),    .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Grid"),   .action = MENU_STR("toggle_pixel_grid"), .first_child = -1, .child_count = 0 },
+
+    /* Show (16..18) */
+    { .label = MENU_STR("Slides"), .action = MENU_STR("toggle_slideshow"), .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Strip"),  .action = MENU_STR("toggle_filmstrip"), .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Files"),  .action = MENU_STR("open_picker"),      .first_child = -1, .child_count = 0 },
+};
+
+static const rubraview_menu_tree_t MENU_TREE = {
+    .items = MENU_ITEMS,
+    .item_count = sizeof(MENU_ITEMS) / sizeof(MENU_ITEMS[0]),
+    .root_first = 0,
+    .root_count = MENU_ROOT_COUNT,
+};
 
 /* U8() only works on string literals; this is its runtime counterpart. */
 static u8str_t cstr(const char *s) {
@@ -146,7 +201,15 @@ typedef struct app_state {
     rubraview_cursor_hide_t cursor;
     double last_frame_seconds;
     double pointer_x, pointer_y;
+
+    /* In-app Metro file picker (§3.15.2), RV-043 */
+    bool                   picker_open;
+    u8str_t                picker_dir;
+    rubraview_fs_listing_t picker_listing;
+    rubraview_picker_t     picker;
 } app_state_t;
+
+static void open_path(app_state_t *app, u8str_t path);
 
 /* ---- page loading ---- */
 
@@ -282,6 +345,99 @@ static void toggle_slideshow(app_state_t *app) {
     }
 }
 
+/* ---- Metro file picker (§3.15.2) ---- */
+
+#define PICKER_COLUMNS 4
+#define PICKER_CRUMB_HEIGHT 44.0
+#define PICKER_ACTION_HEIGHT 48.0
+
+/* Lists a directory and orders it the way the viewer orders pages, so
+   the picker and the page sequence agree. */
+static void picker_navigate(app_state_t *app, u8str_t dir) {
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
+    if (listing.count == 0) return;
+
+    /* Directories first, then files, each in natural order — folders are
+       what a reader scans for first on a touch screen. */
+    rubraview_sort_item_t *items = NULL;
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, listing.count * sizeof(rubraview_sort_item_t));
+    if (proven_is_ok(res.err)) {
+        items = (rubraview_sort_item_t*)(void*)res.value.ptr;
+        for (size_t i = 0; i < listing.count; ++i) {
+            items[i] = (rubraview_sort_item_t){
+                .name = listing.entries[i].name,
+                .mtime = listing.entries[i].is_directory ? 0 : 1, /* sort key: folders first */
+                .ctime = listing.entries[i].ctime,
+                .size_bytes = listing.entries[i].size_bytes,
+                .tag = (uint64_t)i,
+            };
+        }
+        rubraview_sort_items(items, listing.count, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
+
+        proven_result_mem_mut_t ordered_res =
+            proven_arena_alloc(app->arena, listing.count * sizeof(rubraview_fs_entry_t));
+        if (proven_is_ok(ordered_res.err)) {
+            rubraview_fs_entry_t *ordered = (rubraview_fs_entry_t*)(void*)ordered_res.value.ptr;
+            size_t out = 0;
+            for (int folder_pass = 1; folder_pass >= 0; --folder_pass) {
+                for (size_t i = 0; i < listing.count; ++i) {
+                    const rubraview_fs_entry_t *e = &listing.entries[items[i].tag];
+                    if ((int)e->is_directory != folder_pass) continue;
+                    ordered[out++] = *e;
+                }
+            }
+            listing.entries = ordered;
+        }
+    }
+
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double tile = 160.0 * dpi;
+
+    app->picker_dir = dir;
+    app->picker_listing = listing;
+    app->picker = rubraview_picker_create(&app->picker_listing, tile,
+                                          (double)win_h - (PICKER_CRUMB_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
+                                          PICKER_COLUMNS);
+}
+
+static void picker_open(app_state_t *app) {
+    u8str_t dir = app->picker_dir;
+    if (dir.len == 0) {
+        if (app->siblings.count > 0) {
+            dir = rubraview_path_dirname(app->siblings.paths[app->siblings.current]);
+        } else {
+            dir = U8(".");
+        }
+    }
+    picker_navigate(app, dir);
+    app->picker_open = app->picker_listing.count > 0;
+}
+
+/* Activating a tile enters a folder or opens a file. */
+static void picker_activate(app_state_t *app, size_t index) {
+    if (index >= app->picker_listing.count) return;
+    const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+
+    if (entry->is_directory) {
+        picker_navigate(app, entry->path);
+        app->picker.focus = 0;
+        return;
+    }
+
+    app->picker_open = false;
+    open_path(app, entry->path);
+}
+
+/* The box's grid must match however many tiles the current menu level
+   shows, which changes as the reader drills in and back out. */
+static void sync_menubox_tiles(app_state_t *app) {
+    int32_t count = rubraview_menu_visible_count(&app->menu);
+    if (count > MENU_MAX_TILES) count = MENU_MAX_TILES;
+    app->menubox.tile_count = count;
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -334,8 +490,27 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (action_is(action, "toggle_menu")) {
         rubraview_box_click_anchor(&app->menubox);
         rubraview_menu_reset(&app->menu);
+        sync_menubox_tiles(app);
+    } else if (action_is(action, "layout_single")) {
+        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+        app->needs_relayout = true;
+        reset_view(app);
+    } else if (action_is(action, "layout_dual")) {
+        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;
+        app->needs_relayout = true;
+        reset_view(app);
+    } else if (action_is(action, "layout_book")) {
+        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_BOOK;
+        app->needs_relayout = true;
+        reset_view(app);
     } else if (action_is(action, "toggle_toolbox")) {
         rubraview_box_click_anchor(&app->toolbox);
+    } else if (action_is(action, "open_picker")) {
+        if (app->picker_open) {
+            app->picker_open = false;
+        } else {
+            picker_open(app);
+        }
     } else if (action_is(action, "toggle_slideshow")) {
         toggle_slideshow(app);
     } else if (action_is(action, "toggle_fullscreen")) {
@@ -360,7 +535,64 @@ static void handle_action(app_state_t *app, u8str_t action) {
     }
 }
 
+/* While the picker is open it owns the keyboard (§3.7.1's modal
+   context): letters jump, arrows move, Enter opens, Esc closes. */
+static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->picker_open) return false;
+
+    if (combo.key_name.len == 1) {
+        char c = combo.key_name.ptr[0];
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+            rubraview_picker_type_ahead(&app->picker, c);
+            return true;
+        }
+    }
+
+    size_t count = app->picker_listing.count;
+    if (count == 0) { app->picker_open = false; return true; }
+
+    if (combo.key_name.len == 5 && memcmp(combo.key_name.ptr, "Right", 5) == 0) {
+        if (app->picker.focus + 1 < count) app->picker.focus++;
+        rubraview_picker_reveal_focus(&app->picker);
+        return true;
+    }
+    if (combo.key_name.len == 4 && memcmp(combo.key_name.ptr, "Left", 4) == 0) {
+        if (app->picker.focus > 0) app->picker.focus--;
+        rubraview_picker_reveal_focus(&app->picker);
+        return true;
+    }
+    if (combo.key_name.len == 4 && memcmp(combo.key_name.ptr, "Down", 4) == 0) {
+        app->picker.focus = (app->picker.focus + PICKER_COLUMNS < count)
+            ? app->picker.focus + PICKER_COLUMNS : count - 1;
+        rubraview_picker_reveal_focus(&app->picker);
+        return true;
+    }
+    if (combo.key_name.len == 2 && memcmp(combo.key_name.ptr, "Up", 2) == 0) {
+        app->picker.focus = (app->picker.focus >= PICKER_COLUMNS) ? app->picker.focus - PICKER_COLUMNS : 0;
+        rubraview_picker_reveal_focus(&app->picker);
+        return true;
+    }
+    if (combo.key_name.len == 5 && memcmp(combo.key_name.ptr, "Enter", 5) == 0) {
+        picker_activate(app, app->picker.focus);
+        return true;
+    }
+    if (combo.key_name.len == 6 && memcmp(combo.key_name.ptr, "Escape", 6) == 0) {
+        app->picker_open = false;
+        return true;
+    }
+    if (combo.key_name.len == 9 && memcmp(combo.key_name.ptr, "Backspace", 9) == 0) {
+        u8str_t parent = rubraview_path_dirname(app->picker_dir);
+        if (parent.len > 0) {
+            picker_navigate(app, parent);
+            app->picker.focus = 0;
+        }
+        return true;
+    }
+    return false;
+}
+
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (picker_handle_key(app, combo)) return;
     /* §3.7.1: the slide show's own bindings win while it is running,
        then the viewing context, then the global section. */
     if (app->slideshow_running) {
@@ -441,7 +673,11 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     if (tile >= 0) {
         u8str_t action;
         rubraview_menu_result_t result = rubraview_menu_activate(&app->menu, tile, &action);
-        if (result == RUBRAVIEW_MENU_ACTIVATED) handle_action(app, action);
+        if (result == RUBRAVIEW_MENU_ACTIVATED) {
+            handle_action(app, action);
+        } else if (result == RUBRAVIEW_MENU_DESCENDED || result == RUBRAVIEW_MENU_WENT_BACK) {
+            sync_menubox_tiles(app);
+        }
         return true;
     }
 
@@ -461,8 +697,18 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
 
 /* ---- rendering ---- */
 
+/* Tile captions for the menu box come from the current menu level, with
+   the Back tile at index 0 below the root (§3.6.2). */
+static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size) {
+    (void)scratch; (void)scratch_size;
+    if (rubraview_menu_has_back_tile(menu) && tile == 0) return U8("< Back");
+    const rubraview_menu_item_t *item = rubraview_menu_item_at(menu, tile);
+    return item ? item->label : (u8str_t){ .ptr = "", .len = 0 };
+}
+
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
-                     const char *const *captions, int32_t caption_count) {
+                     const char *const *captions, int32_t caption_count,
+                     const rubraview_menu_state_t *menu) {
     rubraview_rect_t bounds = rubraview_box_bounds(box, metrics);
     rubraview_pal_rect_t body = { bounds.x, bounds.y, bounds.width, bounds.height };
 
@@ -481,10 +727,91 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         rubraview_pal_rect_t tile = { t.x, t.y, t.width, t.height };
         rubraview_pal_render_fill_rect(app->renderer, tile, COLOR_TILE_FILL, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_BOX_BORDER, 1.0, 0.0);
-        if (captions && i < caption_count) {
-            rubraview_pal_render_draw_text(app->renderer, cstr(captions[i]), tile,
+        u8str_t caption = { .ptr = "", .len = 0 };
+        if (menu) {
+            char scratch[64];
+            caption = menu_tile_caption(menu, i, scratch, sizeof(scratch));
+        } else if (captions && i < caption_count) {
+            caption = cstr(captions[i]);
+        }
+        if (caption.len > 0) {
+            rubraview_pal_render_draw_text(app->renderer, caption, tile,
                                            metrics->tile_size * 0.22, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
+    }
+}
+
+/* §3.15.2's three tiers: breadcrumb header, virtualised tile grid,
+   action bar. Tiles are large enough to hit with a thumb over Remote
+   Desktop, which is the whole reason this picker exists. */
+static void draw_picker(app_state_t *app, double win_w, double win_h) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+    double action_h = PICKER_ACTION_HEIGHT * dpi;
+
+    rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
+    rubraview_pal_render_fill_rect(app->renderer, backdrop, 0xF0101010u, 0.0);
+
+    /* Breadcrumb: every segment is its own tappable tile. */
+    rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+    double crumb_x = 8.0 * dpi;
+    for (size_t i = 0; i < crumbs.count; ++i) {
+        double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
+        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+        rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
+                                       crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        crumb_x += w + 6.0 * dpi;
+    }
+
+    /* Virtualised grid: only the rows on screen are drawn. */
+    rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
+    double cell = app->picker.tile_extent;
+    double cell_w = win_w / (double)PICKER_COLUMNS;
+
+    for (size_t i = 0; i < visible.count; ++i) {
+        size_t index = visible.first + i;
+        if (index >= app->picker_listing.count) break;
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+
+        size_t row = index / PICKER_COLUMNS;
+        size_t column = index % PICKER_COLUMNS;
+        double x = (double)column * cell_w;
+        double y = crumb_h + (double)row * cell - app->picker.scroll_offset;
+        if (y + cell < crumb_h || y > win_h - action_h) continue;
+
+        rubraview_pal_rect_t tile = { x + 6.0 * dpi, y + 6.0 * dpi, cell_w - 12.0 * dpi, cell - 12.0 * dpi };
+        rubraview_pal_render_fill_rect(app->renderer, tile, COLOR_TILE_FILL, 0.0);
+        rubraview_pal_render_stroke_rect(app->renderer, tile,
+                                         index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER,
+                                         index == app->picker.focus ? 2.0 : 1.0, 0.0);
+
+        rubraview_pal_rect_t caption = { tile.x, tile.y + tile.height * 0.62, tile.width, tile.height * 0.38 };
+        rubraview_pal_render_draw_text(app->renderer, entry->name, caption,
+                                       cell * 0.11, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+        rubraview_pal_rect_t kind = { tile.x, tile.y + tile.height * 0.2, tile.width, tile.height * 0.3 };
+        rubraview_pal_render_draw_text(app->renderer,
+                                       entry->is_directory ? U8("[ folder ]") : U8("[ file ]"),
+                                       kind, cell * 0.10, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    /* Action bar with the selection metrics (§3.15.2 tier three). */
+    rubraview_pal_rect_t bar = { 0.0, win_h - action_h, win_w, action_h };
+    rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
+
+    char status[160];
+    size_t selected = 0;
+    uint64_t bytes = 0;
+    rubraview_picker_selection_metrics(&app->picker, &selected, &bytes);
+    int written = snprintf(status, sizeof(status),
+                           "%zu items   |   selected %zu (%llu bytes)   |   Enter opens, Esc closes",
+                           app->picker_listing.count, selected, (unsigned long long)bytes);
+    if (written > 0) {
+        rubraview_pal_render_draw_text(app->renderer,
+                                       (u8str_t){ .ptr = status, .len = (size_t)written },
+                                       bar, action_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
 
@@ -521,11 +848,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     static const char *const TOOLBOX_CAPTIONS[TOOLBOX_TILES] = {
         "Prev", "Next", "Zoom-", "Zoom+", "1:1", "Rotate", "Slides", "Full",
     };
-    static const char *const MENU_CAPTIONS[MENU_ROOT_TILES] = {
-        "Layout", "Fit", "View", "Show",
-    };
-    draw_box(app, &app->toolbox, &metrics, TOOLBOX_CAPTIONS, TOOLBOX_TILES);
-    draw_box(app, &app->menubox, &metrics, MENU_CAPTIONS, MENU_ROOT_TILES);
+    draw_box(app, &app->toolbox, &metrics, TOOLBOX_CAPTIONS, TOOLBOX_TILES, NULL);
+    draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
 
     if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
         char crumb[128];
@@ -660,7 +984,11 @@ static void render_frame(app_state_t *app) {
         }
     }
 
-    draw_chrome(app, (double)win_w, (double)win_h);
+    if (app->picker_open) {
+        draw_picker(app, (double)win_w, (double)win_h);
+    } else {
+        draw_chrome(app, (double)win_w, (double)win_h);
+    }
 
     if (!rubraview_pal_render_end(app->renderer)) {
         unload_all_pages(app);
@@ -803,11 +1131,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, TOOLBOX_TILES);
-    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, MENU_ROOT_TILES);
-    app.menu = rubraview_menu_create(NULL); /* the tile tree is declared by the menu box's captions for now */
+    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, MENU_ROOT_COUNT);
+    app.menu = rubraview_menu_create(&MENU_TREE); /* §3.6.2 category tree */
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
+    sync_menubox_tiles(&app);
 
     int argc = 0;
     LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -873,6 +1202,39 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+                    if (app.picker_open) {
+                        double dpi = rubraview_pal_window_dpi_scale(app.window);
+                        double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+
+                        if (event.mouse.y < crumb_h) {
+                            /* A breadcrumb chip navigates to its prefix. */
+                            rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app.picker_dir);
+                            double x = 8.0 * dpi;
+                            for (size_t i = 0; i < crumbs.count; ++i) {
+                                double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
+                                if (event.mouse.x >= x && event.mouse.x < x + w) {
+                                    picker_navigate(&app, crumbs.items[i].prefix);
+                                    app.picker.focus = 0;
+                                    break;
+                                }
+                                x += w + 6.0 * dpi;
+                            }
+                            break;
+                        }
+
+                        int32_t pw = 0, ph = 0;
+                        rubraview_pal_window_get_size(app.window, &pw, &ph);
+                        double cell_w = (double)pw / (double)PICKER_COLUMNS;
+                        size_t column = (size_t)(event.mouse.x / cell_w);
+                        size_t row = (size_t)((event.mouse.y - crumb_h + app.picker.scroll_offset) / app.picker.tile_extent);
+                        size_t index = row * PICKER_COLUMNS + column;
+                        if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
+                            app.picker.focus = index;
+                            picker_activate(&app, index);
+                        }
+                        break;
+                    }
+
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
                     rubraview_pointer_context_t ctx = pointer_context(&app);
@@ -893,10 +1255,31 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
+                    if (app.picker_open) {
+                        rubraview_picker_scroll_by(&app.picker, -event.mouse.wheel_delta * app.picker.tile_extent * 0.5);
+                        break;
+                    }
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, event.mouse.modifiers));
                     break;
                 }
+
+                case RUBRAVIEW_WINDOW_EVENT_GESTURE_ZOOM:
+                    /* §3.6.5: pinch-to-zoom about the gesture centroid. */
+                    app.zoom *= event.gesture.scale_ratio;
+                    if (app.zoom < 0.01) app.zoom = 0.01;
+                    note_activity(&app);
+                    break;
+
+                case RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN:
+                    if (app.picker_open) {
+                        rubraview_picker_scroll_by(&app.picker, -event.gesture.dy);
+                    } else {
+                        app.pan_x += event.gesture.dx;
+                        app.pan_y += event.gesture.dy;
+                    }
+                    note_activity(&app);
+                    break;
 
                 default:
                     break;

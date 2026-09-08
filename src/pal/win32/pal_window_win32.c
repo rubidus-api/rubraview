@@ -34,6 +34,12 @@ struct rubraview_window {
     LONG saved_style;
     LONG saved_ex_style;
 
+    /* §3.6.5: WM_GESTURE reports absolute values, so the previous
+       sample is kept to turn them into per-message deltas. */
+    ULONGLONG last_zoom_distance;
+    POINT     last_pan_point;
+    bool      gesture_in_progress;
+
     rubraview_window_event_t queue[EVENT_QUEUE_CAPACITY];
     size_t queue_head;
     size_t queue_count;
@@ -286,6 +292,60 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             return 0;
         }
 
+        case WM_GESTURE: {
+            GESTUREINFO gi = { .cbSize = sizeof(GESTUREINFO) };
+            if (!GetGestureInfo((HGESTUREINFO)lparam, &gi)) break;
+
+            POINT centre = { gi.ptsLocation.x, gi.ptsLocation.y };
+            ScreenToClient(hwnd, &centre); /* gesture points arrive in screen space */
+
+            switch (gi.dwID) {
+                case GID_BEGIN:
+                    w->gesture_in_progress = true;
+                    w->last_zoom_distance = 0;
+                    w->last_pan_point = centre;
+                    break;
+
+                case GID_END:
+                    w->gesture_in_progress = false;
+                    w->last_zoom_distance = 0;
+                    break;
+
+                case GID_ZOOM: {
+                    /* ullArguments carries the distance between the two
+                       fingers; the ratio against the previous sample is
+                       the zoom factor for this step. */
+                    if (w->last_zoom_distance != 0 && gi.ullArguments != 0) {
+                        rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_GESTURE_ZOOM };
+                        e.gesture.scale_ratio = (double)gi.ullArguments / (double)w->last_zoom_distance;
+                        e.gesture.center_x = (double)centre.x;
+                        e.gesture.center_y = (double)centre.y;
+                        queue_push(w, e);
+                    }
+                    w->last_zoom_distance = gi.ullArguments;
+                    break;
+                }
+
+                case GID_PAN: {
+                    rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN };
+                    e.gesture.scale_ratio = 1.0;
+                    e.gesture.dx = (double)(centre.x - w->last_pan_point.x);
+                    e.gesture.dy = (double)(centre.y - w->last_pan_point.y);
+                    e.gesture.center_x = (double)centre.x;
+                    e.gesture.center_y = (double)centre.y;
+                    if (e.gesture.dx != 0.0 || e.gesture.dy != 0.0) queue_push(w, e);
+                    w->last_pan_point = centre;
+                    break;
+                }
+
+                default:
+                    break;
+            }
+
+            CloseGestureInfoHandle((HGESTUREINFO)lparam);
+            return 0;
+        }
+
         case WM_CLOSE: {
             w->should_close = true;
             rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_CLOSE };
@@ -368,6 +428,17 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
         SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
+
+    /* §3.6.5: ask for pinch and two-finger pan. Configuring gestures can
+       fail on a machine with no touch digitiser, which is not an error —
+       mouse and keyboard remain fully operable. */
+    GESTURECONFIG gesture_config[] = {
+        { .dwID = GID_ZOOM, .dwWant = GC_ZOOM, .dwBlock = 0 },
+        { .dwID = GID_PAN,  .dwWant = GC_PAN,  .dwBlock = 0 },
+    };
+    SetGestureConfig(hwnd, 0,
+                     (UINT)(sizeof(gesture_config) / sizeof(gesture_config[0])),
+                     gesture_config, sizeof(GESTURECONFIG));
 
     RECT client;
     GetClientRect(hwnd, &client);
