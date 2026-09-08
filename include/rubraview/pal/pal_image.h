@@ -50,6 +50,25 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
                                                                            size_t size,
                                                                            bool apply_exif_orientation);
 
+/**
+ * §3.20: how many frames or sub-pages a file holds — animation frames
+ * for GIF/WebP/APNG, pages for a multi-page TIFF, mipmaps for an ICO.
+ * Returns 1 for an ordinary single-frame image and 0 if it cannot be
+ * read at all.
+ */
+size_t rubraview_pal_image_frame_count(u8str_t path);
+
+/**
+ * §3.20: decode one frame of a multi-frame file, and report the frame's
+ * own delay so the animation clock can pace it (0 when the container
+ * states none, or for sub-page formats that do not animate).
+ */
+rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
+                                                             u8str_t path,
+                                                             size_t frame_index,
+                                                             bool apply_exif_orientation,
+                                                             double *out_delay_seconds);
+
 #ifdef __cplusplus
 }
 #endif

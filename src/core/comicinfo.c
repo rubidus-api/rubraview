@@ -175,3 +175,33 @@ rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, u8str_t x
 
     return out;
 }
+
+static bool type_is_cover(u8str_t type) {
+    static const char FRONT[] = "FrontCover";
+    static const char INNER[] = "InnerCover";
+    if (type.len == sizeof(FRONT) - 1 && memcmp(type.ptr, FRONT, sizeof(FRONT) - 1) == 0) return true;
+    if (type.len == sizeof(INNER) - 1 && memcmp(type.ptr, INNER, sizeof(INNER) - 1) == 0) return true;
+    return false;
+}
+
+void rubraview_comicinfo_apply(const rubraview_comicinfo_t *info,
+                               rubraview_layout_opts_t *opts,
+                               rubraview_page_info_t *pages,
+                               size_t page_count) {
+    if (!info) return;
+
+    if (opts && info->manga == RUBRAVIEW_MANGA_YES_RTL) {
+        opts->mode = RUBRAVIEW_PAGE_LAYOUT_BOOK;
+        opts->direction = RUBRAVIEW_READING_RTL;
+    }
+
+    if (!pages || page_count == 0 || !info->pages) return;
+
+    for (size_t i = 0; i < info->page_count; ++i) {
+        int32_t index = info->pages[i].image_index;
+        if (index < 0 || (size_t)index >= page_count) continue;
+        if (type_is_cover(info->pages[i].type)) {
+            pages[index].force_standalone = true;
+        }
+    }
+}

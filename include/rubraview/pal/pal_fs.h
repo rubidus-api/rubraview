@@ -57,6 +57,24 @@ bool rubraview_pal_fs_exists(u8str_t path);
 u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t max_bytes);
 
 /**
+ * §3.8.3 step 3: transcode bytes from a legacy code page into UTF-8.
+ * `codepage_id` is a Windows code page number, or 0 for the host's
+ * active one; rubraview/encoding.h decides which applies. Returns an
+ * empty slice when the platform cannot transcode (the host build has no
+ * code-page tables), so the caller keeps the raw bytes rather than
+ * showing nothing.
+ */
+u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id);
+
+/**
+ * Write a whole file, replacing it. Used for the small state files
+ * §3.17 keeps (history.ini, settings.ini); returns false if the file
+ * cannot be written, which in portable mode on read-only media is a
+ * normal outcome rather than an error worth interrupting the reader.
+ */
+bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents);
+
+/**
  * §3.1: "Automatically indexes sibling media files when an image is
  * opened." Filters a listing to files matching `extension_filter` (a
  * ';'-separated glob list from rubraview/glob.h; empty matches every

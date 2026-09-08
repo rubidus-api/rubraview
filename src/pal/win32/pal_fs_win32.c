@@ -142,6 +142,39 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_ent
     return true;
 }
 
+u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || bytes.len == 0 || !bytes.ptr || bytes.len > (size_t)INT32_MAX) return empty;
+
+    /* 0 means CP_ACP, the host's active code page — CP949 on a Korean
+       Windows, Shift-JIS on a Japanese one (§3.8.3 step 3). */
+    UINT cp = (codepage_id == 0) ? CP_ACP : (UINT)codepage_id;
+
+    int wide_len = MultiByteToWideChar(cp, 0, bytes.ptr, (int)bytes.len, NULL, 0);
+    if (wide_len <= 0) return empty;
+
+    proven_result_mem_mut_t wide_res = proven_arena_alloc(arena, (size_t)wide_len * sizeof(WCHAR));
+    if (!proven_is_ok(wide_res.err)) return empty;
+    WCHAR *wide = (WCHAR*)(void*)wide_res.value.ptr;
+
+    if (MultiByteToWideChar(cp, 0, bytes.ptr, (int)bytes.len, wide, wide_len) != wide_len) return empty;
+
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, NULL, 0, NULL, NULL);
+    if (utf8_len <= 0) return empty;
+
+    /* The null-terminated allocation invariant (§7.2.3) holds here too:
+       the name goes on to sorting, matching and text rendering. */
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)utf8_len + 1);
+    if (!proven_is_ok(res.err)) return empty;
+
+    if (WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, (char*)res.value.ptr, utf8_len, NULL, NULL) != utf8_len) {
+        return empty;
+    }
+    res.value.ptr[utf8_len] = '\0';
+
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)utf8_len };
+}
+
 bool rubraview_pal_fs_exists(u8str_t path) {
     if (path.len == 0 || !path.ptr || path.len >= MAX_PATH * 4) return false;
 
@@ -181,6 +214,22 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
 
     res.value.ptr[read] = '\0';
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
+}
+
+bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
+    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+
+    char path_z[4096];
+    memcpy(path_z, path.ptr, path.len);
+    path_z[path.len] = '\0';
+
+    FILE *file = fopen(path_z, "wb");
+    if (!file) return false;
+
+    size_t written = contents.len > 0 ? fwrite(contents.ptr, 1, contents.len, file) : 0;
+    bool ok = (written == contents.len);
+    if (fclose(file) != 0) ok = false;
+    return ok;
 }
 
 #endif /* _WIN32 */

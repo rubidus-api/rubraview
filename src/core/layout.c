@@ -16,6 +16,12 @@ static bool is_wide_spread(const rubraview_page_info_t *p, double threshold) {
     return (p->width / p->height) >= threshold;
 }
 
+/* A page stands alone either because it is a pre-merged spread or
+   because the archive's metadata tagged it as a cover (§3.8.5). */
+static bool stands_alone(const rubraview_page_info_t *p, double threshold) {
+    return p->force_standalone || is_wide_spread(p, threshold);
+}
+
 typedef struct spread_buf {
     rubraview_spread_t *data;
     size_t count;
@@ -78,17 +84,20 @@ static void push_pair(proven_arena_t *arena, spread_buf_t *out, int32_t a, int32
 static bool paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubraview_page_info_t *pages, size_t page_count, size_t start, const rubraview_layout_opts_t *opts) {
     size_t i = start;
     while (i < page_count) {
-        if (is_wide_spread(&pages[i], opts->spread_ar_threshold)) {
-            if (opts->auto_split_wide_spreads) {
+        if (stands_alone(&pages[i], opts->spread_ar_threshold)) {
+            bool wide = is_wide_spread(&pages[i], opts->spread_ar_threshold);
+            /* Splitting bisects a genuinely wide scan; a tagged cover is
+               one page and is shown whole. */
+            if (opts->auto_split_wide_spreads && wide) {
                 push_split(arena, out, (int32_t)i, opts->direction);
             } else {
-                push_single(arena, out, (int32_t)i, true);
+                push_single(arena, out, (int32_t)i, wide);
             }
             i += 1;
             continue;
         }
 
-        bool next_is_pairable = (i + 1 < page_count) && !is_wide_spread(&pages[i + 1], opts->spread_ar_threshold);
+        bool next_is_pairable = (i + 1 < page_count) && !stands_alone(&pages[i + 1], opts->spread_ar_threshold);
         if (next_is_pairable) {
             push_pair(arena, out, (int32_t)i, (int32_t)(i + 1), opts->direction);
             i += 2;
