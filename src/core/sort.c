@@ -154,3 +154,80 @@ void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mo
 
     quicksort_paths(paths, 0, (int)(count - 1), mode, ascending);
 }
+
+/* RV-031: multi-criteria sort over rubraview_sort_item_t. */
+
+static int compare_items(const rubraview_sort_item_t *a, const rubraview_sort_item_t *b, rubraview_sort_mode_t mode, bool ascending) {
+    int cmp = 0;
+    switch (mode) {
+        case RUBRAVIEW_SORT_NAME_LEXICAL:
+            cmp = rubraview_str_lexcmp(a->name, b->name);
+            break;
+        case RUBRAVIEW_SORT_DATE_MODIFIED:
+            cmp = (a->mtime < b->mtime) ? -1 : (a->mtime > b->mtime ? 1 : 0);
+            break;
+        case RUBRAVIEW_SORT_DATE_CREATED:
+            cmp = (a->ctime < b->ctime) ? -1 : (a->ctime > b->ctime ? 1 : 0);
+            break;
+        case RUBRAVIEW_SORT_FILE_SIZE:
+            cmp = (a->size_bytes < b->size_bytes) ? -1 : (a->size_bytes > b->size_bytes ? 1 : 0);
+            break;
+        case RUBRAVIEW_SORT_NAME_NATURAL:
+        default:
+            cmp = rubraview_str_natcmp(a->name, b->name);
+            break;
+    }
+    return ascending ? cmp : -cmp;
+}
+
+static void quicksort_items(rubraview_sort_item_t *items, int low, int high, rubraview_sort_mode_t mode, bool ascending) {
+    if (low >= high) return;
+
+    rubraview_sort_item_t pivot = items[(low + high) / 2];
+    int i = low;
+    int j = high;
+
+    while (i <= j) {
+        while (compare_items(&items[i], &pivot, mode, ascending) < 0) i++;
+        while (compare_items(&items[j], &pivot, mode, ascending) > 0) j--;
+
+        if (i <= j) {
+            rubraview_sort_item_t tmp = items[i];
+            items[i] = items[j];
+            items[j] = tmp;
+            i++;
+            j--;
+        }
+    }
+
+    if (low < j) quicksort_items(items, low, j, mode, ascending);
+    if (i < high) quicksort_items(items, i, high, mode, ascending);
+}
+
+/* splitmix64 (public domain): a small, fast, well-distributed generator,
+   used here purely for its determinism (same seed -> same permutation),
+   not for cryptographic strength. */
+static uint64_t splitmix64_next(uint64_t *state) {
+    uint64_t z = (*state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+void rubraview_sort_items(rubraview_sort_item_t *items, size_t count, rubraview_sort_mode_t mode, bool ascending, const rubraview_shuffle_state_t *shuffle) {
+    if (!items || count <= 1) return;
+
+    if (mode == RUBRAVIEW_SORT_RANDOM) {
+        uint64_t state = shuffle ? shuffle->seed : 0;
+        for (size_t i = count - 1; i > 0; --i) {
+            uint64_t r = splitmix64_next(&state);
+            size_t j = (size_t)(r % (uint64_t)(i + 1));
+            rubraview_sort_item_t tmp = items[i];
+            items[i] = items[j];
+            items[j] = tmp;
+        }
+        return;
+    }
+
+    quicksort_items(items, 0, (int)(count - 1), mode, ascending);
+}
