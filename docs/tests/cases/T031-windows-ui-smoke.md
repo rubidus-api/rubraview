@@ -42,6 +42,13 @@ target.
 | 20 | Click the left 30% / right 30% / middle of the canvas | Previous page / next page / toggle the overlay. In Book mode with `M` pressed (right-to-left), the two sides swap roles (§3.7.3). |
 | 21 | Side mouse buttons, `Shift` + wheel, `Ctrl` + wheel | Previous/next page, 10-page skip, cursor zoom (§3.7.3). |
 | 22 | Create a `keymap.ini` next to the exe with `[navigation]` and `next_page = N`, then restart | `N` now advances the page: the file replaced the built-in bindings (§3.7.5, RV-038). |
+| 23 | Open the menu box (`Tab`) and tap `Layout` | The grid drills into `Single / Dual / Book`, tile 0 becomes `< Back`, and the breadcrumb reads `Menu > Layout` (§3.6.2). |
+| 24 | Tap `Dual`, then reopen and tap `< Back` | The layout switches to dual pages; Back returns to the category level. |
+| 25 | Press `O` | The Metro file picker fills the window: breadcrumb chips across the top, large folder/file tiles, and a bottom bar with the item count (§3.15.2). |
+| 26 | In the picker, press a letter | The focus jumps to the next entry starting with it; pressing the same letter again cycles to the following match (§3.15.4). |
+| 27 | Tap a folder tile, then tap an earlier breadcrumb chip | Entering a folder relists it; the chip navigates straight back to that level. |
+| 28 | Tap an image tile (or focus it and press `Enter`) | The picker closes and that image opens, with its siblings indexed as usual. Press `Esc` instead to close without opening. |
+| 29 | On a touch screen: pinch, and drag with two fingers | Pinch zooms about the point between the fingers; a two-finger drag pans (§3.6.5). On a machine with no digitiser this step is not applicable. |
 
 ## Known M3 limitations (not defects)
 
@@ -49,19 +56,17 @@ target.
   decoded; dedicated low-resolution thumbnail decoding waits for the
   asynchronous pre-cache worker in M4 (RV-044), which is where async
   decode belongs.
-- The menu box's tiles are a fixed first level. The hierarchical tree
-  itself (RV-020's `ui_menu`, with Back tile and multi-level breadcrumb)
-  is implemented and tested on the host but is populated with the full
-  §3.6.2 category tree when the settings surface lands in M9 (RV-082).
-- The in-app Metro file picker's model (breadcrumbs, virtual grid,
-  type-ahead, multi-select) is implemented and tested, but the picker is
-  not yet reachable from a key: opening files is still by command line
-  or the native COM dialog (§3.15.1).
 - Slide-show transitions compute their progress (T029) but the canvas
   still cuts between pages; the cross-fade needs the Direct2D 1.1 device
   context that arrives with RV-064 in M6.
-- Touch gestures (`WM_GESTURE`) are classified by `ui_input` and tested,
-  but the Win32 message is not yet subscribed — mouse and keyboard only.
+- The menu box carries the §3.6.2 category tree for the actions that
+  exist today. Categories whose features are not built yet — Adjust &
+  Filter (M6), Playlist & Bookmarks, Batch Export, Settings (M9) — join
+  the tree as those milestones land; the navigation itself is complete.
+- The picker selects one file at a time. Its multi-select model is
+  implemented and tested (T030) but no gesture binds it yet, since the
+  actions it would feed (`Play as Slideshow`, `Create Playlist`) belong
+  to later milestones.
 
 ## Recording the result
 
