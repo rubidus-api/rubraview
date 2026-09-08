@@ -230,6 +230,15 @@ For viewing comic books, manga, scanned documents, and multi-page albums, Rubrav
 5. **Intelligent Window Orientation Adaptation**:
    - The engine continuously monitors the window aspect ratio $AR_{win} = W_{win} / H_{win}$.
    - **Portrait Window Auto-Collapse**: When viewed on a smartphone held vertically over Remote Desktop ($AR_{win} < 1.0$), displaying two portrait pages side-by-side creates tiny, unreadable postage-stamp images. The layout engine dynamically collapses Book/Dual mode into **Single Page Fit-to-Width** mode. When the user rotates the device to landscape ($AR_{win} \ge 1.3$), it automatically resumes side-by-side dual spreads.
+6. **Webtoon Continuous Vertical Strip Scroll Mode (`RUBRAVIEW_PAGE_LAYOUT_WEBTOON`)**:
+   - Tailored specifically for digital webtoons where chapters consist of dozens of vertical image slices.
+   - Slices within an archive or folder are stitched seamlessly with zero vertical gutter ($\text{Gutter} = 0$).
+   - **Virtual Viewport Compositing**: The renderer allocates Direct2D textures only for slices intersecting the current visible window height (plus $\pm 1$ lookahead slice). As the user scrolls via mouse wheel, touch drag, or `PageDown`, images glide continuously without jarring page-transition cuts.
+7. **Smart Two-Page Spread Splitting (`RUBRAVIEW_SPREAD_SPLIT_AUTO`)**:
+   - When viewing pre-scanned 2-page wide spreads on a vertical/portrait display or mobile phone, reading the whole spread zoomed out is difficult.
+   - The engine can optionally bisect wide images ($AR \ge 1.15$) down the center into two distinct virtual single pages:
+     - **LTR Mode**: Left half displays first (Page $N$), Right half displays second (Page $N+1$).
+     - **RTL Manga Mode**: Right half displays first (Page $N$), Left half displays second (Page $N+1$).
 
 ### 3.4 Viewport Fit & Alignment Modes
 Rubraview implements six deterministic viewport fitting modes (`rubraview_fit_mode_t`):
@@ -527,6 +536,18 @@ Rubraview implements a zero-allocation, high-performance C23 Unicode **NFC (Norm
 3. **Application Invariant**:
    - All filenames enumerated from local filesystems and all entry paths parsed from archive VFS streams are automatically normalized to NFC before being passed to `rubraview_sort_paths`, the OSD title renderer, or bookmark history.
 
+#### 3.8.5 ComicInfo.xml Ingestion & Intelligent Reading Orientation
+Digital comic archives frequently embed a standardized `ComicInfo.xml` manifest in their root:
+1. **Metadata Parsing**:
+   - The VFS reader checks for `ComicInfo.xml` upon indexing.
+   - Extracts title, series, volume number, writer, penciller, summary, and page type tags (`<Page Image="0" Type="FrontCover"/>`).
+2. **Automatic Reading Order Adaptation**:
+   - Inspects the `<Manga>` tag:
+     - `YesAndRightToLeft`: Automatically switches Rubraview into **Book Mode with RTL (Right-to-Left)** reading order without requiring the user to manually press `M`.
+     - `No` or `Yes`: Defaults to Western LTR reading order.
+3. **Explicit Cover Tagging**:
+   - Pages tagged as `FrontCover` or `InnerCover` are strictly treated as standalone single pages in Book Mode, even if numbered unexpectedly.
+
 ### 3.9 Geometric Transforms & Rotation
 - **Rotation Operations**:
   - Rotate $90^\circ$ Clockwise (`R`)
@@ -551,8 +572,10 @@ Rubraview implements a zero-allocation, high-performance C23 Unicode **NFC (Norm
   - WebP: Lossless mode toggle, or Lossy quality slider (1–100) with compression effort parameter.
   - PNG: Compression level (0–9), color depth options (32-bit RGBA, 24-bit RGB, 8-bit Paletted/Grayscale).
   - ICO: Multi-icon generator packing 16x16, 32x32, 48x48, and 256x256 mipmaps into a single `.ico` file.
-- **Metadata Handling**:
-  - Toggle to keep or strip EXIF, XMP, and GPS location metadata for privacy-sensitive exporting.
+- **Privacy Clean: EXIF & GPS Location Stripping**:
+  - Embedded metadata poses severe privacy risks: GPS latitude/longitude coordinates, altitude, timestamp, camera serial number, lens parameters, and author information.
+  - Quick Export provides an explicit toggle: `[x] Privacy Clean (Strip GPS, Camera Serial & Personal Metadata)`.
+  - **Zero-Touch Lossless Metadata Strip**: When saving without re-encoding, Rubraview directly excises EXIF APP1 markers (`0xFFE1`), XMP blocks, and IPTC headers from the JPEG byte stream without touching DCT coefficients, preserving 100% original photographic quality while neutralizing privacy leaks.
 
 ### 3.11 Batch Processing Subsystem
 A robust batch engine designed for bulk media processing:
@@ -563,8 +586,9 @@ A robust batch engine designed for bulk media processing:
   1. *Orientation*: Apply EXIF rotation or manual fixed rotation/flip.
   2. *Resizing*: Resize by percentage ($50\%$), bounding box ($1920\times 1080$ fit inside), fixed width, or fixed height using selectable resampling algorithm (Lanczos-3, Bicubic, Bilinear, Nearest).
   3. *Color & Filters*: Bulk exposure correction, contrast boost, unsharp mask sharpening, or grayscale conversion.
-  4. *Format Conversion*: Target format, quality factor, and compression parameters.
-  5. *Output Naming*: Flexible naming patterns (e.g. `{name}_thumb.{ext}`, `{date}_{name}_{w}x{h}.{ext}`).
+  4. *Privacy Scrub*: Batch-strip GPS coordinates, device identifiers, and EXIF metadata before publishing or archiving.
+  5. *Format Conversion*: Target format, quality factor, and compression parameters.
+  6. *Output Naming*: Flexible naming patterns (e.g. `{name}_thumb.{ext}`, `{date}_{name}_{w}x{h}.{ext}`).
 - **Execution Engine**:
   - Work-stealing thread pool utilizing hardware thread count.
   - Bounded memory footprint via per-thread arena allocators (`prv_arena_t`) that reset completely between processed files.
@@ -600,22 +624,64 @@ Rubraview incorporates a streamlined, non-destructive editing workbench accessib
   - **Unsharp Mask (Sharpen)**: Adjustable Amount ($0\sim 300\%$), Radius ($0.5\sim 10.0\text{ px}$), and Threshold ($0\sim 255$) to sharpen edges without amplifying photographic sensor grain.
   - **Resize**: Target pixel width/height with aspect ratio lock, or percentage scaling ($10\%\sim 500\%$) using Lanczos-3, Bicubic, Bilinear, or Nearest Neighbor.
 
-### 3.14 Audio Playback, Music Player Mode & Background Music (BGM)
-Rubraview seamlessly handles pure audio files as first-class media items, bridging image viewing and music playback:
-- **Audio Format Compatibility**:
-  - Uncompressed / Lossless: WAV, FLAC, AIFF, APE.
-  - Compressed: MP3, AAC, M4A, OGG / OGA (Vorbis/Opus), WMA (v1/v2/Pro).
-  - Legacy Streaming: RealAudio (`.ra`, `.ram` via Cook / ATRAC / 14.4 / 28.8 codecs).
-- **Embedded Cover Art Extraction**:
-  - Automatically extracts embedded album artwork from audio tags (ID3v2 APIC, FLAC Vorbis comments, MP4 `covr`, WMA metadata).
-  - The extracted cover is decoded into an `rubraview_pixbuf_t` and presented prominently on the Direct2D canvas as a high-resolution square album cover with an optional blurred background backdrop.
-- **Dynamic Waveform Visualizer**:
-  - When an audio file contains no embedded cover art, the canvas renders a clean, real-time audio waveform visualizer or 32-band spectrum analyzer computed from the decoded PCM audio buffer.
-  - On-Screen Display (OSD) presents Track Title, Artist, Album, Year, Duration, Bitrate (kbps), and Sample Rate (Hz).
-- **Dedicated Audio HUD & Controls**:
-  - Minimalist floating or docked touch tile controls: Play / Pause (`Space`), Seek scrubber (`Left`/`Right` arrow $\pm 5\text{s}$, `Ctrl + Left/Right` $\pm 30\text{s}$), Volume slider (`Up`/`Down` arrow $\pm 5\%$), Mute (`M`).
-- **Slide Show Background Music (BGM Mode)**:
-  - Users can attach an audio track or background playlist to an ongoing image slide show. The audio stream plays continuously while images auto-advance according to their configured interval.
+### 3.14 Dedicated Music Player Subsystem & Background Audio (BGM)
+Rubraview seamlessly incorporates a dedicated, audiophile-grade **Music Player Subsystem**, elevating pure audio files into first-class multimedia citizens alongside images and videos.
+
+#### 3.14.1 Audio Codec Compatibility & Gapless Playback Engine
+- **Supported Formats**:
+  - *Lossless*: FLAC, Apple Lossless (ALAC), Monkey's Audio (APE), WAV (PCM 8/16/24/32-bit), AIFF.
+  - *Compressed*: MP3, AAC, M4A, Ogg Vorbis, Opus Audio, WMA (v1/v2/Pro).
+  - *Legacy*: RealAudio (`.ra`, `.ram`).
+- **Gapless Playback Engine**:
+  - Pre-buffers the next audio track in memory to eliminate inter-track silence gaps, essential for continuous live concert recordings and classical movements.
+- **Configurable Crossfade**:
+  - Optional smooth volume crossfade ($0.0\text{s} \sim 5.0\text{s}$, adjustable in 0.5s increments) during track transitions.
+
+#### 3.14.2 Visual Presentation Modes & Real-Time Spectrum Visualizer
+The Direct2D canvas transforms into an immersive music visualizer workbench:
+1. **High-Resolution Album Art Showcase**:
+   - Automatically extracts embedded album artwork from ID3v2 APIC, FLAC Vorbis comments, MP4 `covr`, and WMA metadata.
+   - Renders a prominent, high-resolution square album cover centered on the screen, accompanied by a dynamic, real-time blurred backdrop derived from the cover artwork.
+2. **Real-Time 64-Band FFT Spectrum Analyzer**:
+   - Computes a 1024-point Fast Fourier Transform (FFT) on active PCM audio frames.
+   - Renders a butter-smooth 60–144 FPS 64-band frequency spectrum with peak-hold decay needles and high-contrast Metro bars.
+3. **Smooth Oscilloscope Waveform**:
+   - Alternative visualization mode rendering an analog-style oscilloscope waveform path across the lower canvas.
+4. **On-Screen Display (OSD) Track Metadata**:
+   - DirectWrite typographic display: Track Title, Artist, Album, Release Year, Track Number, Bitrate (kbps), Sample Rate (Hz), and Codec type.
+
+#### 3.14.3 Synced Lyrics Engine (`.lrc` & Embedded USLT/SYLT)
+- **Synced Lyrics Auto-Discovery**:
+  - Automatically locates external `.lrc` lyrics files sharing the audio basename (e.g. `track01.mp3` $\rightarrow$ `track01.lrc`).
+  - Parses embedded ID3 `SYLT` (synchronized lyrics) and `USLT` (unsynchronized lyrics) tags.
+- **Karaoke Real-Time Scrolling Typography**:
+  - Renders multi-line lyrics on the Direct2D canvas with current timestamp tracking:
+    - Active lyric line is highlighted in high-contrast accent color with enlarged typography.
+    - Previous and upcoming lines fade gently into semi-transparent secondary text.
+    - Smooth vertical auto-scrolling keeps the current line centered.
+    - Users can click/tap any lyric line to jump playback directly to that timestamp!
+
+#### 3.14.4 Cue Sheet (`.cue`) Parsing & Single-Image Album Splitting
+- Audiophiles frequently store entire albums as a single continuous `.flac` or `.ape` file accompanied by a `.cue` sheet.
+- Rubraview parses the `.cue` file and exposes individual songs as distinct virtual tracks in the playlist and file picker, with instant seeking to track index offsets without splitting files on disk.
+
+#### 3.14.5 Audio DSP: 10-Band Graphic Equalizer, ReplayGain & Night Mode
+1. **10-Band Graphic Equalizer**:
+   - Frequency bands: $31\,\text{Hz}, 62\,\text{Hz}, 125\,\text{Hz}, 250\,\text{Hz}, 500\,\text{Hz}, 1\,\text{kHz}, 2\,\text{kHz}, 4\,\text{kHz}, 8\,\text{kHz}, 16\,\text{kHz}$ ($\pm 12\,\text{dB}$).
+   - Factory presets: Flat, Rock, Pop, Jazz, Classical, Bass Boost, Vocal Boost, Acoustic.
+2. **Volume Normalization (ReplayGain)**:
+   - Reads Track Gain and Album Gain metadata tags to prevent sudden volume spikes between tracks from disparate albums.
+3. **Night Mode (Dynamic Range Compression)**:
+   - Compresses extreme dynamic peaks (quiet whispers vs loud explosions) for comfortable listening at low volume.
+
+#### 3.14.6 Floating Mini-Player Mode & Slideshow/Reading BGM Integration
+1. **Compact Floating Mini-Player**:
+   - Hotkey `Shift + P` or Toolbox tile transitions Rubraview into an ultra-compact, semi-transparent floating pill window ($320\times 80\text{ px}$):
+     - Displays miniature album art, scrolling track title/artist, scrub bar, and compact playback controls (`[⏮] [⏯] [⏭] [🔊]`).
+     - Optional `Always on Top` toggle (`WS_EX_TOPMOST`).
+2. **Slideshow & Comic Reading Background Music (BGM)**:
+   - Users can play music seamlessly in the background while browsing photo galleries, running slideshows, or reading manga.
+   - **Intelligent Audio Arbiter**: If the user opens a video file with an active audio stream, the BGM automatically pauses, resuming when the video ends or is closed.
 
 ### 3.15 Independent File Selection & Dialog Subsystem (`rubraview_file_dialog`)
 To ensure that Rubraview remains portable across desktop operating systems and friendly to touchscreens and Remote Desktop sessions, file selection is decoupled into an independent abstraction layer (`rubraview_file_dialog`):
@@ -759,6 +825,118 @@ Many users run comic viewers from portable USB drives or external SSDs without i
 2. **Standard AppData Fallback**:
    - If `settings.ini` is not found alongside the executable, settings are saved to `%APPDATA%\rubraview\settings.ini`, conforming to Windows application standards.
 
+### 3.18 File Management, Curation & Fast Triage Subsystem
+Rubraview provides a streamlined file management and curation workflow directly inside the viewer, empowering users to triage, organize, and sanitize thousands of files without switching back and forth to Windows Explorer:
+
+#### 3.18.1 Recycle Bin Deletion with Session Undo & Permanent Purge
+1. **Safe Recycle Bin Deletion (`Delete`)**:
+   - Pressing `Delete` dispatches the active file to the Windows Recycle Bin using the native Windows Shell API (`SHFileOperationW` or `IFileOperation`) with the `FOF_ALLOWUNDO | FOF_NOCONFIRMATION` flags.
+   - **Seamless Viewport Transition**: The viewer advances seamlessly to the next media item in the sequence (or the preceding item if the deleted file was the last item) without flickering or blank screens.
+2. **Session Undo Buffer (`Ctrl + Z`)**:
+   - Rubraview maintains an in-memory deletion history stack for the active session.
+   - Pressing `Ctrl + Z` undoes the deletion via `IFileOperation::Undo()`, restores the file from the Recycle Bin, and re-inserts it into the active playlist and directory index at its original position.
+3. **Permanent Purge (`Shift + Delete`)**:
+   - Pressing `Shift + Delete` opens a high-contrast Metro confirmation dialog: `[ ⚠️ Permanently delete this file from disk? (Y/N) ]`.
+   - Upon confirmation (`Y` or `Enter`), calls `DeleteFileW` directly, permanently removing the file without writing to the Recycle Bin.
+
+#### 3.18.2 Inline File Rename (`F2`)
+1. **In-Place Filename Editing**:
+   - Pressing `F2` activates an inline rename overlay box directly above the current filename display.
+   - Under Win32, Rubraview instantiates the transparent child `EDIT` control (`CreateWindowExW(0, L"EDIT", ...)`), enabling full native IME support for Korean, Japanese, and Chinese input.
+   - Automatically selects only the file stem (excluding extension) so users can type a new title without accidentally altering the file format extension.
+2. **Atomic File Move & Index Update**:
+   - Pressing `Enter` validates the filename (disallowing Windows invalid characters `\ / : * ? " < > |`) and executes `MoveFileExW(old_path, new_path, MOVEFILE_COPY_ALLOWED)`.
+   - Immediately updates the active playlist node, VFS cache, and OSD title bar without re-scanning or resetting the entire directory list. Pressing `Esc` cancels the edit cleanly.
+
+#### 3.18.3 1~9 Number Key Quick Folder Curation (Fast Triage Mode)
+Photographers, collectors, and digital archivists frequently process massive directories of uncurated media, sorting files into target categories (e.g. Keep, Best, Wallpaper, Delete, Review):
+1. **Configurable Curation Mapping (`settings.ini`)**:
+   - Keys `1` through `9` map directly to dedicated target folder paths:
+     ```ini
+     [curation]
+     dir_1 = D:\Curation\Keep
+     dir_2 = D:\Curation\Best
+     dir_3 = D:\Curation\Wallpaper
+     dir_4 = D:\Curation\Manga_Archive
+     dir_5 = D:\Curation\Reference
+     curation_mode = move   ; 'move' or 'copy'
+     ```
+2. **Single-Key Fast Triage Action**:
+   - Pressing any number key `1`–`9`:
+     - **Move Mode (`curation_mode = move`)**: Atomically relocates the active file to the assigned directory using `MoveFileExW` ($O(1)$ fast directory pointer update on the same volume). The file is unlinked from the active playlist, and the viewer automatically advances to the next image.
+     - **Copy Mode (`curation_mode = copy`)**: Spawns an asynchronous background worker to duplicate the file into the target folder without interrupting viewing; the viewer remains on the current image.
+   - **OSD Confirmation**: Displays an immediate DirectWrite notification badge: `[ 📁 Moved to: Best (2) ]`.
+   - **Triage Undo**: Pressing `Ctrl + Z` reverses the move operation, returning the file to its source directory and re-inserting it into the viewport.
+
+### 3.19 Application Lifecycle, Single-Instance IPC & Shell Integration
+
+#### 3.19.1 Single-Instance Reuse vs. Multi-Window Execution
+1. **Configurable Single-Instance Mode**:
+   - Controlled via `settings.ini` (`single_instance = true` by default).
+2. **Win32 Mutex & Window Discovery**:
+   - On startup, Rubraview queries a named kernel mutex: `CreateMutexW(NULL, FALSE, L"Local\\Rubraview_SingleInstance_Mutex")`.
+   - If `GetLastError() == ERROR_ALREADY_EXISTS`:
+     - Discovers the existing running window via `FindWindowW(L"Rubraview_MainWindow_Class", NULL)`.
+     - Restores the existing window if minimized (`ShowWindow(hWnd, SW_RESTORE)`) and brings it to the foreground (`SetForegroundWindow(hWnd)`).
+3. **Inter-Process Communication (IPC) via `WM_COPYDATA`**:
+   - The secondary process packages command-line arguments (file path to open, page jump index) into a `COPYDATASTRUCT` with `dwData = RUBRAVIEW_IPC_CMD_OPEN`.
+   - Sends the message via `SendMessageW(hTargetWnd, WM_COPYDATA, ...)`:
+     - Primary instance's `WndProc` receives the payload, unpacks the UTF-8 file path, switches the active media item immediately, and repaints the canvas.
+   - The secondary process terminates instantly with exit code 0, conserving system memory and avoiding duplicate processes.
+   - If `single_instance = false`, Rubraview bypasses the mutex check and launches a fully isolated, standalone viewer instance in a new desktop window.
+
+#### 3.19.2 Drag-and-Drop Ingestion (`WM_DROPFILES` & OLE `IDropTarget`)
+- **Native Explorer Drag-and-Drop**:
+  - Registers `DragAcceptFiles(hWnd, TRUE)` to handle standard Win32 `WM_DROPFILES` messages.
+  - Queries dropped paths via `DragQueryFileW`.
+- **Modern OLE `IDropTarget` Interop**:
+  - Implements lightweight C-style OLE `IDropTarget` and `IDataObject` COM interfaces.
+  - Accepts drag-and-drop operations not only from Windows Explorer, but also from third-party file managers, web browsers, and archive managers (e.g. dragging images directly out of 7-Zip or WinRAR).
+- **Intelligent Dropped Payload Routing**:
+  - Dropping a single image/video/archive: Instantly opens and displays the file.
+  - Dropping a directory: Opens the directory as a sequential gallery.
+  - Dropping multiple files: Generates an on-the-fly temporary playlist containing only the dropped items.
+
+#### 3.19.3 Windows 10/11 Shell Integration & File Associations
+Rubraview provides zero-installer, portable shell registration options executable from the command line:
+1. **Registration Commands**:
+   - `rubraview.exe --register-shell`: Registers file associations and context menu entries.
+   - `rubraview.exe --unregister-shell`: Cleanly removes all registry entries, leaving zero traces.
+2. **Per-User Registry Architecture (`HKCU\Software\Classes`)**:
+   - Operates strictly under `HKEY_CURRENT_USER\Software\Classes`, requiring **zero administrator privileges (No UAC prompt)**.
+   - Registers Rubraview ProgIDs (`Rubraview.Image`, `Rubraview.Comic`, `Rubraview.Video`).
+   - Context Menu Integration: Adds `"Open with Rubraview"` to Explorer right-click menus for supported extensions (`.jpg`, `.png`, `.webp`, `.cbz`, `.cbr`, `.cb7`, `.mp4`, `.mkv`, etc.).
+   - Windows Default Apps: Registers within `HKCU\Software\RegisteredApplications`, allowing Rubraview to be selected as the system default photo viewer and video player inside Windows 10/11 Settings.
+
+### 3.20 Animated Images & Multi-Page / Sub-Frame Formats
+
+#### 3.20.1 Animated Image Engine (GIF, Animated WebP, APNG)
+1. **WIC Multi-Frame Animation Decoding**:
+   - WIC decodes animated GIF and WebP frames via `IWICBitmapDecoder::GetFrameCount()`.
+   - Reads per-frame metadata via `IWICMetadataQueryReader`:
+     - Frame delay in 1/100ths second (`/grctlext/Delay`).
+     - Disposal method (`/grctlext/Disposal`).
+     - Background transparency color index.
+2. **Interactive Animation Controls**:
+   - **Play / Pause**: Pressing `Space` (or clicking the animation tile) freezes or resumes playback.
+   - **Precision Frame-by-Frame Stepping**:
+     - Step forward one frame: `.` (period)
+     - Step backward one frame: `,` (comma)
+   - **Variable Playback Speed**: Cycle through $0.25\times, 0.5\times, 1.0\times, 1.5\times, 2.0\times$ speed multipliers via hotkey `Ctrl + [` and `Ctrl + ]`.
+   - **OSD Sub-Frame Information**: DirectWrite HUD displays current frame and timing metrics: `[ GIF: Frame 12 / 48 (0.36s) | 1.0x ]`.
+3. **Still Frame Export**:
+   - Pressing `Ctrl + Shift + E` or selecting the Export tile captures the current frozen animation frame as a full-resolution standalone PNG, WebP, or JPEG file.
+
+#### 3.20.2 Multi-Page TIFF Documents & Multi-Resolution ICO Formats
+1. **Multi-Page TIFF Sub-Page Navigation**:
+   - Scanned multi-page TIFF legal/medical documents contain dozens of pages within a single file.
+   - Rubraview treats sub-frames as virtual pages:
+     - Navigates between internal sub-pages using `Ctrl + PageDown` (Next Page) and `Ctrl + PageUp` (Previous Page), without jumping to the next file on disk.
+     - OSD displays: `[ TIFF: Page 4 / 24 ]`.
+2. **Multi-Resolution Windows Icons (`.ico`)**:
+   - ICO files pack multiple resolution mipmaps ($16\times 16, 32\times 32, 48\times 48, 64\times 64, 128\times 128, 256\times 256\text{ px}$).
+   - Rubraview defaults to displaying the highest available resolution frame, with sub-page hotkeys allowing instant inspection of each individual icon mipmap layer.
+
 ---
 
 ## 4. Canvas & Rendering Pipeline
@@ -793,6 +971,29 @@ Rendering high-resolution photographs (24MP to 100MP) in legacy GDI requires con
    Direct2D 1.1+ exposes an effect pipeline:
    `Source Bitmap` $\rightarrow$ `Exposure Effect` $\rightarrow$ `Color Matrix (Contrast/Saturation)` $\rightarrow$ `Gamma Transfer` $\rightarrow$ `Output Canvas`.
    Sliders for brightness, contrast, and saturation modify shader constants directly, providing instant 60 FPS previews without executing CPU pixel loops. When the user clicks "Save" or "Apply", the Core Engine applies the transformation to the persistent pixel buffer.
+
+### 4.2 Per-Monitor V2 High-DPI Scaling & Dynamic Canvas Recreation
+1. **Per-Monitor V2 High-DPI Manifest**:
+   - Rubraview declares `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2` in its application manifest and initializes it via `SetProcessDpiAwarenessContext()`.
+   - Guarantees 100% sharp, unscaled Direct2D vector and typography rendering, avoiding blurry Windows DWM bitmap stretching on high-resolution displays (4K/8K displays and high-density laptops).
+2. **Dynamic `WM_DPICHANGED` Message Handling**:
+   - When a user moves the Rubraview window across monitors with disparate DPI scale factors (e.g. from a 100% 1080p desktop monitor to a 200% 4K display):
+     - Win32 delivers a `WM_DPICHANGED` message containing the new target DPI ($X, Y$) and a suggested new window rectangle in `lParam`.
+     - Rubraview immediately resizes the window via `SetWindowPos()` to match the suggested bounds.
+     - Updates internal scaling factor $S_{DPI} = \text{DPI} / 96.0$.
+     - Recomputes Metro touch tile dimensions: $W_{tile} = 48\text{ px} \times S_{DPI}$ (e.g. $72\text{ px}$ at 150% scaling, $96\text{ px}$ at 200% scaling).
+     - Resizes the Direct2D `ID2D1HwndRenderTarget` physical backbuffer size to match the new client rectangle, refreshing DirectWrite text layouts and glyph caches with zero visual distortion.
+
+### 4.3 Wide Color Gamut (WCG) & WIC Color Management
+1. **Embedded ICC Color Profile Extraction**:
+   - Digital SLRs, mirrorless cameras, and modern smartphones (Apple iPhone, Samsung Galaxy) capture photos in wide color gamut color spaces: **Display P3**, **Adobe RGB (1998)**, and **ProPhoto RGB**.
+   - Standard image viewers ignore embedded color profiles, rendering P3/Adobe RGB photos with dull, muted, or shifted colors on standard sRGB monitors.
+   - Rubraview extracts embedded ICC color profile contexts directly using WIC (`IWICBitmapFrameDecode::GetColorContexts`).
+2. **Real-Time Color Transform Pipeline (`IWICColorTransform`)**:
+   - If an image contains an embedded color profile differing from standard sRGB:
+     - Rubraview instantiates an `IWICColorTransform` component via `IWICImagingFactory_CreateColorTransformer()`.
+     - Initializes the transform between the source ICC profile and destination profile (standard sRGB `FACILITY_WINCODEC_ERR_WRONGSTATE` or the monitor's calibrated hardware ICC profile retrieved via `GetICMProfileW`).
+     - Performs hardware-accelerated color space conversion during bitmap decoding, guaranteeing 100% color-accurate reproduction across all display hardware.
 
 ---
 
