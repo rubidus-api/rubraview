@@ -28,3 +28,7 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T019 | R112, R128 | Verify slideshow dwell timing, loop policies, pause/resume | `make test` | tests/test_slideshow.c | active |
 | T020 | R106 | Verify batch file matching and naming-pattern token substitution | `make test` | tests/test_batch.c | active |
 | T021 | R115 | Verify `.rvlist`/`.m3u8` playlist parse and serialize round-trip | `make test` | tests/test_playlist.c | active |
+| T022 | R108 | Verify PAL monotonic clock is positive, monotonic, and tracks elapsed time | `make test` | tests/test_pal_time.c | active |
+| T023 | R112, R134 | Verify PAL directory enumeration, null-term invariant, sibling filtering/ordering | `make test` | tests/test_pal_fs.c | active |
+| T024 | R109, R110 | Verify multi-page compositor: gutter placement, split halves, zoom/pan | `make test` | tests/test_compositor.c | active |
+| T025 | R101, R102, R117, R147 | Windows canvas smoke check: window opens frameless, image decodes and renders, keys navigate, window size never changes on its own | `make win64` then run `dist/rubraview.exe <image>` on Windows | docs/tests/cases/T025-windows-smoke.md | manual |
