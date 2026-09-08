@@ -44,6 +44,7 @@ docs/plans/archive/*.md
 !docs/plans/active/README.md
 !docs/plans/archive/README.md
 build/
+dist/
 resources/prep/
 resources/cache/
 

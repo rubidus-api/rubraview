@@ -6,23 +6,42 @@ SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filt
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c
+            src/core/playlist.c src/core/compositor.c
 SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/src/proven/memory.c \
               vendor/proven/src/proven/panic.c \
               vendor/proven/platform/proven_sys_mem.c
 
+# Portable logic layered on the PAL; compiled into both builds.
+SRCS_PAL_COMMON = src/pal/pal_fs_common.c
+
+# Host (Linux) PAL: real POSIX filesystem and clock, inert stubs for the
+# window/render/image backends that only exist on Windows.
+SRCS_PAL_HOST = src/pal/host/pal_fs_posix.c \
+                src/pal/host/pal_time_posix.c \
+                src/pal/host/pal_file_dialog_host.c
+
+# Windows PAL: Win32, Direct2D, and WIC backends.
+SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
+                 src/pal/win32/pal_time_win32.c \
+                 src/pal/win32/pal_window_win32.c \
+                 src/pal/win32/pal_render_d2d.c \
+                 src/pal/win32/pal_image_wic.c \
+                 src/pal/win32/pal_file_dialog_win32.c
+
+SRCS_APP = src/app/main.c
+
 TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_sort \
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor
 
 .PHONY: all test check clean win64
 
 all: test
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PROVEN)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN)
 	@mkdir -p build/tests
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
 
@@ -38,14 +57,17 @@ check:
 	@sh scripts/project-check.sh
 	@sh scripts/context-budget.sh
 
+MINGW_CC ?= x86_64-w64-mingw32-gcc
+
 win64:
-	@echo "Cross-building Windows x86_64 target (run via linux-build container per REMOTE.md)"
+	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
-	x86_64-w64-mingw32-gcc -std=c23 -O2 \
+	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
-		$(SRCS_CORE) $(SRCS_PROVEN) \
-		-ld2d1 -ldwrite -lole32 -lwindowscodecs -lshcore \
+		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) \
+		-ld2d1 -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 \
 		-o dist/rubraview.exe
+	@echo "Linked: dist/rubraview.exe"
 
 clean:
 	rm -rf build/ dist/
