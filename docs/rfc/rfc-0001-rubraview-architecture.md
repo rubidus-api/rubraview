@@ -3,6 +3,7 @@
 - Status: Accepted
 - Author: Antigravity Agent
 - Date: 2026-09-07
+- Revised: 2026-09-08 (§8.3 marked against the tree, §11 rewritten)
 - Target Stack: C23, WinAPI, Direct2D, WIC, FFmpeg, proven_c_lib
 - Distribution: Windows x86_64 Desktop Executable (`rubraview.exe`)
 
@@ -1388,66 +1389,77 @@ To guarantee that Rubraview remains **pure C23** and can expand smoothly from Wi
 
 ### 8.3 Directory & Header Organization
 
+Marked against the tree on 2026-09-08: `✓` exists and is under `make test`,
+`·` planned (milestone in §11.3). The layout is unchanged; only the marks and the two
+already-shipped headers (`path.h`, `sort.h`) were added.
+
 ```
 rubraview/
 ├── include/
 │   ├── rubraview/
-│   │   ├── core.h           // Portable pixbuf, format conversions
-│   │   ├── color.h          // Color adjustments, LUTs, curves, histogram
-│   │   ├── resample.h       // Resampling kernels (Nearest, Bilinear, Bicubic, Lanczos)
-│   │   ├── filter.h         // Spatial convolutions (Gaussian blur, sharpen, autotrim)
-│   │   ├── layout.h         // Layout engine: AR matching & spread rules
-│   │   ├── archive.h        // CBZ, CBR, CB7 virtual archive streams
-│   │   ├── batch.h          // Batch job queue & worker declarations
-│   │   ├── playlist.h       // Playlist and collection interfaces
-│   │   └── pal/             // Pure C PAL interface contracts
-│   │       ├── pal_window.h
-│   │       ├── pal_render.h
-│   │       ├── pal_image.h
-│   │       ├── pal_audio.h
-│   │       ├── pal_ffmpeg.h
-│   │       ├── pal_file_dialog.h
-│   │       └── pal_fs.h
+│   │   ├── core.h      ✓  // Portable pixbuf, format conversions
+│   │   ├── color.h     ✓  // Color adjustments, LUTs, curves, histogram
+│   │   ├── resample.h  ✓  // Resampling kernels (Nearest, Bilinear, Bicubic, Lanczos)
+│   │   ├── filter.h    ✓  // Spatial convolutions (Gaussian blur, sharpen, autotrim)
+│   │   ├── path.h      ✓  // u8str_t zero-copy path slicing (§7.2)
+│   │   ├── sort.h      ✓  // Natural / lexical name ordering (§3.2.3)
+│   │   ├── layout.h    ·  // Layout engine: AR matching & spread rules (M1)
+│   │   ├── archive.h   ·  // CBZ, CBR, CB7 virtual archive streams (M1/M4)
+│   │   ├── batch.h     ·  // Batch job queue & worker declarations (M1/M6)
+│   │   ├── playlist.h  ·  // Playlist and collection interfaces (M1)
+│   │   └── pal/           // Pure C PAL interface contracts
+│   │       ├── pal_file_dialog.h ✓
+│   │       ├── pal_window.h      ·  (M2)
+│   │       ├── pal_render.h      ·  (M2)
+│   │       ├── pal_image.h       ·  (M2)
+│   │       ├── pal_fs.h          ·  (M2)
+│   │       ├── pal_audio.h       ·  (M5)
+│   │       └── pal_ffmpeg.h      ·  (M5)
 ├── src/
 │   ├── core/                // 100% Pure C23 (compiled on Linux, macOS, and Windows)
-│   │   ├── pixbuf.c
-│   │   ├── color.c
-│   │   ├── resample.c
-│   │   ├── filter.c
-│   │   ├── layout.c
-│   │   ├── archive.c
-│   │   ├── batch.c
-│   │   └── playlist.c
+│   │   ├── pixbuf.c    ✓
+│   │   ├── color.c     ✓
+│   │   ├── resample.c  ✓
+│   │   ├── filter.c    ✓
+│   │   ├── path.c      ✓
+│   │   ├── sort.c      ✓
+│   │   ├── layout.c    ·
+│   │   ├── archive.c   ·
+│   │   ├── batch.c     ·
+│   │   └── playlist.c  ·
 │   ├── pal/
 │   │   ├── win32/           // Windows implementations
-│   │   │   ├── pal_window_win32.c
-│   │   │   ├── pal_render_d2d.c
-│   │   │   ├── pal_image_wic.c
-│   │   │   ├── pal_audio_wasapi.c
-│   │   │   ├── pal_ffmpeg_win32.c
-│   │   │   ├── pal_file_dialog_win32.c
-│   │   │   └── pal_fs_win32.c
+│   │   │   ├── pal_file_dialog_win32.c ✓ (compiles only under MinGW; not yet linked)
+│   │   │   ├── pal_window_win32.c      ·
+│   │   │   ├── pal_render_d2d.c        ·
+│   │   │   ├── pal_image_wic.c         ·
+│   │   │   ├── pal_audio_wasapi.c      ·
+│   │   │   ├── pal_ffmpeg_win32.c      ·
+│   │   │   └── pal_fs_win32.c          ·
 │   │   ├── custom/          // Cross-platform fallback implementations
-│   │   │   └── file_dialog_metro.c // In-app touch Metro tile file picker
+│   │   │   └── file_dialog_metro.c     · // In-app touch Metro tile file picker (M3)
 │   │   └── host/            // Linux host test implementations
-│   │       ├── pal_mock_render.c
-│   │       ├── pal_mock_audio.c
-│   │       ├── pal_archive_posix.c
-│   │       └── pal_fs_posix.c
-│   └── app/                 // Application entry, dispatch & UI state
-│       ├── main.c
-│       ├── touch_tile_ui.c
-│       ├── view_modes.c
-│       └── cli_batch.c
+│   │       ├── pal_file_dialog_host.c  ✓
+│   │       ├── pal_mock_render.c       ·
+│   │       ├── pal_mock_audio.c        ·
+│   │       ├── pal_archive_posix.c     ·
+│   │       └── pal_fs_posix.c          ·
+│   └── app/                 // Application entry, dispatch & UI state (M2+)
+│       ├── main.c           ·
+│       ├── touch_tile_ui.c  ·
+│       ├── view_modes.c     ·
+│       └── cli_batch.c      ·
 └── tests/                   // Executed natively on Linux
-    ├── test_pixbuf.c
-    ├── test_color.c
-    ├── test_resample.c
-    ├── test_filters.c
-    ├── test_layout.c
-    ├── test_archive.c
-    ├── test_batch.c
-    └── test_playlist.c
+    ├── test_pixbuf.c    ✓
+    ├── test_color.c     ✓
+    ├── test_resample.c  ✓
+    ├── test_filters.c   ✓
+    ├── test_path.c      ✓
+    ├── test_sort.c      ✓
+    ├── test_layout.c    ·
+    ├── test_archive.c   ·
+    ├── test_batch.c     ·
+    └── test_playlist.c  ·
 ```
 
 ### 8.4 Verification Ladder:
@@ -1492,33 +1504,302 @@ x86_64-w64-mingw32-gcc -std=c23 -O2 \
 
 ## 11. Implementation Roadmap & Milestones
 
-- **Milestone 1 (Foundations & Core Engine)**:
-  - Pixel buffer structures (`rubraview_pixbuf`), memory arena integration.
-  - Image resampling kernels (Nearest, Bilinear, Bicubic, Lanczos-3).
-  - Spatial filters (Blur, Sharpen) and color adjustments.
-  - Intelligent layout engine (`rubraview_layout_engine`) for pre-merged spreads and AR matching.
-  - Archive streaming engine (`rubraview_archive_io`) for CBZ, CBR, CB7.
-  - Playlist data structures and parsers.
-  - Comprehensive unit test suite running on Linux host.
-- **Milestone 2 (Windows Canvas & WIC Decoder)**:
-  - Win32 main window and message pump with fixed-window stability guarantee.
-  - Direct2D render target initialization, sub-pixel pan/zoom matrix.
-  - Viewport fit modes (Fit Window, Fit Width, Fit Height, Smart Fit, 1:1 Actual).
-  - Multi-page layouts (Single, Dual, Book / Manga with LTR/RTL).
-  - WIC loader for JPEG/PNG/WebP/TIFF into D2D bitmaps.
-- **Milestone 3 (Touch Metro Tile UI & Slide Show)**:
-  - Metro-style square tile touch overlay bar optimized for Remote Desktop.
-  - Fullscreen slide show engine with auto-advance and Direct2D transition effects.
-  - Non-destructive rotation, flip, and EXIF orientation handling.
-  - Single-image export and format transcoding dialog.
-- **Milestone 4 (Video Playback Engine)**:
-  - Dynamic FFmpeg loader (`rubraview_ffmpeg_load()`).
-  - Audio/video demux and decode loop.
-  - Video presentation to D2D bitmap with frame stepping and capture.
-  - Seamless mixed-media playlist integration.
-- **Milestone 5 (Batch Engine & UI Polish)**:
-  - Multi-threaded batch processor and headless CLI mode.
-  - Filmstrip thumbnail gallery and inspector sidebar.
-- **Milestone 6 (Distribution & Packaging)**:
-  - Remote `linux-build` production cross-build.
-  - Release packaging staging (`build/dist/`).
+*Revised 2026-09-08. The roadmap below replaces the six-milestone list written on
+2026-09-07, which predates §3.6, §3.8.2–3.8.5, §3.14–3.22, §4.2–4.3, §5.5–5.7 and §7.4
+and therefore no longer covered what §3 specifies.*
+
+### 11.1 Planning Rules
+
+1. **One row per specification section.** Every subsection of §3–§7 appears exactly once
+   in the traceability table (§11.3) with a milestone and one or more backlog ids
+   (`RV-nnn`). A section that is absent from the table is *not planned* — see §11.5.
+2. **Host-testable first, inside every milestone** (DECISIONS 2026-09-07 "Headless-First
+   Dual Build"). Pure C23 modules that run under `make test` on Linux are built and
+   tested before the Win32 code that consumes them. The table marks each row
+   **H** (host-testable under `make test`) or **W** (needs Windows, verified by
+   `make win64` and a manual smoke run on the target machine).
+3. **"Done means" is observable.** Each milestone names the command or the on-screen
+   behaviour that closes it. A milestone with green tests but no observable behaviour is
+   not done.
+4. **Ids are stable.** `RV-001`–`RV-020` keep their meaning from `BACKLOGS.md`; new work
+   starts at `RV-021`. `RV-007`/`RV-008` are assigned retroactively to the already
+   shipped `path` and `sort` modules so that the table is complete.
+5. **Sequencing hazards are encoded as dependencies, not remembered:**
+   - The frameless `WM_NCCALCSIZE` shell (§3.21.1) is built in the **first** Windows
+     milestone. Adding it later rewrites `WndProc`.
+   - The INI reader (`settings.ini`, `keymap.ini`) precedes every UI milestone; each
+     subsystem reads it.
+   - The memory budget / LRU tracker (§7.4) precedes the pre-cache worker (§3.1);
+     retrofitting a budget onto a running cache is a rewrite.
+   - The settings window (§3.22) is last; it configures everything before it.
+6. **Owner-only choices are not made here.** They are listed in §11.4 and mirrored in
+   `BACKLOGS.md ## Blocked`. Work that depends on one of them is scheduled *after* the
+   choice, never assumed.
+
+### 11.2 Milestones
+
+**M0 — Core engine foundation — SHIPPED (2026-09-07)**
+- Shipped: `pixbuf` (RV-001), `color` (RV-002), `resample` (RV-003), `filter` (RV-004),
+  `path` (RV-007), `sort` (RV-008), ASan/UBSan test harness (RV-006).
+- Evidence: `make test` — 6 test binaries, all pass under `-fsanitize=address,undefined`.
+- Gap against §8.4: the Makefile does not yet pass `-Werror` (RV-009).
+
+**M1 — Portable core, remainder (all H)**
+- Goal: every algorithm §3 needs that has no OS dependency exists, is tested, and is
+  runnable from Linux before a single Win32 line is written.
+- RV-005 playlist (`.rvlist`, `.m3u8`) · RV-021 layout engine (§3.3: single/dual/book,
+  LTR/RTL, cover exception, spread AR ≥ 1.15, portrait auto-collapse, webtoon strip
+  geometry, spread splitting) · RV-022 fit-mode and viewport-matrix math (§3.4, §4.1.2,
+  §5.6 shares it) · RV-023 INI reader/writer (§3.7.5, §3.17.2, §3.22.1) ·
+  RV-024 Unicode NFC fold for Hangul and combining marks (§3.8.4) · RV-025 ZIP central
+  directory index and **stored**-entry streaming (§3.8.1; `deflate` waits on D-2) ·
+  RV-026 archive filename encoding steps 1–2, UTF-8 flag and strict validation
+  (§3.8.3; code-page fallback is W, RV-046) · RV-027 `ComicInfo.xml` minimal reader
+  (§3.8.5) · RV-028 memory budget and two-tier LRU tracker (§7.4; VRAM tier is a
+  callback) · RV-029 EXIF `0x0112` orientation reader and APP1/XMP/IPTC marker strip
+  (§3.9 auto-detection, §3.10 privacy clean) · RV-030 keymap action table and
+  context-aware dispatcher core (§3.7.1–3.7.2, §3.7.5; key events arrive as data) ·
+  RV-031 sort criteria beyond name — date, size, seeded shuffle with history (§3.2.3) ·
+  RV-032 slide-show sequencer state machine (§3.2.1–3.2.2, §3.2.4, §3.2.6; the timer is
+  injected) · RV-033 batch job model — action chain, filters, naming pattern, no threads
+  yet (§3.11 input pipeline and action chain).
+- Depends on: M0.
+- Done means: `make test` runs one test binary per new module and all pass under ASan;
+  `docs/tests/test-index.md` lists them.
+
+**M2 — First window on Windows (W, plus PAL headers)**
+- Goal: `rubraview.exe` opens a folder, shows an image, pans, zooms, flips pages, and
+  the window never changes size on its own (§2 invariant 2).
+- RV-010 Win32 window, message pump, HiDPI Per-Monitor V2 (§4.2) · RV-034 frameless
+  shell — `WM_NCCALCSIZE`, `WM_NCHITTEST` resize zones, `WM_GETMINMAXINFO` taskbar-aware
+  maximise, DWM shadow (§3.21.1) · RV-011 Direct2D render target and viewport matrix
+  wired to RV-022 · RV-014 WIC decode into `ID2D1Bitmap` for the §1 still formats,
+  EXIF auto-rotation via RV-029 · RV-035 `pal_fs_win32` — directory enumeration into
+  `u8str_t` with the null-terminated allocation invariant (§7.2.3), sibling indexing,
+  natural sort via RV-008 · RV-036 `pal_time_win32` (`QueryPerformanceCounter`) ·
+  RV-012 multi-page compositor driven by RV-021 (§4.1.3) · RV-013 nearest-neighbour /
+  integer zoom / pixel grid (§3.5) · RV-019 `make win64` cross-build on linux-build
+  producing a PE that links (needs `src/app/main.c`).
+- Depends on: M1 (RV-021, RV-022, RV-023, RV-029).
+- Done means: `make win64` links; on the target machine, opening a folder of JPEG/PNG
+  shows the first image, `Right`/`Left` flip pages in natural order, `Ctrl+Wheel` zooms
+  at the cursor, `1`–`5` switch fit modes, `B`/`M` switch layouts, and the window
+  rectangle is unchanged after every one of those actions.
+
+**M3 — Reading UI: floating boxes, keyboard, slide show (W)**
+- Goal: the viewer is usable without a mouse and over mobile RDP.
+- RV-020 dual floating boxes — anchors, toolbox, in-window menu box, pin, detach
+  (§3.6.1–3.6.4) · RV-037 mouse zones, wheel, side buttons, `WM_GESTURE` touch
+  (§3.6.5, §3.7.3–3.7.4) · RV-038 keymap dispatcher wired to Win32 input and
+  `keymap.ini` (RV-030 + RV-023) · RV-039 OSD and DirectWrite text (§3.1) · RV-040
+  hover titlebar and window-state buttons (§3.21.2–3.21.3) · RV-015 slide show —
+  multimedia timer, transitions, fullscreen, cursor hiding (§3.2.1, §3.2.5) on top of
+  RV-032 · RV-041 rotation/flip transforms (§3.9 non-destructive part) · RV-042
+  filmstrip and async thumbnail cache (§3.1) under the RV-028 budget · RV-043 file
+  dialog — Win32 `IFileOpenDialog` backend already stubbed, plus the in-app Metro tile
+  picker with virtual scrolling, type-ahead and the native `EDIT` search bar
+  (§3.15.1–3.15.2, §3.15.4).
+- Depends on: M2.
+- Done means: every row of the §3.7.2 hotkey table that belongs to "Navigation",
+  "Zoom & Fit", "Book & Manga", "Slideshow" and "UI & Windows" performs its action;
+  the toolbox can be dragged outside the window and docked back; the menu box never
+  leaves the client rectangle.
+
+**M4 — Comic archives, caching, persistence (H core + W wiring)**
+- Goal: `.cbz` reads without touching disk, page flips are instantaneous, and the reader
+  resumes where the user stopped.
+- RV-044 pre-cache worker on `proven` `job.h` (§3.1 lookahead ring, §3.2.1 stress
+  caching) bounded by RV-028 · RV-045 CBZ wired to WIC (RV-025 + RV-014) with
+  consecutive-archive traversal · RV-046 code-page fallback via `MultiByteToWideChar`
+  and the user override list (§3.8.3 step 3) · RV-047 `ComicInfo.xml` → reading
+  direction and cover tagging in the layout engine (RV-027 + RV-021) · RV-048 reading
+  history, resume prompt, portable-mode hierarchy (§3.17) · RV-049 animated GIF/WebP/APNG
+  frame engine, multi-page TIFF and ICO sub-frames (§3.20) · RV-050 wide-gamut ICC
+  transform through `IWICColorTransform` (§4.3).
+- After D-2 / D-3 (§11.4): RV-051 `deflate` for CBZ · RV-052 CB7 via LZMA SDK,
+  solid-stream persistent decoder · RV-053 CBR.
+- Depends on: M3; RV-051–053 on the named decisions.
+- Done means: a 1 GB stored-entry `.cbz` opens with the index built in under 5 ms
+  (measured, §3.8.1); no file appears under `%TEMP%` during reading; reopening the
+  archive offers the last page; memory stays under the configured cap while flipping
+  200 pages (measured against `settings.ini`).
+
+**M5 — Video and audio playback (W)**
+- Goal: any file the format matrix (§5.1) lists plays with sound, and the viewer still
+  starts when no FFmpeg DLL is present.
+- RV-016 FFmpeg dynamic loader with graceful absence (§5.2 dynamic part) · RV-054
+  demux/decode loop, `sws_scale`, D2D upload (§5.3) · RV-055 WASAPI shared-mode
+  renderer, `swresample`, `proven` `ring.h` buffer, audio-clock master sync (§5.4) ·
+  RV-056 seek, frame step, still-frame capture to clipboard (§5.3) · RV-057 A-B loop
+  and seek-bar HUD (§5.5) · RV-058 video fit modes and live wheel zoom (§5.6, reuses
+  RV-022) · RV-059 subtitles — SRT/SMI/VTT/ASS discovery and DirectWrite rendering,
+  embedded streams, sync offset (§3.16.1) · RV-060 multi-track audio/subtitle switching
+  (§3.16.2) · RV-061 mixed-media slide show and playlist loop policy (§3.2.6, §3.12)
+  wired to RV-032 · RV-062 D3D11VA zero-copy path with software fallback (§5.7).
+- After D-4: RV-063 Windows Media Foundation fallback.
+- Depends on: M3 (toolbox, keymap), M4 (RV-044 for pre-buffering).
+- Done means: an MKV with two audio tracks and an embedded subtitle plays in sync,
+  `.`/`,` step single frames, `[`/`]`/`\` loop and release, and with the FFmpeg DLLs
+  removed the image viewer still opens and reports the missing bridge on the OSD.
+
+**M6 — Editing, export, batch (H core + W UI)**
+- Goal: adjustments preview on the GPU and commit through the core engine; batch runs
+  headless.
+- RV-064 Direct2D effect graph preview — exposure, colour matrix, gamma (§4.1.4,
+  §3.13 preview layer) · RV-065 adjustment panel, curves widget with histogram, levels,
+  manual crop overlay (§3.13, §6.2 UI) · RV-066 `pal_image_wic` encoders (§3.10 formats) · RV-018 quick export dialog with
+  per-format controls and privacy-clean toggle (§3.10) ·
+  RV-067 multi-threaded tiled resampling on `job.h` (§6.5.5) · RV-017 batch engine and
+  `--batch` CLI on RV-033 with per-thread arenas (§3.11 execution engine) · RV-068
+  batch dialog (§3.11 UI).
+- After D-5: RV-069 lossless JPEG rotation (§3.9).
+- Depends on: M3; RV-017 on M1 (RV-033) and RV-044 (job pool).
+- Done means: `rubraview.exe --batch --resize=50% --format=webp <dir>` converts a
+  directory with no window; the same directory converted through the dialog yields
+  byte-identical output; the privacy-clean export of a GPS-tagged JPEG contains no APP1
+  segment (checked with a hex dump).
+
+**M7 — File management, lifecycle, shell (W)**
+- RV-070 recycle-bin delete with session undo, permanent purge, inline rename with the
+  native `EDIT` control (§3.18.1–3.18.2) · RV-071 1–9 quick-folder curation with undo
+  (§3.18.3) · RV-072 single-instance mutex and `WM_COPYDATA` IPC (§3.19.1) · RV-073
+  `WM_DROPFILES` and OLE `IDropTarget` ingestion (§3.19.2) · RV-074
+  `--register-shell` / `--unregister-shell` under `HKCU` (§3.19.3).
+- Depends on: M3.
+- Done means: a second `rubraview.exe <file>` launches in the running window and exits
+  0; dragging three files from Explorer plays them as a temporary playlist;
+  `--unregister-shell` leaves no `Rubraview.*` ProgID in `HKCU\Software\Classes`.
+
+**M8 — Music player (W; scope pending D-6)**
+- RV-075 audio-only playback, gapless pre-buffer, crossfade (§3.14.1) · RV-076 album
+  art extraction, blurred backdrop, track OSD (§3.14.2.1, §3.14.2.4) · RV-077 1024-point
+  FFT, 64-band analyser, oscilloscope (§3.14.2.2–3.14.2.3) · RV-078 `.lrc`, `SYLT`/`USLT`
+  synced lyrics (§3.14.3) · RV-079 `.cue` virtual tracks (§3.14.4) · RV-080 10-band EQ,
+  ReplayGain, night mode (§3.14.5) · RV-081 mini-player window and BGM arbiter
+  (§3.14.6).
+- Depends on: M5 (RV-055 audio engine). The FFT, EQ, `.lrc` and `.cue` parsers are H
+  and can be built and tested on Linux before the Windows wiring.
+- Done means: decided with D-6.
+
+**M9 — Settings window and release (W)**
+- RV-082 tab-styled settings window, all eight tabs, `Apply` without closing, keymap
+  rebinding with conflict detection (§3.22) · RV-083 release packaging under
+  `build/dist/`, manual under `docs/manual/`, `CHANGELOG.md` entry.
+- Depends on: every milestone whose settings the tabs expose.
+- Done means: every key in `settings.ini` written by earlier milestones is reachable from
+  a tab, and a fresh machine runs the packaged `rubraview.exe` with no DLL beside it
+  except the optional FFmpeg set.
+
+### 11.3 Traceability: Specification Section → Milestone → Backlog Id
+
+| § | Subject | Milestone | Ids | H/W |
+| :--- | :--- | :--- | :--- | :--- |
+| 3.1 | Viewport, traversal, pre-cache, filmstrip, OSD | M2 · M3 · M4 | RV-011, RV-035, RV-039, RV-042, RV-044 | W |
+| 3.2.1 | Sub-second timer, stress caching | M1 · M3 · M4 | RV-032, RV-015, RV-044 | H+W |
+| 3.2.2 | Ingestion scopes | M1 | RV-032 | H |
+| 3.2.3 | Multi-criteria sorting | M0 · M1 | RV-008, RV-031 | H |
+| 3.2.4 | Extension and media-type filtering | M1 | RV-032 | H |
+| 3.2.5 | Presentation controls, transitions | M3 | RV-015 | W |
+| 3.2.6 | Mixed-media slide show | M1 · M5 | RV-032, RV-061 | H+W |
+| 3.3 | Layout engine, spreads, webtoon, splitting | M1 · M2 · M4 | RV-021, RV-012, RV-047 | H+W |
+| 3.4 | Fit modes, fit lock | M1 · M2 | RV-022, RV-011 | H+W |
+| 3.5 | Pixel-art rendering, pixel grid | M2 | RV-013 | W |
+| 3.6.1–3.6.4 | Toolbox, menu box, anchors, tiles | M3 | RV-020 | W |
+| 3.6.5 | Multi-touch gestures | M3 | RV-037 | W |
+| 3.7.1–3.7.2 | Context-aware keymap, hotkey table | M1 · M3 | RV-030, RV-038 | H+W |
+| 3.7.3–3.7.4 | Mouse zones, touch and pen | M3 | RV-037 | W |
+| 3.7.5 | `keymap.ini` | M1 · M3 | RV-023, RV-030, RV-038 | H+W |
+| 3.8.1 | ZIP VFS, O(1) index, streaming, traversal | M1 · M4 | RV-025, RV-045, RV-051 (D-2) | H+W |
+| 3.8.2 | 7z solid/non-solid, RAR | M4 | RV-052 (D-3), RV-053 (D-3) | H+W |
+| 3.8.3 | Filename encoding detection and override | M1 · M4 | RV-026, RV-046 | H+W |
+| 3.8.4 | NFC normalisation | M1 | RV-024 | H |
+| 3.8.5 | `ComicInfo.xml` | M1 · M4 | RV-027, RV-047 | H+W |
+| 3.9 | Rotation, EXIF orientation, lossless JPEG | M1 · M3 · M6 | RV-029, RV-041, RV-069 (D-5) | H+W |
+| 3.10 | Quick export, privacy clean | M1 · M6 | RV-029, RV-066, RV-018 | H+W |
+| 3.11 | Batch pipeline, action chain, execution | M1 · M6 | RV-033, RV-017, RV-068 | H+W |
+| 3.12 | Playlists, collections, bookmarks | M1 · M5 | RV-005, RV-061 | H+W |
+| 3.13 | Adjustment panel, curves, crop | M0 · M6 | RV-002, RV-004, RV-064, RV-065 | H+W |
+| 3.14 | Music player | M8 | RV-075 – RV-081 (D-6) | H+W |
+| 3.15.1 | Win32 file dialog | M3 | RV-043 | W |
+| 3.15.2 | In-app Metro picker | M3 | RV-043 | W |
+| 3.15.3 | macOS / Linux dialog backends | — | (D-1) | — |
+| 3.15.4 | Type-ahead, native IME search bar | M3 | RV-043 | W |
+| 3.16.1 | Subtitle formats, rendering, sync | M5 | RV-059 | W |
+| 3.16.2 | Multi-track switching | M5 | RV-060 | W |
+| 3.17 | Reading history, resume, portable mode | M1 · M4 | RV-023, RV-048 | H+W |
+| 3.18 | Delete/undo, rename, 1–9 curation | M7 | RV-070, RV-071 | W |
+| 3.19 | Single instance, drag-and-drop, shell registration | M7 | RV-072, RV-073, RV-074 | W |
+| 3.20 | Animated images, multi-page TIFF, ICO | M4 | RV-049 | W |
+| 3.21.1 | Frameless window mechanics | M2 | RV-034 | W |
+| 3.21.2–3.21.3 | Hover titlebar, state buttons | M3 | RV-040 | W |
+| 3.22 | Settings window | M9 | RV-082 | W |
+| 4.1 | D2D interop, viewport matrix, compositor, effect graph | M1 · M2 · M6 | RV-022, RV-011, RV-012, RV-064 | H+W |
+| 4.2 | Per-Monitor V2 HiDPI | M2 | RV-010 | W |
+| 4.3 | Wide colour gamut | M4 | RV-050 | W |
+| 5.1 | Format matrix | M5 | RV-016, RV-054 | W |
+| 5.2 | Dynamic loading, fallback | M5 | RV-016, RV-063 (D-4) | W |
+| 5.3 | Demux, decode, sync, seek, capture | M5 | RV-054, RV-056 | W |
+| 5.4 | WASAPI audio engine | M5 | RV-055 | W |
+| 5.5 | A-B looping | M5 | RV-057 | W |
+| 5.6 | Video fit modes, live zoom | M5 | RV-058 | W |
+| 5.7 | D3D11VA | M5 | RV-062 | W |
+| 6.1–6.5 | Colour, curves, auto-crop, filters, resampling | M0 · M6 | RV-001 – RV-004, RV-067 | H |
+| 7.1–7.3 | Arenas, `u8str_t`, dynarrays | M0 | RV-001, RV-007 | H |
+| 7.4 | Memory budget, LRU | M1 · M4 | RV-028, RV-044 | H+W |
+| 8.1–8.4 | PAL matrix, layout, verification ladder | M2 (Windows column only) | RV-019, RV-009 | W |
+| 9 | Build pipeline | M0 · M2 | RV-006, RV-019 | H+W |
+| 10 | Security model | M1 · M4 | RV-025 (size caps), RV-028 | H |
+
+### 11.4 Open Decisions (owner)
+
+Each item blocks the ids named after it. Nothing below is assumed by the milestones.
+
+- **D-1 Multi-platform PAL.** §8 plans Linux and macOS back ends; all four accepted
+  decisions and the distribution line say Windows x86_64. Options: (a) record §8 as a
+  decision and keep the PAL headers platform-neutral now; (b) keep §8 as intent only,
+  Windows-only until 1.0; (c) remove §8.2's non-Windows columns. Blocks: nothing in
+  M0–M9; determines whether `include/rubraview/pal/*.h` grow host implementations
+  beyond test mocks.
+- **D-2 `deflate` for CBZ.** §3.8.1 needs an inflater; §8.1 forbids non-`proven`
+  dependencies in `src/core/`, and `proven` has none. Options: (a) vendor a permissive
+  single-file inflater (`miniz`, `stb`-style) under `vendor/` with a
+  `docs/resources/` ledger entry; (b) write a bounded C23 inflater in-house;
+  (c) `stored`-only CBZ until (a) or (b). Blocks: RV-051.
+- **D-3 CB7 and CBR.** §3.8.2 names the public-domain LZMA SDK for 7z (vendoring still
+  needs the ledger). RAR has no pure-C permissively licensed reader that the author of
+  this revision could confirm; `libarchive`'s RAR reader is C/BSD but is a large
+  dependency, and the official UnRAR source is C++. Options for CBR: (a) `libarchive`
+  subset; (b) shell out to an external unrar the user installs; (c) drop CBR from 1.0.
+  Blocks: RV-052, RV-053.
+- **D-4 Windows Media Foundation fallback.** §5.2 offers WMF when FFmpeg is absent;
+  DECISIONS 2026-09-07 chose FFmpeg *because* WMF is insufficient. Options: (a) keep as
+  a limited MP4/MP3 fallback; (b) drop it — no FFmpeg means image viewer only.
+  Blocks: RV-063.
+- **D-5 Lossless JPEG rotation.** §3.9 requires DCT-domain rearrangement, which WIC
+  does not offer. The metadata strip in §3.10 is a plain marker walk and is scheduled
+  (RV-029) regardless. Options: (a) vendor `libjpeg-turbo` for `jpegtran`-class
+  transforms; (b) in-house DCT block transposer; (c) drop lossless rotation, keep
+  non-destructive view rotation only. Blocks: RV-069.
+- **D-6 Music player scope.** §3.14 is a second product (gapless engine, FFT, lyrics,
+  cue, EQ, mini-player). Options: (a) in 1.0 as M8; (b) after 1.0; (c) reduce to
+  "audio files play in the playlist with album art" and fold into M5. Blocks:
+  RV-075–RV-081.
+- **D-7 `-Werror`.** §8.4 promises `-Werror`; the Makefile does not pass it. Options:
+  (a) add it now (RV-009, cheap while the tree is small); (b) keep warnings advisory.
+
+### 11.5 Explicitly Not Scheduled
+
+Listed so that silence is not read as "planned":
+
+- Linux and macOS native back ends (§3.15.3, §8.2 non-Windows columns) — awaiting D-1.
+- T3 multi-platform smoke builds (§8.4) — awaiting D-1.
+- `nob.c` build driver (§9.1) — the Makefile suffices; revisit if the Makefile stops
+  being enough.
+- Separate-process FFmpeg isolation (§10.1) — worker-thread isolation is scheduled
+  (RV-054); process isolation is not.
+
+### 11.6 Backlog Mirror
+
+`BACKLOGS.md` carries one line per id above under `## Ready` (M1) and `## Later`
+(M2–M9), and the D-items under `## Blocked`. When this section and `BACKLOGS.md`
+disagree, this section is the source: correct it here first, then the backlog line.
