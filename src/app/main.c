@@ -38,6 +38,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
+#include "rubraview/default_keymap.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_image.h"
@@ -64,43 +65,7 @@
 #define COLOR_BAR_FILL    0xE1141414u
 #define COLOR_CLOSE_HOVER 0xFFE81123u
 
-/*
- * The built-in keymap, used when no keymap.ini is present. It is the
- * same format §3.7.5 documents, so a user file overrides it wholesale.
- */
-static const char *const DEFAULT_KEYMAP =
-    "toggle_fullscreen = F, F11\n"
-    "toggle_pixel_grid = G\n"
-    "toggle_osd = I\n"
-    "toggle_filmstrip = F4\n"
-    "toggle_menu = Tab, F1\n"
-    "toggle_toolbox = T, F2\n"
-    "open_picker = O\n"
-    "quit = Escape\n"
-    "\n"
-    "[navigation]\n"
-    "next_page = Right, PageDown, Space, J, D\n"
-    "prev_page = Left, PageUp, K, A\n"
-    "first_page = Home\n"
-    "last_page = End\n"
-    "toggle_layout = B\n"
-    "toggle_reading_order = M\n"
-    "\n"
-    "[view]\n"
-    "fit_window = 1\n"
-    "fit_width = 2\n"
-    "fit_height = 3\n"
-    "actual_size = 4\n"
-    "smart_fit = 5\n"
-    "zoom_in = Plus\n"
-    "zoom_out = Minus\n"
-    "rotate_cw = R\n"
-    "flip_horizontal = H\n"
-    "flip_vertical = V\n"
-    "toggle_nearest = N\n"
-    "\n"
-    "[slideshow]\n"
-    "toggle_slideshow = S, F5\n";
+
 
 /*
  * The Menu Box's category tree (§3.6.2). Children are contiguous, which
@@ -185,6 +150,8 @@ typedef struct app_state {
     bool pixel_grid;
     bool force_nearest;
     bool needs_relayout;
+    bool fit_lock;       /* §3.4: keep the fit mode and zoom across page changes */
+    bool spread_detect;  /* §3.3.4 / Shift+B: AR >= threshold treated as a pre-merged spread */
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
@@ -313,7 +280,10 @@ static void go_to_spread(app_state_t *app, size_t index) {
         rubraview_transition_start(&app->transition);
     }
     app->spread_index = index;
-    reset_view(app);
+    /* §3.4 Fit Lock: with the lock on, moving between images of
+       different resolutions keeps the chosen zoom instead of resetting
+       it — the point of the lock. */
+    if (!app->fit_lock) reset_view(app);
     note_activity(app);
 
     int32_t page = current_page_index(app);
@@ -462,6 +432,43 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE; reset_view(app);
     } else if (action_is(action, "smart_fit")) {
         app->fit_mode = RUBRAVIEW_FIT_SMART; reset_view(app);
+    } else if (action_is(action, "fit_stretch")) {
+        app->fit_mode = RUBRAVIEW_FIT_STRETCH; reset_view(app);
+    } else if (action_is(action, "toggle_fit_lock")) {
+        app->fit_lock = !app->fit_lock;
+    } else if (action_is(action, "skip_forward")) {
+        go_to_spread(app, app->spread_index + 10);
+    } else if (action_is(action, "skip_backward")) {
+        go_to_spread(app, app->spread_index > 10 ? app->spread_index - 10 : 0);
+    } else if (action_is(action, "up_to_folder")) {
+        /* §3.7.2: ascend to the parent directory, shown in the picker so
+           the reader can choose what to open next. */
+        u8str_t here = app->picker_dir;
+        if (here.len == 0 && app->siblings.count > 0) {
+            here = rubraview_path_dirname(app->siblings.paths[app->siblings.current]);
+        }
+        u8str_t parent = rubraview_path_dirname(here);
+        if (parent.len > 0) {
+            picker_navigate(app, parent);
+            app->picker.focus = 0;
+            app->picker_open = app->picker_listing.count > 0;
+        }
+    } else if (action_is(action, "open_folder")) {
+        picker_open(app);
+    } else if (action_is(action, "toggle_spread_detect")) {
+        /* §3.3.4: with detection off, a wide scan pairs like any other
+           page instead of standing alone. */
+        app->spread_detect = !app->spread_detect;
+        app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
+        app->needs_relayout = true;
+    } else if (action_is(action, "interval_up")) {
+        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.5);
+    } else if (action_is(action, "interval_down")) {
+        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.5);
+    } else if (action_is(action, "interval_up_fine")) {
+        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.1);
+    } else if (action_is(action, "interval_down_fine")) {
+        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.1);
     } else if (action_is(action, "zoom_in")) {
         app->zoom *= ZOOM_STEP;
     } else if (action_is(action, "zoom_out")) {
@@ -1026,7 +1033,7 @@ static void load_keymap(app_state_t *app) {
     /* §3.7.5: keymap.ini beside the executable overrides the built-in
        bindings wholesale; the defaults apply when it is absent. */
     u8str_t text = rubraview_pal_fs_read_file(app->arena, U8("keymap.ini"), KEYMAP_MAX_BYTES);
-    if (text.len == 0) text = cstr(DEFAULT_KEYMAP);
+    if (text.len == 0) text = cstr(rubraview_default_keymap());
     app->keymap = rubraview_keymap_parse(app->arena, text);
 }
 
@@ -1101,6 +1108,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.fit_mode = RUBRAVIEW_FIT_WINDOW;
     app.zoom = 1.0;
     app.orientation = rubraview_orientation_identity();
+    app.spread_detect = true; /* §3.3.4 default */
     app.layout_opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_READING_LTR);
 
     rubraview_window_config_t window_config = {
