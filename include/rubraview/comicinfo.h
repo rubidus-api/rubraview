@@ -2,6 +2,7 @@
 #define RUBRAVIEW_COMICINFO_H
 
 #include "rubraview/core.h"
+#include "rubraview/layout.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +39,22 @@ typedef struct rubraview_comicinfo {
 } rubraview_comicinfo_t;
 
 rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, u8str_t xml);
+
+/**
+ * §3.8.5 point 2 and 3: let the archive's own metadata configure the
+ * reader. A `<Manga>YesAndRightToLeft</Manga>` switches to Book mode
+ * with right-to-left order without the reader pressing `M`, and every
+ * page tagged `FrontCover` or `InnerCover` is marked to stand alone so
+ * a cover cannot be paired into a spread and push every later pairing
+ * out of step.
+ *
+ * Only what the metadata actually states is changed: a document with no
+ * `<Manga>` tag leaves the layout mode and direction as they were.
+ */
+void rubraview_comicinfo_apply(const rubraview_comicinfo_t *info,
+                               rubraview_layout_opts_t *opts,
+                               rubraview_page_info_t *pages,
+                               size_t page_count);
 
 #ifdef __cplusplus
 }

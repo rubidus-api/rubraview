@@ -95,6 +95,15 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_ent
     return true;
 }
 
+u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id) {
+    (void)arena; (void)bytes; (void)codepage_id;
+    /* The host build carries no legacy code-page tables — that is a
+       Windows facility (§3.8.3 step 3) and the reason this call sits
+       behind the PAL. Returning empty tells the caller to keep the raw
+       bytes rather than display a wrong transliteration. */
+    return (u8str_t){ .ptr = "", .len = 0 };
+}
+
 bool rubraview_pal_fs_exists(u8str_t path) {
     if (path.len == 0 || !path.ptr) return false;
 
@@ -133,6 +142,22 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
 
     res.value.ptr[read] = '\0';
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
+}
+
+bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
+    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+
+    char path_z[4096];
+    memcpy(path_z, path.ptr, path.len);
+    path_z[path.len] = '\0';
+
+    FILE *file = fopen(path_z, "wb");
+    if (!file) return false;
+
+    size_t written = contents.len > 0 ? fwrite(contents.ptr, 1, contents.len, file) : 0;
+    bool ok = (written == contents.len);
+    if (fclose(file) != 0) ok = false;
+    return ok;
 }
 
 #endif /* !_WIN32 */

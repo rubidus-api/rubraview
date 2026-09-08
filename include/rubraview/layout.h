@@ -36,6 +36,11 @@ typedef enum rubraview_spread_half {
 
 typedef struct rubraview_page_info {
     double width, height;
+    /* §3.8.5: a page ComicInfo.xml tags as a cover never pairs with a
+       neighbour, however it happens to be numbered. Pre-merged spread
+       detection reaches the same conclusion from the aspect ratio; this
+       is the metadata saying so outright. */
+    bool force_standalone;
 } rubraview_page_info_t;
 
 typedef struct rubraview_spread {

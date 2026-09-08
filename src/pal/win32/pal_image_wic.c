@@ -75,11 +75,78 @@ static int32_t read_orientation(IWICBitmapFrameDecode *frame) {
     return orientation;
 }
 
-/* Shared tail: frame -> (optional orientation transform) -> 32bppPBGRA
-   -> ID2D1Bitmap (§4.1.1's WIC-to-Direct2D interop). */
-static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *renderer,
-                                                   IWICBitmapDecoder *decoder,
-                                                   bool apply_exif_orientation) {
+/*
+ * §4.3: a photo from a modern camera or phone often carries a Display P3
+ * or Adobe RGB profile. Ignoring it is what makes such pictures look
+ * dull on an sRGB monitor, so the frame is converted through WIC's own
+ * colour transform when it declares a profile that is not already sRGB.
+ *
+ * A file with no profile, or one WIC cannot build a transform for, is
+ * passed through untouched — showing the picture slightly off is better
+ * than not showing it.
+ */
+static IWICBitmapSource *apply_color_management(IWICImagingFactory *factory,
+                                                IWICBitmapFrameDecode *frame,
+                                                IWICBitmapSource *source,
+                                                IWICColorTransform **out_transform) {
+    *out_transform = NULL;
+
+    UINT context_count = 0;
+    if (FAILED(IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &context_count)) || context_count == 0) {
+        return source; /* no embedded profile: already sRGB by convention */
+    }
+
+    IWICColorContext *embedded = NULL;
+    if (FAILED(IWICImagingFactory_CreateColorContext(factory, &embedded)) || !embedded) return source;
+
+    IWICColorContext *contexts[1] = { embedded };
+    UINT actual = 0;
+    if (FAILED(IWICBitmapFrameDecode_GetColorContexts(frame, 1, contexts, &actual)) || actual == 0) {
+        IWICColorContext_Release(embedded);
+        return source;
+    }
+
+    IWICColorContext *destination = NULL;
+    if (FAILED(IWICImagingFactory_CreateColorContext(factory, &destination)) || !destination) {
+        IWICColorContext_Release(embedded);
+        return source;
+    }
+    /* sRGB is the destination: the canvas and the swap chain are sRGB
+       until the wide-gamut display path arrives. */
+    if (FAILED(IWICColorContext_InitializeFromExifColorSpace(destination, 1))) {
+        IWICColorContext_Release(destination);
+        IWICColorContext_Release(embedded);
+        return source;
+    }
+
+    IWICColorTransform *transform = NULL;
+    if (FAILED(IWICImagingFactory_CreateColorTransformer(factory, &transform)) || !transform) {
+        IWICColorContext_Release(destination);
+        IWICColorContext_Release(embedded);
+        return source;
+    }
+
+    HRESULT hr = IWICColorTransform_Initialize(transform, source, embedded, destination,
+                                               &GUID_WICPixelFormat32bppPBGRA);
+    IWICColorContext_Release(destination);
+    IWICColorContext_Release(embedded);
+
+    if (FAILED(hr)) {
+        IWICColorTransform_Release(transform);
+        return source;
+    }
+
+    *out_transform = transform;
+    return (IWICBitmapSource*)transform;
+}
+
+/* Shared tail: frame -> (optional orientation transform) -> colour
+   management -> 32bppPBGRA -> ID2D1Bitmap (§4.1.1's WIC-to-Direct2D
+   interop, §4.3's colour transform). */
+static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *renderer,
+                                                          IWICBitmapDecoder *decoder,
+                                                          UINT frame_index,
+                                                          bool apply_exif_orientation) {
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
 
     IWICImagingFactory *factory = wic_factory();
@@ -87,7 +154,7 @@ static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *rendere
     if (!factory || !rt) return result;
 
     IWICBitmapFrameDecode *frame = NULL;
-    if (FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) return result;
+    if (FAILED(IWICBitmapDecoder_GetFrame(decoder, frame_index, &frame)) || !frame) return result;
 
     result.exif_orientation = read_orientation(frame);
 
@@ -108,8 +175,12 @@ static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *rendere
         }
     }
 
+    IWICColorTransform *color_transform = NULL;
+    source = apply_color_management(factory, frame, source, &color_transform);
+
     IWICFormatConverter *converter = NULL;
     if (FAILED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) || !converter) {
+        if (color_transform) IWICColorTransform_Release(color_transform);
         if (rotator) IWICBitmapFlipRotator_Release(rotator);
         IWICBitmapFrameDecode_Release(frame);
         return result;
@@ -135,8 +206,100 @@ static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *rendere
     }
 
     IWICFormatConverter_Release(converter);
+    if (color_transform) IWICColorTransform_Release(color_transform);
     if (rotator) IWICBitmapFlipRotator_Release(rotator);
     IWICBitmapFrameDecode_Release(frame);
+    return result;
+}
+
+static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *renderer,
+                                                   IWICBitmapDecoder *decoder,
+                                                   bool apply_exif_orientation) {
+    return finish_decode_frame(renderer, decoder, 0, apply_exif_orientation);
+}
+
+/* Opens a decoder for a path, converting at the OS boundary only. */
+static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
+    IWICImagingFactory *factory = wic_factory();
+    if (!factory || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+
+    char narrow[MAX_PATH * 4];
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+
+    WCHAR wide[MAX_PATH * 2];
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
+        return NULL;
+    }
+
+    IWICBitmapDecoder *decoder = NULL;
+    if (FAILED(IWICImagingFactory_CreateDecoderFromFilename(factory, wide, NULL, GENERIC_READ,
+                                                            WICDecodeMetadataCacheOnDemand, &decoder))) {
+        return NULL;
+    }
+    return decoder;
+}
+
+size_t rubraview_pal_image_frame_count(u8str_t path) {
+    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    if (!decoder) return 0;
+
+    UINT count = 0;
+    HRESULT hr = IWICBitmapDecoder_GetFrameCount(decoder, &count);
+    IWICBitmapDecoder_Release(decoder);
+
+    if (FAILED(hr)) return 0;
+    return (size_t)count;
+}
+
+/* §3.20.1: GIF stores a frame's delay in hundredths of a second under
+   the graphic control extension. Other containers state none, which the
+   animation clock replaces with its own minimum. */
+static double frame_delay_seconds(IWICBitmapDecoder *decoder, UINT frame_index) {
+    IWICBitmapFrameDecode *frame = NULL;
+    if (FAILED(IWICBitmapDecoder_GetFrame(decoder, frame_index, &frame)) || !frame) return 0.0;
+
+    double seconds = 0.0;
+    IWICMetadataQueryReader *reader = NULL;
+    if (SUCCEEDED(IWICBitmapFrameDecode_GetMetadataQueryReader(frame, &reader)) && reader) {
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        if (SUCCEEDED(IWICMetadataQueryReader_GetMetadataByName(reader, L"/grctlext/Delay", &value)) &&
+            value.vt == VT_UI2) {
+            seconds = (double)value.uiVal / 100.0;
+        }
+        PropVariantClear(&value);
+        IWICMetadataQueryReader_Release(reader);
+    }
+
+    IWICBitmapFrameDecode_Release(frame);
+    return seconds;
+}
+
+rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
+                                                             u8str_t path,
+                                                             size_t frame_index,
+                                                             bool apply_exif_orientation,
+                                                             double *out_delay_seconds) {
+    rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
+    if (out_delay_seconds) *out_delay_seconds = 0.0;
+
+    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    if (!decoder || !renderer) {
+        if (decoder) IWICBitmapDecoder_Release(decoder);
+        return result;
+    }
+
+    UINT count = 0;
+    if (FAILED(IWICBitmapDecoder_GetFrameCount(decoder, &count)) || frame_index >= (size_t)count) {
+        IWICBitmapDecoder_Release(decoder);
+        return result;
+    }
+
+    if (out_delay_seconds) *out_delay_seconds = frame_delay_seconds(decoder, (UINT)frame_index);
+    result = finish_decode_frame(renderer, decoder, (UINT)frame_index, apply_exif_orientation);
+
+    IWICBitmapDecoder_Release(decoder);
     return result;
 }
 
