@@ -38,3 +38,4 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T029 | R116, R147 | Verify OSD fade and status line, hover titlebar timing and button hit zones, transitions, cursor auto-hide | `make test` | tests/test_ui_chrome.c | active |
 | T030 | R133, R138 | Verify virtual scrolling, filmstrip budget interaction, picker breadcrumbs/type-ahead/multi-select | `make test` | tests/test_ui_browse.c | active |
 | T031 | R116, R120, R129 | Windows reading-UI smoke check: floating boxes, OSD, hover titlebar, slide show, rotation, filmstrip | `make win64` then run `dist/rubraview.exe <image>` on Windows | docs/tests/cases/T031-windows-ui-smoke.md | manual |
+| T032 | R120 | Verify every §3.7.2 hotkey row in M3's scope resolves to its action, and that the RFC's double-booked chords resolve in favour of the primary binding | `make test` | tests/test_default_keymap.c | active |

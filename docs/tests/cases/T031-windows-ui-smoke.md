@@ -50,6 +50,17 @@ target.
 | 28 | Tap an image tile (or focus it and press `Enter`) | The picker closes and that image opens, with its siblings indexed as usual. Press `Esc` instead to close without opening. |
 | 29 | On a touch screen: pinch, and drag with two fingers | Pinch zooms about the point between the fingers; a two-finger drag pans (§3.6.5). On a machine with no digitiser this step is not applicable. |
 
+| 30 | Press `L`, then flip pages between images of different sizes | With Fit Lock on the zoom and fit mode carry across; with it off each page refits (§3.4). |
+| 31 | Press `Ctrl+1` | The image stretches to fill the window, ignoring aspect ratio (§3.4). |
+| 32 | Hold `Shift` and press `Right` / `Left` | Skips ten pages at a time (§3.7.2). |
+| 33 | Press `Alt` with the arrow keys while zoomed in | The viewport pans. `A`, `D` and `S` stay page-back, page-forward and slide show — the RFC double-books them, and the primary binding wins. |
+| 34 | Start the slide show, then press `]` and `[` | The interval moves in 0.5 s steps; with `Shift` held, 0.1 s steps (§3.2.1). |
+| 35 | Press `Shift+B` on a chapter containing a wide double-page scan | Pre-merged spread detection toggles: with it off the wide page pairs like any other (§3.3.4). |
+| 36 | Press `Backspace` | The picker opens on the parent directory (§3.7.2). |
+
+Every binding above is also checked mechanically by T032 on the host, so
+a failure here points at the action's *effect*, not at the key lookup.
+
 ## Known M3 limitations (not defects)
 
 - Filmstrip cells reuse full-size page textures for pages already
