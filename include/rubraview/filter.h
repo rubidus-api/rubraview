@@ -15,12 +15,12 @@ extern "C" {
  * Kernel radius is dynamically computed as ceil(3.0 * sigma).
  * Allocates destination buffer in arena.
  */
-rv_pixbuf_t rv_filter_gaussian_blur(proven_arena_t *arena, const rv_pixbuf_t *src, float sigma);
+rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, float sigma);
 
 /**
  * Apply fast box blur with given pixel radius using separable passes.
  */
-rv_pixbuf_t rv_filter_box_blur(proven_arena_t *arena, const rv_pixbuf_t *src, int32_t radius);
+rubraview_pixbuf_t rubraview_filter_box_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, int32_t radius);
 
 /**
  * Apply threshold-gated unsharp mask sharpening:
@@ -30,8 +30,8 @@ rv_pixbuf_t rv_filter_box_blur(proven_arena_t *arena, const rv_pixbuf_t *src, in
  * amount: sharpening intensity multiplier (e.g. 0.5f to 2.5f).
  * threshold: minimum difference (0..255) to sharpen (prevents amplifying noise).
  */
-rv_pixbuf_t rv_filter_unsharp_mask(proven_arena_t *arena,
-                                   const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_filter_unsharp_mask(proven_arena_t *arena,
+                                   const rubraview_pixbuf_t *src,
                                    float sigma,
                                    float amount,
                                    uint8_t threshold);
@@ -41,8 +41,8 @@ rv_pixbuf_t rv_filter_unsharp_mask(proven_arena_t *arena,
  * detect_white: true for scanned document/manga borders (Y >= threshold),
  *               false for letterboxed black borders (Y <= threshold).
  */
-rv_pixbuf_t rv_filter_autotrim(proven_arena_t *arena,
-                               const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
+                               const rubraview_pixbuf_t *src,
                                uint8_t bg_threshold,
                                bool detect_white);
 
