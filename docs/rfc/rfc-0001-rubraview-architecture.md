@@ -467,6 +467,47 @@ Rubraview seamlessly handles pure audio files as first-class media items, bridgi
 - **Slide Show Background Music (BGM Mode)**:
   - Users can attach an audio track or background playlist to an ongoing image slide show. The audio stream plays continuously while images auto-advance according to their configured interval.
 
+### 3.15 Independent File Selection & Dialog Subsystem (`rv_file_dialog`)
+To ensure that Rubraview remains portable across desktop operating systems and friendly to touchscreens and Remote Desktop sessions, file selection is decoupled into an independent abstraction layer (`rv_file_dialog`):
+
+```c
+typedef struct rv_file_filter {
+    const char *name;     // e.g. "Image Files (*.jpg;*.png;*.webp)"
+    const char *pattern;  // e.g. "*.jpg;*.png;*.webp;*.gif"
+} rv_file_filter_t;
+
+typedef struct rv_file_dialog_opts {
+    const char             *title;
+    const char             *default_dir;
+    const rv_file_filter_t *filters;
+    size_t                  filter_count;
+    bool                    allow_multi;
+    bool                    folder_mode;
+} rv_file_dialog_opts_t;
+
+typedef struct rv_dialog_result {
+    u8str_t *paths;       // Array of selected UTF-8 paths allocated in caller arena
+    size_t   count;
+    bool     accepted;
+} rv_dialog_result_t;
+```
+
+#### 3.15.1 Initial Windows Implementation (`rv_file_dialog_win32`)
+- Utilizes the modern COM `IFileOpenDialog` and `IFileSaveDialog` interfaces (with a fallback to `GetOpenFileNameW` where needed).
+- Supports multi-file selection (`FOS_ALLOWMULTISELECT`), directory picking (`FOS_PICKFOLDERS`), and custom filter specifications.
+- Translates native wide-character UTF-16 paths into clean, bounded UTF-8 slices (`u8str_t`) backed by `proven_arena_t`.
+
+#### 3.15.2 Future Swappable In-App Metro Tile File Picker (`rv_file_dialog_custom`)
+- Standard OS dialogs often feature small, non-scalable list views with microscopic scrollbars, making them cumbersome to navigate over Remote Desktop on smartphones.
+- Rubraview reserves a clean pathway for an **In-App Metro File Picker**:
+  - Renders directly on the hardware-accelerated canvas using large square tiles for folder and file navigation.
+  - Live thumbnail previews generated directly inside the file selection grid.
+  - Zero external GUI toolkit dependency: 100% pure C23, identical behavior across Windows, Linux, and macOS.
+
+#### 3.15.3 Cross-Platform Native Backends
+- **macOS**: Bridges to `NSOpenPanel` / `NSSavePanel` via a lightweight C runtime wrapper.
+- **Linux**: Interacts with the FreeDesktop `org.freedesktop.portal.FileChooser` DBus portal or Zenity, falling back gracefully to the In-App Metro Picker.
+
 ---
 
 ## 4. Canvas & Rendering Pipeline
@@ -692,45 +733,84 @@ Rubraview rejects arbitrary `malloc()`/`free()` allocations in favor of structur
 
 ---
 
-## 8. Platform Abstraction Layer (PAL) & Test Strategy
+## 8. Platform Abstraction Layer (PAL) & Multi-Platform Strategy
 
-To uphold the core rule: **"An unrun test is a claim, not evidence"**, the architecture completely isolates platform-specific code:
+To guarantee that Rubraview remains **pure C23** and can expand smoothly from Windows to **Linux and macOS** without contaminating or refactoring the core algorithmic engine, all operating-system and hardware-dependent facilities are strictly isolated behind the **Platform Abstraction Layer (PAL)**.
+
+### 8.1 Language & Foundation Invariants
+1. **Pure C23 Standard Compliance**:
+   - The entire codebase is written in ISO C23 (`-std=c23`).
+   - Strict avoidance of C++ runtime dependencies (`libstdc++`/`libc++` are forbidden). Native COM interfaces on Windows are consumed purely via C vtables or C wrapper macros (`ID2D1Factory_CreateHwndRenderTarget(...)`).
+2. **proven_c_lib as Sole Base Foundation**:
+   - Dynamic memory management, string slicing, dynamic arrays, sorting, and assertions are strictly provided by vendored `proven_c_lib` (`prv_arena_t`, `u8str_t`, `prv_dynarray_t`, `prv_panic`).
+   - Zero uncontrolled standard library allocations (`malloc`/`free` calls are prohibited in `src/core/`).
+
+### 8.2 Subsystem Abstraction Matrix across Platforms
+
+| Subsystem | PAL Interface Header | Windows (Initial Target) | Linux (Expansion Target) | macOS (Expansion Target) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Windowing & Events** | `rv_pal_window.h` | Win32 `WndProc`, Raw Input | Wayland (`xdg-shell`) / X11 | Cocoa / AppKit (`NSWindow`) |
+| **2D & Canvas Render** | `rv_pal_render.h` | Direct2D 1.1+ / Direct3D 11 | Vulkan / OpenGL / Cairo | Metal / Quartz |
+| **Native Image Codecs**| `rv_pal_image.h` | WIC (Windows Imaging Component)| libspng / libjpeg-turbo / FFmpeg| ImageIO / CoreGraphics |
+| **Audio Output** | `rv_pal_audio.h` | WASAPI (Shared Mode) | PipeWire / PulseAudio / ALSA | CoreAudio (`AudioQueue`) |
+| **Video & Multimedia** | `rv_pal_ffmpeg.h` | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge | FFmpeg PAL Dynamic Bridge |
+| **File Open/Save Dialog**| `rv_pal_file_dialog.h`| COM `IFileOpenDialog` (Native) | In-App Metro Picker / Portal | In-App Metro Picker / `NSOpenPanel` |
+| **Filesystem & Traversal**| `rv_pal_fs.h` | Win32 `FindFirstFileW` / Shell | POSIX `opendir` / `readdir` | POSIX `opendir` / `readdir` |
+| **High-Precision Clock**| `rv_pal_time.h` | `QueryPerformanceCounter` | `clock_gettime(CLOCK_MONOTONIC)`| `mach_absolute_time` |
+| **Threading & Concurrency**| `rv_pal_thread.h` | Win32 Threads / ThreadPool | POSIX Threads (`pthread`) | POSIX Threads (`pthread`) |
+
+### 8.3 Directory & Header Organization
 
 ```
 rubraview/
 ├── include/
 │   ├── rubraview/
-│   │   ├── core.h           // Portable pixbuf, color, filters, resample
+│   │   ├── core.h           // Portable pixbuf, format conversions
+│   │   ├── color.h          // Color adjustments, LUTs, curves, histogram
+│   │   ├── resample.h       // Resampling kernels (Nearest, Bilinear, Bicubic, Lanczos)
+│   │   ├── filter.h         // Spatial convolutions (Gaussian blur, sharpen, autotrim)
 │   │   ├── layout.h         // Layout engine: AR matching & spread rules
-│   │   ├── pal.h            // Platform abstraction interfaces
 │   │   ├── archive.h        // CBZ, CBR, CB7 virtual archive streams
 │   │   ├── batch.h          // Batch job queue & worker declarations
-│   │   └── playlist.h       // Playlist and collection interfaces
+│   │   ├── playlist.h       // Playlist and collection interfaces
+│   │   └── pal/             // Pure C PAL interface contracts
+│   │       ├── pal_window.h
+│   │       ├── pal_render.h
+│   │       ├── pal_image.h
+│   │       ├── pal_audio.h
+│   │       ├── pal_ffmpeg.h
+│   │       ├── pal_file_dialog.h
+│   │       └── pal_fs.h
 ├── src/
-│   ├── core/                // Pure C23 (compiled on Linux and Windows)
+│   ├── core/                // 100% Pure C23 (compiled on Linux, macOS, and Windows)
 │   │   ├── pixbuf.c
 │   │   ├── color.c
-│   │   ├── filters.c
 │   │   ├── resample.c
+│   │   ├── filter.c
 │   │   ├── layout.c
 │   │   ├── archive.c
 │   │   ├── batch.c
 │   │   └── playlist.c
 │   ├── pal/
 │   │   ├── win32/           // Windows implementations
-│   │   │   ├── pal_wic.c
-│   │   │   ├── pal_d2d.c
-│   │   │   ├── pal_ffmpeg.c
-│   │   │   ├── pal_archive_win.c
-│   │   │   └── pal_fs_win.c
+│   │   │   ├── pal_window_win32.c
+│   │   │   ├── pal_render_d2d.c
+│   │   │   ├── pal_image_wic.c
+│   │   │   ├── pal_audio_wasapi.c
+│   │   │   ├── pal_ffmpeg_win32.c
+│   │   │   ├── pal_file_dialog_win32.c
+│   │   │   └── pal_fs_win32.c
+│   │   ├── custom/          // Cross-platform fallback implementations
+│   │   │   └── file_dialog_metro.c // In-app touch Metro tile file picker
 │   │   └── host/            // Linux host test implementations
-│   │       ├── pal_mock_io.c
+│   │       ├── pal_mock_render.c
+│   │       ├── pal_mock_audio.c
 │   │       ├── pal_archive_posix.c
 │   │       └── pal_fs_posix.c
-│   └── app/                 // GUI entry & WinProc
-│       ├── main_win.c
-│       ├── view_modes.c
+│   └── app/                 // Application entry, dispatch & UI state
+│       ├── main.c
 │       ├── touch_tile_ui.c
+│       ├── view_modes.c
 │       └── cli_batch.c
 └── tests/                   // Executed natively on Linux
     ├── test_pixbuf.c
@@ -743,9 +823,10 @@ rubraview/
     └── test_playlist.c
 ```
 
-### Verification Ladder:
-- **T0/T1 (Host Linux)**: `make test` runs all core algorithms under `gcc -std=c23 -Wall -Wextra -Werror` and AddressSanitizer (`-fsanitize=address,undefined`).
+### 8.4 Verification Ladder:
+- **T0/T1 (Host Linux)**: `make test` runs all core algorithms under `gcc -std=c23 -Wall -Wextra -pedantic -Werror` and AddressSanitizer (`-fsanitize=address,undefined`).
 - **T2 (Cross-Build)**: MinGW-w64 x86_64 cross-compilation on `linux-build` validates WinAPI headers, Direct2D/WIC COM bindings, and PE binary generation.
+- **T3 (Multi-Platform Smoke)**: Future native builds on Linux (via Wayland/Cairo) and macOS (via Metal/Cocoa).
 
 ---
 
