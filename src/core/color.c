@@ -9,7 +9,7 @@
 static float s_srgb_to_lin[256];
 static bool s_lut_initialized = false;
 
-void rv_color_lut_init(void) {
+void rubraview_color_lut_init(void) {
     if (s_lut_initialized) return;
     for (int i = 0; i < 256; ++i) {
         float c = (float)i / 255.0f;
@@ -22,12 +22,12 @@ void rv_color_lut_init(void) {
     s_lut_initialized = true;
 }
 
-float rv_srgb_to_linear(uint8_t srgb) {
-    if (!s_lut_initialized) rv_color_lut_init();
+float rubraview_srgb_to_linear(uint8_t srgb) {
+    if (!s_lut_initialized) rubraview_color_lut_init();
     return s_srgb_to_lin[srgb];
 }
 
-uint8_t rv_linear_to_srgb(float lin) {
+uint8_t rubraview_linear_to_srgb(float lin) {
     if (lin <= 0.0f) return 0;
     if (lin >= 1.0f) return 255;
     float s;
@@ -48,18 +48,18 @@ static inline float clampf(float val, float min_val, float max_val) {
     return val;
 }
 
-void rv_color_adjust(rv_pixbuf_t *pb, const rv_color_adjust_params_t *params) {
-    if (!rv_pixbuf_is_valid(pb) || params == NULL) return;
-    if (pb->format != RV_PIXFMT_RGBA8 && pb->format != RV_PIXFMT_BGRA8) return;
+void rubraview_color_adjust(rubraview_pixbuf_t *pb, const rubraview_color_adjust_params_t *params) {
+    if (!rubraview_pixbuf_is_valid(pb) || params == NULL) return;
+    if (pb->format != RUBRAVIEW_PIXFMT_RGBA8 && pb->format != RUBRAVIEW_PIXFMT_BGRA8) return;
 
-    if (!s_lut_initialized) rv_color_lut_init();
+    if (!s_lut_initialized) rubraview_color_lut_init();
 
     float ev_factor = powf(2.0f, params->exposure_ev);
     float contrast_factor = tanf((clampf(params->contrast, -100.0f, 100.0f) + 100.0f) * ((float)M_PI / 400.0f));
     float sat = clampf(params->saturation, 0.0f, 4.0f);
     float inv_gamma = (params->gamma > 0.01f) ? (1.0f / params->gamma) : 1.0f;
 
-    bool is_bgra = (pb->format == RV_PIXFMT_BGRA8);
+    bool is_bgra = (pb->format == RUBRAVIEW_PIXFMT_BGRA8);
 
     for (int32_t y = 0; y < pb->height; ++y) {
         uint8_t *row = pb->pixels + ((ptrdiff_t)y * pb->stride);
@@ -108,20 +108,20 @@ void rv_color_adjust(rv_pixbuf_t *pb, const rv_color_adjust_params_t *params) {
     }
 }
 
-void rv_histogram_compute(const rv_pixbuf_t *pb,
+void rubraview_histogram_compute(const rubraview_pixbuf_t *pb,
                           uint32_t hist_r[256],
                           uint32_t hist_g[256],
                           uint32_t hist_b[256],
                           uint32_t hist_lum[256]) {
-    if (!rv_pixbuf_is_valid(pb)) return;
+    if (!rubraview_pixbuf_is_valid(pb)) return;
 
     if (hist_r) memset(hist_r, 0, 256 * sizeof(uint32_t));
     if (hist_g) memset(hist_g, 0, 256 * sizeof(uint32_t));
     if (hist_b) memset(hist_b, 0, 256 * sizeof(uint32_t));
     if (hist_lum) memset(hist_lum, 0, 256 * sizeof(uint32_t));
 
-    bool is_bgra = (pb->format == RV_PIXFMT_BGRA8);
-    bool is_gray = (pb->format == RV_PIXFMT_GRAY8);
+    bool is_bgra = (pb->format == RUBRAVIEW_PIXFMT_BGRA8);
+    bool is_gray = (pb->format == RUBRAVIEW_PIXFMT_GRAY8);
 
     for (int32_t y = 0; y < pb->height; ++y) {
         const uint8_t *row = pb->pixels + ((ptrdiff_t)y * pb->stride);
@@ -149,7 +149,7 @@ void rv_histogram_compute(const rv_pixbuf_t *pb,
     }
 }
 
-void rv_levels_build_lut(uint8_t lut_out[256], uint8_t black_point, uint8_t white_point, float gamma) {
+void rubraview_levels_build_lut(uint8_t lut_out[256], uint8_t black_point, uint8_t white_point, float gamma) {
     if (!lut_out) return;
     if (white_point <= black_point) white_point = black_point + 1;
     float range = (float)(white_point - black_point);
@@ -169,7 +169,7 @@ void rv_levels_build_lut(uint8_t lut_out[256], uint8_t black_point, uint8_t whit
     }
 }
 
-void rv_curve_build_lut(uint8_t lut_out[256], const rv_curve_point_t *points, size_t count) {
+void rubraview_curve_build_lut(uint8_t lut_out[256], const rubraview_curve_point_t *points, size_t count) {
     if (!lut_out) return;
     if (points == NULL || count < 2) {
         for (int i = 0; i < 256; ++i) {
@@ -266,15 +266,15 @@ void rv_curve_build_lut(uint8_t lut_out[256], const rv_curve_point_t *points, si
     }
 }
 
-void rv_lut_apply(rv_pixbuf_t *pb,
+void rubraview_lut_apply(rubraview_pixbuf_t *pb,
                   const uint8_t lut_r[256],
                   const uint8_t lut_g[256],
                   const uint8_t lut_b[256]) {
-    if (!rv_pixbuf_is_valid(pb)) return;
+    if (!rubraview_pixbuf_is_valid(pb)) return;
     if (!lut_r && !lut_g && !lut_b) return;
 
-    bool is_bgra = (pb->format == RV_PIXFMT_BGRA8);
-    bool is_gray = (pb->format == RV_PIXFMT_GRAY8);
+    bool is_bgra = (pb->format == RUBRAVIEW_PIXFMT_BGRA8);
+    bool is_gray = (pb->format == RUBRAVIEW_PIXFMT_GRAY8);
 
     for (int32_t y = 0; y < pb->height; ++y) {
         uint8_t *row = pb->pixels + ((ptrdiff_t)y * pb->stride);

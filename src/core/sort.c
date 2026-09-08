@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-int rv_str_lexcmp(u8str_t a, u8str_t b) {
+int rubraview_str_lexcmp(u8str_t a, u8str_t b) {
     if (!a.ptr && !b.ptr) return 0;
     if (!a.ptr) return -1;
     if (!b.ptr) return 1;
@@ -31,7 +31,7 @@ int rv_str_lexcmp(u8str_t a, u8str_t b) {
     return tie_breaker;
 }
 
-int rv_str_natcmp(u8str_t a, u8str_t b) {
+int rubraview_str_natcmp(u8str_t a, u8str_t b) {
     if (!a.ptr && !b.ptr) return 0;
     if (!a.ptr) return -1;
     if (!b.ptr) return 1;
@@ -100,21 +100,21 @@ int rv_str_natcmp(u8str_t a, u8str_t b) {
     return tie_breaker;
 }
 
-static int compare_paths(u8str_t a, u8str_t b, rv_sort_mode_t mode, bool ascending) {
+static int compare_paths(u8str_t a, u8str_t b, rubraview_sort_mode_t mode, bool ascending) {
     int cmp = 0;
     switch (mode) {
-        case RV_SORT_NAME_LEXICAL:
-            cmp = rv_str_lexcmp(a, b);
+        case RUBRAVIEW_SORT_NAME_LEXICAL:
+            cmp = rubraview_str_lexcmp(a, b);
             break;
-        case RV_SORT_NAME_NATURAL:
+        case RUBRAVIEW_SORT_NAME_NATURAL:
         default:
-            cmp = rv_str_natcmp(a, b);
+            cmp = rubraview_str_natcmp(a, b);
             break;
     }
     return ascending ? cmp : -cmp;
 }
 
-static void quicksort_paths(u8str_t *paths, int low, int high, rv_sort_mode_t mode, bool ascending) {
+static void quicksort_paths(u8str_t *paths, int low, int high, rubraview_sort_mode_t mode, bool ascending) {
     if (low >= high) return;
 
     u8str_t pivot = paths[(low + high) / 2];
@@ -138,10 +138,10 @@ static void quicksort_paths(u8str_t *paths, int low, int high, rv_sort_mode_t mo
     if (i < high) quicksort_paths(paths, i, high, mode, ascending);
 }
 
-void rv_sort_paths(u8str_t *paths, size_t count, rv_sort_mode_t mode, bool ascending) {
+void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mode, bool ascending) {
     if (!paths || count <= 1) return;
 
-    if (mode == RV_SORT_RANDOM) {
+    if (mode == RUBRAVIEW_SORT_RANDOM) {
         // Fisher-Yates shuffle
         for (size_t i = count - 1; i > 0; --i) {
             size_t j = (size_t)(rand() % (int)(i + 1));

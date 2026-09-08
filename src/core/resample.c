@@ -37,8 +37,8 @@ static inline float lanczos3_weight(float x) {
     return 0.0f;
 }
 
-static void resample_nearest(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+static void resample_nearest(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst) {
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     float scale_x = (float)src->width / (float)dst->width;
     float scale_y = (float)src->height / (float)dst->height;
 
@@ -56,8 +56,8 @@ static void resample_nearest(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
     }
 }
 
-static void resample_bilinear(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+static void resample_bilinear(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst) {
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     float scale_x = (float)src->width / (float)dst->width;
     float scale_y = (float)src->height / (float)dst->height;
 
@@ -105,8 +105,8 @@ static void resample_bilinear(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
     }
 }
 
-static void resample_bicubic(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+static void resample_bicubic(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst) {
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     float scale_x = (float)src->width / (float)dst->width;
     float scale_y = (float)src->height / (float)dst->height;
 
@@ -165,8 +165,8 @@ static void resample_bicubic(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
     }
 }
 
-static void resample_lanczos3(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
-    int32_t bpp = rv_bytes_per_pixel(src->format);
+static void resample_lanczos3(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst) {
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
     float scale_x = (float)src->width / (float)dst->width;
     float scale_y = (float)src->height / (float)dst->height;
 
@@ -225,36 +225,36 @@ static void resample_lanczos3(const rv_pixbuf_t *src, rv_pixbuf_t *dst) {
     }
 }
 
-rv_pixbuf_t rv_pixbuf_resample(proven_arena_t *arena,
-                               const rv_pixbuf_t *src,
+rubraview_pixbuf_t rubraview_pixbuf_resample(proven_arena_t *arena,
+                               const rubraview_pixbuf_t *src,
                                int32_t dst_width,
                                int32_t dst_height,
-                               rv_resample_filter_t filter) {
-    if (!rv_pixbuf_is_valid(src) || arena == NULL || dst_width <= 0 || dst_height <= 0) {
-        return (rv_pixbuf_t){0};
+                               rubraview_resample_filter_t filter) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL || dst_width <= 0 || dst_height <= 0) {
+        return (rubraview_pixbuf_t){0};
     }
 
     /* Fast path: identical dimensions */
     if (src->width == dst_width && src->height == dst_height) {
-        return rv_pixbuf_clone(arena, src);
+        return rubraview_pixbuf_clone(arena, src);
     }
 
-    rv_pixbuf_t dst = rv_pixbuf_create(arena, dst_width, dst_height, src->format);
-    if (!rv_pixbuf_is_valid(&dst)) {
-        return (rv_pixbuf_t){0};
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, dst_width, dst_height, src->format);
+    if (!rubraview_pixbuf_is_valid(&dst)) {
+        return (rubraview_pixbuf_t){0};
     }
 
     switch (filter) {
-        case RV_FILTER_NEAREST:
+        case RUBRAVIEW_FILTER_NEAREST:
             resample_nearest(src, &dst);
             break;
-        case RV_FILTER_BILINEAR:
+        case RUBRAVIEW_FILTER_BILINEAR:
             resample_bilinear(src, &dst);
             break;
-        case RV_FILTER_BICUBIC:
+        case RUBRAVIEW_FILTER_BICUBIC:
             resample_bicubic(src, &dst);
             break;
-        case RV_FILTER_LANCZOS3:
+        case RUBRAVIEW_FILTER_LANCZOS3:
             resample_lanczos3(src, &dst);
             break;
         default:
