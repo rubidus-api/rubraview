@@ -49,6 +49,14 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_ent
 bool rubraview_pal_fs_exists(u8str_t path);
 
 /**
+ * Read an entire file into the arena, NUL-terminated per §7.2.3 so the
+ * result can be handed straight to a text parser. Returns an empty slice
+ * if the file cannot be read or exceeds `max_bytes` (a bound, since this
+ * reads caller-supplied paths such as keymap.ini and settings.ini).
+ */
+u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t max_bytes);
+
+/**
  * §3.1: "Automatically indexes sibling media files when an image is
  * opened." Filters a listing to files matching `extension_filter` (a
  * ';'-separated glob list from rubraview/glob.h; empty matches every

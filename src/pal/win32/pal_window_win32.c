@@ -24,6 +24,7 @@ struct rubraview_window {
     HWND hwnd;
     bool frameless;
     bool should_close;
+    bool cursor_visible;
     bool fullscreen;
     int32_t width, height;
     double dpi_scale;
@@ -323,6 +324,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     struct rubraview_window *w = (struct rubraview_window*)(void*)res.value.ptr;
     memset(w, 0, sizeof(*w));
     w->frameless = config->frameless;
+    w->cursor_visible = true;
     w->dpi_scale = 1.0;
     w->get_dpi_for_window = get_dpi;
     w->saved_placement.length = sizeof(WINDOWPLACEMENT);
@@ -452,6 +454,31 @@ void rubraview_pal_window_set_fullscreen(rubraview_window_t *window, bool enable
 
 bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window) {
     return window ? window->fullscreen : false;
+}
+
+void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible) {
+    if (!window || window->cursor_visible == visible) return;
+    window->cursor_visible = visible;
+    /* ShowCursor keeps an internal counter, so it is only stepped on an
+       actual change — matching the flag we track here. */
+    ShowCursor(visible ? TRUE : FALSE);
+}
+
+void rubraview_pal_window_begin_drag(rubraview_window_t *window) {
+    if (!window || !window->hwnd) return;
+    /* Hand the drag to the OS so Aero Snap keeps working (§3.21.2). */
+    ReleaseCapture();
+    SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_MOVE | 0x0002, 0);
+}
+
+void rubraview_pal_window_minimize(rubraview_window_t *window) {
+    if (!window || !window->hwnd) return;
+    ShowWindow(window->hwnd, SW_MINIMIZE);
+}
+
+void rubraview_pal_window_toggle_maximize(rubraview_window_t *window) {
+    if (!window || !window->hwnd) return;
+    ShowWindow(window->hwnd, IsZoomed(window->hwnd) ? SW_RESTORE : SW_MAXIMIZE);
 }
 
 bool rubraview_pal_window_should_close(const rubraview_window_t *window) {

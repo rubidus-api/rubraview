@@ -3,6 +3,7 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <stdio.h>
 #include <string.h>
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
@@ -107,6 +108,31 @@ bool rubraview_pal_fs_exists(u8str_t path) {
 
     struct stat st;
     return stat(buf, &st) == 0;
+}
+
+u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t max_bytes) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || path.len == 0 || !path.ptr) return empty;
+
+    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
+    if (path_z.len == 0) return empty;
+
+    FILE *file = fopen(path_z.ptr, "rb");
+    if (!file) return empty;
+
+    if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return empty; }
+    long size = ftell(file);
+    if (size < 0 || (size_t)size > max_bytes) { fclose(file); return empty; }
+    rewind(file);
+
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)size + 1);
+    if (!proven_is_ok(res.err)) { fclose(file); return empty; }
+
+    size_t read = fread(res.value.ptr, 1, (size_t)size, file);
+    fclose(file);
+
+    res.value.ptr[read] = '\0';
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
 }
 
 #endif /* !_WIN32 */

@@ -82,6 +82,48 @@ void rubraview_pal_render_draw_pixel_grid(rubraview_renderer_t *renderer,
 void rubraview_pal_texture_size(const rubraview_texture_t *texture, int32_t *out_width, int32_t *out_height);
 void rubraview_pal_texture_destroy(rubraview_texture_t *texture);
 
+/* ---- UI chrome primitives (M3) ----
+ *
+ * The floating boxes, OSD, titlebar and filmstrip (§3.6, §3.1, §3.21)
+ * are drawn from flat rectangles and DirectWrite text — deliberately no
+ * gradients or animation loops, since §3.6.4 requires the overlay to
+ * stay cheap to encode over Remote Desktop.
+ */
+
+typedef struct rubraview_pal_rect {
+    double x, y, width, height;
+} rubraview_pal_rect_t;
+
+/** Filled rectangle in client pixels, `corner_radius` 0 for square Metro tiles. */
+void rubraview_pal_render_fill_rect(rubraview_renderer_t *renderer,
+                                    rubraview_pal_rect_t rect,
+                                    uint32_t argb,
+                                    double corner_radius);
+
+/** 1-pixel outline, used for the crisp high-contrast tile borders (§3.6.4). */
+void rubraview_pal_render_stroke_rect(rubraview_renderer_t *renderer,
+                                      rubraview_pal_rect_t rect,
+                                      uint32_t argb,
+                                      double stroke_width,
+                                      double corner_radius);
+
+typedef enum rubraview_text_align {
+    RUBRAVIEW_TEXT_LEFT = 0,
+    RUBRAVIEW_TEXT_CENTER,
+    RUBRAVIEW_TEXT_RIGHT,
+} rubraview_text_align_t;
+
+/**
+ * Draw UTF-8 text inside `rect`, vertically centred. Returns false when
+ * no text backend is available. `text` need not be NUL-terminated.
+ */
+bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
+                                    u8str_t text,
+                                    rubraview_pal_rect_t rect,
+                                    double font_size,
+                                    uint32_t argb,
+                                    rubraview_text_align_t align);
+
 #ifdef __cplusplus
 }
 #endif
