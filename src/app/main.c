@@ -43,6 +43,11 @@
 #include "rubraview/pagesource.h"
 #include "rubraview/precache.h"
 #include "rubraview/history.h"
+#include "rubraview/batchrun.h"
+#include "rubraview/filter.h"
+#include "rubraview/edit.h"
+#include "rubraview/export.h"
+#include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
 #include "proven/job.h"
 #include "rubraview/pal/pal_window.h"
@@ -62,6 +67,7 @@
 #define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
+#define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
 #define PAGE_CACHE_BUDGET (512u * 1024u * 1024u)   /* §7.4's default budget */
 #define ESTIMATED_PAGE_BYTES (12u * 1024u * 1024u)
 #define PRECACHE_WORKERS 2
@@ -177,6 +183,8 @@ typedef struct app_state {
     rubraview_layout_opts_t layout_opts;
     rubraview_layout_result_t layout;
     size_t spread_index;
+    size_t prev_spread_index;   /* the one the cross-fade is fading out (§3.2.5) */
+    bool   prev_spread_valid;
 
     rubraview_fit_mode_t fit_mode;
     double zoom;
@@ -432,6 +440,10 @@ static void go_to_spread(app_state_t *app, size_t index) {
     if (app->layout.count == 0) return;
     if (index >= app->layout.count) index = app->layout.count - 1;
     if (index != app->spread_index) {
+        /* Remember what is leaving the screen, so the cross-fade has
+           something to fade *from* (§3.2.5). */
+        app->prev_spread_index = app->spread_index;
+        app->prev_spread_valid = true;
         rubraview_transition_start(&app->transition);
     }
     app->spread_index = index;
@@ -1145,15 +1157,14 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 }
 
-static void render_frame(app_state_t *app) {
-    int32_t win_w = 0, win_h = 0;
-    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
-    if (win_w <= 0 || win_h <= 0) return;
-
-    rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
-
-    if (app->layout.count > 0) {
-        const rubraview_spread_t *spread = &app->layout.spreads[app->spread_index];
+/* Draws one spread at a given opacity. Splitting this out is what makes
+   §3.2.5's cross-fade possible: the outgoing spread is drawn first at a
+   falling opacity and the incoming one over it at a rising one. */
+static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
+                        int32_t win_w, int32_t win_h) {
+    if (spread_index >= app->layout.count) return;
+    {
+        const rubraview_spread_t *spread = &app->layout.spreads[spread_index];
 
         app_page_t *left = ensure_page_loaded(app, spread->left_index);
         app_page_t *right = ensure_page_loaded(app, spread->right_index);
@@ -1175,8 +1186,11 @@ static void render_frame(app_state_t *app) {
             (double)win_w, (double)win_h,
             app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
 
+        /* RV-064 made the cubic modes real; before the device context
+           they fell back to linear. Pixel art still gets nearest, which
+           is the one §3.5 actually depends on. */
         rubraview_interpolation_t interp = app->force_nearest
-            ? RUBRAVIEW_INTERP_NEAREST : RUBRAVIEW_INTERP_LINEAR;
+            ? RUBRAVIEW_INTERP_NEAREST : RUBRAVIEW_INTERP_CUBIC;
 
         for (size_t i = 0; i < comp.count; ++i) {
             const rubraview_draw_command_t *cmd = &comp.commands[i];
@@ -1192,7 +1206,7 @@ static void render_frame(app_state_t *app) {
                 rubraview_mat3x2_t oriented = rubraview_mat3x2_multiply(
                     rubraview_orientation_matrix(app->orientation, (double)page->width, (double)page->height),
                     cmd->transform);
-                rubraview_pal_render_draw_texture(app->renderer, page->texture, oriented, interp);
+                rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
 
                 if (app->pixel_grid && comp.scale >= PIXEL_GRID_MIN_SCALE) {
                     rubraview_pal_render_draw_pixel_grid(app->renderer, oriented,
@@ -1210,6 +1224,31 @@ static void render_frame(app_state_t *app) {
                 };
                 rubraview_pal_render_draw_texture_region(app->renderer, page->texture, src, cmd->transform, interp);
             }
+        }
+    }
+}
+
+static void render_frame(app_state_t *app) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) return;
+
+    rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
+
+    if (app->layout.count > 0) {
+        /* §3.2.5: while a transition runs, both spreads are on screen —
+           the old one fading out under the new one fading in. M3 had the
+           timing but no way to draw it; the device context (RV-064) is
+           what changed. */
+        double progress = rubraview_transition_progress(&app->transition);
+        bool fading = progress < 1.0 && app->prev_spread_valid &&
+                      app->prev_spread_index != app->spread_index;
+
+        if (fading) {
+            draw_spread(app, app->prev_spread_index, 1.0 - progress, win_w, win_h);
+            draw_spread(app, app->spread_index, progress, win_w, win_h);
+        } else {
+            draw_spread(app, app->spread_index, 1.0, win_w, win_h);
         }
     }
 
@@ -1491,6 +1530,287 @@ static void open_sibling_archive(app_state_t *app, bool forward) {
 
 #ifdef _WIN32
 
+
+/* ---- headless batch mode (§3.11, RV-017) ---- */
+
+/* Writes a line to the console the shell already owns, if there is one.
+   A GUI subsystem program has no stdout until it asks for its parent's,
+   which is what makes `rubraview.exe --batch ... | more` work at all. */
+static void console_line(const char *text) {
+    static bool attached = false;
+    if (!attached) {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        attached = true;
+    }
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out == INVALID_HANDLE_VALUE || !out) return;
+    DWORD written = 0;
+    WriteFile(out, text, (DWORD)strlen(text), &written, NULL);
+    WriteFile(out, "\r\n", 2, &written, NULL);
+}
+
+typedef struct batch_ctx {
+    const rubraview_cli_result_t *cli;
+    u8str_t output_dir;
+    size_t written;
+} batch_ctx_t;
+
+/* Whether this job changes any pixel. A job that only strips metadata
+   from a JPEG can take §3.10's zero-touch path and keep every
+   coefficient; one that resizes cannot. */
+static bool job_touches_pixels(const rubraview_batch_job_t *job) {
+    for (size_t i = 0; i < job->action_count; ++i) {
+        switch (job->actions[i].kind) {
+            case RUBRAVIEW_BATCH_RESIZE:
+                return true;
+            case RUBRAVIEW_BATCH_COLOR_ADJUST:
+                return true;
+            case RUBRAVIEW_BATCH_ORIENT: {
+                const rubraview_batch_orient_params_t *o = &job->actions[i].params.orient;
+                if (o->rotate_degrees != 0 || o->flip_horizontal || o->flip_vertical ||
+                    o->use_exif_auto_orient) return true;
+                break;
+            }
+            default: break;
+        }
+    }
+    return false;
+}
+
+static rubraview_orientation_t orientation_from_action(const rubraview_batch_orient_params_t *o) {
+    rubraview_orientation_t out = rubraview_orientation_identity();
+    for (int32_t turns = o->rotate_degrees / 90; turns > 0; --turns) {
+        out = rubraview_orientation_rotate_cw(out);
+    }
+    if (o->flip_horizontal) out = rubraview_orientation_flip_h(out);
+    if (o->flip_vertical) out = rubraview_orientation_flip_v(out);
+    return out;
+}
+
+static rubraview_jpegtran_op_t jpegtran_op_for(const rubraview_batch_orient_params_t *o) {
+    if (o->flip_horizontal && o->rotate_degrees == 0) return RUBRAVIEW_JPEGTRAN_FLIP_H;
+    if (o->flip_vertical && o->rotate_degrees == 0) return RUBRAVIEW_JPEGTRAN_FLIP_V;
+    if (o->flip_horizontal || o->flip_vertical) return RUBRAVIEW_JPEGTRAN_NONE; /* combined: not lossless */
+    switch (o->rotate_degrees) {
+        case 90: return RUBRAVIEW_JPEGTRAN_ROT_90;
+        case 180: return RUBRAVIEW_JPEGTRAN_ROT_180;
+        case 270: return RUBRAVIEW_JPEGTRAN_ROT_270;
+        default: return RUBRAVIEW_JPEGTRAN_NONE;
+    }
+}
+
+static int32_t resize_target(const rubraview_batch_resize_params_t *r,
+                             int32_t src_w, int32_t src_h, int32_t *out_h) {
+    double w = src_w, h = src_h;
+    switch (r->mode) {
+        case RUBRAVIEW_RESIZE_PERCENT:
+            w = src_w * r->value_a / 100.0;
+            h = src_h * r->value_a / 100.0;
+            break;
+        case RUBRAVIEW_RESIZE_BOUNDING_BOX: {
+            double sx = r->value_a / (double)src_w;
+            double sy = r->value_b / (double)src_h;
+            double scale = sx < sy ? sx : sy;
+            if (scale > 1.0) scale = 1.0;   /* a bounding box shrinks; it does not enlarge */
+            w = src_w * scale;
+            h = src_h * scale;
+            break;
+        }
+        case RUBRAVIEW_RESIZE_FIXED_WIDTH:
+            w = r->value_a;
+            h = src_h * (r->value_a / (double)src_w);
+            break;
+        case RUBRAVIEW_RESIZE_FIXED_HEIGHT:
+            h = r->value_a;
+            w = src_w * (r->value_a / (double)src_h);
+            break;
+    }
+    *out_h = (int32_t)(h + 0.5) > 0 ? (int32_t)(h + 0.5) : 1;
+    return (int32_t)(w + 0.5) > 0 ? (int32_t)(w + 0.5) : 1;
+}
+
+static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *job,
+                          const rubraview_batch_input_t *input, u8str_t output_name, void *ctx) {
+    batch_ctx_t *bc = (batch_ctx_t*)ctx;
+    u8str_t out_dir = bc->output_dir.len > 0 ? bc->output_dir : rubraview_path_dirname(input->path);
+    u8str_t out_path = rubraview_path_join(arena, out_dir, output_name);
+    if (out_path.len == 0) return false;
+
+    const rubraview_batch_orient_params_t *orient = NULL;
+    const rubraview_batch_resize_params_t *resize = NULL;
+    const rubraview_batch_color_params_t *color = NULL;
+    for (size_t i = 0; i < job->action_count; ++i) {
+        switch (job->actions[i].kind) {
+            case RUBRAVIEW_BATCH_ORIENT: orient = &job->actions[i].params.orient; break;
+            case RUBRAVIEW_BATCH_RESIZE: resize = &job->actions[i].params.resize; break;
+            case RUBRAVIEW_BATCH_COLOR_ADJUST: color = &job->actions[i].params.color; break;
+            default: break;
+        }
+    }
+
+    rubraview_export_options_t options = bc->cli->export_options;
+    rubraview_export_format_t source_format = rubraview_export_format_for_name(input->path);
+    bool pixels_change = job_touches_pixels(job);
+
+    /* §3.9/§3.10: a JPEG that is only being turned, or only being
+       cleaned, never goes near a decoder. This is the whole reason
+       libjpeg-turbo is vendored. */
+    if (source_format == RUBRAVIEW_EXPORT_JPEG &&
+        (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE || options.format == RUBRAVIEW_EXPORT_JPEG) &&
+        !resize && !color) {
+        rubraview_jpegtran_op_t op = orient ? jpegtran_op_for(orient) : RUBRAVIEW_JPEGTRAN_NONE;
+        bool lossless_possible = !orient || !orient->use_exif_auto_orient;
+
+        if (lossless_possible && (op != RUBRAVIEW_JPEGTRAN_NONE || options.privacy_clean)) {
+            u8str_t bytes = rubraview_pal_fs_read_file(arena, input->path, MAX_ARCHIVE_BYTES);
+            if (bytes.len > 0) {
+                rubraview_jpegtran_result_t turned = rubraview_jpegtran_apply(
+                    arena, (const uint8_t*)bytes.ptr, bytes.len, op,
+                    RUBRAVIEW_JPEGTRAN_KEEP_EDGE, options.privacy_clean);
+                if (turned.err == RUBRAVIEW_JPEGTRAN_OK) {
+                    if (rubraview_pal_fs_write_file(out_path, turned.data)) {
+                        bc->written++;
+                        return true;
+                    }
+                    return false;
+                }
+            }
+            /* Fall through: if the lossless path could not do it, the
+               ordinary one still can. */
+        }
+    }
+
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, NULL, 0,
+                                                                orient && orient->use_exif_auto_orient);
+    if (!rubraview_pixbuf_is_valid(&pixels)) return false;
+
+    if (orient && !orient->use_exif_auto_orient) {
+        rubraview_orientation_t o = orientation_from_action(orient);
+        rubraview_pixbuf_t turned = rubraview_pixbuf_orient(arena, &pixels, o);
+        if (rubraview_pixbuf_is_valid(&turned)) pixels = turned;
+    }
+
+    if (resize) {
+        int32_t target_h = 0;
+        int32_t target_w = resize_target(resize, pixels.width, pixels.height, &target_h);
+        if (target_w != pixels.width || target_h != pixels.height) {
+            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample(arena, &pixels, target_w, target_h,
+                                                                  resize->filter);
+            if (rubraview_pixbuf_is_valid(&scaled)) pixels = scaled;
+        }
+    }
+
+    if (color) {
+        if (color->has_color_adjust) rubraview_color_adjust(&pixels, &color->adjust);
+        if (color->grayscale) {
+            rubraview_color_adjust_params_t gray = { .exposure_ev = 0.0f, .contrast = 0.0f,
+                                                     .saturation = 0.0f, .gamma = 1.0f };
+            rubraview_color_adjust(&pixels, &gray);
+        }
+        if (color->has_unsharp) {
+            rubraview_pixbuf_t sharp = rubraview_filter_unsharp_mask(arena, &pixels, color->sigma,
+                                                                     color->amount, color->threshold);
+            if (rubraview_pixbuf_is_valid(&sharp)) pixels = sharp;
+        }
+    }
+
+    (void)pixels_change;
+    if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
+    if (!rubraview_pal_image_save(out_path, &pixels, &options)) return false;
+
+    bc->written++;
+    return true;
+}
+
+/* Collects the files a run will work on: one file, or a directory, or a
+   directory tree when --recursive was given. */
+static size_t collect_inputs(proven_arena_t *arena, u8str_t root, bool recursive,
+                             rubraview_batch_input_t *out, size_t capacity, size_t count) {
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(arena, root);
+    if (listing.count == 0) {
+        /* Not a directory: treat it as the single file it is. */
+        if (count < capacity && rubraview_pal_fs_exists(root)) {
+            out[count].path = root;
+            out[count].size_bytes = 0;
+            count++;
+        }
+        return count;
+    }
+
+    for (size_t i = 0; i < listing.count && count < capacity; ++i) {
+        const rubraview_fs_entry_t *entry = &listing.entries[i];
+        if (entry->is_directory) {
+            if (recursive) count = collect_inputs(arena, entry->path, true, out, capacity, count);
+            continue;
+        }
+        out[count].path = entry->path;
+        out[count].size_bytes = entry->size_bytes;
+        count++;
+    }
+    return count;
+}
+
+#define BATCH_MAX_INPUTS 8192
+
+/* Formats "N of M" without pulling in printf's locale machinery. */
+static void append_number(char *buf, size_t cap, size_t *pos, size_t value) {
+    char digits[24];
+    size_t n = 0;
+    if (value == 0) digits[n++] = '0';
+    while (value > 0 && n < sizeof(digits)) { digits[n++] = (char)('0' + (value % 10)); value /= 10; }
+    while (n > 0 && *pos + 1 < cap) buf[(*pos)++] = digits[--n];
+    buf[*pos] = '\0';
+}
+
+static void append_text(char *buf, size_t cap, size_t *pos, const char *text) {
+    while (*text && *pos + 1 < cap) buf[(*pos)++] = *text++;
+    buf[*pos] = '\0';
+}
+
+static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t));
+    if (!proven_is_ok(res.err)) {
+        console_line("rubraview: out of memory building the file list");
+        return 1;
+    }
+    rubraview_batch_input_t *inputs = (rubraview_batch_input_t*)(void*)res.value.ptr;
+
+    size_t count = collect_inputs(arena, cli->input, cli->recursive, inputs, BATCH_MAX_INPUTS, 0);
+    if (count == 0) {
+        console_line("rubraview: nothing to do — no files matched");
+        return 1;
+    }
+
+    /* §3.11: one arena for the work, reset between files, so a run over
+       ten thousand files uses what one file needs. */
+    void *work_memory = malloc(BATCH_WORK_ARENA_BYTES);
+    if (!work_memory) {
+        console_line("rubraview: out of memory");
+        return 1;
+    }
+    proven_arena_t work = proven_arena_create(
+        (proven_mem_mut_t){ .ptr = (proven_byte_t*)work_memory, .size = BATCH_WORK_ARENA_BYTES });
+
+    batch_ctx_t ctx = { .cli = cli, .output_dir = cli->output_dir, .written = 0 };
+    rubraview_batch_report_t report = rubraview_batch_run(&work, &cli->job, inputs, count,
+                                                          U8(""), batch_process, &ctx, NULL, 0);
+    free(work_memory);
+
+    char line[160];
+    size_t pos = 0;
+    line[0] = '\0';
+    append_text(line, sizeof(line), &pos, "rubraview: ");
+    append_number(line, sizeof(line), &pos, report.processed);
+    append_text(line, sizeof(line), &pos, " converted, ");
+    append_number(line, sizeof(line), &pos, report.skipped);
+    append_text(line, sizeof(line), &pos, " skipped, ");
+    append_number(line, sizeof(line), &pos, report.failed);
+    append_text(line, sizeof(line), &pos, " failed");
+    console_line(line);
+
+    return report.failed > 0 ? 1 : 0;
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)instance; (void)previous; (void)command_line; (void)show;
 
@@ -1504,6 +1824,57 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         return 1;
     }
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = APP_ARENA_BYTES });
+
+    /* §3.11: the command line is read before a window is created,
+       because `--batch` must not open one. */
+    {
+        int argc = 0;
+        LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (wargv) {
+            static char storage[32][2048];
+            const char *argv_utf8[32];
+            int usable = argc < 32 ? argc : 32;
+            for (int i = 0; i < usable; ++i) {
+                int written = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, storage[i],
+                                                  (int)sizeof(storage[i]), NULL, NULL);
+                argv_utf8[i] = written > 0 ? storage[i] : "";
+            }
+            LocalFree(wargv);
+
+            rubraview_cli_result_t cli;
+            rubraview_cli_parse(&cli, &arena, usable, argv_utf8);
+
+            if (cli.err != RUBRAVIEW_CLI_OK) {
+                char message[512];
+                size_t pos = 0;
+                message[0] = '\0';
+                append_text(message, sizeof(message), &pos, "rubraview: ");
+                u8str_t reason = rubraview_cli_error_text(cli.err);
+                for (size_t i = 0; i < reason.len && pos + 1 < sizeof(message); ++i) {
+                    message[pos++] = reason.ptr[i];
+                }
+                message[pos] = '\0';
+                if (cli.offending.len > 0) {
+                    append_text(message, sizeof(message), &pos, ": ");
+                    for (size_t i = 0; i < cli.offending.len && pos + 1 < sizeof(message); ++i) {
+                        message[pos++] = cli.offending.ptr[i];
+                    }
+                    message[pos] = '\0';
+                }
+                console_line(message);
+                free(memory);
+                CoUninitialize();
+                return 2;
+            }
+
+            if (cli.batch_mode) {
+                int code = run_batch(&arena, &cli);
+                free(memory);
+                CoUninitialize();
+                return code;
+            }
+        }
+    }
 
     app_state_t app = {0};
     app.arena = &arena;

@@ -315,6 +315,44 @@ bool rubraview_edit_resize_percent(const rubraview_edit_session_t *session, doub
     return true;
 }
 
+/* ---- preview ---- */
+
+void rubraview_edit_preview_size(const rubraview_edit_session_t *session,
+                                 int32_t view_width, int32_t view_height,
+                                 int32_t *out_width, int32_t *out_height) {
+    if (!out_width || !out_height) return;
+    *out_width = 0;
+    *out_height = 0;
+    if (!session) return;
+
+    int32_t src_w = session->crop_active ? session->crop.width : session->image_width;
+    int32_t src_h = session->crop_active ? session->crop.height : session->image_height;
+    if (src_w <= 0 || src_h <= 0) return;
+
+    if (view_width <= 0 || view_height <= 0) {
+        *out_width = src_w;
+        *out_height = src_h;
+        return;
+    }
+
+    /* Fit inside the view, and never magnify: previewing an icon at
+       eight times its size would cost more than the icon is worth and
+       show nothing extra. */
+    double scale_w = (double)view_width / (double)src_w;
+    double scale_h = (double)view_height / (double)src_h;
+    double scale = scale_w < scale_h ? scale_w : scale_h;
+    if (scale >= 1.0) {
+        *out_width = src_w;
+        *out_height = src_h;
+        return;
+    }
+
+    int32_t w = (int32_t)((double)src_w * scale + 0.5);
+    int32_t h = (int32_t)((double)src_h * scale + 0.5);
+    *out_width = w > 0 ? w : 1;
+    *out_height = h > 0 ? h : 1;
+}
+
 /* ---- commit ---- */
 
 /* Temperature and tint are the two sliders with no direct equivalent in

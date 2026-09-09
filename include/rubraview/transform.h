@@ -64,6 +64,19 @@ void rubraview_orientation_apply_size(rubraview_orientation_t o, double width, d
  */
 rubraview_mat3x2_t rubraview_orientation_matrix(rubraview_orientation_t o, double width, double height);
 
+/**
+ * Apply an orientation to actual pixels, producing a new buffer.
+ *
+ * The viewer never needs this — it orients with a matrix on the GPU,
+ * which costs nothing. The batch engine and the editing commit layer do:
+ * a file written to disk has to have its rows in the right order
+ * (§3.11's orientation stage). Rotating by 90 or 270 swaps the
+ * dimensions.
+ */
+rubraview_pixbuf_t rubraview_pixbuf_orient(proven_arena_t *arena,
+                                           const rubraview_pixbuf_t *src,
+                                           rubraview_orientation_t orientation);
+
 #ifdef __cplusplus
 }
 #endif
