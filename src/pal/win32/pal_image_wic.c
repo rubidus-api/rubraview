@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include <stdarg.h>
+#include <stdio.h>
 #include <windows.h>
 #include <wincodec.h>
 #include <d2d1.h>
@@ -733,6 +735,106 @@ bool rubraview_pal_image_save_ico(u8str_t path,
     rubraview_export_options_t options = rubraview_export_defaults();
     options.format = RUBRAVIEW_EXPORT_ICO;
     return save_frames(path, pixels, &options, RUBRAVIEW_EXPORT_ICO, sizes, size_count);
+}
+
+/* ---- telling the reader why an image did not appear ---- */
+
+/* Appends to a fixed buffer, never past its end. */
+static void diag_add(char *buffer, size_t size, size_t *used, const char *fmt, ...) {
+    if (*used + 1 >= size) return;
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buffer + *used, size - *used, fmt, args);
+    va_end(args);
+    if (n > 0) *used += (size_t)n;
+    if (*used >= size) *used = size - 1;
+}
+
+u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t path,
+                                     char *buffer, size_t buffer_size) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!buffer || buffer_size < 128) return empty;
+
+    size_t used = 0;
+    buffer[0] = '\0';
+
+    IWICImagingFactory *factory = wic_factory();
+    diag_add(buffer, buffer_size, &used, "WIC factory: %s\r\n", factory ? "ok" : "FAILED");
+    if (!factory) return (u8str_t){ .ptr = buffer, .len = used };
+
+    ID2D1RenderTarget *rt = rubraview_d2d_render_target(renderer);
+    diag_add(buffer, buffer_size, &used, "render target: %s\r\n", rt ? "ok" : "FAILED (no renderer)");
+    if (!rt) return (u8str_t){ .ptr = buffer, .len = used };
+
+    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    diag_add(buffer, buffer_size, &used, "opening the file: %s\r\n",
+             decoder ? "ok" : "FAILED (no codec for this format, or the path is wrong)");
+    if (!decoder) return (u8str_t){ .ptr = buffer, .len = used };
+
+    UINT frame_count = 0;
+    IWICBitmapDecoder_GetFrameCount(decoder, &frame_count);
+    diag_add(buffer, buffer_size, &used, "frames in the file: %u\r\n", frame_count);
+
+    IWICBitmapFrameDecode *frame = NULL;
+    HRESULT hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+    diag_add(buffer, buffer_size, &used, "getting frame 0: %s (0x%08lX)\r\n",
+             SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+    if (FAILED(hr) || !frame) { IWICBitmapDecoder_Release(decoder); return (u8str_t){ .ptr = buffer, .len = used }; }
+
+    UINT w = 0, h = 0;
+    IWICBitmapFrameDecode_GetSize(frame, &w, &h);
+    diag_add(buffer, buffer_size, &used, "size: %ux%u\r\n", w, h);
+
+    int32_t orientation = read_orientation(frame);
+    diag_add(buffer, buffer_size, &used, "EXIF orientation: %d\r\n", orientation);
+
+    UINT contexts = 0;
+    IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &contexts);
+    diag_add(buffer, buffer_size, &used, "embedded colour profiles: %u\r\n", contexts);
+
+    /* Each stage separately, so a failure names itself rather than
+       disappearing into a single "could not load". */
+    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    IWICColorTransform *transform = NULL;
+    IWICBitmapSource *managed = apply_color_management(factory, frame, source, &transform);
+    diag_add(buffer, buffer_size, &used, "colour management: %s\r\n",
+             transform ? "applied" : (contexts > 0 ? "skipped (could not build a transform)" : "not needed"));
+    source = managed;
+
+    IWICFormatConverter *converter = NULL;
+    hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+    diag_add(buffer, buffer_size, &used, "creating the converter: %s (0x%08lX)\r\n",
+             SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+
+    if (SUCCEEDED(hr) && converter) {
+        hr = IWICFormatConverter_Initialize(converter, source, &GUID_WICPixelFormat32bppPBGRA,
+                                            WICBitmapDitherTypeNone, NULL, 0.0,
+                                            WICBitmapPaletteTypeMedianCut);
+        diag_add(buffer, buffer_size, &used, "converting to 32bppPBGRA: %s (0x%08lX)\r\n",
+                 SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+
+        if (SUCCEEDED(hr)) {
+            ID2D1Bitmap *bitmap = NULL;
+            hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource*)converter, NULL, &bitmap);
+            diag_add(buffer, buffer_size, &used, "uploading to the GPU: %s (0x%08lX)\r\n",
+                     SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+            if (SUCCEEDED(hr) && bitmap) {
+                D2D1_SIZE_U size = ID2D1Bitmap_GetPixelSize(bitmap);
+                diag_add(buffer, buffer_size, &used, "texture: %ux%u  => the image path works\r\n",
+                         size.width, size.height);
+                ID2D1Bitmap_Release(bitmap);
+            } else if (hr == (HRESULT)D2DERR_UNSUPPORTED_PIXEL_FORMAT) {
+                diag_add(buffer, buffer_size, &used,
+                         "  the target's pixel format does not accept this bitmap\r\n");
+            }
+        }
+        IWICFormatConverter_Release(converter);
+    }
+
+    if (transform) IWICColorTransform_Release(transform);
+    IWICBitmapFrameDecode_Release(frame);
+    IWICBitmapDecoder_Release(decoder);
+    return (u8str_t){ .ptr = buffer, .len = used };
 }
 
 #endif /* _WIN32 */

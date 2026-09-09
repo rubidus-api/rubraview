@@ -81,6 +81,19 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
                                                              double *out_delay_seconds);
 
 /**
+ * Walk the decode path for one file and report what happened at each
+ * step, into `buffer`.
+ *
+ * "The image does not render" is a report with no information in it: the
+ * failure could be the codec, the colour transform, the conversion, or
+ * the upload to the GPU, and from another machine there is no way to
+ * tell which. This runs the real path — the same calls the viewer makes
+ * — and says where it stopped and what the operating system said.
+ */
+u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t path,
+                                     char *buffer, size_t buffer_size);
+
+/**
  * §3.13's commit layer needs the pixels on the CPU, which the viewing
  * path deliberately never does. This reads one decoded image back into
  * a pixel buffer in `arena` — a folder file by path, or an archive page
