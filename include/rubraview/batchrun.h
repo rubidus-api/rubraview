@@ -43,6 +43,9 @@ typedef struct rubraview_cli_result {
     u8str_t             offending;  /* the argument that failed, for the message */
 
     bool                batch_mode; /* --batch was given */
+    bool                register_shell;    /* §3.19.3 --register-shell */
+    bool                unregister_shell;  /* §3.19.3 --unregister-shell */
+    bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
     bool                recursive;  /* --recursive */
     u8str_t             input;      /* the file or directory to work on */
     u8str_t             output_dir; /* --out=..., empty for "beside the source" */

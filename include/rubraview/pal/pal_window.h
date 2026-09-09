@@ -39,6 +39,8 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL,
     RUBRAVIEW_WINDOW_EVENT_GESTURE_ZOOM, /* §3.6.5 GID_ZOOM: two-finger pinch */
     RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN,  /* §3.6.5 GID_PAN: two-finger drag */
+    RUBRAVIEW_WINDOW_EVENT_DROP,         /* §3.19.2: files dropped on the window */
+    RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST, /* §3.19.1: another instance handed us a path */
 } rubraview_window_event_kind_t;
 
 typedef enum rubraview_mouse_button {
@@ -72,6 +74,15 @@ typedef struct rubraview_window_event {
     } mouse;
 
     struct {
+        /* §3.19.2 / §3.19.1: paths arriving from outside. The strings
+           point into the window's own buffer and are valid until the
+           next poll, which is long enough to open them. */
+        const char *paths[16];
+        size_t      path_lengths[16];
+        size_t      count;
+    } drop;
+
+    struct {
         double scale_ratio;   /* pinch: >1 spreading apart, <1 pinching together; 1.0 for a pan */
         double dx, dy;        /* pan: movement since the previous gesture message, in pixels */
         double center_x, center_y; /* the gesture centroid, in client coordinates */
@@ -83,6 +94,34 @@ typedef struct rubraview_window_config {
     int32_t width, height;  /* initial client size in logical pixels (scaled by DPI at creation) */
     bool    frameless;      /* §3.21.1: strip the OS caption and borders via WM_NCCALCSIZE */
 } rubraview_window_config_t;
+
+/* ---- §3.19 lifecycle and shell integration ---- */
+
+/**
+ * §3.19.1: is another copy of this program already running? Taking the
+ * named mutex is what answers it, and holding it for the life of the
+ * process is what makes the answer true for anyone who asks later.
+ */
+bool rubraview_pal_instance_claim(void);
+
+/**
+ * Hand a path to the running instance and bring its window forward.
+ * Returns false when there is nothing to hand it to, in which case the
+ * caller should start normally rather than exiting.
+ */
+bool rubraview_pal_instance_hand_over(u8str_t path);
+
+/** §3.19.2: accept files dropped on this window. */
+void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept);
+
+/**
+ * §3.19.3: register or remove this program's file associations under
+ * HKCU. Registering writes one ProgID per extension; unregistering must
+ * leave none behind, which is why both derive the names the same way
+ * (rubraview_shell_progid).
+ */
+bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list);
+bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list);
 
 /** Returns NULL if the window cannot be created (or on a host build with no windowing backend). */
 rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rubraview_window_config_t *config);
