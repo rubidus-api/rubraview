@@ -47,6 +47,15 @@ typedef struct rubraview_animation {
     size_t loops_done;   /* completed passes, which the slide show waits for (§3.2.6) */
 } rubraview_animation_t;
 
+/**
+ * Decide which of the two kinds a multi-frame file is, from the frames
+ * themselves. The container does not say: what separates an animated
+ * GIF from a scanned TIFF or an icon is that one states timing and the
+ * others state none. A single frame is neither — it is an ordinary
+ * image, and the caller should not build an animation for it.
+ */
+rubraview_frame_kind_t rubraview_animation_classify(const rubraview_frame_t *frames, size_t frame_count);
+
 rubraview_animation_t rubraview_animation_create(rubraview_frame_kind_t kind,
                                                   const rubraview_frame_t *frames,
                                                   size_t frame_count);

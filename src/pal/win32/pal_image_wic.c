@@ -240,16 +240,37 @@ static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
     return decoder;
 }
 
-size_t rubraview_pal_image_frame_count(u8str_t path) {
-    IWICBitmapDecoder *decoder = decoder_for_path(path);
-    if (!decoder) return 0;
+/* Opens a decoder over bytes already in memory — the path an archive
+   page takes, since it has no filename to give WIC. The stream must
+   outlive the decoder, so the caller is handed both. */
+static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, IWICStream **out_stream) {
+    *out_stream = NULL;
+    IWICImagingFactory *factory = wic_factory();
+    if (!factory || !data || size == 0 || size > UINT32_MAX) return NULL;
 
-    UINT count = 0;
-    HRESULT hr = IWICBitmapDecoder_GetFrameCount(decoder, &count);
-    IWICBitmapDecoder_Release(decoder);
+    IWICStream *stream = NULL;
+    if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream) return NULL;
+    if (FAILED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size))) {
+        IWICStream_Release(stream);
+        return NULL;
+    }
 
-    if (FAILED(hr)) return 0;
-    return (size_t)count;
+    IWICBitmapDecoder *decoder = NULL;
+    if (FAILED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
+                                                          WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder) {
+        IWICStream_Release(stream);
+        return NULL;
+    }
+    *out_stream = stream;
+    return decoder;
+}
+
+/* One entry point for both: a path when there is one, bytes otherwise. */
+static IWICBitmapDecoder *decoder_for_source(u8str_t path, const uint8_t *data, size_t size,
+                                             IWICStream **out_stream) {
+    *out_stream = NULL;
+    if (path.len > 0) return decoder_for_path(path);
+    return decoder_for_memory(data, size, out_stream);
 }
 
 /* §3.20.1: GIF stores a frame's delay in hundredths of a second under
@@ -276,23 +297,64 @@ static double frame_delay_seconds(IWICBitmapDecoder *decoder, UINT frame_index) 
     return seconds;
 }
 
+size_t rubraview_pal_image_frame_info(u8str_t path,
+                                      const uint8_t *data, size_t size,
+                                      rubraview_frame_t *out_frames, size_t cap) {
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
+    if (!decoder) {
+        if (stream) IWICStream_Release(stream);
+        return 0;
+    }
+
+    UINT count = 0;
+    HRESULT hr = IWICBitmapDecoder_GetFrameCount(decoder, &count);
+    if (FAILED(hr)) count = 0;
+
+    for (UINT i = 0; out_frames && i < count && (size_t)i < cap; ++i) {
+        out_frames[i].delay_seconds = frame_delay_seconds(decoder, i);
+        out_frames[i].width = 0;
+        out_frames[i].height = 0;
+
+        /* An ICO's frames differ in size and nothing else, so the size
+           is not a detail here — it is how the largest one is found. */
+        IWICBitmapFrameDecode *frame = NULL;
+        if (SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, i, &frame)) && frame) {
+            UINT w = 0, h = 0;
+            if (SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h))) {
+                out_frames[i].width = (int32_t)w;
+                out_frames[i].height = (int32_t)h;
+            }
+            IWICBitmapFrameDecode_Release(frame);
+        }
+    }
+
+    IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
+    return (size_t)count;
+}
+
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
                                                              u8str_t path,
+                                                             const uint8_t *data, size_t size,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
                                                              double *out_delay_seconds) {
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
     if (out_delay_seconds) *out_delay_seconds = 0.0;
 
-    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
     if (!decoder || !renderer) {
         if (decoder) IWICBitmapDecoder_Release(decoder);
+        if (stream) IWICStream_Release(stream);
         return result;
     }
 
     UINT count = 0;
     if (FAILED(IWICBitmapDecoder_GetFrameCount(decoder, &count)) || frame_index >= (size_t)count) {
         IWICBitmapDecoder_Release(decoder);
+        if (stream) IWICStream_Release(stream);
         return result;
     }
 
@@ -300,6 +362,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
     result = finish_decode_frame(renderer, decoder, (UINT)frame_index, apply_exif_orientation);
 
     IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
     return result;
 }
 

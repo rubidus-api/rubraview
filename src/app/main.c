@@ -164,6 +164,13 @@ typedef struct app_state {
     u8str_t                 history_path;
     rubraview_config_mode_t config_mode;
     rubraview_page_info_t  *comic_page_flags; /* §3.8.5 cover marks, applied on every relayout */
+
+    /* §3.20: the animation or sub-page set belonging to the page on
+       screen. Only one page animates at a time — the one being read. */
+    rubraview_animation_t  animation;
+    rubraview_frame_t     *anim_frames;
+    int32_t                anim_page;    /* which page these frames describe; -1 for none */
+    bool                   anim_active;
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -206,6 +213,11 @@ typedef struct app_state {
 static void open_path(app_state_t *app, u8str_t path);
 
 static void update_precache(app_state_t *app);
+
+/* The animation helpers below sit next to page loading, which is where
+   frames are decoded, but they ask which page is on screen — a question
+   the layout answers further down. */
+static int32_t current_page_index(const app_state_t *app);
 
 static size_t page_count(const app_state_t *app) {
     return app->source.page_count;
@@ -256,6 +268,98 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
     page->height = loaded.height;
     page->loaded = true;
     return page;
+}
+
+/* ---- animated images and sub-pages (§3.20) ---- */
+
+#define ANIM_MAX_FRAMES 512
+
+/* Replaces the page's texture with one frame of it. The page keeps its
+   own dimensions from the frame, because an ICO's mipmaps genuinely
+   differ in size and the layout has to follow. */
+static void show_frame(app_state_t *app, size_t frame_index) {
+    if (app->anim_page < 0) return;
+    app_page_t *page = &app->pages[app->anim_page];
+
+    u8str_t path = app->source.pages[app->anim_page].path;
+    rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    if (path.len == 0) {
+        bytes = rubraview_page_source_read(app->arena, &app->source, (size_t)app->anim_page, MAX_PAGE_BYTES);
+        if (!bytes.ok) return;
+    }
+
+    double delay = 0.0;
+    rubraview_image_load_result_t loaded = rubraview_pal_image_load_frame(
+        app->renderer, path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+        frame_index, true, &delay);
+    if (!loaded.ok) return;
+
+    if (page->texture) rubraview_pal_texture_destroy(page->texture);
+    page->texture = loaded.texture;
+    page->width = loaded.width;
+    page->height = loaded.height;
+    page->loaded = true;
+    app->needs_relayout = true;
+}
+
+/* Called whenever the page on screen changes. Most pages are ordinary
+   images and this costs one frame-count query; the rest set up the
+   clock, or — for an ICO — jump straight to the biggest mipmap, which
+   §3.20.2 says is the one worth showing. */
+static void animation_prepare(app_state_t *app) {
+    app->anim_active = false;
+    app->anim_page = -1;
+
+    int32_t page_index = current_page_index(app);
+    if (page_index < 0 || (size_t)page_index >= page_count(app)) return;
+
+    u8str_t path = app->source.pages[page_index].path;
+    rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    if (path.len == 0) {
+        bytes = rubraview_page_source_read(app->arena, &app->source, (size_t)page_index, MAX_PAGE_BYTES);
+        if (!bytes.ok) return;
+    }
+
+    if (!app->anim_frames) {
+        proven_result_mem_mut_t res = proven_arena_alloc(app->arena, ANIM_MAX_FRAMES * sizeof(rubraview_frame_t));
+        if (!proven_is_ok(res.err)) return;
+        app->anim_frames = (rubraview_frame_t*)(void*)res.value.ptr;
+    }
+
+    size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+                                                  app->anim_frames, ANIM_MAX_FRAMES);
+    if (count <= 1) return;               /* an ordinary image */
+    if (count > ANIM_MAX_FRAMES) count = ANIM_MAX_FRAMES;
+
+    rubraview_frame_kind_t kind = rubraview_animation_classify(app->anim_frames, count);
+    bool timed = kind == RUBRAVIEW_FRAMES_ANIMATION;
+
+    app->animation = rubraview_animation_create(kind, app->anim_frames, count);
+    app->anim_page = page_index;
+    app->anim_active = true;
+
+    /* §3.2.6: a slide holding an animation waits for one full pass
+       rather than the fixed interval, so a slide show does not cut a
+       GIF off halfway. */
+    if (timed && app->slides && app->spread_index < app->layout.count) {
+        app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_ANIMATED;
+        app->slides[app->spread_index].duration_seconds = rubraview_animation_cycle_seconds(&app->animation);
+    }
+
+    if (!timed) {
+        /* §3.20.2: open an ICO at its largest layer. */
+        size_t largest = rubraview_animation_largest_frame(&app->animation);
+        if (largest != 0) {
+            app->animation.current = largest;
+            show_frame(app, largest);
+        }
+    }
+}
+
+static void animation_tick(app_state_t *app, double dt) {
+    if (!app->anim_active) return;
+    rubraview_animation_event_t event = rubraview_animation_tick(&app->animation, dt);
+    if (event != RUBRAVIEW_ANIMATION_NONE) show_frame(app, app->animation.current);
 }
 
 /* ---- layout ---- */
@@ -339,6 +443,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
 
     int32_t page = current_page_index(app);
     if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
+    animation_prepare(app);
 }
 
 static void open_sibling_archive(app_state_t *app, bool forward);
@@ -580,6 +685,19 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
+    } else if (action_is(action, "anim_toggle_pause")) {
+        if (app->animation.paused) rubraview_animation_resume(&app->animation);
+        else rubraview_animation_pause(&app->animation);
+    } else if (action_is(action, "anim_step_forward") || action_is(action, "subpage_next")) {
+        rubraview_animation_step(&app->animation, true);
+        show_frame(app, app->animation.current);
+    } else if (action_is(action, "anim_step_back") || action_is(action, "subpage_prev")) {
+        rubraview_animation_step(&app->animation, false);
+        show_frame(app, app->animation.current);
+    } else if (action_is(action, "anim_speed_up")) {
+        app->animation.speed = rubraview_animation_step_speed(app->animation.speed, true);
+    } else if (action_is(action, "anim_speed_down")) {
+        app->animation.speed = rubraview_animation_step_speed(app->animation.speed, false);
     } else if (action_is(action, "next_archive")) {
         open_sibling_archive(app, true);
     } else if (action_is(action, "prev_archive")) {
@@ -680,6 +798,19 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         u8str_t action = rubraview_keymap_find_action(&app->keymap, U8("slideshow"), combo);
         if (action.len > 0) { handle_action(app, action); return; }
     }
+
+    /* §3.20: while an animated image or a multi-page file is the page
+       being read, its own context is consulted first. This is what lets
+       `Space` and `Ctrl + [` mean two things without either meaning
+       being lost — see the comment on those sections in
+       src/core/default_keymap.c. */
+    if (app->anim_active) {
+        u8str_t context = app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION
+                            ? U8("animation") : U8("subpage");
+        u8str_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
+        if (action.len > 0) { handle_action(app, action); return; }
+    }
+
     u8str_t action = rubraview_keymap_find_action(&app->keymap, U8("navigation"), combo);
     if (action.len == 0) action = rubraview_keymap_find_action(&app->keymap, U8("view"), combo);
     if (action.len == 0) action = rubraview_keymap_find_action(&app->keymap, U8("slideshow"), combo);
@@ -1099,6 +1230,7 @@ static void tick_timers(app_state_t *app, double dt) {
     rubraview_osd_tick(&app->osd, dt);
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
+    animation_tick(app, dt);
 
     double grace = 0.5; /* §3.6.3 */
     rubraview_box_tick(&app->toolbox, dt, grace);
@@ -1135,8 +1267,10 @@ static void build_slides(app_state_t *app) {
 
     app->slides = (rubraview_slideshow_item_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < app->layout.count; ++i) {
-        /* Still images for now; animated and video items join the
-           sequence with M4 (RV-049) and M5 (RV-061). */
+        /* Every slide starts as a still. A page that turns out to hold
+           an animation upgrades its own slide when it is opened, since
+           only then is the cycle length known; video joins with M5
+           (RV-061). */
         app->slides[i] = (rubraview_slideshow_item_t){ .kind = RUBRAVIEW_MEDIA_STILL, .duration_seconds = 0.0 };
     }
     app->slideshow = rubraview_slideshow_create(app->layout.count, 3.0, RUBRAVIEW_LOOP_ALL);

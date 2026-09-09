@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "rubraview/core.h"
+#include "rubraview/animation.h"
 #include "rubraview/pal/pal_render.h"
 
 #ifdef __cplusplus
@@ -52,19 +53,28 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
 
 /**
  * §3.20: how many frames or sub-pages a file holds — animation frames
- * for GIF/WebP/APNG, pages for a multi-page TIFF, mipmaps for an ICO.
- * Returns 1 for an ordinary single-frame image and 0 if it cannot be
- * read at all.
+ * for GIF/WebP/APNG, pages for a multi-page TIFF, mipmaps for an ICO —
+ * and what each of them is: its delay, and its size, which is what tells
+ * an ICO's mipmaps apart.
+ *
+ * A page inside an archive has no path, so the source is given either
+ * way: pass a path, or pass the bytes with an empty path. Up to `cap`
+ * frames are described; the return value is the true count, which may be
+ * larger. Returns 1 for an ordinary image and 0 if it cannot be read.
  */
-size_t rubraview_pal_image_frame_count(u8str_t path);
+size_t rubraview_pal_image_frame_info(u8str_t path,
+                                      const uint8_t *data, size_t size,
+                                      rubraview_frame_t *out_frames, size_t cap);
 
 /**
- * §3.20: decode one frame of a multi-frame file, and report the frame's
- * own delay so the animation clock can pace it (0 when the container
- * states none, or for sub-page formats that do not animate).
+ * §3.20: decode one frame of a multi-frame file, from a path or from
+ * bytes, and report the frame's own delay so the animation clock can
+ * pace it (0 when the container states none, or for sub-page formats
+ * that do not animate).
  */
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
                                                              u8str_t path,
+                                                             const uint8_t *data, size_t size,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
                                                              double *out_delay_seconds);
