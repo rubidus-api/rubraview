@@ -48,6 +48,7 @@
 #include "rubraview/edit.h"
 #include "rubraview/ui_panel.h"
 #include "rubraview/filemanage.h"
+#include "rubraview/settings.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
@@ -239,6 +240,15 @@ typedef struct app_state {
     size_t                 notice_length;
     double                 notice_seconds;
 
+    /* §3.22: the settings window. It is the same panel model again,
+       with a tab strip above it — one tab's settings at a time. */
+    bool                     settings_open;
+    rubraview_settings_tab_t settings_tab;
+    rubraview_settings_t     settings;
+    rubraview_settings_t     settings_saved;   /* what is on disk, for Cancel and for Apply's state */
+    u8str_t                  settings_path;
+    rubraview_panel_t        settings_panel;
+
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
     u8str_t                picker_dir;
@@ -267,6 +277,8 @@ static void rename_commit(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
 static void panel_close(app_state_t *app);
+static void settings_open(app_state_t *app);
+static void settings_close(app_state_t *app, bool keep_changes);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
@@ -639,6 +651,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
 
     if (action_is(action, "quit")) {
         /* Esc closes what is open before it closes the program. */
+        if (app->settings_open) { settings_close(app, false); return; }
         if (app->panel.open) { panel_close(app); return; }
         rubraview_pal_window_request_close(app->window);
     } else if (action_is(action, "next_page")) {
@@ -752,6 +765,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
         triage_undo(app);
     } else if (action_is(action, "rename_file")) {
         rename_begin(app);
+    } else if (action_is(action, "open_settings")) {
+        if (app->settings_open) settings_close(app, false);
+        else settings_open(app);
     } else if (action_is(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
         else panel_open_edit(app);
@@ -1944,6 +1960,236 @@ static void draw_panel(app_state_t *app) {
     }
 }
 
+
+/* ---- the settings window (§3.22), RV-082 ---- */
+
+/* §3.22.1 calls for a separate top-level window. This is drawn inside
+   the viewer's own window instead — the "modern Metro frameless dialog"
+   the same sentence offers as the alternative — because a second HWND
+   would need its own message loop, its own DPI handling and its own
+   renderer, none of which changes what the reader can configure. The
+   difference is written down in T048 rather than left to be discovered. */
+
+#define SETTINGS_ROW_BASE 1000   /* row ids are SETTINGS_ROW_BASE + schema index */
+
+enum { SETTINGS_OK = 900, SETTINGS_CANCEL, SETTINGS_APPLY, SETTINGS_DEFAULTS,
+       SETTINGS_REGISTER, SETTINGS_UNREGISTER };
+
+static void settings_build_panel(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->settings_panel = rubraview_panel_create(rubraview_settings_tab_name(app->settings_tab), dpi);
+
+    size_t schema_count = 0;
+    const rubraview_setting_def_t *schema = rubraview_settings_schema(&schema_count);
+
+    for (size_t i = 0; i < schema_count; ++i) {
+        const rubraview_setting_def_t *def = &schema[i];
+        if (def->tab != app->settings_tab) continue;
+
+        int32_t id = SETTINGS_ROW_BASE + (int32_t)i;
+        double value = rubraview_settings_get(&app->settings, def->section, def->key);
+
+        switch (def->type) {
+            case RUBRAVIEW_SETTING_BOOL:
+                rubraview_panel_add_toggle(&app->settings_panel, id, def->label, value > 0.5);
+                break;
+            case RUBRAVIEW_SETTING_CHOICE:
+                rubraview_panel_add_choice(&app->settings_panel, id, def->label,
+                                           (int32_t)value, def->choice_count);
+                break;
+            case RUBRAVIEW_SETTING_PATH:
+                /* A folder needs a text field or a browse dialog, and
+                   this panel has neither yet; the row is shown so the
+                   setting is visible, and disabled so it does not
+                   pretend to be editable. */
+                rubraview_panel_add_button(&app->settings_panel, id, def->label);
+                if (app->settings_panel.row_count > 0) {
+                    app->settings_panel.rows[app->settings_panel.row_count - 1].enabled = false;
+                }
+                break;
+            case RUBRAVIEW_SETTING_INT:
+            case RUBRAVIEW_SETTING_FLOAT:
+            default:
+                rubraview_panel_add_slider(&app->settings_panel, id, def->label, value,
+                                           def->min_value, def->max_value, def->step);
+                break;
+        }
+
+        /* §3.22: a setting nothing reads yet is shown greyed rather than
+           hidden. A gap the reader cannot see does not get closed. */
+        if (!def->wired && app->settings_panel.row_count > 0) {
+            app->settings_panel.rows[app->settings_panel.row_count - 1].enabled = false;
+        }
+    }
+
+    rubraview_panel_add_separator(&app->settings_panel);
+    if (app->settings_tab == RUBRAVIEW_TAB_GENERAL) {
+        rubraview_panel_add_button(&app->settings_panel, SETTINGS_REGISTER, U8("Register file types"));
+        rubraview_panel_add_button(&app->settings_panel, SETTINGS_UNREGISTER, U8("Unregister"));
+        rubraview_panel_add_separator(&app->settings_panel);
+    }
+    rubraview_panel_add_button(&app->settings_panel, SETTINGS_DEFAULTS, U8("Reset to defaults"));
+    rubraview_panel_add_button(&app->settings_panel, SETTINGS_APPLY, U8("Apply"));
+    rubraview_panel_add_button(&app->settings_panel, SETTINGS_OK, U8("OK"));
+    rubraview_panel_add_button(&app->settings_panel, SETTINGS_CANCEL, U8("Cancel"));
+
+    app->settings_panel.open = true;
+
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    if (w > 0 && h > 0) rubraview_panel_layout(&app->settings_panel, (double)w, (double)h);
+}
+
+static void settings_open(app_state_t *app) {
+    /* §3.22.1: portable mode saves beside the executable, otherwise
+       under AppData — the same rule the reading history follows, so the
+       two files never end up in different places. */
+    u8str_t appdata = U8(".");
+#ifdef _WIN32
+    char appdata_utf8[1024];
+    DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
+    if (written > 0 && written < sizeof(appdata_utf8)) {
+        appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
+    }
+#endif
+    app->settings_path = rubraview_config_path(app->arena, app->config_mode,
+                                               U8("."), appdata, U8("settings.ini"));
+
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    app->settings = rubraview_settings_load(app->arena, text);
+    app->settings_saved = app->settings;
+
+    app->settings_open = true;
+    app->settings_tab = RUBRAVIEW_TAB_GENERAL;
+    settings_build_panel(app);
+}
+
+static void settings_apply(app_state_t *app) {
+    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
+    if (text.len == 0) return;
+
+    if (rubraview_pal_fs_write_file(app->settings_path, text)) {
+        app->settings_saved = app->settings;
+        /* §3.18.3's folders are read from the same file, so they follow
+           immediately rather than at the next launch. */
+        app->curation = rubraview_curation_parse(app->arena, text);
+        osd_say(app, U8("settings saved"));
+    } else {
+        osd_say(app, U8("could not write settings.ini"));
+    }
+}
+
+static void settings_close(app_state_t *app, bool keep_changes) {
+    if (!keep_changes) app->settings = app->settings_saved;
+    app->settings_open = false;
+    app->settings_panel.open = false;
+    app->settings_panel.row_count = 0;
+}
+
+static void settings_row_changed(app_state_t *app, int32_t row) {
+    if (row < 0 || (size_t)row >= app->settings_panel.row_count) return;
+    int32_t id = app->settings_panel.rows[row].id;
+    if (id < SETTINGS_ROW_BASE) return;
+
+    size_t schema_count = 0;
+    const rubraview_setting_def_t *schema = rubraview_settings_schema(&schema_count);
+    size_t index = (size_t)(id - SETTINGS_ROW_BASE);
+    if (index >= schema_count) return;
+
+    rubraview_settings_set(&app->settings, schema[index].section, schema[index].key,
+                           app->settings_panel.rows[row].value);
+}
+
+static void settings_button(app_state_t *app, int32_t row) {
+    if (row < 0 || (size_t)row >= app->settings_panel.row_count) return;
+
+    switch (app->settings_panel.rows[row].id) {
+        case SETTINGS_APPLY:
+            settings_apply(app);
+            break;
+        case SETTINGS_OK:
+            settings_apply(app);
+            settings_close(app, true);
+            break;
+        case SETTINGS_CANCEL:
+            settings_close(app, false);
+            break;
+        case SETTINGS_DEFAULTS:
+            rubraview_settings_reset(&app->settings);
+            settings_build_panel(app);
+            break;
+        case SETTINGS_REGISTER:
+            osd_say(app, rubraview_pal_shell_register(rubraview_shell_extensions())
+                           ? U8("file types registered") : U8("could not register the file types"));
+            break;
+        case SETTINGS_UNREGISTER:
+            osd_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
+                           ? U8("file types removed") : U8("could not remove the file types"));
+            break;
+        default:
+            break;
+    }
+}
+
+/* The tab strip runs across the top of the panel. */
+static rubraview_pal_rect_t settings_tab_rect(const app_state_t *app, int32_t tab) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double width = app->settings_panel.bounds.width / (double)RUBRAVIEW_TAB_COUNT;
+    return (rubraview_pal_rect_t){
+        .x = app->settings_panel.bounds.x + width * (double)tab,
+        .y = app->settings_panel.bounds.y - 26.0 * dpi,
+        .width = width,
+        .height = 26.0 * dpi,
+    };
+}
+
+static bool settings_handle_press(app_state_t *app, double px, double py) {
+    if (!app->settings_open) return false;
+
+    for (int32_t t = 0; t < RUBRAVIEW_TAB_COUNT; ++t) {
+        rubraview_pal_rect_t r = settings_tab_rect(app, t);
+        if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
+            app->settings_tab = (rubraview_settings_tab_t)t;
+            settings_build_panel(app);
+            return true;
+        }
+    }
+
+    int32_t row = -1;
+    rubraview_panel_event_t event = rubraview_panel_press(&app->settings_panel, px, py, &row);
+    if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) { settings_row_changed(app, row); return true; }
+    if (event == RUBRAVIEW_PANEL_BUTTON_PRESSED) { settings_button(app, row); return true; }
+
+    if (!rubraview_rect_contains(app->settings_panel.bounds, px, py)) {
+        /* Clicking away cancels rather than saving: a half-made change
+           should not commit itself. */
+        settings_close(app, false);
+        return true;
+    }
+    return true;
+}
+
+static void draw_settings(app_state_t *app) {
+    if (!app->settings_open) return;
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    for (int32_t t = 0; t < RUBRAVIEW_TAB_COUNT; ++t) {
+        rubraview_pal_rect_t r = settings_tab_rect(app, t);
+        bool active = t == (int32_t)app->settings_tab;
+        rubraview_pal_render_fill_rect(app->renderer, r, active ? COLOR_TILE_FILL : COLOR_BAR_FILL, 2.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       rubraview_settings_tab_name((rubraview_settings_tab_t)t),
+                                       r, 11.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    /* The panel itself is drawn by the same code the workbench uses. */
+    rubraview_panel_t saved = app->panel;
+    app->panel = app->settings_panel;
+    draw_panel(app);
+    app->panel = saved;
+}
+
 static void render_frame(app_state_t *app) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -1973,6 +2219,7 @@ static void render_frame(app_state_t *app) {
     } else {
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_panel(app);
+        draw_settings(app);
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
@@ -2798,6 +3045,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    if (settings_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
