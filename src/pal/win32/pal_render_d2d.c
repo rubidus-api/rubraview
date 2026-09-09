@@ -7,6 +7,7 @@
 #include <dxgi1_2.h>
 #include <dwrite.h>
 #include <string.h>
+#include <stdio.h>
 
 /*
  * MinGW declares IID_IDWriteFactory with DEFINE_GUID but its import
@@ -52,6 +53,29 @@ struct rubraview_texture {
  * A device context *is* an ID2D1RenderTarget, so every drawing call in
  * this file and in the WIC backend carried over unchanged.
  */
+/* Where the last failure happened, and what the OS said about it. A
+   global rather than a field because the failure that matters most is
+   the one where no renderer exists to hold it. */
+static const char *g_last_error = NULL;
+static HRESULT g_last_hresult = S_OK;
+static D3D_FEATURE_LEVEL g_feature_level = (D3D_FEATURE_LEVEL)0;
+static bool g_used_warp = false;
+
+static bool fail_step(const char *what, HRESULT hr) {
+    g_last_error = what;
+    g_last_hresult = hr;
+    return false;
+}
+
+u8str_t rubraview_pal_render_last_error(void) {
+    if (!g_last_error) return (u8str_t){ .ptr = "", .len = 0 };
+    return (u8str_t){ .ptr = g_last_error, .len = strlen(g_last_error) };
+}
+
+uint32_t rubraview_pal_render_last_hresult(void) {
+    return (uint32_t)g_last_hresult;
+}
+
 struct rubraview_renderer {
     proven_arena_t *arena;
     ID2D1Factory1 *factory;
@@ -113,12 +137,18 @@ static void texture_recycle(rubraview_renderer_t *renderer, struct rubraview_tex
    because the back buffer is a different surface each time. */
 static bool bind_back_buffer(struct rubraview_renderer *r) {
     IDXGISurface *surface = NULL;
-    if (FAILED(IDXGISwapChain1_GetBuffer(r->swap_chain, 0, &RV_IID_IDXGISurface, (void**)&surface)) || !surface) {
-        return false;
+    HRESULT hr_buffer = IDXGISwapChain1_GetBuffer(r->swap_chain, 0, &RV_IID_IDXGISurface, (void**)&surface);
+    if (FAILED(hr_buffer) || !surface) {
+        return fail_step("getting the swap chain's back buffer", hr_buffer);
     }
 
     D2D1_BITMAP_PROPERTIES1 props = {
-        .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED },
+        /* The alpha mode has to agree with the swap chain's. The chain
+           below is created with DXGI_ALPHA_MODE_IGNORE — an ordinary
+           opaque window — so the bitmap must ignore alpha too. Asking
+           for premultiplied against an opaque chain is rejected, and the
+           rejection is silent unless someone is looking. */
+        .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_IGNORE },
         /* Physical pixels: the viewport transform (RV-022) already
            accounts for DPI, so Direct2D must not scale a second time. */
         .dpiX = 96.0f, .dpiY = 96.0f,
@@ -128,7 +158,9 @@ static bool bind_back_buffer(struct rubraview_renderer *r) {
 
     HRESULT hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(r->target, surface, &props, &r->back_buffer);
     IDXGISurface_Release(surface);
-    if (FAILED(hr) || !r->back_buffer) return false;
+    if (FAILED(hr) || !r->back_buffer) {
+        return fail_step("wrapping the back buffer as a Direct2D bitmap", hr);
+    }
 
     ID2D1DeviceContext_SetTarget(r->target, (struct ID2D1Image*)r->back_buffer);
     ID2D1RenderTarget_SetDpi((ID2D1RenderTarget*)r->target, 96.0f, 96.0f);
@@ -156,26 +188,35 @@ static bool create_device(struct rubraview_renderer *r) {
         D3D_FEATURE_LEVEL_9_3,  D3D_FEATURE_LEVEL_9_1,
     };
 
+    g_used_warp = false;
     HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags,
                                    levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
-                                   D3D11_SDK_VERSION, &r->d3d, NULL, NULL);
+                                   D3D11_SDK_VERSION, &r->d3d, &g_feature_level, NULL);
     if (FAILED(hr)) {
+        g_used_warp = true;
         hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, flags,
                                levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
-                               D3D11_SDK_VERSION, &r->d3d, NULL, NULL);
+                               D3D11_SDK_VERSION, &r->d3d, &g_feature_level, NULL);
     }
-    if (FAILED(hr) || !r->d3d) return false;
+    if (FAILED(hr) || !r->d3d) return fail_step("creating the Direct3D 11 device", hr);
 
     IDXGIDevice *dxgi_device = NULL;
-    if (FAILED(ID3D11Device_QueryInterface(r->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi_device)) || !dxgi_device) {
-        return false;
+    HRESULT hr_qi = ID3D11Device_QueryInterface(r->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi_device);
+    if (FAILED(hr_qi) || !dxgi_device) {
+        return fail_step("asking the D3D device for its DXGI interface", hr_qi);
     }
 
     hr = ID2D1Factory1_CreateDevice(r->factory, dxgi_device, &r->device);
-    if (FAILED(hr) || !r->device) { IDXGIDevice_Release(dxgi_device); return false; }
+    if (FAILED(hr) || !r->device) {
+        IDXGIDevice_Release(dxgi_device);
+        return fail_step("creating the Direct2D device", hr);
+    }
 
     hr = ID2D1Device_CreateDeviceContext(r->device, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &r->target);
-    if (FAILED(hr) || !r->target) { IDXGIDevice_Release(dxgi_device); return false; }
+    if (FAILED(hr) || !r->target) {
+        IDXGIDevice_Release(dxgi_device);
+        return fail_step("creating the Direct2D device context", hr);
+    }
 
     IDXGIAdapter *adapter = NULL;
     IDXGIFactory2 *dxgi_factory = NULL;
@@ -184,7 +225,7 @@ static bool create_device(struct rubraview_renderer *r) {
         IDXGIAdapter_Release(adapter);
     }
     IDXGIDevice_Release(dxgi_device);
-    if (!dxgi_factory) return false;
+    if (!dxgi_factory) return fail_step("finding the DXGI factory", E_FAIL);
 
     DXGI_SWAP_CHAIN_DESC1 desc = {
         .Width = (UINT)r->width,
@@ -203,7 +244,7 @@ static bool create_device(struct rubraview_renderer *r) {
     hr = IDXGIFactory2_CreateSwapChainForHwnd(dxgi_factory, (IUnknown*)r->d3d, r->hwnd,
                                               &desc, NULL, NULL, &r->swap_chain);
     IDXGIFactory2_Release(dxgi_factory);
-    if (FAILED(hr) || !r->swap_chain) return false;
+    if (FAILED(hr) || !r->swap_chain) return fail_step("creating the swap chain for the window", hr);
 
     return bind_back_buffer(r);
 }
@@ -223,8 +264,29 @@ static bool create_device(struct rubraview_renderer *r) {
  * exposes the effect interfaces in C, this is where the graph would go.
  */
 
+u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size < 32) return (u8str_t){ .ptr = "", .len = 0 };
+
+    int written = snprintf(buffer, buffer_size,
+        "driver: %s   feature level: 0x%04X   size: %dx%d   swap chain: %s   text: %s",
+        g_used_warp ? "WARP (software)" : "hardware",
+        (unsigned)g_feature_level,
+        renderer ? renderer->width : 0,
+        renderer ? renderer->height : 0,
+        (renderer && renderer->swap_chain) ? "yes" : "no",
+        (renderer && renderer->dwrite) ? "DirectWrite" : "unavailable");
+
+    if (written <= 0) return (u8str_t){ .ptr = "", .len = 0 };
+    return (u8str_t){ .ptr = buffer, .len = (size_t)written };
+}
+
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height) {
-    if (!arena || !native_window_handle || width <= 0 || height <= 0) return NULL;
+    g_last_error = NULL;
+    g_last_hresult = S_OK;
+    if (!arena || !native_window_handle || width <= 0 || height <= 0) {
+        fail_step("bad arguments to the renderer", E_INVALIDARG);
+        return NULL;
+    }
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, sizeof(struct rubraview_renderer));
     if (!proven_is_ok(res.err)) return NULL;
@@ -237,7 +299,10 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
     r->height = height;
 
     HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &RV_IID_ID2D1Factory1, NULL, (void**)&r->factory);
-    if (FAILED(hr) || !r->factory) return NULL;
+    if (FAILED(hr) || !r->factory) {
+        fail_step("creating the Direct2D factory", hr);
+        return NULL;
+    }
 
     if (!create_device(r)) {
         rubraview_pal_render_destroy(r);
