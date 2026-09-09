@@ -35,6 +35,21 @@ provenance record for each is in `docs/resources/sources-and-licenses.md`.
 - Public domain imposes no condition; this notice is credit, not
   compliance.
 
+## libjpeg-turbo 3.0.4
+
+- Vendored snapshot at `vendor/libjpeg-turbo/` (the libjpeg API library
+  only; see `vendor/libjpeg-turbo/VENDORED.md`)
+- This software is based in part on the work of the Independent JPEG
+  Group. Copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding;
+  libjpeg-turbo modifications copyright (C) 2009-2024, D. R. Commander
+  and others.
+- Licences: the IJG License (`vendor/libjpeg-turbo/README.ijg`) and the
+  Modified 3-clause BSD License (`vendor/libjpeg-turbo/LICENSE.md`).
+  Both are attribution-only.
+- Used for: rotating and flipping JPEGs by rearranging their DCT
+  coefficients, and stripping metadata, without decoding any pixel. No
+  encoder, no file I/O, no SIMD and no arithmetic coding is included.
+
 Nothing else in the tree is third-party code. The Windows platform
 libraries (Direct2D, DirectWrite, the Windows Imaging Component, WASAPI)
 are operating-system components, not bundled dependencies.
