@@ -99,6 +99,33 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
                                                       rubraview_sort_mode_t mode,
                                                       bool ascending);
 
+/* ---- file management (§3.18), RV-070 / RV-071 ---- */
+
+/**
+ * Send a file to the recycle bin (§3.18.1). Undoable by the OS, which is
+ * the whole reason to prefer it to a delete.
+ */
+bool rubraview_pal_fs_recycle(u8str_t path);
+
+/** Delete a file outright (§3.18.1's Shift+Delete). Not undoable. */
+bool rubraview_pal_fs_delete(u8str_t path);
+
+/**
+ * Restore the most recently recycled file. Returns false when the
+ * platform cannot do it — the caller must then say so rather than
+ * reporting a success it did not have.
+ */
+bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path);
+
+/** Move or rename a file. Used by both §3.18.2 and §3.18.3. */
+bool rubraview_pal_fs_move(u8str_t from, u8str_t to);
+
+/** Copy a file (§3.18.3's copy mode). Fails rather than overwriting. */
+bool rubraview_pal_fs_copy(u8str_t from, u8str_t to);
+
+/** Create a directory, and any missing parent of it. */
+bool rubraview_pal_fs_make_dirs(u8str_t path);
+
 #ifdef __cplusplus
 }
 #endif

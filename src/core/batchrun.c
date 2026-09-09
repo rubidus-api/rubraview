@@ -139,6 +139,9 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         }
 
         if (equals(arg, "--batch")) { result.batch_mode = true; continue; }
+        if (equals(arg, "--register-shell")) { result.register_shell = true; continue; }
+        if (equals(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
+        if (equals(arg, "--new-instance")) { result.new_instance = true; continue; }
         if (equals(arg, "--recursive")) { result.recursive = true; continue; }
         if (equals(arg, "--grayscale")) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_COLOR_ADJUST);

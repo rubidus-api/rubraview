@@ -243,6 +243,27 @@ int main(void) {
     }
     printf("  [PASS] A failed file is counted and the run carries on\n");
 
+    /* Test 11: §3.19's own flags parse, and none of them implies a
+       batch run. */
+    {
+        const char *argv[] = { "x", "--register-shell" };
+        rubraview_cli_result_t r;
+        rubraview_cli_parse(&r, &arena, 2, argv);
+        assert(r.err == RUBRAVIEW_CLI_OK && r.register_shell && !r.batch_mode);
+
+        const char *argv2[] = { "x", "--unregister-shell" };
+        rubraview_cli_result_t r2;
+        rubraview_cli_parse(&r2, &arena, 2, argv2);
+        assert(r2.err == RUBRAVIEW_CLI_OK && r2.unregister_shell);
+
+        const char *argv3[] = { "x", "--new-instance", "D:/a.jpg" };
+        rubraview_cli_result_t r3;
+        rubraview_cli_parse(&r3, &arena, 3, argv3);
+        assert(r3.err == RUBRAVIEW_CLI_OK && r3.new_instance);
+        assert(is(r3.input, "D:/a.jpg"));
+    }
+    printf("  [PASS] The shell and instance flags parse without implying a batch run\n");
+
     free(raw);
     printf("[test_batchrun] All tests passed successfully!\n");
     return 0;

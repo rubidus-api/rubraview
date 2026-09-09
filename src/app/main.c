@@ -47,6 +47,7 @@
 #include "rubraview/filter.h"
 #include "rubraview/edit.h"
 #include "rubraview/ui_panel.h"
+#include "rubraview/filemanage.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
@@ -222,6 +223,22 @@ typedef struct app_state {
     rubraview_batch_job_t      batch_job;
     rubraview_batch_action_t   batch_actions[8];
 
+    /* §3.18: triage. The undo stack is what makes Delete safe to press
+       quickly, which is the point of the whole section. */
+    rubraview_undo_stack_t undo;
+    rubraview_curation_t   curation;
+    bool                   rename_active;
+    char                   rename_buffer[256];
+    size_t                 rename_length;
+    bool                   confirm_purge;   /* §3.18.1's Y/N dialog is showing */
+
+    /* A short-lived message: "moved to Best", "cannot be brought back".
+       §3.18.3 calls it a notification badge; it is a line of text with a
+       timer, drawn over the canvas. */
+    char                   notice[192];
+    size_t                 notice_length;
+    double                 notice_seconds;
+
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
     u8str_t                picker_dir;
@@ -241,6 +258,14 @@ static int32_t current_page_index(const app_state_t *app);
 /* The workbench and the two dialogs are defined further down, next to
    the drawing they belong with; the key handler above needs to name
    them. */
+static bool open_folder(app_state_t *app, u8str_t dir);
+static void triage_delete(app_state_t *app, bool permanent);
+static void triage_undo(app_state_t *app);
+static void triage_curate(app_state_t *app, int32_t digit);
+static void rename_begin(app_state_t *app);
+static void rename_commit(app_state_t *app);
+static void finish_open(app_state_t *app, size_t start_page);
+
 static void panel_close(app_state_t *app);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
@@ -718,6 +743,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
+    } else if (action_is(action, "delete_file")) {
+        triage_delete(app, false);
+    } else if (action_is(action, "purge_file")) {
+        /* §3.18.1: a permanent delete asks first, every time. */
+        app->confirm_purge = true;
+    } else if (action_is(action, "undo")) {
+        triage_undo(app);
+    } else if (action_is(action, "rename_file")) {
+        rename_begin(app);
     } else if (action_is(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
         else panel_open_edit(app);
@@ -832,7 +866,79 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     return false;
 }
 
+static bool key_is(rubraview_key_combo_t combo, const char *name) {
+    size_t n = strlen(name);
+    return combo.key_name.len == n && memcmp(combo.key_name.ptr, name, n) == 0;
+}
+
+/* Everything §3.18 puts in front of the reader answers the next key
+   press before anything else does: a confirmation that is ignored is
+   worse than no confirmation at all. */
+static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (app->confirm_purge) {
+        if (key_is(combo, "Y") || key_is(combo, "Enter")) {
+            app->confirm_purge = false;
+            triage_delete(app, true);
+        } else {
+            /* Anything else is "no". A confirmation should be hard to
+               agree to by accident and easy to refuse. */
+            app->confirm_purge = false;
+        }
+        return true;
+    }
+
+    if (app->rename_active) {
+        if (key_is(combo, "Enter")) { rename_commit(app); return true; }
+        if (key_is(combo, "Escape")) { app->rename_active = false; return true; }
+        if (key_is(combo, "Backspace")) {
+            if (app->rename_length > 0) {
+                /* Step back over a whole UTF-8 character, not one byte:
+                   deleting half of a Hangul syllable would leave the
+                   name unwritable. */
+                size_t at = app->rename_length;
+                while (at > 0 && ((unsigned char)app->rename_buffer[at - 1] & 0xC0u) == 0x80u) at--;
+                if (at > 0) at--;
+                app->rename_length = at;
+                app->rename_buffer[at] = '\0';
+            }
+            return true;
+        }
+
+        /* A single printable key extends the name. Text entry beyond
+           this — IME, selection, the clipboard — belongs to the native
+           EDIT control §3.18.2 names, which is not built yet. */
+        if (combo.key_name.len == 1 && combo.modifiers == RUBRAVIEW_MOD_NONE) {
+            char c = combo.key_name.ptr[0];
+            if (app->rename_length + 1 < sizeof(app->rename_buffer)) {
+                if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                app->rename_buffer[app->rename_length++] = c;
+                app->rename_buffer[app->rename_length] = '\0';
+            }
+            return true;
+        }
+        return true;   /* while renaming, nothing else gets through */
+    }
+
+    /* §3.18.3: 1-9 curate — but only where a folder is actually bound.
+       §3.7.2 gives 1-5 to the fit modes, and an unconfigured viewer must
+       keep them; a reader who has set up triage folders has said which
+       meaning they want. */
+    if (combo.modifiers == RUBRAVIEW_MOD_NONE && combo.key_name.len == 1) {
+        char c = combo.key_name.ptr[0];
+        if (c >= '1' && c <= '9') {
+            int32_t digit = c - '0';
+            if (rubraview_curation_target(&app->curation, digit).len > 0) {
+                triage_curate(app, digit);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (triage_handle_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
     /* §3.7.1: the slide show's own bindings win while it is running,
        then the viewing context, then the global section. */
@@ -1071,6 +1177,38 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
 
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
+
+    /* §3.18's confirmation and its notices sit above everything else:
+       they are answers to something the reader just did. */
+    if (app->confirm_purge) {
+        double box_w = 520.0 * chrome_dpi, box_h = 90.0 * chrome_dpi;
+        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       U8("Delete this file from the disk for good?  (Y / N)"),
+                                       box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    if (app->rename_active) {
+        double box_w = 560.0 * chrome_dpi, box_h = 64.0 * chrome_dpi;
+        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       (u8str_t){ .ptr = app->rename_buffer, .len = app->rename_length },
+                                       box, 18.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    if (app->notice_seconds > 0.0 && app->notice_length > 0) {
+        double box_h = 44.0 * chrome_dpi;
+        rubraview_pal_rect_t box = { win_w * 0.2, win_h * 0.08, win_w * 0.6, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BAR_FILL, 3.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       (u8str_t){ .ptr = app->notice, .len = app->notice_length },
+                                       box, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
 
     /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
        low-resolution thumbnail decoding arrives with the asynchronous
@@ -1258,6 +1396,230 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
     }
 }
 
+
+
+/* ---- triage: delete, rename, curate (§3.18) ---- */
+
+/* The file behind the page on screen, or an empty slice for an archive
+   page — a page inside a CBZ is not a file, so none of §3.18 applies to
+   it and every action below refuses rather than doing something to the
+   archive. */
+static u8str_t current_file_path(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    if (page < 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) {
+        return (u8str_t){ .ptr = "", .len = 0 };
+    }
+    return app->source.pages[page].path;
+}
+
+/* After a file leaves the sequence the viewer has to land somewhere.
+   §3.18.1: the next item, or the one before when the last was removed. */
+static void reopen_after_removal(app_state_t *app, size_t removed_index) {
+    u8str_t dir = app->source_dir;
+    if (dir.len == 0) return;
+
+    size_t target = removed_index;
+    open_folder(app, dir);
+    if (page_count(app) == 0) return;
+    if (target >= page_count(app)) target = page_count(app) - 1;
+
+    finish_open(app, target);
+}
+
+static void osd_say(app_state_t *app, u8str_t text) {
+    size_t n = text.len < sizeof(app->notice) - 1 ? text.len : sizeof(app->notice) - 1;
+    memcpy(app->notice, text.ptr, n);
+    app->notice[n] = '\0';
+    app->notice_length = n;
+    app->notice_seconds = 2.5;
+}
+
+static void triage_delete(app_state_t *app, bool permanent) {
+    u8str_t path = current_file_path(app);
+    if (path.len == 0) return;
+
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+
+    bool ok = permanent ? rubraview_pal_fs_delete(path) : rubraview_pal_fs_recycle(path);
+    if (!ok) {
+        osd_say(app, U8("could not delete that file"));
+        return;
+    }
+
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = permanent ? RUBRAVIEW_FILE_OP_PURGE : RUBRAVIEW_FILE_OP_RECYCLE,
+        .source_path = path,
+        .playlist_index = (size_t)page,
+    });
+
+    osd_say(app, permanent ? U8("deleted permanently") : U8("moved to the recycle bin"));
+    reopen_after_removal(app, (size_t)page);
+}
+
+static void triage_curate(app_state_t *app, int32_t digit) {
+    u8str_t path = current_file_path(app);
+    if (path.len == 0) return;
+
+    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
+    if (target_dir.len == 0) return;   /* that key is not bound: do nothing */
+
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+
+    rubraview_pal_fs_make_dirs(target_dir);
+    u8str_t name = rubraview_path_basename(path);
+    u8str_t target = rubraview_path_join(app->arena, target_dir, name);
+    if (target.len == 0) return;
+
+    bool moving = app->curation.mode == RUBRAVIEW_CURATION_MOVE;
+    bool ok = moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target);
+    if (!ok) {
+        osd_say(app, U8("could not put the file there"));
+        return;
+    }
+
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+        .source_path = path,
+        .target_path = target,
+        .playlist_index = (size_t)page,
+    });
+
+    osd_say(app, moving ? U8("moved") : U8("copied"));
+
+    /* §3.18.3: a move takes the file out of the sequence, so the viewer
+       advances; a copy leaves it, so it stays put. */
+    if (rubraview_curation_advances(&app->curation)) {
+        reopen_after_removal(app, (size_t)page);
+    }
+}
+
+static void triage_undo(app_state_t *app) {
+    rubraview_file_action_t action = {0};
+    switch (rubraview_undo_peek(&app->undo, &action)) {
+        case RUBRAVIEW_UNDO_NOTHING:
+            osd_say(app, U8("nothing to undo"));
+            return;
+        case RUBRAVIEW_UNDO_IRREVERSIBLE:
+            /* Said plainly rather than silently undoing the action
+               before it, which would restore the wrong file. */
+            osd_say(app, U8("that file was deleted permanently and cannot be brought back"));
+            return;
+        case RUBRAVIEW_UNDO_AVAILABLE:
+            break;
+    }
+
+    bool ok = false;
+    switch (action.op) {
+        case RUBRAVIEW_FILE_OP_MOVE:
+        case RUBRAVIEW_FILE_OP_RENAME:
+            ok = rubraview_pal_fs_move(action.target_path, action.source_path);
+            break;
+        case RUBRAVIEW_FILE_OP_COPY:
+            /* Undoing a copy means removing the copy, not the original. */
+            ok = rubraview_pal_fs_delete(action.target_path);
+            break;
+        case RUBRAVIEW_FILE_OP_RECYCLE:
+            ok = rubraview_pal_fs_restore_last_recycled(action.source_path);
+            if (!ok) osd_say(app, U8("Windows keeps the recycle bin's undo to itself — restore it from there"));
+            break;
+        default:
+            break;
+    }
+
+    if (!ok) return;
+
+    rubraview_undo_commit(&app->undo);
+    osd_say(app, U8("undone"));
+    reopen_after_removal(app, action.playlist_index);
+}
+
+/* §3.18.2's inline rename. The text is collected by the key handler
+   rather than by a child EDIT control: the control the RFC names brings
+   native IME with it, and adding it is a separate piece of work, so the
+   limitation is written down rather than hidden. */
+static void rename_begin(app_state_t *app) {
+    u8str_t path = current_file_path(app);
+    if (path.len == 0) return;
+
+    u8str_t name = rubraview_path_basename(path);
+    size_t stem = rubraview_rename_stem_length(name);
+    if (stem >= sizeof(app->rename_buffer)) return;
+
+    memcpy(app->rename_buffer, name.ptr, stem);
+    app->rename_length = stem;
+    app->rename_buffer[stem] = '\0';
+    app->rename_active = true;
+}
+
+static void rename_commit(app_state_t *app) {
+    if (!app->rename_active) return;
+    app->rename_active = false;
+
+    u8str_t path = current_file_path(app);
+    if (path.len == 0) return;
+
+    u8str_t old_name = rubraview_path_basename(path);
+    u8str_t stem = { .ptr = app->rename_buffer, .len = app->rename_length };
+    u8str_t new_name = rubraview_rename_compose(app->arena, old_name, stem);
+
+    rubraview_rename_err_t err = rubraview_rename_validate(new_name);
+    if (err != RUBRAVIEW_RENAME_OK) {
+        osd_say(app, rubraview_rename_error_text(err));
+        return;
+    }
+
+    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), new_name);
+    if (target.len == 0 || !rubraview_pal_fs_move(path, target)) {
+        osd_say(app, U8("could not rename that file"));
+        return;
+    }
+
+    int32_t page = current_page_index(app);
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = RUBRAVIEW_FILE_OP_RENAME,
+        .source_path = path,
+        .target_path = target,
+        .playlist_index = page >= 0 ? (size_t)page : 0,
+    });
+
+    osd_say(app, U8("renamed"));
+    reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
+}
+
+/* §3.19.2: what to do with what was dropped. */
+static void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
+    rubraview_drop_item_t items[16];
+    size_t count = event->drop.count < 16 ? event->drop.count : 16;
+
+    for (size_t i = 0; i < count; ++i) {
+        items[i].path = (u8str_t){ .ptr = event->drop.paths[i], .len = event->drop.path_lengths[i] };
+        /* A directory has no extension and does list: asking the
+           filesystem is cheaper than guessing from the name. */
+        rubraview_fs_listing_t probe = rubraview_pal_fs_list_dir(app->arena, items[i].path);
+        items[i].is_directory = probe.count > 0;
+    }
+
+    switch (rubraview_drop_classify(items, count)) {
+        case RUBRAVIEW_DROP_OPEN_FILE:
+        case RUBRAVIEW_DROP_OPEN_FOLDER:
+            open_path(app, items[0].path);
+            break;
+        case RUBRAVIEW_DROP_PLAYLIST:
+            /* §3.19.2: several things become a temporary sequence of
+               exactly those things. Opening the first one's folder would
+               show files the reader did not drop, so the first item is
+               opened and the rest are left for the playlist work in
+               §3.12 — recorded as a limitation rather than guessed at. */
+            open_path(app, items[0].path);
+            osd_say(app, U8("opened the first of the dropped files"));
+            break;
+        case RUBRAVIEW_DROP_NOTHING:
+        default:
+            break;
+    }
+}
 
 /* ---- the workbench and the two dialogs (§3.13, §3.10, §3.11) ---- */
 
@@ -1625,6 +1987,11 @@ static void tick_timers(app_state_t *app, double dt) {
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
     animation_tick(app, dt);
+
+    if (app->notice_seconds > 0.0) {
+        app->notice_seconds -= dt;
+        if (app->notice_seconds < 0.0) app->notice_seconds = 0.0;
+    }
 
     double grace = 0.5; /* §3.6.3 */
     rubraview_box_tick(&app->toolbox, dt, grace);
@@ -2228,6 +2595,42 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 CoUninitialize();
                 return code;
             }
+
+            /* §3.19.3: registering associations is a job, not a launch. */
+            if (cli.register_shell || cli.unregister_shell) {
+                bool ok = cli.register_shell
+                            ? rubraview_pal_shell_register(rubraview_shell_extensions())
+                            : rubraview_pal_shell_unregister(rubraview_shell_extensions());
+                console_line(ok ? "rubraview: file associations updated"
+                                : "rubraview: could not update the file associations");
+                free(memory);
+                CoUninitialize();
+                return ok ? 0 : 1;
+            }
+
+            /* §3.19.1: hand the file to the window that is already open,
+               rather than opening a second one. */
+            {
+                u8str_t settings = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
+                bool single_instance = true;
+                if (settings.len > 0) {
+                    rubraview_ini_doc_t doc = rubraview_ini_parse(&arena, settings);
+                    single_instance = rubraview_ini_get_bool(&doc, U8(""), U8("single_instance"), true);
+                }
+                if (cli.new_instance) single_instance = false;
+
+                bool alone = rubraview_pal_instance_claim();
+                if (rubraview_instance_decide(single_instance, !alone) == RUBRAVIEW_INSTANCE_HAND_OVER) {
+                    if (rubraview_pal_instance_hand_over(cli.input)) {
+                        free(memory);
+                        CoUninitialize();
+                        return 0;
+                    }
+                    /* The mutex said someone was there but no window
+                       answered — a crashed instance, most likely. Start
+                       normally rather than refusing to run. */
+                }
+            }
         }
     }
 
@@ -2281,6 +2684,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
+
+    /* §3.18.3: the triage folders, and §3.19.2: accept drops. */
+    {
+        u8str_t settings = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
+        app.curation = rubraview_curation_parse(&arena, settings);
+    }
+    rubraview_pal_window_accept_drops(app.window, true);
     sync_menubox_tiles(&app);
 
     int argc = 0;
@@ -2427,6 +2837,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.zoom *= event.gesture.scale_ratio;
                     if (app.zoom < 0.01) app.zoom = 0.01;
                     note_activity(&app);
+                    break;
+
+                case RUBRAVIEW_WINDOW_EVENT_DROP:
+                case RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST:
+                    handle_drop(&app, &event);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN:
