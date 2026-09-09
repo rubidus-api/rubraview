@@ -93,7 +93,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
             build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_subtitle build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics
 
-.PHONY: all test check clean win64 package
+.PHONY: all test check clean win64 package mfprobe
 
 all: test
 
@@ -171,6 +171,16 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 \
 		-o dist/rubraview.exe
 	@echo "Linked: dist/rubraview.exe"
+
+# A diagnostic, not part of the viewer: it asks a Windows machine which
+# media formats it can decode by itself. That question cannot be answered
+# from this build machine, and the answer decides how much of §5.1 needs
+# FFmpeg at all.
+mfprobe:
+	@mkdir -p dist
+	$(MINGW_CC) -std=c11 -O2 -Wall -Wextra -municode tools/mfprobe.c \
+		-o dist/mfprobe.exe -lmfplat -lmfreadwrite -lmfuuid -lole32 -loleaut32
+	@echo "Built: dist/mfprobe.exe — run it on Windows, optionally with a file to test"
 
 # RV-083: the release layout. Depends on win64 rather than repeating it,
 # so what is packaged is always what was just built.
