@@ -200,6 +200,34 @@ int main(void) {
     }
     printf("  [PASS] A neutral commit copies the image through unchanged\n");
 
+    /* Test 10: the preview is bounded by the view, never magnified, and
+       measured against the crop when there is one. */
+    {
+        rubraview_edit_session_t s = rubraview_edit_begin(9000, 6000);
+        int32_t w = 0, h = 0;
+
+        rubraview_edit_preview_size(&s, 1920, 1080, &w, &h);
+        assert(w <= 1920 && h <= 1080);
+        assert(w > 0 && h > 0);
+        /* The aspect ratio is kept: 3:2 in, 3:2 out. */
+        assert(fabs((double)w / (double)h - 1.5) < 0.01);
+
+        /* A small image is not blown up to fill the view. */
+        rubraview_edit_session_t small = rubraview_edit_begin(64, 64);
+        rubraview_edit_preview_size(&small, 1920, 1080, &w, &h);
+        assert(w == 64 && h == 64);
+
+        /* With a crop set, the preview follows the crop. */
+        rubraview_edit_crop_drag(&s, 0, 0, 900, 600);
+        rubraview_edit_preview_size(&s, 300, 300, &w, &h);
+        assert(w == 300 && h == 200);
+
+        /* No view given means full size — the commit path. */
+        rubraview_edit_preview_size(&s, 0, 0, &w, &h);
+        assert(w == 900 && h == 600);
+    }
+    printf("  [PASS] The preview is bounded by the view, never magnified, and follows the crop\n");
+
     free(raw);
     printf("[test_edit] All tests passed successfully!\n");
     return 0;

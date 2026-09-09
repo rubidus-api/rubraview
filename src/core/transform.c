@@ -95,3 +95,51 @@ rubraview_mat3x2_t rubraview_orientation_matrix(rubraview_orientation_t o, doubl
 
     return rubraview_mat3x2_multiply(rotation, flip);
 }
+
+rubraview_pixbuf_t rubraview_pixbuf_orient(proven_arena_t *arena,
+                                           const rubraview_pixbuf_t *src,
+                                           rubraview_orientation_t orientation) {
+    rubraview_pixbuf_t empty = {0};
+    if (!arena || !rubraview_pixbuf_is_valid(src)) return empty;
+
+    bool swaps = rubraview_orientation_swaps_axes(orientation);
+    int32_t dst_w = swaps ? src->height : src->width;
+    int32_t dst_h = swaps ? src->width : src->height;
+
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, dst_w, dst_h, src->format);
+    if (!rubraview_pixbuf_is_valid(&dst)) return empty;
+
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
+
+    /* Walk the destination and ask where each pixel came from. Going
+       this way round means every destination pixel is written exactly
+       once, whatever the rotation is — the reverse mapping is where
+       off-by-ones and gaps come from. */
+    for (int32_t y = 0; y < dst_h; ++y) {
+        uint8_t *dst_row = dst.pixels + (ptrdiff_t)y * dst.stride;
+        for (int32_t x = 0; x < dst_w; ++x) {
+            int32_t sx = x, sy = y;
+
+            switch (orientation.rotation) {
+                case RUBRAVIEW_ROTATE_90:  sx = y;                 sy = dst_w - 1 - x;    break;
+                case RUBRAVIEW_ROTATE_180: sx = dst_w - 1 - x;     sy = dst_h - 1 - y;    break;
+                case RUBRAVIEW_ROTATE_270: sx = dst_h - 1 - y;     sy = x;                break;
+                case RUBRAVIEW_ROTATE_0:
+                default: break;
+            }
+
+            /* The flips are applied in the source's own space, after the
+               rotation has decided which source pixel this is. */
+            if (orientation.flip_horizontal) sx = src->width - 1 - sx;
+            if (orientation.flip_vertical)   sy = src->height - 1 - sy;
+
+            if (sx < 0 || sy < 0 || sx >= src->width || sy >= src->height) continue;
+
+            const uint8_t *spx = src->pixels + (ptrdiff_t)sy * src->stride + (ptrdiff_t)sx * bpp;
+            uint8_t *dpx = dst_row + (ptrdiff_t)x * bpp;
+            for (int32_t c = 0; c < bpp; ++c) dpx[c] = spx[c];
+        }
+    }
+
+    return dst;
+}

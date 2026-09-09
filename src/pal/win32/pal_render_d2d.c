@@ -2,6 +2,9 @@
 #define COBJMACROS
 #include <windows.h>
 #include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
 #include <dwrite.h>
 #include <string.h>
 
@@ -13,6 +16,20 @@
  */
 static const GUID RUBRAVIEW_IID_IDWriteFactory =
     { 0xb859ee5a, 0xd838, 0x4b5b, { 0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48 } };
+
+/*
+ * The same applies to the Direct2D 1.1 and DXGI interface ids the device
+ * path needs. Each value is copied from the toolchain's own header
+ * (d2d1_1.h, dxgi.h, dxgi1_2.h) rather than written from memory.
+ */
+static const GUID RV_IID_ID2D1Factory1 =
+    { 0xbb12d362, 0xdaee, 0x4b9a, { 0xaa, 0x1d, 0x14, 0xba, 0x40, 0x1c, 0xfa, 0x1f } };
+static const GUID RV_IID_IDXGIDevice =
+    { 0x54ec77fa, 0x1377, 0x44e6, { 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
+static const GUID RV_IID_IDXGIFactory2 =
+    { 0x50c83a1c, 0xe072, 0x4c48, { 0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0 } };
+static const GUID RV_IID_IDXGISurface =
+    { 0xcafcb56c, 0x6ac3, 0x4889, { 0xbf, 0x47, 0x9e, 0x23, 0xbb, 0xd2, 0x60, 0xec } };
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 
@@ -23,10 +40,26 @@ struct rubraview_texture {
     struct rubraview_texture *next_free; /* recycled struct free list */
 };
 
+/*
+ * RV-064 moved this backend from Direct2D 1.0's ID2D1HwndRenderTarget to
+ * 1.1's ID2D1DeviceContext on a DXGI swap chain. Three things needed it,
+ * and all three were blocked until now:
+ *
+ *   - cubic bitmap interpolation (§3.4), which 1.0 simply does not have;
+ *   - the effect graph behind §3.13's live adjustment preview;
+ *   - the slide-show cross-fade (§3.2.5), which M3 had to leave undrawn.
+ *
+ * A device context *is* an ID2D1RenderTarget, so every drawing call in
+ * this file and in the WIC backend carried over unchanged.
+ */
 struct rubraview_renderer {
     proven_arena_t *arena;
-    ID2D1Factory *factory;
-    ID2D1HwndRenderTarget *target;
+    ID2D1Factory1 *factory;
+    ID2D1Device *device;
+    ID2D1DeviceContext *target;    /* the render target, and the effect graph's owner */
+    ID3D11Device *d3d;
+    IDXGISwapChain1 *swap_chain;
+    ID2D1Bitmap1 *back_buffer;
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
     HWND hwnd;
     int32_t width, height;
@@ -38,6 +71,10 @@ struct rubraview_renderer {
 
 ID2D1RenderTarget *rubraview_d2d_render_target(rubraview_renderer_t *renderer) {
     return renderer ? (ID2D1RenderTarget*)renderer->target : NULL;
+}
+
+ID2D1DeviceContext *rubraview_d2d_device_context(rubraview_renderer_t *renderer) {
+    return renderer ? renderer->target : NULL;
 }
 
 rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, ID2D1Bitmap *bitmap) {
@@ -71,28 +108,120 @@ static void texture_recycle(rubraview_renderer_t *renderer, struct rubraview_tex
 
 /* ---- lifecycle ---- */
 
-static bool create_target(struct rubraview_renderer *r) {
-    D2D1_RENDER_TARGET_PROPERTIES props = {
-        .type = D2D1_RENDER_TARGET_TYPE_DEFAULT,
+/* The swap chain's back buffer, wrapped as a Direct2D bitmap and made
+   the context's target. Called at start-up and again after every resize,
+   because the back buffer is a different surface each time. */
+static bool bind_back_buffer(struct rubraview_renderer *r) {
+    IDXGISurface *surface = NULL;
+    if (FAILED(IDXGISwapChain1_GetBuffer(r->swap_chain, 0, &RV_IID_IDXGISurface, (void**)&surface)) || !surface) {
+        return false;
+    }
+
+    D2D1_BITMAP_PROPERTIES1 props = {
         .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED },
-        .dpiX = 0.0f, .dpiY = 0.0f, /* 0 means "use the desktop DPI"; we work in physical pixels below */
-        .usage = D2D1_RENDER_TARGET_USAGE_NONE,
-        .minLevel = D2D1_FEATURE_LEVEL_DEFAULT,
-    };
-    D2D1_HWND_RENDER_TARGET_PROPERTIES hwnd_props = {
-        .hwnd = r->hwnd,
-        .pixelSize = { (UINT32)r->width, (UINT32)r->height },
-        .presentOptions = D2D1_PRESENT_OPTIONS_NONE,
+        /* Physical pixels: the viewport transform (RV-022) already
+           accounts for DPI, so Direct2D must not scale a second time. */
+        .dpiX = 96.0f, .dpiY = 96.0f,
+        .bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        .colorContext = NULL,
     };
 
-    HRESULT hr = ID2D1Factory_CreateHwndRenderTarget(r->factory, &props, &hwnd_props, &r->target);
-    if (FAILED(hr) || !r->target) return false;
+    HRESULT hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(r->target, surface, &props, &r->back_buffer);
+    IDXGISurface_Release(surface);
+    if (FAILED(hr) || !r->back_buffer) return false;
 
-    /* Draw in physical pixels: the viewport transform (RV-022) already
-       accounts for DPI, so Direct2D must not scale a second time. */
+    ID2D1DeviceContext_SetTarget(r->target, (struct ID2D1Image*)r->back_buffer);
     ID2D1RenderTarget_SetDpi((ID2D1RenderTarget*)r->target, 96.0f, 96.0f);
     return true;
 }
+
+static void release_back_buffer(struct rubraview_renderer *r) {
+    if (r->target) ID2D1DeviceContext_SetTarget(r->target, NULL);
+    if (r->back_buffer) {
+        /* MinGW's C headers do not chain the inherited methods on the
+           1.1 interfaces, so the base interface is the one to call. */
+        ID2D1Bitmap_Release((ID2D1Bitmap*)r->back_buffer);
+        r->back_buffer = NULL;
+    }
+}
+
+/* Brings up D3D11, Direct2D and the swap chain. The hardware driver is
+   tried first and WARP — the software rasteriser — second, so a machine
+   with no usable GPU still shows images rather than failing to start. */
+static bool create_device(struct rubraview_renderer *r) {
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT; /* required by Direct2D */
+    D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
+        D3D_FEATURE_LEVEL_9_3,  D3D_FEATURE_LEVEL_9_1,
+    };
+
+    HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags,
+                                   levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
+                                   D3D11_SDK_VERSION, &r->d3d, NULL, NULL);
+    if (FAILED(hr)) {
+        hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, flags,
+                               levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
+                               D3D11_SDK_VERSION, &r->d3d, NULL, NULL);
+    }
+    if (FAILED(hr) || !r->d3d) return false;
+
+    IDXGIDevice *dxgi_device = NULL;
+    if (FAILED(ID3D11Device_QueryInterface(r->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi_device)) || !dxgi_device) {
+        return false;
+    }
+
+    hr = ID2D1Factory1_CreateDevice(r->factory, dxgi_device, &r->device);
+    if (FAILED(hr) || !r->device) { IDXGIDevice_Release(dxgi_device); return false; }
+
+    hr = ID2D1Device_CreateDeviceContext(r->device, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &r->target);
+    if (FAILED(hr) || !r->target) { IDXGIDevice_Release(dxgi_device); return false; }
+
+    IDXGIAdapter *adapter = NULL;
+    IDXGIFactory2 *dxgi_factory = NULL;
+    if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi_device, &adapter)) && adapter) {
+        IDXGIAdapter_GetParent(adapter, &RV_IID_IDXGIFactory2, (void**)&dxgi_factory);
+        IDXGIAdapter_Release(adapter);
+    }
+    IDXGIDevice_Release(dxgi_device);
+    if (!dxgi_factory) return false;
+
+    DXGI_SWAP_CHAIN_DESC1 desc = {
+        .Width = (UINT)r->width,
+        .Height = (UINT)r->height,
+        .Format = DXGI_FORMAT_B8G8R8A8_UNORM,
+        .Stereo = FALSE,
+        .SampleDesc = { .Count = 1, .Quality = 0 },
+        .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
+        .BufferCount = 2,
+        .Scaling = DXGI_SCALING_STRETCH,
+        .SwapEffect = DXGI_SWAP_EFFECT_DISCARD,
+        .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
+        .Flags = 0,
+    };
+
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(dxgi_factory, (IUnknown*)r->d3d, r->hwnd,
+                                              &desc, NULL, NULL, &r->swap_chain);
+    IDXGIFactory2_Release(dxgi_factory);
+    if (FAILED(hr) || !r->swap_chain) return false;
+
+    return bind_back_buffer(r);
+}
+
+/*
+ * §3.13 describes the live preview as a Direct2D effect graph. That is
+ * not reachable from here: MinGW's `d2d1_1.h` declares ID2D1Effect for
+ * C++ only — there is no C vtable for it — so a C program on this
+ * toolchain cannot build one.
+ *
+ * The preview is therefore computed the other way round: the *same*
+ * commit code runs on a reduced-size copy of the image (see
+ * `rubraview_edit_preview_size`). That is fast enough to move with a
+ * slider on any image a screen can show, and it has a property the
+ * effect graph does not — the preview and the final result are produced
+ * by one implementation, so they cannot drift apart. If a toolchain ever
+ * exposes the effect interfaces in C, this is where the graph would go.
+ */
 
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height) {
     if (!arena || !native_window_handle || width <= 0 || height <= 0) return NULL;
@@ -107,11 +236,11 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
     r->width = width;
     r->height = height;
 
-    HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void**)&r->factory);
+    HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &RV_IID_ID2D1Factory1, NULL, (void**)&r->factory);
     if (FAILED(hr) || !r->factory) return NULL;
 
-    if (!create_target(r)) {
-        ID2D1Factory_Release(r->factory);
+    if (!create_device(r)) {
+        rubraview_pal_render_destroy(r);
         return NULL;
     }
 
@@ -127,27 +256,33 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
 
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     if (!renderer) return;
-    if (renderer->target) {
-        ID2D1HwndRenderTarget_Release(renderer->target);
-        renderer->target = NULL;
-    }
+    release_back_buffer(renderer);
+    if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
+    if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
+    if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
+    if (renderer->d3d) { ID3D11Device_Release(renderer->d3d); renderer->d3d = NULL; }
     if (renderer->dwrite) {
         IDWriteFactory_Release(renderer->dwrite);
         renderer->dwrite = NULL;
     }
     if (renderer->factory) {
-        ID2D1Factory_Release(renderer->factory);
+        ID2D1Factory_Release((ID2D1Factory*)renderer->factory);
         renderer->factory = NULL;
     }
 }
 
 bool rubraview_pal_render_resize(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
-    if (!renderer || !renderer->target || width <= 0 || height <= 0) return false;
+    if (!renderer || !renderer->target || !renderer->swap_chain || width <= 0 || height <= 0) return false;
     renderer->width = width;
     renderer->height = height;
-    D2D1_SIZE_U size = { (UINT32)width, (UINT32)height };
-    HRESULT hr = ID2D1HwndRenderTarget_Resize(renderer->target, &size);
-    return SUCCEEDED(hr);
+
+    /* The back buffer must be let go before the swap chain can resize —
+       a surface still referenced cannot be replaced. */
+    release_back_buffer(renderer);
+    HRESULT hr = IDXGISwapChain1_ResizeBuffers(renderer->swap_chain, 0, (UINT)width, (UINT)height,
+                                               DXGI_FORMAT_UNKNOWN, 0);
+    if (FAILED(hr)) return false;
+    return bind_back_buffer(renderer);
 }
 
 /* ---- frame ---- */
@@ -175,16 +310,24 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
     HRESULT hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     renderer->drawing = false;
 
-    if (hr == (HRESULT)D2DERR_RECREATE_TARGET) {
-        /* Device lost: drop the target so the caller can rebuild it and
-           reload its textures (every ID2D1Bitmap died with it). */
-        ID2D1HwndRenderTarget_Release(renderer->target);
-        renderer->target = NULL;
+    if (SUCCEEDED(hr) && renderer->swap_chain) {
+        hr = IDXGISwapChain1_Present(renderer->swap_chain, 1, 0);
+    }
+
+    if (hr == (HRESULT)D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED ||
+        hr == DXGI_ERROR_DEVICE_RESET) {
+        /* The device is gone — a driver update, a GPU reset, a laptop
+           switching graphics adapters. Everything built on it died with
+           it, textures included, so the whole device is rebuilt and the
+           caller is told to reload. */
+        release_back_buffer(renderer);
+        if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
+        if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
+        if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
+        if (renderer->d3d) { ID3D11Device_Release(renderer->d3d); renderer->d3d = NULL; }
         renderer->free_textures = NULL;
-        if (create_target(renderer)) {
-            return false; /* recreated, but the caller must reload textures */
-        }
-        return false;
+        (void)create_device(renderer);
+        return false; /* recreated or not, the caller must reload textures */
     }
     return SUCCEEDED(hr);
 }
@@ -202,17 +345,27 @@ static D2D1_MATRIX_3X2_F to_d2d_matrix(rubraview_mat3x2_t m) {
 }
 
 /*
- * ID2D1HwndRenderTarget (Direct2D 1.0) offers only nearest-neighbour and
- * linear bitmap interpolation. Cubic modes need an ID2D1DeviceContext
- * (Direct2D 1.1), which arrives with the effect graph in M6 (RV-064);
- * until then CUBIC and HIGH_QUALITY_CUBIC render as linear. Nearest —
- * the mode pixel art actually depends on (§3.5) — is exact.
+ * With the device context (RV-064) the cubic modes are finally real. Under
+ * Direct2D 1.0 they had to be drawn as linear, which is the limitation M2
+ * recorded; nothing else about §3.4 changed, and NEAREST — the mode pixel
+ * art depends on (§3.5) — was always exact.
  */
-static D2D1_BITMAP_INTERPOLATION_MODE to_d2d_interpolation(rubraview_interpolation_t interp) {
-    return (interp == RUBRAVIEW_INTERP_NEAREST)
-        ? D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR
-        : D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
+static D2D1_INTERPOLATION_MODE to_d2d_interpolation(rubraview_interpolation_t interp) {
+    switch (interp) {
+        case RUBRAVIEW_INTERP_NEAREST:            return D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+        case RUBRAVIEW_INTERP_CUBIC:              return D2D1_INTERPOLATION_MODE_CUBIC;
+        case RUBRAVIEW_INTERP_HIGH_QUALITY_CUBIC: return D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC;
+        case RUBRAVIEW_INTERP_LINEAR:
+        default:                                  return D2D1_INTERPOLATION_MODE_LINEAR;
+    }
 }
+
+static void draw_region_opacity(rubraview_renderer_t *renderer,
+                                const rubraview_texture_t *texture,
+                                rubraview_src_rect_t src,
+                                rubraview_mat3x2_t transform,
+                                rubraview_interpolation_t interpolation,
+                                FLOAT opacity);
 
 void rubraview_pal_render_draw_texture(rubraview_renderer_t *renderer,
                                        const rubraview_texture_t *texture,
@@ -224,13 +377,25 @@ void rubraview_pal_render_draw_texture(rubraview_renderer_t *renderer,
     rubraview_pal_render_draw_texture_region(renderer, texture, src, transform, interpolation);
 }
 
-void rubraview_pal_render_draw_texture_region(rubraview_renderer_t *renderer,
-                                              const rubraview_texture_t *texture,
-                                              rubraview_src_rect_t src,
-                                              rubraview_mat3x2_t transform,
-                                              rubraview_interpolation_t interpolation) {
+void rubraview_pal_render_draw_texture_opacity(rubraview_renderer_t *renderer,
+                                               const rubraview_texture_t *texture,
+                                               rubraview_mat3x2_t transform,
+                                               rubraview_interpolation_t interpolation,
+                                               double opacity) {
     if (!renderer || !renderer->target || !texture || !texture->bitmap) return;
+    if (opacity <= 0.0) return;
+    if (opacity > 1.0) opacity = 1.0;
 
+    rubraview_src_rect_t src = { 0.0, 0.0, (double)texture->width, (double)texture->height };
+    draw_region_opacity(renderer, texture, src, transform, interpolation, (FLOAT)opacity);
+}
+
+static void draw_region_opacity(rubraview_renderer_t *renderer,
+                                const rubraview_texture_t *texture,
+                                rubraview_src_rect_t src,
+                                rubraview_mat3x2_t transform,
+                                rubraview_interpolation_t interpolation,
+                                FLOAT opacity) {
     ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
     D2D1_MATRIX_3X2_F matrix = to_d2d_matrix(transform);
     ID2D1RenderTarget_SetTransform(rt, &matrix);
@@ -247,11 +412,29 @@ void rubraview_pal_render_draw_texture_region(rubraview_renderer_t *renderer,
         .right = (FLOAT)src.right, .bottom = (FLOAT)src.bottom,
     };
 
-    ID2D1RenderTarget_DrawBitmap(rt, texture->bitmap, &dest, 1.0f,
-                                 to_d2d_interpolation(interpolation), &source);
+    /* The device context's DrawBitmap is the one that takes a
+       D2D1_INTERPOLATION_MODE — the render target's older overload only
+       knows the two 1.0 modes.
+
+       It is called through the vtable rather than through the
+       ID2D1DeviceContext_DrawBitmap macro because that macro is wrong in
+       this toolchain's d2d1_1.h: it expands to a member named
+       `ID2D1DeviceContext_DrawBitmap`, while the struct's member is
+       `DrawBitmap`. */
+    renderer->target->lpVtbl->DrawBitmap(renderer->target, texture->bitmap, &dest, opacity,
+                                         to_d2d_interpolation(interpolation), &source, NULL);
 
     D2D1_MATRIX_3X2_F identity = to_d2d_matrix(rubraview_mat3x2_identity());
     ID2D1RenderTarget_SetTransform(rt, &identity);
+}
+
+void rubraview_pal_render_draw_texture_region(rubraview_renderer_t *renderer,
+                                              const rubraview_texture_t *texture,
+                                              rubraview_src_rect_t src,
+                                              rubraview_mat3x2_t transform,
+                                              rubraview_interpolation_t interpolation) {
+    if (!renderer || !renderer->target || !texture || !texture->bitmap) return;
+    draw_region_opacity(renderer, texture, src, transform, interpolation, 1.0f);
 }
 
 void rubraview_pal_render_draw_pixel_grid(rubraview_renderer_t *renderer,

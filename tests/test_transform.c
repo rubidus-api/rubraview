@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 static bool approx(double a, double b) { return fabs(a - b) < 1e-9; }
 
@@ -158,6 +160,57 @@ int main(void) {
         assert_corners_map_onto_oriented_rect(o, W, H);
     }
     printf("  [PASS] Rotation combined with both flips remains a rigid placement\n");
+
+    /* Orienting real pixels (RV-017's batch stage). A 90-degree turn
+       swaps the dimensions and moves the corner marker where a reader
+       would expect it to go. */
+    {
+        size_t mem_size = 1024 * 1024;
+        void *raw2 = malloc(mem_size);
+        assert(raw2 != NULL);
+        proven_arena_t arena2 = proven_arena_create((proven_mem_mut_t){ .ptr = raw2, .size = mem_size });
+
+        rubraview_pixbuf_t src = rubraview_pixbuf_create(&arena2, 4, 2, RUBRAVIEW_PIXFMT_RGBA8);
+        assert(rubraview_pixbuf_is_valid(&src));
+        for (int32_t y = 0; y < 2; ++y) {
+            for (int32_t x = 0; x < 4; ++x) {
+                uint8_t *px = src.pixels + (ptrdiff_t)y * src.stride + x * 4;
+                px[0] = (uint8_t)(x + 1); px[1] = (uint8_t)(y + 1); px[2] = 0; px[3] = 255;
+            }
+        }
+
+        rubraview_orientation_t cw = rubraview_orientation_rotate_cw(rubraview_orientation_identity());
+        rubraview_pixbuf_t turned = rubraview_pixbuf_orient(&arena2, &src, cw);
+        assert(rubraview_pixbuf_is_valid(&turned));
+        assert(turned.width == 2 && turned.height == 4);
+
+        /* Turning clockwise puts the source's bottom-left in the
+           destination's top-left. */
+        const uint8_t *bottom_left = src.pixels + (ptrdiff_t)1 * src.stride + 0 * 4;
+        const uint8_t *top_left = turned.pixels;
+        assert(top_left[0] == bottom_left[0] && top_left[1] == bottom_left[1]);
+
+        /* Four turns come back to where it started. */
+        rubraview_pixbuf_t a = rubraview_pixbuf_orient(&arena2, &src, cw);
+        rubraview_pixbuf_t b = rubraview_pixbuf_orient(&arena2, &a, cw);
+        rubraview_pixbuf_t c = rubraview_pixbuf_orient(&arena2, &b, cw);
+        rubraview_pixbuf_t d = rubraview_pixbuf_orient(&arena2, &c, cw);
+        assert(d.width == src.width && d.height == src.height);
+        for (int32_t y = 0; y < 2; ++y) {
+            const uint8_t *ra = src.pixels + (ptrdiff_t)y * src.stride;
+            const uint8_t *rb = d.pixels + (ptrdiff_t)y * d.stride;
+            assert(memcmp(ra, rb, 4 * 4) == 0);
+        }
+
+        /* A horizontal flip mirrors the columns and keeps the size. */
+        rubraview_orientation_t flipped = rubraview_orientation_flip_h(rubraview_orientation_identity());
+        rubraview_pixbuf_t mirror = rubraview_pixbuf_orient(&arena2, &src, flipped);
+        assert(mirror.width == 4 && mirror.height == 2);
+        assert(mirror.pixels[0] == 4); /* the rightmost column is now the leftmost */
+
+        free(raw2);
+        printf("  [PASS] Orienting pixels swaps the dimensions and returns after four turns\n");
+    }
 
     printf("[test_transform] All tests passed successfully!\n");
     return 0;
