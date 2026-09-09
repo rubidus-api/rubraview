@@ -16,6 +16,8 @@ const char *rubraview_default_keymap(void) {
     "quick_export = Ctrl+E\n"
     "save_as = Ctrl+Shift+S\n"
     "open_batch = Ctrl+B\n"
+    /* §3.22.1 */
+    "open_settings = F10, Ctrl+Comma\n"
     "toggle_pixel_grid = G\n"
     "quit = Escape\n"
     /* §3.18: triage. Delete is safe — it goes to the recycle bin — and
