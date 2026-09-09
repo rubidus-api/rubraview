@@ -28,6 +28,10 @@ const char *rubraview_default_keymap(void) {
     "toggle_layout = B\n"
     "toggle_reading_order = M\n"
     "toggle_spread_detect = Shift+B\n"
+    /* §3.8.1 point 4. §3.7.2 also offers Ctrl+PageDown/PageUp here, but
+       those are skipping's primary and skipping keeps them. */
+    "next_archive = Ctrl+BracketRight\n"
+    "prev_archive = Ctrl+BracketLeft\n"
     "\n"
     "[view]\n"
     "fit_window = 1\n"
@@ -57,5 +61,29 @@ const char *rubraview_default_keymap(void) {
     "interval_up = BracketRight\n"
     "interval_down = BracketLeft\n"
     "interval_up_fine = Shift+BracketRight\n"
-    "interval_down_fine = Shift+BracketLeft\n";
+    "interval_down_fine = Shift+BracketLeft\n"
+    "\n"
+
+    /* §3.20.1. This context is active only while an animated image is on
+       screen, which is what lets these chords be spent twice: the
+       specification gives `Space` to page turning (§3.7.2) and to
+       play/pause (§3.20.1), and `Ctrl + [` / `Ctrl + ]` to archive
+       stepping and to playback speed. A context-specific binding wins
+       over the global one, so while a GIF is playing the keys mean the
+       animation, and everywhere else they mean what they always meant.
+       Nothing is unreachable: paging a folder of GIFs still works with
+       Right/Left, PageDown/PageUp, J/K and D/A. */
+    "[animation]\n"
+    "anim_toggle_pause = Space\n"
+    "anim_step_forward = Period\n"
+    "anim_step_back = Comma\n"
+    "anim_speed_up = Ctrl+BracketRight\n"
+    "anim_speed_down = Ctrl+BracketLeft\n"
+    "\n"
+
+    /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,
+       so its sub-pages are stepped rather than played. */
+    "[subpage]\n"
+    "subpage_next = Period\n"
+    "subpage_prev = Comma\n";
 }

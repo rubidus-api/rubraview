@@ -4,6 +4,14 @@
 static const double SPEEDS[] = { 0.25, 0.5, 1.0, 1.5, 2.0 };
 #define SPEED_COUNT ((int)(sizeof(SPEEDS) / sizeof(SPEEDS[0])))
 
+rubraview_frame_kind_t rubraview_animation_classify(const rubraview_frame_t *frames, size_t frame_count) {
+    if (!frames) return RUBRAVIEW_FRAMES_SUBPAGES;
+    for (size_t i = 0; i < frame_count; ++i) {
+        if (frames[i].delay_seconds > 0.0) return RUBRAVIEW_FRAMES_ANIMATION;
+    }
+    return RUBRAVIEW_FRAMES_SUBPAGES;
+}
+
 rubraview_animation_t rubraview_animation_create(rubraview_frame_kind_t kind,
                                                   const rubraview_frame_t *frames,
                                                   size_t frame_count) {
