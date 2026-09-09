@@ -46,6 +46,7 @@ typedef struct rubraview_cli_result {
     bool                register_shell;    /* §3.19.3 --register-shell */
     bool                unregister_shell;  /* §3.19.3 --unregister-shell */
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
+    bool                diagnostics;       /* --diag: report what the graphics device is and stop */
     bool                recursive;  /* --recursive */
     u8str_t             input;      /* the file or directory to work on */
     u8str_t             output_dir; /* --out=..., empty for "beside the source" */

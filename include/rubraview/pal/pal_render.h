@@ -35,6 +35,30 @@ typedef struct rubraview_src_rect {
     double left, top, right, bottom;
 } rubraview_src_rect_t;
 
+/**
+ * Why the renderer would not start.
+ *
+ * A viewer that shows nothing is the least informative failure there is,
+ * and "it does not render" cannot be debugged from another machine. So
+ * every step of bringing the graphics device up records itself, and this
+ * reports the one that failed — with the operating system's own error
+ * code, which is the part that actually identifies the cause.
+ *
+ * Returns an empty slice when nothing has failed.
+ */
+u8str_t rubraview_pal_render_last_error(void);
+
+/** The same, as a number: the HRESULT the OS returned, or 0. */
+uint32_t rubraview_pal_render_last_hresult(void);
+
+/**
+ * What the renderer ended up using — driver kind, feature level, buffer
+ * format. Written into `buffer`. Useful in a bug report, and the
+ * difference between "the GPU path" and "the software fallback" is
+ * exactly the sort of thing that explains a slow or wrong picture.
+ */
+u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
+
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height);
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer);
 

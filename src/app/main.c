@@ -2780,6 +2780,95 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     return report.failed > 0 ? 1 : 0;
 }
 
+
+/* ---- telling the reader why nothing appeared ---- */
+
+/*
+ * A viewer that shows nothing is the least useful failure there is, and
+ * it cannot be diagnosed from another machine. So when the graphics
+ * device will not start, the reason is put in front of the reader and
+ * written to a file next to the program — with the operating system's
+ * own error code, which is the part that identifies the cause.
+ */
+static void report_startup_failure(void) {
+    u8str_t where = rubraview_pal_render_last_error();
+    uint32_t hr = rubraview_pal_render_last_hresult();
+
+    char message[512];
+    int n = snprintf(message, sizeof(message),
+        "Rubraview could not start its graphics.\r\n\r\n"
+        "It failed while %.*s.\r\n"
+        "Windows reported error 0x%08lX.\r\n\r\n"
+        "This has been written to rubraview-diag.txt next to the program.",
+        (int)where.len, where.len > 0 ? where.ptr : "starting up",
+        (unsigned long)hr);
+    if (n <= 0) return;
+
+    /* The file first: a message box can be dismissed before it is read,
+       and a file can be pasted into a report. */
+    HANDLE file = CreateFileW(L"rubraview-diag.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                              NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(file, message, (DWORD)n, &written, NULL);
+        CloseHandle(file);
+    }
+
+    WCHAR wide[1024];
+    if (MultiByteToWideChar(CP_UTF8, 0, message, -1, wide, 1024) > 0) {
+        MessageBoxW(NULL, wide, L"Rubraview", MB_OK | MB_ICONERROR);
+    }
+}
+
+/* `--diag`: bring the graphics up, say what it got, and stop. One run
+   from a command prompt answers "what is this machine actually using",
+   which is otherwise guesswork from far away. */
+static int run_diagnostics(proven_arena_t *arena) {
+    rubraview_window_config_t config = { .title = "Rubraview diagnostics", .width = 640, .height = 400, .frameless = false };
+    rubraview_window_t *window = rubraview_pal_window_create(arena, &config);
+    if (!window) {
+        console_line("rubraview: the window itself could not be created");
+        return 1;
+    }
+
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(window, &w, &h);
+    rubraview_renderer_t *renderer = rubraview_pal_render_create(
+        arena, rubraview_pal_window_native_handle(window), w, h);
+
+    if (!renderer) {
+        char line[512];
+        u8str_t where = rubraview_pal_render_last_error();
+        snprintf(line, sizeof(line), "rubraview: graphics FAILED while %.*s (0x%08lX)",
+                 (int)where.len, where.ptr, (unsigned long)rubraview_pal_render_last_hresult());
+        console_line(line);
+        rubraview_pal_window_destroy(window);
+        return 1;
+    }
+
+    char described[256];
+    u8str_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
+    char line[320];
+    snprintf(line, sizeof(line), "rubraview: graphics OK — %.*s", (int)info.len, info.ptr);
+    console_line(line);
+
+    /* Draw one frame and present it. Creating a device proves less than
+       actually putting something on the screen, which is the thing that
+       is reportedly not happening. */
+    rubraview_pal_render_begin(renderer, 0xFF203040u);
+    rubraview_pal_rect_t box = { 40.0, 40.0, 200.0, 120.0 };
+    rubraview_pal_render_fill_rect(renderer, box, 0xFFCC4444u, 4.0);
+    bool presented = rubraview_pal_render_end(renderer);
+    console_line(presented ? "rubraview: a test frame was drawn and presented"
+                           : "rubraview: the test frame did NOT present — the device was lost");
+
+    rubraview_pal_time_sleep_ms(1500);   /* long enough to see the window */
+
+    rubraview_pal_render_destroy(renderer);
+    rubraview_pal_window_destroy(window);
+    return presented ? 0 : 1;
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)instance; (void)previous; (void)command_line; (void)show;
 
@@ -2834,6 +2923,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 free(memory);
                 CoUninitialize();
                 return 2;
+            }
+
+            if (cli.diagnostics) {
+                int code = run_diagnostics(&arena);
+                free(memory);
+                CoUninitialize();
+                return code;
             }
 
             if (cli.batch_mode) {
@@ -2906,6 +3002,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     rubraview_pal_window_get_size(app.window, &win_w, &win_h);
     app.renderer = rubraview_pal_render_create(&arena, rubraview_pal_window_native_handle(app.window), win_w, win_h);
     if (!app.renderer) {
+        report_startup_failure();
         rubraview_pal_window_destroy(app.window);
         free(memory);
         CoUninitialize();
