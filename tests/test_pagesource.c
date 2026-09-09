@@ -105,6 +105,8 @@ static size_t build_zip(uint8_t *out, const zip_entry_t *entries, size_t count) 
     return pos;
 }
 
+#include "fixtures_7z.inc"
+
 int main(void) {
     printf("[test_pagesource] Starting page source (folder and CBZ) unit tests...\n");
 
@@ -128,7 +130,7 @@ int main(void) {
 
         rubraview_page_source_t source = rubraview_page_source_from_archive(
             &arena, zip, len, lit("D:/Comics/Vol01.cbz"), U8("*.jpg;*.png"),
-            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX);
+            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
 
         assert(source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE);
         assert(source.page_count == 3); /* the directory entry and the text file are not pages */
@@ -149,7 +151,7 @@ int main(void) {
         size_t len = build_zip(zip, entries, 2);
 
         rubraview_page_source_t source = rubraview_page_source_from_archive(
-            &arena, zip, len, lit("a.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX);
+            &arena, zip, len, lit("a.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
         assert(source.page_count == 2);
 
         rubraview_page_bytes_t first = rubraview_page_source_read(&arena, &source, 0, UINT32_MAX);
@@ -175,7 +177,7 @@ int main(void) {
         size_t len = build_zip(zip, entries, 3);
 
         rubraview_page_source_t source = rubraview_page_source_from_archive(
-            &arena, zip, len, lit("m.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX);
+            &arena, zip, len, lit("m.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
 
         assert(source.page_count == 2); /* the manifest is not a page */
         assert(source.has_comicinfo);
@@ -251,7 +253,7 @@ int main(void) {
         memset(garbage, 0x5A, sizeof(garbage));
         rubraview_page_source_t source = rubraview_page_source_from_archive(
             &arena, garbage, sizeof(garbage), lit("x.cbz"), U8("*.jpg"),
-            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX);
+            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
         assert(source.page_count == 0);
 
         rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &source, 0, UINT32_MAX);
@@ -267,13 +269,45 @@ int main(void) {
         size_t len = build_zip(zip, entries, 1);
 
         rubraview_page_source_t source = rubraview_page_source_from_archive(
-            &arena, zip, len, lit("b.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX);
+            &arena, zip, len, lit("b.cbz"), U8("*.jpg"), RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
         assert(source.page_count == 1);
 
         rubraview_page_bytes_t capped = rubraview_page_source_read(&arena, &source, 0, 8);
         assert(!capped.ok);
     }
     printf("  [PASS] The size cap applies through the page source as well\n");
+
+    /* Test: a CB7 goes down the 7z path, and the caller cannot tell.
+       §3.8.2 — recognised by signature, not by the name it was given. */
+    {
+        rubraview_page_source_t source = rubraview_page_source_from_archive(
+            &arena, SZ_SOLID, sizeof(SZ_SOLID), lit("D:/Comics/Vol01.cb7"), U8("*.txt"),
+            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
+
+        assert(source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z);
+        assert(source.page_count == 2);
+        assert(str_eq(source.pages[0].name, "001.txt"));
+        assert(source.has_comicinfo); /* ComicInfo.xml is extracted, not listed as a page */
+
+        rubraview_page_bytes_t first = rubraview_page_source_read(&arena, &source, 0, UINT32_MAX);
+        assert(first.ok && !first.from_disk);
+        assert(first.data.len == 35);
+
+        rubraview_page_source_close(&source);
+    }
+    printf("  [PASS] A CB7 is recognised by signature and read through the same interface\n");
+
+    /* Test: an archive named .cbz that is really a 7z still opens —
+       the extension is a hint, the signature is the evidence. */
+    {
+        rubraview_page_source_t source = rubraview_page_source_from_archive(
+            &arena, SZ_NONSOLID, sizeof(SZ_NONSOLID), lit("mislabelled.cbz"), U8("*.txt"),
+            RUBRAVIEW_CODEPAGE_AUTO, UINT32_MAX, UINT64_MAX);
+        assert(source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z);
+        assert(source.page_count == 2);
+        rubraview_page_source_close(&source);
+    }
+    printf("  [PASS] A 7z with a .cbz name is still read as a 7z\n");
 
     free(raw);
     printf("[test_pagesource] All tests passed successfully!\n");

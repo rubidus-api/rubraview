@@ -37,17 +37,18 @@ Before using third-party code, images, audio, fonts, datasets, text, or other re
   own §3.8.1 central-directory reader. Provenance details and the
   update procedure are in `vendor/miniz/VENDORED.md`.
 
-## R002: 7-Zip LZMA SDK (planned — not yet vendored)
+## R002: 7-Zip LZMA SDK 24.08
 
-- Source: (fill at vendoring: upstream URL and tag)
-- Author: (fill at vendoring)
-- License: Public domain (expected; verify `lzma-sdk` DOC/lzma.txt)
-- Retrieved: (fill at vendoring)
-- Local path: vendor/ (planned)
+- Source: https://www.7-zip.org/sdk.html — release `lzma2408.7z`, retrieved from the project's SourceForge mirror
+- Author: Igor Pavlov (PPMd var.H: Dmitry Shkarin)
+- License: **Public domain — verified 2026-09-09** by reading `DOC/lzma-sdk.txt` in the retrieved archive; copied to `vendor/lzma/LICENSE.txt`
+- SHA-256 (release archive): `105a12afcafcd5bdce70bc75e7f0e94eafd07293646278ea225e6601e048cf17`
+- Retrieved: 2026-09-09
+- Local path: vendor/lzma/ (decode subset only — see `vendor/lzma/VENDORED.md`)
 - Distribution: yes — statically linked into `rubraview.exe`; licence text shipped
-- Modification: none intended; allocator routed to `prv_arena_t` through the library's hook if available
+- Modification: none — files are byte-identical to the release
 - Attribution: licence notice in `THIRD_PARTY_NOTICES.md`
-- Notes: 7z / CB7 decoding incl. solid streams (RV-052, D-3). Admitted under RFC-0001 §8.1 (owner decision 2026-09-08). Fill the empty fields and change the heading from "planned" before the first commit that adds the files.
+- Notes: 7z / CB7 decoding including solid blocks (RV-052, D-3). Admitted under RFC-0001 §8.1 (owner decision 2026-09-08). Encoders, `7zFile.c` and the AES/SHA-256 sources are deliberately not vendored; an encrypted archive therefore surfaces as an unsupported coder.
 
 ## R003: libjpeg-turbo (planned — not yet vendored)
 

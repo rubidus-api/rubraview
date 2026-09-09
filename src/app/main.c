@@ -59,7 +59,7 @@
 #define GUTTER 8.0
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
-#define ARCHIVE_FILTER "*.cbz;*.zip"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
 #define PAGE_CACHE_BUDGET (512u * 1024u * 1024u)   /* §7.4's default budget */
@@ -1220,6 +1220,10 @@ static void history_remember(app_state_t *app) {
 /* ---- opening ---- */
 
 static bool open_archive(app_state_t *app, u8str_t archive_path) {
+    /* Leaving one archive for another gives back what the old one held;
+       a CB7's decoded solid block is heap memory, not arena memory. */
+    rubraview_page_source_close(&app->source);
+
     u8str_t bytes = rubraview_pal_fs_read_file(app->arena, archive_path, MAX_ARCHIVE_BYTES);
     if (bytes.len == 0) return false;
 
@@ -1227,12 +1231,15 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     app->source = rubraview_page_source_from_archive(app->arena,
                                                      (const uint8_t*)bytes.ptr, bytes.len,
                                                      archive_path, U8(IMAGE_FILTER),
-                                                     RUBRAVIEW_CODEPAGE_AUTO, MAX_PAGE_BYTES);
+                                                     RUBRAVIEW_CODEPAGE_AUTO, MAX_PAGE_BYTES,
+                                                     PAGE_CACHE_BUDGET);
     app->source_dir = rubraview_path_dirname(archive_path);
     return app->source.page_count > 0;
 }
 
 static bool open_folder(app_state_t *app, u8str_t dir) {
+    rubraview_page_source_close(&app->source);
+
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
     if (listing.count == 0) return false;
 
@@ -1594,6 +1601,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     }
 
     unload_all_pages(&app);
+    rubraview_page_source_close(&app.source);
     rubraview_pal_render_destroy(app.renderer);
     rubraview_pal_window_destroy(app.window);
     free(memory);

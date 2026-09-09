@@ -43,4 +43,5 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T034 | R118, R136 | Verify CBZ and folder page sources, ComicInfo extraction, and consecutive archive traversal | `make test` | tests/test_pagesource.c | active |
 | T035 | R138 | Verify the pre-cache ring window, fast-slideshow widening, budget eviction and worker submission | `make test` | tests/test_precache.c | active |
 | T036 | R144 | Verify animation frame timing, speed ladder, stepping, and multi-page/ICO sub-page behaviour | `make test` | tests/test_animation.c | active |
+| T038 | R118 | Verify CB7 reading on real 7-Zip archives: solid-block reuse, the §10.2 block-size guard, and refusal of encrypted, truncated and damaged archives | `make test` | tests/test_sevenzip.c | active |
 | T037 | R118, R145 | Windows archive smoke check: a real CBZ opens and pages turn, covers stand alone, colour-managed photos render, volumes chain | `make win64` then run `dist/rubraview.exe <file.cbz>` on Windows | docs/tests/cases/T037-windows-archive-smoke.md | manual |

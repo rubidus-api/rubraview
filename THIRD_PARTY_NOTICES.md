@@ -21,6 +21,20 @@ provenance record for each is in `docs/resources/sources-and-licenses.md`.
 - Used for: DEFLATE decompression of CBZ (ZIP) entries only. The ZIP
   container itself is parsed by rubraview's own reader.
 
+## LZMA SDK 24.08
+
+- Vendored snapshot at `vendor/lzma/` (decode subset; see
+  `vendor/lzma/VENDORED.md` for exactly which files and why)
+- Written and placed in the **public domain** by Igor Pavlov. Some of it
+  is based on public-domain code by other authors: PPMd var.H (2001) by
+  Dmitry Shkarin.
+- Licence text: `vendor/lzma/LICENSE.txt`
+- Used for: reading 7z (CB7) comic archives, including the solid blocks
+  §3.8.2 needs a persistent decoder for. No encoder, no file I/O and no
+  encryption support is included.
+- Public domain imposes no condition; this notice is credit, not
+  compliance.
+
 Nothing else in the tree is third-party code. The Windows platform
 libraries (Direct2D, DirectWrite, the Windows Imaging Component, WASAPI)
 are operating-system components, not bundled dependencies.
