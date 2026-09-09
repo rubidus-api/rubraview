@@ -34,6 +34,12 @@ typedef struct probe_format {
     const GUID *guid;
     const char *label;
     const char *matrix_row;   /* which §5.1 row it belongs to */
+    /* Some formats are not compressed, so no decoder exists to find and
+       asking for one produces a false alarm. PCM is the case: it is raw
+       samples, handled by the media type itself. The first run of this
+       probe reported "PCM: no" on a Windows 11 machine that plays WAV
+       perfectly well — the question was wrong, not the answer. */
+    bool needs_no_decoder;
 } probe_format_t;
 
 /* Theora has a GUID in newer SDKs but not in this toolchain's headers,
@@ -66,7 +72,7 @@ static const probe_format_t AUDIO_FORMATS[] = {
     { &MFAudioFormat_WMAudio_Lossless,"WMA Lossless",   "Compressed audio" },
     { &MFAudioFormat_FLAC,            "FLAC",           "Lossless audio" },
     { &MFAudioFormat_ALAC,            "Apple Lossless", "Lossless audio" },
-    { &MFAudioFormat_PCM,             "PCM (WAV)",      "Lossless audio" },
+    { &MFAudioFormat_PCM,             "PCM (WAV)",      "Lossless audio", true },
     { &MFAudioFormat_Vorbis,          "Ogg Vorbis",     "Ogg open media" },
     { &MFAudioFormat_Opus,            "Opus",           "Ogg open media" },
     { &MFAudioFormat_Dolby_AC3,       "Dolby AC-3",     "(extra)" },
@@ -95,6 +101,11 @@ static void report_group(const char *heading, const probe_format_t *formats, siz
                          const GUID *category, const GUID *major) {
     printf("\n%s\n", heading);
     for (size_t i = 0; i < count; ++i) {
+        if (formats[i].needs_no_decoder) {
+            printf("  [n/a] %-24s  %s  (uncompressed — no decoder needed)\n",
+                   formats[i].label, formats[i].matrix_row);
+            continue;
+        }
         bool present = has_decoder(category, major, formats[i].guid);
         printf("  [%s] %-24s  %s\n",
                present ? "yes" : " - ", formats[i].label, formats[i].matrix_row);
@@ -190,7 +201,10 @@ int wmain(int argc, wchar_t **argv) {
         printf("Trying the file you named.\n");
         result = probe_file(argv[1]);
     } else {
-        printf("\nPass a file to find out whether Windows can open that file:\n");
+        printf("\nIf HEVC says \" - \" above: install \"HEVC Video Extensions\" from the\n");
+    printf("Microsoft Store to add it. Much recent video is encoded with it.\n");
+
+    printf("\nPass a file to find out whether Windows can open that file:\n");
         printf("  mfprobe.exe \"D:\\Films\\episode.mkv\"\n");
         printf("\nA container Windows cannot read is the thing to watch for.\n");
         printf("A decoder can be present while the container still is not.\n");

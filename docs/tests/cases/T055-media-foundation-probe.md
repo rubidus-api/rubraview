@@ -70,3 +70,29 @@ takes a minute.
   `SetStreamSelection` for choosing among several audio or subtitle
   tracks. The probe reports every stream it finds, so the file's own
   track count is visible.
+
+## Measured: Windows 11, 2026-09-09
+
+The first run, on the owner's Windows 11 machine:
+
+**Video — 12 of 14 present.** H.264, VP8, VP9, **AV1**, MPEG-1, MPEG-2,
+MPEG-4 ASP (DivX/XviD), H.263, DV, WMV3, VC-1 and Motion JPEG all
+decode. Missing: **HEVC** and Theora.
+
+**Audio — 8 of 10 present.** AAC, MP3, WMA v9, WMA Lossless, FLAC,
+Apple Lossless, **Ogg Vorbis** and **Opus** all decode. Missing: DTS.
+
+Two notes on reading that:
+
+- **PCM reported "no" and that was this probe's mistake, since fixed.**
+  WAV is uncompressed, so no decoder exists to find; asking for one
+  produced a false alarm on a machine that plays WAV perfectly well.
+  It now reads `n/a`.
+- **HEVC is the finding that matters.** It needs the *HEVC Video
+  Extensions* from the Microsoft Store, and a large share of recent
+  video — including most current anime releases — is encoded with it.
+  On a machine without that extension, those files need FFmpeg.
+
+Still unmeasured: whether the **containers** open. The decoder list says
+nothing about that, and it is a separate failure with a separate cause.
+Run the probe against real files to close it.
