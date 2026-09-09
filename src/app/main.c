@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #define COBJMACROS
 #include <windows.h>
+#include <wincodec.h>
 #include <objbase.h>
 #include <shellapi.h>
 #endif
@@ -2834,14 +2835,98 @@ static void report_startup_failure(void) {
 /* `--diag`: bring the graphics up, say what it got, and stop. One run
    from a command prompt answers "what is this machine actually using",
    which is otherwise guesswork from far away. */
+/*
+ * The stages are deliberately separated and each one announces itself
+ * *before* it runs, so a hang names the step it hung in rather than
+ * leaving a silent window. The first run of this found exactly that: the
+ * report stopped after "walking the image path", which said the failure
+ * was in the very first call and nowhere else.
+ *
+ * They also run in order of dependency — COM, then the codec, then a
+ * window, then the GPU — so the earliest broken thing is found before
+ * anything downstream can confuse the picture.
+ */
+static void pump_messages(void) {
+    /* A window whose messages nobody reads is a window Windows calls
+       "not responding", and an STA that never pumps can deadlock COM
+       outright. Anywhere this code waits, it waits like this. */
+    MSG msg;
+    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+static void wait_pumping(int milliseconds) {
+    for (int i = 0; i < milliseconds; i += 16) {
+        pump_messages();
+        rubraview_pal_time_sleep_ms(16);
+    }
+}
+
 static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
+    console_line("rubraview: step 1 - starting COM's imaging factory (WIC)");
+    /* Before any window exists, so a hang here cannot be blamed on one. */
+    IWICImagingFactory *probe_factory = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IWICImagingFactory, (void**)&probe_factory);
+    if (FAILED(hr) || !probe_factory) {
+        char line[160];
+        snprintf(line, sizeof(line), "rubraview: step 1 FAILED (0x%08lX) - no imaging codecs at all", (unsigned long)hr);
+        console_line(line);
+        return 1;
+    }
+    console_line("rubraview: step 1 ok");
+
+    if (image_path.len > 0) {
+        console_line("rubraview: step 2 - opening the file with WIC (no window, no GPU)");
+
+        char narrow[1024];
+        size_t n = image_path.len < sizeof(narrow) - 1 ? image_path.len : sizeof(narrow) - 1;
+        memcpy(narrow, image_path.ptr, n);
+        narrow[n] = '\0';
+
+        WCHAR wide[1024];
+        IWICBitmapDecoder *decoder = NULL;
+        if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, 1024) > 0) {
+            hr = IWICImagingFactory_CreateDecoderFromFilename(probe_factory, wide, NULL, GENERIC_READ,
+                                                              WICDecodeMetadataCacheOnDemand, &decoder);
+        } else {
+            hr = E_INVALIDARG;
+        }
+
+        char line[256];
+        if (FAILED(hr) || !decoder) {
+            snprintf(line, sizeof(line), "rubraview: step 2 FAILED (0x%08lX) - the path or the format", (unsigned long)hr);
+            console_line(line);
+            IWICImagingFactory_Release(probe_factory);
+            return 1;
+        }
+
+        UINT frames = 0;
+        IWICBitmapDecoder_GetFrameCount(decoder, &frames);
+        IWICBitmapFrameDecode *frame = NULL;
+        hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(hr) && frame) IWICBitmapFrameDecode_GetSize(frame, &w, &h);
+        snprintf(line, sizeof(line), "rubraview: step 2 ok - %u frame(s), %ux%u", frames, w, h);
+        console_line(line);
+        if (frame) IWICBitmapFrameDecode_Release(frame);
+        IWICBitmapDecoder_Release(decoder);
+    }
+    IWICImagingFactory_Release(probe_factory);
+
+    console_line("rubraview: step 3 - creating the window");
     rubraview_window_config_t config = { .title = "Rubraview diagnostics", .width = 640, .height = 400, .frameless = false };
     rubraview_window_t *window = rubraview_pal_window_create(arena, &config);
     if (!window) {
-        console_line("rubraview: the window itself could not be created");
+        console_line("rubraview: step 3 FAILED - the window could not be created");
         return 1;
     }
+    pump_messages();
+    console_line("rubraview: step 3 ok");
 
+    console_line("rubraview: step 4 - starting the graphics device");
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(window, &w, &h);
     rubraview_renderer_t *renderer = rubraview_pal_render_create(
@@ -2850,7 +2935,7 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     if (!renderer) {
         char line[512];
         u8str_t where = rubraview_pal_render_last_error();
-        snprintf(line, sizeof(line), "rubraview: graphics FAILED while %.*s (0x%08lX)",
+        snprintf(line, sizeof(line), "rubraview: step 4 FAILED while %.*s (0x%08lX)",
                  (int)where.len, where.ptr, (unsigned long)rubraview_pal_render_last_hresult());
         console_line(line);
         rubraview_pal_window_destroy(window);
@@ -2860,68 +2945,62 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     char described[256];
     u8str_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
     char line[320];
-    snprintf(line, sizeof(line), "rubraview: graphics OK - %.*s", (int)info.len, info.ptr);
+    snprintf(line, sizeof(line), "rubraview: step 4 ok - %.*s", (int)info.len, info.ptr);
     console_line(line);
 
-    /* Draw one frame and present it. Creating a device proves less than
-       actually putting something on the screen, which is the thing that
-       is reportedly not happening. */
+    console_line("rubraview: step 5 - drawing a plain rectangle");
     rubraview_pal_render_begin(renderer, 0xFF203040u);
     rubraview_pal_rect_t box = { 40.0, 40.0, 200.0, 120.0 };
     rubraview_pal_render_fill_rect(renderer, box, 0xFFCC4444u, 4.0);
     bool presented = rubraview_pal_render_end(renderer);
-    console_line(presented ? "rubraview: a test frame was drawn and presented"
-                           : "rubraview: the test frame did NOT present — the device was lost");
+    console_line(presented ? "rubraview: step 5 ok - it was presented"
+                           : "rubraview: step 5 FAILED - the device was lost");
+    wait_pumping(800);
 
-    /* With a file named, run the real decode path on it. A device that
-       starts and a picture that appears are two different claims, and
-       the second is the one being questioned. */
     if (image_path.len > 0) {
-        console_line("");
-        console_line("rubraview: walking the image path for that file");
+        console_line("rubraview: step 6 - the viewer's own decode path, stage by stage");
 
         char report[2048];
         u8str_t text = rubraview_pal_image_diagnose(renderer, image_path, report, sizeof(report));
 
-        /* The report is several lines; hand them over one at a time so
-           the console shows them properly. */
         size_t start = 0;
         for (size_t i = 0; i <= text.len; ++i) {
-            bool end = i == text.len;
-            if (!end && text.ptr[i] != '\n') continue;
+            bool at_end = i == text.len;
+            if (!at_end && text.ptr[i] != '\n') continue;
             size_t stop = i;
             while (stop > start && (text.ptr[stop - 1] == '\r' || text.ptr[stop - 1] == '\n')) stop--;
             if (stop > start) {
                 char one[256];
-                size_t n = stop - start < sizeof(one) - 1 ? stop - start : sizeof(one) - 1;
-                memcpy(one, text.ptr + start, n);
-                one[n] = '\0';
+                size_t take = stop - start < sizeof(one) - 1 ? stop - start : sizeof(one) - 1;
+                memcpy(one, text.ptr + start, take);
+                one[take] = '\0';
                 console_line(one);
             }
             start = i + 1;
         }
 
-        /* And then actually put it on the screen, which is the claim
-           that matters. */
+        console_line("rubraview: step 7 - loading it the way the viewer does");
         rubraview_image_load_result_t loaded =
             rubraview_pal_image_load_texture(renderer, image_path, true);
-        console_line(loaded.ok ? "rubraview: the image loaded as a texture"
-                               : "rubraview: the image did NOT load as a texture");
+        console_line(loaded.ok ? "rubraview: step 7 ok - it became a texture"
+                               : "rubraview: step 7 FAILED - it did not become a texture");
 
         if (loaded.ok && loaded.texture) {
+            console_line("rubraview: step 8 - putting it on the screen (5 seconds)");
             rubraview_pal_render_begin(renderer, 0xFF101010u);
             rubraview_mat3x2_t place = rubraview_mat3x2_identity();
             rubraview_pal_render_draw_texture(renderer, loaded.texture, place, RUBRAVIEW_INTERP_LINEAR);
             bool shown = rubraview_pal_render_end(renderer);
-            console_line(shown ? "rubraview: the image was drawn to the window - look at it now"
-                               : "rubraview: drawing the image did NOT present");
-            rubraview_pal_time_sleep_ms(4000);
+            console_line(shown ? "rubraview: step 8 ok - look at the window now"
+                               : "rubraview: step 8 FAILED - it did not present");
+            wait_pumping(5000);
             rubraview_pal_texture_destroy(loaded.texture);
         }
     } else {
-        rubraview_pal_time_sleep_ms(1500);   /* long enough to see the test frame */
+        wait_pumping(1200);
     }
 
+    console_line("rubraview: done");
     rubraview_pal_render_destroy(renderer);
     rubraview_pal_window_destroy(window);
     return presented ? 0 : 1;
@@ -2933,6 +3012,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;
     }
+
+    /* Before any window exists. A single-threaded apartment that is not
+       pumping messages can deadlock while activating a COM object, and
+       the first image is opened before the message loop has run once —
+       so this has to happen while there is no window to deadlock
+       against. Without it the program hangs on the first picture, which
+       from the outside looks like an image that will not render. */
+    rubraview_pal_image_startup();
 
     void *memory = malloc(APP_ARENA_BYTES);
     if (!memory) {
@@ -3096,6 +3183,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     sync_menubox_tiles(&app);
 
     int argc = 0;
+    /* Let the freshly created window settle its own messages before the
+       first file is opened. Decoding runs COM calls, and an apartment
+       with an unpumped window is where those calls go to hang. */
+    pump_messages();
+
     LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
         if (argc > 1) {
