@@ -30,6 +30,16 @@ rubraview_pixbuf_t rubraview_pixbuf_resample(proven_arena_t *arena,
                                int32_t dst_height,
                                rubraview_resample_filter_t filter);
 
+/**
+ * Resample only the destination rows `[y0, y1)`, into a destination the
+ * caller already allocated. The scale is taken from the destination's
+ * full size, so bands computed separately join up exactly as if they had
+ * been computed together. This is what RV-067's parallel resize is built
+ * on (§6.5.5); ordinary callers want rubraview_pixbuf_resample.
+ */
+void rubraview_resample_band(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst,
+                             rubraview_resample_filter_t filter, int32_t y0, int32_t y1);
+
 #ifdef __cplusplus
 }
 #endif
