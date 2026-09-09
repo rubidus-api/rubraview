@@ -50,14 +50,15 @@ Before using third-party code, images, audio, fonts, datasets, text, or other re
 - Attribution: licence notice in `THIRD_PARTY_NOTICES.md`
 - Notes: 7z / CB7 decoding including solid blocks (RV-052, D-3). Admitted under RFC-0001 §8.1 (owner decision 2026-09-08). Encoders, `7zFile.c` and the AES/SHA-256 sources are deliberately not vendored; an encrypted archive therefore surfaces as an unsupported coder.
 
-## R003: libjpeg-turbo (planned — not yet vendored)
+## R003: libjpeg-turbo 3.0.4
 
-- Source: (fill at vendoring: upstream URL and tag)
-- Author: (fill at vendoring)
-- License: BSD-3-Clause + IJG + zlib (expected; verify LICENSE.md — three notices, all must ship)
-- Retrieved: (fill at vendoring)
-- Local path: vendor/ (planned)
-- Distribution: yes — statically linked into `rubraview.exe`; licence text shipped
-- Modification: none intended; allocator routed to `prv_arena_t` through the library's hook if available
-- Attribution: licence notice in `THIRD_PARTY_NOTICES.md`
-- Notes: DCT-domain lossless rotate/flip only; no pixel decoding (RV-069, D-5). Admitted under RFC-0001 §8.1 (owner decision 2026-09-08). Fill the empty fields and change the heading from "planned" before the first commit that adds the files.
+- Source: https://github.com/libjpeg-turbo/libjpeg-turbo, tag `3.0.4`
+- Author: The libjpeg-turbo Project; derived from the Independent JPEG Group's software (Thomas G. Lane, Guido Vollbeding) and modified by D. R. Commander
+- License: **IJG License + Modified (3-clause) BSD — verified 2026-09-09** by reading `LICENSE.md` and `README.ijg` in the retrieved tarball; both texts are shipped in `vendor/libjpeg-turbo/`
+- SHA-256 (release tarball): `0270f9496ad6d69e743f1e7b9e3e9398f5b4d606b6a47744df4b73df50f62e38`
+- Retrieved: 2026-09-09
+- Local path: vendor/libjpeg-turbo/ (libjpeg API library only — see `vendor/libjpeg-turbo/VENDORED.md`)
+- Distribution: yes — statically linked into `rubraview.exe`; licence texts shipped
+- Modification: no upstream file is changed. `jconfig.h`, `jconfigint.h` and `jversion.h` are new files written for this build, because upstream generates them with CMake and this project does not use CMake.
+- Attribution: licence notices in `THIRD_PARTY_NOTICES.md`
+- Notes: DCT-coefficient transforms for lossless JPEG rotation and metadata stripping (RV-069, D-5, §3.9/§3.10). The tools, the TurboJPEG wrapper, the SIMD assembly and arithmetic coding are deliberately not vendored. WIC remains the only pixel codec in the program.

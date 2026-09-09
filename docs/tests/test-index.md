@@ -44,4 +44,9 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T035 | R138 | Verify the pre-cache ring window, fast-slideshow widening, budget eviction and worker submission | `make test` | tests/test_precache.c | active |
 | T036 | R144 | Verify animation frame timing, speed ladder, stepping, kind classification and multi-page/ICO sub-page behaviour | `make test` | tests/test_animation.c | active |
 | T038 | R118 | Verify CB7 reading on real 7-Zip archives: solid-block reuse, the §10.2 block-size guard, and refusal of encrypted, truncated and damaged archives | `make test` | tests/test_sevenzip.c | active |
+| T039 | R127 | Verify the editing session: slider ranges, levels ordering, the tone curve staying a function, crop normalisation and aspect locks, resize lock, and a non-destructive commit | `make test` | tests/test_edit.c | active |
+| T040 | R110 | Verify export settings clamping, format/extension agreement, and §3.10's re-encode-only-when-asked rule | `make test` | tests/test_export.c | active |
+| T041 | R113 | Verify the `--batch` command line refuses typos and bad values, and that the engine filters, renames and resets its arena per file | `make test` | tests/test_batchrun.c | active |
+| T042 | R150 | Verify parallel resampling is byte-identical to the single-threaded path across four filters and three sizes | `make test` | tests/test_resample_mt.c | active |
+| T043 | R109 | Verify lossless JPEG rotation: four 90-degree turns return the original coefficients byte for byte, ragged images honour the edge policy, and a corrupt file errors instead of crashing | `make test` | tests/test_jpegtran.c | active |
 | T037 | R118, R145 | Windows archive smoke check: a real CBZ opens and pages turn, covers stand alone, colour-managed photos render, volumes chain | `make win64` then run `dist/rubraview.exe <file.cbz>` on Windows | docs/tests/cases/T037-windows-archive-smoke.md | manual |
