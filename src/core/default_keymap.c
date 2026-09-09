@@ -18,6 +18,12 @@ const char *rubraview_default_keymap(void) {
     "open_batch = Ctrl+B\n"
     "toggle_pixel_grid = G\n"
     "quit = Escape\n"
+    /* §3.18: triage. Delete is safe — it goes to the recycle bin — and
+       Shift+Delete asks before it is not. */
+    "delete_file = Delete\n"
+    "purge_file = Shift+Delete\n"
+    "undo = Ctrl+Z\n"
+    "rename_file = F2\n"
     "\n"
     "[navigation]\n"
     "next_page = Right, PageDown, Space, J, D\n"

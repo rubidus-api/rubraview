@@ -161,3 +161,19 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
 }
 
 #endif /* !_WIN32 */
+
+/* ---- file management (§3.18) ----
+ *
+ * The host build exists to run the tests, and no test writes to the real
+ * filesystem: the decisions these calls sit behind are checked in
+ * `tests/test_filemanage.c` against the model, not against a disk. So
+ * these report failure rather than doing something a test did not ask
+ * for. The Windows backend is the one that acts.
+ */
+
+bool rubraview_pal_fs_recycle(u8str_t path) { (void)path; return false; }
+bool rubraview_pal_fs_delete(u8str_t path) { (void)path; return false; }
+bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path) { (void)original_path; return false; }
+bool rubraview_pal_fs_move(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_make_dirs(u8str_t path) { (void)path; return false; }

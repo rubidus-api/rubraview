@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <string.h>
 #include "rubraview/pal/pal_fs.h"
@@ -233,3 +234,111 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
 }
 
 #endif /* _WIN32 */
+
+/* ---- file management (§3.18), RV-070 / RV-071 ---- */
+
+/* A stack-based converter for the calls below, which take no arena. The
+   path is bounded by MAX_PATH anyway at the OS boundary. */
+static bool utf8_to_wide_buf(u8str_t path, WCHAR *out, size_t capacity) {
+    if (path.len == 0 || path.len >= capacity) return false;
+
+    char narrow[MAX_PATH * 4];
+    if (path.len >= sizeof(narrow)) return false;
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+
+    return MultiByteToWideChar(CP_UTF8, 0, narrow, -1, out, (int)capacity) > 0;
+}
+
+/* SHFileOperationW needs a double-null-terminated list, so the path is
+   copied into a buffer with room for the second terminator. */
+static bool to_wide_double_null(u8str_t path, WCHAR *out, size_t capacity) {
+    if (path.len == 0 || path.len >= capacity) return false;
+
+    char narrow[MAX_PATH * 4];
+    if (path.len >= sizeof(narrow)) return false;
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+
+    int written = MultiByteToWideChar(CP_UTF8, 0, narrow, -1, out, (int)capacity - 1);
+    if (written <= 0) return false;
+
+    out[written] = L'\0';   /* the second terminator */
+    return true;
+}
+
+bool rubraview_pal_fs_recycle(u8str_t path) {
+    WCHAR wide[MAX_PATH * 2 + 2];
+    if (!to_wide_double_null(path, wide, sizeof(wide) / sizeof(wide[0]) - 1)) return false;
+
+    SHFILEOPSTRUCTW op = {0};
+    op.wFunc = FO_DELETE;
+    op.pFrom = wide;
+    /* ALLOWUNDO is what puts it in the recycle bin rather than deleting
+       it; NOCONFIRMATION is because the viewer already asked. */
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+
+    return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
+}
+
+bool rubraview_pal_fs_delete(u8str_t path) {
+    WCHAR wide[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;
+    return DeleteFileW(wide) != 0;
+}
+
+bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path) {
+    /* Windows can undo a recycle only through the shell's own undo
+       stack, which belongs to Explorer rather than to this process.
+       IFileOperation::Undo does not exist; the documented route is
+       IFileOperation with an undo-aware sink, and it is not reachable
+       from a process that has already returned to its message loop.
+       Saying so is better than pretending: §3.18.1's Ctrl+Z is reported
+       as unavailable for recycled files and the reader is pointed at the
+       recycle bin. */
+    (void)original_path;
+    return false;
+}
+
+bool rubraview_pal_fs_move(u8str_t from, u8str_t to) {
+    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
+    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+
+    /* COPY_ALLOWED lets the move cross volumes; on the same volume it is
+       a directory-entry update and costs nothing (§3.18.3). */
+    return MoveFileExW(wfrom, wto, MOVEFILE_COPY_ALLOWED) != 0;
+}
+
+bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) {
+    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
+    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+
+    /* The last argument is "fail if it exists": curation must never
+       silently overwrite a file already in the target folder. */
+    return CopyFileW(wfrom, wto, TRUE) != 0;
+}
+
+bool rubraview_pal_fs_make_dirs(u8str_t path) {
+    WCHAR wide[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;
+
+    /* Walk the path creating each level; an existing level is not an
+       error, which is what makes this idempotent. */
+    for (size_t i = 0; wide[i] != L'\0'; ++i) {
+        if (wide[i] != L'\\' && wide[i] != L'/') continue;
+        if (i == 0) continue;
+        if (i == 2 && wide[1] == L':') continue;   /* "C:\" is not a directory to create */
+
+        WCHAR saved = wide[i];
+        wide[i] = L'\0';
+        if (!CreateDirectoryW(wide, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+            wide[i] = saved;
+            return false;
+        }
+        wide[i] = saved;
+    }
+
+    return CreateDirectoryW(wide, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
+}
