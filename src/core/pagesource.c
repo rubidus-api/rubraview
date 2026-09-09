@@ -3,7 +3,7 @@
 #include "rubraview/path.h"
 #include <string.h>
 
-#define ARCHIVE_FILTER "*.cbz;*.zip"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z"
 #define COMICINFO_NAME "ComicInfo.xml"
 
 static bool name_is_comicinfo(u8str_t name) {
@@ -66,12 +66,12 @@ rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena
     return source;
 }
 
-rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
-                                                            const uint8_t *data, size_t size,
-                                                            u8str_t archive_path,
-                                                            u8str_t extension_filter,
-                                                            rubraview_codepage_t override_choice,
-                                                            uint32_t max_entry_bytes) {
+static rubraview_page_source_t page_source_from_zip(proven_arena_t *arena,
+                                                    const uint8_t *data, size_t size,
+                                                    u8str_t archive_path,
+                                                    u8str_t extension_filter,
+                                                    rubraview_codepage_t override_choice,
+                                                    uint32_t max_entry_bytes) {
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE, .archive_path = archive_path };
     if (!arena || !data || size == 0) return source;
 
@@ -146,8 +146,98 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
     return source;
 }
 
+/* 7z stores its names as UTF-16 and the SDK hands them back as UTF-8,
+   so §3.8.3's code-page guessing has nothing to do here — the format
+   never had the ambiguity ZIP has. */
+static rubraview_page_source_t page_source_from_7z(proven_arena_t *arena,
+                                                   const uint8_t *data, size_t size,
+                                                   u8str_t archive_path,
+                                                   u8str_t extension_filter,
+                                                   uint32_t max_entry_bytes,
+                                                   uint64_t max_block_bytes) {
+    rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z, .archive_path = archive_path };
+
+    rubraview_sz_result_t opened = rubraview_sz_open(arena, data, size, max_block_bytes);
+    if (opened.err != RUBRAVIEW_SZ_OK) return source;
+    source.archive7z = opened.value;
+
+    proven_result_mem_mut_t items_res =
+        proven_arena_alloc(arena, (opened.value.entry_count + 1) * sizeof(rubraview_sort_item_t));
+    if (!proven_is_ok(items_res.err)) return source;
+    rubraview_sort_item_t *items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
+
+    ref_buf_t buf = {0};
+    size_t kept = 0;
+    for (size_t i = 0; i < opened.value.entry_count; ++i) {
+        u8str_t name = opened.value.entries[i].name;
+
+        if (name_is_comicinfo(name)) {
+            rubraview_sz_data_result_t xml = rubraview_sz_read_entry(arena, &source.archive7z, i, max_entry_bytes);
+            if (xml.err == RUBRAVIEW_SZ_OK) {
+                source.has_comicinfo = true;
+                source.comicinfo_xml = xml.data;
+            }
+            continue;
+        }
+
+        if (!rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
+
+        items[kept++] = (rubraview_sort_item_t){
+            .name = name,
+            .mtime = 0, .ctime = 0,
+            .size_bytes = opened.value.entries[i].size > UINT32_MAX
+                            ? UINT32_MAX : (uint32_t)opened.value.entries[i].size,
+            .tag = (uint64_t)i,
+        };
+    }
+
+    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
+
+    for (size_t i = 0; i < kept; ++i) {
+        rubraview_page_ref_t ref = {
+            .name = items[i].name,
+            .path = { .ptr = "", .len = 0 },
+            .entry_index = (size_t)items[i].tag,
+        };
+        if (!ref_buf_push(arena, &buf, ref)) break;
+    }
+
+    source.pages = buf.data;
+    source.page_count = buf.count;
+    return source;
+}
+
+/* The extension is a hint, not evidence: a `.cbz` that is really a 7z
+   happens often enough that the signature decides. */
+static bool looks_like_7z(const uint8_t *data, size_t size) {
+    static const uint8_t sig[6] = { '7', 'z', 0xBC, 0xAF, 0x27, 0x1C };
+    return size >= sizeof(sig) && memcmp(data, sig, sizeof(sig)) == 0;
+}
+
+rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
+                                                            const uint8_t *data, size_t size,
+                                                            u8str_t archive_path,
+                                                            u8str_t extension_filter,
+                                                            rubraview_codepage_t override_choice,
+                                                            uint32_t max_entry_bytes,
+                                                            uint64_t max_block_bytes) {
+    if (arena && data && looks_like_7z(data, size)) {
+        return page_source_from_7z(arena, data, size, archive_path, extension_filter,
+                                   max_entry_bytes, max_block_bytes);
+    }
+    return page_source_from_zip(arena, data, size, archive_path, extension_filter,
+                                override_choice, max_entry_bytes);
+}
+
+void rubraview_page_source_close(rubraview_page_source_t *source) {
+    if (!source) return;
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_close(&source->archive7z);
+    source->pages = NULL;
+    source->page_count = 0;
+}
+
 rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
-                                                   const rubraview_page_source_t *source,
+                                                   rubraview_page_source_t *source,
                                                    size_t index,
                                                    uint32_t max_entry_bytes) {
     rubraview_page_bytes_t result = { .data = { .ptr = "", .len = 0 }, .from_disk = false, .ok = false };
@@ -158,6 +248,15 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
            lets the image PAL decode straight from the file. */
         result.from_disk = true;
         result.ok = source->pages[index].path.len > 0;
+        return result;
+    }
+
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) {
+        rubraview_sz_data_result_t seven = rubraview_sz_read_entry(
+            arena, &source->archive7z, source->pages[index].entry_index, max_entry_bytes);
+        if (seven.err != RUBRAVIEW_SZ_OK) return result;
+        result.data = seven.data;
+        result.ok = true;
         return result;
     }
 
