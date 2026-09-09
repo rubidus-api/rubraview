@@ -12,10 +12,16 @@
 
 #ifdef _WIN32
 #include <d2d1.h>
+#include <d2d1_1.h>
 #include "rubraview/pal/pal_render.h"
 
 /** The render target backing this renderer, for CreateBitmapFromWicBitmap. */
 ID2D1RenderTarget *rubraview_d2d_render_target(rubraview_renderer_t *renderer);
+
+/* The same object as a Direct2D 1.1 device context (RV-064), for the
+   callers that need what 1.0 could not do: cubic interpolation and the
+   effect graph. */
+ID2D1DeviceContext *rubraview_d2d_device_context(rubraview_renderer_t *renderer);
 
 /**
  * Wrap a Direct2D bitmap as an opaque rubraview texture. The texture

@@ -430,4 +430,309 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
     return result;
 }
 
+/* ---- reading pixels back, and writing them out (§3.10, §3.13) ---- */
+
+/* The viewing path never brings pixels to the CPU (§4.1.1). The editing
+   workbench has to: its commit layer runs the core engine on a real
+   buffer, not on a GPU texture. */
+rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
+                                                   u8str_t path,
+                                                   const uint8_t *data, size_t size,
+                                                   bool apply_exif_orientation) {
+    rubraview_pixbuf_t empty = {0};
+    IWICImagingFactory *factory = wic_factory();
+    if (!factory || !arena) return empty;
+
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
+    if (!decoder) { if (stream) IWICStream_Release(stream); return empty; }
+
+    IWICBitmapFrameDecode *frame = NULL;
+    if (FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) {
+        IWICBitmapDecoder_Release(decoder);
+        if (stream) IWICStream_Release(stream);
+        return empty;
+    }
+
+    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    IWICBitmapFlipRotator *rotator = NULL;
+    int orientation = read_orientation(frame);
+    if (apply_exif_orientation && orientation != 1) {
+        if (SUCCEEDED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) && rotator) {
+            if (SUCCEEDED(IWICBitmapFlipRotator_Initialize(rotator, (IWICBitmapSource*)frame,
+                                                           exif_to_transform(orientation)))) {
+                source = (IWICBitmapSource*)rotator;
+            } else {
+                IWICBitmapFlipRotator_Release(rotator);
+                rotator = NULL;
+            }
+        }
+    }
+
+    /* The core engine works in RGBA8, so the conversion happens here
+       rather than being a special case inside every filter. */
+    IWICFormatConverter *converter = NULL;
+    rubraview_pixbuf_t out = empty;
+    if (SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter &&
+        SUCCEEDED(IWICFormatConverter_Initialize(converter, source, &GUID_WICPixelFormat32bppRGBA,
+                                                 WICBitmapDitherTypeNone, NULL, 0.0,
+                                                 WICBitmapPaletteTypeMedianCut))) {
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(IWICFormatConverter_GetSize(converter, &w, &h)) && w > 0 && h > 0) {
+            rubraview_pixbuf_t pb = rubraview_pixbuf_create(arena, (int32_t)w, (int32_t)h,
+                                                            RUBRAVIEW_PIXFMT_RGBA8);
+            if (rubraview_pixbuf_is_valid(&pb)) {
+                UINT stride = (UINT)pb.stride;
+                UINT buffer_size = stride * h;
+                if (SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, stride,
+                                                             buffer_size, pb.pixels))) {
+                    out = pb;
+                }
+            }
+        }
+    }
+
+    if (converter) IWICFormatConverter_Release(converter);
+    if (rotator) IWICBitmapFlipRotator_Release(rotator);
+    IWICBitmapFrameDecode_Release(frame);
+    IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
+    return out;
+}
+
+static const GUID *container_for_format(rubraview_export_format_t format) {
+    switch (format) {
+        case RUBRAVIEW_EXPORT_JPEG: return &GUID_ContainerFormatJpeg;
+        case RUBRAVIEW_EXPORT_PNG:  return &GUID_ContainerFormatPng;
+        case RUBRAVIEW_EXPORT_WEBP: return &GUID_ContainerFormatWmp; /* see the note in save() */
+        case RUBRAVIEW_EXPORT_GIF:  return &GUID_ContainerFormatGif;
+        case RUBRAVIEW_EXPORT_BMP:  return &GUID_ContainerFormatBmp;
+        case RUBRAVIEW_EXPORT_TIFF: return &GUID_ContainerFormatTiff;
+        case RUBRAVIEW_EXPORT_ICO:  return &GUID_ContainerFormatIco;
+        default: return NULL;
+    }
+}
+
+/* Opens a file stream for writing, converting the path at the boundary. */
+static IWICStream *writable_stream(IWICImagingFactory *factory, u8str_t path) {
+    if (!factory || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+
+    char narrow[MAX_PATH * 4];
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+
+    WCHAR wide[MAX_PATH * 2];
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
+        return NULL;
+    }
+
+    IWICStream *stream = NULL;
+    if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream) return NULL;
+    if (FAILED(IWICStream_InitializeFromFilename(stream, wide, GENERIC_WRITE))) {
+        IWICStream_Release(stream);
+        return NULL;
+    }
+    return stream;
+}
+
+/* Sets the per-format knobs §3.10 exposes. A property WIC does not know
+   is simply not set: an encoder that ignores a quality hint still writes
+   a correct file, and refusing to save over it would help nobody. */
+static void apply_encoder_options(IPropertyBag2 *bag,
+                                  const rubraview_export_options_t *options,
+                                  rubraview_export_format_t format) {
+    if (!bag || !options) return;
+
+    PROPBAG2 option = {0};
+    VARIANT value;
+
+    if (format == RUBRAVIEW_EXPORT_JPEG) {
+        option.pstrName = (LPOLESTR)L"ImageQuality";
+        VariantInit(&value);
+        value.vt = VT_R4;
+        value.fltVal = (float)options->jpeg_quality / 100.0f;
+        IPropertyBag2_Write(bag, 1, &option, &value);
+
+        if (options->jpeg_progressive) {
+            option.pstrName = (LPOLESTR)L"JpegYCrCbSubsampling";
+            VariantInit(&value);
+            value.vt = VT_UI1;
+            value.bVal = WICJpegYCrCbSubsampling420;
+            IPropertyBag2_Write(bag, 1, &option, &value);
+        }
+    } else if (format == RUBRAVIEW_EXPORT_PNG) {
+        /* WIC's PNG encoder has no compression *level*; what it exposes
+           is the filter, and interlacing. Level 0 is taken as "do not
+           spend time", which is what the filter choice controls. */
+        option.pstrName = (LPOLESTR)L"FilterOption";
+        VariantInit(&value);
+        value.vt = VT_UI1;
+        value.bVal = options->png_compression == 0
+                       ? WICPngFilterNone : WICPngFilterAdaptive;
+        IPropertyBag2_Write(bag, 1, &option, &value);
+    } else if (format == RUBRAVIEW_EXPORT_TIFF) {
+        option.pstrName = (LPOLESTR)L"CompressionQuality";
+        VariantInit(&value);
+        value.vt = VT_R4;
+        value.fltVal = 1.0f;
+        IPropertyBag2_Write(bag, 1, &option, &value);
+    }
+}
+
+/* Writes one frame of `pixels`, scaled to `width` x `height` when those
+   differ from the buffer's own size (which is how the ICO writer makes
+   its mipmaps). */
+static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
+                        const rubraview_pixbuf_t *pixels,
+                        const rubraview_export_options_t *options,
+                        rubraview_export_format_t format,
+                        UINT width, UINT height) {
+    IWICBitmapFrameEncode *frame = NULL;
+    IPropertyBag2 *bag = NULL;
+    if (FAILED(IWICBitmapEncoder_CreateNewFrame(encoder, &frame, &bag)) || !frame) return false;
+
+    apply_encoder_options(bag, options, format);
+    if (FAILED(IWICBitmapFrameEncode_Initialize(frame, bag))) {
+        if (bag) IPropertyBag2_Release(bag);
+        IWICBitmapFrameEncode_Release(frame);
+        return false;
+    }
+    if (bag) IPropertyBag2_Release(bag);
+
+    /* The source is a WIC bitmap over the caller's buffer; nothing is
+       copied unless a scale is asked for. */
+    IWICBitmap *bitmap = NULL;
+    HRESULT hr = IWICImagingFactory_CreateBitmapFromMemory(
+        factory, (UINT)pixels->width, (UINT)pixels->height,
+        &GUID_WICPixelFormat32bppRGBA, (UINT)pixels->stride,
+        (UINT)pixels->stride * (UINT)pixels->height, pixels->pixels, &bitmap);
+    if (FAILED(hr) || !bitmap) {
+        IWICBitmapFrameEncode_Release(frame);
+        return false;
+    }
+
+    IWICBitmapSource *source = (IWICBitmapSource*)bitmap;
+    IWICBitmapScaler *scaler = NULL;
+    if (width != (UINT)pixels->width || height != (UINT)pixels->height) {
+        if (SUCCEEDED(IWICImagingFactory_CreateBitmapScaler(factory, &scaler)) && scaler &&
+            SUCCEEDED(IWICBitmapScaler_Initialize(scaler, (IWICBitmapSource*)bitmap, width, height,
+                                                  WICBitmapInterpolationModeFant))) {
+            source = (IWICBitmapSource*)scaler;
+        }
+    }
+
+    /* WIC picks the nearest pixel format the container supports; asking
+       for one it cannot write and then insisting is how encoders fail. */
+    WICPixelFormatGUID pixel_format = GUID_WICPixelFormat32bppBGRA;
+    if (format == RUBRAVIEW_EXPORT_JPEG || format == RUBRAVIEW_EXPORT_PNG) {
+        if (options && format == RUBRAVIEW_EXPORT_PNG &&
+            (options->png_depth == RUBRAVIEW_PNG_RGB24 || options->png_depth == RUBRAVIEW_PNG_PALETTE8 ||
+             options->png_depth == RUBRAVIEW_PNG_GRAY8)) {
+            pixel_format = options->png_depth == RUBRAVIEW_PNG_GRAY8
+                             ? GUID_WICPixelFormat8bppGray
+                             : (options->png_depth == RUBRAVIEW_PNG_PALETTE8
+                                  ? GUID_WICPixelFormat8bppIndexed
+                                  : GUID_WICPixelFormat24bppBGR);
+        } else if (format == RUBRAVIEW_EXPORT_JPEG) {
+            pixel_format = GUID_WICPixelFormat24bppBGR;  /* JPEG has no alpha */
+        }
+    }
+    IWICBitmapFrameEncode_SetPixelFormat(frame, &pixel_format);
+    IWICBitmapFrameEncode_SetSize(frame, width, height);
+
+    bool ok = false;
+    IWICFormatConverter *converter = NULL;
+    if (SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter &&
+        SUCCEEDED(IWICFormatConverter_Initialize(converter, source, &pixel_format,
+                                                 WICBitmapDitherTypeErrorDiffusion, NULL, 0.0,
+                                                 WICBitmapPaletteTypeMedianCut))) {
+        if (SUCCEEDED(IWICBitmapFrameEncode_WriteSource(frame, (IWICBitmapSource*)converter, NULL)) &&
+            SUCCEEDED(IWICBitmapFrameEncode_Commit(frame))) {
+            ok = true;
+        }
+    }
+
+    if (converter) IWICFormatConverter_Release(converter);
+    if (scaler) IWICBitmapScaler_Release(scaler);
+    IWICBitmap_Release(bitmap);
+    IWICBitmapFrameEncode_Release(frame);
+    return ok;
+}
+
+static bool save_frames(u8str_t path, const rubraview_pixbuf_t *pixels,
+                        const rubraview_export_options_t *options,
+                        rubraview_export_format_t format,
+                        const int32_t *sizes, size_t size_count) {
+    IWICImagingFactory *factory = wic_factory();
+    if (!factory || !rubraview_pixbuf_is_valid(pixels)) return false;
+
+    const GUID *container = container_for_format(format);
+    if (!container) return false;
+
+    IWICStream *stream = writable_stream(factory, path);
+    if (!stream) return false;
+
+    IWICBitmapEncoder *encoder = NULL;
+    if (FAILED(IWICImagingFactory_CreateEncoder(factory, container, NULL, &encoder)) || !encoder) {
+        IWICStream_Release(stream);
+        return false;
+    }
+    if (FAILED(IWICBitmapEncoder_Initialize(encoder, (IStream*)stream, WICBitmapEncoderNoCache))) {
+        IWICBitmapEncoder_Release(encoder);
+        IWICStream_Release(stream);
+        return false;
+    }
+
+    bool ok = true;
+    if (sizes && size_count > 0) {
+        for (size_t i = 0; i < size_count && ok; ++i) {
+            if (sizes[i] <= 0) continue;
+            ok = write_frame(factory, encoder, pixels, options, format,
+                             (UINT)sizes[i], (UINT)sizes[i]);
+        }
+    } else {
+        ok = write_frame(factory, encoder, pixels, options, format,
+                         (UINT)pixels->width, (UINT)pixels->height);
+    }
+
+    if (ok) ok = SUCCEEDED(IWICBitmapEncoder_Commit(encoder));
+
+    IWICBitmapEncoder_Release(encoder);
+    IWICStream_Release(stream);
+    return ok;
+}
+
+bool rubraview_pal_image_save(u8str_t path,
+                              const rubraview_pixbuf_t *pixels,
+                              const rubraview_export_options_t *options) {
+    if (!options) return false;
+
+    rubraview_export_format_t format = options->format;
+    if (format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
+        /* No source to be the same as: the filename decides. */
+        format = rubraview_export_format_for_name(path);
+    }
+    if (format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) return false;
+
+    if (format == RUBRAVIEW_EXPORT_ICO && options->ico_multi_size) {
+        int32_t sizes[8] = {0};
+        size_t n = rubraview_export_ico_sizes(sizes, 8);
+        return save_frames(path, pixels, options, format, sizes, n);
+    }
+
+    /* WebP: Windows has no built-in WebP *encoder*. WIC decodes WebP
+       through a system codec on current Windows, but writing one needs a
+       codec that may not be installed, so this simply fails rather than
+       writing a file with the wrong contents. */
+    return save_frames(path, pixels, options, format, NULL, 0);
+}
+
+bool rubraview_pal_image_save_ico(u8str_t path,
+                                  const rubraview_pixbuf_t *pixels,
+                                  const int32_t *sizes, size_t size_count) {
+    rubraview_export_options_t options = rubraview_export_defaults();
+    options.format = RUBRAVIEW_EXPORT_ICO;
+    return save_frames(path, pixels, &options, RUBRAVIEW_EXPORT_ICO, sizes, size_count);
+}
+
 #endif /* _WIN32 */

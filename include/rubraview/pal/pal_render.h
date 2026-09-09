@@ -61,6 +61,18 @@ void rubraview_pal_render_draw_texture(rubraview_renderer_t *renderer,
                                        rubraview_interpolation_t interpolation);
 
 /** Draw only `src` of the texture — the half-page case from RV-021. */
+/**
+ * The same, with an opacity: what the slide show's cross-fade needs
+ * (§3.2.5). Drawing the outgoing page and then the incoming one over it
+ * at rising opacity is the whole transition. Direct2D 1.0 could not do
+ * it; the device context (RV-064) can.
+ */
+void rubraview_pal_render_draw_texture_opacity(rubraview_renderer_t *renderer,
+                                               const rubraview_texture_t *texture,
+                                               rubraview_mat3x2_t transform,
+                                               rubraview_interpolation_t interpolation,
+                                               double opacity);
+
 void rubraview_pal_render_draw_texture_region(rubraview_renderer_t *renderer,
                                               const rubraview_texture_t *texture,
                                               rubraview_src_rect_t src,

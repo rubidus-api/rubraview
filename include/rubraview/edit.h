@@ -191,6 +191,24 @@ void rubraview_edit_set_resize(rubraview_edit_session_t *session, int32_t width,
 bool rubraview_edit_resize_percent(const rubraview_edit_session_t *session, double percent,
                                    int32_t *out_width, int32_t *out_height);
 
+/* ---- preview ---- */
+
+/**
+ * §3.13 asks for a preview that moves while a slider moves. The Direct2D
+ * effect graph it names is not reachable from C on the build toolchain
+ * (see the note in `src/pal/win32/pal_render_d2d.c`), so the preview
+ * runs the *same* commit code on a reduced copy of the image instead.
+ *
+ * This decides how reduced: no larger than the area it will be shown in,
+ * and never larger than the source. A preview of a 60-megapixel photo
+ * displayed in a 2000-pixel-wide window costs 2000 pixels of work, not
+ * 60 million — and because it is the same code as the commit, what the
+ * reader sees is what they will get.
+ */
+void rubraview_edit_preview_size(const rubraview_edit_session_t *session,
+                                 int32_t view_width, int32_t view_height,
+                                 int32_t *out_width, int32_t *out_height);
+
 /* ---- commit ---- */
 
 /**

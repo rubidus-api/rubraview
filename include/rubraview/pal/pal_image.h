@@ -7,6 +7,7 @@
 #include "rubraview/core.h"
 #include "rubraview/animation.h"
 #include "rubraview/pal/pal_render.h"
+#include "rubraview/export.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,6 +79,39 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
                                                              double *out_delay_seconds);
+
+/**
+ * §3.13's commit layer needs the pixels on the CPU, which the viewing
+ * path deliberately never does. This reads one decoded image back into
+ * a pixel buffer in `arena` — a folder file by path, or an archive page
+ * from its bytes.
+ */
+rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
+                                                   u8str_t path,
+                                                   const uint8_t *data, size_t size,
+                                                   bool apply_exif_orientation);
+
+/**
+ * §3.10: encode a pixel buffer and write it to `path`. The format and
+ * its quality settings come from the export options, which were already
+ * clamped and decided by `rubraview_export_*` — this call does no
+ * deciding, it only asks WIC for what was chosen.
+ *
+ * `privacy_clean` is honoured by construction rather than by stripping:
+ * the encoder is given pixels and no metadata, so there is none to
+ * carry over.
+ */
+bool rubraview_pal_image_save(u8str_t path,
+                              const rubraview_pixbuf_t *pixels,
+                              const rubraview_export_options_t *options);
+
+/**
+ * §3.10's multi-size ICO. The same image is written at each of the sizes
+ * `rubraview_export_ico_sizes` names, into one file.
+ */
+bool rubraview_pal_image_save_ico(u8str_t path,
+                                  const rubraview_pixbuf_t *pixels,
+                                  const int32_t *sizes, size_t size_count);
 
 #ifdef __cplusplus
 }
