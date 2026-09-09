@@ -39,21 +39,30 @@ Run this after T025 (canvas) and T031 (reading UI) on the Windows target.
 | 12 | Open a folder of ordinary images | Everything behaves as before: archives did not change how folders work — both are the same page source. |
 | 13 | Start a fast slide show (`S`, then `[` down to about 0.2 s) | Slides keep pace without stalling on decode: the ring widened (§3.2.1). |
 
-## Known M4 limitations (not defects)
+## Steps for animated and multi-frame files (§3.20)
 
-- CB7 (`.cb7`, 7-Zip) is not implemented. Owner decision D-3 approved
-  vendoring the LZMA SDK for it (RV-052), but the solid-stream decoder
-  §3.8.2 describes is a substantial piece of work in its own right and
-  has not been started. A `.cb7` will not open.
-- CBR (`.cbr`, RAR) is post-1.0 by the same decision — no pure-C
+| # | Action | Expected |
+|---|---|---|
+| 14 | Open an animated GIF | It plays. `Space` freezes it and `Space` resumes; `.` and `,` step one frame at a time and leave it frozen. |
+| 15 | With the GIF playing, press `Ctrl+]` a few times, then `Ctrl+[` | It speeds up to 2x and slows to 0.25x, stopping at each end rather than wrapping. Note that the same chords step *archives* when no animation is on screen — that is deliberate (§3.7.2 and §3.20.1 both claim them). |
+| 16 | Open a folder of GIFs and press `Right` | Paging still works: `Space` belongs to the animation, but `Right`, `PageDown`, `J` and `D` still turn pages. |
+| 17 | Run a slide show over a folder containing one long GIF | The GIF is not cut off mid-loop; the slide waits for one full pass (§3.2.6). |
+| 18 | Open a multi-size `.ico` | The largest layer is shown, not the 16x16 one. `.` and `,` walk the layers and the window does not resize (§2 invariant 2). |
+| 19 | Open a multi-page `.tif` | The first page shows and nothing advances on its own; `.` and `,` step pages. |
+| 20 | Open an animated GIF **inside a CBZ** | It animates there too — an archive page has no filename, and the frames come from the bytes. |
+
+## Known limitations (not defects)
+
+- CBR (`.cbr`, RAR) is post-1.0 by owner decision D-3 — no pure-C
   permissively licensed reader was found.
-- Animated GIF, WebP and APNG have their frame model, timing and
-  stepping implemented and tested (T036), and the WIC backend can decode
-  an individual frame, but the viewer does not yet run the animation
-  clock against the canvas: an animated file shows its first frame.
-- ICO opens at its first frame rather than its largest; the "largest
-  mipmap" rule is implemented and tested but not yet wired to the
-  loader.
+- An encrypted `.cb7` is refused with "unsupported coder". AES is
+  deliberately not vendored: the viewer has no way to ask for a
+  password, so it says so instead of pretending.
+- Each animation frame is decoded through WIC as it is shown, so a very
+  large GIF costs one decode per frame rather than reading from a cache
+  of decoded frames. It is bounded by the frame rate, and no frame is
+  decoded twice in a row, but a 4K animation may not keep pace on a slow
+  machine. Watch for it in step 14 and report it if you see it.
 
 ## Recording the result
 

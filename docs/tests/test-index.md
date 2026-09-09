@@ -38,10 +38,10 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T029 | R116, R147 | Verify OSD fade and status line, hover titlebar timing and button hit zones, transitions, cursor auto-hide | `make test` | tests/test_ui_chrome.c | active |
 | T030 | R133, R138 | Verify virtual scrolling, filmstrip budget interaction, picker breadcrumbs/type-ahead/multi-select | `make test` | tests/test_ui_browse.c | active |
 | T031 | R116, R120, R129 | Windows reading-UI smoke check: floating boxes, OSD, hover titlebar, slide show, rotation, filmstrip | `make win64` then run `dist/rubraview.exe <image>` on Windows | docs/tests/cases/T031-windows-ui-smoke.md | manual |
-| T032 | R120 | Verify every §3.7.2 hotkey row in M3's scope resolves to its action, and that the RFC's double-booked chords resolve in favour of the primary binding | `make test` | tests/test_default_keymap.c | active |
+| T032 | R120, R144 | Verify every §3.7.2 hotkey row in M3's scope resolves to its action, that the RFC's double-booked chords resolve in favour of the primary binding, and that §3.20's animation and sub-page rows resolve by context | `make test` | tests/test_default_keymap.c | active |
 | T033 | R137 | Verify reading-position history parse/record/prune/round-trip and the portable vs AppData config hierarchy | `make test` | tests/test_history.c | active |
 | T034 | R118, R136 | Verify CBZ and folder page sources, ComicInfo extraction, and consecutive archive traversal | `make test` | tests/test_pagesource.c | active |
 | T035 | R138 | Verify the pre-cache ring window, fast-slideshow widening, budget eviction and worker submission | `make test` | tests/test_precache.c | active |
-| T036 | R144 | Verify animation frame timing, speed ladder, stepping, and multi-page/ICO sub-page behaviour | `make test` | tests/test_animation.c | active |
+| T036 | R144 | Verify animation frame timing, speed ladder, stepping, kind classification and multi-page/ICO sub-page behaviour | `make test` | tests/test_animation.c | active |
 | T038 | R118 | Verify CB7 reading on real 7-Zip archives: solid-block reuse, the §10.2 block-size guard, and refusal of encrypted, truncated and damaged archives | `make test` | tests/test_sevenzip.c | active |
 | T037 | R118, R145 | Windows archive smoke check: a real CBZ opens and pages turn, covers stand alone, colour-managed photos render, volumes chain | `make win64` then run `dist/rubraview.exe <file.cbz>` on Windows | docs/tests/cases/T037-windows-archive-smoke.md | manual |

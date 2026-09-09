@@ -169,6 +169,41 @@ int main(void) {
     }
     printf("  [PASS] A, D and S keep their primary bindings over panning\n");
 
+    /* §3.20's rows exist, and the chords the specification spends twice
+       resolve by context rather than by one of the two meanings being
+       dropped: Space and Ctrl+[ / Ctrl+] mean the animation while one is
+       playing, and page turning and archive stepping everywhere else. */
+    {
+        rubraview_key_combo_t space = { .modifiers = RUBRAVIEW_MOD_NONE, .key_name = lit("Space") };
+        rubraview_key_combo_t ctrl_rb = { .modifiers = RUBRAVIEW_MOD_CTRL, .key_name = lit("BracketRight") };
+        rubraview_key_combo_t ctrl_lb = { .modifiers = RUBRAVIEW_MOD_CTRL, .key_name = lit("BracketLeft") };
+        rubraview_key_combo_t period = { .modifiers = RUBRAVIEW_MOD_NONE, .key_name = lit("Period") };
+        rubraview_key_combo_t comma = { .modifiers = RUBRAVIEW_MOD_NONE, .key_name = lit("Comma") };
+
+        u8str_t nav_space = resolve(&keymap, "navigation", space);
+        assert(nav_space.len == 9 && memcmp(nav_space.ptr, "next_page", 9) == 0);
+        u8str_t anim_space = resolve(&keymap, "animation", space);
+        assert(anim_space.len == 17 && memcmp(anim_space.ptr, "anim_toggle_pause", 17) == 0);
+
+        u8str_t nav_next = resolve(&keymap, "navigation", ctrl_rb);
+        assert(nav_next.len == 12 && memcmp(nav_next.ptr, "next_archive", 12) == 0);
+        u8str_t nav_prev = resolve(&keymap, "navigation", ctrl_lb);
+        assert(nav_prev.len == 12 && memcmp(nav_prev.ptr, "prev_archive", 12) == 0);
+
+        u8str_t anim_faster = resolve(&keymap, "animation", ctrl_rb);
+        assert(anim_faster.len == 13 && memcmp(anim_faster.ptr, "anim_speed_up", 13) == 0);
+        u8str_t anim_slower = resolve(&keymap, "animation", ctrl_lb);
+        assert(anim_slower.len == 15 && memcmp(anim_slower.ptr, "anim_speed_down", 15) == 0);
+
+        u8str_t step_fwd = resolve(&keymap, "animation", period);
+        assert(step_fwd.len == 17 && memcmp(step_fwd.ptr, "anim_step_forward", 17) == 0);
+        u8str_t sub_next = resolve(&keymap, "subpage", period);
+        assert(sub_next.len == 12 && memcmp(sub_next.ptr, "subpage_next", 12) == 0);
+        u8str_t sub_prev = resolve(&keymap, "subpage", comma);
+        assert(sub_prev.len == 12 && memcmp(sub_prev.ptr, "subpage_prev", 12) == 0);
+    }
+    printf("  [PASS] §3.20's animation and sub-page rows resolve, by context, without losing the global meanings\n");
+
     free(raw);
     printf("[test_default_keymap] All tests passed successfully!\n");
     return 0;

@@ -132,6 +132,29 @@ int main(void) {
     }
     printf("  [PASS] An empty frame list is inert, no crash\n");
 
+    /* Test: which kind a multi-frame file is comes from the frames, not
+       from the file extension — a WebP can be either. */
+    {
+        rubraview_frame_t animated[3] = {
+            { .delay_seconds = 0.1, .width = 64, .height = 64 },
+            { .delay_seconds = 0.0, .width = 64, .height = 64 },
+            { .delay_seconds = 0.1, .width = 64, .height = 64 },
+        };
+        rubraview_frame_t icon[3] = {
+            { .delay_seconds = 0.0, .width = 16, .height = 16 },
+            { .delay_seconds = 0.0, .width = 48, .height = 48 },
+            { .delay_seconds = 0.0, .width = 32, .height = 32 },
+        };
+        assert(rubraview_animation_classify(animated, 3) == RUBRAVIEW_FRAMES_ANIMATION);
+        assert(rubraview_animation_classify(icon, 3) == RUBRAVIEW_FRAMES_SUBPAGES);
+        assert(rubraview_animation_classify(NULL, 0) == RUBRAVIEW_FRAMES_SUBPAGES);
+
+        /* And the icon opens at its biggest layer, not its first. */
+        rubraview_animation_t ico = rubraview_animation_create(RUBRAVIEW_FRAMES_SUBPAGES, icon, 3);
+        assert(rubraview_animation_largest_frame(&ico) == 1);
+    }
+    printf("  [PASS] A file's kind is read from its frames, and an ICO opens at its largest layer\n");
+
     printf("[test_animation] All tests passed successfully!\n");
     return 0;
 }
