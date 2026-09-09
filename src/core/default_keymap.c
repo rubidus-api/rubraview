@@ -11,6 +11,11 @@ const char *rubraview_default_keymap(void) {
     "open_folder = Ctrl+Shift+O\n"
     "toggle_filmstrip = F4\n"
     "toggle_osd = I\n"
+    /* §3.13 / §3.10 / §3.11 */
+    "open_edit = E\n"
+    "quick_export = Ctrl+E\n"
+    "save_as = Ctrl+Shift+S\n"
+    "open_batch = Ctrl+B\n"
     "toggle_pixel_grid = G\n"
     "quit = Escape\n"
     "\n"

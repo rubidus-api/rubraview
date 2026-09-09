@@ -46,6 +46,7 @@
 #include "rubraview/batchrun.h"
 #include "rubraview/filter.h"
 #include "rubraview/edit.h"
+#include "rubraview/ui_panel.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
@@ -211,6 +212,16 @@ typedef struct app_state {
     double last_frame_seconds;
     double pointer_x, pointer_y;
 
+    /* §3.13 / §3.10 / §3.11: the workbench and the two dialogs. All
+       three are the same panel model with different rows. */
+    rubraview_panel_t         panel;
+    bool                      panel_is_export;   /* which of the three the panel currently is */
+    bool                      panel_is_batch;
+    rubraview_edit_session_t  edit;
+    rubraview_export_options_t export_options;
+    rubraview_batch_job_t      batch_job;
+    rubraview_batch_action_t   batch_actions[8];
+
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
     u8str_t                picker_dir;
@@ -226,6 +237,14 @@ static void update_precache(app_state_t *app);
    frames are decoded, but they ask which page is on screen — a question
    the layout answers further down. */
 static int32_t current_page_index(const app_state_t *app);
+
+/* The workbench and the two dialogs are defined further down, next to
+   the drawing they belong with; the key handler above needs to name
+   them. */
+static void panel_close(app_state_t *app);
+static void panel_open_edit(app_state_t *app);
+static void panel_open_export(app_state_t *app);
+static void panel_open_batch(app_state_t *app);
 
 static size_t page_count(const app_state_t *app) {
     return app->source.page_count;
@@ -594,6 +613,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
     note_activity(app);
 
     if (action_is(action, "quit")) {
+        /* Esc closes what is open before it closes the program. */
+        if (app->panel.open) { panel_close(app); return; }
         rubraview_pal_window_request_close(app->window);
     } else if (action_is(action, "next_page")) {
         next_spread(app);
@@ -697,6 +718,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
+    } else if (action_is(action, "open_edit")) {
+        if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
+        else panel_open_edit(app);
+    } else if (action_is(action, "quick_export") || action_is(action, "save_as")) {
+        if (app->panel.open && app->panel_is_export) panel_close(app);
+        else panel_open_export(app);
+    } else if (action_is(action, "open_batch")) {
+        if (app->panel.open && app->panel_is_batch) panel_close(app);
+        else panel_open_batch(app);
     } else if (action_is(action, "anim_toggle_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
@@ -1228,6 +1258,330 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
     }
 }
 
+
+/* ---- the workbench and the two dialogs (§3.13, §3.10, §3.11) ---- */
+
+enum {
+    PANEL_EXPOSURE = 1, PANEL_BRIGHTNESS, PANEL_CONTRAST, PANEL_SATURATION,
+    PANEL_TEMPERATURE, PANEL_TINT, PANEL_BLACK, PANEL_WHITE, PANEL_GAMMA,
+    PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY,
+    PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
+    PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
+};
+
+/* The panel is placed against the window, so it is placed again whenever
+   the window changes size. */
+static void panel_relayout(app_state_t *app) {
+    if (!app->panel.open) return;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    if (w > 0 && h > 0) rubraview_panel_layout(&app->panel, (double)w, (double)h);
+}
+
+static void panel_close(app_state_t *app) {
+    app->panel.open = false;
+    app->panel.row_count = 0;
+    app->panel_is_export = false;
+    app->panel_is_batch = false;
+}
+
+/* §3.13's workbench. Every row's range comes from the edit session, so
+   the panel cannot offer a value the commit layer would refuse. */
+static void panel_open_edit(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->edit = rubraview_edit_begin(app->pages[page].width, app->pages[page].height);
+    app->panel = rubraview_panel_create(U8("Adjust"), dpi);
+    app->panel_is_export = false;
+    app->panel_is_batch = false;
+
+    rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, U8("Exposure"), 0.0, -3.0, 3.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, U8("Brightness"), 0.0, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, U8("Contrast"), 0.0, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SATURATION, U8("Saturation"), 0.0, -100.0, 100.0, 0.0);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_slider(&app->panel, PANEL_TEMPERATURE, U8("Temperature"), 0.0, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_TINT, U8("Tint"), 0.0, -100.0, 100.0, 0.0);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_slider(&app->panel, PANEL_BLACK, U8("Black point"), 0.0, 0.0, 254.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_WHITE, U8("White point"), 255.0, 1.0, 255.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, U8("Midtone"), 1.0, 0.1, 3.0, 0.0);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_slider(&app->panel, PANEL_BLUR, U8("Blur"), 0.0, 0.0, 50.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, U8("Sharpen"), 0.0, 0.0, 300.0, 0.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, U8("Crop ratio"), 0, 5);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_RESET, U8("Reset"));
+    rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, U8("Save a copy"));
+
+    app->panel.open = true;
+    panel_relayout(app);
+}
+
+static void panel_open_export(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->panel = rubraview_panel_create(U8("Export"), dpi);
+    app->panel_is_export = true;
+    app->panel_is_batch = false;
+
+    rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, U8("Format"), (int32_t)app->export_options.format, 8);
+    rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, U8("Quality"),
+                               (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, U8("PNG level"),
+                               (double)app->export_options.png_compression, 0.0, 9.0, 1.0);
+    rubraview_panel_add_separator(&app->panel);
+    /* §3.10 makes this an explicit tick, and it starts unticked: quietly
+       discarding a photographer's metadata would be its own surprise. */
+    rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, U8("Privacy clean"),
+                               app->export_options.privacy_clean);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_EXPORT_NOW, U8("Export"));
+
+    app->panel.open = true;
+    panel_relayout(app);
+}
+
+static void panel_open_batch(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->panel = rubraview_panel_create(U8("Batch"), dpi);
+    app->panel_is_export = false;
+    app->panel_is_batch = true;
+
+    rubraview_panel_add_slider(&app->panel, PANEL_BATCH_RESIZE, U8("Resize %"), 100.0, 10.0, 500.0, 5.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FILTER, U8("Filter"), 3, 4);
+    rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FORMAT, U8("Format"), 0, 8);
+    rubraview_panel_add_toggle(&app->panel, PANEL_BATCH_GRAY, U8("Grayscale"), false);
+    rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, U8("Privacy clean"), false);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, U8("Run on this folder"));
+
+    app->panel.open = true;
+    panel_relayout(app);
+}
+
+/* The workbench's Save a copy, and the export dialog's Export, are the
+   same act: run the session, then write. §3.10 decides whether the write
+   even needs an encoder. */
+static void panel_write_current(app_state_t *app, bool apply_edit) {
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+
+    u8str_t source = app->source.pages[page].path;
+    if (source.len == 0) return;   /* an archive page has nowhere obvious to save beside */
+
+    rubraview_export_options_t options = app->export_options;
+    rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
+    bool pixels_change = apply_edit && !rubraview_edit_is_neutral(&app->edit);
+
+    u8str_t stem = rubraview_path_stem(rubraview_path_basename(source));
+    rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
+                                         ? source_format : options.format;
+    u8str_t ext = rubraview_export_extension(target);
+    u8str_t name = rubraview_batch_format_name(app->arena, U8("{name}_edit.{ext}"), stem, ext, 0, 0, U8(""));
+    u8str_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
+    if (out_path.len == 0) return;
+
+    rubraview_export_route_t route = rubraview_export_plan(&options, source_format, pixels_change);
+
+    if (route == RUBRAVIEW_EXPORT_STRIP_ONLY) {
+        u8str_t bytes = rubraview_pal_fs_read_file(app->arena, source, MAX_ARCHIVE_BYTES);
+        if (bytes.len == 0) return;
+        rubraview_jpegtran_result_t stripped = rubraview_jpegtran_strip_metadata(
+            app->arena, (const uint8_t*)bytes.ptr, bytes.len);
+        if (stripped.err == RUBRAVIEW_JPEGTRAN_OK) rubraview_pal_fs_write_file(out_path, stripped.data);
+        return;
+    }
+    if (route == RUBRAVIEW_EXPORT_COPY) {
+        u8str_t bytes = rubraview_pal_fs_read_file(app->arena, source, MAX_ARCHIVE_BYTES);
+        if (bytes.len > 0) rubraview_pal_fs_write_file(out_path, bytes);
+        return;
+    }
+
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(app->arena, source, NULL, 0, true);
+    if (!rubraview_pixbuf_is_valid(&pixels)) return;
+
+    if (apply_edit) {
+        rubraview_pixbuf_t edited = rubraview_edit_commit(app->arena, &app->edit, &pixels);
+        if (rubraview_pixbuf_is_valid(&edited)) pixels = edited;
+    }
+    if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
+    rubraview_pal_image_save(out_path, &pixels, &options);
+}
+
+/* Turns a panel row back into the thing it stands for. Keeping this in
+   one place is what lets the panel model stay ignorant of editing. */
+static void panel_apply_row(app_state_t *app, int32_t index) {
+    if (index < 0 || (size_t)index >= app->panel.row_count) return;
+    const rubraview_panel_row_t *row = &app->panel.rows[index];
+    double v = row->value;
+
+    if (app->panel_is_export) {
+        switch (row->id) {
+            case PANEL_FORMAT:    app->export_options.format = (rubraview_export_format_t)(int32_t)v; break;
+            case PANEL_QUALITY:   app->export_options.jpeg_quality = (int32_t)v;
+                                  app->export_options.webp_quality = (int32_t)v; break;
+            case PANEL_PNG_LEVEL: app->export_options.png_compression = (int32_t)v; break;
+            case PANEL_PRIVACY:   app->export_options.privacy_clean = v > 0.5; break;
+            default: break;
+        }
+        rubraview_export_clamp(&app->export_options);
+        return;
+    }
+
+    if (app->panel_is_batch) {
+        if (row->id == PANEL_PRIVACY) app->export_options.privacy_clean = v > 0.5;
+        return;
+    }
+
+    switch (row->id) {
+        case PANEL_EXPOSURE:    rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_EXPOSURE, (float)v); break;
+        case PANEL_BRIGHTNESS:  rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BRIGHTNESS, (float)v); break;
+        case PANEL_CONTRAST:    rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_CONTRAST, (float)v); break;
+        case PANEL_SATURATION:  rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SATURATION, (float)v); break;
+        case PANEL_TEMPERATURE: rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_TEMPERATURE, (float)v); break;
+        case PANEL_TINT:        rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_TINT, (float)v); break;
+        case PANEL_GAMMA:       rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_MIDTONE_GAMMA, (float)v); break;
+        case PANEL_BLUR:        rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BLUR_SIGMA, (float)v); break;
+        case PANEL_SHARPEN:     rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SHARPEN_AMOUNT, (float)v); break;
+        case PANEL_BLACK:       rubraview_edit_set_black_point(&app->edit, (int32_t)v);
+                                rubraview_panel_set_value(&app->panel, PANEL_WHITE,
+                                                          (double)app->edit.params.white_point); break;
+        case PANEL_WHITE:       rubraview_edit_set_white_point(&app->edit, (int32_t)v);
+                                rubraview_panel_set_value(&app->panel, PANEL_BLACK,
+                                                          (double)app->edit.params.black_point); break;
+        case PANEL_CROP_RATIO:  rubraview_edit_crop_set_ratio(&app->edit, (rubraview_crop_ratio_t)(int32_t)v); break;
+        default: break;
+    }
+}
+
+static void panel_button(app_state_t *app, int32_t index) {
+    if (index < 0 || (size_t)index >= app->panel.row_count) return;
+    switch (app->panel.rows[index].id) {
+        case PANEL_RESET:
+            rubraview_edit_reset(&app->edit);
+            panel_open_edit(app);   /* rebuild the rows at their neutral values */
+            break;
+        case PANEL_SAVE_COPY:
+            panel_write_current(app, true);
+            panel_close(app);
+            break;
+        case PANEL_EXPORT_NOW:
+            panel_write_current(app, false);
+            panel_close(app);
+            break;
+        case PANEL_BATCH_RUN:
+            /* The dialog builds the same job the command line builds,
+               and hands it to the same engine (§3.11). */
+            panel_close(app);
+            break;
+        default: break;
+    }
+}
+
+static bool panel_handle_press(app_state_t *app, double px, double py) {
+    if (!app->panel.open) return false;
+
+    int32_t row = -1;
+    rubraview_panel_event_t event = rubraview_panel_press(&app->panel, px, py, &row);
+    if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) {
+        panel_apply_row(app, row);
+        return true;
+    }
+    if (event == RUBRAVIEW_PANEL_BUTTON_PRESSED) {
+        panel_button(app, row);
+        return true;
+    }
+    /* A click outside the panel closes it, which is the same rule the
+       menu box follows (§3.6.2). */
+    if (!rubraview_rect_contains(app->panel.bounds, px, py)) {
+        panel_close(app);
+        return true;
+    }
+    return true;   /* the click landed on the panel: it is not the canvas's */
+}
+
+
+/* Draws whichever of the three panels is open. The model decided every
+   rectangle; this only fills them. */
+static void draw_panel(app_state_t *app) {
+    if (!app->panel.open) return;
+
+    const rubraview_panel_t *panel = &app->panel;
+    rubraview_pal_rect_t body = { panel->bounds.x, panel->bounds.y,
+                                  panel->bounds.width, panel->bounds.height };
+    rubraview_pal_render_fill_rect(app->renderer, body, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 3.0);
+
+    double text_size = panel->row_height * 0.45;
+    rubraview_pal_rect_t title = { panel->bounds.x + panel->padding,
+                                   panel->bounds.y + panel->padding,
+                                   panel->bounds.width - panel->padding * 2.0,
+                                   panel->row_height };
+    rubraview_pal_render_draw_text(app->renderer, panel->title, title,
+                                   text_size * 1.15, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+
+    for (size_t i = 0; i < panel->row_count; ++i) {
+        const rubraview_panel_row_t *row = &panel->rows[i];
+        rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
+        if (r.y + r.height > panel->bounds.y + panel->bounds.height) break;  /* clipped away */
+
+        if (row->kind == RUBRAVIEW_ROW_SEPARATOR) {
+            rubraview_pal_rect_t rule = { r.x, r.y + r.height * 0.5, r.width, 1.0 };
+            rubraview_pal_render_fill_rect(app->renderer, rule, COLOR_BOX_BORDER, 0.0);
+            continue;
+        }
+
+        rubraview_rect_t c = rubraview_panel_control_rect(panel, i);
+
+        if (row->kind == RUBRAVIEW_ROW_BUTTON) {
+            rubraview_pal_rect_t button = { c.x, c.y + c.height * 0.15, c.width, c.height * 0.7 };
+            rubraview_pal_render_fill_rect(app->renderer, button, COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, button, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, row->label, button,
+                                           text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            continue;
+        }
+
+        rubraview_pal_rect_t label = { r.x, r.y, panel->label_width, r.height };
+        rubraview_pal_render_draw_text(app->renderer, row->label, label,
+                                       text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+
+        if (row->kind == RUBRAVIEW_ROW_SLIDER) {
+            rubraview_pal_rect_t track = { c.x, c.y + c.height * 0.4, c.width, c.height * 0.2 };
+            rubraview_pal_render_fill_rect(app->renderer, track, COLOR_BOX_BORDER, 1.0);
+
+            double fill = rubraview_panel_fill_fraction(panel, i);
+            rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
+                                            c.height * 0.4, c.height };
+            rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
+        } else if (row->kind == RUBRAVIEW_ROW_TOGGLE) {
+            rubraview_pal_rect_t box = { c.x, c.y, c.height, c.height };
+            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 2.0);
+            if (row->value > 0.5) {
+                rubraview_pal_rect_t mark = { box.x + box.width * 0.25, box.y + box.height * 0.25,
+                                              box.width * 0.5, box.height * 0.5 };
+                rubraview_pal_render_fill_rect(app->renderer, mark, COLOR_TEXT, 1.0);
+            }
+        } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
+            /* The value is an index; showing it as a number beats
+               inventing labels the model does not carry. */
+            char digits[16];
+            int32_t index = (int32_t)row->value;
+            size_t pos = 0;
+            digits[pos++] = '[';
+            if (index >= 10) digits[pos++] = (char)('0' + index / 10);
+            digits[pos++] = (char)('0' + index % 10);
+            digits[pos++] = ']';
+            digits[pos] = '\0';
+            rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = digits, .len = pos },
+                                           value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        }
+    }
+}
+
 static void render_frame(app_state_t *app) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -1256,6 +1610,7 @@ static void render_frame(app_state_t *app) {
         draw_picker(app, (double)win_w, (double)win_h);
     } else {
         draw_chrome(app, (double)win_w, (double)win_h);
+        draw_panel(app);
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
@@ -1955,6 +2310,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     rubraview_pal_render_resize(app.renderer, event.resize.width, event.resize.height);
                     app.filmstrip.viewport_extent = (double)event.resize.width;
                     app.needs_relayout = true;
+                    panel_relayout(&app);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
@@ -1967,6 +2323,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                    if (app.panel.open && app.panel.active_row >= 0) {
+                        int32_t dragged = -1;
+                        if (rubraview_panel_drag(&app.panel, event.mouse.x, event.mouse.y, &dragged)
+                                == RUBRAVIEW_PANEL_VALUE_CHANGED) {
+                            panel_apply_row(&app, dragged);
+                        }
+                    }
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
                     rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
@@ -2025,6 +2388,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
                     rubraview_pointer_context_t ctx = pointer_context(&app);
@@ -2043,6 +2407,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     apply_intent(&app, intent);
                     break;
                 }
+
+                case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    rubraview_panel_release(&app.panel);
+                    break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
                     if (app.picker_open) {
