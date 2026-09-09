@@ -6,7 +6,7 @@ SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filt
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c
 # miniz is third-party and does not build clean under this project's
 # -Werror -pedantic settings, so it is compiled separately with warnings
 # off. It is still instrumented by the sanitisers on the host build:
@@ -91,9 +91,9 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings
 
-.PHONY: all test check clean win64
+.PHONY: all test check clean win64 package
 
 all: test
 
@@ -171,6 +171,13 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 \
 		-o dist/rubraview.exe
 	@echo "Linked: dist/rubraview.exe"
+
+# RV-083: the release layout. Depends on win64 rather than repeating it,
+# so what is packaged is always what was just built.
+package: win64
+	@sh scripts/package.sh $(VERSION)
+
+VERSION ?= 0.1.0
 
 clean:
 	rm -rf build/ dist/

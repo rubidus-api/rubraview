@@ -52,3 +52,4 @@ resources/cache/
 .DS_Store
 *.tmp
 *.log
+build/

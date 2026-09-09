@@ -49,4 +49,10 @@ if command -v find >/dev/null 2>&1; then
   done
 fi
 
+# §11.2's M9 criterion, checked mechanically: a setting some module reads
+# but no tab offers is a setting the reader cannot change.
+if command -v python3 >/dev/null 2>&1 && [ -x scripts/check-settings.py ]; then
+  python3 scripts/check-settings.py || fail "a setting is not reachable from the settings window"
+fi
+
 printf '%s\n' "project-check: ok"
