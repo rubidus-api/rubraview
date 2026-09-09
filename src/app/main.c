@@ -2823,7 +2823,7 @@ static void report_startup_failure(void) {
 /* `--diag`: bring the graphics up, say what it got, and stop. One run
    from a command prompt answers "what is this machine actually using",
    which is otherwise guesswork from far away. */
-static int run_diagnostics(proven_arena_t *arena) {
+static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     rubraview_window_config_t config = { .title = "Rubraview diagnostics", .width = 640, .height = 400, .frameless = false };
     rubraview_window_t *window = rubraview_pal_window_create(arena, &config);
     if (!window) {
@@ -2849,7 +2849,7 @@ static int run_diagnostics(proven_arena_t *arena) {
     char described[256];
     u8str_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
     char line[320];
-    snprintf(line, sizeof(line), "rubraview: graphics OK — %.*s", (int)info.len, info.ptr);
+    snprintf(line, sizeof(line), "rubraview: graphics OK - %.*s", (int)info.len, info.ptr);
     console_line(line);
 
     /* Draw one frame and present it. Creating a device proves less than
@@ -2862,7 +2862,54 @@ static int run_diagnostics(proven_arena_t *arena) {
     console_line(presented ? "rubraview: a test frame was drawn and presented"
                            : "rubraview: the test frame did NOT present — the device was lost");
 
-    rubraview_pal_time_sleep_ms(1500);   /* long enough to see the window */
+    /* With a file named, run the real decode path on it. A device that
+       starts and a picture that appears are two different claims, and
+       the second is the one being questioned. */
+    if (image_path.len > 0) {
+        console_line("");
+        console_line("rubraview: walking the image path for that file");
+
+        char report[2048];
+        u8str_t text = rubraview_pal_image_diagnose(renderer, image_path, report, sizeof(report));
+
+        /* The report is several lines; hand them over one at a time so
+           the console shows them properly. */
+        size_t start = 0;
+        for (size_t i = 0; i <= text.len; ++i) {
+            bool end = i == text.len;
+            if (!end && text.ptr[i] != '\n') continue;
+            size_t stop = i;
+            while (stop > start && (text.ptr[stop - 1] == '\r' || text.ptr[stop - 1] == '\n')) stop--;
+            if (stop > start) {
+                char one[256];
+                size_t n = stop - start < sizeof(one) - 1 ? stop - start : sizeof(one) - 1;
+                memcpy(one, text.ptr + start, n);
+                one[n] = '\0';
+                console_line(one);
+            }
+            start = i + 1;
+        }
+
+        /* And then actually put it on the screen, which is the claim
+           that matters. */
+        rubraview_image_load_result_t loaded =
+            rubraview_pal_image_load_texture(renderer, image_path, true);
+        console_line(loaded.ok ? "rubraview: the image loaded as a texture"
+                               : "rubraview: the image did NOT load as a texture");
+
+        if (loaded.ok && loaded.texture) {
+            rubraview_pal_render_begin(renderer, 0xFF101010u);
+            rubraview_mat3x2_t place = rubraview_mat3x2_identity();
+            rubraview_pal_render_draw_texture(renderer, loaded.texture, place, RUBRAVIEW_INTERP_LINEAR);
+            bool shown = rubraview_pal_render_end(renderer);
+            console_line(shown ? "rubraview: the image was drawn to the window - look at it now"
+                               : "rubraview: drawing the image did NOT present");
+            rubraview_pal_time_sleep_ms(4000);
+            rubraview_pal_texture_destroy(loaded.texture);
+        }
+    } else {
+        rubraview_pal_time_sleep_ms(1500);   /* long enough to see the test frame */
+    }
 
     rubraview_pal_render_destroy(renderer);
     rubraview_pal_window_destroy(window);
@@ -2926,7 +2973,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             }
 
             if (cli.diagnostics) {
-                int code = run_diagnostics(&arena);
+                int code = run_diagnostics(&arena, cli.input);
                 free(memory);
                 CoUninitialize();
                 return code;
