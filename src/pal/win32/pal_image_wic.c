@@ -17,6 +17,15 @@
  */
 static IWICImagingFactory *g_wic_factory = NULL;
 
+static IWICImagingFactory *wic_factory(void);
+
+bool rubraview_pal_image_startup(void) {
+    /* See the header: this is about timing, not capability. Doing it
+       here — after CoInitializeEx, before any window — is what keeps the
+       first image from deadlocking an apartment nobody is pumping. */
+    return wic_factory() != NULL;
+}
+
 static IWICImagingFactory *wic_factory(void) {
     if (g_wic_factory) return g_wic_factory;
 

@@ -81,6 +81,22 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
                                                              double *out_delay_seconds);
 
 /**
+ * Bring the imaging codecs up, once, before anything else needs them.
+ *
+ * This exists because of *when* the factory is created, not whether.
+ * COM was started as a single-threaded apartment (the file dialog
+ * requires it), and in such an apartment activating an object while a
+ * window exists on the same thread that nobody is pumping messages for
+ * can deadlock. The viewer opens its first file before its message loop
+ * has run even once — so the first image would take the whole program
+ * down with it, silently, looking exactly like "images do not render".
+ *
+ * Called immediately after COM starts and before any window exists,
+ * there is no window to deadlock against. Safe to call more than once.
+ */
+bool rubraview_pal_image_startup(void);
+
+/**
  * Walk the decode path for one file and report what happened at each
  * step, into `buffer`.
  *
