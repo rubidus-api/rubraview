@@ -28,16 +28,22 @@ const char *rubraview_default_keymap(void) {
     "rename_file = F2\n"
     "\n"
     "[navigation]\n"
-    "next_page = Right, PageDown, Space, J, D\n"
-    "prev_page = Left, PageUp, Shift+Space, K, A\n"
+    /* Owner, 2026-09-09: page turning is on these keys and nothing else
+       — PageDown/PageUp, Space/Enter and Backspace. The arrows, J/K and
+       A/D were bound here too; they were removed on request so that what
+       moves between files is a short, deliberate list. */
+    "next_page = PageDown, Space, Enter\n"
+    "prev_page = PageUp, Backspace, Shift+Space\n"
     "first_page = Home, Ctrl+Home\n"
     "last_page = End, Ctrl+End\n"
     "skip_forward = Shift+Right, Ctrl+PageDown\n"
     "skip_backward = Shift+Left, Ctrl+PageUp\n"
-    /* §3.7.2 offers `Alt+Up` as an alternative here, but that chord is
-       also panning's primary; "up to folder" keeps its own primary,
-       Backspace, and panning keeps the whole Alt+Arrow set. */
-    "up_to_folder = Backspace\n"
+    /* §3.7.2 gives "up to folder" two keys, Backspace and Alt+Up, and
+       both are now spoken for: Backspace turns a page (owner,
+       2026-09-09) and Alt+Up pans, which is the whole Alt+Arrow set.
+       So it moved to Ctrl+Up — the nearest free chord that still reads
+       as "up". */
+    "up_to_folder = Ctrl+Up\n"
     "toggle_layout = B\n"
     "toggle_reading_order = M\n"
     "toggle_spread_detect = Shift+B\n"
