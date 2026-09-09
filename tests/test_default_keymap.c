@@ -52,16 +52,16 @@ int main(void) {
 
     const binding_expectation_t EXPECTED[] = {
         /* Navigation */
-        { "navigation", RUBRAVIEW_MOD_NONE,  "Right",        "next_page" },
+        /* Owner, 2026-09-09: paging is these keys and nothing else. The
+           arrows, J/K and A/D used to be here and were removed on
+           request; §3.7.2 lists them, and this row set is the deliberate
+           departure from it. */
         { "navigation", RUBRAVIEW_MOD_NONE,  "PageDown",     "next_page" },
         { "navigation", RUBRAVIEW_MOD_NONE,  "Space",        "next_page" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "J",            "next_page" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "D",            "next_page" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "Left",         "prev_page" },
+        { "navigation", RUBRAVIEW_MOD_NONE,  "Enter",        "next_page" },
         { "navigation", RUBRAVIEW_MOD_NONE,  "PageUp",       "prev_page" },
+        { "navigation", RUBRAVIEW_MOD_NONE,  "Backspace",    "prev_page" },
         { "navigation", RUBRAVIEW_MOD_SHIFT, "Space",        "prev_page" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "K",            "prev_page" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "A",            "prev_page" },
         { "navigation", RUBRAVIEW_MOD_NONE,  "Home",         "first_page" },
         { "navigation", RUBRAVIEW_MOD_CTRL,  "Home",         "first_page" },
         { "navigation", RUBRAVIEW_MOD_NONE,  "End",          "last_page" },
@@ -70,7 +70,7 @@ int main(void) {
         { "navigation", RUBRAVIEW_MOD_CTRL,  "PageDown",     "skip_forward" },
         { "navigation", RUBRAVIEW_MOD_SHIFT, "Left",         "skip_backward" },
         { "navigation", RUBRAVIEW_MOD_CTRL,  "PageUp",       "skip_backward" },
-        { "navigation", RUBRAVIEW_MOD_NONE,  "Backspace",    "up_to_folder" },
+        { "navigation", RUBRAVIEW_MOD_CTRL,  "Up",           "up_to_folder" },
 
         /* Zoom & Fit */
         { "view", RUBRAVIEW_MOD_NONE, "Plus",   "zoom_in" },
@@ -132,13 +132,18 @@ int main(void) {
         u8str_t action = resolve(&keymap, EXPECTED[i].context, combo);
 
         if (action.len == 0) {
+            /* Flushed before the abort: an assert kills the process
+               with the message still sitting in the buffer, and a
+               failure nobody can read is barely a failure report. */
             printf("  [FAIL] %s is not bound to anything\n", EXPECTED[i].key_name);
+            fflush(stdout);
             assert(action.len != 0);
         }
         size_t expected_len = strlen(EXPECTED[i].action);
         if (action.len != expected_len || memcmp(action.ptr, EXPECTED[i].action, expected_len) != 0) {
             printf("  [FAIL] %s resolved to '%.*s', expected '%s'\n",
                    EXPECTED[i].key_name, (int)action.len, action.ptr, EXPECTED[i].action);
+            fflush(stdout);
             assert(false);
         }
     }
@@ -163,11 +168,14 @@ int main(void) {
         u8str_t d_action = resolve(&keymap, "navigation", d);
         u8str_t s_action = resolve(&keymap, "navigation", s_key);
 
-        assert(a_action.len == 9 && memcmp(a_action.ptr, "prev_page", 9) == 0);
-        assert(d_action.len == 9 && memcmp(d_action.ptr, "next_page", 9) == 0);
+        /* A and D no longer page — the owner asked for a short, explicit
+           list of keys that move between files, and these are not on it.
+           They are free now; S still starts the slide show. */
+        assert(a_action.len == 0);
+        assert(d_action.len == 0);
         assert(s_action.len == 16 && memcmp(s_action.ptr, "toggle_slideshow", 16) == 0);
     }
-    printf("  [PASS] A, D and S keep their primary bindings over panning\n");
+    printf("  [PASS] A and D no longer page; S still starts the slide show\n");
 
     /* §3.20's rows exist, and the chords the specification spends twice
        resolve by context rather than by one of the two meanings being
@@ -203,6 +211,27 @@ int main(void) {
         assert(sub_prev.len == 12 && memcmp(sub_prev.ptr, "subpage_prev", 12) == 0);
     }
     printf("  [PASS] §3.20's animation and sub-page rows resolve, by context, without losing the global meanings\n");
+
+    /* The wheel must not turn pages (owner, 2026-09-09). That is not a
+       binding, so it is checked where it lives — in the pointer model —
+       but the keys that *do* turn pages are asserted here, and this is
+       the list. Anything not on it must not page. */
+    {
+        const char *must_not_page[] = { "Right", "Left", "J", "K", "A", "D", "Up", "Down" };
+        for (size_t i = 0; i < sizeof(must_not_page) / sizeof(must_not_page[0]); ++i) {
+            rubraview_key_combo_t combo = { .modifiers = RUBRAVIEW_MOD_NONE,
+                                            .key_name = lit(must_not_page[i]) };
+            u8str_t action = resolve(&keymap, "navigation", combo);
+            bool pages = (action.len == 9 && memcmp(action.ptr, "next_page", 9) == 0) ||
+                         (action.len == 9 && memcmp(action.ptr, "prev_page", 9) == 0);
+            if (pages) {
+                printf("  [FAIL] %s still turns pages\n", must_not_page[i]);
+                fflush(stdout);
+                assert(false);
+            }
+        }
+    }
+    printf("  [PASS] Only the named keys turn pages; the arrows and letters do not\n");
 
     free(raw);
     printf("[test_default_keymap] All tests passed successfully!\n");

@@ -82,8 +82,12 @@ int main(void) {
         assert(rubraview_pointer_wheel(&comic, -1.0, RUBRAVIEW_MOD_CTRL) == RUBRAVIEW_INTENT_ZOOM_OUT);
         assert(rubraview_pointer_wheel(&comic, 1.0, RUBRAVIEW_MOD_SHIFT) == RUBRAVIEW_INTENT_SKIP_BACKWARD);
         assert(rubraview_pointer_wheel(&comic, -1.0, RUBRAVIEW_MOD_SHIFT) == RUBRAVIEW_INTENT_SKIP_FORWARD);
-        assert(rubraview_pointer_wheel(&comic, 1.0, RUBRAVIEW_MOD_NONE) == RUBRAVIEW_INTENT_PREV_PAGE);
-        assert(rubraview_pointer_wheel(&comic, -1.0, RUBRAVIEW_MOD_NONE) == RUBRAVIEW_INTENT_NEXT_PAGE);
+        /* A plain wheel does nothing on a page that fits (owner,
+           2026-09-09). It used to turn pages, which made one gesture
+           mean two things: a nudge on a tall image, a jump to another
+           file on a short one. Turning pages is on the keys now. */
+        assert(rubraview_pointer_wheel(&comic, 1.0, RUBRAVIEW_MOD_NONE) == RUBRAVIEW_INTENT_NONE);
+        assert(rubraview_pointer_wheel(&comic, -1.0, RUBRAVIEW_MOD_NONE) == RUBRAVIEW_INTENT_NONE);
         assert(rubraview_pointer_wheel(&comic, 0.0, RUBRAVIEW_MOD_NONE) == RUBRAVIEW_INTENT_NONE);
     }
     printf("  [PASS] Wheel: Ctrl zooms, Shift skips, plain notch flips pages\n");

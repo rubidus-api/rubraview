@@ -61,8 +61,18 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
     if (ctx->scrollable_vertically) {
         return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
     }
-    /* Wheel forward means "back a page", matching document scrolling. */
-    return forward ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
+
+    /* The wheel does *not* turn pages (owner, 2026-09-09).
+     *
+     * It used to, and that is a common thing for a viewer to do, but it
+     * makes the wheel mean two different things depending on whether the
+     * picture happens to be taller than the window — so a small scroll
+     * on one image nudges it, and the same gesture on the next image
+     * jumps to a different file. Turning pages stays on the keys, where
+     * it is deliberate. Ctrl+wheel still zooms, and a scrollable image
+     * still scrolls. */
+    (void)forward;
+    return RUBRAVIEW_INTENT_NONE;
 }
 
 rubraview_pointer_intent_t rubraview_pointer_side_button(bool is_forward_button) {

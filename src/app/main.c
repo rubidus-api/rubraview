@@ -891,6 +891,17 @@ static bool key_is(rubraview_key_combo_t combo, const char *name) {
    press before anything else does: a confirmation that is ignored is
    worse than no confirmation at all. */
 static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    /* §3.17.1's resume prompt answers Enter before paging does. Enter
+       turns a page now (owner, 2026-09-09), and a prompt that the very
+       key meant to answer it walks straight past is not a prompt. */
+    if (app->resume_offer && key_is(combo, "Enter")) {
+        app->resume_offer = false;
+        size_t target = spread_index_for_page(app, app->resume_page);
+        go_to_spread(app, target);
+        update_precache(app);
+        return true;
+    }
+
     if (app->confirm_purge) {
         if (key_is(combo, "Y") || key_is(combo, "Enter")) {
             app->confirm_purge = false;
