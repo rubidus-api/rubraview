@@ -101,7 +101,8 @@ ID2D1DeviceContext *rubraview_d2d_device_context(rubraview_renderer_t *renderer)
     return renderer ? renderer->target : NULL;
 }
 
-rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, ID2D1Bitmap *bitmap) {
+rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, ID2D1Bitmap *bitmap,
+                                                int32_t width, int32_t height) {
     if (!renderer || !bitmap) return NULL;
 
     struct rubraview_texture *tex = renderer->free_textures;
@@ -113,10 +114,11 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
         tex = (struct rubraview_texture*)(void*)res.value.ptr;
     }
 
-    D2D1_SIZE_U size = ID2D1Bitmap_GetPixelSize(bitmap);
+    /* The size comes from the caller, not from GetPixelSize — see the
+       note on this function in pal_render_d2d_internal.h. */
     tex->bitmap = bitmap;
-    tex->width = (int32_t)size.width;
-    tex->height = (int32_t)size.height;
+    tex->width = width;
+    tex->height = height;
     tex->owner = renderer;
     tex->next_free = NULL;
     return tex;
