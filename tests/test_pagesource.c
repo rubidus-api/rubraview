@@ -309,6 +309,48 @@ int main(void) {
     }
     printf("  [PASS] A 7z with a .cbz name is still read as a 7z\n");
 
+    /* Test: the file the reader named must be the page that opens.
+       Getting this wrong is not a subtle failure — the viewer shows a
+       different picture, which is what `rubraview.exe test.jpg` did:
+       the command line says one thing, the directory listing says
+       another, and a byte comparison of the two never matches. */
+    {
+        rubraview_fs_entry_t entries[] = {
+            { .name = lit("alpha.jpg"), .path = lit("D:/Pictures/alpha.jpg") },
+            { .name = lit("test.jpg"),  .path = lit("D:/Pictures/test.jpg") },
+            { .name = lit("zulu.jpg"),  .path = lit("D:/Pictures/zulu.jpg") },
+        };
+        rubraview_fs_listing_t listing = { .entries = entries, .count = 3 };
+        rubraview_page_source_t source = rubraview_page_source_from_listing(
+            &arena, &listing, U8("*.jpg"), RUBRAVIEW_SORT_NAME_NATURAL, true);
+        assert(source.page_count == 3);
+
+        /* The full path, as a file dialog would give it. */
+        assert(rubraview_page_source_find(&source, lit("D:/Pictures/test.jpg")) == 1);
+
+        /* A bare filename, as a command prompt gives it. This is the
+           one that was broken. */
+        assert(rubraview_page_source_find(&source, lit("test.jpg")) == 1);
+
+        /* Backslashes, as Windows writes them. */
+        assert(rubraview_page_source_find(&source, lit("C:\\Users\\someone\\Pictures\\test.jpg")) == 1);
+
+        /* Different case: Windows calls this the same file. */
+        assert(rubraview_page_source_find(&source, lit("TEST.JPG")) == 1);
+        assert(rubraview_page_source_find(&source, lit("Test.Jpg")) == 1);
+
+        /* A file that is not in the folder is not found — and must not
+           quietly resolve to page zero. */
+        assert(rubraview_page_source_find(&source, lit("absent.jpg")) == -1);
+        assert(rubraview_page_source_find(&source, lit("")) == -1);
+        assert(rubraview_page_source_find(NULL, lit("test.jpg")) == -1);
+
+        /* A name that merely contains another must not match it. */
+        assert(rubraview_page_source_find(&source, lit("test.jpg.bak")) == -1);
+        assert(rubraview_page_source_find(&source, lit("mytest.jpg")) == -1);
+    }
+    printf("  [PASS] The named file is the page that opens, however the name was written\n");
+
     free(raw);
     printf("[test_pagesource] All tests passed successfully!\n");
     return 0;
