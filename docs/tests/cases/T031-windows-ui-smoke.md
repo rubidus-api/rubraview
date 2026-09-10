@@ -85,3 +85,29 @@ Note the Windows version and which steps passed. A failure in 1-7 points
 at the chrome drawing path (DirectWrite or the fill/stroke primitives);
 8-13 at the box wiring in `main.c`, since the geometry itself is proven
 by T028; 15-16 at the orientation wiring, proven by T026.
+
+
+## Floating boxes: the two-button anchor and putting them back (2026-09-10)
+
+The owner asked for the collapsed anchor to be two square buttons side
+by side — the left opening the box only when clicked, the right opening
+it on hover — and for a way to bring both boxes back when they have been
+dragged somewhere unreachable.
+
+| # | Action | Expected |
+|---|---|---|
+| 1 | Look at either collapsed box | It is a **wide bar, not a square**: two buttons. The left is outlined, the right is filled — they must not look like one control. |
+| 2 | Rest the pointer on the **left** button without clicking | **Nothing opens.** Wait a few seconds; still nothing. |
+| 3 | Rest the pointer on the **right** button | It expands on its own. Move away: it collapses after about half a second. |
+| 4 | Click the **left** button | It opens and **stays open** with the pointer elsewhere. Click again: it closes. |
+| 5 | Hover the right button to open it, then click that same button | It stays open when the pointer leaves — the click means "keep it". |
+| 6 | Drag a box far off the window, then move the pointer to the very top | The hover titlebar appears. The **leftmost** icon in the top-right group is the put-them-back button. |
+| 7 | Press it | **Both** boxes reappear: the menu box at the **top-left**, the toolbox at the **bottom-right**, wholly inside the window, and a line says so. |
+| 8 | Drag the toolbox right out of the window so it detaches, then press the button | It comes back inside and is docked again. |
+| 9 | Make the window very small and press the button | The boxes are still on screen — at minimum their top-left corner, which is the part with the buttons on it. |
+| 10 | Resize the window, then press the button again | They land in the corners of the *new* size. |
+
+The placement rules, the two halves and the corner each box goes home to
+are checked on the host by T009 and T030; what needs a machine is
+whether the two buttons are visibly different and whether the hover feels
+right.

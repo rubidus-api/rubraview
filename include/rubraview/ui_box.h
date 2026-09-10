@@ -36,6 +36,34 @@ typedef enum rubraview_box_kind {
     RUBRAVIEW_BOX_MENU,        /* §3.6.2: strictly inside the client area */
 } rubraview_box_kind_t;
 
+/*
+ * The collapsed anchor is a bar twice as wide as it is tall: two square
+ * halves that behave differently (owner, 2026-09-10).
+ *
+ * The two ways a box can open used to be one control, which meant the
+ * pointer merely passing over it opened something the reader did not
+ * ask for. Splitting them means each half does exactly one thing, and
+ * the reader can see which is which before touching it.
+ */
+typedef enum rubraview_anchor_half {
+    RUBRAVIEW_ANCHOR_NONE = -1,
+    RUBRAVIEW_ANCHOR_CLICK = 0,  /* the left square: opens only when clicked */
+    RUBRAVIEW_ANCHOR_HOVER = 1,  /* the right square: opens when the pointer rests on it */
+} rubraview_anchor_half_t;
+
+/*
+ * Where a box goes when the reader asks for it back.
+ *
+ * A floating box that has been dragged somewhere unhelpful — behind
+ * another monitor's edge, or off the window entirely — is a box the
+ * reader cannot get to. Each box has a corner it belongs to, and one
+ * button puts both of them back there.
+ */
+typedef enum rubraview_box_home {
+    RUBRAVIEW_BOX_HOME_TOP_LEFT = 0,
+    RUBRAVIEW_BOX_HOME_BOTTOM_RIGHT,
+} rubraview_box_home_t;
+
 typedef enum rubraview_box_state {
     RUBRAVIEW_BOX_COLLAPSED = 0, /* the compact anchor tile */
     RUBRAVIEW_BOX_EXPANDED,      /* unfolded by hover; collapses again when the pointer leaves */
@@ -61,9 +89,51 @@ typedef struct rubraview_box {
     bool   pinned;               /* §3.6.1: pinned boxes ignore the idle collapse timer */
     double idle_seconds;         /* time since the pointer left the box */
     int32_t tile_count;          /* how many tiles the expanded grid holds */
+    rubraview_box_home_t home;   /* the corner "put it back" returns it to */
 } rubraview_box_t;
 
 rubraview_box_t rubraview_box_create(rubraview_box_kind_t kind, double anchor_x, double anchor_y, int32_t tile_count);
+
+/**
+ * The collapsed anchor bar: two squares side by side, so twice
+ * `anchor_size` wide and one `anchor_size` tall.
+ */
+rubraview_rect_t rubraview_box_anchor_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
+
+/** One half of that bar, for painting the two buttons. */
+rubraview_rect_t rubraview_box_anchor_half_rect(const rubraview_box_t *box,
+                                                const rubraview_tile_metrics_t *metrics,
+                                                rubraview_anchor_half_t half);
+
+/** Which half the point is over, or NONE. */
+rubraview_anchor_half_t rubraview_box_anchor_half_at(const rubraview_box_t *box,
+                                                      const rubraview_tile_metrics_t *metrics,
+                                                      double px, double py);
+
+/**
+ * Feed the pointer. Only the hover half opens the box; resting on the
+ * click half does nothing, which is the point of having two.
+ * Returns true when the state changed.
+ */
+bool rubraview_box_pointer(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                           double px, double py);
+
+/**
+ * Feed a click. The click half toggles the box open and locked; the
+ * hover half pins what hovering already opened, so it stays when the
+ * pointer leaves. A click anywhere else is not this box's business.
+ * Returns true when the click was taken.
+ */
+bool rubraview_box_click(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                         double px, double py);
+
+/**
+ * Put the box back in its corner, fully inside the window, and dock it
+ * if it had been dragged out. This is the answer to a floating box that
+ * has wandered somewhere the reader cannot reach.
+ */
+void rubraview_box_snap_home(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                             double window_width, double window_height);
 
 /** The box's current outer rectangle: the anchor when collapsed, the whole grid when expanded. */
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);

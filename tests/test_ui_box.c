@@ -12,6 +12,144 @@ static bool str_eq(u8str_t s, const char *l) {
     return s.len == n && (n == 0 || memcmp(s.ptr, l, n) == 0);
 }
 
+/* The two halves of the anchor, and the corner a box goes home to. */
+static void test_two_part_anchor(void) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
+
+    /* Test: the bar is two squares, side by side, and each half knows
+       itself. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 100.0, 200.0, 6);
+
+        rubraview_rect_t bar = rubraview_box_anchor_rect(&box, &m);
+        assert(approx(bar.width, m.anchor_size * 2.0) && approx(bar.height, m.anchor_size));
+
+        rubraview_rect_t left = rubraview_box_anchor_half_rect(&box, &m, RUBRAVIEW_ANCHOR_CLICK);
+        rubraview_rect_t right = rubraview_box_anchor_half_rect(&box, &m, RUBRAVIEW_ANCHOR_HOVER);
+        assert(approx(left.width, m.anchor_size) && approx(right.width, m.anchor_size));
+        assert(approx(left.x, 100.0) && approx(right.x, 100.0 + m.anchor_size));
+        assert(approx(left.y, right.y));   /* side by side, not stacked */
+
+        assert(rubraview_box_anchor_half_at(&box, &m, 105.0, 205.0) == RUBRAVIEW_ANCHOR_CLICK);
+        assert(rubraview_box_anchor_half_at(&box, &m, 100.0 + m.anchor_size + 5.0, 205.0) == RUBRAVIEW_ANCHOR_HOVER);
+        assert(rubraview_box_anchor_half_at(&box, &m, 50.0, 205.0) == RUBRAVIEW_ANCHOR_NONE);
+    }
+    printf("  [PASS] The anchor is two squares side by side, each knowing itself\n");
+
+    /* Test: hovering the right half opens; hovering the left half does
+       not. That difference is the whole point of splitting them. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 0.0, 0.0, 6);
+
+        rubraview_box_pointer(&box, &m, m.anchor_size * 0.5, m.anchor_size * 0.5);
+        assert(box.state == RUBRAVIEW_BOX_COLLAPSED);   /* the click half: nothing */
+
+        rubraview_box_pointer(&box, &m, m.anchor_size * 1.5, m.anchor_size * 0.5);
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);    /* the hover half: opens */
+
+        /* Moving away starts the collapse timer rather than collapsing
+           at once — §3.6.3's grace period. */
+        rubraview_box_pointer(&box, &m, 900.0, 900.0);
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);
+        assert(rubraview_box_tick(&box, 1.0, 0.5));
+        assert(box.state == RUBRAVIEW_BOX_COLLAPSED);
+    }
+    printf("  [PASS] Only the hover half opens the box\n");
+
+    /* Test: the click half opens and closes, and what it opens stays
+       open when the pointer leaves. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 0.0, 0.0, 6);
+
+        assert(rubraview_box_click(&box, &m, m.anchor_size * 0.5, m.anchor_size * 0.5));
+        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+
+        rubraview_box_pointer(&box, &m, 900.0, 900.0);
+        assert(!rubraview_box_tick(&box, 5.0, 0.5));
+        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);   /* a click means "stay" */
+
+        assert(rubraview_box_click(&box, &m, m.anchor_size * 0.5, m.anchor_size * 0.5));
+        assert(box.state == RUBRAVIEW_BOX_COLLAPSED);
+
+        /* A click nowhere near the anchor is not this box's business. */
+        assert(!rubraview_box_click(&box, &m, 500.0, 500.0));
+    }
+    printf("  [PASS] The click half toggles, and what it opens stays open\n");
+
+    /* Test: clicking the hover half keeps what hovering opened. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 0.0, 0.0, 6);
+        rubraview_box_pointer(&box, &m, m.anchor_size * 1.5, m.anchor_size * 0.5);
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);
+
+        assert(rubraview_box_click(&box, &m, m.anchor_size * 1.5, m.anchor_size * 0.5));
+        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+
+        rubraview_box_pointer(&box, &m, 900.0, 900.0);
+        assert(!rubraview_box_tick(&box, 5.0, 0.5));
+        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+    }
+    printf("  [PASS] Clicking the hover half keeps what hovering opened\n");
+
+    /* Test: putting the boxes back. This is the answer to a floating
+       box dragged somewhere the reader cannot reach. */
+    {
+        double win_w = 1280.0, win_h = 800.0;
+
+        rubraview_box_t menu = rubraview_box_create(RUBRAVIEW_BOX_MENU, 0.0, 0.0, 6);
+        rubraview_box_t tools = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 0.0, 0.0, 6);
+        assert(menu.home == RUBRAVIEW_BOX_HOME_TOP_LEFT);
+        assert(tools.home == RUBRAVIEW_BOX_HOME_BOTTOM_RIGHT);
+
+        /* Drag both somewhere useless, including off the window. */
+        menu.anchor_x = -5000.0; menu.anchor_y = 9000.0;
+        tools.anchor_x = 99999.0; tools.anchor_y = -400.0;
+        tools.state = RUBRAVIEW_BOX_DETACHED;
+
+        rubraview_box_snap_home(&menu, &m, win_w, win_h);
+        rubraview_box_snap_home(&tools, &m, win_w, win_h);
+
+        rubraview_rect_t menu_box = rubraview_box_bounds(&menu, &m);
+        rubraview_rect_t tools_box = rubraview_box_bounds(&tools, &m);
+
+        /* Both are wholly inside the window again. */
+        assert(menu_box.x >= 0.0 && menu_box.y >= 0.0);
+        assert(menu_box.x + menu_box.width <= win_w && menu_box.y + menu_box.height <= win_h);
+        assert(tools_box.x >= 0.0 && tools_box.y >= 0.0);
+        assert(tools_box.x + tools_box.width <= win_w && tools_box.y + tools_box.height <= win_h);
+
+        /* And each is in its own corner. */
+        assert(menu_box.x < win_w * 0.5 && menu_box.y < win_h * 0.5);
+        assert(tools_box.x + tools_box.width > win_w * 0.5);
+        assert(tools_box.y + tools_box.height > win_h * 0.5);
+
+        /* A detached toolbox comes back in — leaving it out would
+           defeat the button. */
+        assert(tools.state != RUBRAVIEW_BOX_DETACHED);
+    }
+    printf("  [PASS] Both boxes come back to their own corner, inside the window\n");
+
+    /* Test: an open box still fits after snapping, and a window smaller
+       than the box still shows the corner with the buttons on it. */
+    {
+        rubraview_box_t tools = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 0.0, 0.0, 8);
+        rubraview_box_hover_enter(&tools);
+        rubraview_box_snap_home(&tools, &m, 1280.0, 800.0);
+
+        rubraview_rect_t open_box = rubraview_box_bounds(&tools, &m);
+        assert(open_box.x >= 0.0 && open_box.y >= 0.0);
+        assert(open_box.x + open_box.width <= 1280.0);
+        assert(open_box.y + open_box.height <= 800.0);
+
+        rubraview_box_t tiny = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 0.0, 0.0, 8);
+        rubraview_box_hover_enter(&tiny);
+        rubraview_box_snap_home(&tiny, &m, 50.0, 40.0);
+        rubraview_rect_t tiny_box = rubraview_box_bounds(&tiny, &m);
+        assert(tiny_box.x >= 0.0 && tiny_box.y >= 0.0);
+    }
+    printf("  [PASS] Snapping keeps an open box inside, and survives a tiny window\n");
+}
+
 static void test_boxes(void) {
     rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
     assert(approx(m.tile_size, 64.0) && approx(m.gutter, 8.0));
@@ -20,8 +158,10 @@ static void test_boxes(void) {
        grows to the tile grid. */
     {
         rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 100.0, 100.0, 7);
+        /* Collapsed, the box is the two-button bar: two squares wide,
+           one tall (owner, 2026-09-10). */
         rubraview_rect_t collapsed = rubraview_box_bounds(&box, &m);
-        assert(approx(collapsed.width, m.anchor_size) && approx(collapsed.height, m.anchor_size));
+        assert(approx(collapsed.width, m.anchor_size * 2.0) && approx(collapsed.height, m.anchor_size));
 
         rubraview_box_hover_enter(&box);
         assert(box.state == RUBRAVIEW_BOX_EXPANDED);
@@ -268,6 +408,7 @@ static void test_menu(void) {
 int main(void) {
     printf("[test_ui_box] Starting floating box and menu hierarchy unit tests...\n");
     test_boxes();
+    test_two_part_anchor();
     test_menu();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;

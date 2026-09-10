@@ -6,6 +6,32 @@
 
 static bool approx(double a, double b) { return fabs(a - b) < 1e-9; }
 
+/* The button that rescues a wandered-off floating box has to be
+   reachable, and the owner asked for it at the left end of the icon
+   row. A control nobody can find is not a rescue. */
+static void test_snap_button_placement(void) {
+    rubraview_titlebar_t bar = rubraview_titlebar_create(1.0);
+    bar.shown = true;
+    double win_w = 1280.0;
+
+    rubraview_rect_t snap = rubraview_titlebar_button_rect(&bar, RUBRAVIEW_TITLEBAR_SNAP_BOXES, win_w);
+    rubraview_rect_t minimise = rubraview_titlebar_button_rect(&bar, RUBRAVIEW_TITLEBAR_MINIMIZE, win_w);
+    rubraview_rect_t close = rubraview_titlebar_button_rect(&bar, RUBRAVIEW_TITLEBAR_CLOSE, win_w);
+
+    assert(snap.width > 0.0);
+    assert(snap.x < minimise.x);            /* leftmost of the icons */
+    assert(close.x > minimise.x);           /* close stays at the far right */
+    assert(snap.x + snap.width <= win_w);
+
+    /* And it is hit where it is drawn. */
+    assert(rubraview_titlebar_hit(&bar, snap.x + 2.0, bar.height * 0.5, win_w) == RUBRAVIEW_TITLEBAR_SNAP_BOXES);
+    /* Not when the bar is hidden. */
+    bar.shown = false;
+    assert(rubraview_titlebar_hit(&bar, snap.x + 2.0, bar.height * 0.5, win_w) == RUBRAVIEW_TITLEBAR_NONE);
+
+    printf("  [PASS] The put-the-boxes-back button is leftmost in the icon row and hit where drawn\n");
+}
+
 int main(void) {
     printf("[test_ui_chrome] Starting OSD and hover titlebar unit tests...\n");
 
@@ -191,6 +217,8 @@ int main(void) {
         assert(!rubraview_cursor_hide_notify_motion(&cursor)); /* already visible */
     }
     printf("  [PASS] Cursor hides after the idle delay and returns on motion\n");
+
+    test_snap_button_placement();
 
     printf("[test_ui_chrome] All tests passed successfully!\n");
     return 0;

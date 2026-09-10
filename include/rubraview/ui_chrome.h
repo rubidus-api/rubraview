@@ -54,6 +54,12 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
 
 typedef enum rubraview_titlebar_button {
     RUBRAVIEW_TITLEBAR_NONE = 0,
+    /* Leftmost of the icons (owner, 2026-09-10): puts both floating
+       boxes back in their corners. It sits with the window controls
+       because that is where a reader looks when something about the
+       window is wrong, and a box that has wandered off is exactly
+       that. */
+    RUBRAVIEW_TITLEBAR_SNAP_BOXES,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
