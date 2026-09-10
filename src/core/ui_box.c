@@ -22,6 +22,10 @@ rubraview_box_t rubraview_box_create(rubraview_box_kind_t kind, double anchor_x,
         .pinned = false,
         .idle_seconds = 0.0,
         .tile_count = tile_count > 0 ? tile_count : 0,
+        /* §3.6.2's menu box lives top-left and the toolbox bottom-right,
+           which is also where "put it back" returns them. */
+        .home = kind == RUBRAVIEW_BOX_MENU ? RUBRAVIEW_BOX_HOME_TOP_LEFT
+                                           : RUBRAVIEW_BOX_HOME_BOTTOM_RIGHT,
     };
 }
 
@@ -43,13 +47,133 @@ static int32_t grid_rows(const rubraview_box_t *box, const rubraview_tile_metric
     return (box->tile_count + columns - 1) / columns;
 }
 
+/* The collapsed anchor is two squares wide: a click button and a hover
+   button, side by side. */
+rubraview_rect_t rubraview_box_anchor_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
+    if (!box || !metrics) return (rubraview_rect_t){0};
+    return (rubraview_rect_t){
+        .x = box->anchor_x, .y = box->anchor_y,
+        .width = metrics->anchor_size * 2.0, .height = metrics->anchor_size,
+    };
+}
+
+rubraview_rect_t rubraview_box_anchor_half_rect(const rubraview_box_t *box,
+                                                const rubraview_tile_metrics_t *metrics,
+                                                rubraview_anchor_half_t half) {
+    if (!box || !metrics || half == RUBRAVIEW_ANCHOR_NONE) return (rubraview_rect_t){0};
+    return (rubraview_rect_t){
+        .x = box->anchor_x + (half == RUBRAVIEW_ANCHOR_HOVER ? metrics->anchor_size : 0.0),
+        .y = box->anchor_y,
+        .width = metrics->anchor_size,
+        .height = metrics->anchor_size,
+    };
+}
+
+rubraview_anchor_half_t rubraview_box_anchor_half_at(const rubraview_box_t *box,
+                                                      const rubraview_tile_metrics_t *metrics,
+                                                      double px, double py) {
+    if (!box || !metrics) return RUBRAVIEW_ANCHOR_NONE;
+
+    /* The anchor stays where it is while the box is open, so the two
+       buttons remain reachable — closing by leaving is what the hover
+       half is for, and a control that moves out from under the pointer
+       cannot be clicked. */
+    if (rubraview_rect_contains(rubraview_box_anchor_half_rect(box, metrics, RUBRAVIEW_ANCHOR_CLICK), px, py)) {
+        return RUBRAVIEW_ANCHOR_CLICK;
+    }
+    if (rubraview_rect_contains(rubraview_box_anchor_half_rect(box, metrics, RUBRAVIEW_ANCHOR_HOVER), px, py)) {
+        return RUBRAVIEW_ANCHOR_HOVER;
+    }
+    return RUBRAVIEW_ANCHOR_NONE;
+}
+
+bool rubraview_box_pointer(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                           double px, double py) {
+    if (!box || !metrics) return false;
+
+    rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, metrics, px, py);
+    bool inside_body = rubraview_rect_contains(rubraview_box_bounds(box, metrics), px, py);
+
+    /* Only the hover half opens. Resting on the click half deliberately
+       does nothing: that is the difference the reader can rely on. */
+    if (half == RUBRAVIEW_ANCHOR_HOVER) {
+        if (box->state == RUBRAVIEW_BOX_COLLAPSED) {
+            rubraview_box_hover_enter(box);
+            return true;
+        }
+        box->idle_seconds = 0.0;
+        return false;
+    }
+
+    if (inside_body || half == RUBRAVIEW_ANCHOR_CLICK) {
+        /* Over the box: it is in use, so the collapse timer waits. */
+        box->idle_seconds = 0.0;
+        return false;
+    }
+
+    rubraview_box_hover_leave(box);
+    return false;
+}
+
+bool rubraview_box_click(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                         double px, double py) {
+    if (!box || !metrics) return false;
+
+    switch (rubraview_box_anchor_half_at(box, metrics, px, py)) {
+        case RUBRAVIEW_ANCHOR_CLICK:
+            rubraview_box_click_anchor(box);
+            return true;
+        case RUBRAVIEW_ANCHOR_HOVER:
+            /* Hover already opened it; clicking says "keep it". */
+            if (box->state == RUBRAVIEW_BOX_EXPANDED) {
+                box->state = RUBRAVIEW_BOX_LOCKED_OPEN;
+            } else if (box->state == RUBRAVIEW_BOX_LOCKED_OPEN) {
+                box->state = RUBRAVIEW_BOX_COLLAPSED;
+            } else {
+                rubraview_box_click_anchor(box);
+            }
+            return true;
+        case RUBRAVIEW_ANCHOR_NONE:
+        default:
+            return false;
+    }
+}
+
+void rubraview_box_snap_home(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                             double window_width, double window_height) {
+    if (!box || !metrics) return;
+
+    /* A toolbox that had been dragged out of the window comes back in:
+       leaving it outside would defeat the purpose of the button. */
+    if (box->state == RUBRAVIEW_BOX_DETACHED) box->state = RUBRAVIEW_BOX_COLLAPSED;
+
+    rubraview_rect_t bounds = rubraview_box_bounds(box, metrics);
+    double margin = metrics->gutter;
+
+    double x = margin;
+    double y = margin;
+    if (box->home == RUBRAVIEW_BOX_HOME_BOTTOM_RIGHT) {
+        x = window_width - bounds.width - margin;
+        y = window_height - bounds.height - margin;
+    }
+
+    /* A window smaller than the box still gets the box's top-left
+       corner on screen, which is the part with the buttons on it. */
+    if (x < 0.0) x = 0.0;
+    if (y < 0.0) y = 0.0;
+
+    box->anchor_x = x;
+    box->anchor_y = y;
+}
+
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
     if (!box || !metrics) return (rubraview_rect_t){0};
 
     if (!is_open(box) || box->tile_count <= 0) {
+        /* Collapsed, the box *is* the two-button anchor bar. */
         return (rubraview_rect_t){
             .x = box->anchor_x, .y = box->anchor_y,
-            .width = metrics->anchor_size, .height = metrics->anchor_size,
+            .width = metrics->anchor_size * 2.0, .height = metrics->anchor_size,
         };
     }
 
