@@ -202,10 +202,19 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
                                                 WICBitmapDitherTypeNone, NULL, 0.0,
                                                 WICBitmapPaletteTypeMedianCut);
     if (SUCCEEDED(hr)) {
+        /* Ask WIC for the size, through out-parameters. This is the
+           number the texture carries from here on; the Direct2D call
+           that returns a struct by value is not used, because on the
+           owner's machine it produced 1435680840x390 for a 4032x3024
+           photograph (see pal_render_d2d_internal.h). */
+        UINT decoded_w = 0, decoded_h = 0;
+        HRESULT size_hr = IWICFormatConverter_GetSize(converter, &decoded_w, &decoded_h);
+
         ID2D1Bitmap *bitmap = NULL;
         hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource*)converter, NULL, &bitmap);
-        if (SUCCEEDED(hr) && bitmap) {
-            rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, bitmap);
+        if (SUCCEEDED(hr) && bitmap && SUCCEEDED(size_hr) && decoded_w > 0 && decoded_h > 0) {
+            rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, bitmap,
+                                                                      (int32_t)decoded_w, (int32_t)decoded_h);
             if (texture) {
                 rubraview_pal_texture_size(texture, &result.width, &result.height);
                 result.texture = texture;
@@ -213,6 +222,10 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
             } else {
                 ID2D1Bitmap_Release(bitmap);
             }
+        } else if (bitmap) {
+            /* A bitmap whose size is unknown is worse than none: it
+               would be laid out against a number nobody measured. */
+            ID2D1Bitmap_Release(bitmap);
         }
     }
 
@@ -828,9 +841,20 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
             diag_add(buffer, buffer_size, &used, "uploading to the GPU: %s (0x%08lX)\r\n",
                      SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
             if (SUCCEEDED(hr) && bitmap) {
-                D2D1_SIZE_U size = ID2D1Bitmap_GetPixelSize(bitmap);
-                diag_add(buffer, buffer_size, &used, "texture: %ux%u  => the image path works\r\n",
-                         size.width, size.height);
+                /* Three ways of asking the same question. They should
+                   agree; when they do not, the one that disagrees is
+                   the bug, and printing all three says which. */
+                UINT cw = 0, ch = 0;
+                IWICFormatConverter_GetSize(converter, &cw, &ch);
+                diag_add(buffer, buffer_size, &used, "size from WIC converter: %ux%u\r\n", cw, ch);
+
+                D2D1_SIZE_U by_value = ID2D1Bitmap_GetPixelSize(bitmap);
+                diag_add(buffer, buffer_size, &used,
+                         "size from D2D GetPixelSize (returns a struct by value): %ux%u%s\r\n",
+                         by_value.width, by_value.height,
+                         (by_value.width == cw && by_value.height == ch)
+                           ? "" : "   <-- DISAGREES, this call's ABI is wrong here");
+
                 ID2D1Bitmap_Release(bitmap);
             } else if (hr == (HRESULT)D2DERR_UNSUPPORTED_PIXEL_FORMAT) {
                 diag_add(buffer, buffer_size, &used,
