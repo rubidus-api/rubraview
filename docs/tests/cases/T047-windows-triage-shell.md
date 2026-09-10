@@ -11,7 +11,7 @@ Windows calls behind them do what they say.
 
 ## Prerequisites
 
-- `dist/rubraview.exe` from `make win64`.
+- `dist/rubraview-v<version>.exe` from `make win64`.
 - A throwaway folder of 20-30 images, copied from somewhere else.
 - A `settings.ini` beside the executable containing:
   ```ini

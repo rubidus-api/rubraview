@@ -1,3 +1,10 @@
+# Derived from include/rubraview/version.h rather than written again
+# here: a version in two places is a version that eventually disagrees
+# with itself, and then a bug report cannot say which build it came from.
+VERSION := $(shell sed -n 's/^#define RUBRAVIEW_VERSION_STRING "\(.*\)".*/\1/p' include/rubraview/version.h)
+EXE_NAME := rubraview-v$(VERSION).exe
+PROBE_NAME := rubraview-mfprobe-v$(VERSION).exe
+
 CC ?= gcc
 CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
 LDFLAGS ?= -lm -lpthread
@@ -169,8 +176,8 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 \
-		-o dist/rubraview.exe
-	@echo "Linked: dist/rubraview.exe"
+		-o dist/$(EXE_NAME)
+	@echo "Linked: dist/$(EXE_NAME)"
 
 # A diagnostic, not part of the viewer: it asks a Windows machine which
 # media formats it can decode by itself. That question cannot be answered
@@ -179,15 +186,14 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 mfprobe:
 	@mkdir -p dist
 	$(MINGW_CC) -std=c11 -O2 -Wall -Wextra -municode tools/mfprobe.c \
-		-o dist/mfprobe.exe -lmfplat -lmfreadwrite -lmfuuid -lole32 -loleaut32
-	@echo "Built: dist/mfprobe.exe — run it on Windows, optionally with a file to test"
+		-o dist/$(PROBE_NAME) -lmfplat -lmfreadwrite -lmfuuid -lole32 -loleaut32
+	@echo "Built: dist/$(PROBE_NAME) — run it on Windows, optionally with a file to test"
 
 # RV-083: the release layout. Depends on win64 rather than repeating it,
 # so what is packaged is always what was just built.
 package: win64
 	@sh scripts/package.sh $(VERSION)
 
-VERSION ?= 0.1.0
 
 clean:
 	rm -rf build/ dist/

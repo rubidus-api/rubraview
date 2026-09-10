@@ -12,7 +12,7 @@ target.
 
 ## Prerequisites
 
-- `dist/rubraview.exe` from `make win64`.
+- `dist/rubraview-v<version>.exe` from `make win64`.
 - A folder of at least a dozen images, plus one photo taken with the
   camera held sideways.
 

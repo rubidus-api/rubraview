@@ -15,7 +15,7 @@ Run after T025, T031 and T037.
 
 ## Prerequisites
 
-- `dist/rubraview.exe` from `make win64`.
+- `dist/rubraview-v<version>.exe` from `make win64`.
 - A folder of 30-50 JPEGs, backed up. The batch steps write files.
 - One photo with GPS in its EXIF, and a hex viewer.
 - A machine with no dedicated GPU, or one where the driver can be

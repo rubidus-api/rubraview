@@ -49,6 +49,11 @@ if command -v find >/dev/null 2>&1; then
   done
 fi
 
+# The version must live in one place and be derived everywhere else.
+if command -v python3 >/dev/null 2>&1 && [ -x scripts/check-version.py ]; then
+  python3 scripts/check-version.py || fail "the version disagrees with itself"
+fi
+
 # §11.2's M9 criterion, checked mechanically: a setting some module reads
 # but no tab offers is a setting the reader cannot change.
 if command -v python3 >/dev/null 2>&1 && [ -x scripts/check-settings.py ]; then

@@ -17,7 +17,7 @@ So this asks the machine directly.
 make mfprobe
 ```
 
-Copy `dist/mfprobe.exe` to the Windows machine and run it:
+Copy `dist/rubraview-mfprobe-v<version>.exe` to the Windows machine and run it:
 
 ```
 mfprobe.exe

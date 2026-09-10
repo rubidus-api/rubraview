@@ -50,6 +50,7 @@
 #include "rubraview/ui_panel.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/settings.h"
+#include "rubraview/version.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
@@ -2808,7 +2809,7 @@ static void report_startup_failure(void) {
 
     char message[512];
     int n = snprintf(message, sizeof(message),
-        "Rubraview could not start its graphics.\r\n\r\n"
+        "Rubraview " RUBRAVIEW_VERSION_STRING " could not start its graphics.\r\n\r\n"
         "It failed while %.*s.\r\n"
         "Windows reported error 0x%08lX.\r\n\r\n"
         "This has been written to rubraview-diag.txt next to the program.",
@@ -2865,6 +2866,7 @@ static void wait_pumping(int milliseconds) {
 }
 
 static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
+    console_line("rubraview " RUBRAVIEW_VERSION_STRING " - diagnostics");
     console_line("rubraview: step 1 - starting COM's imaging factory (WIC)");
     /* Before any window exists, so a hang here cannot be blamed on one. */
     IWICImagingFactory *probe_factory = NULL;
@@ -2917,7 +2919,7 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     IWICImagingFactory_Release(probe_factory);
 
     console_line("rubraview: step 3 - creating the window");
-    rubraview_window_config_t config = { .title = "Rubraview diagnostics", .width = 640, .height = 400, .frameless = false };
+    rubraview_window_config_t config = { .title = "Rubraview " RUBRAVIEW_VERSION_STRING " diagnostics", .width = 640, .height = 400, .frameless = false };
     rubraview_window_t *window = rubraview_pal_window_create(arena, &config);
     if (!window) {
         console_line("rubraview: step 3 FAILED - the window could not be created");
@@ -3070,6 +3072,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 return 2;
             }
 
+            if (cli.show_version) {
+                console_line("rubraview " RUBRAVIEW_VERSION_STRING);
+                free(memory);
+                CoUninitialize();
+                return 0;
+            }
+
             if (cli.diagnostics) {
                 int code = run_diagnostics(&arena, cli.input);
                 free(memory);
@@ -3131,7 +3140,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.layout_opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_READING_LTR);
 
     rubraview_window_config_t window_config = {
-        .title = "Rubraview",
+        /* The version is in the title so a screenshot identifies the
+           build it came from — which is most of what a bug report needs. */
+        .title = "Rubraview " RUBRAVIEW_VERSION_STRING,
         .width = 1280,
         .height = 800,
         .frameless = true, /* §2 invariant 5: zero-margin canvas */

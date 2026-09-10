@@ -3,7 +3,7 @@
 Milestone M2 is the first one that produces a running executable, and it
 is the first one this workstation cannot verify: there is no Windows
 here. The cross-compiler proves the code builds and links
-(`make win64` → `dist/rubraview.exe`, a PE32+ GUI binary), and the host
+(`make win64` → `dist/rubraview-v<version>.exe`, a PE32+ GUI binary), and the host
 test suite proves the portable half (layout, viewport maths, compositor,
 keymap, sibling indexing, clock). What no automated gate covers is
 whether a window actually appears and an image actually renders.
@@ -14,7 +14,7 @@ This procedure is that missing check. Run it on the Windows target.
 
 - Windows 10 version 1703 or later (for Per-Monitor V2 DPI; the binary
   starts on older versions but falls back to system DPI scaling).
-- `dist/rubraview.exe`, built with `make win64`.
+- `dist/rubraview-v<version>.exe`, built with `make win64`.
 - A folder holding at least four images named so natural ordering
   matters, e.g. `page (1).jpg`, `page (2).jpg`, `page (9).jpg`,
   `page (10).jpg`. At least one JPEG carrying an EXIF orientation tag

@@ -11,7 +11,7 @@ Run this after T025 (canvas) and T031 (reading UI) on the Windows target.
 
 ## Prerequisites
 
-- `dist/rubraview.exe` from `make win64`.
+- `dist/rubraview-v<version>.exe` from `make win64`.
 - A real `.cbz` of a comic or manga volume, ideally one produced by a
   Korean or Japanese archiver so its filenames are not UTF-8.
 - A second volume in the same folder, named so the two sort in order
