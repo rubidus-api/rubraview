@@ -4,6 +4,14 @@ A viewer for images, comic archives and (later) video, for Windows.
 
 ## Getting it running
 
+The program is built with its version in its name —
+`rubraview-v0.0.1.exe` — so that a copy sitting in a downloads folder
+still says which build it is. Rename it to `rubraview.exe` if you prefer;
+nothing depends on the name. The examples below use the short form.
+
+`rubraview.exe --version` prints the version, and it is in the window
+title too, so a screenshot identifies the build.
+
 `rubraview.exe` needs nothing installed beside it. Double-click it, or
 give it a file or a folder:
 

@@ -8,17 +8,21 @@
 set -eu
 
 out=build/dist
-version=${1:-0.1.0}
 
-if [ ! -f dist/rubraview.exe ]; then
-  printf '%s\n' "package: dist/rubraview.exe is missing — run 'make win64' first" >&2
+# The version comes from the header, the same place the Makefile reads
+# it, so the folder and the executable inside it cannot disagree.
+version=${1:-$(sed -n 's/^#define RUBRAVIEW_VERSION_STRING "\(.*\)".*/\1/p' include/rubraview/version.h)}
+exe="rubraview-v$version.exe"
+
+if [ ! -f "dist/$exe" ]; then
+  printf '%s\n' "package: dist/$exe is missing — run 'make win64' first" >&2
   exit 1
 fi
 
 rm -rf "$out"
 mkdir -p "$out" "$out/licences"
 
-cp dist/rubraview.exe "$out/"
+cp "dist/$exe" "$out/"
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
 cp CHANGELOG.md "$out/"
@@ -34,7 +38,7 @@ printf '%s\n' "$version" > "$out/VERSION"
 # The check the "no DLL beside it" criterion really needs: list what the
 # executable imports, so a new dependency cannot slip in unnoticed.
 if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-  x86_64-w64-mingw32-objdump -p dist/rubraview.exe \
+  x86_64-w64-mingw32-objdump -p "dist/$exe" \
     | sed -n 's/^\tDLL Name: //p' | sort > "$out/imports.txt"
   printf '%s\n' "package: imports recorded in $out/imports.txt"
 fi
