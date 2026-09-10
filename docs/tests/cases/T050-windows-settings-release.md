@@ -11,7 +11,7 @@ was not built.
 
 ## Prerequisites
 
-- `build/dist/` from `make package`.
+- `dist/rubraview-v<version>/` from `make package`.
 - A second Windows machine, or a fresh user account, that has never run
   this program.
 
@@ -31,8 +31,8 @@ was not built.
 | 10 | Set a curation folder in `settings.ini`, press `Apply` in the settings window, then press `1` on an image | The file goes to that folder **without restarting** — the settings window re-reads the folders when it saves. |
 | 11 | With **no** `settings.ini` beside the executable, press `F10` and `Apply` | The file is written to `%APPDATA%\rubraview\settings.ini`. |
 | 12 | Put an empty `settings.ini` beside the executable and repeat | It is written **there**, and nothing new appears under `%APPDATA%`. |
-| 13 | Copy the whole `build/dist` folder to a machine that has never run this program, and run it | It starts. There is no runtime to install. |
-| 14 | Compare `build/dist/imports.txt` against that machine | Every name in it is a Windows system DLL. If a new name appears in a later build that is not, the "no DLL beside it" promise has been broken and the packaging step is where to catch it. |
+| 13 | Copy the whole `dist/rubraview-v<version>` folder to a machine that has never run this program, and run it | It starts. There is no runtime to install. |
+| 14 | Compare the bundle's `imports.txt` against that machine | Every name in it is a Windows system DLL. If a new name appears in a later build that is not, the "no DLL beside it" promise has been broken and the packaging step is where to catch it. |
 | 15 | Run it from a USB stick with a `settings.ini` beside it, then check the host machine | Nothing was written outside the stick — no `%APPDATA%\rubraview`, no registry keys unless you asked for the file associations. |
 
 ## Known limitations (not defects)

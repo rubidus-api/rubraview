@@ -2,6 +2,20 @@
 
 A viewer for images, comic archives and (later) video, for Windows.
 
+## Where the files are
+
+A build puts everything under `dist/`:
+
+```
+dist/rubraview-v0.0.1.exe              the viewer
+dist/rubraview-mfprobe-v0.0.1.exe      a tool that reports which video
+                                       formats your Windows can play
+dist/rubraview-v0.0.1/                 the release bundle — zip this
+```
+
+The bundle holds the viewer, this manual, the licences of the three
+libraries it borrows, and a list of the system DLLs it calls.
+
 ## Getting it running
 
 The program is built with its version in its name —

@@ -9,7 +9,7 @@ build/
 build/tests/
   compiled test binaries, test objects, coverage files, and test-generated artifacts
 
-build/dist/
+dist/rubraview-v<version>/
   release packaging staging area
 
 dist/

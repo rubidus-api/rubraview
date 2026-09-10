@@ -25,7 +25,7 @@ This project follows Keep a Changelog.
 - Single-instance window reuse, drag-and-drop, and `--register-shell` /
   `--unregister-shell` file associations under `HKCU`.
 - A settings window (`F10`) with eight tabs, writing `settings.ini`.
-- `make package`: the release layout under `build/dist/`, with the manual and
+- `make package`: the release layout under `dist/rubraview-v<version>/`, with the manual and
   the vendored libraries' licences, and a record of which DLLs the executable
   imports.
 

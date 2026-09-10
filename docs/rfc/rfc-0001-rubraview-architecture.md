@@ -1689,7 +1689,8 @@ and therefore no longer covered what §3 specifies.*
 **M9 — Settings window and release (W)**
 - RV-082 tab-styled settings window, all eight tabs, `Apply` without closing, keymap
   rebinding with conflict detection (§3.22) · RV-083 release packaging under
-  `build/dist/`, manual under `docs/manual/`, `CHANGELOG.md` entry.
+  `dist/rubraview-v<version>/` (owner, 2026-09-11), manual under `docs/manual/`,
+  `CHANGELOG.md` entry.
 - Depends on: every milestone whose settings the tabs expose.
 - Done means: every key in `settings.ini` written by earlier milestones is reachable from
   a tab, and a fresh machine runs the packaged `rubraview.exe` with no DLL beside it

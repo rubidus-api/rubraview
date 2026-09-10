@@ -36,7 +36,7 @@ docs/agents/  docs/manual/  docs/rfc/  docs/research/  docs/benchmark/results/
 docs/backlogs/items/  docs/plans/active/  docs/plans/archive/  docs/requirements/
 docs/resources/  docs/tests/cases/
 resources/distribution/  resources/prep/  resources/cache/
-build/tests/  build/dist/  tests/  dist/  scripts/
+build/tests/  tests/  dist/  scripts/
 ```
 
 Light profile creates `docs/agents/`, `docs/plans/`, `docs/tests/`, `scripts/`, omits `MEMORY.md` (facts go to the `## Facts` section of `LESSONS.md`), and creates any other standard directory on demand.
