@@ -113,6 +113,23 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
                                                    uint32_t max_entry_bytes);
 
 /**
+ * Which page is the file the reader named, or -1.
+ *
+ * This cannot be a byte comparison of whole paths, and assuming it
+ * could is what made `rubraview.exe test.jpg` open a *different*
+ * picture: the command line says `test.jpg`, the directory listing says
+ * `C:\Users\someone\Downloads\test.jpg`, and on Windows the same file
+ * is also `TEST.JPG` and may be written with either slash. None of
+ * those are equal as bytes, the search found nothing, and the viewer
+ * fell back to the first page in the folder.
+ *
+ * So the comparison is on the file's own name, with the two separators
+ * treated alike and letters compared without case — which is what
+ * Windows itself considers the same file.
+ */
+int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path);
+
+/**
  * §3.8.1 point 4: the next or previous archive in the same directory,
  * so reaching the last page of `Vol 01.cbz` continues into `Vol 02.cbz`.
  * Returns an empty slice when there is none in that direction.

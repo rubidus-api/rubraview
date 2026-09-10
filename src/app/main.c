@@ -2466,8 +2466,13 @@ static void open_path(app_state_t *app, u8str_t path) {
     } else if (rubraview_glob_match_list(rubraview_path_basename(entry.path), U8(ARCHIVE_FILTER))) {
         opened = open_archive(app, entry.path);
     } else {
-        opened = open_folder(app, rubraview_path_dirname(entry.path));
-        key = rubraview_path_dirname(entry.path);
+        /* `rubraview.exe test.jpg` has no directory part at all, and
+           listing "" lists nothing. The folder it means is the one the
+           command was run in. */
+        u8str_t folder = rubraview_path_dirname(entry.path);
+        if (folder.len == 0) folder = U8(".");
+        opened = open_folder(app, folder);
+        key = folder;
     }
     if (!opened) return;
 
@@ -2485,13 +2490,10 @@ static void open_path(app_state_t *app, u8str_t path) {
 
     /* A file that was opened directly wins over the remembered spot. */
     if (!entry.is_directory && app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER) {
-        for (size_t i = 0; i < app->source.page_count; ++i) {
-            if (app->source.pages[i].path.len == entry.path.len &&
-                memcmp(app->source.pages[i].path.ptr, entry.path.ptr, entry.path.len) == 0) {
-                start_page = i;
-                app->resume_offer = false;
-                break;
-            }
+        int32_t named = rubraview_page_source_find(&app->source, entry.path);
+        if (named >= 0) {
+            start_page = (size_t)named;
+            app->resume_offer = false;
         }
     }
 

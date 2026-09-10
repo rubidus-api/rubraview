@@ -96,6 +96,15 @@ static int32_t read_orientation(IWICBitmapFrameDecode *frame) {
  * passed through untouched — showing the picture slightly off is better
  * than not showing it.
  */
+/*
+ * §4.3's colour transform.
+ *
+ * Anything that does not work exactly is skipped rather than forced: a
+ * picture with slightly wrong colours beats a picture of noise. The
+ * checks after Initialize exist because succeeding and being right are
+ * not the same thing — a transform that disagrees with its own source
+ * about the size or the pixel format is not used.
+ */
 static IWICBitmapSource *apply_color_management(IWICImagingFactory *factory,
                                                 IWICBitmapFrameDecode *frame,
                                                 IWICBitmapSource *source,
@@ -143,6 +152,24 @@ static IWICBitmapSource *apply_color_management(IWICImagingFactory *factory,
     IWICColorContext_Release(embedded);
 
     if (FAILED(hr)) {
+        IWICColorTransform_Release(transform);
+        return source;
+    }
+
+    /* Succeeding is not the same as being right. If the transform does
+       not describe the same picture it was given, it is not used —
+       that mismatch is what produced noise instead of a photograph. */
+    UINT in_w = 0, in_h = 0, out_w = 0, out_h = 0;
+    if (FAILED(IWICBitmapSource_GetSize(source, &in_w, &in_h)) ||
+        FAILED(IWICColorTransform_GetSize(transform, &out_w, &out_h)) ||
+        in_w != out_w || in_h != out_h || out_w == 0 || out_h == 0) {
+        IWICColorTransform_Release(transform);
+        return source;
+    }
+
+    WICPixelFormatGUID out_format;
+    if (FAILED(IWICColorTransform_GetPixelFormat(transform, &out_format)) ||
+        !IsEqualGUID(&out_format, &GUID_WICPixelFormat32bppPBGRA)) {
         IWICColorTransform_Release(transform);
         return source;
     }
