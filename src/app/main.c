@@ -279,6 +279,7 @@ static void rename_commit(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
 static void panel_close(app_state_t *app);
+static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app, bool keep_changes);
 static void panel_open_edit(app_state_t *app);
@@ -1054,9 +1055,23 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_FULLSCREEN:
             rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
             return true;
+        case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
+            /* Both boxes back to their corners, inside the window. */
+            rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
+            rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
+            osd_say(app, U8("the floating boxes are back in their corners"));
+            return true;
         case RUBRAVIEW_TITLEBAR_CAPTION:    rubraview_pal_window_begin_drag(app->window); return true;
         default: break;
     }
+
+    /* The anchor's two buttons answer first: they sit on top of the
+       box, and a click there is never a tile. */
+    if (rubraview_box_click(&app->menubox, &metrics, x, y)) {
+        sync_menubox_tiles(app);
+        return true;
+    }
+    if (rubraview_box_click(&app->toolbox, &metrics, x, y)) return true;
 
     int32_t tile = rubraview_box_tile_at(&app->menubox, &metrics, x, y);
     if (tile >= 0) {
@@ -1104,12 +1119,26 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     rubraview_pal_render_fill_rect(app->renderer, body, COLOR_BOX_FILL, 2.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 2.0);
 
-    if (box->state == RUBRAVIEW_BOX_COLLAPSED) {
-        rubraview_pal_render_draw_text(app->renderer,
-                                       box->kind == RUBRAVIEW_BOX_MENU ? U8("=") : U8("<>"),
-                                       body, metrics->anchor_size * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        return;
-    }
+    /* The anchor is two buttons, and they must not look like one. The
+       left is outlined — it waits to be clicked; the right is filled —
+       it answers the pointer on its own. */
+    rubraview_rect_t click_half = rubraview_box_anchor_half_rect(box, metrics, RUBRAVIEW_ANCHOR_CLICK);
+    rubraview_rect_t hover_half = rubraview_box_anchor_half_rect(box, metrics, RUBRAVIEW_ANCHOR_HOVER);
+
+    rubraview_pal_rect_t left = { click_half.x, click_half.y, click_half.width, click_half.height };
+    rubraview_pal_rect_t right = { hover_half.x, hover_half.y, hover_half.width, hover_half.height };
+
+    rubraview_pal_render_stroke_rect(app->renderer, left, COLOR_BOX_BORDER, 1.0, 2.0);
+    rubraview_pal_render_fill_rect(app->renderer, right, COLOR_TILE_FILL, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, right, COLOR_BOX_BORDER, 1.0, 2.0);
+
+    rubraview_pal_render_draw_text(app->renderer,
+                                   box->kind == RUBRAVIEW_BOX_MENU ? U8("=") : U8("<>"),
+                                   left, metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(app->renderer, U8("v"), right,
+                                   metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
 
     for (int32_t i = 0; i < box->tile_count; ++i) {
         rubraview_rect_t t = rubraview_box_tile_rect(box, metrics, i);
@@ -3255,19 +3284,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
                     note_activity(&app);
 
+                    /* §3.6: the box model decides what a pointer over
+                       it means — only the hover half opens anything. */
                     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app.window));
-                    rubraview_rect_t tb = rubraview_box_bounds(&app.toolbox, &metrics);
-                    rubraview_rect_t mb = rubraview_box_bounds(&app.menubox, &metrics);
-                    if (rubraview_rect_contains(tb, event.mouse.x, event.mouse.y)) {
-                        rubraview_box_hover_enter(&app.toolbox);
-                    } else {
-                        rubraview_box_hover_leave(&app.toolbox);
-                    }
-                    if (rubraview_rect_contains(mb, event.mouse.x, event.mouse.y)) {
-                        rubraview_box_hover_enter(&app.menubox);
-                    } else {
-                        rubraview_box_hover_leave(&app.menubox);
-                    }
+                    rubraview_box_pointer(&app.toolbox, &metrics, event.mouse.x, event.mouse.y);
+                    rubraview_box_pointer(&app.menubox, &metrics, event.mouse.x, event.mouse.y);
                     break;
                 }
 
