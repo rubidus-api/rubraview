@@ -189,9 +189,10 @@ mfprobe:
 		-o dist/$(PROBE_NAME) -lmfplat -lmfreadwrite -lmfuuid -lole32 -loleaut32
 	@echo "Built: dist/$(PROBE_NAME) — run it on Windows, optionally with a file to test"
 
-# RV-083: the release layout. Depends on win64 rather than repeating it,
-# so what is packaged is always what was just built.
-package: win64
+# RV-083: the release layout, under dist/ with everything else a build
+# produces. Depends on win64 and mfprobe rather than repeating them, so
+# what is packaged is always what was just built.
+package: win64 mfprobe
 	@sh scripts/package.sh $(VERSION)
 
 
