@@ -11,6 +11,7 @@
 #include <math.h>
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/pal/pal_audio.h"
+#include "rubraview/pal/pal_media_backend.h"
 
 /*
  * Media Foundation backend for the media PAL (D-8). Video comes out of the
@@ -44,11 +45,14 @@ typedef struct media_slot {
     uint64_t generation;   /* which seek this frame belongs to */
 } media_slot_t;
 
-struct rubraview_media {
+typedef struct mf_media {
     HANDLE thread;
     HANDLE opened;                          /* set by the thread once it has said yes or no */
     WCHAR path[MAX_PATH * 2];
-    rubraview_media_open_result_t result;   /* written by the thread before `opened` */
+    /* Written by the thread before `opened`. */
+    bool ok;
+    rubraview_media_failure_t failure;
+    rubraview_media_info_t info;
 
     DWORD video_stream;                     /* NO_STREAM for a file with no picture */
     DWORD audio_stream;                     /* NO_STREAM when the sound is not played */
@@ -68,7 +72,7 @@ struct rubraview_media {
     _Atomic uint64_t end_generation;        /* the generation whose decode reached the end */
 
     uint64_t consumer_generation;           /* caller's thread only */
-};
+} mf_media_t;
 
 /*
  * Media Foundation is loaded at run time, not linked. A Windows "N"
@@ -110,18 +114,18 @@ static bool mf_load(void) {
     return g_mf.ok;
 }
 
-bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend) {
-    return backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION && mf_load();
+static bool mf_available(void) {
+    return mf_load();
 }
 
 /* ---- decode thread ---- */
 
-static void fail(rubraview_media_t *m, rubraview_media_failure_t failure) {
-    m->result.media = NULL;
-    m->result.failure = failure;
+static void fail(mf_media_t *m, rubraview_media_failure_t failure) {
+    m->ok = false;
+    m->failure = failure;
 }
 
-static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
+static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
     *out_reader = NULL;
 
     IMFAttributes *attrs = NULL;
@@ -265,9 +269,9 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
     m->video_stream = video_stream;
     m->width = width;
     m->height = height;
-    m->result.media = m;
-    m->result.failure = RUBRAVIEW_MEDIA_OPENED;
-    m->result.info = (rubraview_media_info_t){
+    m->ok = true;
+    m->failure = RUBRAVIEW_MEDIA_OPENED;
+    m->info = (rubraview_media_info_t){
         .backend = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION,
         .duration_seconds = duration,
         .frame_rate = rate_den ? (double)rate_num / (double)rate_den : 0.0,
@@ -283,7 +287,7 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
 }
 
 /* Copies one decoded sample into a slot, top row first. */
-static bool copy_sample(rubraview_media_t *m, IMFSample *sample, uint8_t *dst) {
+static bool copy_sample(mf_media_t *m, IMFSample *sample, uint8_t *dst) {
     IMFMediaBuffer *buffer = NULL;
     if (FAILED(IMFSample_ConvertToContiguousBuffer(sample, &buffer)) || !buffer) return false;
 
@@ -327,7 +331,7 @@ static bool copy_sample(rubraview_media_t *m, IMFSample *sample, uint8_t *dst) {
 
 /* Writes decoded samples to the ring, waiting for room. A seek or quit
    makes the rest unwanted, so it stops there. */
-static void push_audio(rubraview_media_t *m, const float *data, size_t count, uint64_t generation) {
+static void push_audio(mf_media_t *m, const float *data, size_t count, uint64_t generation) {
     while (count > 0) {
         size_t n = rubraview_pcm_ring_write(&m->pcm, data, count);
         data += n;
@@ -342,7 +346,7 @@ static void push_audio(rubraview_media_t *m, const float *data, size_t count, ui
 /* One decoded audio sample into the ring. After a seek, packets wholly
    before the target are dropped and the one that straddles it is cut, so
    the sound starts where the picture does. */
-static void deliver_audio(rubraview_media_t *m, IMFSample *sample, double pts, double *skip_until,
+static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *skip_until,
                           uint64_t generation) {
     IMFMediaBuffer *buffer = NULL;
     if (FAILED(IMFSample_ConvertToContiguousBuffer(sample, &buffer)) || !buffer) return;
@@ -369,7 +373,7 @@ static void deliver_audio(rubraview_media_t *m, IMFSample *sample, double pts, d
     IMFMediaBuffer_Release(buffer);
 }
 
-static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
+static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
     const bool want_video = m->video_stream != NO_STREAM;
@@ -461,7 +465,7 @@ static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
 }
 
 static DWORD WINAPI decode_thread(LPVOID arg) {
-    rubraview_media_t *m = (rubraview_media_t*)arg;
+    mf_media_t *m = (mf_media_t*)arg;
 
     bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
     bool mf = SUCCEEDED(g_mf.startup(MF_VERSION, MFSTARTUP_LITE));
@@ -481,7 +485,8 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
 
 /* ---- caller's thread ---- */
 
-void rubraview_pal_media_close(rubraview_media_t *media) {
+static void mf_close(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
     atomic_store_explicit(&media->quit, true, memory_order_release);
     if (media->thread) {
@@ -496,25 +501,19 @@ void rubraview_pal_media_close(rubraview_media_t *media) {
     free(media);
 }
 
-rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend) {
-    rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
-    if (backend != RUBRAVIEW_BACKEND_MEDIA_FOUNDATION || !mf_load()) {
-        /* D-8's second backend is slice 3; a Windows without Media
-           Foundation has no first one either. */
-        result.failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
-        return result;
-    }
-    if (path.len == 0 || path.len >= MAX_PATH * 4) return result;
+static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info) {
+    *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+    if (!mf_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 
-    rubraview_media_t *m = (rubraview_media_t*)calloc(1, sizeof(*m));
-    if (!m) return result;
+    mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
+    if (!m) return NULL;
 
     char narrow[MAX_PATH * 4];
     memcpy(narrow, path.ptr, path.len);
     narrow[path.len] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, m->path, (int)(sizeof(m->path) / sizeof(m->path[0]))) <= 0) {
         free(m);
-        return result;
+        return NULL;
     }
 
     atomic_init(&m->quit, false);
@@ -525,26 +524,27 @@ rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_m
     m->video_stream = NO_STREAM;
     m->audio_stream = NO_STREAM;
     rubraview_spsc_init(&m->ring, SLOT_COUNT);
-    m->result.failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+    m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
 
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
     if (!m->thread || WaitForSingleObject(m->opened, OPEN_TIMEOUT_MS) != WAIT_OBJECT_0) {
-        rubraview_pal_media_close(m);
-        return result;
+        mf_close(m);
+        return NULL;
     }
 
-    result = m->result;
-    if (result.failure != RUBRAVIEW_MEDIA_OPENED) {
-        rubraview_pal_media_close(m);
-        result.media = NULL;
-        return result;
+    *out_failure = m->failure;
+    if (!m->ok) {
+        mf_close(m);
+        return NULL;
     }
+    *out_info = m->info;
     rubraview_pal_audio_set_playing(m->audio, true);   /* NULL-safe: no sound, nothing to start */
-    return result;
+    return m;
 }
 
-bool rubraview_pal_media_peek_frame(rubraview_media_t *media, rubraview_video_frame_t *out_frame) {
+static bool mf_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (!media || !out_frame) return false;
     for (;;) {
         size_t slot;
@@ -567,17 +567,20 @@ bool rubraview_pal_media_peek_frame(rubraview_media_t *media, rubraview_video_fr
     }
 }
 
-void rubraview_pal_media_pop_frame(rubraview_media_t *media) {
+static void mf_pop_frame(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
     size_t slot;
     if (rubraview_spsc_peek_read(&media->ring, &slot)) rubraview_spsc_release_read(&media->ring);
 }
 
-size_t rubraview_pal_media_frames_ready(rubraview_media_t *media) {
+static size_t mf_frames_ready(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
     return media ? rubraview_spsc_count(&media->ring) : 0;
 }
 
-void rubraview_pal_media_seek(rubraview_media_t *media, double seconds) {
+static void mf_seek(void *handle, double seconds) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
     if (!(seconds > 0.0)) seconds = 0.0;
     atomic_store_explicit(&media->seek_target_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
@@ -586,20 +589,40 @@ void rubraview_pal_media_seek(rubraview_media_t *media, double seconds) {
         atomic_fetch_add_explicit(&media->seek_generation, 1, memory_order_release) + 1;
 }
 
-bool rubraview_pal_media_finished(rubraview_media_t *media) {
+static bool mf_finished(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (!media) return true;
     rubraview_video_frame_t frame;
-    if (rubraview_pal_media_peek_frame(media, &frame)) return false;
+    if (mf_peek_frame(media, &frame)) return false;
     return atomic_load_explicit(&media->end_generation, memory_order_acquire) == media->consumer_generation &&
            rubraview_pal_audio_drained(media->audio);
 }
 
-void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused) {
+static void mf_set_paused(void *handle, bool paused) {
+    mf_media_t *media = (mf_media_t*)handle;
     if (media) rubraview_pal_audio_set_playing(media->audio, !paused);
 }
 
-bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall) {
+static bool mf_audio_position(void *handle, double *out_position, double *out_wall) {
+    mf_media_t *media = (mf_media_t*)handle;
     return media && media->audio && rubraview_pal_audio_position(media->audio, out_position, out_wall);
+}
+
+static const rubraview_media_backend_api_t MF_API = {
+    .available = mf_available,
+    .open = mf_open,
+    .close = mf_close,
+    .peek_frame = mf_peek_frame,
+    .pop_frame = mf_pop_frame,
+    .frames_ready = mf_frames_ready,
+    .seek = mf_seek,
+    .finished = mf_finished,
+    .set_paused = mf_set_paused,
+    .audio_position = mf_audio_position,
+};
+
+const rubraview_media_backend_api_t *rubraview_media_backend_mf(void) {
+    return &MF_API;
 }
 
 #endif /* _WIN32 */

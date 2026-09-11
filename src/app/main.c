@@ -218,6 +218,7 @@ typedef struct app_state {
     double                 media_position;    /* pts of the picture on screen */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
+    rubraview_media_backend_t media_preferred; /* §3.22 [video] decoder — the one tried first (D-9) */
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
@@ -558,8 +559,10 @@ static void update_window_title(app_state_t *app) {
             char at[32], total[32];
             u8str_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
             u8str_t t = rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
-            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
-                         (int)a.len, a.ptr, (int)t.len, t.ptr, app->media_paused ? " paused" : "");
+            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s%s ",
+                         (int)a.len, a.ptr, (int)t.len, t.ptr,
+                         app->media_paused ? " paused" : "",
+                         app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
@@ -690,10 +693,9 @@ static void media_prepare(app_state_t *app) {
     u8str_t path = app->source.pages[index].path;
     if (!is_media_path(path)) return;
 
-    /* D-9: the preferred backend first, the other one when it cannot.
-       Slice 1 has only Media Foundation; FFmpeg joins in slice 3. */
+    /* D-9: the preferred backend first, the other one when it cannot. */
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(RUBRAVIEW_BACKEND_MEDIA_FOUNDATION,
+    size_t count = rubraview_media_backend_order(app->media_preferred,
                                                  rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                  order);
     rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
@@ -3623,6 +3625,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        without one and precache_decode queues pages for the main loop. */
     app.jobs = NULL;
     app.media_page = -1;
+    /* §3.22 [video] decoder (D-9): which backend opens a file first. The
+       other one still gets its turn when this one cannot. */
+    app.media_preferred = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    {
+        u8str_t settings_text = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
+        if (settings_text.len > 0) {
+            rubraview_ini_doc_t settings_doc = rubraview_ini_parse(&arena, settings_text);
+            const u8str_t *decoder = rubraview_ini_get(&settings_doc, U8("video"), U8("decoder"));
+            if (decoder && decoder->len == 6 && memcmp(decoder->ptr, "ffmpeg", 6) == 0) {
+                app.media_preferred = RUBRAVIEW_BACKEND_FFMPEG;
+            }
+        }
+    }
     history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
