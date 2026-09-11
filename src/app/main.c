@@ -19,6 +19,7 @@
 #include <wincodec.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #endif
 
 #include <stdlib.h>
@@ -66,9 +67,12 @@
 
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
-/* M5 slice 1: video files join the folder as pages. Audio-only files
-   wait for slice 2, which brings the sound. */
-#define MEDIA_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
+/* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
+#define MEDIA_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp;" \
+                     "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
+/* How far the picture's clock may run on from the last thing the sound
+   thread reported, before it waits for the next report. */
+#define MEDIA_AUDIO_EXTRAPOLATION 0.2
 #define MEDIA_SEEK_STEP 5.0
 #define MEDIA_NOTICE_SECONDS 5.0
 /* How far the picture may fall behind the clock before the clock is
@@ -213,6 +217,8 @@ typedef struct app_state {
     bool                   media_skip_pending;/* D-9: a file nothing could open; move past it */
     double                 media_position;    /* pts of the picture on screen */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
+    rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
+    bool                   media_ended;       /* reached the end; Space plays it again from the start */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -580,21 +586,97 @@ static void media_close(app_state_t *app) {
     app->media_has_frame = false;
     app->media_position = 0.0;
     app->media_title_tenth = -1;
+    app->media_ended = false;
 }
 
-/* The video's page with its texture, making a new one after a lost device. */
+/* Defined here so the link does not depend on which MinGW carries it. */
+static const GUID RV_IID_IShellItemImageFactory = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
+
+/* RV-084: what a file that is only sound shows — the album art Windows'
+   own shell finds in it (ID3, MP4 and FLAC tags alike), or a plain dark
+   square when it has none. Main thread only: the shell wants the
+   apartment this thread already runs. */
+static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
+    rubraview_texture_t *texture = NULL;
+    char narrow[MAX_PATH * 4];
+    WCHAR wide[MAX_PATH * 2];
+    if (path.len > 0 && path.len < sizeof(narrow)) {
+        memcpy(narrow, path.ptr, path.len);
+        narrow[path.len] = '\0';
+        IShellItemImageFactory *factory = NULL;
+        if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) > 0 &&
+            SUCCEEDED(SHCreateItemFromParsingName(wide, NULL, &RV_IID_IShellItemImageFactory, (void**)&factory)) &&
+            factory) {
+            SIZE size = { 512, 512 };
+            HBITMAP bitmap = NULL;
+            /* THUMBNAILONLY: the art itself, never the generic file icon. */
+            if (SUCCEEDED(factory->lpVtbl->GetImage(factory, size, SIIGBF_BIGGERSIZEOK | SIIGBF_THUMBNAILONLY, &bitmap)) &&
+                bitmap) {
+                BITMAP info;
+                if (GetObjectW(bitmap, sizeof(info), &info) && info.bmWidth > 0 && info.bmHeight > 0 &&
+                    info.bmWidth <= 4096 && info.bmHeight <= 4096) {
+                    int32_t w = info.bmWidth, h = info.bmHeight;
+                    uint8_t *pixels = (uint8_t*)malloc((size_t)w * (size_t)h * 4u);
+                    BITMAPINFO bi = {0};
+                    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                    bi.bmiHeader.biWidth = w;
+                    bi.bmiHeader.biHeight = -h;   /* top row first */
+                    bi.bmiHeader.biPlanes = 1;
+                    bi.bmiHeader.biBitCount = 32;
+                    bi.bmiHeader.biCompression = BI_RGB;
+                    HDC dc = GetDC(NULL);
+                    if (pixels && dc && GetDIBits(dc, bitmap, 0, (UINT)h, pixels, &bi, DIB_RGB_COLORS) == h) {
+                        texture = rubraview_pal_texture_create_bgra(app->renderer, w, h);
+                        if (texture && !rubraview_pal_texture_upload_bgra(texture, pixels, w * 4)) {
+                            rubraview_pal_texture_destroy(texture);
+                            texture = NULL;
+                        }
+                        if (texture) { *out_w = w; *out_h = h; }
+                    }
+                    if (dc) ReleaseDC(NULL, dc);
+                    free(pixels);
+                }
+                DeleteObject(bitmap);
+            }
+            factory->lpVtbl->Release(factory);
+        }
+    }
+    if (!texture) {
+        enum { SIDE = 512 };
+        uint32_t *pixels = (uint32_t*)malloc((size_t)SIDE * SIDE * 4u);
+        if (pixels) {
+            for (size_t k = 0; k < (size_t)SIDE * SIDE; ++k) pixels[k] = 0xFF262626u;
+            texture = rubraview_pal_texture_create_bgra(app->renderer, SIDE, SIDE);
+            if (texture && !rubraview_pal_texture_upload_bgra(texture, (const uint8_t*)(const void*)pixels, SIDE * 4)) {
+                rubraview_pal_texture_destroy(texture);
+                texture = NULL;
+            }
+            if (texture) { *out_w = SIDE; *out_h = SIDE; }
+            free(pixels);
+        }
+    }
+    return texture;
+}
+
+/* The media page with its texture, made again after a lost device: a
+   frame-sized one for video, the album picture for sound only. */
 static app_page_t *media_page_ready(app_state_t *app) {
     if (!app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app)) return NULL;
     app_page_t *page = &app->pages[app->media_page];
     if (!page->texture) {
-        page->texture = rubraview_pal_texture_create_bgra(app->renderer, app->media_info.width,
-                                                          app->media_info.height);
+        int32_t w = app->media_info.width, h = app->media_info.height;
+        page->texture = app->media_info.has_video
+            ? rubraview_pal_texture_create_bgra(app->renderer, w, h)
+            : audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h);
         if (!page->texture) return NULL;
-        page->width = app->media_info.width;
-        page->height = app->media_info.height;
+        page->width = w;
+        page->height = h;
         page->loaded = true;
         page->failed = false;
-        app->media_has_frame = false;
+        /* A sound-only page's picture is already on it; a video's first
+           frame is still to come. */
+        app->media_has_frame = !app->media_info.has_video;
+        app->needs_relayout = true;
     }
     return page;
 }
@@ -636,10 +718,12 @@ static void media_prepare(app_state_t *app) {
     app->media_has_frame = false;
     app->media_position = 0.0;
     app->media_title_tenth = -1;
-    /* Slice 1 plays no sound, so the wall clock is master; §5.3's audio
-       master arrives with the sound in slice 2. */
-    app->media_clock = rubraview_media_clock_create(rubraview_media_master_for(false, false), 0.0,
-                                                    rubraview_pal_time_now_seconds());
+    app->media_ended = false;
+    /* §5.3: the sound is the master clock when it reaches a device;
+       otherwise — a silent file, or no device, as on the test VM — the
+       wall clock is. */
+    app->media_master = rubraview_media_master_for(opened.info.has_audio, opened.info.audio_output);
+    app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
     if (!media_page_ready(app)) {
         media_close(app);
         osd_say(app, U8("could not make room to show that video"));
@@ -661,40 +745,71 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
     }
 }
 
-/* Once per loop pass: put the frame that is due on the page. */
+/* Once per loop pass: follow the sound, put the due frame on the page,
+   and notice the end. */
 static void media_tick(app_state_t *app) {
     app_page_t *page = media_page_ready(app);
     if (!page) return;
     rubraview_media_t *m = app->media;
-    if (app->media_paused && app->media_has_frame) return;
-
     double now = rubraview_pal_time_now_seconds();
+
+    /* §5.3: with the sound as master, the clock follows what is heard. */
+    if (app->media_master == RUBRAVIEW_CLOCK_AUDIO) {
+        double heard = 0.0, at = 0.0;
+        if (rubraview_pal_media_audio_position(m, &heard, &at)) {
+            rubraview_media_clock_sync_audio(&app->media_clock,
+                rubraview_audio_position_now(heard, at, now, !app->media_paused, MEDIA_AUDIO_EXTRAPOLATION),
+                now);
+        }
+    }
     double clock = rubraview_media_clock_now(&app->media_clock, now);
-    rubraview_video_frame_t frame;
-    while (rubraview_pal_media_peek_frame(m, &frame)) {
-        /* The first picture after opening or seeking shows at once. */
-        rubraview_frame_decision_t decision = app->media_has_frame
-            ? rubraview_media_schedule(frame.pts, frame.duration, clock)
-            : RUBRAVIEW_FRAME_SHOW;
-        if (decision == RUBRAVIEW_FRAME_WAIT) break;
-        if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {
+
+    if (!app->media_info.has_video) {
+        /* Only sound: the position is the clock. */
+        app->media_position = clock;
+        int64_t tenth = (int64_t)(clock * 10.0);
+        if (tenth != app->media_title_tenth) {
+            app->media_title_tenth = tenth;
+            update_window_title(app);
+        }
+    } else if (!(app->media_paused && app->media_has_frame)) {
+        rubraview_video_frame_t frame;
+        while (rubraview_pal_media_peek_frame(m, &frame)) {
+            /* The first picture after opening or seeking shows at once. */
+            rubraview_frame_decision_t decision = app->media_has_frame
+                ? rubraview_media_schedule(frame.pts, frame.duration, clock)
+                : RUBRAVIEW_FRAME_SHOW;
+            if (decision == RUBRAVIEW_FRAME_WAIT) break;
+            if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {
+                rubraview_pal_media_pop_frame(m);
+                continue;
+            }
+            bool first = !app->media_has_frame;
+            media_show(app, page, &frame);
             rubraview_pal_media_pop_frame(m);
-            continue;
+            /* Only a wall clock may be moved to the picture. The sound is
+               the truth when it is the master; a late picture is dropped. */
+            if (app->media_master == RUBRAVIEW_CLOCK_WALL &&
+                (first || clock - frame.pts > MEDIA_RESYNC_SECONDS)) {
+                rubraview_media_clock_seek(&app->media_clock, frame.pts, now);
+            }
+            break;
         }
-        bool first = !app->media_has_frame;
-        media_show(app, page, &frame);
-        rubraview_pal_media_pop_frame(m);
-        if (first || clock - frame.pts > MEDIA_RESYNC_SECONDS) {
-            rubraview_media_clock_seek(&app->media_clock, frame.pts, now);
-        }
-        break;
     }
 
-    if (!app->media_paused && rubraview_pal_media_finished(m)) {
-        /* The end: hold the last picture. Slice 4 hands this to the slide show. */
-        rubraview_media_clock_pause(&app->media_clock, now);
-        app->media_paused = true;
-        update_window_title(app);
+    if (!app->media_paused) {
+        /* A sound-only file with no device decodes nothing; its end is its duration. */
+        bool at_end = (app->media_info.has_video || app->media_info.audio_output)
+            ? rubraview_pal_media_finished(m)
+            : (app->media_info.duration_seconds > 0.0 && clock >= app->media_info.duration_seconds);
+        if (at_end) {
+            /* The end: hold the last picture. Slice 4 hands this to the slide show. */
+            rubraview_media_clock_pause(&app->media_clock, now);
+            rubraview_pal_media_set_paused(m, true);
+            app->media_paused = true;
+            app->media_ended = true;
+            update_window_title(app);
+        }
     }
 }
 
@@ -705,7 +820,10 @@ static void media_seek_to(app_state_t *app, double seconds) {
     if (seconds < 0.0) seconds = 0.0;
     rubraview_pal_media_seek(app->media, seconds);
     rubraview_media_clock_seek(&app->media_clock, seconds, rubraview_pal_time_now_seconds());
-    app->media_has_frame = false;   /* the landing frame shows at once, even while paused */
+    /* The landing frame shows at once, even while paused; a sound-only
+       page keeps its picture. */
+    app->media_has_frame = !app->media_info.has_video;
+    app->media_ended = false;
 }
 
 static void media_toggle_pause(app_state_t *app) {
@@ -713,11 +831,13 @@ static void media_toggle_pause(app_state_t *app) {
     double now = rubraview_pal_time_now_seconds();
     if (app->media_paused) {
         /* At the end, playing again starts from the beginning. */
-        if (rubraview_pal_media_finished(app->media)) media_seek_to(app, 0.0);
+        if (app->media_ended) media_seek_to(app, 0.0);
         rubraview_media_clock_resume(&app->media_clock, now);
+        rubraview_pal_media_set_paused(app->media, false);
         app->media_paused = false;
     } else {
         rubraview_media_clock_pause(&app->media_clock, now);
+        rubraview_pal_media_set_paused(app->media, true);
         app->media_paused = true;
     }
     update_window_title(app);
@@ -731,9 +851,10 @@ static double media_frame_seconds(const app_state_t *app) {
    into the middle of the previous frame's interval, which the exact seek
    turns into that frame. Either way playback is paused first. */
 static void media_step(app_state_t *app, bool forward) {
-    if (!app->media) return;
+    if (!app->media || !app->media_info.has_video) return;   /* sound has no frames to step */
     if (!app->media_paused) {
         rubraview_media_clock_pause(&app->media_clock, rubraview_pal_time_now_seconds());
+        rubraview_pal_media_set_paused(app->media, true);
         app->media_paused = true;
     }
     if (!forward) {
