@@ -181,3 +181,19 @@ u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
             return U8("");
     }
 }
+
+static int failure_rank(rubraview_media_failure_t f) {
+    switch (f) {
+        case RUBRAVIEW_MEDIA_FAIL_HEVC:      return 4;
+        case RUBRAVIEW_MEDIA_FAIL_CODEC:     return 3;
+        case RUBRAVIEW_MEDIA_FAIL_CONTAINER: return 2;
+        case RUBRAVIEW_MEDIA_FAIL_FILE:      return 1;
+        case RUBRAVIEW_MEDIA_OPENED:
+        default:                             return 0;
+    }
+}
+
+rubraview_media_failure_t rubraview_media_failure_pick(rubraview_media_failure_t a,
+                                                       rubraview_media_failure_t b) {
+    return failure_rank(b) > failure_rank(a) ? b : a;
+}

@@ -712,4 +712,31 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
     return true;
 }
 
+/* ---- textures filled from memory (video frames, M5) ---- */
+
+rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *renderer,
+                                                       int32_t width, int32_t height) {
+    if (!renderer || !renderer->target || width <= 0 || height <= 0) return NULL;
+    /* Decoders leave the fourth byte undefined, so it is ignored rather
+       than read as transparency. */
+    D2D1_BITMAP_PROPERTIES props = {
+        .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_IGNORE },
+        .dpiX = 96.0f,
+        .dpiY = 96.0f,
+    };
+    D2D1_SIZE_U size = { .width = (UINT32)width, .height = (UINT32)height };
+    ID2D1Bitmap *bitmap = NULL;
+    HRESULT hr = ID2D1RenderTarget_CreateBitmap((ID2D1RenderTarget*)renderer->target, size, NULL, 0,
+                                                &props, &bitmap);
+    if (FAILED(hr) || !bitmap) return NULL;
+    rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, bitmap, width, height);
+    if (!texture) ID2D1Bitmap_Release(bitmap);
+    return texture;
+}
+
+bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture, const uint8_t *pixels, int32_t stride) {
+    if (!texture || !texture->bitmap || !pixels || stride <= 0) return false;
+    return SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, pixels, (UINT32)stride));
+}
+
 #endif /* _WIN32 */
