@@ -98,6 +98,10 @@ const char *rubraview_default_keymap(void) {
     "anim_step_back = Comma\n"
     "anim_speed_up = Ctrl+BracketRight\n"
     "anim_speed_down = Ctrl+BracketLeft\n"
+    /* M5: the same context holds while a video is on screen. Ctrl+Left and
+       Ctrl+Right were free; plain Left/Right keep turning pages. */
+    "media_seek_forward = Ctrl+Right\n"
+    "media_seek_back = Ctrl+Left\n"
     "\n"
 
     /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,
