@@ -209,6 +209,15 @@ int main(void) {
     }
     printf("  [PASS] Failures are told apart, HEVC is recognised, and its message names both remedies\n");
 
+    /* Test 9: two failures, one report — the more specific wins. */
+    {
+        assert(rubraview_media_failure_pick(RUBRAVIEW_MEDIA_FAIL_HEVC, RUBRAVIEW_MEDIA_FAIL_CONTAINER) == RUBRAVIEW_MEDIA_FAIL_HEVC);
+        assert(rubraview_media_failure_pick(RUBRAVIEW_MEDIA_FAIL_CONTAINER, RUBRAVIEW_MEDIA_FAIL_HEVC) == RUBRAVIEW_MEDIA_FAIL_HEVC);
+        assert(rubraview_media_failure_pick(RUBRAVIEW_MEDIA_FAIL_FILE, RUBRAVIEW_MEDIA_FAIL_CODEC) == RUBRAVIEW_MEDIA_FAIL_CODEC);
+        assert(rubraview_media_failure_pick(RUBRAVIEW_MEDIA_FAIL_CONTAINER, RUBRAVIEW_MEDIA_FAIL_FILE) == RUBRAVIEW_MEDIA_FAIL_CONTAINER);
+    }
+    printf("  [PASS] Of two failures, the more specific one is reported\n");
+
     printf("[test_mediaclock] All tests passed successfully!\n");
     return 0;
 }

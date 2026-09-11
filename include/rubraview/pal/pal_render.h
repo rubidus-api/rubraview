@@ -115,6 +115,18 @@ void rubraview_pal_render_draw_pixel_grid(rubraview_renderer_t *renderer,
                                           int32_t texture_height,
                                           uint32_t line_argb);
 
+/**
+ * A texture filled from CPU memory — what a video frame needs, since it
+ * arrives as pixels rather than as a file. 32-bit BGRA; the alpha byte is
+ * ignored, because decoders leave it undefined.
+ */
+rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *renderer,
+                                                       int32_t width, int32_t height);
+
+/** Replace a BGRA texture's pixels. `stride` is bytes per row, top row first. */
+bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture,
+                                       const uint8_t *pixels, int32_t stride);
+
 void rubraview_pal_texture_size(const rubraview_texture_t *texture, int32_t *out_width, int32_t *out_height);
 void rubraview_pal_texture_destroy(rubraview_texture_t *texture);
 

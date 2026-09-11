@@ -158,6 +158,15 @@ rubraview_media_failure_t rubraview_media_classify(bool readable, bool container
  */
 u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure);
 
+/**
+ * When both backends fail, the more specific reason is the one worth
+ * reporting: Media Foundation saying "HEVC without the extension" must
+ * not be buried under FFmpeg saying it is not installed.
+ * HEVC > codec > container > file.
+ */
+rubraview_media_failure_t rubraview_media_failure_pick(rubraview_media_failure_t a,
+                                                       rubraview_media_failure_t b);
+
 #ifdef __cplusplus
 }
 #endif
