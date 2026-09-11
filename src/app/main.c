@@ -503,6 +503,22 @@ static void note_activity(app_state_t *app) {
     rubraview_osd_notify_activity(&app->osd);
 }
 
+/* The caption names the file on screen and where it sits in the folder
+   or archive, so the taskbar, Alt+Tab and a test script can all tell
+   which page is showing. */
+static void update_window_title(app_state_t *app) {
+    char title[768];
+    int32_t page = current_page_index(app);
+    if (page >= 0 && (size_t)page < page_count(app)) {
+        u8str_t name = rubraview_path_basename(app->source.pages[page].path);
+        snprintf(title, sizeof(title), "%.*s (%d/%zu) - Rubraview %s",
+                 (int)name.len, name.ptr, (int)page + 1, page_count(app), RUBRAVIEW_VERSION_STRING);
+    } else {
+        snprintf(title, sizeof(title), "Rubraview %s", RUBRAVIEW_VERSION_STRING);
+    }
+    rubraview_pal_window_set_title(app->window, title);
+}
+
 static void go_to_spread(app_state_t *app, size_t index) {
     if (app->layout.count == 0) return;
     if (index >= app->layout.count) index = app->layout.count - 1;
@@ -523,6 +539,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
     int32_t page = current_page_index(app);
     if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
     animation_prepare(app);
+    update_window_title(app);
 }
 
 static void open_sibling_archive(app_state_t *app, bool forward);
@@ -2505,6 +2522,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     rubraview_filmstrip_reveal(&app->filmstrip, start_page);
     build_slides(app);
     update_precache(app);
+    update_window_title(app);
 }
 
 static void open_path(app_state_t *app, u8str_t path) {
