@@ -83,3 +83,27 @@ Before using third-party code, images, audio, fonts, datasets, text, or other re
 - Attribution: "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org"
 - Notes: chosen under D-9 (public samples after a licence check). The FFmpeg
   tool used to cut and convert is not part of the repository or the release.
+
+## R005: FFmpeg 8.1.2 public headers
+
+- Source: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+  (SHA-256 `464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`)
+- Author: the FFmpeg project
+- License: LGPL-2.1-or-later, the text shipped at `vendor/ffmpeg/COPYING.LGPLv2.1`.
+  Only the public headers are here; no FFmpeg source is compiled, and no
+  FFmpeg code is linked into or shipped with rubraview. Every function is
+  resolved at run time with `GetProcAddress` from DLLs the *user* places
+  beside the executable, which is what keeps rubraview itself MIT.
+- Retrieved: 2026-09-12
+- Local path: `vendor/ffmpeg/include/` (libavutil, libavcodec, libavformat,
+  libswscale, libswresample — the headers each library's Makefile installs),
+  plus a hand-written `libavutil/avconfig.h` (the x86-64 values FFmpeg's
+  configure generates).
+- Distribution: no — headers only, used to compile calls; nothing of FFmpeg
+  ships in `dist/`.
+- Modification: none to the upstream headers.
+- Attribution: `THIRD_PARTY_NOTICES.md` and `vendor/ffmpeg/COPYING.LGPLv2.1`
+- Notes: admitted under owner decision D-8 (2026-09-11, "headers may go into
+  the repository"). The major versions matter: `pal_media_ffmpeg.c` asks each
+  DLL for its version and refuses a different major rather than reading its
+  memory by the wrong layout. Details in `vendor/ffmpeg/VENDORED.md`.
