@@ -70,6 +70,7 @@
    wait for slice 2, which brings the sound. */
 #define MEDIA_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
 #define MEDIA_SEEK_STEP 5.0
+#define MEDIA_NOTICE_SECONDS 5.0
 /* How far the picture may fall behind the clock before the clock is
    moved to the picture instead: on a machine that cannot decode in
    real time, playing a little slow beats a slideshow of jumps. */
@@ -622,6 +623,7 @@ static void media_prepare(app_state_t *app) {
     }
     if (!opened.media) {
         osd_say(app, rubraview_media_failure_text(why));
+        app->notice_seconds = MEDIA_NOTICE_SECONDS;   /* long enough to read the HEVC line */
         app->pages[index].failed = true;
         app->media_skip_pending = true;   /* D-9: say so, then move on */
         return;
