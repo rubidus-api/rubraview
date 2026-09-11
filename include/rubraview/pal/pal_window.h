@@ -134,6 +134,13 @@ void rubraview_pal_window_destroy(rubraview_window_t *window);
  */
 bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_window_event_t *out_event);
 
+/**
+ * Block until the OS has input or a message for this thread, or until
+ * timeout_ms passes. Returns at once if events are already queued. An
+ * idle viewer calls this instead of redrawing a frame nobody asked for.
+ */
+void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms);
+
 void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height);
 
 /** §4.2: DPI / 96.0 for the monitor the window is currently on. */
