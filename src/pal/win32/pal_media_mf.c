@@ -59,8 +59,48 @@ struct rubraview_media {
     uint64_t consumer_generation;           /* caller's thread only */
 };
 
+/*
+ * Media Foundation is loaded at run time, not linked. A Windows "N"
+ * edition ships without it until the Media Feature Pack is installed;
+ * importing MFPlat.dll directly would stop rubraview from starting there
+ * at all — the image viewer included. Only System32 is searched, so a
+ * look-alike DLL placed beside the executable is never picked up.
+ */
+typedef HRESULT (WINAPI *mf_startup_fn)(ULONG, DWORD);
+typedef HRESULT (WINAPI *mf_shutdown_fn)(void);
+typedef HRESULT (WINAPI *mf_create_attributes_fn)(IMFAttributes**, UINT32);
+typedef HRESULT (WINAPI *mf_create_media_type_fn)(IMFMediaType**);
+typedef HRESULT (WINAPI *mf_create_reader_fn)(LPCWSTR, IMFAttributes*, IMFSourceReader**);
+
+static struct {
+    bool tried, ok;
+    mf_startup_fn startup;
+    mf_shutdown_fn shutdown;
+    mf_create_attributes_fn create_attributes;
+    mf_create_media_type_fn create_media_type;
+    mf_create_reader_fn create_reader;
+} g_mf;
+
+/* Called on the caller's thread before any decode thread exists, so the
+   thread start is what publishes these pointers to it. */
+static bool mf_load(void) {
+    if (g_mf.tried) return g_mf.ok;
+    g_mf.tried = true;
+    HMODULE plat = LoadLibraryExW(L"mfplat.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    HMODULE rw = LoadLibraryExW(L"mfreadwrite.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!plat || !rw) return false;
+    g_mf.startup = (mf_startup_fn)(void*)GetProcAddress(plat, "MFStartup");
+    g_mf.shutdown = (mf_shutdown_fn)(void*)GetProcAddress(plat, "MFShutdown");
+    g_mf.create_attributes = (mf_create_attributes_fn)(void*)GetProcAddress(plat, "MFCreateAttributes");
+    g_mf.create_media_type = (mf_create_media_type_fn)(void*)GetProcAddress(plat, "MFCreateMediaType");
+    g_mf.create_reader = (mf_create_reader_fn)(void*)GetProcAddress(rw, "MFCreateSourceReaderFromURL");
+    g_mf.ok = g_mf.startup && g_mf.shutdown && g_mf.create_attributes &&
+              g_mf.create_media_type && g_mf.create_reader;
+    return g_mf.ok;
+}
+
 bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend) {
-    return backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    return backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION && mf_load();
 }
 
 /* ---- decode thread ---- */
@@ -74,13 +114,13 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
     *out_reader = NULL;
 
     IMFAttributes *attrs = NULL;
-    if (FAILED(MFCreateAttributes(&attrs, 1)) || !attrs) { fail(m, RUBRAVIEW_MEDIA_FAIL_FILE); return false; }
+    if (FAILED(g_mf.create_attributes(&attrs, 1)) || !attrs) { fail(m, RUBRAVIEW_MEDIA_FAIL_FILE); return false; }
     /* Lets the reader convert YUV to RGB32 itself, so the caller gets
        pixels Direct2D can take as they are. */
     IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
 
     IMFSourceReader *reader = NULL;
-    HRESULT hr = MFCreateSourceReaderFromURL(m->path, attrs, &reader);
+    HRESULT hr = g_mf.create_reader(m->path, attrs, &reader);
     IMFAttributes_Release(attrs);
     if (FAILED(hr) || !reader) {
         bool readable = GetFileAttributesW(m->path) != INVALID_FILE_ATTRIBUTES;
@@ -120,7 +160,7 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
 
     IMFMediaType *want = NULL;
     bool decodable = false;
-    if (SUCCEEDED(MFCreateMediaType(&want)) && want) {
+    if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
         IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
         IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
         decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want));
@@ -295,7 +335,7 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     rubraview_media_t *m = (rubraview_media_t*)arg;
 
     bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
-    bool mf = SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
+    bool mf = SUCCEEDED(g_mf.startup(MF_VERSION, MFSTARTUP_LITE));
 
     IMFSourceReader *reader = NULL;
     bool opened = mf && open_reader(m, &reader);
@@ -305,7 +345,7 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     if (opened) decode_loop(m, reader);
 
     if (reader) IMFSourceReader_Release(reader);
-    if (mf) MFShutdown();
+    if (mf) g_mf.shutdown();
     if (com) CoUninitialize();
     return 0;
 }
@@ -326,8 +366,9 @@ void rubraview_pal_media_close(rubraview_media_t *media) {
 
 rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend) {
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
-    if (backend != RUBRAVIEW_BACKEND_MEDIA_FOUNDATION) {
-        /* D-8's second backend is slice 3. */
+    if (backend != RUBRAVIEW_BACKEND_MEDIA_FOUNDATION || !mf_load()) {
+        /* D-8's second backend is slice 3; a Windows without Media
+           Foundation has no first one either. */
         result.failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
         return result;
     }
