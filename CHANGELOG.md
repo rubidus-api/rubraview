@@ -6,6 +6,28 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-09-11
+
+Found by running the viewer on a Windows 11 test machine.
+
+### Added
+
+- The window title names the file on screen and its place in the folder, e.g.
+  `c_plain.png (3/5) - Rubraview 0.0.2`.
+
+### Fixed
+
+- An idle viewer no longer redraws an unchanged picture. On a machine without a
+  GPU it kept two CPU cores busy; it now sleeps until there is input.
+- Pictures being viewed, and the neighbours read ahead of them, are no longer
+  locked: they can be renamed, deleted or saved over while the viewer is open.
+- Pages read ahead are decoded on the main thread; they were decoded on worker
+  threads that the imaging and drawing code do not support.
+- The first window fits inside the screen's work area instead of covering the
+  taskbar on a small screen.
+
+## [0.0.1]
+
 ### Added
 
 - Comic archives: `.cbz`/`.zip` and `.cb7`/`.7z`, read straight from memory with
