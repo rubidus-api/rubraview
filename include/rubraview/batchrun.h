@@ -48,6 +48,7 @@ typedef struct rubraview_cli_result {
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
     bool                diagnostics;       /* --diag: report what the graphics device is and stop */
     bool                show_version;      /* --version: print the version and stop */
+    bool                probe_media;       /* --probe-media: open the file with each media backend and report */
     bool                recursive;  /* --recursive */
     u8str_t             input;      /* the file or directory to work on */
     u8str_t             output_dir; /* --out=..., empty for "beside the source" */

@@ -2978,7 +2978,23 @@ static void console_line(const char *text) {
     }
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     if (out == INVALID_HANDLE_VALUE || !out) return;
+
+    /* A console takes UTF-16: writing UTF-8 bytes into one leaves them to
+       be read as the code page of the day, which turned an em dash into
+       "??" (and would do worse to a Korean filename). A pipe or a file
+       gets the UTF-8 bytes, which is what a redirect wants. */
+    DWORD mode = 0;
     DWORD written = 0;
+    if (GetConsoleMode(out, &mode)) {
+        WCHAR wide[1024];
+        int count = MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1022);
+        if (count > 1) {
+            wide[count - 1] = L'\r';
+            wide[count] = L'\n';
+            WriteConsoleW(out, wide, (DWORD)(count + 1), &written, NULL);
+            return;
+        }
+    }
     WriteFile(out, text, (DWORD)strlen(text), &written, NULL);
     WriteFile(out, "\r\n", 2, &written, NULL);
 }
@@ -3285,6 +3301,65 @@ static void report_startup_failure(void) {
     }
 }
 
+/* `--probe-media`: open a file with each backend in turn and say what
+   happened — which one took it, what it thinks the file is, and whether
+   frames really come out. There is no window, so it answers over a
+   remote shell: the media PAL hands over CPU pixels and needs no
+   renderer. mfprobe asks Windows what it *could* decode; this asks
+   rubraview what it actually does with one file. */
+static int probe_media_file(u8str_t path) {
+    char line[512];
+    bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+    console_line(ffmpeg_here
+        ? "FFmpeg: its DLLs are here, at a version these headers know"
+        : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
+
+    rubraview_media_backend_t order[2];
+    size_t count = rubraview_media_backend_order(RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, ffmpeg_here, order);
+    for (size_t i = 0; i < count; ++i) {
+        const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
+        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i]);
+        if (!opened.media) {
+            u8str_t why = rubraview_media_failure_text(opened.failure);
+            snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.len, why.ptr);
+            console_line(line);
+            continue;
+        }
+
+        snprintf(line, sizeof(line), "%s: opened — %dx%d, %.3f s, %.2f fps, picture %s, sound %s%s",
+                 name, opened.info.width, opened.info.height, opened.info.duration_seconds,
+                 opened.info.frame_rate, opened.info.has_video ? "yes" : "no",
+                 opened.info.has_audio ? "yes" : "no",
+                 opened.info.has_audio
+                     ? (opened.info.audio_output ? " (going to a device)" : " (no audio device here)") : "");
+        console_line(line);
+
+        /* Opening is not playing: take some frames and see. */
+        int frames = 0;
+        double first = -1.0, last = -1.0;
+        for (int spin = 0; spin < 600 && frames < 24; ++spin) {
+            rubraview_video_frame_t frame;
+            if (rubraview_pal_media_peek_frame(opened.media, &frame)) {
+                if (first < 0.0) first = frame.pts;
+                last = frame.pts;
+                frames++;
+                rubraview_pal_media_pop_frame(opened.media);
+                continue;
+            }
+            if (rubraview_pal_media_finished(opened.media)) break;
+            rubraview_pal_time_sleep_ms(10);
+        }
+        if (opened.info.has_video) {
+            snprintf(line, sizeof(line), "%s: %d picture(s) decoded, %.3f s to %.3f s", name, frames, first, last);
+        } else {
+            snprintf(line, sizeof(line), "%s: sound only — nothing to decode into pictures", name);
+        }
+        console_line(line);
+        rubraview_pal_media_close(opened.media);
+    }
+    return 0;
+}
+
 /* `--diag`: bring the graphics up, say what it got, and stop. One run
    from a command prompt answers "what is this machine actually using",
    which is otherwise guesswork from far away. */
@@ -3529,6 +3604,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 free(memory);
                 CoUninitialize();
                 return 0;
+            }
+
+            if (cli.probe_media) {
+                int code = probe_media_file(cli.input);
+                free(memory);
+                CoUninitialize();
+                return code;
             }
 
             if (cli.diagnostics) {
