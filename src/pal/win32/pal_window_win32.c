@@ -559,6 +559,13 @@ bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_windo
     return true;
 }
 
+void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms) {
+    if (!window || window->queue_count > 0 || window->should_close) return;
+    /* MWMO_INPUTAVAILABLE also wakes for input that an earlier Peek
+       already saw but left in the queue. */
+    MsgWaitForMultipleObjectsEx(0, NULL, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+}
+
 void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height) {
     if (!window) return;
     if (out_width) *out_width = window->width;

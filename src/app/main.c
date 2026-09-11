@@ -76,6 +76,10 @@
 #define PAGE_CACHE_BUDGET (512u * 1024u * 1024u)   /* §7.4's default budget */
 #define ESTIMATED_PAGE_BYTES (12u * 1024u * 1024u)
 #define PENDING_DECODE_MAX 32
+/* Seconds of redrawing after the last input or animation. Longer than
+   every fade the chrome runs (OSD 2.0 + 0.5, box grace 0.5), so none is
+   cut off when the loop stops drawing. */
+#define IDLE_REDRAW_GRACE 3.0
 #define HISTORY_MAX_ENTRIES 512
 #define TOOLBOX_TILES 8
 #define MENU_MAX_TILES 12
@@ -3264,10 +3268,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     }
 
     app.last_frame_seconds = rubraview_pal_time_now_seconds();
+    double last_busy_seconds = app.last_frame_seconds;
+    double last_idle_frame_seconds = app.last_frame_seconds;
 
     while (!rubraview_pal_window_should_close(app.window)) {
         rubraview_window_event_t event;
+        size_t handled = 0;
         while (rubraview_pal_window_poll_event(app.window, &event)) {
+            handled++;
             switch (event.kind) {
                 case RUBRAVIEW_WINDOW_EVENT_CLOSE:
                     rubraview_pal_window_request_close(app.window);
@@ -3421,10 +3429,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         app.last_frame_seconds = now;
         tick_timers(&app, dt);
 
-        render_frame(&app);
-        /* A queued decode takes the loop's idle slice; the sleep is only
-           for when there is nothing left to get ready. */
-        if (!drain_one_pending_decode(&app)) rubraview_pal_time_sleep_ms(4);
+        /* Redraw only while something can change on screen. Without a
+           GPU, Direct2D rasterises on the CPU, and a loop that redrew
+           the same still image kept two cores busy doing it. */
+        bool animating = app.slideshow_running || app.anim_active ||
+                         app.notice_seconds > 0.0 || app.pending_decode_count > 0;
+        if (handled > 0 || animating) last_busy_seconds = now;
+        bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;
+        if (!settled || now - last_idle_frame_seconds >= 1.0) {
+            render_frame(&app);
+            if (settled) last_idle_frame_seconds = now;
+        }
+
+        /* A queued decode takes the loop's idle slice. With nothing to
+           get ready, a settled loop sleeps until the OS has something
+           for it instead of spinning. */
+        if (drain_one_pending_decode(&app)) {
+            last_busy_seconds = now;
+        } else if (settled) {
+            rubraview_pal_window_wait_event(app.window, 250);
+        } else {
+            rubraview_pal_time_sleep_ms(4);
+        }
     }
 
     /* §3.17.1: remember where the reader stopped before shutting down. */
