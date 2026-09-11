@@ -60,9 +60,21 @@
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/pal/pal_time.h"
+#include "rubraview/pal/pal_media.h"
+#include "rubraview/mediaclock.h"
+#include "rubraview/playback.h"
 
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
+/* M5 slice 1: video files join the folder as pages. Audio-only files
+   wait for slice 2, which brings the sound. */
+#define MEDIA_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
+#define MEDIA_SEEK_STEP 5.0
+#define MEDIA_NOTICE_SECONDS 5.0
+/* How far the picture may fall behind the clock before the clock is
+   moved to the picture instead: on a machine that cannot decode in
+   real time, playing a little slow beats a slideshow of jumps. */
+#define MEDIA_RESYNC_SECONDS 0.25
 #define PIXEL_GRID_MIN_SCALE 4.0 /* §3.5: the grid appears from 400% zoom */
 #define ZOOM_STEP 1.1
 #define PAN_STEP 60.0
@@ -190,6 +202,17 @@ typedef struct app_state {
     rubraview_frame_t     *anim_frames;
     int32_t                anim_page;    /* which page these frames describe; -1 for none */
     bool                   anim_active;
+
+    /* M5: the video on the current page, when it is one (D-8, D-9). */
+    rubraview_media_t      *media;
+    rubraview_media_info_t  media_info;
+    rubraview_media_clock_t media_clock;
+    int32_t                media_page;        /* -1 when no video is open */
+    bool                   media_paused;
+    bool                   media_has_frame;   /* false until the first picture after opening or seeking */
+    bool                   media_skip_pending;/* D-9: a file nothing could open; move past it */
+    double                 media_position;    /* pts of the picture on screen */
+    int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -315,10 +338,18 @@ static void unload_all_pages(app_state_t *app) {
     }
 }
 
+/* Whether a page is a video, opened by the media PAL rather than WIC. */
+static bool is_media_path(u8str_t path) {
+    return path.len > 0 && rubraview_glob_match_list(rubraview_path_basename(path), U8(MEDIA_FILTER));
+}
+
 static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= page_count(app)) return NULL;
     app_page_t *page = &app->pages[index];
     if (page->loaded || page->failed) return page;
+    /* A video page gets its texture from media_prepare, and only while
+       it is the page on screen: the pre-cache must not open videos. */
+    if (is_media_path(app->source.pages[index].path)) return page;
 
     rubraview_page_bytes_t bytes = rubraview_page_source_read(app->arena, &app->source,
                                                               (size_t)index, MAX_PAGE_BYTES);
@@ -508,15 +539,218 @@ static void note_activity(app_state_t *app) {
    which page is showing. */
 static void update_window_title(app_state_t *app) {
     char title[768];
+    size_t used = 0;
     int32_t page = current_page_index(app);
     if (page >= 0 && (size_t)page < page_count(app)) {
         u8str_t name = rubraview_path_basename(app->source.pages[page].path);
-        snprintf(title, sizeof(title), "%.*s (%d/%zu) - Rubraview %s",
-                 (int)name.len, name.ptr, (int)page + 1, page_count(app), RUBRAVIEW_VERSION_STRING);
-    } else {
-        snprintf(title, sizeof(title), "Rubraview %s", RUBRAVIEW_VERSION_STRING);
+        int n = snprintf(title, sizeof(title), "%.*s (%d/%zu) ",
+                         (int)name.len, name.ptr, (int)page + 1, page_count(app));
+        used = n > 0 ? ((size_t)n < sizeof(title) ? (size_t)n : sizeof(title) - 1) : 0;
+        if (app->media && page == app->media_page) {
+            /* A video shows where it is, to the millisecond — which is
+               also how a frame step can be checked from outside. */
+            char at[32], total[32];
+            u8str_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
+            u8str_t t = rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
+            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
+                         (int)a.len, a.ptr, (int)t.len, t.ptr, app->media_paused ? " paused" : "");
+            if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
+        }
     }
+    snprintf(title + used, sizeof(title) - used, "%sRubraview %s", used > 0 ? "- " : "", RUBRAVIEW_VERSION_STRING);
     rubraview_pal_window_set_title(app->window, title);
+}
+
+/* ---- video pages (M5 slice 1: D-8, D-9) ---- */
+
+static void osd_say(app_state_t *app, u8str_t text);
+
+static void media_close(app_state_t *app) {
+    if (app->media) {
+        rubraview_pal_media_close(app->media);
+        app->media = NULL;
+    }
+    if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
+        app_page_t *page = &app->pages[app->media_page];
+        if (page->texture) rubraview_pal_texture_destroy(page->texture);
+        *page = (app_page_t){0};
+    }
+    app->media_page = -1;
+    app->media_paused = false;
+    app->media_has_frame = false;
+    app->media_position = 0.0;
+    app->media_title_tenth = -1;
+}
+
+/* The video's page with its texture, making a new one after a lost device. */
+static app_page_t *media_page_ready(app_state_t *app) {
+    if (!app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app)) return NULL;
+    app_page_t *page = &app->pages[app->media_page];
+    if (!page->texture) {
+        page->texture = rubraview_pal_texture_create_bgra(app->renderer, app->media_info.width,
+                                                          app->media_info.height);
+        if (!page->texture) return NULL;
+        page->width = app->media_info.width;
+        page->height = app->media_info.height;
+        page->loaded = true;
+        page->failed = false;
+        app->media_has_frame = false;
+    }
+    return page;
+}
+
+/* Opens the video when the page on screen is one, and closes the old one. */
+static void media_prepare(app_state_t *app) {
+    int32_t index = current_page_index(app);
+    if (app->media && index == app->media_page) return;
+    media_close(app);
+    if (index < 0 || (size_t)index >= page_count(app)) return;
+    u8str_t path = app->source.pages[index].path;
+    if (!is_media_path(path)) return;
+
+    /* D-9: the preferred backend first, the other one when it cannot.
+       Slice 1 has only Media Foundation; FFmpeg joins in slice 3. */
+    rubraview_media_backend_t order[2];
+    size_t count = rubraview_media_backend_order(RUBRAVIEW_BACKEND_MEDIA_FOUNDATION,
+                                                 rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
+                                                 order);
+    rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
+    rubraview_media_failure_t why = RUBRAVIEW_MEDIA_FAIL_FILE;
+    for (size_t i = 0; i < count; ++i) {
+        opened = rubraview_pal_media_open(path, order[i]);
+        if (opened.media) break;
+        why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
+    }
+    if (!opened.media) {
+        osd_say(app, rubraview_media_failure_text(why));
+        app->notice_seconds = MEDIA_NOTICE_SECONDS;   /* long enough to read the HEVC line */
+        app->pages[index].failed = true;
+        app->media_skip_pending = true;   /* D-9: say so, then move on */
+        return;
+    }
+
+    app->media = opened.media;
+    app->media_info = opened.info;
+    app->media_page = index;
+    app->media_paused = false;
+    app->media_has_frame = false;
+    app->media_position = 0.0;
+    app->media_title_tenth = -1;
+    /* Slice 1 plays no sound, so the wall clock is master; §5.3's audio
+       master arrives with the sound in slice 2. */
+    app->media_clock = rubraview_media_clock_create(rubraview_media_master_for(false, false), 0.0,
+                                                    rubraview_pal_time_now_seconds());
+    if (!media_page_ready(app)) {
+        media_close(app);
+        osd_say(app, U8("could not make room to show that video"));
+        app->pages[index].failed = true;
+        app->media_skip_pending = true;
+        return;
+    }
+    app->needs_relayout = true;   /* the page has a size now */
+}
+
+static void media_show(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame) {
+    rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
+    app->media_has_frame = true;
+    app->media_position = frame->pts;
+    int64_t tenth = (int64_t)(frame->pts * 10.0);
+    if (app->media_paused || tenth != app->media_title_tenth) {
+        app->media_title_tenth = tenth;
+        update_window_title(app);
+    }
+}
+
+/* Once per loop pass: put the frame that is due on the page. */
+static void media_tick(app_state_t *app) {
+    app_page_t *page = media_page_ready(app);
+    if (!page) return;
+    rubraview_media_t *m = app->media;
+    if (app->media_paused && app->media_has_frame) return;
+
+    double now = rubraview_pal_time_now_seconds();
+    double clock = rubraview_media_clock_now(&app->media_clock, now);
+    rubraview_video_frame_t frame;
+    while (rubraview_pal_media_peek_frame(m, &frame)) {
+        /* The first picture after opening or seeking shows at once. */
+        rubraview_frame_decision_t decision = app->media_has_frame
+            ? rubraview_media_schedule(frame.pts, frame.duration, clock)
+            : RUBRAVIEW_FRAME_SHOW;
+        if (decision == RUBRAVIEW_FRAME_WAIT) break;
+        if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {
+            rubraview_pal_media_pop_frame(m);
+            continue;
+        }
+        bool first = !app->media_has_frame;
+        media_show(app, page, &frame);
+        rubraview_pal_media_pop_frame(m);
+        if (first || clock - frame.pts > MEDIA_RESYNC_SECONDS) {
+            rubraview_media_clock_seek(&app->media_clock, frame.pts, now);
+        }
+        break;
+    }
+
+    if (!app->media_paused && rubraview_pal_media_finished(m)) {
+        /* The end: hold the last picture. Slice 4 hands this to the slide show. */
+        rubraview_media_clock_pause(&app->media_clock, now);
+        app->media_paused = true;
+        update_window_title(app);
+    }
+}
+
+static void media_seek_to(app_state_t *app, double seconds) {
+    if (!app->media) return;
+    double duration = app->media_info.duration_seconds;
+    if (duration > 0.0 && seconds > duration) seconds = duration;
+    if (seconds < 0.0) seconds = 0.0;
+    rubraview_pal_media_seek(app->media, seconds);
+    rubraview_media_clock_seek(&app->media_clock, seconds, rubraview_pal_time_now_seconds());
+    app->media_has_frame = false;   /* the landing frame shows at once, even while paused */
+}
+
+static void media_toggle_pause(app_state_t *app) {
+    if (!app->media) return;
+    double now = rubraview_pal_time_now_seconds();
+    if (app->media_paused) {
+        /* At the end, playing again starts from the beginning. */
+        if (rubraview_pal_media_finished(app->media)) media_seek_to(app, 0.0);
+        rubraview_media_clock_resume(&app->media_clock, now);
+        app->media_paused = false;
+    } else {
+        rubraview_media_clock_pause(&app->media_clock, now);
+        app->media_paused = true;
+    }
+    update_window_title(app);
+}
+
+static double media_frame_seconds(const app_state_t *app) {
+    return app->media_info.frame_rate > 0.0 ? 1.0 / app->media_info.frame_rate : 1.0 / 30.0;
+}
+
+/* §5.3 frame stepping. Forward takes the next decoded frame; back seeks
+   into the middle of the previous frame's interval, which the exact seek
+   turns into that frame. Either way playback is paused first. */
+static void media_step(app_state_t *app, bool forward) {
+    if (!app->media) return;
+    if (!app->media_paused) {
+        rubraview_media_clock_pause(&app->media_clock, rubraview_pal_time_now_seconds());
+        app->media_paused = true;
+    }
+    if (!forward) {
+        media_seek_to(app, app->media_position - media_frame_seconds(app) * 0.5);
+        update_window_title(app);
+        return;
+    }
+    app_page_t *page = media_page_ready(app);
+    rubraview_video_frame_t frame;
+    for (int i = 0; i < 100 && !rubraview_pal_media_peek_frame(app->media, &frame); ++i) {
+        rubraview_pal_time_sleep_ms(5);   /* the decoder is at most one frame behind */
+    }
+    if (page && rubraview_pal_media_peek_frame(app->media, &frame)) {
+        media_show(app, page, &frame);
+        rubraview_pal_media_pop_frame(app->media);
+        rubraview_media_clock_seek(&app->media_clock, frame.pts, rubraview_pal_time_now_seconds());
+    }
 }
 
 static void go_to_spread(app_state_t *app, size_t index) {
@@ -539,6 +773,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
     int32_t page = current_page_index(app);
     if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
     animation_prepare(app);
+    media_prepare(app);
     update_window_title(app);
 }
 
@@ -805,6 +1040,16 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (action_is(action, "open_batch")) {
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
+    } else if (app->media && action_is(action, "anim_toggle_pause")) {
+        media_toggle_pause(app);
+    } else if (app->media && action_is(action, "anim_step_forward")) {
+        media_step(app, true);
+    } else if (app->media && action_is(action, "anim_step_back")) {
+        media_step(app, false);
+    } else if (app->media && action_is(action, "media_seek_forward")) {
+        media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
+    } else if (app->media && action_is(action, "media_seek_back")) {
+        media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
     } else if (action_is(action, "anim_toggle_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
@@ -1007,8 +1252,8 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
        `Space` and `Ctrl + [` mean two things without either meaning
        being lost — see the comment on those sections in
        src/core/default_keymap.c. */
-    if (app->anim_active) {
-        u8str_t context = app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION
+    if (app->anim_active || app->media) {
+        u8str_t context = (app->media || app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION)
                             ? U8("animation") : U8("subpage");
         u8str_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
         if (action.len > 0) { handle_action(app, action); return; }
@@ -2382,6 +2627,7 @@ static void release_evicted(app_state_t *app, const uint64_t *evicted, size_t co
     for (size_t i = 0; i < count; ++i) {
         size_t index = (size_t)evicted[i];
         if (index >= page_count(app)) continue;
+        if ((int32_t)index == app->media_page) continue; /* the playing video, not a cached picture */
         if (!app->pages[index].texture) continue;
         /* §7.4: the budget decided this page has to go. */
         rubraview_pal_texture_destroy(app->pages[index].texture);
@@ -2472,7 +2718,7 @@ static bool open_folder(app_state_t *app, u8str_t dir) {
     if (listing.count == 0) return false;
 
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
-    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER),
+    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER ";" MEDIA_FILTER),
                                                      RUBRAVIEW_SORT_NAME_NATURAL, true);
     app->source_dir = dir;
     return app->source.page_count > 0;
@@ -2481,6 +2727,7 @@ static bool open_folder(app_state_t *app, u8str_t dir) {
 /* Finishes opening whichever source was just built: allocate the page
    table, apply any ComicInfo, lay out, and start the ring. */
 static void finish_open(app_state_t *app, size_t start_page) {
+    media_close(app); /* the playing video belongs to the source being replaced */
     proven_result_mem_mut_t res = proven_arena_alloc(app->arena, page_count(app) * sizeof(app_page_t));
     if (!proven_is_ok(res.err)) {
         app->source.page_count = 0;
@@ -2522,6 +2769,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     rubraview_filmstrip_reveal(&app->filmstrip, start_page);
     build_slides(app);
     update_precache(app);
+    media_prepare(app);
     update_window_title(app);
 }
 
@@ -3249,6 +3497,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        arena, none of which may be used off this thread; the ring runs
        without one and precache_decode queues pages for the main loop. */
     app.jobs = NULL;
+    app.media_page = -1;
     history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
@@ -3446,11 +3695,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         if (dt < 0.0) dt = 0.0;
         app.last_frame_seconds = now;
         tick_timers(&app, dt);
+        if (app.media_skip_pending) {
+            /* D-9: the file nothing could open was reported; move past it. */
+            app.media_skip_pending = false;
+            next_spread(&app);
+        }
+        media_tick(&app);
 
         /* Redraw only while something can change on screen. Without a
            GPU, Direct2D rasterises on the CPU, and a loop that redrew
            the same still image kept two cores busy doing it. */
         bool animating = app.slideshow_running || app.anim_active ||
+                         (app.media && !app.media_paused) ||
                          app.notice_seconds > 0.0 || app.pending_decode_count > 0;
         if (handled > 0 || animating) last_busy_seconds = now;
         bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;
@@ -3484,6 +3740,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         app.jobs = NULL;
     }
 
+    media_close(&app);
     unload_all_pages(&app);
     rubraview_page_source_close(&app.source);
     rubraview_pal_render_destroy(app.renderer);
