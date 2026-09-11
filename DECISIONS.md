@@ -65,3 +65,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: Windows Media Foundation is the default decode path. FFmpeg is a second backend behind the same PAL interface, loaded dynamically at run time and replaceable; its headers may be vendored in the tree (owner, 2026-09-11). How a file reaches FFmpeg — a setting, an automatic fallback, or both — is settled in the M5 plan (`docs/plans/active/2026-09-11-m5-decoder.md`).
 - Consequences: common formats play with no DLL beside the executable; formats Media Foundation lacks need FFmpeg DLLs or a codec extension. RV-016/054/055/056/062 are reworded around a backend-neutral PAL. Statements that FFmpeg is the only path (SPEC §5, the video requirement, RFC-0001 §5.2) are updated when the plan is confirmed.
 - Supersedes: D-4 (2026-09-08). Refines 2026-09-07 "Dynamic FFmpeg C API PAL Bridge for Universal Video Playback", which remains true of the FFmpeg backend.
+
+## 2026-09-11: D-9 How Media Reaches Each Backend (M5 plan answers)
+
+- Status: Accepted
+- Context: D-8 left the swap between Media Foundation and FFmpeg to the M5 plan; the plan put four questions to the owner.
+- Decision:
+  - A setting names the preferred backend, and a file the preferred backend cannot open is retried on the other one automatically.
+  - A file neither backend can open is reported on screen and the viewer moves on to the next file.
+  - For HEVC without the Store extension the message names both remedies: the $0.99 Microsoft Store extension, or FFmpeg DLLs beside the executable.
+  - Test media are public sample files whose licence has been checked; they stay out of git and are recorded in the resource ledger.
+- Consequences: the backend-selection policy lives in `src/core` and is host-tested; the OSD message table gains the "cannot open" and HEVC entries.
+- Supersedes: None (completes D-8).
