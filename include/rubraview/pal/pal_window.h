@@ -141,6 +141,10 @@ bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_windo
  */
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms);
 
+/** Set the window's caption (UTF-8). Frameless windows still show it in
+    the taskbar and Alt+Tab. */
+void rubraview_pal_window_set_title(rubraview_window_t *window, const char *title_utf8);
+
 void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height);
 
 /** §4.2: DPI / 96.0 for the monitor the window is currently on. */

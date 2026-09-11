@@ -559,6 +559,13 @@ bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_windo
     return true;
 }
 
+void rubraview_pal_window_set_title(rubraview_window_t *window, const char *title_utf8) {
+    if (!window || !window->hwnd || !title_utf8) return;
+    WCHAR wide[512];
+    if (MultiByteToWideChar(CP_UTF8, 0, title_utf8, -1, wide, 512) <= 0) return;
+    SetWindowTextW(window->hwnd, wide);
+}
+
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms) {
     if (!window || window->queue_count > 0 || window->should_close) return;
     /* MWMO_INPUTAVAILABLE also wakes for input that an earlier Peek
