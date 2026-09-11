@@ -176,7 +176,7 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) \
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) \
-		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfplat -lmfreadwrite -lmfuuid \
+		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"
 
