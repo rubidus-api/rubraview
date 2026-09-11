@@ -3301,21 +3301,37 @@ static void report_startup_failure(void) {
     }
 }
 
+/* §3.22 [video] decoder (D-9): the backend a file is offered to first.
+   The other one still gets its turn when this one cannot open it. */
+static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
+    u8str_t text = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
+    if (text.len == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
+    const u8str_t *decoder = rubraview_ini_get(&doc, U8("video"), U8("decoder"));
+    return (decoder && decoder->len == 6 && memcmp(decoder->ptr, "ffmpeg", 6) == 0)
+        ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+}
+
 /* `--probe-media`: open a file with each backend in turn and say what
    happened — which one took it, what it thinks the file is, and whether
    frames really come out. There is no window, so it answers over a
    remote shell: the media PAL hands over CPU pixels and needs no
    renderer. mfprobe asks Windows what it *could* decode; this asks
    rubraview what it actually does with one file. */
-static int probe_media_file(u8str_t path) {
+static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     char line[512];
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
         : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
 
+    rubraview_media_backend_t preferred = preferred_backend(arena);
+    console_line(preferred == RUBRAVIEW_BACKEND_FFMPEG
+        ? "settings.ini [video] decoder = ffmpeg — FFmpeg is tried first"
+        : "settings.ini [video] decoder = windows (or unset) — Media Foundation is tried first");
+
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, ffmpeg_here, order);
+    size_t count = rubraview_media_backend_order(preferred, ffmpeg_here, order);
     for (size_t i = 0; i < count; ++i) {
         const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i]);
@@ -3607,7 +3623,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             }
 
             if (cli.probe_media) {
-                int code = probe_media_file(cli.input);
+                int code = probe_media_file(&arena, cli.input);
                 free(memory);
                 CoUninitialize();
                 return code;
@@ -3709,17 +3725,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.media_page = -1;
     /* §3.22 [video] decoder (D-9): which backend opens a file first. The
        other one still gets its turn when this one cannot. */
-    app.media_preferred = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
-    {
-        u8str_t settings_text = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
-        if (settings_text.len > 0) {
-            rubraview_ini_doc_t settings_doc = rubraview_ini_parse(&arena, settings_text);
-            const u8str_t *decoder = rubraview_ini_get(&settings_doc, U8("video"), U8("decoder"));
-            if (decoder && decoder->len == 6 && memcmp(decoder->ptr, "ffmpeg", 6) == 0) {
-                app.media_preferred = RUBRAVIEW_BACKEND_FFMPEG;
-            }
-        }
-    }
+    app.media_preferred = preferred_backend(&arena);
     history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
