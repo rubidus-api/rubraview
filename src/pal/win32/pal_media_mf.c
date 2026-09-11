@@ -10,11 +10,14 @@
 #include <string.h>
 #include <math.h>
 #include "rubraview/pal/pal_media.h"
+#include "rubraview/pal/pal_audio.h"
 
 /*
- * Media Foundation backend for the media PAL (D-8), slice 1: video only,
- * the reader's own video processor converting whatever the decoder
- * produces into 32-bit RGB.
+ * Media Foundation backend for the media PAL (D-8). Video comes out of the
+ * reader's own video processor as 32-bit RGB; sound comes out as 32-bit
+ * float and goes to the WASAPI output (pal_audio) through a PCM ring
+ * (slice 2). On a machine with no audio device the sound stream is not
+ * decoded at all and the caller plays on the wall clock.
  *
  * The decode thread owns everything Media Foundation hands out. It
  * starts COM and Media Foundation for itself, opens the reader itself,
@@ -31,6 +34,9 @@
 #define MAX_DIMENSION 16384
 #define OPEN_TIMEOUT_MS 15000
 #define NO_GENERATION UINT64_MAX
+#define NO_STREAM ((DWORD)-1)
+#define PCM_RING_SECONDS 2          /* more than the audio/video interleave of any sane file */
+#define AUDIO_ROOM_SAMPLES 16384    /* room wanted before reading the next sample */
 
 typedef struct media_slot {
     uint8_t *pixels;       /* width * height * 4, top row first */
@@ -44,7 +50,12 @@ struct rubraview_media {
     WCHAR path[MAX_PATH * 2];
     rubraview_media_open_result_t result;   /* written by the thread before `opened` */
 
-    DWORD video_stream;
+    DWORD video_stream;                     /* NO_STREAM for a file with no picture */
+    DWORD audio_stream;                     /* NO_STREAM when the sound is not played */
+    uint32_t audio_rate, audio_channels;
+    rubraview_pcm_ring_t pcm;
+    float *pcm_storage;
+    rubraview_audio_out_t *audio;           /* NULL: no sound (no device, or no audio stream) */
     int32_t width, height;
     LONG default_stride;                    /* the negotiated type's stride; negative = bottom-up */
 
@@ -128,10 +139,9 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
         return false;
     }
 
-    /* Find the first video stream, and note whether there is audio. */
-    DWORD video_stream = (DWORD)-1;
+    /* Find the first stream of each kind. */
+    DWORD video_stream = NO_STREAM, audio_stream = NO_STREAM;
     uint32_t fourcc = 0;
-    bool has_audio = false;
     for (DWORD s = 0; ; ++s) {
         IMFMediaType *type = NULL;
         hr = IMFSourceReader_GetNativeMediaType(reader, s, 0, &type);
@@ -140,61 +150,104 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
         GUID major = {0}, subtype = {0};
         IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
         IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
-        if (IsEqualGUID(&major, &MFMediaType_Video) && video_stream == (DWORD)-1) {
+        if (IsEqualGUID(&major, &MFMediaType_Video) && video_stream == NO_STREAM) {
             video_stream = s;
             fourcc = (uint32_t)subtype.Data1;   /* Media Foundation subtypes carry the FOURCC here */
-        } else if (IsEqualGUID(&major, &MFMediaType_Audio)) {
-            has_audio = true;
+        } else if (IsEqualGUID(&major, &MFMediaType_Audio) && audio_stream == NO_STREAM) {
+            audio_stream = s;
         }
         IMFMediaType_Release(type);
     }
-    if (video_stream == (DWORD)-1) {
-        /* Audio-only files are slice 2. */
+    bool has_audio = audio_stream != NO_STREAM;
+    if (video_stream == NO_STREAM && !has_audio) {
         IMFSourceReader_Release(reader);
         fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
         return false;
     }
 
     IMFSourceReader_SetStreamSelection(reader, (DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE);
-    IMFSourceReader_SetStreamSelection(reader, video_stream, TRUE);
 
-    IMFMediaType *want = NULL;
-    bool decodable = false;
-    if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
-        IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
-        IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
-        decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want));
-        IMFMediaType_Release(want);
-    }
-    if (!decodable) {
-        IMFSourceReader_Release(reader);
-        fail(m, rubraview_media_classify(true, true, false, fourcc));
-        return false;
-    }
-
-    IMFMediaType *current = NULL;
-    UINT64 frame_size = 0, frame_rate = 0;
-    UINT32 stride = 0;
-    if (SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, video_stream, &current)) && current) {
-        IMFMediaType_GetUINT64(current, &MF_MT_FRAME_SIZE, &frame_size);
-        IMFMediaType_GetUINT64(current, &MF_MT_FRAME_RATE, &frame_rate);
-        if (FAILED(IMFMediaType_GetUINT32(current, &MF_MT_DEFAULT_STRIDE, &stride))) stride = 0;
-        IMFMediaType_Release(current);
-    }
-    int32_t width = (int32_t)(frame_size >> 32);
-    int32_t height = (int32_t)(frame_size & 0xFFFFFFFFu);
-    if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION) {
-        IMFSourceReader_Release(reader);
-        fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
-        return false;
-    }
-
-    for (int i = 0; i < SLOT_COUNT; ++i) {
-        m->slots[i].pixels = (uint8_t*)malloc((size_t)width * (size_t)height * 4u);
-        if (!m->slots[i].pixels) {
+    int32_t width = 0, height = 0;
+    UINT64 frame_rate = 0;
+    if (video_stream != NO_STREAM) {
+        IMFSourceReader_SetStreamSelection(reader, video_stream, TRUE);
+        IMFMediaType *want = NULL;
+        bool decodable = false;
+        if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
+            IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
+            IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
+            decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want));
+            IMFMediaType_Release(want);
+        }
+        if (!decodable) {
             IMFSourceReader_Release(reader);
-            fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+            fail(m, rubraview_media_classify(true, true, false, fourcc));
             return false;
+        }
+
+        IMFMediaType *current = NULL;
+        UINT64 frame_size = 0;
+        UINT32 stride = 0;
+        if (SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, video_stream, &current)) && current) {
+            IMFMediaType_GetUINT64(current, &MF_MT_FRAME_SIZE, &frame_size);
+            IMFMediaType_GetUINT64(current, &MF_MT_FRAME_RATE, &frame_rate);
+            if (FAILED(IMFMediaType_GetUINT32(current, &MF_MT_DEFAULT_STRIDE, &stride))) stride = 0;
+            IMFMediaType_Release(current);
+        }
+        width = (int32_t)(frame_size >> 32);
+        height = (int32_t)(frame_size & 0xFFFFFFFFu);
+        if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION) {
+            IMFSourceReader_Release(reader);
+            fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
+            return false;
+        }
+        for (int i = 0; i < SLOT_COUNT; ++i) {
+            m->slots[i].pixels = (uint8_t*)malloc((size_t)width * (size_t)height * 4u);
+            if (!m->slots[i].pixels) {
+                IMFSourceReader_Release(reader);
+                fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+                return false;
+            }
+        }
+        m->default_stride = (LONG)(INT32)stride;
+    }
+
+    /* The sound: float samples, at whatever rate and layout the file has. */
+    if (has_audio) {
+        IMFSourceReader_SetStreamSelection(reader, audio_stream, TRUE);
+        IMFMediaType *want = NULL;
+        bool decodable = false;
+        if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
+            IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+            IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
+            decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, audio_stream, NULL, want));
+            IMFMediaType_Release(want);
+        }
+        UINT32 rate = 0, channels = 0;
+        IMFMediaType *current = NULL;
+        if (decodable && SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, audio_stream, &current)) && current) {
+            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
+            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
+            IMFMediaType_Release(current);
+        }
+        size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
+        if (decodable && rate > 0 && channels > 0 && channels <= 8) {
+            m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+            if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
+                m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
+            }
+        }
+        if (m->audio) {
+            m->audio_stream = audio_stream;
+            m->audio_rate = rate;
+            m->audio_channels = channels;
+        } else {
+            /* No device, or a sound we cannot decode: the picture plays
+               alone. A file that is only sound still "plays" — on the
+               wall clock, silently — so its time and its end are right. */
+            IMFSourceReader_SetStreamSelection(reader, audio_stream, FALSE);
+            free(m->pcm_storage);
+            m->pcm_storage = NULL;
         }
     }
 
@@ -212,7 +265,6 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
     m->video_stream = video_stream;
     m->width = width;
     m->height = height;
-    m->default_stride = (LONG)(INT32)stride;
     m->result.media = m;
     m->result.failure = RUBRAVIEW_MEDIA_OPENED;
     m->result.info = (rubraview_media_info_t){
@@ -221,8 +273,9 @@ static bool open_reader(rubraview_media_t *m, IMFSourceReader **out_reader) {
         .frame_rate = rate_den ? (double)rate_num / (double)rate_den : 0.0,
         .width = width,
         .height = height,
-        .has_video = true,
+        .has_video = video_stream != NO_STREAM,
         .has_audio = has_audio,
+        .audio_output = m->audio != NULL,
         .video_fourcc = fourcc,
     };
     *out_reader = reader;
@@ -272,68 +325,138 @@ static bool copy_sample(rubraview_media_t *m, IMFSample *sample, uint8_t *dst) {
     return ok;
 }
 
+/* Writes decoded samples to the ring, waiting for room. A seek or quit
+   makes the rest unwanted, so it stops there. */
+static void push_audio(rubraview_media_t *m, const float *data, size_t count, uint64_t generation) {
+    while (count > 0) {
+        size_t n = rubraview_pcm_ring_write(&m->pcm, data, count);
+        data += n;
+        count -= n;
+        if (count == 0) break;
+        if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
+            atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) return;
+        Sleep(2);
+    }
+}
+
+/* One decoded audio sample into the ring. After a seek, packets wholly
+   before the target are dropped and the one that straddles it is cut, so
+   the sound starts where the picture does. */
+static void deliver_audio(rubraview_media_t *m, IMFSample *sample, double pts, double *skip_until,
+                          uint64_t generation) {
+    IMFMediaBuffer *buffer = NULL;
+    if (FAILED(IMFSample_ConvertToContiguousBuffer(sample, &buffer)) || !buffer) return;
+    BYTE *data = NULL;
+    DWORD max_len = 0, len = 0;
+    if (SUCCEEDED(IMFMediaBuffer_Lock(buffer, &data, &max_len, &len)) && data) {
+        size_t frames = len / ((size_t)m->audio_channels * sizeof(float));
+        size_t skip = 0;
+        if (*skip_until >= 0.0) {
+            double end = pts + (double)frames / (double)m->audio_rate;
+            if (end <= *skip_until + 1e-4) {
+                skip = frames;
+            } else {
+                if (pts < *skip_until) skip = (size_t)((*skip_until - pts) * (double)m->audio_rate);
+                *skip_until = -1.0;
+            }
+        }
+        if (skip < frames) {
+            push_audio(m, (const float*)(const void*)data + skip * m->audio_channels,
+                       (frames - skip) * m->audio_channels, generation);
+        }
+        IMFMediaBuffer_Unlock(buffer);
+    }
+    IMFMediaBuffer_Release(buffer);
+}
+
 static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
-    double skip_until = -1.0;
-    bool ended = false;
+    double skip_video = -1.0, skip_audio = -1.0;
+    const bool want_video = m->video_stream != NO_STREAM;
+    const bool want_audio = m->audio_stream != NO_STREAM;
+    bool video_done = false, audio_done = false, ended = false;
 
     while (!atomic_load_explicit(&m->quit, memory_order_acquire)) {
         uint64_t wanted = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
         if (wanted != generation) {
             generation = wanted;
             int64_t target = atomic_load_explicit(&m->seek_target_100ns, memory_order_relaxed);
+            /* Empty the sound first: this thread is not writing while the
+               output thread discards, so nothing new is lost. */
+            if (m->audio) rubraview_pal_audio_flush(m->audio, (double)target / 1e7);
             PROPVARIANT position;
             PropVariantInit(&position);
             position.vt = VT_I8;
             position.hVal.QuadPart = target;
-            /* The reader lands on the keyframe before the target; the
-               frames between are decoded and skipped below, so the first
-               frame the caller sees is the one the target falls in. */
+            /* The reader lands on the keyframe before the target; what lies
+               between is decoded and skipped below. */
             IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &position);
-            skip_until = (double)target / 1e7;
-            ended = false;
+            skip_video = skip_audio = (double)target / 1e7;
+            video_done = audio_done = ended = false;
         }
-        if (ended) { Sleep(5); continue; }
+        if (ended || (!want_video && !want_audio)) { Sleep(5); continue; }
 
-        size_t slot;
-        if (!rubraview_spsc_acquire_write(&m->ring, &slot)) { Sleep(2); continue; }
+        /* Read only what there is room for. With the picture's ring full
+           the sound is still read, and the other way round — otherwise a
+           full picture ring waiting on a sound clock that has run dry
+           would wait for ever. */
+        /* A stream is read only when it is wanted, not finished, and has
+           room. "Not wanted" must never count as room: a film whose sound
+           is not played (no device, as on the VM) asked for its missing
+           audio stream as soon as the picture ring filled, Media
+           Foundation refused, and playback stopped at the fourth frame. */
+        size_t slot = 0;
+        bool video_can = want_video && !video_done && rubraview_spsc_acquire_write(&m->ring, &slot);
+        bool audio_can = want_audio && !audio_done &&
+                         rubraview_pcm_ring_space(&m->pcm) >= AUDIO_ROOM_SAMPLES;
+        if (!video_can && !audio_can) { Sleep(2); continue; }
+        DWORD which = (video_can && audio_can) ? (DWORD)MF_SOURCE_READER_ANY_STREAM
+                    : video_can ? m->video_stream : m->audio_stream;
 
         DWORD actual = 0, flags = 0;
         LONGLONG timestamp = 0;
         IMFSample *sample = NULL;
-        HRESULT hr = IMFSourceReader_ReadSample(reader, m->video_stream, 0, &actual, &flags, &timestamp, &sample);
-        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+        HRESULT hr = IMFSourceReader_ReadSample(reader, which, 0, &actual, &flags, &timestamp, &sample);
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) {
             if (sample) IMFSample_Release(sample);
+            video_done = audio_done = true;
+        } else {
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+                if (actual == m->video_stream) video_done = true;
+                if (actual == m->audio_stream) audio_done = true;
+            }
+            if (sample) {
+                double pts = (double)timestamp / 1e7;
+                if (video_can && actual == m->video_stream) {
+                    LONGLONG duration = 0;
+                    IMFSample_GetSampleDuration(sample, &duration);
+                    double frame_duration = (double)duration / 1e7;
+                    /* Skip frames that end at or before the target; the
+                       0.1 ms of slack is for a target on a frame boundary,
+                       where pts + duration lands a hair above it (seen on
+                       the VM: 0.083 s + 5 s stopped at 5.042, not 5.083). */
+                    bool before = skip_video >= 0.0 &&
+                        pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_video + 1e-4;
+                    if (!before) {
+                        skip_video = -1.0;
+                        if (copy_sample(m, sample, m->slots[slot].pixels)) {
+                            m->slots[slot].pts = pts;
+                            m->slots[slot].duration = frame_duration;
+                            m->slots[slot].generation = generation;
+                            rubraview_spsc_commit_write(&m->ring);   /* publishes the pixels above */
+                        }
+                    }
+                } else if (want_audio && actual == m->audio_stream) {
+                    deliver_audio(m, sample, pts, &skip_audio, generation);
+                }
+                IMFSample_Release(sample);
+            }
+        }
+
+        if ((!want_video || video_done) && (!want_audio || audio_done)) {
             atomic_store_explicit(&m->end_generation, generation, memory_order_release);
             ended = true;
-            continue;
         }
-        if (!sample) continue;   /* a gap or a format note, no picture */
-
-        LONGLONG duration = 0;
-        IMFSample_GetSampleDuration(sample, &duration);
-        double pts = (double)timestamp / 1e7;
-        double frame_duration = (double)duration / 1e7;
-
-        /* Skip frames that end at or before the target. The 0.1 ms of
-           slack is for targets that fall exactly on a frame boundary:
-           pts + duration comes out a hair above the target in floating
-           point, and without it the seek stopped one frame early (seen on
-           the VM: 0.083 s + 5 s landed on 5.042 instead of 5.083). */
-        if (skip_until >= 0.0 &&
-            pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_until + 1e-4) {
-            IMFSample_Release(sample);
-            continue;
-        }
-        skip_until = -1.0;
-
-        if (copy_sample(m, sample, m->slots[slot].pixels)) {
-            m->slots[slot].pts = pts;
-            m->slots[slot].duration = frame_duration;
-            m->slots[slot].generation = generation;
-            rubraview_spsc_commit_write(&m->ring);   /* publishes the pixels above */
-        }
-        IMFSample_Release(sample);
     }
 }
 
@@ -366,6 +489,9 @@ void rubraview_pal_media_close(rubraview_media_t *media) {
         CloseHandle(media->thread);
     }
     if (media->opened) CloseHandle(media->opened);
+    /* The output thread reads the PCM storage, so it goes before the storage does. */
+    rubraview_pal_audio_close(media->audio);
+    free(media->pcm_storage);
     for (int i = 0; i < SLOT_COUNT; ++i) free(media->slots[i].pixels);
     free(media);
 }
@@ -396,6 +522,8 @@ rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_m
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
     m->consumer_generation = 0;
+    m->video_stream = NO_STREAM;
+    m->audio_stream = NO_STREAM;
     rubraview_spsc_init(&m->ring, SLOT_COUNT);
     m->result.failure = RUBRAVIEW_MEDIA_FAIL_FILE;
 
@@ -410,7 +538,9 @@ rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_m
     if (result.failure != RUBRAVIEW_MEDIA_OPENED) {
         rubraview_pal_media_close(m);
         result.media = NULL;
+        return result;
     }
+    rubraview_pal_audio_set_playing(m->audio, true);   /* NULL-safe: no sound, nothing to start */
     return result;
 }
 
@@ -460,7 +590,16 @@ bool rubraview_pal_media_finished(rubraview_media_t *media) {
     if (!media) return true;
     rubraview_video_frame_t frame;
     if (rubraview_pal_media_peek_frame(media, &frame)) return false;
-    return atomic_load_explicit(&media->end_generation, memory_order_acquire) == media->consumer_generation;
+    return atomic_load_explicit(&media->end_generation, memory_order_acquire) == media->consumer_generation &&
+           rubraview_pal_audio_drained(media->audio);
+}
+
+void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused) {
+    if (media) rubraview_pal_audio_set_playing(media->audio, !paused);
+}
+
+bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall) {
+    return media && media->audio && rubraview_pal_audio_position(media->audio, out_position, out_wall);
 }
 
 #endif /* _WIN32 */

@@ -112,6 +112,50 @@ bool rubraview_spsc_peek_read(rubraview_spsc_t *ring, size_t *out_slot);
 /** Consumer: give the slot back to the producer. */
 void rubraview_spsc_release_read(rubraview_spsc_t *ring);
 
+/* ---- audio samples crossing threads (M5 slice 2) ---- */
+
+/**
+ * A single-producer, single-consumer ring of float samples: the decode
+ * thread writes decoded audio, the audio device thread reads it. The
+ * storage belongs to the caller; the ring only counts. Writes and reads
+ * move as many samples as fit and say how many that was, so neither side
+ * ever blocks the other.
+ *
+ * `discard` is the consumer throwing away everything written so far — a
+ * seek, done while the producer is known to be waiting (see pal_audio).
+ */
+typedef struct rubraview_pcm_ring {
+    float *samples;
+    size_t capacity;          /* in samples, not frames */
+    _Atomic size_t written;   /* total ever written; producer only */
+    _Atomic size_t read;      /* total ever read; consumer only */
+} rubraview_pcm_ring_t;
+
+bool   rubraview_pcm_ring_init(rubraview_pcm_ring_t *ring, float *storage, size_t capacity);
+size_t rubraview_pcm_ring_count(rubraview_pcm_ring_t *ring);   /* samples waiting */
+size_t rubraview_pcm_ring_space(rubraview_pcm_ring_t *ring);   /* samples that fit */
+size_t rubraview_pcm_ring_write(rubraview_pcm_ring_t *ring, const float *src, size_t count);
+size_t rubraview_pcm_ring_read(rubraview_pcm_ring_t *ring, float *dst, size_t count);
+void   rubraview_pcm_ring_discard(rubraview_pcm_ring_t *ring);
+
+/**
+ * Where the listener is, in file time: the seek base plus the frames
+ * handed to the device minus the frames still waiting in its buffer.
+ * Never before the base, whatever the numbers say.
+ */
+double rubraview_audio_heard_seconds(double base_seconds, uint64_t frames_submitted,
+                                     uint64_t frames_pending, uint32_t sample_rate);
+
+/**
+ * The audio thread records (position, wall time) when it can; the
+ * drawing thread asks where playback is *now*. Between two records the
+ * position runs on with the wall clock — but not while paused, and not
+ * by more than `max_extrapolation`, so a stalled device freezes the
+ * picture instead of racing ahead of the sound.
+ */
+double rubraview_audio_position_now(double recorded_position, double recorded_wall,
+                                    double wall_now, bool playing, double max_extrapolation);
+
 /* ---- which backend opens a file (D-8, D-9) ---- */
 
 typedef enum rubraview_media_backend {

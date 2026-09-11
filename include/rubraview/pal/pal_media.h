@@ -33,6 +33,7 @@ typedef struct rubraview_media_info {
     int32_t  width, height;              /* decoded picture size */
     bool     has_video;
     bool     has_audio;
+    bool     audio_output;               /* the sound reaches a device (false on a machine without one) */
     uint32_t video_fourcc;               /* the native codec, for messages (RUBRAVIEW_FOURCC order) */
 } rubraview_media_info_t;
 
@@ -90,6 +91,15 @@ void rubraview_pal_media_seek(rubraview_media_t *media, double seconds);
 
 /** The decoder has reached the end and every decoded frame has been taken. */
 bool rubraview_pal_media_finished(rubraview_media_t *media);
+
+/** Pause or resume the sound (the picture is paused by the caller's clock). */
+void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused);
+
+/**
+ * Where the listener is and when that was measured — the §5.3 master
+ * clock. False when the file's sound is not playing on a device.
+ */
+bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall);
 
 #ifdef __cplusplus
 }
