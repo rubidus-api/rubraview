@@ -11,6 +11,9 @@ static const char *const INTERP[] = { "nearest", "bilinear", "bicubic", "lanczos
 static const char *const SORT_MODES[] = { "natural", "lexical", "date", "size", NULL };
 static const char *const CODEPAGES[] = { "auto", "utf8", "cp949", "shift_jis", "gbk", "big5", "cp1252", NULL };
 static const char *const STARTUP[] = { "blank", "last_file", "last_folder", NULL };
+/* D-8/D-9: which decoder to try first. The other one is still tried
+   when this one cannot open a file. */
+static const char *const DECODER[] = { "windows", "ffmpeg", NULL };
 static const char *const CURATION_MODES[] = { "move", "copy", NULL };
 static const char *const ACCENTS[] = { "crimson", "cobalt", "emerald", "amber", "teal", "purple", NULL };
 static const char *const TILE_SIZES[] = { "48", "64", "96", NULL };
@@ -102,6 +105,7 @@ static const rubraview_setting_def_t SCHEMA[] = {
     BOOL_ROW("bgm_pause_on_video", "audio", "Pause music during video", RUBRAVIEW_TAB_AUDIO, 1.0, false),
 
     /* Tab 5: Video and subtitles (§3.22.2.5) */
+    CHOICE_ROW("decoder", "video", "Decoder", RUBRAVIEW_TAB_VIDEO, DECODER, 2, 0.0, true),
     BOOL_ROW("hardware_decode", "video", "GPU decoding", RUBRAVIEW_TAB_VIDEO, 1.0, false),
     NUM_ROW("subtitle_size", "video", "Subtitle size", RUBRAVIEW_TAB_VIDEO,
             RUBRAVIEW_SETTING_INT, 24.0, 10.0, 72.0, 1.0, false),
