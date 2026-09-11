@@ -62,3 +62,24 @@ Before using third-party code, images, audio, fonts, datasets, text, or other re
 - Modification: no upstream file is changed. `jconfig.h`, `jconfigint.h` and `jversion.h` are new files written for this build, because upstream generates them with CMake and this project does not use CMake.
 - Attribution: licence notices in `THIRD_PARTY_NOTICES.md`
 - Notes: DCT-coefficient transforms for lossless JPEG rotation and metadata stripping (RV-069, D-5, §3.9/§3.10). The tools, the TurboJPEG wrapper, the SIMD assembly and arithmetic coding are deliberately not vendored. WIC remains the only pixel codec in the program.
+
+## R004: Big Buck Bunny (test media only)
+
+- Source: https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip
+  (SHA-256 `7118242b6728d40c871479c5b3c0f0fb27d748089df15d7f1b469f297c74a2d6`)
+- Author: Blender Foundation (Peach open movie project), 2008
+- License: Creative Commons Attribution 3.0, read from the project's own
+  licence page (https://peach.blender.org/about/, "License information"):
+  free reuse and redistribution, commercial included, with attribution.
+- Retrieved: 2026-09-11
+- Local path: `resources/cache/bbb/` (the source) and `resources/cache/media/`
+  (a 10-second cut at 60 s, re-encoded into each container the M5 tests open).
+  Both are git-ignored and rebuildable.
+- Distribution: no — test input only, never shipped with rubraview.
+- Modification: cut to 10 s and re-encoded with a local FFmpeg tool build
+  into MP4/MKV/MOV/TS/FLV (H.264), WebM (VP9/Opus), AVI (MPEG-4/MP3),
+  WMV (WMV2/WMA2), Ogg (Theora/Vorbis), MP4 (HEVC), and audio-only
+  MP3/M4A/FLAC/WAV/Ogg/Opus.
+- Attribution: "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org"
+- Notes: chosen under D-9 (public samples after a licence check). The FFmpeg
+  tool used to cut and convert is not part of the repository or the release.
