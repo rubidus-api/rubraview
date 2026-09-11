@@ -127,6 +127,77 @@ void rubraview_spsc_release_read(rubraview_spsc_t *ring) {
     atomic_store_explicit(&ring->tail, tail + 1, memory_order_release);
 }
 
+/* ---- PCM ring ----
+ *
+ * The same pairing as the frame ring: the producer's release store of
+ * `written` publishes the samples it copied, the consumer's release store
+ * of `read` hands the space back. Totals only grow; positions are totals
+ * modulo capacity. */
+
+bool rubraview_pcm_ring_init(rubraview_pcm_ring_t *ring, float *storage, size_t capacity) {
+    if (!ring || !storage || capacity == 0) return false;
+    ring->samples = storage;
+    ring->capacity = capacity;
+    atomic_init(&ring->written, 0);
+    atomic_init(&ring->read, 0);
+    return true;
+}
+
+size_t rubraview_pcm_ring_count(rubraview_pcm_ring_t *ring) {
+    if (!ring) return 0;
+    size_t w = atomic_load_explicit(&ring->written, memory_order_acquire);
+    size_t r = atomic_load_explicit(&ring->read, memory_order_acquire);
+    return w - r;
+}
+
+size_t rubraview_pcm_ring_space(rubraview_pcm_ring_t *ring) {
+    if (!ring) return 0;
+    return ring->capacity - rubraview_pcm_ring_count(ring);
+}
+
+size_t rubraview_pcm_ring_write(rubraview_pcm_ring_t *ring, const float *src, size_t count) {
+    if (!ring || !src || ring->capacity == 0) return 0;
+    size_t w = atomic_load_explicit(&ring->written, memory_order_relaxed);
+    size_t r = atomic_load_explicit(&ring->read, memory_order_acquire);
+    size_t space = ring->capacity - (w - r);
+    if (count > space) count = space;
+    for (size_t i = 0; i < count; ++i) ring->samples[(w + i) % ring->capacity] = src[i];
+    atomic_store_explicit(&ring->written, w + count, memory_order_release);
+    return count;
+}
+
+size_t rubraview_pcm_ring_read(rubraview_pcm_ring_t *ring, float *dst, size_t count) {
+    if (!ring || !dst || ring->capacity == 0) return 0;
+    size_t r = atomic_load_explicit(&ring->read, memory_order_relaxed);
+    size_t w = atomic_load_explicit(&ring->written, memory_order_acquire);
+    size_t have = w - r;
+    if (count > have) count = have;
+    for (size_t i = 0; i < count; ++i) dst[i] = ring->samples[(r + i) % ring->capacity];
+    atomic_store_explicit(&ring->read, r + count, memory_order_release);
+    return count;
+}
+
+void rubraview_pcm_ring_discard(rubraview_pcm_ring_t *ring) {
+    if (!ring) return;
+    size_t w = atomic_load_explicit(&ring->written, memory_order_acquire);
+    atomic_store_explicit(&ring->read, w, memory_order_release);
+}
+
+double rubraview_audio_heard_seconds(double base_seconds, uint64_t frames_submitted,
+                                     uint64_t frames_pending, uint32_t sample_rate) {
+    if (sample_rate == 0 || frames_pending >= frames_submitted) return base_seconds;
+    return base_seconds + (double)(frames_submitted - frames_pending) / (double)sample_rate;
+}
+
+double rubraview_audio_position_now(double recorded_position, double recorded_wall,
+                                    double wall_now, bool playing, double max_extrapolation) {
+    if (!playing) return recorded_position;
+    double elapsed = wall_now - recorded_wall;
+    if (elapsed < 0.0) elapsed = 0.0;
+    if (max_extrapolation >= 0.0 && elapsed > max_extrapolation) elapsed = max_extrapolation;
+    return recorded_position + elapsed;
+}
+
 /* ---- backends ---- */
 
 size_t rubraview_media_backend_order(rubraview_media_backend_t preferred, bool ffmpeg_available,

@@ -28,6 +28,31 @@ static int producer(void *arg) {
     return 0;
 }
 
+#define PCM_STRESS_SAMPLES 1000000u
+
+typedef struct pcm_stress {
+    rubraview_pcm_ring_t ring;
+    float storage[4096];
+} pcm_stress_t;
+
+static int pcm_producer(void *arg) {
+    pcm_stress_t *s = (pcm_stress_t*)arg;
+    float chunk[333];
+    uint32_t next = 0;
+    while (next < PCM_STRESS_SAMPLES) {
+        size_t n = 0;
+        while (n < 333 && next + n < PCM_STRESS_SAMPLES) { chunk[n] = (float)(next + n); n++; }
+        size_t done = 0;
+        while (done < n) {
+            size_t w = rubraview_pcm_ring_write(&s->ring, chunk + done, n - done);
+            if (w == 0) thrd_yield();
+            done += w;
+        }
+        next += (uint32_t)n;
+    }
+    return 0;
+}
+
 int main(void) {
     printf("[test_mediaclock] Starting media clock tests...\n");
 
@@ -217,6 +242,71 @@ int main(void) {
         assert(rubraview_media_failure_pick(RUBRAVIEW_MEDIA_FAIL_CONTAINER, RUBRAVIEW_MEDIA_FAIL_FILE) == RUBRAVIEW_MEDIA_FAIL_CONTAINER);
     }
     printf("  [PASS] Of two failures, the more specific one is reported\n");
+
+    /* Test 10: the PCM ring on one thread — partial writes and reads,
+       wrap-around, and discarding on a seek. */
+    {
+        float store[8];
+        rubraview_pcm_ring_t r;
+        assert(!rubraview_pcm_ring_init(&r, NULL, 8));
+        assert(!rubraview_pcm_ring_init(&r, store, 0));
+        assert(rubraview_pcm_ring_init(&r, store, 8));
+
+        float in[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+        assert(rubraview_pcm_ring_write(&r, in, 10) == 8);           /* only what fits */
+        assert(rubraview_pcm_ring_count(&r) == 8 && rubraview_pcm_ring_space(&r) == 0);
+
+        float out[10] = {0};
+        assert(rubraview_pcm_ring_read(&r, out, 3) == 3 && out[0] == 1 && out[2] == 3);
+        assert(rubraview_pcm_ring_write(&r, in + 8, 2) == 2);        /* wraps round */
+        assert(rubraview_pcm_ring_read(&r, out, 10) == 7);           /* only what is there */
+        assert(out[0] == 4 && out[4] == 8 && out[5] == 9 && out[6] == 10);
+        assert(rubraview_pcm_ring_read(&r, out, 1) == 0);
+
+        rubraview_pcm_ring_write(&r, in, 5);
+        rubraview_pcm_ring_discard(&r);                              /* a seek */
+        assert(rubraview_pcm_ring_count(&r) == 0 && rubraview_pcm_ring_space(&r) == 8);
+    }
+    printf("  [PASS] The PCM ring moves what fits, wraps, and empties on a seek\n");
+
+    /* Test 11: the PCM ring across two threads, odd-sized chunks on both
+       sides — every sample arrives once, in order. */
+    {
+        static pcm_stress_t s;
+        assert(rubraview_pcm_ring_init(&s.ring, s.storage, sizeof(s.storage) / sizeof(s.storage[0])));
+        thrd_t t;
+        assert(thrd_create(&t, pcm_producer, &s) == thrd_success);
+        float buf[257];
+        uint32_t expect = 0;
+        while (expect < PCM_STRESS_SAMPLES) {
+            size_t n = rubraview_pcm_ring_read(&s.ring, buf, 257);
+            if (n == 0) { thrd_yield(); continue; }
+            for (size_t i = 0; i < n; ++i) assert(buf[i] == (float)(expect + i));
+            expect += (uint32_t)n;
+        }
+        int result = 1;
+        thrd_join(t, &result);
+        assert(result == 0 && rubraview_pcm_ring_count(&s.ring) == 0);
+    }
+    printf("  [PASS] %u samples cross two threads in order\n", PCM_STRESS_SAMPLES);
+
+    /* Test 12: where the listener is — submitted minus still buffered. */
+    {
+        assert(near(rubraview_audio_heard_seconds(10.0, 48000, 4800, 48000), 10.9));
+        assert(near(rubraview_audio_heard_seconds(10.0, 0, 0, 48000), 10.0));
+        assert(near(rubraview_audio_heard_seconds(10.0, 100, 500, 48000), 10.0));  /* never before the base */
+        assert(near(rubraview_audio_heard_seconds(3.0, 44100, 0, 0), 3.0));       /* no rate: no progress */
+    }
+    printf("  [PASS] The heard position is what was sent minus what is still buffered\n");
+
+    /* Test 13: extrapolating between the audio thread's records. */
+    {
+        assert(near(rubraview_audio_position_now(5.0, 100.0, 100.05, true, 0.2), 5.05));
+        assert(near(rubraview_audio_position_now(5.0, 100.0, 101.0, true, 0.2), 5.2));   /* a stalled device: capped */
+        assert(near(rubraview_audio_position_now(5.0, 100.0, 101.0, false, 0.2), 5.0));  /* paused: frozen */
+        assert(near(rubraview_audio_position_now(5.0, 100.0, 99.0, true, 0.2), 5.0));    /* the clock stepped back */
+    }
+    printf("  [PASS] The audio position runs on between records, but not while paused or stalled\n");
 
     printf("[test_mediaclock] All tests passed successfully!\n");
     return 0;
