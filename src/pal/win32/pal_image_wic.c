@@ -269,7 +269,19 @@ static rubraview_image_load_result_t finish_decode(rubraview_renderer_t *rendere
     return finish_decode_frame(renderer, decoder, 0, apply_exif_orientation);
 }
 
-/* Opens a decoder for a path, converting at the OS boundary only. */
+/* The largest file a page may be. Reading a file whole is what keeps it
+   unlocked, so the size has to be bounded somewhere. */
+#define MAX_IMAGE_FILE_BYTES ((DWORD)1 << 30)
+
+/* Opens a decoder for a path, converting at the OS boundary only.
+ *
+ * WIC is never given the file. A decoder made by CreateDecoderFromFilename
+ * kept its handle open — without write or delete sharing — for as long
+ * as anything held it, and on the Win11 VM every page the viewer had
+ * decoded, neighbours included, could then not be renamed, deleted or
+ * saved over. Instead the file is read whole with full sharing, the
+ * handle closed at once, and WIC decodes from a stream that owns the
+ * bytes. Nothing the viewer keeps can lock a user's file. */
 static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
     IWICImagingFactory *factory = wic_factory();
     if (!factory || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
@@ -283,11 +295,47 @@ static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
         return NULL;
     }
 
-    IWICBitmapDecoder *decoder = NULL;
-    if (FAILED(IWICImagingFactory_CreateDecoderFromFilename(factory, wide, NULL, GENERIC_READ,
-                                                            WICDecodeMetadataCacheOnDemand, &decoder))) {
+    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+
+    LARGE_INTEGER file_size;
+    if (!GetFileSizeEx(file, &file_size) || file_size.QuadPart <= 0 ||
+        file_size.QuadPart > (LONGLONG)MAX_IMAGE_FILE_BYTES) {
+        CloseHandle(file);
         return NULL;
     }
+    DWORD size = (DWORD)file_size.QuadPart;
+
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!memory) { CloseHandle(file); return NULL; }
+
+    BYTE *bytes = (BYTE*)GlobalLock(memory);
+    DWORD total = 0;
+    while (bytes && total < size) {
+        DWORD got = 0;
+        if (!ReadFile(file, bytes + total, size - total, &got, NULL) || got == 0) break;
+        total += got;
+    }
+    if (bytes) GlobalUnlock(memory);
+    CloseHandle(file);
+    if (!bytes || total != size) { GlobalFree(memory); return NULL; }
+
+    /* fDeleteOnRelease: the stream frees the memory when the last
+       reference — ours or the decoder's — goes away. */
+    IStream *stream = NULL;
+    if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream)) || !stream) {
+        GlobalFree(memory);
+        return NULL;
+    }
+    ULARGE_INTEGER stream_size = { .QuadPart = size };
+    IStream_SetSize(stream, stream_size);
+
+    IWICBitmapDecoder *decoder = NULL;
+    HRESULT hr = IWICImagingFactory_CreateDecoderFromStream(factory, stream, NULL,
+                                                            WICDecodeMetadataCacheOnDemand, &decoder);
+    IStream_Release(stream); /* the decoder holds its own reference */
+    if (FAILED(hr)) return NULL;
     return decoder;
 }
 
@@ -422,24 +470,11 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_rendere
                                                                bool apply_exif_orientation) {
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
 
-    IWICImagingFactory *factory = wic_factory();
-    if (!factory || !renderer || path.len == 0 || path.len >= MAX_PATH * 4) return result;
+    if (!renderer) return result;
 
-    /* The caller's slice need not be NUL-terminated: convert from a
-       bounded stack copy at the OS boundary (§7.2.3). */
-    char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
-
-    WCHAR wide[MAX_PATH * 2];
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
-        return result;
-    }
-
-    IWICBitmapDecoder *decoder = NULL;
-    HRESULT hr = IWICImagingFactory_CreateDecoderFromFilename(factory, wide, NULL, GENERIC_READ,
-                                                              WICDecodeMetadataCacheOnDemand, &decoder);
-    if (FAILED(hr) || !decoder) return result;
+    /* decoder_for_path reads the file whole so WIC never holds it open. */
+    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    if (!decoder) return result;
 
     result = finish_decode(renderer, decoder, apply_exif_orientation);
     IWICBitmapDecoder_Release(decoder);
