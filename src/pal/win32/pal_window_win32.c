@@ -487,6 +487,28 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
+    /* The requested size can exceed a small screen, and CW_USEDEFAULT
+       then leaves the window over the taskbar and past the edge. Keep
+       the first placement inside the monitor's work area. */
+    {
+        MONITORINFO mi = { .cbSize = sizeof(mi) };
+        RECT r;
+        if (GetWindowRect(hwnd, &r) &&
+            GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+            RECT wa = mi.rcWork;
+            int ww = r.right - r.left, wh = r.bottom - r.top;
+            int aw = wa.right - wa.left, ah = wa.bottom - wa.top;
+            if (ww > aw) ww = aw;
+            if (wh > ah) wh = ah;
+            int x = r.left, y = r.top;
+            if (x + ww > wa.right) x = wa.right - ww;
+            if (y + wh > wa.bottom) y = wa.bottom - wh;
+            if (x < wa.left) x = wa.left;
+            if (y < wa.top) y = wa.top;
+            SetWindowPos(hwnd, NULL, x, y, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
     /* §3.6.5: ask for pinch and two-finger pan. Configuring gestures can
        fail on a machine with no touch digitiser, which is not an error —
        mouse and keyboard remain fully operable. */
