@@ -75,7 +75,7 @@
 #define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
 #define PAGE_CACHE_BUDGET (512u * 1024u * 1024u)   /* §7.4's default budget */
 #define ESTIMATED_PAGE_BYTES (12u * 1024u * 1024u)
-#define PRECACHE_WORKERS 2
+#define PENDING_DECODE_MAX 32
 #define HISTORY_MAX_ENTRIES 512
 #define TOOLBOX_TILES 8
 #define MENU_MAX_TILES 12
@@ -171,6 +171,10 @@ typedef struct app_state {
     proven_job_sys_t       *jobs;
     rubraview_lru_cache_t   page_cache;
     rubraview_precache_t    precache;
+    /* Pages the ring asked for, decoded one per loop pass on this thread:
+       WIC, Direct2D and the arena all belong to the main thread. */
+    size_t                  pending_decode[PENDING_DECODE_MAX];
+    size_t                  pending_decode_count;
     rubraview_history_t     history;
     u8str_t                 history_path;
     rubraview_config_mode_t config_mode;
@@ -2327,11 +2331,30 @@ static void build_slides(app_state_t *app) {
     rubraview_slideshow_pause(&app->slideshow);
 }
 
-/* Decoding for the pre-cache worker: the ring calls this off the main
-   thread for pages it wants ready before the reader reaches them. */
+/* The ring names pages it wants ready before the reader reaches them.
+   Decoding them here would stall the flip that asked, and decoding them
+   on a worker is unsound — WIC wants COM on the calling thread, the
+   Direct2D context is single-threaded, and the arena is not locked — so
+   they are queued and the main loop decodes one per pass. */
 static void precache_decode(void *ctx, size_t page_index) {
     app_state_t *app = (app_state_t*)ctx;
-    ensure_page_loaded(app, (int32_t)page_index);
+    for (size_t i = 0; i < app->pending_decode_count; ++i) {
+        if (app->pending_decode[i] == page_index) return;
+    }
+    if (app->pending_decode_count < PENDING_DECODE_MAX) {
+        app->pending_decode[app->pending_decode_count++] = page_index;
+    }
+}
+
+/* Decodes the oldest queued page. Returns whether there was one. */
+static bool drain_one_pending_decode(app_state_t *app) {
+    if (app->pending_decode_count == 0) return false;
+    size_t index = app->pending_decode[0];
+    app->pending_decode_count--;
+    memmove(app->pending_decode, app->pending_decode + 1,
+            app->pending_decode_count * sizeof(app->pending_decode[0]));
+    ensure_page_loaded(app, (int32_t)index);
+    return true;
 }
 
 static void release_evicted(app_state_t *app, const uint64_t *evicted, size_t count) {
@@ -2444,6 +2467,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     }
     app->pages = (app_page_t*)(void*)res.value.ptr;
     memset(app->pages, 0, page_count(app) * sizeof(app_page_t));
+    app->pending_decode_count = 0; /* those indices named the old source's pages */
 
     app->page_cache = rubraview_lru_create(app->arena, page_count(app) + 8, PAGE_CACHE_BUDGET);
     app->precache = rubraview_precache_create(app->jobs, &app->page_cache,
@@ -3199,13 +3223,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     double dpi = rubraview_pal_window_dpi_scale(app.window);
     load_keymap(&app);
 
-    /* §3.1: pages decode on worker threads so a flip does not wait for
-       the disk. A pool that fails to start is not fatal — the ring then
-       decodes inline, which is slower but correct. */
-    proven_allocator_t job_alloc = proven_arena_as_allocator(&arena);
-    if (proven_job_system_init(job_alloc, PRECACHE_WORKERS, 64, &app.jobs) != PROVEN_OK) {
-        app.jobs = NULL;
-    }
+    /* §3.1: no worker pool. Every decode touches WIC, Direct2D and the
+       arena, none of which may be used off this thread; the ring runs
+       without one and precache_decode queues pages for the main loop. */
+    app.jobs = NULL;
     history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
@@ -3401,7 +3422,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         tick_timers(&app, dt);
 
         render_frame(&app);
-        rubraview_pal_time_sleep_ms(4);
+        /* A queued decode takes the loop's idle slice; the sleep is only
+           for when there is nothing left to get ready. */
+        if (!drain_one_pending_decode(&app)) rubraview_pal_time_sleep_ms(4);
     }
 
     /* §3.17.1: remember where the reader stopped before shutting down. */
