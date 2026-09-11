@@ -400,13 +400,18 @@ static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
            the sound is still read, and the other way round — otherwise a
            full picture ring waiting on a sound clock that has run dry
            would wait for ever. */
+        /* A stream is read only when it is wanted, not finished, and has
+           room. "Not wanted" must never count as room: a film whose sound
+           is not played (no device, as on the VM) asked for its missing
+           audio stream as soon as the picture ring filled, Media
+           Foundation refused, and playback stopped at the fourth frame. */
         size_t slot = 0;
-        bool video_room = !want_video || video_done || rubraview_spsc_acquire_write(&m->ring, &slot);
-        bool audio_room = !want_audio || audio_done || rubraview_pcm_ring_space(&m->pcm) >= AUDIO_ROOM_SAMPLES;
-        DWORD which = (DWORD)MF_SOURCE_READER_ANY_STREAM;
-        if (!video_room && !audio_room) { Sleep(2); continue; }
-        if (!video_room) which = m->audio_stream;
-        else if (!audio_room) which = m->video_stream;
+        bool video_can = want_video && !video_done && rubraview_spsc_acquire_write(&m->ring, &slot);
+        bool audio_can = want_audio && !audio_done &&
+                         rubraview_pcm_ring_space(&m->pcm) >= AUDIO_ROOM_SAMPLES;
+        if (!video_can && !audio_can) { Sleep(2); continue; }
+        DWORD which = (video_can && audio_can) ? (DWORD)MF_SOURCE_READER_ANY_STREAM
+                    : video_can ? m->video_stream : m->audio_stream;
 
         DWORD actual = 0, flags = 0;
         LONGLONG timestamp = 0;
@@ -422,7 +427,7 @@ static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
             }
             if (sample) {
                 double pts = (double)timestamp / 1e7;
-                if (want_video && actual == m->video_stream) {
+                if (video_can && actual == m->video_stream) {
                     LONGLONG duration = 0;
                     IMFSample_GetSampleDuration(sample, &duration);
                     double frame_duration = (double)duration / 1e7;

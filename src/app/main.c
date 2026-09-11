@@ -808,6 +808,10 @@ static void media_tick(app_state_t *app) {
             rubraview_pal_media_set_paused(m, true);
             app->media_paused = true;
             app->media_ended = true;
+            if (!app->media_info.has_video && app->media_info.duration_seconds > 0.0 &&
+                app->media_position > app->media_info.duration_seconds) {
+                app->media_position = app->media_info.duration_seconds;   /* the clock overshoots by a pass */
+            }
             update_window_title(app);
         }
     }
