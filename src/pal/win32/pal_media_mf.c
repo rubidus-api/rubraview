@@ -315,7 +315,13 @@ static void decode_loop(rubraview_media_t *m, IMFSourceReader *reader) {
         double pts = (double)timestamp / 1e7;
         double frame_duration = (double)duration / 1e7;
 
-        if (skip_until >= 0.0 && pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_until) {
+        /* Skip frames that end at or before the target. The 0.1 ms of
+           slack is for targets that fall exactly on a frame boundary:
+           pts + duration comes out a hair above the target in floating
+           point, and without it the seek stopped one frame early (seen on
+           the VM: 0.083 s + 5 s landed on 5.042 instead of 5.083). */
+        if (skip_until >= 0.0 &&
+            pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_until + 1e-4) {
             IMFSample_Release(sample);
             continue;
         }
