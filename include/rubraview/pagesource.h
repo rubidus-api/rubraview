@@ -118,7 +118,7 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
  * This cannot be a byte comparison of whole paths, and assuming it
  * could is what made `rubraview.exe test.jpg` open a *different*
  * picture: the command line says `test.jpg`, the directory listing says
- * `C:\Users\someone\Downloads\test.jpg`, and on Windows the same file
+ * `D:\Downloads\test.jpg`, and on Windows the same file
  * is also `TEST.JPG` and may be written with either slash. None of
  * those are equal as bytes, the search found nothing, and the viewer
  * fell back to the first page in the folder.
