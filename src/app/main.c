@@ -246,6 +246,10 @@ typedef struct app_state {
     rubraview_track_set_t         tracks;
     rubraview_subtitle_candidate_t subtitle_files[8];
     size_t                         subtitle_count;
+    /* §3.16.1: a sync the reader set by hand belongs to that film, not
+       to the moment — playing it again must not throw it away. */
+    u8str_t                        subtitle_offset_for;
+    double                         subtitle_offset_seconds;
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -799,6 +803,10 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     }
 }
 
+static bool same_text(u8str_t a, u8str_t b) {
+    return a.len == b.len && (a.len == 0 || memcmp(a.ptr, b.ptr, a.len) == 0);
+}
+
 /* Shows one subtitle track, or none when `index` is -1. */
 static void subtitle_select(app_state_t *app, int32_t index) {
     app->subtitle = (rubraview_subtitle_track_t){0};
@@ -813,6 +821,11 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     if (app->subtitle.count == 0) return;
     app->subtitle_name = track->title;
     app->tracks.current_subtitle = index;
+    /* The same film again: the sync the reader set by hand comes back. */
+    if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
+        same_text(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
+        app->subtitle.offset_seconds = app->subtitle_offset_seconds;
+    }
 }
 
 static void subtitle_load(app_state_t *app, u8str_t video_path) {
@@ -1374,6 +1387,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
             osd_say(app, U8("no subtitle file goes with this video"));
         } else {
             rubraview_subtitle_nudge(&app->subtitle, action_is(action, "subtitle_later"));
+            if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
+                app->subtitle_offset_for = app->source.pages[app->media_page].path;
+                app->subtitle_offset_seconds = app->subtitle.offset_seconds;
+            }
             char line[96];
             int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
@@ -1839,9 +1856,14 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (!cue || cue->text.len == 0) return;
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double font = (double)win_h * 0.045;
-    if (font < 16.0 * dpi) font = 16.0 * dpi;
-    if (font > 48.0 * dpi) font = 48.0 * dpi;
+    /* §3.22.2.5: the reader sets the size in points; the window's own
+       height still has a say, so a subtitle is not a speck on a large
+       screen nor a banner on a small one. */
+    double wanted = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size"));
+    if (wanted <= 0.0) wanted = 24.0;
+    double font = wanted * dpi * ((double)win_h / 720.0);
+    if (font < wanted * dpi * 0.6) font = wanted * dpi * 0.6;
+    if (font > wanted * dpi * 2.5) font = wanted * dpi * 2.5;
 
     size_t lines = 1;
     for (size_t i = 0; i < cue->text.len; ++i) {
@@ -1852,13 +1874,14 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     rubraview_pal_rect_t rect = { (double)win_w * 0.05, (double)win_h - below - height,
                                   (double)win_w * 0.9, height };
 
-    /* R135 asks for a two-pixel outline. The text PAL draws flat text,
-       so the outline is the same string drawn four times behind it —
-       which keeps this out of the PAL header. */
-    double off = 2.0 * dpi;
+    /* R135 asks for a two-pixel outline, and §3.22.2.5 lets the reader
+       change it (0 turns it off). The text PAL draws flat text, so the
+       outline is the same string drawn four times behind it — which
+       keeps this out of the PAL header. */
+    double off = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
     static const double DX[4] = { -1.0, 1.0, -1.0, 1.0 };
     static const double DY[4] = { -1.0, -1.0, 1.0, 1.0 };
-    for (size_t i = 0; i < 4; ++i) {
+    for (size_t i = 0; off > 0.0 && i < 4; ++i) {
         rubraview_pal_rect_t shadow = { rect.x + DX[i] * off, rect.y + DY[i] * off,
                                         rect.width, rect.height };
         rubraview_pal_render_draw_text(app->renderer, cue->text, shadow, font,
@@ -2719,10 +2742,15 @@ static void settings_build_panel(app_state_t *app) {
     if (w > 0 && h > 0) rubraview_panel_layout(&app->settings_panel, (double)w, (double)h);
 }
 
-static void settings_open(app_state_t *app) {
-    /* §3.22.1: portable mode saves beside the executable, otherwise
-       under AppData — the same rule the reading history follows, so the
-       two files never end up in different places. */
+/* §3.22.1: reads settings.ini — portable mode beside the executable,
+   otherwise under AppData, the same rule the reading history follows,
+   so the two files never end up in different places.
+
+   This runs at startup, not only when the settings window is opened.
+   It used to run only there, which meant a settings.ini on disk changed
+   nothing until the reader pressed F10: every setting read while
+   viewing came back 0. */
+static void settings_read_file(app_state_t *app) {
     u8str_t appdata = U8(".");
 #ifdef _WIN32
     char appdata_utf8[1024];
@@ -2737,6 +2765,11 @@ static void settings_open(app_state_t *app) {
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
     app->settings_saved = app->settings;
+}
+
+static void settings_open(app_state_t *app) {
+    /* What is on disk now — another window may have written it since. */
+    settings_read_file(app);
 
     app->settings_open = true;
     app->settings_tab = RUBRAVIEW_TAB_GENERAL;
@@ -3054,6 +3087,10 @@ static void history_load(app_state_t *app) {
                                               U8("."), appdata, U8("history.ini"));
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
+
+    /* The reader's settings apply from the first frame, not from the
+       first time the settings window is opened. */
+    settings_read_file(app);
 }
 
 static void history_remember(app_state_t *app) {
