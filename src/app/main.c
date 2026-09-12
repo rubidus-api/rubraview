@@ -259,6 +259,7 @@ typedef struct app_state {
        to the moment — playing it again must not throw it away. */
     u8str_t                        subtitle_offset_for;
     double                         subtitle_offset_seconds;
+    char                           subtitle_label[96];   /* what the OSD calls the track in use */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -803,6 +804,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     for (size_t i = 0; i < app->subtitle_count; ++i) {
         rubraview_track_t track = {
             .kind = RUBRAVIEW_TRACK_SUBTITLE,
+            .is_external = true,          /* a file beside the video, not a stream in it */
             .stream_index = (int32_t)i,   /* into app->subtitle_files, not the container */
             .language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path),
             .title = rubraview_path_basename(app->subtitle_files[i].path),
@@ -825,11 +827,28 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->tracks.count) return;
     const rubraview_track_t *track = &app->tracks.tracks[index];
     if (track->kind != RUBRAVIEW_TRACK_SUBTITLE) return;
-    if (track->stream_index < 0 || (size_t)track->stream_index >= app->subtitle_count) return;
 
-    app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
+    if (track->is_external) {
+        if (track->stream_index < 0 || (size_t)track->stream_index >= app->subtitle_count) return;
+        app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
+    } else {
+        /* §3.16.1 / D-12: a stream inside the file. Reading it walks the
+           whole container once, so say what is happening first. */
+        osd_say(app, U8("reading the subtitles out of the file"));
+        u8str_t text = rubraview_pal_media_read_subtitle_stream(app->media, app->arena,
+                                                                track->stream_index);
+        if (text.len == 0) {
+            osd_say(app, U8("this backend cannot read that subtitle stream"));
+            return;
+        }
+        app->subtitle = rubraview_subtitle_parse(app->arena, text, RUBRAVIEW_SUBTITLE_SRT);
+    }
     if (app->subtitle.count == 0) return;
-    app->subtitle_name = track->title;
+    /* A stream inside a file often has no name of its own, so the OSD
+       uses the same label the track menu shows. */
+    u8str_t label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+                                          &app->tracks, index);
+    app->subtitle_name = track->title.len > 0 ? track->title : label;
     app->tracks.current_subtitle = index;
     /* The same film again: the sync the reader set by hand comes back. */
     if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
@@ -1377,8 +1396,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (app->media && action_is(action, "next_subtitle_track")) {
         /* §3.16.2: the subtitle files beside the film, and off. */
-        if (app->subtitle_count == 0) {
-            osd_say(app, U8("no subtitle file goes with this video"));
+        if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
+            osd_say(app, U8("this video has no subtitles, in it or beside it"));
         } else {
             int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
                                                  app->tracks.current_subtitle);
@@ -1394,7 +1413,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
         if (app->subtitle.count == 0) {
-            osd_say(app, U8("no subtitle file goes with this video"));
+            osd_say(app, U8("no subtitles are showing"));
         } else {
             rubraview_subtitle_nudge(&app->subtitle, action_is(action, "subtitle_later"));
             if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
@@ -3714,8 +3733,10 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
                 char label[160];
                 u8str_t text = rubraview_track_label(label, sizeof(label), &set, (int32_t)t);
                 bool current = (int32_t)t == set.current_video || (int32_t)t == set.current_audio;
-                snprintf(line, sizeof(line), "%s: %s %s %.*s", name,
-                         set.tracks[t].kind == RUBRAVIEW_TRACK_AUDIO ? "sound" : "picture",
+                const char *kind = set.tracks[t].kind == RUBRAVIEW_TRACK_AUDIO ? "sound"
+                                 : set.tracks[t].kind == RUBRAVIEW_TRACK_SUBTITLE ? "subtitle"
+                                 : "picture";
+                snprintf(line, sizeof(line), "%s: %-8s %s %.*s", name, kind,
                          current ? "*" : " ", (int)text.len, text.ptr);
                 console_line(line);
             }

@@ -86,6 +86,13 @@ bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t st
     return media->api->select_audio_track(media->impl, stream_index);
 }
 
+u8str_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
+                                                 int32_t stream_index) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!media || !arena || !media->api->read_subtitle_stream) return empty;
+    return media->api->read_subtitle_stream(media->impl, arena, stream_index);
+}
+
 bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t *out_set) {
     /* A backend that does not fill this member leaves it NULL — the
        table is written with designated initialisers, so the compiler

@@ -35,6 +35,9 @@ typedef struct rubraview_media_backend_api {
 
     /** Ask the decode thread to play another sound track (§3.16.2). */
     bool  (*select_audio_track)(void *impl, int32_t stream_index);
+
+    /** A subtitle stream inside the file, as SubRip text (D-12). */
+    u8str_t (*read_subtitle_stream)(void *impl, proven_arena_t *arena, int32_t stream_index);
 } rubraview_media_backend_api_t;
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void);
