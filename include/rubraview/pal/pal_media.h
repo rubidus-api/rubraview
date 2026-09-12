@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include "rubraview/core.h"
 #include "rubraview/mediaclock.h"
+#include "rubraview/playback.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,6 +101,32 @@ void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused);
  * clock. False when the file's sound is not playing on a device.
  */
 bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall);
+
+/**
+ * §3.16.2 / R135: the tracks the container holds. The set is worked out
+ * once, on the decode thread, while the file is being opened; this call
+ * copies it. The strings in it belong to the media object and stay
+ * valid until it is closed.
+ *
+ * Text subtitle streams are not listed: neither backend decodes them
+ * yet (D-10), and a track nobody can display is not a choice.
+ */
+bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t *out_set);
+
+/**
+ * §3.16.2: play a different sound track of the same file, by its
+ * `stream_index` from the set above. The request is handed to the decode
+ * thread, which owns the decoder; it takes effect within a frame or two.
+ *
+ * Seek to where the film is straight afterwards: that is what flushes
+ * what the old track had already decoded, so picture and sound restart
+ * together.
+ *
+ * False when the backend cannot: no sound is being played on this
+ * machine at all, the index is not an audio track of this file, or the
+ * new track cannot be decoded (the old one keeps playing).
+ */
+bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index);
 
 #ifdef __cplusplus
 }

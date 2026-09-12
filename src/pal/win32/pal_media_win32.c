@@ -81,4 +81,17 @@ bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_po
     return media && media->api->audio_position(media->impl, out_position, out_wall);
 }
 
+bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index) {
+    if (!media || !media->api->select_audio_track) return false;
+    return media->api->select_audio_track(media->impl, stream_index);
+}
+
+bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t *out_set) {
+    /* A backend that does not fill this member leaves it NULL — the
+       table is written with designated initialisers, so the compiler
+       will not say a word about the gap. */
+    if (!media || !out_set || !media->api->tracks) return false;
+    return media->api->tracks(media->impl, out_set);
+}
+
 #endif /* _WIN32 */
