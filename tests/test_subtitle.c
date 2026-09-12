@@ -191,6 +191,26 @@ int main(void) {
     }
     printf("  [PASS] Subtitles are found by the video's name, tags included, prefixes excluded\n");
 
+    /* A subtitle file's name says which language it is, or says nothing. */
+    {
+        assert(rubraview_subtitle_language_tag(lit("D:/Films/movie.mkv"),
+                                               lit("D:/Films/movie.kor.srt")).len == 3);
+        u8str_t tag = rubraview_subtitle_language_tag(lit("D:/Films/movie.mkv"),
+                                                      lit("D:/Films/movie.kor.srt"));
+        assert(memcmp(tag.ptr, "kor", 3) == 0);
+        /* No tag between the name and the extension. */
+        assert(rubraview_subtitle_language_tag(lit("D:/Films/movie.mkv"),
+                                               lit("D:/Films/movie.srt")).len == 0);
+        /* Another film's subtitle claims nothing here. */
+        assert(rubraview_subtitle_language_tag(lit("D:/Films/movie.mkv"),
+                                               lit("D:/Films/other.kor.srt")).len == 0);
+        /* Two tags: the first is the language, as ffmpeg and mpv read it. */
+        tag = rubraview_subtitle_language_tag(lit("D:/Films/movie.mkv"),
+                                              lit("D:/Films/movie.eng.forced.srt"));
+        assert(tag.len == 3 && memcmp(tag.ptr, "eng", 3) == 0);
+    }
+    printf("  [PASS] A subtitle file's name says which language it is, or says nothing\n");
+
     /* Test 10: empty and hostile input produces an empty track, not a
        crash. ASan is the real assertion here. */
     {

@@ -29,6 +29,12 @@ typedef struct rubraview_media_backend_api {
     bool  (*finished)(void *impl);
     void  (*set_paused)(void *impl, bool paused);
     bool  (*audio_position)(void *impl, double *out_position, double *out_wall);
+
+    /** The container's tracks, as found while opening (§3.16.2). */
+    bool  (*tracks)(void *impl, rubraview_track_set_t *out_set);
+
+    /** Ask the decode thread to play another sound track (§3.16.2). */
+    bool  (*select_audio_track)(void *impl, int32_t stream_index);
 } rubraview_media_backend_api_t;
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void);

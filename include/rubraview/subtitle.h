@@ -79,6 +79,13 @@ typedef struct rubraview_subtitle_candidate {
     rubraview_subtitle_format_t format;
 } rubraview_subtitle_candidate_t;
 
+/**
+ * The language a subtitle file's name claims: `film.kor.srt` beside
+ * `film.mkv` is "kor", `film.srt` claims nothing. §3.16.2's track list
+ * shows it, so a reader with two files can tell them apart.
+ */
+u8str_t rubraview_subtitle_language_tag(u8str_t video_path, u8str_t subtitle_path);
+
 size_t rubraview_subtitle_discover(u8str_t video_path,
                                    const u8str_t *sibling_paths, size_t sibling_count,
                                    rubraview_subtitle_candidate_t *out, size_t capacity);

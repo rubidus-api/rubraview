@@ -67,11 +67,17 @@ typedef struct mf_media {
     media_slot_t slots[SLOT_COUNT];
 
     _Atomic bool quit;
+    _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;      /* written before seek_generation is bumped */
     _Atomic uint64_t seek_generation;
     _Atomic uint64_t end_generation;        /* the generation whose decode reached the end */
 
     uint64_t consumer_generation;           /* caller's thread only */
+
+    /* §3.16.2: what the container holds, worked out once while opening.
+       The strings live here so the set can be copied out by value. */
+    rubraview_track_set_t tracks;
+    char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
 } mf_media_t;
 
 /*
@@ -125,6 +131,114 @@ static void fail(mf_media_t *m, rubraview_media_failure_t failure) {
     m->failure = failure;
 }
 
+/* ---- what the container holds (§3.16.2) ---- */
+
+/* Media Foundation speaks UTF-16 everywhere; the rest of the program
+   speaks UTF-8. An empty or over-long name comes back empty rather than
+   cut in the middle of a character. */
+static u8str_t mf_utf8(char *buffer, size_t capacity, const WCHAR *wide) {
+    u8str_t empty = { .ptr = buffer, .len = 0 };
+    buffer[0] = '\0';
+    if (!wide || !wide[0]) return empty;
+    int n = WideCharToMultiByte(CP_UTF8, 0, wide, -1, buffer, (int)capacity, NULL, NULL);
+    if (n <= 1) return empty;
+    return (u8str_t){ .ptr = buffer, .len = (size_t)(n - 1) };
+}
+
+/* A stream attribute that is a string, or nothing. */
+static u8str_t mf_stream_string(IMFSourceReader *reader, DWORD stream, const GUID *key,
+                                char *buffer, size_t capacity) {
+    u8str_t empty = { .ptr = buffer, .len = 0 };
+    buffer[0] = '\0';
+    PROPVARIANT pv;
+    PropVariantInit(&pv);
+    HRESULT hr = IMFSourceReader_GetPresentationAttribute(reader, stream, key, &pv);
+    u8str_t out = empty;
+    if (SUCCEEDED(hr) && pv.vt == VT_LPWSTR) out = mf_utf8(buffer, capacity, pv.pwszVal);
+    PropVariantClear(&pv);
+    return out;
+}
+
+/* The codec, for a label. Video subtypes carry a printable FOURCC in
+   their first field; audio subtypes carry a small number instead, so
+   those are named from a short table. */
+static u8str_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity) {
+    static const struct { uint32_t id; const char *name; } AUDIO[] = {
+        { 0x0001, "pcm" },   { 0x0003, "float" }, { 0x0055, "mp3" },
+        { 0x0160, "wma" },   { 0x0161, "wma" },   { 0x0162, "wma" }, { 0x0163, "wma" },
+        { 0x1610, "aac" },   { 0x2000, "ac3" },   { 0x2001, "dts" },
+        { 0xF1AC, "flac" },  { 0x704F, "opus" },  { 0x6C61, "alac" },
+    };
+    uint32_t id = (uint32_t)subtype->Data1;
+    for (size_t i = 0; i < sizeof(AUDIO) / sizeof(AUDIO[0]); ++i) {
+        if (AUDIO[i].id == id) {
+            size_t len = strlen(AUDIO[i].name);
+            if (len >= capacity) len = capacity - 1;
+            memcpy(buffer, AUDIO[i].name, len);
+            buffer[len] = '\0';
+            return (u8str_t){ .ptr = buffer, .len = len };
+        }
+    }
+    char chars[4] = { (char)(id & 0xFF), (char)((id >> 8) & 0xFF),
+                      (char)((id >> 16) & 0xFF), (char)((id >> 24) & 0xFF) };
+    for (size_t i = 0; i < 4; ++i) {
+        if (chars[i] < 0x20 || chars[i] > 0x7E) {
+            buffer[0] = '\0';
+            return (u8str_t){ .ptr = buffer, .len = 0 };
+        }
+    }
+    if (capacity < 5) { buffer[0] = '\0'; return (u8str_t){ .ptr = buffer, .len = 0 }; }
+    memcpy(buffer, chars, 4);
+    buffer[4] = '\0';
+    return (u8str_t){ .ptr = buffer, .len = 4 };
+}
+
+static void mf_track_add(mf_media_t *m, IMFSourceReader *reader, DWORD stream,
+                         rubraview_track_kind_t kind, IMFMediaType *type, const GUID *subtype) {
+    size_t slot = m->tracks.count;
+    if (slot >= RUBRAVIEW_MAX_TRACKS) return;
+
+    UINT32 channels = 0;
+    if (kind == RUBRAVIEW_TRACK_AUDIO) {
+        IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
+    }
+    rubraview_track_t track = {
+        .kind = kind,
+        .stream_index = (int32_t)stream,
+        .language = mf_stream_string(reader, stream, &MF_SD_LANGUAGE,
+                                     m->track_text[slot][0], sizeof(m->track_text[slot][0])),
+        .title = mf_stream_string(reader, stream, &MF_SD_STREAM_NAME,
+                                  m->track_text[slot][1], sizeof(m->track_text[slot][1])),
+        .codec = mf_codec_name(subtype, m->track_text[slot][2], sizeof(m->track_text[slot][2])),
+        .channels = (int32_t)channels,
+    };
+    rubraview_tracks_add(&m->tracks, track);
+}
+
+/* Puts one audio stream into float samples and says what came out.
+   Used when the file is opened and again when the reader switches to
+   another sound track (§3.16.2). */
+static bool mf_negotiate_audio(IMFSourceReader *reader, DWORD stream,
+                               UINT32 *out_rate, UINT32 *out_channels) {
+    *out_rate = 0; *out_channels = 0;
+    IMFMediaType *want = NULL;
+    bool decodable = false;
+    if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
+        IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+        IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
+        decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, stream, NULL, want));
+        IMFMediaType_Release(want);
+    }
+    if (!decodable) return false;
+    IMFMediaType *current = NULL;
+    if (SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, stream, &current)) && current) {
+        IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_SAMPLES_PER_SECOND, out_rate);
+        IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_NUM_CHANNELS, out_channels);
+        IMFMediaType_Release(current);
+    }
+    return *out_rate > 0 && *out_channels > 0 && *out_channels <= 8;
+}
+
 static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
     *out_reader = NULL;
 
@@ -143,7 +257,9 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
         return false;
     }
 
-    /* Find the first stream of each kind. */
+    /* Find the first stream of each kind, and note every one of them
+       for the track menu on the way past (§3.16.2). */
+    m->tracks = rubraview_tracks_create();
     DWORD video_stream = NO_STREAM, audio_stream = NO_STREAM;
     uint32_t fourcc = 0;
     for (DWORD s = 0; ; ++s) {
@@ -154,14 +270,29 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
         GUID major = {0}, subtype = {0};
         IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
         IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
-        if (IsEqualGUID(&major, &MFMediaType_Video) && video_stream == NO_STREAM) {
-            video_stream = s;
-            fourcc = (uint32_t)subtype.Data1;   /* Media Foundation subtypes carry the FOURCC here */
-        } else if (IsEqualGUID(&major, &MFMediaType_Audio) && audio_stream == NO_STREAM) {
-            audio_stream = s;
+        if (IsEqualGUID(&major, &MFMediaType_Video)) {
+            mf_track_add(m, reader, s, RUBRAVIEW_TRACK_VIDEO, type, &subtype);
+            if (video_stream == NO_STREAM) {
+                video_stream = s;
+                fourcc = (uint32_t)subtype.Data1;   /* Media Foundation subtypes carry the FOURCC here */
+            }
+        } else if (IsEqualGUID(&major, &MFMediaType_Audio)) {
+            mf_track_add(m, reader, s, RUBRAVIEW_TRACK_AUDIO, type, &subtype);
+            if (audio_stream == NO_STREAM) audio_stream = s;
         }
         IMFMediaType_Release(type);
     }
+    for (size_t i = 0; i < m->tracks.count; ++i) {
+        if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_VIDEO &&
+            m->tracks.tracks[i].stream_index == (int32_t)video_stream) {
+            m->tracks.current_video = (int32_t)i;
+        }
+        if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
+            m->tracks.tracks[i].stream_index == (int32_t)audio_stream) {
+            m->tracks.current_audio = (int32_t)i;
+        }
+    }
+
     bool has_audio = audio_stream != NO_STREAM;
     if (video_stream == NO_STREAM && !has_audio) {
         IMFSourceReader_Release(reader);
@@ -219,23 +350,10 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
     /* The sound: float samples, at whatever rate and layout the file has. */
     if (has_audio) {
         IMFSourceReader_SetStreamSelection(reader, audio_stream, TRUE);
-        IMFMediaType *want = NULL;
-        bool decodable = false;
-        if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
-            IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
-            IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFAudioFormat_Float);
-            decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, audio_stream, NULL, want));
-            IMFMediaType_Release(want);
-        }
         UINT32 rate = 0, channels = 0;
-        IMFMediaType *current = NULL;
-        if (decodable && SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, audio_stream, &current)) && current) {
-            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
-            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
-            IMFMediaType_Release(current);
-        }
+        bool decodable = mf_negotiate_audio(reader, audio_stream, &rate, &channels);
         size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
-        if (decodable && rate > 0 && channels > 0 && channels <= 8) {
+        if (decodable) {
             m->pcm_storage = (float*)malloc(capacity * sizeof(float));
             if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
                 m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
@@ -373,14 +491,74 @@ static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *
     IMFMediaBuffer_Release(buffer);
 }
 
+/* §3.16.2, on the decode thread: stop reading one sound track and start
+   reading another. The caller seeks straight afterwards, which is what
+   empties what the old track had already handed to the device. */
+static bool mf_apply_audio_switch(mf_media_t *m, IMFSourceReader *reader, DWORD wanted) {
+    DWORD previous = m->audio_stream;
+    if (wanted == previous) return false;
+
+    IMFSourceReader_SetStreamSelection(reader, previous, FALSE);
+    IMFSourceReader_SetStreamSelection(reader, wanted, TRUE);
+    UINT32 rate = 0, channels = 0;
+    if (!mf_negotiate_audio(reader, wanted, &rate, &channels)) {
+        /* Put the old one back — a track that cannot be decoded must not
+           cost the sound that was playing. */
+        IMFSourceReader_SetStreamSelection(reader, wanted, FALSE);
+        IMFSourceReader_SetStreamSelection(reader, previous, TRUE);
+        mf_negotiate_audio(reader, previous, &rate, &channels);
+        return false;
+    }
+
+    if (rate != m->audio_rate || channels != m->audio_channels) {
+        /* A different rate or a different number of channels is a
+           different device format and a different ring size. */
+        rubraview_pal_audio_close(m->audio);
+        m->audio = NULL;
+        free(m->pcm_storage);
+        size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
+        m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+        if (!m->pcm_storage || !rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
+            free(m->pcm_storage);
+            m->pcm_storage = NULL;
+            m->audio_stream = NO_STREAM;
+            return false;
+        }
+        m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
+        if (!m->audio) {
+            free(m->pcm_storage);
+            m->pcm_storage = NULL;
+            m->audio_stream = NO_STREAM;
+            return false;
+        }
+    }
+    m->audio_stream = wanted;
+    m->audio_rate = rate;
+    m->audio_channels = channels;
+    for (size_t i = 0; i < m->tracks.count; ++i) {
+        if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
+            m->tracks.tracks[i].stream_index == (int32_t)wanted) {
+            m->tracks.current_audio = (int32_t)i;
+        }
+    }
+    return true;
+}
+
 static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
     const bool want_video = m->video_stream != NO_STREAM;
-    const bool want_audio = m->audio_stream != NO_STREAM;
     bool video_done = false, audio_done = false, ended = false;
 
     while (!atomic_load_explicit(&m->quit, memory_order_acquire)) {
+        /* §3.16.2: another sound track was asked for. Reading it is this
+           thread's business, so the request waits here for it. */
+        int32_t asked = atomic_exchange_explicit(&m->pending_audio_stream, -1, memory_order_acq_rel);
+        if (asked >= 0) {
+            if (mf_apply_audio_switch(m, reader, (DWORD)asked)) audio_done = false;
+        }
+        const bool want_audio = m->audio_stream != NO_STREAM;
+
         uint64_t wanted = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
         if (wanted != generation) {
             generation = wanted;
@@ -520,6 +698,7 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     atomic_init(&m->seek_target_100ns, 0);
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
+    atomic_init(&m->pending_audio_stream, -1);
     m->consumer_generation = 0;
     m->video_stream = NO_STREAM;
     m->audio_stream = NO_STREAM;
@@ -608,6 +787,32 @@ static bool mf_audio_position(void *handle, double *out_position, double *out_wa
     return media && media->audio && rubraview_pal_audio_position(media->audio, out_position, out_wall);
 }
 
+static bool mf_select_audio_track(void *handle, int32_t stream_index) {
+    mf_media_t *m = (mf_media_t*)handle;
+    if (!m || stream_index < 0) return false;
+    /* Nothing is being played: there is no sound to switch (the VM has
+       no audio device, and the stream was never even selected). */
+    if (!m->audio || m->audio_stream == NO_STREAM) return false;
+    if ((DWORD)stream_index == m->audio_stream) return true;
+    bool known = false;
+    for (size_t i = 0; i < m->tracks.count; ++i) {
+        if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
+            m->tracks.tracks[i].stream_index == stream_index) known = true;
+    }
+    if (!known) return false;
+    atomic_store_explicit(&m->pending_audio_stream, stream_index, memory_order_release);
+    return true;
+}
+
+static bool mf_tracks(void *handle, rubraview_track_set_t *out_set) {
+    mf_media_t *media = (mf_media_t*)handle;
+    if (!media || !out_set) return false;
+    /* Filled on the decode thread before `opened` was signalled, and
+       never touched again — so this copy needs no lock. */
+    *out_set = media->tracks;
+    return media->tracks.count > 0;
+}
+
 static const rubraview_media_backend_api_t MF_API = {
     .available = mf_available,
     .open = mf_open,
@@ -619,6 +824,8 @@ static const rubraview_media_backend_api_t MF_API = {
     .finished = mf_finished,
     .set_paused = mf_set_paused,
     .audio_position = mf_audio_position,
+    .tracks = mf_tracks,
+    .select_audio_track = mf_select_audio_track,
 };
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void) {

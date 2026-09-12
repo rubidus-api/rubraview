@@ -61,9 +61,14 @@ typedef struct ff_media {
     rubraview_audio_out_t *audio;
 
     _Atomic bool quit, paused;
+    _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;
     _Atomic uint64_t seek_generation, end_generation;
     uint64_t consumer_generation;
+
+    /* §3.16.2: the container's tracks, read once while opening. */
+    rubraview_track_set_t tracks;
+    char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -98,6 +103,8 @@ typedef struct ff_api {
     void (*av_frame_unref)(AVFrame*);
     void (*av_log_set_level)(int);
     void (*av_channel_layout_default)(AVChannelLayout*, int);
+    AVDictionaryEntry *(*av_dict_get)(const AVDictionary*, const char*, const AVDictionaryEntry*, int);
+    const char *(*avcodec_get_name)(enum AVCodecID);
     /* swscale, swresample */
     unsigned (*swscale_version)(void);
     struct SwsContext *(*sws_getContext)(int, int, enum AVPixelFormat, int, int, enum AVPixelFormat,
@@ -144,6 +151,7 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND(codec, av_packet_alloc); BIND(codec, av_packet_free); BIND(codec, av_packet_unref);
     BIND(util, avutil_version); BIND(util, av_frame_alloc); BIND(util, av_frame_free);
     BIND(util, av_frame_unref); BIND(util, av_log_set_level); BIND(util, av_channel_layout_default);
+    BIND(util, av_dict_get); BIND(codec, avcodec_get_name);
     BIND(sws, swscale_version); BIND(sws, sws_getContext); BIND(sws, sws_scale); BIND(sws, sws_freeContext);
     BIND(swr, swresample_version); BIND(swr, swr_alloc_set_opts2); BIND(swr, swr_init);
     BIND(swr, swr_convert); BIND(swr, swr_free);
@@ -195,6 +203,94 @@ static double stream_seconds(AVFormatContext *format, int index, int64_t pts) {
     return (double)pts * av_q2d(format->streams[index]->time_base);
 }
 
+/* Opens one audio stream's decoder and the resampler that turns it into
+   the float samples the output wants. Used when the file is opened and
+   again when another sound track is chosen (§3.16.2). */
+static bool ff_open_audio_stream(ff_media_t *m, ff_decode_t *d, int stream_index) {
+    if (stream_index < 0 || (unsigned)stream_index >= d->format->nb_streams) return false;
+    AVCodecParameters *par = d->format->streams[stream_index]->codecpar;
+    const AVCodec *decoder = g_ff.avcodec_find_decoder(par->codec_id);
+    if (!decoder || par->sample_rate <= 0 || par->ch_layout.nb_channels <= 0 ||
+        par->ch_layout.nb_channels > 8) return false;
+
+    AVCodecContext *context = g_ff.avcodec_alloc_context3(decoder);
+    if (!context || g_ff.avcodec_parameters_to_context(context, par) < 0 ||
+        g_ff.avcodec_open2(context, decoder, NULL) < 0) {
+        if (context) g_ff.avcodec_free_context(&context);
+        return false;
+    }
+
+    struct SwrContext *swr = NULL;
+    AVChannelLayout out_layout;
+    g_ff.av_channel_layout_default(&out_layout, par->ch_layout.nb_channels);
+    if (g_ff.swr_alloc_set_opts2(&swr, &out_layout, AV_SAMPLE_FMT_FLT, par->sample_rate,
+                                 &context->ch_layout, context->sample_fmt,
+                                 context->sample_rate, 0, NULL) < 0 || !swr ||
+        g_ff.swr_init(swr) < 0) {
+        if (swr) g_ff.swr_free(&swr);
+        g_ff.avcodec_free_context(&context);
+        return false;
+    }
+
+    if (d->audio) g_ff.avcodec_free_context(&d->audio);
+    if (d->swr) g_ff.swr_free(&d->swr);
+    d->audio = context;
+    d->swr = swr;
+    m->audio_rate = (uint32_t)par->sample_rate;
+    m->audio_channels = (uint32_t)par->ch_layout.nb_channels;
+    return true;
+}
+
+/* ---- what the container holds (§3.16.2) ---- */
+
+static u8str_t ff_copy(char *buffer, size_t capacity, const char *text) {
+    buffer[0] = '\0';
+    if (!text || !text[0]) return (u8str_t){ .ptr = buffer, .len = 0 };
+    size_t len = strlen(text);
+    if (len >= capacity) len = capacity - 1;
+    memcpy(buffer, text, len);
+    buffer[len] = '\0';
+    return (u8str_t){ .ptr = buffer, .len = len };
+}
+
+/* Text subtitle streams are deliberately left out: nothing displays
+   them yet (D-10), and a track nobody can pick is not a choice. */
+static void ff_collect_tracks(ff_media_t *m, AVFormatContext *format) {
+    m->tracks = rubraview_tracks_create();
+    for (unsigned i = 0; i < format->nb_streams && m->tracks.count < RUBRAVIEW_MAX_TRACKS; ++i) {
+        const AVStream *stream = format->streams[i];
+        const AVCodecParameters *par = stream->codecpar;
+        rubraview_track_kind_t kind;
+        if (par->codec_type == AVMEDIA_TYPE_VIDEO) kind = RUBRAVIEW_TRACK_VIDEO;
+        else if (par->codec_type == AVMEDIA_TYPE_AUDIO) kind = RUBRAVIEW_TRACK_AUDIO;
+        else continue;
+
+        size_t slot = m->tracks.count;
+        const AVDictionaryEntry *language = g_ff.av_dict_get(stream->metadata, "language", NULL, 0);
+        const AVDictionaryEntry *title = g_ff.av_dict_get(stream->metadata, "title", NULL, 0);
+        rubraview_track_t track = {
+            .kind = kind,
+            .stream_index = (int32_t)i,
+            .language = ff_copy(m->track_text[slot][0], sizeof(m->track_text[slot][0]),
+                                language ? language->value : NULL),
+            .title = ff_copy(m->track_text[slot][1], sizeof(m->track_text[slot][1]),
+                             title ? title->value : NULL),
+            .codec = ff_copy(m->track_text[slot][2], sizeof(m->track_text[slot][2]),
+                             g_ff.avcodec_get_name(par->codec_id)),
+            .channels = kind == RUBRAVIEW_TRACK_AUDIO ? par->ch_layout.nb_channels : 0,
+            .is_default = (stream->disposition & AV_DISPOSITION_DEFAULT) != 0,
+            .is_forced = (stream->disposition & AV_DISPOSITION_FORCED) != 0,
+        };
+        rubraview_tracks_add(&m->tracks, track);
+    }
+    for (size_t i = 0; i < m->tracks.count; ++i) {
+        if (m->tracks.tracks[i].stream_index == m->video_stream &&
+            m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_VIDEO) m->tracks.current_video = (int32_t)i;
+        if (m->tracks.tracks[i].stream_index == m->audio_stream &&
+            m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO) m->tracks.current_audio = (int32_t)i;
+    }
+}
+
 static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) {
         m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
@@ -212,6 +308,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         m->failure = RUBRAVIEW_MEDIA_FAIL_CODEC;
         return false;
     }
+    ff_collect_tracks(m, d->format);
 
     if (m->video_stream >= 0) {
         AVCodecParameters *par = d->format->streams[m->video_stream]->codecpar;
@@ -238,25 +335,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     }
 
     if (m->audio_stream >= 0) {
-        AVCodecParameters *par = d->format->streams[m->audio_stream]->codecpar;
-        const AVCodec *decoder = g_ff.avcodec_find_decoder(par->codec_id);
-        bool ready = false;
-        if (decoder && par->sample_rate > 0 && par->ch_layout.nb_channels > 0 &&
-            par->ch_layout.nb_channels <= 8) {
-            d->audio = g_ff.avcodec_alloc_context3(decoder);
-            ready = d->audio && g_ff.avcodec_parameters_to_context(d->audio, par) >= 0 &&
-                    g_ff.avcodec_open2(d->audio, decoder, NULL) >= 0;
-        }
-        if (ready) {
-            m->audio_rate = (uint32_t)par->sample_rate;
-            m->audio_channels = (uint32_t)par->ch_layout.nb_channels;
-            AVChannelLayout out_layout;
-            g_ff.av_channel_layout_default(&out_layout, (int)m->audio_channels);
-            ready = g_ff.swr_alloc_set_opts2(&d->swr, &out_layout, AV_SAMPLE_FMT_FLT,
-                                             (int)m->audio_rate, &d->audio->ch_layout,
-                                             d->audio->sample_fmt, d->audio->sample_rate, 0, NULL) >= 0 &&
-                    d->swr && g_ff.swr_init(d->swr) >= 0;
-        }
+        bool ready = ff_open_audio_stream(m, d, m->audio_stream);
         if (ready) {
             size_t capacity = (size_t)m->audio_rate * m->audio_channels * PCM_RING_SECONDS;
             m->pcm_storage = (float*)malloc(capacity * sizeof(float));
@@ -368,6 +447,37 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
     bool ended = false;
 
     while (!atomic_load_explicit(&m->quit, memory_order_acquire)) {
+        /* §3.16.2: another sound track was asked for. Only this thread
+           may touch the decoder, so the request is applied here. */
+        int32_t asked = atomic_exchange_explicit(&m->pending_audio_stream, -1, memory_order_acq_rel);
+        if (asked >= 0 && asked != m->audio_stream) {
+            uint32_t old_rate = m->audio_rate, old_channels = m->audio_channels;
+            if (ff_open_audio_stream(m, d, asked)) {
+                m->audio_stream = asked;
+                for (size_t i = 0; i < m->tracks.count; ++i) {
+                    if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
+                        m->tracks.tracks[i].stream_index == asked) m->tracks.current_audio = (int32_t)i;
+                }
+                if (m->audio_rate != old_rate || m->audio_channels != old_channels) {
+                    /* A different format is a different device and a
+                       different ring; the old sound is dropped, not mixed. */
+                    rubraview_pal_audio_close(m->audio);
+                    m->audio = NULL;
+                    free(m->pcm_storage);
+                    size_t capacity = (size_t)m->audio_rate * m->audio_channels * PCM_RING_SECONDS;
+                    m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+                    if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
+                        m->audio = rubraview_pal_audio_open(m->audio_rate, m->audio_channels, &m->pcm);
+                    }
+                    if (!m->audio) {
+                        free(m->pcm_storage);
+                        m->pcm_storage = NULL;
+                        m->audio_stream = -1;
+                    }
+                }
+            }
+        }
+
         uint64_t wanted = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
         if (wanted != generation) {
             generation = wanted;
@@ -459,6 +569,7 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     atomic_init(&m->seek_target_100ns, 0);
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
+    atomic_init(&m->pending_audio_stream, -1);
     rubraview_spsc_init(&m->ring, SLOT_COUNT);
 
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -536,6 +647,29 @@ static bool ff_audio_position(void *handle, double *out_position, double *out_wa
     return m && m->audio && rubraview_pal_audio_position(m->audio, out_position, out_wall);
 }
 
+static bool ff_select_audio_track(void *handle, int32_t stream_index) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || stream_index < 0) return false;
+    if (!m->audio || m->audio_stream < 0) return false;   /* nothing is being played */
+    if (stream_index == m->audio_stream) return true;
+    bool known = false;
+    for (size_t i = 0; i < m->tracks.count; ++i) {
+        if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
+            m->tracks.tracks[i].stream_index == stream_index) known = true;
+    }
+    if (!known) return false;
+    atomic_store_explicit(&m->pending_audio_stream, stream_index, memory_order_release);
+    return true;
+}
+
+static bool ff_tracks(void *handle, rubraview_track_set_t *out_set) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !out_set) return false;
+    /* Written on the decode thread before `opened` was signalled. */
+    *out_set = m->tracks;
+    return m->tracks.count > 0;
+}
+
 static const rubraview_media_backend_api_t FFMPEG_API = {
     .available = ff_available,
     .open = ff_open,
@@ -547,6 +681,8 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .finished = ff_finished,
     .set_paused = ff_set_paused,
     .audio_position = ff_audio_position,
+    .tracks = ff_tracks,
+    .select_audio_track = ff_select_audio_track,
 };
 
 const rubraview_media_backend_api_t *rubraview_media_backend_ffmpeg(void) {

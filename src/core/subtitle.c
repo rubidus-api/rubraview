@@ -487,6 +487,22 @@ void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later) {
     track->offset_seconds += later ? 0.5 : -0.5;
 }
 
+u8str_t rubraview_subtitle_language_tag(u8str_t video_path, u8str_t subtitle_path) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    u8str_t stem = rubraview_path_stem(rubraview_path_basename(video_path));
+    u8str_t name = rubraview_path_basename(subtitle_path);
+    if (stem.len == 0 || name.len <= stem.len + 1) return none;
+    if (memcmp(name.ptr, stem.ptr, stem.len) != 0 || name.ptr[stem.len] != '.') return none;
+
+    /* What is left is either `srt` — the extension, and no language —
+       or `kor.srt`, whose first part is the tag. */
+    u8str_t rest = { .ptr = name.ptr + stem.len + 1, .len = name.len - stem.len - 1 };
+    for (size_t i = 0; i < rest.len; ++i) {
+        if (rest.ptr[i] == '.') return (u8str_t){ .ptr = rest.ptr, .len = i };
+    }
+    return none;
+}
+
 size_t rubraview_subtitle_discover(u8str_t video_path,
                                    const u8str_t *sibling_paths, size_t sibling_count,
                                    rubraview_subtitle_candidate_t *out, size_t capacity) {

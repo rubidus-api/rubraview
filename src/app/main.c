@@ -119,7 +119,7 @@
  * keyboard can already reach, so the tiles and the keymap stay in step.
  */
 enum {
-    MENU_ROOT_LAYOUT = 0, MENU_ROOT_FIT, MENU_ROOT_VIEW, MENU_ROOT_SHOW,
+    MENU_ROOT_LAYOUT = 0, MENU_ROOT_FIT, MENU_ROOT_VIEW, MENU_ROOT_SHOW, MENU_ROOT_MEDIA,
     MENU_ROOT_COUNT,
 };
 
@@ -129,33 +129,41 @@ enum {
 #define MENU_STR(lit) { .ptr = (lit), .len = sizeof(lit) - 1 }
 
 static const rubraview_menu_item_t MENU_ITEMS[] = {
-    /* 0 */ { .label = MENU_STR("Layout"), .action = MENU_STR(""), .first_child = 4, .child_count = 3 },
-    /* 1 */ { .label = MENU_STR("Fit"),    .action = MENU_STR(""), .first_child = 7, .child_count = 5 },
-    /* 2 */ { .label = MENU_STR("View"),   .action = MENU_STR(""), .first_child = 12, .child_count = 4 },
-    /* 3 */ { .label = MENU_STR("Show"),   .action = MENU_STR(""), .first_child = 16, .child_count = 3 },
+    /* 0 */ { .label = MENU_STR("Layout"), .action = MENU_STR(""), .first_child = 5, .child_count = 3 },
+    /* 1 */ { .label = MENU_STR("Fit"),    .action = MENU_STR(""), .first_child = 8, .child_count = 5 },
+    /* 2 */ { .label = MENU_STR("View"),   .action = MENU_STR(""), .first_child = 13, .child_count = 4 },
+    /* 3 */ { .label = MENU_STR("Show"),   .action = MENU_STR(""), .first_child = 17, .child_count = 3 },
+    /* 4 */ { .label = MENU_STR("Media"),  .action = MENU_STR(""), .first_child = 20, .child_count = 4 },
 
-    /* Layout (4..6) */
+    /* Layout (5..7) */
     { .label = MENU_STR("Single"), .action = MENU_STR("layout_single"), .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Dual"),   .action = MENU_STR("layout_dual"),   .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Book"),   .action = MENU_STR("layout_book"),   .first_child = -1, .child_count = 0 },
 
-    /* Fit (7..11) */
+    /* Fit (8..12) */
     { .label = MENU_STR("Window"), .action = MENU_STR("fit_window"),  .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Width"),  .action = MENU_STR("fit_width"),   .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Height"), .action = MENU_STR("fit_height"),  .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("1:1"),    .action = MENU_STR("actual_size"), .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Smart"),  .action = MENU_STR("smart_fit"),   .first_child = -1, .child_count = 0 },
 
-    /* View (12..15) */
+    /* View (13..16) */
     { .label = MENU_STR("Rotate"), .action = MENU_STR("rotate_cw"),         .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Flip H"), .action = MENU_STR("flip_horizontal"),   .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Crisp"),  .action = MENU_STR("toggle_nearest"),    .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Grid"),   .action = MENU_STR("toggle_pixel_grid"), .first_child = -1, .child_count = 0 },
 
-    /* Show (16..18) */
+    /* Show (17..19) */
     { .label = MENU_STR("Slides"), .action = MENU_STR("toggle_slideshow"), .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Strip"),  .action = MENU_STR("toggle_filmstrip"), .first_child = -1, .child_count = 0 },
     { .label = MENU_STR("Files"),  .action = MENU_STR("open_picker"),      .first_child = -1, .child_count = 0 },
+
+    /* Media (20..23) — §3.16.2 wants these reachable from the Menu Box,
+       not only from the keyboard. */
+    { .label = MENU_STR("Sound"),  .action = MENU_STR("next_audio_track"),    .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Subs"),   .action = MENU_STR("next_subtitle_track"), .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Sub -"),  .action = MENU_STR("subtitle_earlier"),    .first_child = -1, .child_count = 0 },
+    { .label = MENU_STR("Sub +"),  .action = MENU_STR("subtitle_later"),      .first_child = -1, .child_count = 0 },
 };
 
 static const rubraview_menu_tree_t MENU_TREE = {
@@ -233,6 +241,11 @@ typedef struct app_state {
        video on screen. Empty when the film has none. */
     rubraview_subtitle_track_t subtitle;
     u8str_t                    subtitle_name;   /* what to say in the OSD */
+    /* §3.16.2: the sound tracks the file holds and the subtitle files
+       beside it, in one list — what the reader cycles through. */
+    rubraview_track_set_t         tracks;
+    rubraview_subtitle_candidate_t subtitle_files[8];
+    size_t                         subtitle_count;
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -607,6 +620,8 @@ static void media_close(app_state_t *app) {
        line of dialogue. */
     app->subtitle = (rubraview_subtitle_track_t){0};
     app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
+    app->tracks = rubraview_tracks_create();
+    app->subtitle_count = 0;
 }
 
 /* Defined here so the link does not depend on which MinGW carries it. */
@@ -704,34 +719,34 @@ static app_page_t *media_page_ready(app_state_t *app) {
 #define SUBTITLE_MAX_BYTES (2u * 1024u * 1024u)
 #define SUBTITLE_MAX_CANDIDATES 8
 
-/* §3.16.1 / R135: the subtitle file that shares the film's name. The
+/* §3.16.1 / R135: the subtitle files that share the film's name. The
    folder is listed rather than reused from the page list, because a
    .srt is not a page — the page source never saw it. */
-static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t video_path,
-                                                u8str_t *out_name, const char **out_why) {
-    rubraview_subtitle_track_t empty = {0};
-    if (out_name) *out_name = (u8str_t){ .ptr = "", .len = 0 };
-    const char *why = "no subtitle file beside the video";
-
+static size_t subtitle_candidates(proven_arena_t *arena, u8str_t video_path,
+                                  rubraview_subtitle_candidate_t *out, size_t capacity,
+                                  const char **out_why) {
+    if (out_why) *out_why = "no subtitle file beside the video";
     rubraview_fs_listing_t listing =
         rubraview_pal_fs_list_dir(arena, rubraview_path_dirname(video_path));
-    if (listing.count == 0) { if (out_why) *out_why = "the folder could not be listed"; return empty; }
+    if (listing.count == 0) { if (out_why) *out_why = "the folder could not be listed"; return 0; }
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, listing.count * sizeof(u8str_t));
-    if (!proven_is_ok(res.err)) { if (out_why) *out_why = "out of memory"; return empty; }
+    if (!proven_is_ok(res.err)) { if (out_why) *out_why = "out of memory"; return 0; }
     u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
     size_t sibling_count = 0;
     for (size_t i = 0; i < listing.count; ++i) {
         if (listing.entries[i].is_directory) continue;
         paths[sibling_count++] = listing.entries[i].path;
     }
+    return rubraview_subtitle_discover(video_path, paths, sibling_count, out, capacity);
+}
 
-    rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
-    size_t count = rubraview_subtitle_discover(video_path, paths, sibling_count,
-                                               found, SUBTITLE_MAX_CANDIDATES);
-    if (count == 0) { if (out_why) *out_why = why; return empty; }
-
-    u8str_t text = rubraview_pal_fs_read_file(arena, found[0].path, SUBTITLE_MAX_BYTES);
+/* Reads and parses one of them. */
+static rubraview_subtitle_track_t subtitle_read(proven_arena_t *arena,
+                                                rubraview_subtitle_candidate_t candidate,
+                                                const char **out_why) {
+    rubraview_subtitle_track_t empty = {0};
+    u8str_t text = rubraview_pal_fs_read_file(arena, candidate.path, SUBTITLE_MAX_BYTES);
     if (text.len == 0) { if (out_why) *out_why = "the subtitle file could not be read"; return empty; }
     /* A Korean .smi is nearly always CP949, and the parser reads UTF-8.
        The archive-name check is a UTF-8 validator, so it answers this
@@ -741,15 +756,71 @@ static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t v
         u8str_t converted = rubraview_pal_transcode_codepage(arena, text, 0);
         if (converted.len > 0) text = converted;
     }
-    rubraview_subtitle_track_t track = rubraview_subtitle_parse(arena, text, found[0].format);
+    rubraview_subtitle_track_t track = rubraview_subtitle_parse(arena, text, candidate.format);
     if (track.count == 0) { if (out_why) *out_why = "the subtitle file held no usable lines"; return empty; }
-    if (out_name) *out_name = rubraview_path_basename(found[0].path);
     if (out_why) *out_why = NULL;
     return track;
 }
 
+/* What `--probe-media` reports: the first subtitle file, read. */
+static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t video_path,
+                                                u8str_t *out_name, const char **out_why) {
+    rubraview_subtitle_track_t empty = {0};
+    if (out_name) *out_name = (u8str_t){ .ptr = "", .len = 0 };
+    rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
+    size_t count = subtitle_candidates(arena, video_path, found, SUBTITLE_MAX_CANDIDATES, out_why);
+    if (count == 0) return empty;
+    rubraview_subtitle_track_t track = subtitle_read(arena, found[0], out_why);
+    if (track.count > 0 && out_name) *out_name = rubraview_path_basename(found[0].path);
+    return track;
+}
+
+/* Puts the film's tracks — its own sound, and every subtitle file beside
+   it — into one list, and turns on the subtitle the reader would want
+   (§3.16.2). Subtitles are "off" as well as every file: that is a
+   choice, so it is in the cycle. */
+static void tracks_prepare(app_state_t *app, u8str_t video_path) {
+    app->tracks = rubraview_tracks_create();
+    if (app->media) rubraview_pal_media_tracks(app->media, &app->tracks);
+
+    app->subtitle_count = subtitle_candidates(app->arena, video_path, app->subtitle_files,
+                                              SUBTITLE_MAX_CANDIDATES, NULL);
+    static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass" };
+    for (size_t i = 0; i < app->subtitle_count; ++i) {
+        rubraview_track_t track = {
+            .kind = RUBRAVIEW_TRACK_SUBTITLE,
+            .stream_index = (int32_t)i,   /* into app->subtitle_files, not the container */
+            .language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path),
+            .title = rubraview_path_basename(app->subtitle_files[i].path),
+            .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 5
+                                      ? (size_t)app->subtitle_files[i].format : 0]),
+        };
+        rubraview_tracks_add(&app->tracks, track);
+    }
+}
+
+/* Shows one subtitle track, or none when `index` is -1. */
+static void subtitle_select(app_state_t *app, int32_t index) {
+    app->subtitle = (rubraview_subtitle_track_t){0};
+    app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
+    app->tracks.current_subtitle = -1;
+    if (index < 0 || (size_t)index >= app->tracks.count) return;
+    const rubraview_track_t *track = &app->tracks.tracks[index];
+    if (track->kind != RUBRAVIEW_TRACK_SUBTITLE) return;
+    if (track->stream_index < 0 || (size_t)track->stream_index >= app->subtitle_count) return;
+
+    app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
+    if (app->subtitle.count == 0) return;
+    app->subtitle_name = track->title;
+    app->tracks.current_subtitle = index;
+}
+
 static void subtitle_load(app_state_t *app, u8str_t video_path) {
-    app->subtitle = subtitle_find(app->arena, video_path, &app->subtitle_name, NULL);
+    tracks_prepare(app, video_path);
+    /* §3.16.2: the preferred language decides; with none set, the first
+       file wins. Parsing happens now, and only for the one chosen. */
+    subtitle_select(app, rubraview_tracks_choose(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
+                                                 (u8str_t){ .ptr = "", .len = 0 }));
 }
 
 /* Opens the video when the page on screen is one, and closes the old one. */
@@ -1258,6 +1329,44 @@ static void handle_action(app_state_t *app, u8str_t action) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
     } else if (app->media && action_is(action, "media_seek_back")) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
+    } else if (app->media && action_is(action, "next_audio_track")) {
+        /* §3.16.2: the next sound track of the same file, without
+           stopping the picture. */
+        int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO,
+                                             app->tracks.current_audio);
+        if (next < 0 || next == app->tracks.current_audio) {
+            osd_say(app, U8("this file has only one sound track"));
+        } else if (!rubraview_pal_media_select_audio_track(app->media,
+                                                           app->tracks.tracks[next].stream_index)) {
+            /* No device on this machine, or the track cannot be decoded:
+               the one that was playing keeps playing. */
+            osd_say(app, U8("the sound track cannot be changed here"));
+        } else {
+            app->tracks.current_audio = next;
+            /* Both streams start again from where the film is, so what
+               the old track had already decoded is thrown away. */
+            media_seek_to(app, app->media_position);
+            char label[160];
+            u8str_t text = rubraview_track_label(label, sizeof(label), &app->tracks, next);
+            char line[192];
+            int n = snprintf(line, sizeof(line), "sound %.*s", (int)text.len, text.ptr);
+            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        }
+    } else if (app->media && action_is(action, "next_subtitle_track")) {
+        /* §3.16.2: the subtitle files beside the film, and off. */
+        if (app->subtitle_count == 0) {
+            osd_say(app, U8("no subtitle file goes with this video"));
+        } else {
+            int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
+                                                 app->tracks.current_subtitle);
+            subtitle_select(app, next);
+            char label[160];
+            u8str_t text = rubraview_track_label(label, sizeof(label), &app->tracks,
+                                                 app->tracks.current_subtitle);
+            char line[192];
+            int n = snprintf(line, sizeof(line), "subtitles %.*s", (int)text.len, text.ptr);
+            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        }
     } else if (app->media && (action_is(action, "subtitle_earlier") || action_is(action, "subtitle_later"))) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
@@ -3491,6 +3600,23 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
                  opened.info.has_audio
                      ? (opened.info.audio_output ? " (going to a device)" : " (no audio device here)") : "");
         console_line(line);
+
+        /* §3.16.2: what the container holds, as the menu would show it. */
+        rubraview_track_set_t set = {0};
+        if (rubraview_pal_media_tracks(opened.media, &set) && set.count > 0) {
+            for (size_t t = 0; t < set.count; ++t) {
+                char label[160];
+                u8str_t text = rubraview_track_label(label, sizeof(label), &set, (int32_t)t);
+                bool current = (int32_t)t == set.current_video || (int32_t)t == set.current_audio;
+                snprintf(line, sizeof(line), "%s: %s %s %.*s", name,
+                         set.tracks[t].kind == RUBRAVIEW_TRACK_AUDIO ? "sound" : "picture",
+                         current ? "*" : " ", (int)text.len, text.ptr);
+                console_line(line);
+            }
+        } else {
+            snprintf(line, sizeof(line), "%s: the track list is empty", name);
+            console_line(line);
+        }
 
         /* Opening is not playing: take some frames and see. */
         int frames = 0;
