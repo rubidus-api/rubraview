@@ -218,6 +218,7 @@ typedef struct app_state {
     double                 media_position;    /* pts of the picture on screen */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
+    rubraview_media_backend_t media_preferred; /* §3.22 [video] decoder — the one tried first (D-9) */
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
@@ -558,8 +559,10 @@ static void update_window_title(app_state_t *app) {
             char at[32], total[32];
             u8str_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
             u8str_t t = rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
-            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
-                         (int)a.len, a.ptr, (int)t.len, t.ptr, app->media_paused ? " paused" : "");
+            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s%s ",
+                         (int)a.len, a.ptr, (int)t.len, t.ptr,
+                         app->media_paused ? " paused" : "",
+                         app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
@@ -690,10 +693,9 @@ static void media_prepare(app_state_t *app) {
     u8str_t path = app->source.pages[index].path;
     if (!is_media_path(path)) return;
 
-    /* D-9: the preferred backend first, the other one when it cannot.
-       Slice 1 has only Media Foundation; FFmpeg joins in slice 3. */
+    /* D-9: the preferred backend first, the other one when it cannot. */
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(RUBRAVIEW_BACKEND_MEDIA_FOUNDATION,
+    size_t count = rubraview_media_backend_order(app->media_preferred,
                                                  rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                  order);
     rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
@@ -2976,7 +2978,23 @@ static void console_line(const char *text) {
     }
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     if (out == INVALID_HANDLE_VALUE || !out) return;
+
+    /* A console takes UTF-16: writing UTF-8 bytes into one leaves them to
+       be read as the code page of the day, which turned an em dash into
+       "??" (and would do worse to a Korean filename). A pipe or a file
+       gets the UTF-8 bytes, which is what a redirect wants. */
+    DWORD mode = 0;
     DWORD written = 0;
+    if (GetConsoleMode(out, &mode)) {
+        WCHAR wide[1024];
+        int count = MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1022);
+        if (count > 1) {
+            wide[count - 1] = L'\r';
+            wide[count] = L'\n';
+            WriteConsoleW(out, wide, (DWORD)(count + 1), &written, NULL);
+            return;
+        }
+    }
     WriteFile(out, text, (DWORD)strlen(text), &written, NULL);
     WriteFile(out, "\r\n", 2, &written, NULL);
 }
@@ -3283,6 +3301,81 @@ static void report_startup_failure(void) {
     }
 }
 
+/* §3.22 [video] decoder (D-9): the backend a file is offered to first.
+   The other one still gets its turn when this one cannot open it. */
+static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
+    u8str_t text = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
+    if (text.len == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
+    const u8str_t *decoder = rubraview_ini_get(&doc, U8("video"), U8("decoder"));
+    return (decoder && decoder->len == 6 && memcmp(decoder->ptr, "ffmpeg", 6) == 0)
+        ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+}
+
+/* `--probe-media`: open a file with each backend in turn and say what
+   happened — which one took it, what it thinks the file is, and whether
+   frames really come out. There is no window, so it answers over a
+   remote shell: the media PAL hands over CPU pixels and needs no
+   renderer. mfprobe asks Windows what it *could* decode; this asks
+   rubraview what it actually does with one file. */
+static int probe_media_file(proven_arena_t *arena, u8str_t path) {
+    char line[512];
+    bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+    console_line(ffmpeg_here
+        ? "FFmpeg: its DLLs are here, at a version these headers know"
+        : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
+
+    rubraview_media_backend_t preferred = preferred_backend(arena);
+    console_line(preferred == RUBRAVIEW_BACKEND_FFMPEG
+        ? "settings.ini [video] decoder = ffmpeg — FFmpeg is tried first"
+        : "settings.ini [video] decoder = windows (or unset) — Media Foundation is tried first");
+
+    rubraview_media_backend_t order[2];
+    size_t count = rubraview_media_backend_order(preferred, ffmpeg_here, order);
+    for (size_t i = 0; i < count; ++i) {
+        const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
+        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i]);
+        if (!opened.media) {
+            u8str_t why = rubraview_media_failure_text(opened.failure);
+            snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.len, why.ptr);
+            console_line(line);
+            continue;
+        }
+
+        snprintf(line, sizeof(line), "%s: opened — %dx%d, %.3f s, %.2f fps, picture %s, sound %s%s",
+                 name, opened.info.width, opened.info.height, opened.info.duration_seconds,
+                 opened.info.frame_rate, opened.info.has_video ? "yes" : "no",
+                 opened.info.has_audio ? "yes" : "no",
+                 opened.info.has_audio
+                     ? (opened.info.audio_output ? " (going to a device)" : " (no audio device here)") : "");
+        console_line(line);
+
+        /* Opening is not playing: take some frames and see. */
+        int frames = 0;
+        double first = -1.0, last = -1.0;
+        for (int spin = 0; spin < 600 && frames < 24; ++spin) {
+            rubraview_video_frame_t frame;
+            if (rubraview_pal_media_peek_frame(opened.media, &frame)) {
+                if (first < 0.0) first = frame.pts;
+                last = frame.pts;
+                frames++;
+                rubraview_pal_media_pop_frame(opened.media);
+                continue;
+            }
+            if (rubraview_pal_media_finished(opened.media)) break;
+            rubraview_pal_time_sleep_ms(10);
+        }
+        if (opened.info.has_video) {
+            snprintf(line, sizeof(line), "%s: %d picture(s) decoded, %.3f s to %.3f s", name, frames, first, last);
+        } else {
+            snprintf(line, sizeof(line), "%s: sound only — nothing to decode into pictures", name);
+        }
+        console_line(line);
+        rubraview_pal_media_close(opened.media);
+    }
+    return 0;
+}
+
 /* `--diag`: bring the graphics up, say what it got, and stop. One run
    from a command prompt answers "what is this machine actually using",
    which is otherwise guesswork from far away. */
@@ -3529,6 +3622,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 return 0;
             }
 
+            if (cli.probe_media) {
+                int code = probe_media_file(&arena, cli.input);
+                free(memory);
+                CoUninitialize();
+                return code;
+            }
+
             if (cli.diagnostics) {
                 int code = run_diagnostics(&arena, cli.input);
                 free(memory);
@@ -3623,6 +3723,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        without one and precache_decode queues pages for the main loop. */
     app.jobs = NULL;
     app.media_page = -1;
+    /* §3.22 [video] decoder (D-9): which backend opens a file first. The
+       other one still gets its turn when this one cannot. */
+    app.media_preferred = preferred_backend(&arena);
     history_load(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */

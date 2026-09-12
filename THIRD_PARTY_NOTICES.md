@@ -53,3 +53,15 @@ provenance record for each is in `docs/resources/sources-and-licenses.md`.
 Nothing else in the tree is third-party code. The Windows platform
 libraries (Direct2D, DirectWrite, the Windows Imaging Component, WASAPI)
 are operating-system components, not bundled dependencies.
+
+## FFmpeg (headers only, not shipped)
+
+rubraview can play media through FFmpeg when its DLLs are present beside
+the executable. To compile those calls, the public headers of FFmpeg
+8.1.2 are kept in `vendor/ffmpeg/include/`; they are licensed
+LGPL-2.1-or-later (`vendor/ffmpeg/COPYING.LGPLv2.1`).
+
+No FFmpeg code is compiled into rubraview and none is distributed with
+it: the functions are looked up at run time from DLLs the user provides.
+Windows Media Foundation remains the default decoder (D-8).
+

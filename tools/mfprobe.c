@@ -116,8 +116,17 @@ static void report_group(const char *heading, const probe_format_t *formats, siz
    *container* still cannot be read. That is the case for Matroska, which
    is why an .mkv can fail on a machine whose H.264 decoder is fine. */
 static int probe_file(const wchar_t *path) {
+    /* The same attributes the viewer uses. Without them this said "no"
+       for Ogg files the viewer opens perfectly well — a measuring tool
+       that does not measure what the program does is worse than none. */
+    IMFAttributes *attrs = NULL;
+    if (SUCCEEDED(MFCreateAttributes(&attrs, 1)) && attrs) {
+        IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+    }
+
     IMFSourceReader *reader = NULL;
-    HRESULT hr = MFCreateSourceReaderFromURL(path, NULL, &reader);
+    HRESULT hr = MFCreateSourceReaderFromURL(path, attrs, &reader);
+    if (attrs) IMFAttributes_Release(attrs);
 
     if (FAILED(hr) || !reader) {
         printf("\nOpening the file: FAILED (hr = 0x%08lX)\n", (unsigned long)hr);
