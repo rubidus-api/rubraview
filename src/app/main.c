@@ -733,6 +733,12 @@ static void media_prepare(app_state_t *app) {
        wall clock is. */
     app->media_master = rubraview_media_master_for(opened.info.has_audio, opened.info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
+    /* §3.2.6 / RV-061: a slide holding a film or a track waits for the
+       whole of it, not for the still-image interval. */
+    if (app->slides && (size_t)app->spread_index < app->layout.count) {
+        app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_VIDEO;
+        app->slides[app->spread_index].duration_seconds = opened.info.duration_seconds;
+    }
     if (!media_page_ready(app)) {
         media_close(app);
         osd_say(app, U8("could not make room to show that video"));
