@@ -56,6 +56,35 @@ static void test_two_part_anchor(void) {
     }
     printf("  [PASS] Only the hover half opens the box\n");
 
+    /* Test: a pointer resting on the box holds it open, and moving about
+       elsewhere does not keep an abandoned box open. Pointer events stop
+       arriving when the mouse stops, so the caller re-states where the
+       pointer is on every pass. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 0.0, 0.0, 6);
+        double hover_x = m.anchor_size * 1.5, hover_y = m.anchor_size * 0.5;
+
+        rubraview_box_pointer(&box, &m, hover_x, hover_y);
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);
+
+        /* A whole second of resting on it, fed a pass at a time. */
+        for (int i = 0; i < 10; ++i) {
+            rubraview_box_pointer(&box, &m, hover_x, hover_y);
+            assert(!rubraview_box_tick(&box, 0.1, 0.5));
+        }
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);
+
+        /* Away from it, the grace runs out even while the mouse keeps
+           moving somewhere else. */
+        bool collapsed = false;
+        for (int i = 0; i < 10 && !collapsed; ++i) {
+            rubraview_box_pointer(&box, &m, 900.0 + i, 900.0);
+            collapsed = rubraview_box_tick(&box, 0.1, 0.5);
+        }
+        assert(collapsed && box.state == RUBRAVIEW_BOX_COLLAPSED);
+    }
+    printf("  [PASS] Resting on the box holds it open; leaving it collapses on time\n");
+
     /* Test: the click half opens and closes, and what it opens stays
        open when the pointer leaves. */
     {
