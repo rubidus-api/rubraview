@@ -6,6 +6,20 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Video and audio playback (M5) is complete except the sound check that needs
+  a machine with speakers (T058). Media Foundation plays the file by default
+  and FFmpeg takes the ones it cannot (D-8, D-9); a file nothing can open is
+  reported and skipped. Subtitle files beside a video are found, drawn with an
+  outline and nudged half a second at a time; the sound tracks of a file and
+  the subtitle files beside it can both be switched while it plays (D-10). A
+  slide show holding a film waits for the whole film. Hardware decode is not in
+  this milestone and will be the zero-copy path when it is built (D-11).
+- settings.ini is read when the viewer starts, not only when the settings
+  window is opened — until now every setting read while viewing came back 0.
+- The floating boxes come back where they were left (layout.ini).
+
 ## [0.0.2] - 2026-09-11
 
 Found by running the viewer on a Windows 11 test machine.

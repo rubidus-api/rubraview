@@ -1636,14 +1636,23 @@ and therefore no longer covered what §3 specifies.*
   RV-022) · RV-059 subtitles — SRT/SMI/VTT/ASS discovery and DirectWrite rendering,
   embedded streams, sync offset (§3.16.1) · RV-060 multi-track audio/subtitle switching
   (§3.16.2) · RV-061 mixed-media slide show and playlist loop policy (§3.2.6, §3.12)
-  wired to RV-032 · RV-062 D3D11VA zero-copy path with software fallback (§5.7).
+  wired to RV-032.
+- **Out of M5 by decision, the work itself unchanged:** RV-062 (D3D11VA
+  zero-copy, §5.7) waits for a machine that can measure it — D-11 chose the
+  zero-copy shape over a cheaper read-back one, so it is a piece of work of
+  its own rather than a corner of this milestone. RV-059's *embedded*
+  subtitle streams wait on the FFmpeg-only path D-10 describes; external
+  subtitle files — discovery, drawing, sync — are in M5 and done.
 - RV-084 audio-only files (§5.1 audio rows) play from the playlist and slide show with
   embedded album art shown — the D-6 minimum; everything else of §3.14 is post-1.0.
   RV-063 (Windows Media Foundation fallback) is withdrawn (D-4).
 - Depends on: M3 (toolbox, keymap), M4 (RV-044 for pre-buffering).
-- Done means: an MKV with two audio tracks and an embedded subtitle plays in sync,
-  `.`/`,` step single frames, `[`/`]`/`\` loop and release, and with the FFmpeg DLLs
-  removed the image viewer still opens and reports the missing bridge on the OSD.
+- Done means: a file with two audio tracks and a subtitle file beside it plays
+  in sync and both can be switched while it plays, `.`/`,` step single frames,
+  the A-B loop takes and releases, and with no FFmpeg DLL present every format
+  Media Foundation knows still plays while the rest are reported and skipped
+  (D-9). Reached 2026-09-13; the sound itself is heard in T058, which needs a
+  machine with an audio device.
 
 **M6 — Editing, export, batch (H core + W UI)**
 - Goal: adjustments preview on the GPU and commit through the core engine; batch runs
@@ -1730,7 +1739,7 @@ and therefore no longer covered what §3 specifies.*
 | 3.15.2 | In-app Metro picker | M3 | RV-043 | W |
 | 3.15.3 | macOS / Linux dialog backends | post-1.0 (D-1) | — | — |
 | 3.15.4 | Type-ahead, native IME search bar | M3 | RV-043 | W |
-| 3.16.1 | Subtitle formats, rendering, sync | M5 | RV-059 | W |
+| 3.16.1 | Subtitle formats, rendering, sync | M5 (embedded streams after M5, D-10) | RV-059 | W |
 | 3.16.2 | Multi-track switching | M5 | RV-060 | W |
 | 3.17 | Reading history, resume, portable mode | M1 · M4 | RV-023, RV-048 | H+W |
 | 3.18 | Delete/undo, rename, 1–9 curation | M7 | RV-070, RV-071 | W |
@@ -1748,7 +1757,7 @@ and therefore no longer covered what §3 specifies.*
 | 5.4 | WASAPI audio engine | M5 | RV-055 | W |
 | 5.5 | A-B looping | M5 | RV-057 | W |
 | 5.6 | Video fit modes, live zoom | M5 | RV-058 | W |
-| 5.7 | D3D11VA | M5 | RV-062 | W |
+| 5.7 | D3D11VA | after M5 (D-11) | RV-062 | W |
 | 6.1–6.5 | Colour, curves, auto-crop, filters, resampling | M0 · M6 | RV-001 – RV-004, RV-067 | H |
 | 7.1–7.3 | Arenas, `u8str_t`, dynarrays | M0 | RV-001, RV-007 | H |
 | 7.4 | Memory budget, LRU | M1 · M4 | RV-028, RV-044 | H+W |
