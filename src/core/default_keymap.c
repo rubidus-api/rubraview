@@ -102,6 +102,11 @@ const char *rubraview_default_keymap(void) {
        Ctrl+Right were free; plain Left/Right keep turning pages. */
     "media_seek_forward = Ctrl+Right\n"
     "media_seek_back = Ctrl+Left\n"
+    /* §3.16.1 / R135: an external subtitle that runs early or late is
+       nudged half a second at a time. Z and X are free — the global
+       section only spends Ctrl+Z. */
+    "subtitle_earlier = Z\n"
+    "subtitle_later = X\n"
     "\n"
 
     /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,
