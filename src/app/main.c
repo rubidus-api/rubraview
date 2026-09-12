@@ -2680,6 +2680,14 @@ static void tick_timers(app_state_t *app, double dt) {
     }
 
     double grace = 0.5; /* §3.6.3 */
+    /* Where the pointer *is*, not where it last moved: a pointer resting
+       on a box must hold it open. Pointer events stop arriving the moment
+       the mouse stops, and the box used to fold up under it half a second
+       later. */
+    rubraview_tile_metrics_t box_metrics =
+        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_box_pointer(&app->toolbox, &box_metrics, app->pointer_x, app->pointer_y);
+    rubraview_box_pointer(&app->menubox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_tick(&app->toolbox, dt, grace);
     rubraview_box_tick(&app->menubox, dt, grace);
 
