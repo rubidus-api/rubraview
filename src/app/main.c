@@ -34,6 +34,8 @@
 #include "rubraview/compositor.h"
 #include "rubraview/transform.h"
 #include "rubraview/slideshow.h"
+#include "rubraview/subtitle.h"
+#include "rubraview/encoding.h"
 #include "rubraview/glob.h"
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
@@ -227,6 +229,10 @@ typedef struct app_state {
     double                 box_press_x, box_press_y;
     bool                   box_drag_moved;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
+    /* §3.16.1 / R135: the external subtitle file that goes with the
+       video on screen. Empty when the film has none. */
+    rubraview_subtitle_track_t subtitle;
+    u8str_t                    subtitle_name;   /* what to say in the OSD */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -597,6 +603,10 @@ static void media_close(app_state_t *app) {
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_ended = false;
+    /* Otherwise the still page after a film would keep drawing its last
+       line of dialogue. */
+    app->subtitle = (rubraview_subtitle_track_t){0};
+    app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
 }
 
 /* Defined here so the link does not depend on which MinGW carries it. */
@@ -691,6 +701,57 @@ static app_page_t *media_page_ready(app_state_t *app) {
     return page;
 }
 
+#define SUBTITLE_MAX_BYTES (2u * 1024u * 1024u)
+#define SUBTITLE_MAX_CANDIDATES 8
+
+/* §3.16.1 / R135: the subtitle file that shares the film's name. The
+   folder is listed rather than reused from the page list, because a
+   .srt is not a page — the page source never saw it. */
+static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t video_path,
+                                                u8str_t *out_name, const char **out_why) {
+    rubraview_subtitle_track_t empty = {0};
+    if (out_name) *out_name = (u8str_t){ .ptr = "", .len = 0 };
+    const char *why = "no subtitle file beside the video";
+
+    rubraview_fs_listing_t listing =
+        rubraview_pal_fs_list_dir(arena, rubraview_path_dirname(video_path));
+    if (listing.count == 0) { if (out_why) *out_why = "the folder could not be listed"; return empty; }
+
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, listing.count * sizeof(u8str_t));
+    if (!proven_is_ok(res.err)) { if (out_why) *out_why = "out of memory"; return empty; }
+    u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
+    size_t sibling_count = 0;
+    for (size_t i = 0; i < listing.count; ++i) {
+        if (listing.entries[i].is_directory) continue;
+        paths[sibling_count++] = listing.entries[i].path;
+    }
+
+    rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
+    size_t count = rubraview_subtitle_discover(video_path, paths, sibling_count,
+                                               found, SUBTITLE_MAX_CANDIDATES);
+    if (count == 0) { if (out_why) *out_why = why; return empty; }
+
+    u8str_t text = rubraview_pal_fs_read_file(arena, found[0].path, SUBTITLE_MAX_BYTES);
+    if (text.len == 0) { if (out_why) *out_why = "the subtitle file could not be read"; return empty; }
+    /* A Korean .smi is nearly always CP949, and the parser reads UTF-8.
+       The archive-name check is a UTF-8 validator, so it answers this
+       question too; bytes that are not UTF-8 are read in the machine's
+       own code page (0). */
+    if (rubraview_archive_filename_detect(text, false) == RUBRAVIEW_ENCODING_NEEDS_FALLBACK) {
+        u8str_t converted = rubraview_pal_transcode_codepage(arena, text, 0);
+        if (converted.len > 0) text = converted;
+    }
+    rubraview_subtitle_track_t track = rubraview_subtitle_parse(arena, text, found[0].format);
+    if (track.count == 0) { if (out_why) *out_why = "the subtitle file held no usable lines"; return empty; }
+    if (out_name) *out_name = rubraview_path_basename(found[0].path);
+    if (out_why) *out_why = NULL;
+    return track;
+}
+
+static void subtitle_load(app_state_t *app, u8str_t video_path) {
+    app->subtitle = subtitle_find(app->arena, video_path, &app->subtitle_name, NULL);
+}
+
 /* Opens the video when the page on screen is one, and closes the old one. */
 static void media_prepare(app_state_t *app) {
     int32_t index = current_page_index(app);
@@ -738,6 +799,13 @@ static void media_prepare(app_state_t *app) {
     if (app->slides && (size_t)app->spread_index < app->layout.count) {
         app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_VIDEO;
         app->slides[app->spread_index].duration_seconds = opened.info.duration_seconds;
+    }
+    subtitle_load(app, path);
+    if (app->subtitle.count > 0) {
+        char line[256];
+        int n = snprintf(line, sizeof(line), "subtitles: %.*s",
+                         (int)app->subtitle_name.len, app->subtitle_name.ptr);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     }
     if (!media_page_ready(app)) {
         media_close(app);
@@ -1190,6 +1258,17 @@ static void handle_action(app_state_t *app, u8str_t action) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
     } else if (app->media && action_is(action, "media_seek_back")) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
+    } else if (app->media && (action_is(action, "subtitle_earlier") || action_is(action, "subtitle_later"))) {
+        /* §3.16.1: half a second at a time, and the OSD says where the
+           track now sits so the reader can aim. */
+        if (app->subtitle.count == 0) {
+            osd_say(app, U8("no subtitle file goes with this video"));
+        } else {
+            rubraview_subtitle_nudge(&app->subtitle, action_is(action, "subtitle_later"));
+            char line[96];
+            int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
+            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        }
     } else if (action_is(action, "anim_toggle_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
@@ -1643,6 +1722,43 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* §3.16.1 / R135: the line of dialogue for where the film is now, laid
+   over the picture with a dark outline so it reads on any background. */
+static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
+    if (!app->media || app->subtitle.count == 0) return;
+    const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
+    if (!cue || cue->text.len == 0) return;
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double font = (double)win_h * 0.045;
+    if (font < 16.0 * dpi) font = 16.0 * dpi;
+    if (font > 48.0 * dpi) font = 48.0 * dpi;
+
+    size_t lines = 1;
+    for (size_t i = 0; i < cue->text.len; ++i) {
+        if (cue->text.ptr[i] == '\n') ++lines;
+    }
+    double height = font * 1.35 * (double)lines;
+    double below = (app->filmstrip.visible ? FILMSTRIP_THUMB * dpi : 0.0) + 36.0 * dpi;
+    rubraview_pal_rect_t rect = { (double)win_w * 0.05, (double)win_h - below - height,
+                                  (double)win_w * 0.9, height };
+
+    /* R135 asks for a two-pixel outline. The text PAL draws flat text,
+       so the outline is the same string drawn four times behind it —
+       which keeps this out of the PAL header. */
+    double off = 2.0 * dpi;
+    static const double DX[4] = { -1.0, 1.0, -1.0, 1.0 };
+    static const double DY[4] = { -1.0, -1.0, 1.0, 1.0 };
+    for (size_t i = 0; i < 4; ++i) {
+        rubraview_pal_rect_t shadow = { rect.x + DX[i] * off, rect.y + DY[i] * off,
+                                        rect.width, rect.height };
+        rubraview_pal_render_draw_text(app->renderer, cue->text, shadow, font,
+                                       0xFF000000u, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_render_draw_text(app->renderer, cue->text, rect, font,
+                                   0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
+}
+
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -1768,6 +1884,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                            prompt, bar_h * 0.4, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
     }
+
+    draw_subtitle(app, win_w, win_h);
 
     /* OSD (§3.1), skipped once it has faded out entirely. */
     if (rubraview_osd_opacity(&app->osd) > 0.01) {
@@ -3397,6 +3515,20 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
         console_line(line);
         rubraview_pal_media_close(opened.media);
     }
+
+    /* §3.16.1: the same search the viewer does, said out loud — which
+       of discovery, reading and parsing worked, and what came out. */
+    u8str_t sub_name = { .ptr = "", .len = 0 };
+    const char *why = NULL;
+    rubraview_subtitle_track_t track = subtitle_find(arena, path, &sub_name, &why);
+    if (track.count == 0) {
+        snprintf(line, sizeof(line), "Subtitles: none — %s", why ? why : "not looked for");
+    } else {
+        snprintf(line, sizeof(line), "Subtitles: %.*s — %zu line(s), the first %.3f s to %.3f s",
+                 (int)sub_name.len, sub_name.ptr, track.count,
+                 track.cues[0].start_seconds, track.cues[0].end_seconds);
+    }
+    console_line(line);
     return 0;
 }
 
