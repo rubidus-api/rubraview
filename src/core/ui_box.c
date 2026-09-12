@@ -111,7 +111,10 @@ bool rubraview_box_pointer(rubraview_box_t *box, const rubraview_tile_metrics_t 
         return false;
     }
 
-    rubraview_box_hover_leave(box);
+    /* Outside: the timer runs. It is *not* restarted here — the grace
+       counts from when the pointer last left the box, and restarting it
+       on every stray movement elsewhere would keep an abandoned box open
+       for as long as the mouse kept moving. */
     return false;
 }
 
@@ -275,7 +278,8 @@ void rubraview_box_hover_enter(rubraview_box_t *box) {
 
 void rubraview_box_hover_leave(rubraview_box_t *box) {
     if (!box) return;
-    box->idle_seconds = 0.0; /* the grace period starts now */
+    /* Nothing to do: `idle_seconds` counts since the pointer was last
+       over the box, so leaving simply stops refreshing it. */
 }
 
 void rubraview_box_click_anchor(rubraview_box_t *box) {
