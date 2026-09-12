@@ -317,6 +317,7 @@ typedef struct app_state {
     rubraview_settings_t     settings;
     rubraview_settings_t     settings_saved;   /* what is on disk, for Cancel and for Apply's state */
     u8str_t                  settings_path;
+    u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     rubraview_panel_t        settings_panel;
 
     /* In-app Metro file picker (§3.15.2), RV-043 */
@@ -3085,12 +3086,71 @@ static void history_load(app_state_t *app) {
 
     app->history_path = rubraview_config_path(app->arena, app->config_mode,
                                               U8("."), appdata, U8("history.ini"));
+    app->layout_path = rubraview_config_path(app->arena, app->config_mode,
+                                             U8("."), appdata, U8("layout.ini"));
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
 
     /* The reader's settings apply from the first frame, not from the
        first time the settings window is opened. */
     settings_read_file(app);
+}
+
+/* §3.6: "Positions persisted across sessions". The two floating boxes
+   are not settings the reader edits in a dialog — they are where the
+   hands left them — so they live in their own small file beside the
+   reading history, under the same portable-or-AppData rule. */
+static double ini_number(const rubraview_ini_doc_t *doc, u8str_t key, double fallback) {
+    const u8str_t *text = rubraview_ini_get(doc, U8("boxes"), key);
+    if (!text || text->len == 0 || text->len > 31) return fallback;
+    char buffer[32];
+    memcpy(buffer, text->ptr, text->len);
+    buffer[text->len] = '\0';
+    char *end = NULL;
+    double value = strtod(buffer, &end);
+    return (end && end != buffer) ? value : fallback;
+}
+
+static void layout_load(app_state_t *app) {
+    if (app->layout_path.len == 0) return;
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->layout_path, 8u * 1024u);
+    if (text.len == 0) return;
+    rubraview_ini_doc_t doc = rubraview_ini_parse(app->arena, text);
+
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    /* A position saved on a larger screen must not put a box out of
+       reach; the anchor stays inside the window with room to grab it. */
+    double margin = 48.0 * dpi;
+    double max_x = (double)win_w - margin, max_y = (double)win_h - margin;
+
+    struct { rubraview_box_t *box; const char *x_key, *y_key; } BOXES[] = {
+        { &app->toolbox, "toolbox_x", "toolbox_y" },
+        { &app->menubox, "menubox_x", "menubox_y" },
+    };
+    for (size_t i = 0; i < sizeof(BOXES) / sizeof(BOXES[0]); ++i) {
+        double x = ini_number(&doc, cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
+        double y = ini_number(&doc, cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
+        if (x < 0.0) x = 0.0;
+        if (y < 0.0) y = 0.0;
+        if (max_x > 0.0 && x > max_x) x = max_x;
+        if (max_y > 0.0 && y > max_y) y = max_y;
+        BOXES[i].box->anchor_x = x;
+        BOXES[i].box->anchor_y = y;
+    }
+}
+
+static void layout_save(app_state_t *app) {
+    if (app->layout_path.len == 0) return;
+    char text[256];
+    int n = snprintf(text, sizeof(text),
+                     "[boxes]\ntoolbox_x = %.1f\ntoolbox_y = %.1f\n"
+                     "menubox_x = %.1f\nmenubox_y = %.1f\n",
+                     app->toolbox.anchor_x, app->toolbox.anchor_y,
+                     app->menubox.anchor_x, app->menubox.anchor_y);
+    if (n <= 0) return;
+    rubraview_pal_fs_write_file(app->layout_path, (u8str_t){ .ptr = text, .len = (size_t)n });
 }
 
 static void history_remember(app_state_t *app) {
@@ -4097,6 +4157,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, TOOLBOX_TILES);
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, MENU_ROOT_COUNT);
+    layout_load(&app);   /* §3.6: back where the reader left them */
     app.menu = rubraview_menu_create(&MENU_TREE); /* §3.6.2 category tree */
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
@@ -4326,7 +4387,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
     }
 
-    /* §3.17.1: remember where the reader stopped before shutting down. */
+    /* §3.6 / §3.17.1: remember where the reader stopped, and where the
+       boxes were left, before shutting down. */
+    layout_save(&app);
     history_remember(&app);
     if (app.history_path.len > 0 && app.history.count > 0) {
         u8str_t text = rubraview_history_serialize(&arena, &app.history);
