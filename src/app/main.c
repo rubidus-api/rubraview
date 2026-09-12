@@ -20,6 +20,15 @@
 #include <objbase.h>
 #include <shellapi.h>
 #include <shobjidl.h>
+/* --probe-gpu only: the graphics device and Media Foundation's own
+   interfaces, asked about directly rather than through a PAL, because
+   the question it answers is about this machine, not about the app. */
+#include <d3d11_4.h>   /* ID3D11Multithread lives here in mingw-w64 */
+#include <dxgi.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <mferror.h>
 #endif
 
 #include <stdlib.h>
@@ -3755,6 +3764,180 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     return 0;
 }
 
+/* `--probe-gpu`: what graphics card this machine has, whether Media
+   Foundation will take it for decoding, and — the question that decides
+   RV-062's shape — whether a decoded frame then comes back as a texture
+   or as system memory. Written before building the zero-copy path so
+   that "can this be tried here at all" is measured, not assumed. */
+static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
+    (void)arena;
+    char line[512];
+
+    typedef HRESULT (WINAPI *create_dxgi_manager_fn)(UINT*, IMFDXGIDeviceManager**);
+    HMODULE plat = LoadLibraryExW(L"mfplat.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    HMODULE rw = LoadLibraryExW(L"mfreadwrite.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!plat || !rw) { console_line("Media Foundation is not installed here"); return 2; }
+    create_dxgi_manager_fn create_manager =
+        (create_dxgi_manager_fn)(void*)GetProcAddress(plat, "MFCreateDXGIDeviceManager");
+    HRESULT (WINAPI *mf_startup)(ULONG, DWORD) =
+        (HRESULT (WINAPI *)(ULONG, DWORD))(void*)GetProcAddress(plat, "MFStartup");
+    HRESULT (WINAPI *mf_shutdown)(void) =
+        (HRESULT (WINAPI *)(void))(void*)GetProcAddress(plat, "MFShutdown");
+    HRESULT (WINAPI *mf_create_attributes)(IMFAttributes**, UINT32) =
+        (HRESULT (WINAPI *)(IMFAttributes**, UINT32))(void*)GetProcAddress(plat, "MFCreateAttributes");
+    HRESULT (WINAPI *mf_create_reader)(LPCWSTR, IMFAttributes*, IMFSourceReader**) =
+        (HRESULT (WINAPI *)(LPCWSTR, IMFAttributes*, IMFSourceReader**))
+            (void*)GetProcAddress(rw, "MFCreateSourceReaderFromURL");
+    if (!create_manager || !mf_startup || !mf_shutdown || !mf_create_attributes || !mf_create_reader) {
+        console_line("Media Foundation is here but not the calls this needs");
+        return 2;
+    }
+
+    /* 1. A device. Hardware if there is one, otherwise Windows' own
+          software rasteriser (WARP) — which is what a machine with no
+          graphics card falls back to. */
+    ID3D11Device *device = NULL;
+    ID3D11DeviceContext *context = NULL;
+    D3D_FEATURE_LEVEL level = (D3D_FEATURE_LEVEL)0;
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
+    const char *kind = "hardware";
+    HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags, NULL, 0,
+                                   D3D11_SDK_VERSION, &device, &level, &context);
+    if (FAILED(hr)) {
+        kind = "WARP (software)";
+        hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, flags, NULL, 0,
+                               D3D11_SDK_VERSION, &device, &level, &context);
+    }
+    if (FAILED(hr) || !device) {
+        console_line("no Direct3D 11 device at all, with or without video support");
+        return 2;
+    }
+    snprintf(line, sizeof(line), "Device: %s, feature level %u.%u",
+             kind, (unsigned)(level >> 12) & 0xF, (unsigned)(level >> 8) & 0xF);
+    console_line(line);
+
+    IDXGIDevice *dxgi = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void**)&dxgi)) && dxgi) {
+        IDXGIAdapter *adapter = NULL;
+        if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi, &adapter)) && adapter) {
+            DXGI_ADAPTER_DESC desc = {0};
+            if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc))) {
+                char name[256] = {0};
+                WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, (int)sizeof(name), NULL, NULL);
+                snprintf(line, sizeof(line), "Adapter: %s (%u MB of its own memory)",
+                         name, (unsigned)(desc.DedicatedVideoMemory / (1024u * 1024u)));
+                console_line(line);
+            }
+            IDXGIAdapter_Release(adapter);
+        }
+        IDXGIDevice_Release(dxgi);
+    }
+
+    /* 2. Does it offer decoders at all? */
+    ID3D11VideoDevice *video = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(device, &IID_ID3D11VideoDevice, (void**)&video)) && video) {
+        UINT profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
+        snprintf(line, sizeof(line), "Decoder profiles the card offers: %u", profiles);
+        console_line(line);
+        ID3D11VideoDevice_Release(video);
+    } else {
+        console_line("Decoder profiles the card offers: none (no video device)");
+    }
+
+    /* 3. Hand the device to Media Foundation and read one frame. */
+    if (FAILED(mf_startup(((ULONG)0x00020070), 0))) {
+        console_line("Media Foundation would not start");
+        return 2;
+    }
+    int code = 0;
+    /* mingw-w64 declares the interface but ships no IID for it. */
+    static const GUID iid_multithread =
+        { 0x9B7E4E00, 0x342C, 0x4106, { 0xA1, 0x9F, 0x4F, 0x27, 0x04, 0xF6, 0x89, 0xF0 } };
+    ID3D11Multithread *mt = NULL;
+    if (SUCCEEDED(ID3D11DeviceContext_QueryInterface(context, &iid_multithread, (void**)&mt)) && mt) {
+        /* Media Foundation uses the device from its own threads. */
+        ID3D11Multithread_SetMultithreadProtected(mt, TRUE);
+        ID3D11Multithread_Release(mt);
+    }
+
+    IMFDXGIDeviceManager *manager = NULL;
+    UINT token = 0;
+    if (FAILED(create_manager(&token, &manager)) || !manager ||
+        FAILED(IMFDXGIDeviceManager_ResetDevice(manager, (IUnknown*)device, token))) {
+        console_line("Media Foundation refused the device manager");
+        code = 2;
+    } else {
+        WCHAR wide[MAX_PATH * 2];
+        if (MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, wide,
+                                (int)(sizeof(wide) / sizeof(wide[0])) - 1) <= 0) {
+            console_line("that path cannot be read");
+            code = 2;
+        } else {
+            wide[MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, NULL, 0)] = L'\0';
+            IMFAttributes *attrs = NULL;
+            IMFSourceReader *reader = NULL;
+            if (SUCCEEDED(mf_create_attributes(&attrs, 3)) && attrs) {
+                IMFAttributes_SetUnknown(attrs, &MF_SOURCE_READER_D3D_MANAGER, (IUnknown*)manager);
+                IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+                IMFAttributes_SetUINT32(attrs, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+                hr = mf_create_reader(wide, attrs, &reader);
+                IMFAttributes_Release(attrs);
+            } else {
+                hr = E_FAIL;
+            }
+            if (FAILED(hr) || !reader) {
+                console_line("the reader would not open the file with the device attached");
+                code = 2;
+            } else {
+                console_line("The reader took the device.");
+                /* The first read often answers with a format change and
+                   no picture at all; ask a few times before believing
+                   that nothing is coming. */
+                DWORD stream = 0, sample_flags = 0;
+                LONGLONG timestamp = 0;
+                IMFSample *sample = NULL;
+                DWORD last_flags = 0;
+                for (int attempt = 0; attempt < 40 && !sample; ++attempt) {
+                    hr = IMFSourceReader_ReadSample(reader, (DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
+                                                    &stream, &sample_flags, &timestamp, &sample);
+                    last_flags = sample_flags;
+                    if (FAILED(hr) || (sample_flags & MF_SOURCE_READERF_ENDOFSTREAM) ||
+                        (sample_flags & MF_SOURCE_READERF_ERROR)) break;
+                }
+                if (FAILED(hr) || !sample) {
+                    snprintf(line, sizeof(line),
+                             "but no picture came out of it (hr=0x%08lX, last flags=0x%lX)",
+                             (unsigned long)hr, (unsigned long)last_flags);
+                    console_line(line);
+                    code = 2;
+                } else {
+                    IMFMediaBuffer *buffer = NULL;
+                    bool on_the_card = false;
+                    if (SUCCEEDED(IMFSample_GetBufferByIndex(sample, 0, &buffer)) && buffer) {
+                        IMFDXGIBuffer *dxgi_buffer = NULL;
+                        if (SUCCEEDED(IMFMediaBuffer_QueryInterface(buffer, &IID_IMFDXGIBuffer,
+                                                                    (void**)&dxgi_buffer)) && dxgi_buffer) {
+                            on_the_card = true;
+                            IMFDXGIBuffer_Release(dxgi_buffer);
+                        }
+                        IMFMediaBuffer_Release(buffer);
+                    }
+                    console_line(on_the_card
+                        ? "The frame came back as a texture on the card — the zero-copy path can be tried here."
+                        : "The frame came back as system memory — this machine cannot exercise the zero-copy path.");
+                    IMFSample_Release(sample);
+                }
+                IMFSourceReader_Release(reader);
+            }
+        }
+    }
+    if (manager) IMFDXGIDeviceManager_Release(manager);
+    mf_shutdown();
+    ID3D11DeviceContext_Release(context);
+    ID3D11Device_Release(device);
+    return code;
+}
+
 /* `--diag`: bring the graphics up, say what it got, and stop. One run
    from a command prompt answers "what is this machine actually using",
    which is otherwise guesswork from far away. */
@@ -4050,6 +4233,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
             if (cli.probe_media) {
                 int code = probe_media_file(&arena, cli.input);
+                free(memory);
+                CoUninitialize();
+                return code;
+            }
+
+            if (cli.probe_gpu) {
+                int code = probe_gpu_file(&arena, cli.input);
                 free(memory);
                 CoUninitialize();
                 return code;
