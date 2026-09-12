@@ -241,6 +241,15 @@ static bool ff_open_audio_stream(ff_media_t *m, ff_decode_t *d, int stream_index
     return true;
 }
 
+/* §3.16.1 / D-12: the subtitle formats that are text. A picture-based
+   one (DVD, Blu-ray, DVB) would need a second image path to draw, so it
+   is not offered at all rather than offered and then refused. */
+static bool ff_subtitle_is_text(enum AVCodecID id) {
+    return id == AV_CODEC_ID_SUBRIP || id == AV_CODEC_ID_TEXT ||
+           id == AV_CODEC_ID_WEBVTT || id == AV_CODEC_ID_MOV_TEXT ||
+           id == AV_CODEC_ID_ASS || id == AV_CODEC_ID_SSA;
+}
+
 /* ---- what the container holds (§3.16.2) ---- */
 
 static u8str_t ff_copy(char *buffer, size_t capacity, const char *text) {
@@ -263,7 +272,9 @@ static void ff_collect_tracks(ff_media_t *m, AVFormatContext *format) {
         rubraview_track_kind_t kind;
         if (par->codec_type == AVMEDIA_TYPE_VIDEO) kind = RUBRAVIEW_TRACK_VIDEO;
         else if (par->codec_type == AVMEDIA_TYPE_AUDIO) kind = RUBRAVIEW_TRACK_AUDIO;
-        else continue;
+        else if (par->codec_type == AVMEDIA_TYPE_SUBTITLE && ff_subtitle_is_text(par->codec_id))
+            kind = RUBRAVIEW_TRACK_SUBTITLE;
+        else continue;   /* picture-based subtitles are not listed: nothing can draw them (D-12) */
 
         size_t slot = m->tracks.count;
         const AVDictionaryEntry *language = g_ff.av_dict_get(stream->metadata, "language", NULL, 0);
@@ -647,6 +658,128 @@ static bool ff_audio_position(void *handle, double *out_position, double *out_wa
     return m && m->audio && rubraview_pal_audio_position(m->audio, out_position, out_wall);
 }
 
+/* §3.16.1 / D-12: read one text subtitle stream out of the file and
+   write it as SubRip, which the core parser already knows. No subtitle
+   *decoder* is involved: in every text format the packet's payload is
+   the line itself (Matroska's S_TEXT/UTF8 verbatim, ASS as its comma
+   fields, MP4 text behind a two-byte length).
+
+   The file is opened a second time on purpose. The decode thread owns
+   the first context and is reading from it; a second reader walking the
+   same one would move its position under it. */
+#define SUBTITLE_BLOB_MAX (4u * 1024u * 1024u)
+#define SUBTITLE_MAX_CUE_SECONDS 10.0
+
+static size_t ff_timecode(char *out, size_t capacity, double seconds) {
+    if (seconds < 0.0) seconds = 0.0;
+    int total_ms = (int)(seconds * 1000.0 + 0.5);
+    int ms = total_ms % 1000, total_s = total_ms / 1000;
+    int sec = total_s % 60, total_m = total_s / 60;
+    int min = total_m % 60, hour = total_m / 60;
+    int written = snprintf(out, capacity, "%02d:%02d:%02d,%03d", hour, min, sec, ms);
+    return written > 0 ? (size_t)written : 0;
+}
+
+/* The text inside one packet, whatever wrapping its format uses. */
+static void ff_subtitle_payload(enum AVCodecID id, const uint8_t *data, int size,
+                                const uint8_t **out_text, int *out_len) {
+    *out_text = data;
+    *out_len = size;
+    if (size <= 0) { *out_len = 0; return; }
+
+    if (id == AV_CODEC_ID_MOV_TEXT) {
+        /* Two bytes of length, then the text. */
+        if (size < 2) { *out_len = 0; return; }
+        int inner = (data[0] << 8) | data[1];
+        if (inner > size - 2) inner = size - 2;
+        *out_text = data + 2;
+        *out_len = inner;
+        return;
+    }
+    if (id == AV_CODEC_ID_ASS || id == AV_CODEC_ID_SSA) {
+        /* ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+           — eight commas, then the line. */
+        int commas = 0, i = 0;
+        for (; i < size && commas < 8; ++i) {
+            if (data[i] == ',') commas++;
+        }
+        if (commas == 8) {
+            *out_text = data + i;
+            *out_len = size - i;
+        }
+    }
+}
+
+static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int32_t stream_index) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !arena || stream_index < 0 || !g_ff.ok) return empty;
+
+    AVFormatContext *format = NULL;
+    if (g_ff.avformat_open_input(&format, m->path, NULL, NULL) < 0 || !format) return empty;
+    if (g_ff.avformat_find_stream_info(format, NULL) < 0 ||
+        (unsigned)stream_index >= format->nb_streams) {
+        g_ff.avformat_close_input(&format);
+        return empty;
+    }
+    const AVStream *stream = format->streams[stream_index];
+    if (stream->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE ||
+        !ff_subtitle_is_text(stream->codecpar->codec_id)) {
+        g_ff.avformat_close_input(&format);
+        return empty;
+    }
+
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, SUBTITLE_BLOB_MAX);
+    if (!proven_is_ok(res.err)) {
+        g_ff.avformat_close_input(&format);
+        return empty;
+    }
+    char *blob = (char*)(void*)res.value.ptr;
+    size_t used = 0;
+    int32_t number = 0;
+
+    AVPacket *packet = g_ff.av_packet_alloc();
+    while (packet && g_ff.av_read_frame(format, packet) >= 0) {
+        if (packet->stream_index != stream_index || packet->size <= 0 ||
+            packet->pts == AV_NOPTS_VALUE) {
+            g_ff.av_packet_unref(packet);
+            continue;
+        }
+        double start = stream_seconds(format, stream_index, packet->pts);
+        double length = packet->duration > 0
+            ? (double)packet->duration * av_q2d(stream->time_base) : SUBTITLE_MAX_CUE_SECONDS;
+        const uint8_t *text = NULL;
+        int text_len = 0;
+        ff_subtitle_payload(stream->codecpar->codec_id, packet->data, packet->size, &text, &text_len);
+
+        char from[32], to[32];
+        size_t from_len = ff_timecode(from, sizeof(from), start);
+        size_t to_len = ff_timecode(to, sizeof(to), start + length);
+        /* number, times, the line, a blank line — and the line itself
+           must hold no blank line of its own or the parser would read
+           one cue as two. */
+        if (text_len > 0 && used + (size_t)text_len + 64 < SUBTITLE_BLOB_MAX) {
+            used += (size_t)snprintf(blob + used, SUBTITLE_BLOB_MAX - used, "%d\n%.*s --> %.*s\n",
+                                     ++number, (int)from_len, from, (int)to_len, to);
+            for (int i = 0; i < text_len; ++i) {
+                char c = (char)text[i];
+                if (c == '\r') continue;
+                if (c == '\n' && used > 0 && blob[used - 1] == '\n') continue;
+                blob[used++] = c;
+            }
+            if (used > 0 && blob[used - 1] != '\n') blob[used++] = '\n';
+            blob[used++] = '\n';
+        }
+        g_ff.av_packet_unref(packet);
+    }
+    if (packet) g_ff.av_packet_free(&packet);
+    g_ff.avformat_close_input(&format);
+
+    if (used == 0) return empty;
+    blob[used] = '\0';   /* §7.2.3: allocated with room for it */
+    return (u8str_t){ .ptr = blob, .len = used };
+}
+
 static bool ff_select_audio_track(void *handle, int32_t stream_index) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || stream_index < 0) return false;
@@ -683,6 +816,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .audio_position = ff_audio_position,
     .tracks = ff_tracks,
     .select_audio_track = ff_select_audio_track,
+    .read_subtitle_stream = ff_read_subtitle_stream,
 };
 
 const rubraview_media_backend_api_t *rubraview_media_backend_ffmpeg(void) {

@@ -96,6 +96,10 @@ typedef struct rubraview_track {
     int32_t  channels;       /* audio only */
     bool     is_default;     /* the container's own default flag */
     bool     is_forced;      /* subtitles: forced narrative signs */
+    /* Subtitles come from two places: streams inside the container and
+       files beside it. The reader cycles through both in one list, and
+       picking one has to know which kind it is (D-12). */
+    bool     is_external;
 } rubraview_track_t;
 
 #define RUBRAVIEW_MAX_TRACKS 32

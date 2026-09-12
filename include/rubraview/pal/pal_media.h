@@ -128,6 +128,20 @@ bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t 
  */
 bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index);
 
+/**
+ * §3.16.1 / D-12: a text subtitle stream carried inside the container,
+ * handed over as SubRip text for the core parser. Empty when the
+ * backend cannot read it — Media Foundation never can, and no backend
+ * offers the picture-based subtitle formats, which is why those are not
+ * listed as tracks at all.
+ *
+ * Reads the file a second time, on the calling thread, and returns when
+ * it has the whole stream: the decode thread's own reading is not
+ * disturbed. Long films take a moment.
+ */
+u8str_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
+                                                 int32_t stream_index);
+
 #ifdef __cplusplus
 }
 #endif
