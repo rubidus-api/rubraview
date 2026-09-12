@@ -44,6 +44,7 @@ LZMA_OBJS_WIN = $(patsubst vendor/lzma/%.c,build/lzma-win/%.o,$(LZMA_SRCS))
 # jconfigint.h are hand-written for this build — upstream generates them
 # with CMake, which this project does not use.
 JPEG_INCLUDE = -Ivendor/libjpeg-turbo
+FFMPEG_INCLUDE = -Ivendor/ffmpeg/include
 # Five of the .c files upstream are not translation units at all: they
 # are colour-conversion bodies #included several times with different
 # macros. jstdhuff.c is the same. They must not be compiled on their own.
@@ -92,7 +93,9 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_image_wic.c \
                  src/pal/win32/pal_file_dialog_win32.c \
                  src/pal/win32/pal_media_mf.c \
-                 src/pal/win32/pal_audio_wasapi.c
+                 src/pal/win32/pal_audio_wasapi.c \
+                 src/pal/win32/pal_media_win32.c \
+                 src/pal/win32/pal_media_ffmpeg.c
 
 SRCS_APP = src/app/main.c
 
@@ -175,7 +178,7 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
 		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) \
-		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
+		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid \
 		-o dist/$(EXE_NAME)
