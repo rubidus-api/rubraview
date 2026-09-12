@@ -18,6 +18,10 @@ This project follows Keep a Changelog.
   this milestone and will be the zero-copy path when it is built (D-11).
 - settings.ini is read when the viewer starts, not only when the settings
   window is opened — until now every setting read while viewing came back 0.
+- Subtitles carried inside a file are shown too, not only files beside it:
+  the FFmpeg backend lists a film's text subtitle streams and reads one by
+  walking the container again, so no subtitle decoder is involved (D-12).
+  Picture-based subtitle formats are not offered — nothing can draw them.
 - The floating boxes come back where they were left (layout.ini).
 
 ## [0.0.2] - 2026-09-11

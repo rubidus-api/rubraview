@@ -1640,9 +1640,10 @@ and therefore no longer covered what §3 specifies.*
 - **Out of M5 by decision, the work itself unchanged:** RV-062 (D3D11VA
   zero-copy, §5.7) waits for a machine that can measure it — D-11 chose the
   zero-copy shape over a cheaper read-back one, so it is a piece of work of
-  its own rather than a corner of this milestone. RV-059's *embedded*
-  subtitle streams wait on the FFmpeg-only path D-10 describes; external
-  subtitle files — discovery, drawing, sync — are in M5 and done.
+  its own rather than a corner of this milestone. RV-059 is
+  complete: subtitle files beside a video and text subtitle streams inside
+  it are both found, shown and switched (D-12); picture-based subtitle
+  formats stay out, since nothing can draw them.
 - RV-084 audio-only files (§5.1 audio rows) play from the playlist and slide show with
   embedded album art shown — the D-6 minimum; everything else of §3.14 is post-1.0.
   RV-063 (Windows Media Foundation fallback) is withdrawn (D-4).
@@ -1739,7 +1740,7 @@ and therefore no longer covered what §3 specifies.*
 | 3.15.2 | In-app Metro picker | M3 | RV-043 | W |
 | 3.15.3 | macOS / Linux dialog backends | post-1.0 (D-1) | — | — |
 | 3.15.4 | Type-ahead, native IME search bar | M3 | RV-043 | W |
-| 3.16.1 | Subtitle formats, rendering, sync | M5 (embedded streams after M5, D-10) | RV-059 | W |
+| 3.16.1 | Subtitle formats, rendering, sync | M5 (text streams inside the file: D-12; picture formats out) | RV-059 | W |
 | 3.16.2 | Multi-track switching | M5 | RV-060 | W |
 | 3.17 | Reading history, resume, portable mode | M1 · M4 | RV-023, RV-048 | H+W |
 | 3.18 | Delete/undo, rename, 1–9 curation | M7 | RV-070, RV-071 | W |

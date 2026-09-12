@@ -174,8 +174,18 @@ int main(void) {
         /* One subtitle track, so the cycle is: it, then off, then it. */
         assert(rubraview_tracks_next(&set, RUBRAVIEW_TRACK_SUBTITLE, -1) == 2);
         assert(rubraview_tracks_next(&set, RUBRAVIEW_TRACK_SUBTITLE, 2) == -1);
+
+        /* D-12: subtitles come from two places and the cycle runs
+           through both — a stream inside the file, then a file beside
+           it, then off. Which kind a track is has to survive the trip. */
+        rubraview_tracks_add(&set, (rubraview_track_t){
+            .kind = RUBRAVIEW_TRACK_SUBTITLE, .codec = lit("srt"), .is_external = true });
+        assert(set.tracks[2].is_external == false);
+        assert(set.tracks[3].is_external == true);
+        assert(rubraview_tracks_next(&set, RUBRAVIEW_TRACK_SUBTITLE, 2) == 3);
+        assert(rubraview_tracks_next(&set, RUBRAVIEW_TRACK_SUBTITLE, 3) == -1);
     }
-    printf("  [PASS] Audio cycles round; subtitles cycle through off\n");
+    printf("  [PASS] Audio cycles round; subtitles cycle through off, inside the file and beside it\n");
 
     /* Test 11: the labels a menu shows. */
     {
