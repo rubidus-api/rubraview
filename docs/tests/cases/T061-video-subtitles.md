@@ -47,10 +47,10 @@ Put a `.srt` beside a short video with the same base name — `e_clip.mp4` and
 
 ## Measured on the Windows 11 VM, 2026-09-12 (v0.0.2)
 
-All four steps as described. The film reopens from the start when it is played
-again after the end, and reopening re-reads the subtitle file — so a sync
-offset set by `Z`/`X` does not survive a replay. That is recorded as a backlog
-item, not a defect against this case.
+All four steps as described. Playing the film again after the end reopens it
+and re-reads the subtitle file; the sync offset set by `Z`/`X` is kept for that
+film and comes back with it (measured 2026-09-13: `+2.5 s`, replay, one more
+`X` → `+3.0 s`).
 
 > Capture the screen from inside the logged-on session and close to the moment
 > you mean: `vmkeys.sh <keys> 1 50 <ms>` photographs the screen `<ms>` after the

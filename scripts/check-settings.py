@@ -30,9 +30,13 @@ ROW = re.compile(
 )
 WIRED = re.compile(r'(BOOL_ROW|NUM_ROW|CHOICE_ROW|PATH_ROW)\("[^"]*",\s*"[^"]*".*?(true|false)\s*\)', re.S)
 
-# A read: rubraview_ini_get*(&doc, U8("section"), U8("key"))
+# A read, in either of the two shapes the app uses:
+#   rubraview_ini_get*(&doc, U8("section"), U8("key"))      — straight from the file
+#   rubraview_settings_get*(&app->settings, U8("s"), U8("k")) — from what was loaded
+# The second one is what a setting read while viewing looks like, now that
+# settings.ini is loaded at startup rather than when the window opens.
 READ = re.compile(
-    r'rubraview_ini_get\w*\(\s*&?\w+\s*,\s*U8\("([^"]*)"\)\s*,\s*U8\("([^"]*)"\)'
+    r'rubraview_(?:ini|settings)_get\w*\(\s*&?[\w.>-]+\s*,\s*U8\("([^"]*)"\)\s*,\s*U8\("([^"]*)"\)'
 )
 
 
