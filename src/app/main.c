@@ -219,6 +219,13 @@ typedef struct app_state {
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
     rubraview_media_backend_t media_preferred; /* §3.22 [video] decoder — the one tried first (D-9) */
+
+    /* §3.6: an anchor is a button and a handle at once; which one a press
+       turns out to be is known only when it is released. */
+    rubraview_box_t       *box_drag;          /* the box a press landed on, NULL when none */
+    double                 box_grab_dx, box_grab_dy;   /* where inside the anchor it was grabbed */
+    double                 box_press_x, box_press_y;
+    bool                   box_drag_moved;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
@@ -2670,6 +2677,9 @@ static void render_frame(app_state_t *app) {
 
 static void tick_timers(app_state_t *app, double dt) {
     rubraview_osd_tick(&app->osd, dt);
+    /* Where the pointer is now, not where it last moved — the same reason
+       as the boxes below: a pointer resting on the titlebar must keep it. */
+    rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
     animation_tick(app, dt);
@@ -3559,6 +3569,53 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     return presented ? 0 : 1;
 }
 
+/* §3.6: dragging a floating box. The press is held: travel more than a
+   few pixels and it was a drag, otherwise it was the click the anchor
+   would have done anyway. */
+#define BOX_DRAG_SLOP 4.0
+
+static bool box_press(app_state_t *app, double x, double y) {
+    rubraview_tile_metrics_t metrics =
+        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
+    for (size_t i = 0; i < 2; ++i) {
+        if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) == RUBRAVIEW_ANCHOR_NONE) continue;
+        app->box_drag = boxes[i];
+        app->box_grab_dx = x - boxes[i]->anchor_x;
+        app->box_grab_dy = y - boxes[i]->anchor_y;
+        app->box_press_x = x;
+        app->box_press_y = y;
+        app->box_drag_moved = false;
+        return true;
+    }
+    return false;
+}
+
+static void box_drag_motion(app_state_t *app, double x, double y) {
+    if (!app->box_drag) return;
+    if (!app->box_drag_moved) {
+        double dx = x - app->box_press_x, dy = y - app->box_press_y;
+        if (dx * dx + dy * dy < BOX_DRAG_SLOP * BOX_DRAG_SLOP) return;
+        app->box_drag_moved = true;
+    }
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    rubraview_tile_metrics_t metrics =
+        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_box_drag_to(app->box_drag, &metrics, x - app->box_grab_dx, y - app->box_grab_dy,
+                          (double)win_w, (double)win_h);
+}
+
+static void box_release(app_state_t *app, double x, double y) {
+    if (!app->box_drag) return;
+    rubraview_box_t *box = app->box_drag;
+    app->box_drag = NULL;
+    if (app->box_drag_moved) return;   /* a drag: the box stays where it was let go */
+    rubraview_tile_metrics_t metrics =
+        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    if (rubraview_box_click(box, &metrics, x, y) && box == &app->menubox) sync_menubox_tiles(app);
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)instance; (void)previous; (void)command_line; (void)show;
 
@@ -3821,6 +3878,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app.window));
                     rubraview_box_pointer(&app.toolbox, &metrics, event.mouse.x, event.mouse.y);
                     rubraview_box_pointer(&app.menubox, &metrics, event.mouse.x, event.mouse.y);
+                    box_drag_motion(&app, event.mouse.x, event.mouse.y);
                     break;
                 }
 
@@ -3860,6 +3918,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                     if (settings_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    /* The anchors answer before the rest of the chrome: a
+                       press there is a click *or* the start of a drag. */
+                    if (box_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
                     rubraview_pointer_context_t ctx = pointer_context(&app);
@@ -3881,6 +3942,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                     rubraview_panel_release(&app.panel);
+                    box_release(&app, event.mouse.x, event.mouse.y);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {

@@ -114,9 +114,13 @@ int main(void) {
         assert(rubraview_titlebar_pointer_moved(&bar, 5.0)); /* inside the trigger band */
         assert(bar.shown);
 
-        /* Still over the revealed bar: it must not start hiding. */
-        rubraview_titlebar_pointer_moved(&bar, 20.0);
-        assert(!rubraview_titlebar_tick(&bar, 0.4));
+        /* Still over the revealed bar: it must not start hiding. The
+           pointer is re-stated every pass, as the viewer does — a still
+           mouse sends no events of its own. */
+        for (int i = 0; i < 4; ++i) {
+            rubraview_titlebar_pointer_moved(&bar, 20.0);
+            assert(!rubraview_titlebar_tick(&bar, 0.1));
+        }
         assert(bar.shown);
 
         /* Pointer moves well below the bar: the countdown starts. */
@@ -127,6 +131,29 @@ int main(void) {
         assert(!bar.shown);
     }
     printf("  [PASS] Titlebar reveals on the top edge and hides after the grace period\n");
+
+    /* Test: the bar stays while the pointer rests on it, and a pointer
+       wandering elsewhere does not keep it up. The caller re-states the
+       pointer every pass, because a still mouse sends no events. */
+    {
+        rubraview_titlebar_t bar = rubraview_titlebar_create(1.0);
+        rubraview_titlebar_pointer_moved(&bar, 2.0);
+        assert(bar.shown);
+
+        for (int i = 0; i < 10; ++i) {                 /* a second of resting on it */
+            rubraview_titlebar_pointer_moved(&bar, 2.0);
+            assert(!rubraview_titlebar_tick(&bar, 0.1));
+        }
+        assert(bar.shown);
+
+        bool hidden = false;
+        for (int i = 0; i < 10 && !hidden; ++i) {      /* away, still moving about */
+            rubraview_titlebar_pointer_moved(&bar, 400.0 + i);
+            hidden = rubraview_titlebar_tick(&bar, 0.1);
+        }
+        assert(hidden && !bar.shown);
+    }
+    printf("  [PASS] The titlebar stays under a resting pointer and hides once left\n");
 
     /* Test 7: The control cluster sits at the right edge in the order
        minimize, maximize, fullscreen, close (§3.21.3). */

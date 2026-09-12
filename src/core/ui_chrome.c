@@ -88,7 +88,11 @@ bool rubraview_titlebar_pointer_moved(rubraview_titlebar_t *bar, double pointer_
         return false;
     }
 
-    if (bar->shown) bar->idle_seconds = 0.0; /* leaving now: start the grace period */
+    /* Clear of the bar: the countdown runs. It is not restarted here —
+       `idle_seconds` counts from when the pointer last sat on the bar, so
+       moving the mouse about elsewhere no longer keeps the bar up (and a
+       pointer resting on the bar no longer loses it, because the caller
+       re-states where the pointer is every pass). */
     return false;
 }
 
