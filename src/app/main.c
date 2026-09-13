@@ -3171,14 +3171,15 @@ static void layout_load(app_state_t *app) {
 
 static void layout_save(app_state_t *app) {
     if (app->layout_path.len == 0) return;
-    char text[256];
-    int n = snprintf(text, sizeof(text),
-                     "[boxes]\ntoolbox_x = %.1f\ntoolbox_y = %.1f\n"
-                     "menubox_x = %.1f\nmenubox_y = %.1f\n",
-                     app->toolbox.anchor_x, app->toolbox.anchor_y,
-                     app->menubox.anchor_x, app->menubox.anchor_y);
-    if (n <= 0) return;
-    rubraview_pal_fs_write_file(app->layout_path, (u8str_t){ .ptr = text, .len = (size_t)n });
+    /* Through the configuration writer, so the file is in the INI and
+       TOML subset (D-13). */
+    rubraview_ini_doc_t doc = {0};
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_x"), app->toolbox.anchor_x);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_y"), app->toolbox.anchor_y);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_x"), app->menubox.anchor_x);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_y"), app->menubox.anchor_y);
+    u8str_t text = rubraview_ini_serialize(app->arena, &doc);
+    if (text.len > 0) rubraview_pal_fs_write_file(app->layout_path, text);
 }
 
 static void history_remember(app_state_t *app) {
@@ -4298,8 +4299,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 u8str_t settings = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
                 bool single_instance = true;
                 if (settings.len > 0) {
-                    rubraview_ini_doc_t doc = rubraview_ini_parse(&arena, settings);
-                    single_instance = rubraview_ini_get_bool(&doc, U8(""), U8("single_instance"), true);
+                    /* Through the settings loader, which knows where the key
+                       lives now ([general]) and where older files put it. */
+                    rubraview_settings_t loaded = rubraview_settings_load(&arena, settings);
+                    single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
                 }
                 if (cli.new_instance) single_instance = false;
 
