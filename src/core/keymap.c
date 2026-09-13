@@ -109,8 +109,13 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
 
     binding_buf_t buf = {0};
     for (size_t i = 0; i < doc.count; ++i) {
+        /* D-13: `[ui]` is the context everything falls back to. Before it
+           had a name those bindings sat above the first section, and an
+           older keymap.ini that still does that reads the same way. */
+        u8str_t context = doc.entries[i].section;
+        if (context.len == 2 && memcmp(context.ptr, "ui", 2) == 0) context = (u8str_t){ .ptr = "", .len = 0 };
         rubraview_key_binding_t binding = {
-            .context = doc.entries[i].section,
+            .context = context,
             .action = doc.entries[i].key,
             .combos = NULL,
             .combo_count = 0,
