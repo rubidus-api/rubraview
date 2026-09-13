@@ -59,7 +59,8 @@ typedef enum rubraview_settings_button {
 } rubraview_settings_button_t;
 
 #define RUBRAVIEW_SETTINGS_VIEW_MAX_LINES 96
-#define RUBRAVIEW_TABLE_ROWS 12   /* how tall a `table` line is */
+#define RUBRAVIEW_TABLE_ROWS 12   /* how tall a `table` line is until the viewer says how many rows it has */
+#define RUBRAVIEW_TABLE_ROWS_MAX 1024
 
 typedef struct rubraview_settings_view {
     const rubraview_settings_doc_t *doc;
@@ -72,6 +73,7 @@ typedef struct rubraview_settings_view {
     int32_t focus_button;            /* a button, or RUBRAVIEW_BUTTON_NONE */
     int32_t scroll;                  /* the first content row shown */
     int32_t dragging_line;           /* a number being dragged, or -1 */
+    int32_t table_rows;              /* how tall a `table` line is, in rows */
 
     rubraview_settings_line_t lines[RUBRAVIEW_SETTINGS_VIEW_MAX_LINES];
     size_t line_count;
@@ -83,6 +85,13 @@ rubraview_settings_view_t rubraview_settings_view_create(const rubraview_setting
 
 /** The window changed size: lay the page out again, keeping the focus in sight. */
 void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t cols, int32_t rows);
+
+/**
+ * How many rows `table` lines have (a heading and the keymap's bindings,
+ * say), so every row can be scrolled to rather than the first dozen.
+ * Clamped to 1..RUBRAVIEW_TABLE_ROWS_MAX.
+ */
+void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows);
 
 /** Go to a page; focus its first setting. */
 void rubraview_settings_view_set_page(rubraview_settings_view_t *view, int32_t page);

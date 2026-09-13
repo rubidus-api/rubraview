@@ -337,6 +337,10 @@ typedef struct app_state {
     rubraview_settings_view_t  settings_view;
     double                     settings_font, settings_cell_w, settings_cell_h;
     bool                       settings_dirty;       /* its picture is out of date */
+    double                     settings_info_seconds; /* when `info` lines were last redrawn */
+    /* Where the window was left (layout.ini); width 0 until known. Closing
+       hides the window rather than destroying it, so it is made once. */
+    int32_t                    settings_frame[4];     /* x, y, width, height in screen pixels */
     bool                       settings_mouse_down;
     char                       settings_message[160]; /* the last action's result, under the page */
 
@@ -371,6 +375,7 @@ static void panel_close(app_state_t *app);
 static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
+static void layout_save(app_state_t *app);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
@@ -2847,6 +2852,20 @@ static void settings_open(app_state_t *app) {
     /* What is on disk now — another copy of the program may have written it. */
     settings_read_file(app);
 
+    if (app->settings_window) {
+        /* Made on the first F10 and hidden on close: shown again as it was. */
+        rubraview_pal_window_set_visible(app->settings_window, true);
+        settings_measure(app);
+        int32_t cols = 0, rows = 0;
+        settings_grid(app, &cols, &rows);
+        rubraview_settings_view_resize(&app->settings_view, cols, rows);
+        app->settings_open = true;
+        app->settings_dirty = true;
+        app->settings_mouse_down = false;
+        app->settings_message[0] = '\0';
+        return;
+    }
+
     rubraview_window_config_t config = {
         .title = "Rubraview settings", .width = 980, .height = 680, .owner = app->window,
     };
@@ -2854,6 +2873,10 @@ static void settings_open(app_state_t *app) {
     if (!app->settings_window) {
         osd_say(app, U8("the settings window could not be opened"));
         return;
+    }
+    if (app->settings_frame[2] > 0 && app->settings_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->settings_window, app->settings_frame[0], app->settings_frame[1],
+                                       app->settings_frame[2], app->settings_frame[3]);
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
@@ -2869,6 +2892,7 @@ static void settings_open(app_state_t *app) {
     int32_t cols = 0, rows = 0;
     settings_grid(app, &cols, &rows);
     app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
+    rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);  /* heading + bindings */
     app->settings_open = true;
     app->settings_dirty = true;
     app->settings_mouse_down = false;
@@ -2892,11 +2916,11 @@ static void settings_close(app_state_t *app) {
             osd_say(app, U8("could not write settings.ini"));
         }
     }
-    rubraview_pal_render_destroy(app->settings_renderer);
-    rubraview_pal_window_destroy(app->settings_window);
-    app->settings_renderer = NULL;
-    app->settings_window = NULL;
+    int32_t *f = app->settings_frame;
+    if (!rubraview_pal_window_get_frame(app->settings_window, &f[0], &f[1], &f[2], &f[3])) f[2] = f[3] = 0;
+    rubraview_pal_window_set_visible(app->settings_window, false);
     app->settings_open = false;
+    layout_save(app);
 }
 
 /* What a change means for the viewer right now, beyond what it reads
@@ -3123,7 +3147,9 @@ static void draw_settings_window(app_state_t *app) {
             u8str_t text = rubraview_settings_line_text(v, &app->settings, &sources, i, k, line, sizeof(line));
             uint32_t color = SETTINGS_TEXT;
             if (ln->kind == RUBRAVIEW_LINE_SECTION) color = SETTINGS_ACCENT;
-            if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired) color = SETTINGS_DIM;
+            /* Not read by the viewer yet: dimmed, except under the focus bar, where dim text is unreadable. */
+            if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired &&
+                (int32_t)i != v->focus_line) color = SETTINGS_DIM;
             rubraview_pal_render_draw_text_mono(r, text, x0, y, fs, color);
         }
     }
@@ -3342,8 +3368,8 @@ static void history_load(app_state_t *app) {
    are not settings the reader edits in a dialog — they are where the
    hands left them — so they live in their own small file beside the
    reading history, under the same portable-or-AppData rule. */
-static double ini_number(const rubraview_ini_doc_t *doc, u8str_t key, double fallback) {
-    const u8str_t *text = rubraview_ini_get(doc, U8("boxes"), key);
+static double ini_number(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double fallback) {
+    const u8str_t *text = rubraview_ini_get(doc, section, key);
     if (!text || text->len == 0 || text->len > 31) return fallback;
     char buffer[32];
     memcpy(buffer, text->ptr, text->len);
@@ -3372,8 +3398,8 @@ static void layout_load(app_state_t *app) {
         { &app->menubox, "menubox_x", "menubox_y" },
     };
     for (size_t i = 0; i < sizeof(BOXES) / sizeof(BOXES[0]); ++i) {
-        double x = ini_number(&doc, cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
-        double y = ini_number(&doc, cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
+        double x = ini_number(&doc, U8("boxes"), cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
+        double y = ini_number(&doc, U8("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
         if (x < 0.0) x = 0.0;
         if (y < 0.0) y = 0.0;
         if (max_x > 0.0 && x > max_x) x = max_x;
@@ -3381,6 +3407,15 @@ static void layout_load(app_state_t *app) {
         BOXES[i].box->anchor_x = x;
         BOXES[i].box->anchor_y = y;
     }
+
+    /* The settings window's frame; the PAL pulls it onto a screen when it is placed. */
+    static const char *const FRAME_KEYS[4] = { "x", "y", "width", "height" };
+    int32_t frame[4];
+    for (size_t i = 0; i < 4; ++i) {
+        double v = ini_number(&doc, U8("settings_window"), cstr(FRAME_KEYS[i]), 0.0);
+        frame[i] = (v > -100000.0 && v < 100000.0) ? (int32_t)v : 0;
+    }
+    if (frame[2] >= 200 && frame[3] >= 150) memcpy(app->settings_frame, frame, sizeof(frame));
 }
 
 static void layout_save(app_state_t *app) {
@@ -3392,6 +3427,12 @@ static void layout_save(app_state_t *app) {
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_y"), app->toolbox.anchor_y);
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_x"), app->menubox.anchor_x);
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_y"), app->menubox.anchor_y);
+    if (app->settings_frame[2] > 0 && app->settings_frame[3] > 0) {
+        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("x"), app->settings_frame[0]);
+        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("y"), app->settings_frame[1]);
+        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("width"), app->settings_frame[2]);
+        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("height"), app->settings_frame[3]);
+    }
     u8str_t text = rubraview_ini_serialize(app->arena, &doc);
     if (text.len > 0) rubraview_pal_fs_write_file(app->layout_path, text);
 }
@@ -4809,6 +4850,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             render_frame(&app);
             if (settled) last_idle_frame_seconds = now;
         }
+        if (app.settings_open && now - app.settings_info_seconds >= 1.0) {
+            /* `info` lines (cache in use, the adapter) are live data: once a second. */
+            app.settings_info_seconds = now;
+            app.settings_dirty = true;
+        }
         draw_settings_window(&app);
 
         /* A queued decode takes the loop's idle slice. With nothing to
@@ -4826,6 +4872,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     /* §3.22: closing the viewer with the settings window open still
        writes what was changed in it. */
     settings_close(&app);
+    if (app.settings_window) {
+        rubraview_pal_render_destroy(app.settings_renderer);
+        rubraview_pal_window_destroy(app.settings_window);
+    }
 
     /* §3.6 / §3.17.1: remember where the reader stopped, and where the
        boxes were left, before shutting down. */

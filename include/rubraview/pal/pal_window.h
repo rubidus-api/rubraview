@@ -153,6 +153,19 @@ void rubraview_pal_window_set_title(rubraview_window_t *window, const char *titl
 
 void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height);
 
+/**
+ * §3.22.1: where the window is on the desktop — its outer frame, in
+ * screen pixels — so a window can come back where it was left. Returns
+ * false when there is no window.
+ */
+bool rubraview_pal_window_get_frame(const rubraview_window_t *window,
+                                    int32_t *out_x, int32_t *out_y, int32_t *out_width, int32_t *out_height);
+/** Move and size the frame; a place off every screen is pulled back onto the nearest one. */
+void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32_t y, int32_t width, int32_t height);
+
+/** Hide a window without destroying it, or show it again in front. */
+void rubraview_pal_window_set_visible(rubraview_window_t *window, bool visible);
+
 /** §4.2: DPI / 96.0 for the monitor the window is currently on. */
 double rubraview_pal_window_dpi_scale(const rubraview_window_t *window);
 
