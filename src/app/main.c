@@ -4581,6 +4581,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        other one still gets its turn when this one cannot. */
     app.media_preferred = preferred_backend(&arena);
     history_load(&app);
+    /* history_load read settings.ini from wherever it lives (beside the
+       program or in AppData); the decoder choice comes from that, not
+       only from a file in the working folder. */
+    settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, TOOLBOX_TILES);
