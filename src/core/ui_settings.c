@@ -48,6 +48,30 @@ static int32_t cells_of(u8str_t text) {
     return cells;
 }
 
+size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity) {
+    if (!out || capacity == 0) return 0;
+    size_t count = 0;
+    int32_t col = 0;
+    bool open_narrow = false;
+    for (size_t i = 0; i < text.len;) {
+        uint32_t cp = 0;
+        size_t n = next_code_point(text.ptr + i, text.len - i, &cp);
+        int w = cell_width(cp);
+        if (w == 1 && open_narrow) {
+            out[count - 1].length += n;
+        } else if (count == capacity) {
+            out[count - 1].length += n;      /* out of room: the rest rides on the last run */
+        } else {
+            out[count++] = (rubraview_cell_run_t){ .offset = i, .length = n, .col = col };
+            open_narrow = w == 1;
+        }
+        if (count == capacity) open_narrow = true;
+        col += w;
+        i += n;
+    }
+    return count;
+}
+
 /* Writes into a buffer by cells: text cut to fit, then spaces to fill. */
 typedef struct cell_writer {
     char  *buffer;
