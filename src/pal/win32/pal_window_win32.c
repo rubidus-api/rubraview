@@ -426,6 +426,24 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+/* Place a frame, pulled inside the work area of the monitor nearest to
+   it: no larger than that area, no part of it past an edge or under the
+   taskbar. */
+static void keep_on_screen(HWND hwnd, int x, int y, int ww, int wh) {
+    RECT want = { x, y, x + ww, y + wh };
+    MONITORINFO mi = { .cbSize = sizeof(mi) };
+    if (!GetMonitorInfoW(MonitorFromRect(&want, MONITOR_DEFAULTTONEAREST), &mi)) return;
+    RECT wa = mi.rcWork;
+    int aw = wa.right - wa.left, ah = wa.bottom - wa.top;
+    if (ww > aw) ww = aw;
+    if (wh > ah) wh = ah;
+    if (x + ww > wa.right) x = wa.right - ww;
+    if (y + wh > wa.bottom) y = wa.bottom - wh;
+    if (x < wa.left) x = wa.left;
+    if (y < wa.top) y = wa.top;
+    SetWindowPos(hwnd, NULL, x, y, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rubraview_window_config_t *config) {
     if (!arena || !config) return NULL;
 
@@ -498,21 +516,9 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
        then leaves the window over the taskbar and past the edge. Keep
        the first placement inside the monitor's work area. */
     {
-        MONITORINFO mi = { .cbSize = sizeof(mi) };
         RECT r;
-        if (GetWindowRect(hwnd, &r) &&
-            GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
-            RECT wa = mi.rcWork;
-            int ww = r.right - r.left, wh = r.bottom - r.top;
-            int aw = wa.right - wa.left, ah = wa.bottom - wa.top;
-            if (ww > aw) ww = aw;
-            if (wh > ah) wh = ah;
-            int x = r.left, y = r.top;
-            if (x + ww > wa.right) x = wa.right - ww;
-            if (y + wh > wa.bottom) y = wa.bottom - wh;
-            if (x < wa.left) x = wa.left;
-            if (y < wa.top) y = wa.top;
-            SetWindowPos(hwnd, NULL, x, y, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+        if (GetWindowRect(hwnd, &r)) {
+            keep_on_screen(hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top);
         }
     }
 
@@ -584,6 +590,33 @@ void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *ou
     if (!window) return;
     if (out_width) *out_width = window->width;
     if (out_height) *out_height = window->height;
+}
+
+bool rubraview_pal_window_get_frame(const rubraview_window_t *window,
+                                    int32_t *out_x, int32_t *out_y, int32_t *out_width, int32_t *out_height) {
+    RECT r;
+    if (!window || !window->hwnd || !GetWindowRect(window->hwnd, &r)) return false;
+    if (out_x) *out_x = r.left;
+    if (out_y) *out_y = r.top;
+    if (out_width) *out_width = r.right - r.left;
+    if (out_height) *out_height = r.bottom - r.top;
+    return true;
+}
+
+void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!window || !window->hwnd || width <= 0 || height <= 0) return;
+    keep_on_screen(window->hwnd, x, y, width, height);
+}
+
+void rubraview_pal_window_set_visible(rubraview_window_t *window, bool visible) {
+    if (!window || !window->hwnd) return;
+    if (visible) {
+        window->should_close = false;
+        ShowWindow(window->hwnd, SW_SHOW);
+        SetForegroundWindow(window->hwnd);
+    } else {
+        ShowWindow(window->hwnd, SW_HIDE);
+    }
 }
 
 double rubraview_pal_window_dpi_scale(const rubraview_window_t *window) {
