@@ -172,6 +172,18 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     uint32_t argb,
                                     rubraview_text_align_t align);
 
+/**
+ * §3.22 / D-13: the settings window is a grid of fixed-width cells. This
+ * is how big one cell is at `font_size` in the fixed-width face — the
+ * width of one character and the height of one line.
+ */
+bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
+                                    double *out_width, double *out_height);
+
+/** One line of fixed-width text, its top-left at (x, y), never wrapped. */
+bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t text,
+                                         double x, double y, double font_size, uint32_t argb);
+
 #ifdef __cplusplus
 }
 #endif

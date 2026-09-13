@@ -296,6 +296,12 @@ static bool one_line(parser_t *p, u8str_t line) {
         if (n != 2 || t[1].kind != TOKEN_WORD) return fail(p, "table needs a source name");
         return add_node(p, (rubraview_settings_node_t){ .kind = RUBRAVIEW_NODE_TABLE, .page = p->page, .name = t[1].text });
     }
+    if (word_is(t[0], "action")) {
+        if (n != 3 || t[1].kind != TOKEN_WORD || t[2].kind != TOKEN_QUOTED) return fail(p, "action needs a name and a \"label\"");
+        return add_node(p, (rubraview_settings_node_t){
+            .kind = RUBRAVIEW_NODE_ACTION, .page = p->page, .name = t[1].text, .text = t[2].text,
+        });
+    }
     return fail(p, "not a kind of line this document knows");
 }
 
