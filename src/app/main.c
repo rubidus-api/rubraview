@@ -62,6 +62,9 @@
 #include "rubraview/ui_panel.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/settings.h"
+#include "rubraview/settings_doc.h"
+#include "rubraview/ui_settings.h"
+#include "rubraview/pal/pal_file_dialog.h"
 #include "rubraview/version.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
@@ -323,12 +326,19 @@ typedef struct app_state {
     /* §3.22: the settings window. It is the same panel model again,
        with a tab strip above it — one tab's settings at a time. */
     bool                     settings_open;
-    rubraview_settings_tab_t settings_tab;
     rubraview_settings_t     settings;
-    rubraview_settings_t     settings_saved;   /* what is on disk, for Cancel and for Apply's state */
+    rubraview_settings_t     settings_saved;   /* what the file held when the window opened — Revert goes back to it */
     u8str_t                  settings_path;
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
-    rubraview_panel_t        settings_panel;
+    /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
+       from the settings document. */
+    rubraview_window_t        *settings_window;
+    rubraview_renderer_t      *settings_renderer;
+    rubraview_settings_view_t  settings_view;
+    double                     settings_font, settings_cell_w, settings_cell_h;
+    bool                       settings_dirty;       /* its picture is out of date */
+    bool                       settings_mouse_down;
+    char                       settings_message[160]; /* the last action's result, under the page */
 
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
@@ -360,7 +370,7 @@ static void finish_open(app_state_t *app, size_t start_page);
 static void panel_close(app_state_t *app);
 static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
-static void settings_close(app_state_t *app, bool keep_changes);
+static void settings_close(app_state_t *app);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
@@ -1235,7 +1245,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
 
     if (action_is(action, "quit")) {
         /* Esc closes what is open before it closes the program. */
-        if (app->settings_open) { settings_close(app, false); return; }
+        if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
         rubraview_pal_window_request_close(app->window);
     } else if (action_is(action, "next_page")) {
@@ -1350,7 +1360,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (action_is(action, "rename_file")) {
         rename_begin(app);
     } else if (action_is(action, "open_settings")) {
-        if (app->settings_open) settings_close(app, false);
+        if (app->settings_open) settings_close(app);
         else settings_open(app);
     } else if (action_is(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
@@ -1877,6 +1887,27 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* Text with a dark outline around it, for subtitles and their preview.
+   The text PAL draws flat text, so the outline is the same string drawn
+   behind it, displaced. Four corners were enough at two pixels; at eight
+   they came apart into four ghost copies (VM, 2026-09-13), so it is
+   eight directions, and a second ring at half the distance once the
+   outline is wide enough to show a gap. */
+static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+                               double size, double outline, uint32_t argb) {
+    static const double DX[8] = { -1.0, 0.0, 1.0, -1.0, 1.0, -1.0, 0.0, 1.0 };
+    static const double DY[8] = { -1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0 };
+    int rings = outline > 3.0 ? 2 : 1;
+    for (int ring = 0; outline > 0.0 && ring < rings; ++ring) {
+        double off = ring == 0 ? outline : outline * 0.5;
+        for (size_t i = 0; i < 8; ++i) {
+            rubraview_pal_rect_t shadow = { rect.x + DX[i] * off, rect.y + DY[i] * off, rect.width, rect.height };
+            rubraview_pal_render_draw_text(renderer, text, shadow, size, 0xFF000000u, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+    rubraview_pal_render_draw_text(renderer, text, rect, size, argb, RUBRAVIEW_TEXT_CENTER);
+}
+
 /* §3.16.1 / R135: the line of dialogue for where the film is now, laid
    over the picture with a dark outline so it reads on any background. */
 static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
@@ -1904,20 +1935,9 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
                                   (double)win_w * 0.9, height };
 
     /* R135 asks for a two-pixel outline, and §3.22.2.5 lets the reader
-       change it (0 turns it off). The text PAL draws flat text, so the
-       outline is the same string drawn four times behind it — which
-       keeps this out of the PAL header. */
-    double off = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
-    static const double DX[4] = { -1.0, 1.0, -1.0, 1.0 };
-    static const double DY[4] = { -1.0, -1.0, 1.0, 1.0 };
-    for (size_t i = 0; off > 0.0 && i < 4; ++i) {
-        rubraview_pal_rect_t shadow = { rect.x + DX[i] * off, rect.y + DY[i] * off,
-                                        rect.width, rect.height };
-        rubraview_pal_render_draw_text(app->renderer, cue->text, shadow, font,
-                                       0xFF000000u, RUBRAVIEW_TEXT_CENTER);
-    }
-    rubraview_pal_render_draw_text(app->renderer, cue->text, rect, font,
-                                   0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
+       change it (0 turns it off). */
+    double outline = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
+    draw_outlined_text(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu);
 }
 
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
@@ -2692,84 +2712,19 @@ static void draw_panel(app_state_t *app) {
 }
 
 
-/* ---- the settings window (§3.22), RV-082 ---- */
+/* ---- the settings window (§3.22), RV-082, D-13 ---- */
 
-/* §3.22.1 calls for a separate top-level window. This is drawn inside
-   the viewer's own window instead — the "modern Metro frameless dialog"
-   the same sentence offers as the alternative — because a second HWND
-   would need its own message loop, its own DPI handling and its own
-   renderer, none of which changes what the reader can configure. The
-   difference is written down in T048 rather than left to be discovered. */
+/* §3.22.1 asks for a separate top-level window, and since D-13 that is
+   what it is: a window owned by the viewer's, drawn by its own renderer,
+   pumped by the same loop. What is on it is not written here control by
+   control — the settings document says what each page holds, the
+   interpreter (ui_settings) lays it out on a grid of fixed-width cells
+   and turns keys and clicks into changes, and this code only prints the
+   lines it is given and does what an event names.
 
-#define SETTINGS_ROW_BASE 1000   /* row ids are SETTINGS_ROW_BASE + schema index */
-
-enum { SETTINGS_OK = 900, SETTINGS_CANCEL, SETTINGS_APPLY, SETTINGS_DEFAULTS,
-       SETTINGS_REGISTER, SETTINGS_UNREGISTER };
-
-static void settings_build_panel(app_state_t *app) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    app->settings_panel = rubraview_panel_create(rubraview_settings_tab_name(app->settings_tab), dpi);
-
-    size_t schema_count = 0;
-    const rubraview_setting_def_t *schema = rubraview_settings_schema(&schema_count);
-
-    for (size_t i = 0; i < schema_count; ++i) {
-        const rubraview_setting_def_t *def = &schema[i];
-        if (def->tab != app->settings_tab) continue;
-
-        int32_t id = SETTINGS_ROW_BASE + (int32_t)i;
-        double value = rubraview_settings_get(&app->settings, def->section, def->key);
-
-        switch (def->type) {
-            case RUBRAVIEW_SETTING_BOOL:
-                rubraview_panel_add_toggle(&app->settings_panel, id, def->label, value > 0.5);
-                break;
-            case RUBRAVIEW_SETTING_CHOICE:
-                rubraview_panel_add_choice(&app->settings_panel, id, def->label,
-                                           (int32_t)value, def->choice_count);
-                break;
-            case RUBRAVIEW_SETTING_PATH:
-                /* A folder needs a text field or a browse dialog, and
-                   this panel has neither yet; the row is shown so the
-                   setting is visible, and disabled so it does not
-                   pretend to be editable. */
-                rubraview_panel_add_button(&app->settings_panel, id, def->label);
-                if (app->settings_panel.row_count > 0) {
-                    app->settings_panel.rows[app->settings_panel.row_count - 1].enabled = false;
-                }
-                break;
-            case RUBRAVIEW_SETTING_INT:
-            case RUBRAVIEW_SETTING_FLOAT:
-            default:
-                rubraview_panel_add_slider(&app->settings_panel, id, def->label, value,
-                                           def->min_value, def->max_value, def->step);
-                break;
-        }
-
-        /* §3.22: a setting nothing reads yet is shown greyed rather than
-           hidden. A gap the reader cannot see does not get closed. */
-        if (!def->wired && app->settings_panel.row_count > 0) {
-            app->settings_panel.rows[app->settings_panel.row_count - 1].enabled = false;
-        }
-    }
-
-    rubraview_panel_add_separator(&app->settings_panel);
-    if (app->settings_tab == RUBRAVIEW_TAB_GENERAL) {
-        rubraview_panel_add_button(&app->settings_panel, SETTINGS_REGISTER, U8("Register file types"));
-        rubraview_panel_add_button(&app->settings_panel, SETTINGS_UNREGISTER, U8("Unregister"));
-        rubraview_panel_add_separator(&app->settings_panel);
-    }
-    rubraview_panel_add_button(&app->settings_panel, SETTINGS_DEFAULTS, U8("Reset to defaults"));
-    rubraview_panel_add_button(&app->settings_panel, SETTINGS_APPLY, U8("Apply"));
-    rubraview_panel_add_button(&app->settings_panel, SETTINGS_OK, U8("OK"));
-    rubraview_panel_add_button(&app->settings_panel, SETTINGS_CANCEL, U8("Cancel"));
-
-    app->settings_panel.open = true;
-
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->window, &w, &h);
-    if (w > 0 && h > 0) rubraview_panel_layout(&app->settings_panel, (double)w, (double)h);
-}
+   A change applies to the viewer at once; the file is written when the
+   window closes; Revert returns to what the file held when it opened
+   (owner, 2026-09-13, "1a"). */
 
 /* §3.22.1: reads settings.ini — portable mode beside the executable,
    otherwise under AppData, the same rule the reading history follows,
@@ -2796,139 +2751,399 @@ static void settings_read_file(app_state_t *app) {
     app->settings_saved = app->settings;
 }
 
+static bool u8str_equal_lit(u8str_t s, const char *lit) {
+    size_t n = strlen(lit);
+    return s.len == n && memcmp(s.ptr, lit, n) == 0;
+}
+
+/* A binding as keymap.ini spells it: "Ctrl+Shift+O". */
+static u8str_t combo_text(char *buffer, size_t capacity, rubraview_key_combo_t combo) {
+    int n = snprintf(buffer, capacity, "%s%s%s%.*s",
+                     (combo.modifiers & RUBRAVIEW_MOD_CTRL) ? "Ctrl+" : "",
+                     (combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? "Shift+" : "",
+                     (combo.modifiers & RUBRAVIEW_MOD_ALT) ? "Alt+" : "",
+                     (int)combo.key_name.len, combo.key_name.ptr);
+    if (n <= 0) return (u8str_t){ .ptr = "", .len = 0 };
+    return (u8str_t){ .ptr = buffer, .len = (size_t)n < capacity ? (size_t)n : capacity - 1 };
+}
+
+#define SETTINGS_BACKGROUND  0xFF161616u
+#define SETTINGS_PANE        0xFF1E1E1Eu
+#define SETTINGS_FOCUS       0xFF2D4A6Eu
+#define SETTINGS_TEXT        0xFFE8E8E8u
+#define SETTINGS_DIM         0xFF8A8A8Au   /* a setting nothing reads yet (not `wired`) */
+#define SETTINGS_ACCENT      0xFF6FA8DCu
+
+/* The live values the document's `info` lines name. */
+static size_t settings_info(void *user, u8str_t source, char *buffer, size_t capacity) {
+    app_state_t *app = (app_state_t*)user;
+    int n = 0;
+    if (u8str_equal_lit(source, "config.path")) {
+        n = snprintf(buffer, capacity, "%.*s%s", (int)app->settings_path.len, app->settings_path.ptr,
+                     app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? "  (portable)" : "");
+    } else if (u8str_equal_lit(source, "media.ffmpeg")) {
+        n = snprintf(buffer, capacity, "%s",
+                     rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
+                         ? "its DLLs are beside the program" : "not found - Media Foundation only");
+    } else if (u8str_equal_lit(source, "gpu.adapter")) {
+        n = snprintf(buffer, capacity, "run rubraview --probe-gpu <video> for the details");
+    } else if (u8str_equal_lit(source, "cache.used")) {
+        size_t loaded = 0;
+        for (size_t i = 0; i < page_count(app); ++i) if (app->pages[i].texture) loaded++;
+        n = snprintf(buffer, capacity, "%zu page(s) decoded and kept", loaded);
+    }
+    if (n <= 0) return 0;
+    return (size_t)n < capacity ? (size_t)n : capacity - 1;
+}
+
+/* The rows the document's `table` lines name. */
+static size_t settings_table_row(void *user, u8str_t source, size_t index, char *buffer, size_t capacity) {
+    app_state_t *app = (app_state_t*)user;
+    if (!u8str_equal_lit(source, "keymap")) return 0;
+    if (index == 0) {
+        int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", "keys");
+        return n > 0 ? (size_t)n : 0;
+    }
+    if (index - 1 >= app->keymap.count) return 0;
+    const rubraview_key_binding_t *b = &app->keymap.bindings[index - 1];
+    char keys[128];
+    size_t used = 0;
+    for (size_t c = 0; c < b->combo_count && used + 32 < sizeof(keys); ++c) {
+        char one[64];
+        u8str_t text = combo_text(one, sizeof(one), b->combos[c]);
+        int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.len, text.ptr);
+        if (n > 0) used += (size_t)n;
+    }
+    keys[used] = '\0';
+    int n = snprintf(buffer, capacity, "%-12.*s %-24.*s %s",
+                     b->context.len ? (int)b->context.len : 2, b->context.len ? b->context.ptr : "ui",
+                     (int)b->action.len, b->action.ptr, keys);
+    if (n <= 0) return 0;
+    return (size_t)n < capacity ? (size_t)n : capacity - 1;
+}
+
+static void settings_measure(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
+    app->settings_font = 15.0 * dpi;
+    if (!rubraview_pal_render_mono_cell(app->settings_renderer, app->settings_font,
+                                        &app->settings_cell_w, &app->settings_cell_h) ||
+        app->settings_cell_w <= 0.0 || app->settings_cell_h <= 0.0) {
+        app->settings_cell_w = 8.3 * dpi;     /* Consolas at 15 px, if measuring failed */
+        app->settings_cell_h = 17.6 * dpi;
+    }
+}
+
+static void settings_grid(const app_state_t *app, int32_t *out_cols, int32_t *out_rows) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->settings_window, &w, &h);
+    *out_cols = (int32_t)((double)w / app->settings_cell_w);
+    *out_rows = (int32_t)((double)h / app->settings_cell_h);
+    if (*out_cols < 40) *out_cols = 40;
+    if (*out_rows < 12) *out_rows = 12;
+}
+
 static void settings_open(app_state_t *app) {
-    /* What is on disk now — another window may have written it since. */
+    if (app->settings_open) return;
+    /* What is on disk now — another copy of the program may have written it. */
     settings_read_file(app);
 
-    app->settings_open = true;
-    app->settings_tab = RUBRAVIEW_TAB_GENERAL;
-    settings_build_panel(app);
-}
-
-static void settings_apply(app_state_t *app) {
-    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
-    u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
-    if (text.len == 0) return;
-
-    if (rubraview_pal_fs_write_file(app->settings_path, text)) {
-        app->settings_saved = app->settings;
-        /* §3.18.3's folders are read from the same file, so they follow
-           immediately rather than at the next launch. */
-        app->curation = rubraview_curation_parse(app->arena, text);
-        osd_say(app, U8("settings saved"));
-    } else {
-        osd_say(app, U8("could not write settings.ini"));
-    }
-}
-
-static void settings_close(app_state_t *app, bool keep_changes) {
-    if (!keep_changes) app->settings = app->settings_saved;
-    app->settings_open = false;
-    app->settings_panel.open = false;
-    app->settings_panel.row_count = 0;
-}
-
-static void settings_row_changed(app_state_t *app, int32_t row) {
-    if (row < 0 || (size_t)row >= app->settings_panel.row_count) return;
-    int32_t id = app->settings_panel.rows[row].id;
-    if (id < SETTINGS_ROW_BASE) return;
-
-    size_t schema_count = 0;
-    const rubraview_setting_def_t *schema = rubraview_settings_schema(&schema_count);
-    size_t index = (size_t)(id - SETTINGS_ROW_BASE);
-    if (index >= schema_count) return;
-
-    rubraview_settings_set(&app->settings, schema[index].section, schema[index].key,
-                           app->settings_panel.rows[row].value);
-}
-
-static void settings_button(app_state_t *app, int32_t row) {
-    if (row < 0 || (size_t)row >= app->settings_panel.row_count) return;
-
-    switch (app->settings_panel.rows[row].id) {
-        case SETTINGS_APPLY:
-            settings_apply(app);
-            break;
-        case SETTINGS_OK:
-            settings_apply(app);
-            settings_close(app, true);
-            break;
-        case SETTINGS_CANCEL:
-            settings_close(app, false);
-            break;
-        case SETTINGS_DEFAULTS:
-            rubraview_settings_reset(&app->settings);
-            settings_build_panel(app);
-            break;
-        case SETTINGS_REGISTER:
-            osd_say(app, rubraview_pal_shell_register(rubraview_shell_extensions())
-                           ? U8("file types registered") : U8("could not register the file types"));
-            break;
-        case SETTINGS_UNREGISTER:
-            osd_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
-                           ? U8("file types removed") : U8("could not remove the file types"));
-            break;
-        default:
-            break;
-    }
-}
-
-/* The tab strip runs across the top of the panel. */
-static rubraview_pal_rect_t settings_tab_rect(const app_state_t *app, int32_t tab) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double width = app->settings_panel.bounds.width / (double)RUBRAVIEW_TAB_COUNT;
-    return (rubraview_pal_rect_t){
-        .x = app->settings_panel.bounds.x + width * (double)tab,
-        .y = app->settings_panel.bounds.y - 26.0 * dpi,
-        .width = width,
-        .height = 26.0 * dpi,
+    rubraview_window_config_t config = {
+        .title = "Rubraview settings", .width = 980, .height = 680, .owner = app->window,
     };
+    app->settings_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->settings_window) {
+        osd_say(app, U8("the settings window could not be opened"));
+        return;
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->settings_window, &w, &h);
+    app->settings_renderer = rubraview_pal_render_create(app->arena,
+                                                         rubraview_pal_window_native_handle(app->settings_window), w, h);
+    if (!app->settings_renderer) {
+        rubraview_pal_window_destroy(app->settings_window);
+        app->settings_window = NULL;
+        osd_say(app, U8("the settings window could not be drawn"));
+        return;
+    }
+    settings_measure(app);
+    int32_t cols = 0, rows = 0;
+    settings_grid(app, &cols, &rows);
+    app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
+    app->settings_open = true;
+    app->settings_dirty = true;
+    app->settings_mouse_down = false;
+    app->settings_message[0] = '\0';
 }
 
-static bool settings_handle_press(app_state_t *app, double px, double py) {
-    if (!app->settings_open) return false;
+/* 1a: the file is written as the window closes, and only when something
+   in it changed. */
+static void settings_close(app_state_t *app) {
+    if (!app->settings_open) return;
+    if (rubraview_settings_differs(&app->settings, &app->settings_saved)) {
+        u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+        u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
+        if (text.len > 0 && rubraview_pal_fs_write_file(app->settings_path, text)) {
+            app->settings_saved = app->settings;
+            /* §3.18.3's folders are read from the same file, so they follow
+               at once rather than at the next launch. */
+            app->curation = rubraview_curation_parse(app->arena, text);
+            osd_say(app, U8("settings saved"));
+        } else {
+            osd_say(app, U8("could not write settings.ini"));
+        }
+    }
+    rubraview_pal_render_destroy(app->settings_renderer);
+    rubraview_pal_window_destroy(app->settings_window);
+    app->settings_renderer = NULL;
+    app->settings_window = NULL;
+    app->settings_open = false;
+}
 
-    for (int32_t t = 0; t < RUBRAVIEW_TAB_COUNT; ++t) {
-        rubraview_pal_rect_t r = settings_tab_rect(app, t);
-        if (px >= r.x && px < r.x + r.width && py >= r.y && py < r.y + r.height) {
-            app->settings_tab = (rubraview_settings_tab_t)t;
-            settings_build_panel(app);
-            return true;
+/* What a change means for the viewer right now, beyond what it reads
+   every frame (the subtitle size and outline). */
+static void settings_took_effect(app_state_t *app) {
+    app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
+        ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+}
+
+static void settings_say(app_state_t *app, const char *text) {
+    snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
+}
+
+static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
+    switch (event) {
+        case RUBRAVIEW_SEVENT_NONE:
+            return;
+        case RUBRAVIEW_SEVENT_MOVED:
+            break;
+        case RUBRAVIEW_SEVENT_CHANGED:
+            settings_took_effect(app);
+            app->settings_message[0] = '\0';
+            break;
+        case RUBRAVIEW_SEVENT_REVERT: {
+            uint32_t total = app->settings.revision_total;
+            app->settings = app->settings_saved;
+            app->settings.revision_total = total + 1;
+            settings_took_effect(app);
+            settings_say(app, "back to what settings.ini held when this window opened");
+            break;
+        }
+        case RUBRAVIEW_SEVENT_DEFAULTS:
+            rubraview_settings_reset(&app->settings);
+            settings_took_effect(app);
+            settings_say(app, "every setting is at its default (Revert undoes this)");
+            break;
+        case RUBRAVIEW_SEVENT_CLOSE:
+            settings_close(app);
+            return;
+        case RUBRAVIEW_SEVENT_EDIT_TEXT:
+        case RUBRAVIEW_SEVENT_CLEAR_TEXT: {
+            const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
+            if (!node || node->kind != RUBRAVIEW_NODE_SETTING) break;
+            const rubraview_setting_def_t *def = &app->settings_view.doc->defs[node->setting];
+            if (event == RUBRAVIEW_SEVENT_CLEAR_TEXT) {
+                rubraview_settings_set_text(&app->settings, def->section, def->key, U8(""));
+                settings_say(app, "folder cleared");
+                break;
+            }
+            rubraview_file_dialog_opts_t opts = {
+                .title = "Choose a folder", .folder_mode = true,
+                .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
+            };
+            rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+            if (picked.accepted && picked.count > 0) {
+                rubraview_settings_set_text(&app->settings, def->section, def->key, picked.paths[0]);
+                settings_say(app, "folder chosen (Delete clears it)");
+            }
+            break;
+        }
+        case RUBRAVIEW_SEVENT_ACTION: {
+            const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
+            if (!node) break;
+            if (u8str_equal_lit(node->name, "shell.register")) {
+                settings_say(app, rubraview_pal_shell_register(rubraview_shell_extensions())
+                                      ? "file types registered" : "could not register the file types");
+            } else if (u8str_equal_lit(node->name, "shell.unregister")) {
+                settings_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
+                                      ? "file types removed" : "could not remove the file types");
+            }
+            break;
+        }
+    }
+    app->settings_dirty = true;
+}
+
+static bool settings_key_of(rubraview_key_combo_t combo, rubraview_settings_key_t *out) {
+    static const struct { const char *name; rubraview_settings_key_t key; } KEYS[] = {
+        { "Up", RUBRAVIEW_SKEY_UP }, { "Down", RUBRAVIEW_SKEY_DOWN },
+        { "Left", RUBRAVIEW_SKEY_LEFT }, { "Right", RUBRAVIEW_SKEY_RIGHT },
+        { "PageUp", RUBRAVIEW_SKEY_PAGE_UP }, { "PageDown", RUBRAVIEW_SKEY_PAGE_DOWN },
+        { "Space", RUBRAVIEW_SKEY_SPACE }, { "Enter", RUBRAVIEW_SKEY_ENTER },
+        { "Home", RUBRAVIEW_SKEY_HOME }, { "End", RUBRAVIEW_SKEY_END },
+        { "Escape", RUBRAVIEW_SKEY_ESCAPE }, { "Delete", RUBRAVIEW_SKEY_DELETE },
+        { "Backspace", RUBRAVIEW_SKEY_DELETE },
+    };
+    if (key_is(combo, "Tab")) {
+        *out = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? RUBRAVIEW_SKEY_SHIFT_TAB : RUBRAVIEW_SKEY_TAB;
+        return true;
+    }
+    for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); ++i) {
+        if (key_is(combo, KEYS[i].name)) { *out = KEYS[i].key; return true; }
+    }
+    return false;
+}
+
+/* Everything the settings window's queue holds; returns how many. */
+static size_t settings_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->settings_open && rubraview_pal_window_poll_event(app->settings_window, &event)) {
+        handled++;
+        rubraview_settings_view_t *view = &app->settings_view;
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                settings_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE: {
+                rubraview_pal_render_resize(app->settings_renderer, event.resize.width, event.resize.height);
+                int32_t cols = 0, rows = 0;
+                settings_grid(app, &cols, &rows);
+                rubraview_settings_view_resize(view, cols, rows);
+                app->settings_dirty = true;
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED: {
+                settings_measure(app);
+                int32_t cols = 0, rows = 0;
+                settings_grid(app, &cols, &rows);
+                rubraview_settings_view_resize(view, cols, rows);
+                app->settings_dirty = true;
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+                app->settings_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_settings_key_t key;
+                if (settings_key_of(event.key.combo, &key)) {
+                    settings_event(app, rubraview_settings_view_key(view, &app->settings, key));
+                }
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                app->settings_mouse_down = true;
+                settings_event(app, rubraview_settings_view_press(view, &app->settings,
+                                   (int32_t)(event.mouse.x / app->settings_cell_w),
+                                   (int32_t)(event.mouse.y / app->settings_cell_h)));
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                if (app->settings_mouse_down) {
+                    settings_event(app, rubraview_settings_view_drag(view, &app->settings,
+                                       (int32_t)(event.mouse.x / app->settings_cell_w)));
+                }
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                app->settings_mouse_down = false;
+                rubraview_settings_view_release(view);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                settings_event(app, rubraview_settings_view_scroll(view, event.mouse.wheel_delta > 0 ? -3 : 3));
+                break;
+            default:
+                break;
+        }
+        if (!app->settings_open) break;
+    }
+    return handled;
+}
+
+/* A `preview subtitle` line: the sample drawn the way the video will
+   draw it, at the size and outline on the page right now. */
+static void settings_preview(app_state_t *app, u8str_t name, rubraview_pal_rect_t rect) {
+    rubraview_renderer_t *r = app->settings_renderer;
+    rubraview_pal_render_fill_rect(r, rect, 0xFF303A44u, 0.0);
+    if (!u8str_equal_lit(name, "subtitle")) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
+    double size = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size")) * dpi;
+    double off = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
+    u8str_t sample = U8("Subtitle sample  \xEC\x9E\x90\xEB\xA7\x89 \xEB\xAF\xB8\xEB\xA6\xAC\xEB\xB3\xB4\xEA\xB8\xB0");
+    /* A size too tall for the block is drawn as tall as the block
+       allows — the video's own subtitle shows the real size. */
+    if (size > rect.height * 0.6) size = rect.height * 0.6;
+    draw_outlined_text(r, sample, rect, size, off, 0xFFFFFFFFu);
+}
+
+static void draw_settings_window(app_state_t *app) {
+    if (!app->settings_open || !app->settings_dirty) return;
+    app->settings_dirty = false;
+    rubraview_renderer_t *r = app->settings_renderer;
+    const rubraview_settings_view_t *v = &app->settings_view;
+    const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->settings_window, &w, &h);
+    rubraview_settings_sources_t sources = { .user = app, .info = settings_info, .table_row = settings_table_row };
+    char line[1024];
+
+    rubraview_pal_render_begin(r, SETTINGS_BACKGROUND);
+
+    /* The page list. */
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, 0, cw * v->list_cols, (double)h }, SETTINGS_PANE, 0.0);
+    rubraview_pal_render_draw_text_mono(r, U8(" Settings"), 0.0, 0.0, fs, SETTINGS_ACCENT);
+    for (int32_t p = 0; p < (int32_t)v->doc->page_count; ++p) {
+        double y = ch * (2 + p);
+        if (p == v->page) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, y, cw * v->list_cols, ch }, SETTINGS_FOCUS, 0.0);
+        }
+        rubraview_pal_render_draw_text_mono(r, rubraview_settings_page_text(v, p, line, sizeof(line)),
+                                            0.0, y, fs, SETTINGS_TEXT);
+    }
+
+    /* The page. */
+    double x0 = cw * v->content_col;
+    rubraview_pal_render_draw_text_mono(r, rubraview_settings_page_title((size_t)v->page), x0, 0.0, fs, SETTINGS_ACCENT);
+    for (size_t i = 0; i < v->line_count; ++i) {
+        const rubraview_settings_line_t *ln = &v->lines[i];
+        const rubraview_settings_node_t *node = &v->doc->nodes[ln->node];
+        for (int32_t k = 0; k < ln->height; ++k) {
+            int32_t content_row = ln->row + k - v->scroll;
+            if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(v)) continue;
+            double y = ch * (2 + content_row);
+            if (ln->kind == RUBRAVIEW_LINE_PREVIEW) {
+                if (k == 0) {
+                    rubraview_pal_rect_t box = { x0, y, cw * (v->cols - v->content_col - 1), ch * ln->height };
+                    settings_preview(app, node->name, box);
+                }
+                continue;
+            }
+            if ((int32_t)i == v->focus_line) {
+                rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 - cw * 0.5, y, cw * (v->cols - v->content_col), ch },
+                                               SETTINGS_FOCUS, 0.0);
+            }
+            u8str_t text = rubraview_settings_line_text(v, &app->settings, &sources, i, k, line, sizeof(line));
+            uint32_t color = SETTINGS_TEXT;
+            if (ln->kind == RUBRAVIEW_LINE_SECTION) color = SETTINGS_ACCENT;
+            if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired) color = SETTINGS_DIM;
+            rubraview_pal_render_draw_text_mono(r, text, x0, y, fs, color);
         }
     }
 
-    int32_t row = -1;
-    rubraview_panel_event_t event = rubraview_panel_press(&app->settings_panel, px, py, &row);
-    if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) { settings_row_changed(app, row); return true; }
-    if (event == RUBRAVIEW_PANEL_BUTTON_PRESSED) { settings_button(app, row); return true; }
-
-    if (!rubraview_rect_contains(app->settings_panel.bounds, px, py)) {
-        /* Clicking away cancels rather than saving: a half-made change
-           should not commit itself. */
-        settings_close(app, false);
-        return true;
+    /* Under the page: the last action's result, then the buttons. */
+    if (app->settings_message[0]) {
+        rubraview_pal_render_draw_text_mono(r, cstr(app->settings_message), x0, ch * (v->rows - 2), fs, SETTINGS_DIM);
     }
-    return true;
-}
-
-static void draw_settings(app_state_t *app) {
-    if (!app->settings_open) return;
-
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    for (int32_t t = 0; t < RUBRAVIEW_TAB_COUNT; ++t) {
-        rubraview_pal_rect_t r = settings_tab_rect(app, t);
-        bool active = t == (int32_t)app->settings_tab;
-        rubraview_pal_render_fill_rect(app->renderer, r, active ? COLOR_TILE_FILL : COLOR_BAR_FILL, 2.0);
-        rubraview_pal_render_draw_text(app->renderer,
-                                       rubraview_settings_tab_name((rubraview_settings_tab_t)t),
-                                       r, 11.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
+        int32_t col = 0, width = 0;
+        rubraview_settings_view_button_cells(v, (rubraview_settings_button_t)b, &col, &width);
+        double y = ch * (v->rows - 1);
+        if (b == v->focus_button) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * col, y, cw * width, ch }, SETTINGS_FOCUS, 0.0);
+        }
+        rubraview_pal_render_draw_text_mono(r, rubraview_settings_button_text((rubraview_settings_button_t)b),
+                                            cw * col, y, fs, SETTINGS_TEXT);
     }
 
-    /* The panel itself is drawn by the same code the workbench uses. */
-    rubraview_panel_t saved = app->panel;
-    app->panel = app->settings_panel;
-    draw_panel(app);
-    app->panel = saved;
+    if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }
 
 static void render_frame(app_state_t *app) {
@@ -2960,7 +3175,6 @@ static void render_frame(app_state_t *app) {
     } else {
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_panel(app);
-        draw_settings(app);
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
@@ -4492,7 +4706,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
-                    if (settings_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     /* The anchors answer before the rest of the chrome: a
                        press there is a click *or* the start of a drag. */
@@ -4558,6 +4771,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             }
         }
 
+        /* §3.22 / D-13: the settings window's own queue. Polling the main
+           window pumped the thread's messages into it. */
+        handled += settings_pump(&app);
+
         if (app.needs_relayout) {
             int32_t page = current_page_index(&app);
             rebuild_layout(&app);
@@ -4588,18 +4805,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             render_frame(&app);
             if (settled) last_idle_frame_seconds = now;
         }
+        draw_settings_window(&app);
 
         /* A queued decode takes the loop's idle slice. With nothing to
            get ready, a settled loop sleeps until the OS has something
            for it instead of spinning. */
         if (drain_one_pending_decode(&app)) {
             last_busy_seconds = now;
-        } else if (settled) {
+        } else if (settled && settings_pump(&app) == 0) {
             rubraview_pal_window_wait_event(app.window, 250);
         } else {
             rubraview_pal_time_sleep_ms(4);
         }
     }
+
+    /* §3.22: closing the viewer with the settings window open still
+       writes what was changed in it. */
+    settings_close(&app);
 
     /* §3.6 / §3.17.1: remember where the reader stopped, and where the
        boxes were left, before shutting down. */
