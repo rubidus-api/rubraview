@@ -98,6 +98,79 @@ int main(void) {
     }
     printf("  [PASS] Entry array grows correctly past initial capacity\n");
 
+    /* Test 6 (D-13): what older files and hand edits hold still reads —
+       a byte-order mark, bare text, `;` comments — and a quoted string
+       means its contents, with its two escapes undone. */
+    {
+        const char *old =
+            "\xEF\xBB\xBF[video]\n"
+            "; an old comment\n"
+            "decoder = ffmpeg\n"
+            "subtitle_size = 48\n"
+            "path = \"C:\\\\Films\\\\a \\\"b\\\"\"\n"
+            "zero_led = 010\n"
+            "ratio = 0.5\n"
+            "flag = true\n";
+        rubraview_ini_doc_t d = rubraview_ini_parse(&arena, lit(old));
+        const u8str_t *decoder = rubraview_ini_get(&d, lit("video"), lit("decoder"));
+        assert(decoder && str_eq(*decoder, "ffmpeg"));            /* the BOM did not hide [video] */
+        const u8str_t *path = rubraview_ini_get(&d, lit("video"), lit("path"));
+        assert(path && str_eq(*path, "C:\\Films\\a \"b\""));
+        for (size_t i = 0; i < d.count; ++i) {
+            u8str_t k = d.entries[i].key;
+            if (str_eq(k, "decoder"))       assert(d.entries[i].kind == RUBRAVIEW_INI_STRING);
+            if (str_eq(k, "subtitle_size")) assert(d.entries[i].kind == RUBRAVIEW_INI_INT);
+            if (str_eq(k, "zero_led"))      assert(d.entries[i].kind == RUBRAVIEW_INI_STRING); /* TOML refuses 010 */
+            if (str_eq(k, "ratio"))         assert(d.entries[i].kind == RUBRAVIEW_INI_FLOAT);
+            if (str_eq(k, "flag"))          assert(d.entries[i].kind == RUBRAVIEW_INI_BOOL);
+        }
+    }
+    printf("  [PASS] Old files read: BOM, bare text, ';' comments; quoted strings mean their contents\n");
+
+    /* Test 7 (D-13): what is written is the subset — text quoted with its
+       two escapes, typed values bare, a repeated key once with its last
+       value, floats with a digit on each side of the point. */
+    {
+        rubraview_ini_doc_t w = {0};
+        rubraview_ini_set_string(&arena, &w, lit("video"), lit("decoder"), lit("ffmpeg"));
+        rubraview_ini_set_string(&arena, &w, lit("files"), lit("folder"), lit("2024"));
+        rubraview_ini_set_string(&arena, &w, lit("files"), lit("path"), lit("C:\\a \"b\""));
+        rubraview_ini_set_int(&arena, &w, lit("video"), lit("subtitle_size"), 48);
+        rubraview_ini_set_float(&arena, &w, lit("video"), lit("step"), 2.0);
+        rubraview_ini_set_float(&arena, &w, lit("video"), lit("half"), 0.5);
+        rubraview_ini_set_bool(&arena, &w, lit("video"), lit("gpu"), true);
+        rubraview_ini_set(&arena, &w, lit("video"), lit("guessed"), lit("12"));
+
+        u8str_t out = rubraview_ini_serialize(&arena, &w);
+        const char *want =
+            "[video]\n"
+            "decoder = \"ffmpeg\"\n"
+            "subtitle_size = 48\n"
+            "step = 2.0\n"
+            "half = 0.5\n"
+            "gpu = true\n"
+            "guessed = 12\n"
+            "[files]\n"
+            "folder = \"2024\"\n"
+            "path = \"C:\\\\a \\\"b\\\"\"\n";
+        if (!str_eq(out, want)) {
+            fprintf(stderr, "---- got ----\n%.*s---- want ----\n%s", (int)out.len, out.ptr, want);
+        }
+        assert(str_eq(out, want));
+
+        /* A key a hand edit repeated is written once, with its last value
+           — TOML refuses a repeat. */
+        rubraview_ini_doc_t rep = rubraview_ini_parse(&arena, lit("[s]\na = 1\nb = 2\na = 3\n"));
+        u8str_t once = rubraview_ini_serialize(&arena, &rep);
+        assert(str_eq(once, "[s]\nb = 2\na = 3\n"));
+
+        assert(rubraview_ini_name_ok(lit("subtitle_size")));
+        assert(!rubraview_ini_name_ok(lit("Subtitle")));   /* INI folds case; the subset is lower case */
+        assert(!rubraview_ini_name_ok(lit("a.b")));        /* a dotted key is a TOML table */
+        assert(!rubraview_ini_name_ok(lit("")));
+    }
+    printf("  [PASS] Written files are the subset: quoted text, bare typed values, one key once\n");
+
     free(raw_mem);
     printf("[test_ini] All tests passed successfully!\n");
     return 0;

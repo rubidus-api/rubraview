@@ -10,17 +10,39 @@ extern "C" {
 #endif
 
 /**
- * Minimal INI reader/writer for settings.ini and keymap.ini (§3.7.5,
- * §3.17.2, §3.22.1). Lines: `[section]` headers, `key = value` pairs,
- * blank lines, and `;` or `#` full-line comments. Keys before any
- * `[section]` header belong to the global section (name.len == 0).
- * All slices are zero-copy views into the arena-owned parsed text.
+ * The configuration file format (§3.7.5, §3.17.2, §3.22.1, D-13): the
+ * lines that a TOML 1.0 parser and a plain line-based INI reader both
+ * accept with the same meaning.
+ *
+ * **Written** — only this, so every file rubraview writes is both:
+ *   - UTF-8 without a BOM; a comment is a whole line starting `#`
+ *   - `[section]` and `key = value`, names of `[a-z0-9_-]`, a key once
+ *     per section, no key before the first section
+ *   - values: `true`/`false`, `-?[0-9]+`, `-?[0-9]+.[0-9]+`, or a string
+ *     in double quotes with exactly two escapes, `\\` and `\"`
+ *
+ * **Read** — that, and whatever older files and hand edits contain: a
+ * BOM, `;` comments, bare unquoted text (`decoder = ffmpeg`), repeated
+ * keys (the last wins), keys before any section (the global section,
+ * name.len == 0). Nobody's existing file stops loading; the next save
+ * writes it in the subset.
+ *
+ * `scripts/check-conf-format.py` runs Python's `tomllib` and
+ * `configparser` on what the writer produces, so "both" is measured.
  */
+
+typedef enum rubraview_ini_kind {
+    RUBRAVIEW_INI_STRING = 0,   /* written quoted */
+    RUBRAVIEW_INI_BOOL,
+    RUBRAVIEW_INI_INT,
+    RUBRAVIEW_INI_FLOAT,
+} rubraview_ini_kind_t;
 
 typedef struct rubraview_ini_entry {
     u8str_t section; /* "" for the global section */
     u8str_t key;
-    u8str_t value;
+    u8str_t value;   /* the meaning: quotes removed, escapes undone */
+    rubraview_ini_kind_t kind;
 } rubraview_ini_entry_t;
 
 typedef struct rubraview_ini_doc {
@@ -53,13 +75,25 @@ double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, u8str_t section, 
 /**
  * Insert or update (in place, preserving position) a key's value within a
  * section. Grows the document's backing storage in `arena` as needed.
+ *
+ * The plain setter works the kind out from the text — `true`, `12`, `0.5`
+ * are written bare, anything else quoted. A caller that knows the type
+ * says so with a typed setter: a folder named `2024` must stay a string.
  */
 void rubraview_ini_set(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value);
+void rubraview_ini_set_string(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value);
+void rubraview_ini_set_bool(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, bool value);
+void rubraview_ini_set_int(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, long long value);
+void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double value);
+
+/** A name the subset allows for a section or a key: `[a-z0-9_-]+`. */
+bool rubraview_ini_name_ok(u8str_t name);
 
 /**
- * Serialize a document back to INI text, grouping entries by section in
- * first-appearance order (global-section entries, if any, are written
- * first with no `[section]` header).
+ * Serialize a document in the subset, grouping entries by section in
+ * first-appearance order. Global-section entries are not part of the
+ * subset: they are written first, with no header, only so that nothing
+ * a caller put in is lost — the format gate refuses a file that has any.
  */
 u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t *doc);
 

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static bool u8str_eq(u8str_t a, u8str_t b) {
     if (a.len != b.len) return false;
@@ -14,6 +15,87 @@ static u8str_t trim(const char *ptr, size_t len) {
     while (start < end && (ptr[start] == ' ' || ptr[start] == '\t')) start++;
     while (end > start && (ptr[end - 1] == ' ' || ptr[end - 1] == '\t')) end--;
     return (u8str_t){ .ptr = ptr + start, .len = end - start };
+}
+
+/* ---- values: what the subset writes, and what older files hold ---- */
+
+static bool all_digits(const char *p, size_t n) {
+    if (n == 0) return false;
+    for (size_t i = 0; i < n; ++i) if (p[i] < '0' || p[i] > '9') return false;
+    return true;
+}
+
+/* The kind a piece of unquoted text is, read as TOML would read it.
+   TOML refuses a leading zero (`010`), so that stays a string — which is
+   also what an INI reader saw. */
+static rubraview_ini_kind_t kind_of_bare(u8str_t v) {
+    if (v.len == 4 && memcmp(v.ptr, "true", 4) == 0) return RUBRAVIEW_INI_BOOL;
+    if (v.len == 5 && memcmp(v.ptr, "false", 5) == 0) return RUBRAVIEW_INI_BOOL;
+
+    size_t i = 0;
+    if (v.len > 0 && (v.ptr[0] == '-' || v.ptr[0] == '+')) i = 1;
+    const char *p = v.ptr + i;
+    size_t n = v.len - i;
+    size_t dot = n;
+    for (size_t k = 0; k < n; ++k) if (p[k] == '.') { dot = k; break; }
+
+    if (dot == n) {
+        if (!all_digits(p, n)) return RUBRAVIEW_INI_STRING;
+        if (n > 1 && p[0] == '0') return RUBRAVIEW_INI_STRING;
+        return RUBRAVIEW_INI_INT;
+    }
+    if (!all_digits(p, dot) || !all_digits(p + dot + 1, n - dot - 1)) return RUBRAVIEW_INI_STRING;
+    if (dot > 1 && p[0] == '0') return RUBRAVIEW_INI_STRING;
+    return RUBRAVIEW_INI_FLOAT;
+}
+
+/* Reads the value part of a line. A quoted string loses its quotes and
+   its two escapes; anything else is taken as it stands, with its kind
+   worked out from the text. */
+static u8str_t read_value(proven_arena_t *arena, u8str_t raw, rubraview_ini_kind_t *out_kind) {
+    if (raw.len >= 2 && raw.ptr[0] == '"') {
+        size_t close = 0;
+        bool escaped = false;
+        for (size_t i = 1; i < raw.len; ++i) {
+            if (raw.ptr[i] == '\\' && i + 1 < raw.len && (raw.ptr[i + 1] == '\\' || raw.ptr[i + 1] == '"')) {
+                escaped = true;
+                ++i;
+                continue;
+            }
+            if (raw.ptr[i] == '"') { close = i; break; }
+        }
+        if (close > 0) {
+            *out_kind = RUBRAVIEW_INI_STRING;
+            u8str_t inner = { .ptr = raw.ptr + 1, .len = close - 1 };
+            if (!escaped) return inner;
+            proven_result_mem_mut_t res = proven_arena_alloc(arena, inner.len + 1);
+            if (!proven_is_ok(res.err)) return inner;
+            char *out = (char*)(void*)res.value.ptr;
+            size_t n = 0;
+            for (size_t i = 0; i < inner.len; ++i) {
+                if (inner.ptr[i] == '\\' && i + 1 < inner.len &&
+                    (inner.ptr[i + 1] == '\\' || inner.ptr[i + 1] == '"')) {
+                    ++i;
+                }
+                out[n++] = inner.ptr[i];
+            }
+            out[n] = '\0';
+            return (u8str_t){ .ptr = out, .len = n };
+        }
+        /* No closing quote: an older hand edit. Keep it as it stands. */
+    }
+    *out_kind = kind_of_bare(raw);
+    return raw;
+}
+
+bool rubraview_ini_name_ok(u8str_t name) {
+    if (name.len == 0) return false;
+    for (size_t i = 0; i < name.len; ++i) {
+        char c = name.ptr[i];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
 }
 
 static bool ini_entries_reserve(proven_arena_t *arena, rubraview_ini_doc_t *doc, size_t min_capacity) {
@@ -39,8 +121,14 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, u8str_t text) {
 
     u8str_t current_section = (u8str_t){ .ptr = "", .len = 0 };
 
+    /* A byte-order mark is not part of the first line. Left in, it made
+       `[video]` unrecognisable and hid the whole section (VM, 2026-09-13). */
     size_t line_start = 0;
-    for (size_t i = 0; i <= text.len; ++i) {
+    if (text.len >= 3 && (unsigned char)text.ptr[0] == 0xEF &&
+        (unsigned char)text.ptr[1] == 0xBB && (unsigned char)text.ptr[2] == 0xBF) {
+        line_start = 3;
+    }
+    for (size_t i = line_start; i <= text.len; ++i) {
         if (i == text.len || text.ptr[i] == '\n') {
             size_t line_end = i;
             /* Strip a trailing '\r' from CRLF line endings */
@@ -66,12 +154,15 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, u8str_t text) {
             if (eq >= line.len) continue; /* malformed line, skip leniently */
 
             u8str_t key = trim(line.ptr, eq);
-            u8str_t value = trim(line.ptr + eq + 1, line.len - eq - 1);
+            u8str_t raw = trim(line.ptr + eq + 1, line.len - eq - 1);
             if (key.len == 0) continue;
+
+            rubraview_ini_kind_t kind = RUBRAVIEW_INI_STRING;
+            u8str_t value = read_value(arena, raw, &kind);
 
             if (!ini_entries_reserve(arena, &doc, doc.count + 1)) return doc;
             doc.entries[doc.count++] = (rubraview_ini_entry_t){
-                .section = current_section, .key = key, .value = value
+                .section = current_section, .key = key, .value = value, .kind = kind
             };
         }
     }
@@ -141,18 +232,59 @@ double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, u8str_t section, 
     return result;
 }
 
-void rubraview_ini_set(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value) {
+static void set_kind(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key,
+                     u8str_t value, rubraview_ini_kind_t kind) {
     if (!arena || !doc) return;
 
     for (size_t i = 0; i < doc->count; ++i) {
         if (u8str_eq(doc->entries[i].section, section) && u8str_eq(doc->entries[i].key, key)) {
             doc->entries[i].value = value;
+            doc->entries[i].kind = kind;
             return;
         }
     }
 
     if (!ini_entries_reserve(arena, doc, doc->count + 1)) return;
-    doc->entries[doc->count++] = (rubraview_ini_entry_t){ .section = section, .key = key, .value = value };
+    doc->entries[doc->count++] = (rubraview_ini_entry_t){
+        .section = section, .key = key, .value = value, .kind = kind
+    };
+}
+
+void rubraview_ini_set(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value) {
+    set_kind(arena, doc, section, key, value, kind_of_bare(value));
+}
+
+void rubraview_ini_set_string(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value) {
+    set_kind(arena, doc, section, key, value, RUBRAVIEW_INI_STRING);
+}
+
+void rubraview_ini_set_bool(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, bool value) {
+    set_kind(arena, doc, section, key, value ? U8("true") : U8("false"), RUBRAVIEW_INI_BOOL);
+}
+
+static u8str_t arena_text(proven_arena_t *arena, const char *text, int len) {
+    if (!arena || len <= 0) return (u8str_t){ .ptr = "", .len = 0 };
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)len + 1);
+    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    memcpy(res.value.ptr, text, (size_t)len);
+    res.value.ptr[len] = '\0';
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)len };
+}
+
+void rubraview_ini_set_int(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, long long value) {
+    char buffer[32];
+    int n = snprintf(buffer, sizeof(buffer), "%lld", value);
+    set_kind(arena, doc, section, key, arena_text(arena, buffer, n), RUBRAVIEW_INI_INT);
+}
+
+void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double value) {
+    /* TOML wants digits on both sides of the point and no exponent; %.6f
+       then trailing zeros trimmed keeps one digit after the point. */
+    char buffer[64];
+    int n = snprintf(buffer, sizeof(buffer), "%.6f", value);
+    if (n <= 0 || n >= (int)sizeof(buffer)) { n = snprintf(buffer, sizeof(buffer), "0.0"); }
+    while (n > 2 && buffer[n - 1] == '0' && buffer[n - 2] != '.') buffer[--n] = '\0';
+    set_kind(arena, doc, section, key, arena_text(arena, buffer, n), RUBRAVIEW_INI_FLOAT);
 }
 
 typedef struct byte_buf {
@@ -186,6 +318,25 @@ static bool byte_buf_append_str(proven_arena_t *arena, byte_buf_t *b, u8str_t s)
     return byte_buf_append(arena, b, s.ptr, s.len);
 }
 
+/* One value, in the subset: bare for the typed kinds, quoted with the two
+   escapes for text. A line break inside text would end the line, so it
+   becomes a space — the subset has no multi-line strings. */
+static void append_value(proven_arena_t *arena, byte_buf_t *b, const rubraview_ini_entry_t *e) {
+    if (e->kind != RUBRAVIEW_INI_STRING) {
+        byte_buf_append_str(arena, b, e->value);
+        return;
+    }
+    byte_buf_append(arena, b, "\"", 1);
+    for (size_t i = 0; i < e->value.len; ++i) {
+        char c = e->value.ptr[i];
+        if (c == '\\') byte_buf_append(arena, b, "\\\\", 2);
+        else if (c == '"') byte_buf_append(arena, b, "\\\"", 2);
+        else if (c == '\n' || c == '\r' || c == '\t') byte_buf_append(arena, b, " ", 1);
+        else byte_buf_append(arena, b, &c, 1);
+    }
+    byte_buf_append(arena, b, "\"", 1);
+}
+
 u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t *doc) {
     if (!arena || !doc) return (u8str_t){ .ptr = "", .len = 0 };
 
@@ -196,7 +347,7 @@ u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t
         if (doc->entries[i].section.len != 0) continue;
         byte_buf_append_str(arena, &buf, doc->entries[i].key);
         byte_buf_append(arena, &buf, " = ", 3);
-        byte_buf_append_str(arena, &buf, doc->entries[i].value);
+        append_value(arena, &buf, &doc->entries[i]);
         byte_buf_append(arena, &buf, "\n", 1);
     }
 
@@ -220,9 +371,19 @@ u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t
 
         for (size_t i = 0; i < doc->count; ++i) {
             if (!u8str_eq(doc->entries[i].section, section)) continue;
+            /* A key repeated in the document is written once, with its
+               last value: TOML refuses a repeat. */
+            bool later = false;
+            for (size_t k = i + 1; k < doc->count; ++k) {
+                if (u8str_eq(doc->entries[k].section, section) && u8str_eq(doc->entries[k].key, doc->entries[i].key)) {
+                    later = true;
+                    break;
+                }
+            }
+            if (later) continue;
             byte_buf_append_str(arena, &buf, doc->entries[i].key);
             byte_buf_append(arena, &buf, " = ", 3);
-            byte_buf_append_str(arena, &buf, doc->entries[i].value);
+            append_value(arena, &buf, &doc->entries[i]);
             byte_buf_append(arena, &buf, "\n", 1);
         }
     }

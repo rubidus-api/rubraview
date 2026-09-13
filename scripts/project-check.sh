@@ -60,4 +60,10 @@ if command -v python3 >/dev/null 2>&1 && [ -x scripts/check-settings.py ]; then
   python3 scripts/check-settings.py || fail "a setting is not reachable from the settings window"
 fi
 
+# D-13: every configuration file the viewer writes is valid TOML and valid
+# INI with the same meaning — measured with both parsers, not asserted.
+if command -v python3 >/dev/null 2>&1 && command -v cc >/dev/null 2>&1 && [ -x scripts/check-conf-format.py ]; then
+  python3 scripts/check-conf-format.py || fail "a configuration file is not in the INI and TOML subset"
+fi
+
 printf '%s\n' "project-check: ok"
