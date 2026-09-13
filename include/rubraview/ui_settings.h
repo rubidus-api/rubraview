@@ -176,6 +176,20 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
 u8str_t rubraview_settings_page_text(const rubraview_settings_view_t *view, int32_t page,
                                      char *buffer, size_t capacity);
 
+/**
+ * Where a line's text goes on the grid, run by run. A font's wide glyphs
+ * (Hangul, CJK) are rarely exactly two of its narrow cells, so a line
+ * drawn in one piece drifts after the first of them. Split here, each
+ * narrow run and each wide character is drawn at its own column and the
+ * grid holds. Returns how many runs; past `capacity` the last run takes
+ * the rest of the text.
+ */
+typedef struct rubraview_cell_run {
+    size_t  offset, length;   /* bytes of the text */
+    int32_t col;              /* the cell it starts in */
+} rubraview_cell_run_t;
+size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity);
+
 /** A button's label, as drawn: "[ Revert ]". */
 u8str_t rubraview_settings_button_text(rubraview_settings_button_t button);
 

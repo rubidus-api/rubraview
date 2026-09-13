@@ -3098,6 +3098,20 @@ static void settings_preview(app_state_t *app, u8str_t name, rubraview_pal_rect_
     draw_outlined_text(r, sample, rect, size, off, 0xFFFFFFFFu);
 }
 
+/* Text on the settings grid, each narrow run and each wide character at
+   its own cell, so Hangul in a folder name does not pull the rest of the
+   line off its columns. */
+static void settings_text(app_state_t *app, u8str_t text, double x, double y, uint32_t color) {
+    rubraview_cell_run_t runs[256];
+    size_t n = rubraview_cell_runs(text, runs, sizeof(runs) / sizeof(runs[0]));
+    for (size_t i = 0; i < n; ++i) {
+        u8str_t piece = { .ptr = text.ptr + runs[i].offset, .len = runs[i].length };
+        if (piece.len == 1 && piece.ptr[0] == ' ') continue;
+        rubraview_pal_render_draw_text_mono(app->settings_renderer, piece, x + app->settings_cell_w * runs[i].col,
+                                            y, app->settings_font, color);
+    }
+}
+
 static void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -3119,13 +3133,12 @@ static void draw_settings_window(app_state_t *app) {
         if (p == v->page) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, y, cw * v->list_cols, ch }, SETTINGS_FOCUS, 0.0);
         }
-        rubraview_pal_render_draw_text_mono(r, rubraview_settings_page_text(v, p, line, sizeof(line)),
-                                            0.0, y, fs, SETTINGS_TEXT);
+        settings_text(app, rubraview_settings_page_text(v, p, line, sizeof(line)), 0.0, y, SETTINGS_TEXT);
     }
 
     /* The page. */
     double x0 = cw * v->content_col;
-    rubraview_pal_render_draw_text_mono(r, rubraview_settings_page_title((size_t)v->page), x0, 0.0, fs, SETTINGS_ACCENT);
+    settings_text(app, rubraview_settings_page_title((size_t)v->page), x0, 0.0, SETTINGS_ACCENT);
     for (size_t i = 0; i < v->line_count; ++i) {
         const rubraview_settings_line_t *ln = &v->lines[i];
         const rubraview_settings_node_t *node = &v->doc->nodes[ln->node];
@@ -3150,7 +3163,7 @@ static void draw_settings_window(app_state_t *app) {
             /* Not read by the viewer yet: dimmed, except under the focus bar, where dim text is unreadable. */
             if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired &&
                 (int32_t)i != v->focus_line) color = SETTINGS_DIM;
-            rubraview_pal_render_draw_text_mono(r, text, x0, y, fs, color);
+            settings_text(app, text, x0, y, color);
         }
     }
 

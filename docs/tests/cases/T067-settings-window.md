@@ -72,4 +72,7 @@ rings), and the preview's text spilled out of its block at large sizes.
 - **Decoder at launch:** `[video] decoder = "ffmpeg"` in AppData's
   settings.ini put ` ffmpeg` in the title of a new launch; `"windows"` did
   not. Before the fix both launched with Media Foundation.
-
+- **Hangul on the grid:** a folder named in Hangul pulled the rest of its
+  line about one cell left — Consolas's fallback glyphs are narrower than two
+  cells. Each wide character is now drawn at its own cell (T067 test 8), and
+  the closing `]` lines up with the rows above and below.

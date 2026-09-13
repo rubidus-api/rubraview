@@ -249,6 +249,24 @@ int main(void) {
     }
     printf("  [PASS] A table is as tall as its rows, and its last row can be scrolled to\n");
 
+    /* 8. Text splits into runs that each start on their own cell: a
+          narrow run whole, every wide character alone. */
+    {
+        rubraview_cell_run_t runs[8];
+        u8str_t text = lit("[C:\\\xed\x95\x9c\xea\xb8\x80 ab]");   /* [C:\한글 ab] */
+        size_t n = rubraview_cell_runs(text, runs, 8);
+        assert(n == 4);
+        assert(runs[0].offset == 0 && runs[0].length == 4 && runs[0].col == 0);   /* "[C:\" */
+        assert(runs[1].offset == 4 && runs[1].length == 3 && runs[1].col == 4);   /* 한 */
+        assert(runs[2].offset == 7 && runs[2].length == 3 && runs[2].col == 6);   /* 글 */
+        assert(runs[3].offset == 10 && runs[3].length == 4 && runs[3].col == 8);  /* " ab]" */
+        assert(rubraview_cell_runs(lit("plain"), runs, 8) == 1 && runs[0].length == 5);
+        assert(rubraview_cell_runs(lit(""), runs, 8) == 0);
+        size_t few = rubraview_cell_runs(text, runs, 2);
+        assert(few == 2 && runs[1].offset == 4 && runs[1].offset + runs[1].length == text.len);   /* the rest rides along */
+    }
+    printf("  [PASS] Text splits into runs on their own cells, wide characters alone\n");
+
     printf("[test_ui_settings] All tests passed successfully!\n");
     return 0;
 }
