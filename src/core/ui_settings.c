@@ -154,7 +154,7 @@ static void layout(rubraview_settings_view_t *view) {
                 break;
             case RUBRAVIEW_NODE_TABLE:
                 line.kind = RUBRAVIEW_LINE_TABLE;
-                line.height = RUBRAVIEW_TABLE_ROWS;
+                line.height = view->table_rows > 0 ? view->table_rows : RUBRAVIEW_TABLE_ROWS;
                 break;
             case RUBRAVIEW_NODE_ACTION:
                 line.kind = RUBRAVIEW_LINE_ACTION;
@@ -217,6 +217,7 @@ rubraview_settings_view_t rubraview_settings_view_create(const rubraview_setting
     rubraview_settings_view_t view = {
         .doc = doc, .cols = cols, .rows = rows, .page = 0,
         .focus_line = -1, .focus_button = RUBRAVIEW_BUTTON_NONE, .dragging_line = -1,
+        .table_rows = RUBRAVIEW_TABLE_ROWS,
     };
     if (!doc || doc->page_count == 0) return view;
     layout(&view);
@@ -229,6 +230,15 @@ void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t col
     if (!view || !view->doc) return;
     view->cols = cols;
     view->rows = rows;
+    layout(view);
+    keep_focus_visible(view);
+}
+
+void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows) {
+    if (!view || !view->doc) return;
+    if (rows < 1) rows = 1;
+    if (rows > RUBRAVIEW_TABLE_ROWS_MAX) rows = RUBRAVIEW_TABLE_ROWS_MAX;
+    view->table_rows = rows;
     layout(view);
     keep_focus_visible(view);
 }

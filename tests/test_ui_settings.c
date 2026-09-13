@@ -230,6 +230,25 @@ int main(void) {
     }
     printf("  [PASS] Actions are focused and pressed; Delete empties a path and nothing else\n");
 
+    /* 7. A table is as tall as the rows the viewer says it has, so the
+          last binding can be scrolled to — not only the first dozen. */
+    {
+        rubraview_settings_view_t v = rubraview_settings_view_create(doc, 80, 24);
+        rubraview_settings_view_set_page(&v, RUBRAVIEW_TAB_KEYS);
+        size_t table = v.line_count;
+        for (size_t i = 0; i < v.line_count; ++i) if (v.lines[i].kind == RUBRAVIEW_LINE_TABLE) table = i;
+        assert(table < v.line_count && v.lines[table].height == RUBRAVIEW_TABLE_ROWS);
+        rubraview_settings_view_set_table_rows(&v, 67);
+        assert(v.lines[table].height == 67);
+        assert(v.content_height == v.lines[table].row + 67);
+        int32_t visible = rubraview_settings_view_visible_rows(&v);
+        assert(rubraview_settings_view_scroll(&v, 1000) == RUBRAVIEW_SEVENT_MOVED);
+        assert(v.scroll == v.content_height - visible);    /* the last row is the bottom one on screen */
+        rubraview_settings_view_set_table_rows(&v, 0);
+        assert(v.lines[table].height == 1 && v.scroll <= v.content_height);
+    }
+    printf("  [PASS] A table is as tall as its rows, and its last row can be scrolled to\n");
+
     printf("[test_ui_settings] All tests passed successfully!\n");
     return 0;
 }

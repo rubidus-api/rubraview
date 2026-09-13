@@ -56,3 +56,20 @@ rings), and the preview's text spilled out of its block at large sizes.
 > window: `vmkeys.sh <keys> 1 50 <shot-ms> "Rubraview settings"`. And a window
 > the settings window covers can be uncovered with
 > `vmwinpos.sh "Rubraview settings" 640 0 640 520`.
+
+## Measured again on the Windows 11 VM, 2026-09-13 (after 33be9b6)
+
+- **Where it was left:** the window moved to 60,40 at 820×560 and closed with
+  `Esc` wrote `[settings_window] x = 60 y = 40 width = 820 height = 560` to
+  layout.ini; `F10` brought it back there, and so did a new launch of the
+  viewer.
+- **Opened and closed ten times:** closing hides the window instead of
+  destroying it, so nothing is allocated again; the process's working set
+  was 76 MB before and 36 MB after.
+- **Keys page:** the table was twelve rows tall, so 11 of 66 bindings could
+  be seen and the rest were out of reach. It is now as tall as the keymap;
+  `Down` past the last setting scrolls to `subpage_prev`, the last binding.
+- **Decoder at launch:** `[video] decoder = "ffmpeg"` in AppData's
+  settings.ini put ` ffmpeg` in the title of a new launch; `"windows"` did
+  not. Before the fix both launched with Media Foundation.
+

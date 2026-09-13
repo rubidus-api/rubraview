@@ -27,8 +27,10 @@ This project follows Keep a Changelog.
   from one internal document that also declares every setting's type, range
   and default; a change applies to the viewer at once, the file is written when
   the window closes, and Revert goes back to what it held (D-13). The Keys page
-  lists every binding; the Video page previews the subtitle at the chosen size
-  and outline.
+  lists every binding, scrolled to the last; the Video page previews the
+  subtitle at the chosen size and outline. The window comes back where it was
+  left, at the size it was left (layout.ini), pulled onto a screen if that
+  place is gone. A decoder chosen there is used at the next launch too.
 - Configuration files are written in the common subset of INI and TOML: quoted
   strings, `true`/`false`, plain numbers, sections for everything. Older files
   still load and are rewritten on the next save. The reading history now keeps
