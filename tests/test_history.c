@@ -96,6 +96,12 @@ int main(void) {
 
         u8str_t text = rubraview_history_serialize(&arena, &history);
         assert(text.len > 0 && text.ptr[text.len] == '\0');
+        /* D-13: one section per book, the path a quoted string — a path
+           cannot be a key in a file that is also TOML. */
+        const char *want =
+            "[entry-1]\npath = \"a.cbz\"\npage = 12\ntotal = 100\ntime = 555\n"
+            "[entry-2]\npath = \"b/c d.cbz\"\npage = 3\ntotal = 40\ntime = 556\n";
+        assert(text.len == strlen(want) && memcmp(text.ptr, want, text.len) == 0);
 
         rubraview_history_t back = rubraview_history_parse(&arena, text);
         assert(back.count == 2);

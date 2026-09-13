@@ -147,9 +147,37 @@ int main(void) {
 
         rubraview_settings_t back = rubraview_settings_load(&arena, written);
         assert(rubraview_settings_get(&back, U8("viewer"), U8("gutter_px")) == 12.0);
-        assert(rubraview_settings_get(&back, U8("")   , U8("single_instance")) == 1.0);
+        assert(rubraview_settings_get(&back, U8("general"), U8("single_instance")) == 1.0);
+        /* D-13: nothing is written above the first section. */
+        assert(written.len > 0 && written.ptr[0] == '[');
     }
     printf("  [PASS] Settings round-trip, and an unknown key survives the save\n");
+
+    /* D-13: a file from before [general] existed still loads its keys. */
+    {
+        rubraview_settings_t old = rubraview_settings_load(&arena,
+            U8("single_instance = false\n[viewer]\ngutter_px = 12\n"));
+        assert(rubraview_settings_get(&old, U8("general"), U8("single_instance")) == 0.0);
+        assert(rubraview_settings_get(&old, U8("viewer"), U8("gutter_px")) == 12.0);
+    }
+    printf("  [PASS] An older file with General keys above the first section still loads\n");
+
+    /* D-13: saving over such a file moves what sat above the first section
+       under [general], once — the check-conf-format gate found the save
+       writing it back where INI refuses it. */
+    {
+        u8str_t old = U8("startup = \"last\"\nmystery = 7\n[general]\nstartup = \"folder\"\n");
+        rubraview_settings_t s = rubraview_settings_load(&arena, old);
+        u8str_t written = rubraview_settings_save(&arena, &s, old);
+        assert(written.len > 0 && written.ptr[0] == '[');        /* nothing above the first section */
+        size_t startups = 0;
+        for (size_t i = 0; i + 7 <= written.len; ++i) {
+            if (memcmp(written.ptr + i, "startup", 7) == 0) startups++;
+        }
+        assert(startups == 1);                                    /* written once */
+        assert(contains(written, "mystery = 7"));                 /* an unknown key still survives */
+    }
+    printf("  [PASS] Saving over an older file moves its top keys under [general], once\n");
 
     /* Test 8: setting a value clamps and steps it the same way loading
        does — one rule, not two. */

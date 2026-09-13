@@ -69,31 +69,70 @@ static void parse_position(u8str_t value, int32_t *out_page, int32_t *out_total,
     }
 }
 
+static int64_t whole_number(u8str_t v) {
+    int64_t n = 0;
+    size_t i = 0;
+    bool negative = false;
+    if (v.len > 0 && v.ptr[0] == '-') { negative = true; i = 1; }
+    for (; i < v.len && v.ptr[i] >= '0' && v.ptr[i] <= '9'; ++i) n = n * 10 + (v.ptr[i] - '0');
+    return negative ? -n : n;
+}
+
+static bool starts_with(u8str_t s, const char *prefix) {
+    size_t n = strlen(prefix);
+    return s.len >= n && memcmp(s.ptr, prefix, n) == 0;
+}
+
+static void add_entry(proven_arena_t *arena, rubraview_history_t *history,
+                      u8str_t path, int32_t page, int32_t total, int64_t timestamp) {
+    if (path.len == 0) return;
+    if (!entries_reserve(arena, history, history->count + 1)) return;
+    history->entries[history->count++] = (rubraview_history_entry_t){
+        .path = path, .page = page, .total = total, .timestamp = timestamp,
+    };
+}
+
 rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text) {
     rubraview_history_t history = {0};
     if (!arena || text.len == 0) return history;
 
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
-    for (size_t i = 0; i < doc.count; ++i) {
-        /* §3.17.1 puts the positions under [history]; a stray key
-           elsewhere in the file is not one of ours. */
-        if (doc.entries[i].section.len != sizeof(HISTORY_SECTION) - 1 ||
-            memcmp(doc.entries[i].section.ptr, HISTORY_SECTION, sizeof(HISTORY_SECTION) - 1) != 0) {
+
+    /* D-13: one `[entry-N]` section per book, its path a quoted string —
+       a path cannot be a key in a file that must also be TOML. */
+    u8str_t section = { .ptr = "", .len = 0 };
+    u8str_t path = { .ptr = "", .len = 0 };
+    int32_t page = 0, total = 0;
+    int64_t timestamp = 0;
+    for (size_t i = 0; i <= doc.count; ++i) {
+        bool boundary = i == doc.count || !u8str_eq(doc.entries[i].section, section);
+        if (boundary) {
+            if (starts_with(section, "entry-")) add_entry(arena, &history, path, page, total, timestamp);
+            if (i == doc.count) break;
+            section = doc.entries[i].section;
+            path = (u8str_t){ .ptr = "", .len = 0 };
+            page = 0; total = 0; timestamp = 0;
+        }
+        const rubraview_ini_entry_t *e = &doc.entries[i];
+        if (starts_with(e->section, "entry-")) {
+            if (u8str_eq(e->key, U8("path")))       path = e->value;
+            else if (u8str_eq(e->key, U8("page")))  page = (int32_t)whole_number(e->value);
+            else if (u8str_eq(e->key, U8("total"))) total = (int32_t)whole_number(e->value);
+            else if (u8str_eq(e->key, U8("time")))  timestamp = whole_number(e->value);
             continue;
         }
-        if (doc.entries[i].key.len == 0) continue;
 
-        int32_t page = 0, total = 0;
-        int64_t timestamp = 0;
-        parse_position(doc.entries[i].value, &page, &total, &timestamp);
-
-        if (!entries_reserve(arena, &history, history.count + 1)) break;
-        history.entries[history.count++] = (rubraview_history_entry_t){
-            .path = doc.entries[i].key,
-            .page = page,
-            .total = total,
-            .timestamp = timestamp,
-        };
+        /* The format before D-13, still read: under [history], the path
+           as the key and `page:58, total:192, time:172...` as the value. */
+        if (e->section.len != sizeof(HISTORY_SECTION) - 1 ||
+            memcmp(e->section.ptr, HISTORY_SECTION, sizeof(HISTORY_SECTION) - 1) != 0) {
+            continue;
+        }
+        if (e->key.len == 0) continue;
+        int32_t old_page = 0, old_total = 0;
+        int64_t old_time = 0;
+        parse_position(e->value, &old_page, &old_total, &old_time);
+        add_entry(arena, &history, e->key, old_page, old_total, old_time);
     }
 
     return history;
@@ -142,49 +181,28 @@ void rubraview_history_prune(rubraview_history_t *history, size_t max_entries) {
     }
 }
 
-typedef struct byte_buf {
-    uint8_t *data;
-    size_t len, cap;
-} byte_buf_t;
-
-static bool byte_buf_append(proven_arena_t *arena, byte_buf_t *b, const char *s, size_t n) {
-    if (n == 0) return true;
-    if (b->len + n > b->cap) {
-        size_t new_cap = b->cap == 0 ? 512 : b->cap * 2;
-        while (new_cap < b->len + n) new_cap *= 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap);
-        if (!proven_is_ok(res.err)) return false;
-        if (b->data && b->len > 0) memcpy(res.value.ptr, b->data, b->len);
-        b->data = res.value.ptr;
-        b->cap = new_cap;
-    }
-    memcpy(b->data + b->len, s, n);
-    b->len += n;
-    return true;
-}
-
 u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history) {
     if (!arena || !history) return (u8str_t){ .ptr = "", .len = 0 };
 
-    byte_buf_t buf = {0};
-    byte_buf_append(arena, &buf, "[" HISTORY_SECTION "]\n", sizeof("[" HISTORY_SECTION "]\n") - 1);
-
+    /* Through the configuration writer, so the file is in the INI and
+       TOML subset by construction (D-13). */
+    rubraview_ini_doc_t doc = {0};
     for (size_t i = 0; i < history->count; ++i) {
         const rubraview_history_entry_t *e = &history->entries[i];
-        byte_buf_append(arena, &buf, e->path.ptr, e->path.len);
+        char name[32];
+        int n = snprintf(name, sizeof(name), "entry-%zu", i + 1);
+        if (n <= 0) continue;
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
+        if (!proven_is_ok(res.err)) break;
+        memcpy(res.value.ptr, name, (size_t)n + 1);
+        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
 
-        char tail[96];
-        int written = snprintf(tail, sizeof(tail), " = page:%d, total:%d, time:%lld\n",
-                               e->page, e->total, (long long)e->timestamp);
-        if (written > 0) byte_buf_append(arena, &buf, tail, (size_t)written);
+        rubraview_ini_set_string(arena, &doc, section, U8("path"), e->path);
+        rubraview_ini_set_int(arena, &doc, section, U8("page"), e->page);
+        rubraview_ini_set_int(arena, &doc, section, U8("total"), e->total);
+        rubraview_ini_set_int(arena, &doc, section, U8("time"), e->timestamp);
     }
-
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, buf.len + 1);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
-    if (buf.len > 0) memcpy(res.value.ptr, buf.data, buf.len);
-    res.value.ptr[buf.len] = '\0';
-
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = buf.len };
+    return rubraview_ini_serialize(arena, &doc);
 }
 
 bool rubraview_history_should_offer_resume(const rubraview_history_entry_t *entry) {

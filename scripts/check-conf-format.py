@@ -29,6 +29,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCES = [
     "tools/conf_samples.c",
     "src/core/ini.c",
+    "src/core/history.c",
+    "src/core/path.c",
+    "src/core/utf8.c",
+    "src/core/settings.c",
+    "src/core/keymap.c",
+    "src/core/default_keymap.c",
     "vendor/proven/src/proven/arena.c",
     "vendor/proven/src/proven/memory.c",
     "vendor/proven/src/proven/panic.c",

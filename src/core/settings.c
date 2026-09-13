@@ -55,12 +55,12 @@ static const char *const REPLAYGAIN[] = { "off", "track", "album", NULL };
  */
 static const rubraview_setting_def_t SCHEMA[] = {
     /* Tab 1: General (§3.22.2.1) */
-    CHOICE_ROW("startup", "", "On startup", RUBRAVIEW_TAB_GENERAL, STARTUP, 3, 2, false),
-    BOOL_ROW("single_instance", "", "Reuse the open window", RUBRAVIEW_TAB_GENERAL, 1.0, true),
-    BOOL_ROW("frameless", "", "Frameless window", RUBRAVIEW_TAB_GENERAL, 1.0, false),
-    NUM_ROW("titlebar_trigger_px", "", "Titlebar trigger height", RUBRAVIEW_TAB_GENERAL,
+    CHOICE_ROW("startup", "general", "On startup", RUBRAVIEW_TAB_GENERAL, STARTUP, 3, 2, false),
+    BOOL_ROW("single_instance", "general", "Reuse the open window", RUBRAVIEW_TAB_GENERAL, 1.0, true),
+    BOOL_ROW("frameless", "general", "Frameless window", RUBRAVIEW_TAB_GENERAL, 1.0, false),
+    NUM_ROW("titlebar_trigger_px", "general", "Titlebar trigger height", RUBRAVIEW_TAB_GENERAL,
             RUBRAVIEW_SETTING_INT, 12.0, 4.0, 40.0, 1.0, false),
-    NUM_ROW("titlebar_hide_ms", "", "Titlebar hide delay", RUBRAVIEW_TAB_GENERAL,
+    NUM_ROW("titlebar_hide_ms", "general", "Titlebar hide delay", RUBRAVIEW_TAB_GENERAL,
             RUBRAVIEW_SETTING_INT, 500.0, 100.0, 3000.0, 50.0, false),
 
     /* Tab 2: Viewer and layout (§3.22.2.2) */
@@ -225,6 +225,11 @@ static bool choice_index(const rubraview_setting_def_t *def, u8str_t word, doubl
     return false;
 }
 
+static bool u8str_equal_lit(u8str_t s, const char *lit) {
+    size_t n = strlen(lit);
+    return s.len == n && memcmp(s.ptr, lit, n) == 0;
+}
+
 rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, u8str_t ini_text) {
     rubraview_settings_t settings = rubraview_settings_defaults();
     if (!arena || ini_text.len == 0) return settings;
@@ -233,7 +238,14 @@ rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, u8str_t ini_
 
     for (size_t i = 0; i < SCHEMA_COUNT; ++i) {
         const rubraview_setting_def_t *def = &SCHEMA[i];
-        const u8str_t *raw = rubraview_ini_get(&doc, def->section, def->key);
+        u8str_t section = def->section;
+        const u8str_t *raw = rubraview_ini_get(&doc, section, def->key);
+        /* D-13 moved the General tab's keys under [general]; a file from
+           before still has them above the first section. */
+        if (!raw && u8str_equal_lit(section, "general")) {
+            section = (u8str_t){ .ptr = "", .len = 0 };
+            raw = rubraview_ini_get(&doc, section, def->key);
+        }
         if (!raw || raw->len == 0) continue;
 
         switch (def->type) {
@@ -246,13 +258,13 @@ rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, u8str_t ini_
                 break;
             }
             case RUBRAVIEW_SETTING_BOOL:
-                settings.values[i] = rubraview_ini_get_bool(&doc, def->section, def->key,
+                settings.values[i] = rubraview_ini_get_bool(&doc, section, def->key,
                                                             def->default_value > 0.5) ? 1.0 : 0.0;
                 break;
             case RUBRAVIEW_SETTING_INT:
             case RUBRAVIEW_SETTING_FLOAT:
             default: {
-                double value = rubraview_ini_get_float(&doc, def->section, def->key, def->default_value);
+                double value = rubraview_ini_get_float(&doc, section, def->key, def->default_value);
                 /* A hand-edited file must not be able to ask for a 40 GB
                    cache: out of range is clamped, not obeyed. */
                 settings.values[i] = clamp_to(def, value);
@@ -273,57 +285,57 @@ u8str_t rubraview_settings_save(proven_arena_t *arena, const rubraview_settings_
        not know about survives being opened by it. */
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, existing_ini_text);
 
+    /* D-13: nothing may sit above the first section. What an older file
+       kept there moves under [general] — where the General tab's keys
+       live now — and when [general] already has the same key, the later
+       one in the file wins, as it did when the file was read. */
+    size_t kept = 0;
+    for (size_t i = 0; i < doc.count; ++i) {
+        rubraview_ini_entry_t e = doc.entries[i];
+        if (e.section.len == 0) e.section = U8("general");
+        bool replaced = false;
+        for (size_t k = 0; k < kept; ++k) {
+            if (doc.entries[k].section.len == e.section.len &&
+                memcmp(doc.entries[k].section.ptr, e.section.ptr, e.section.len) == 0 &&
+                doc.entries[k].key.len == e.key.len &&
+                memcmp(doc.entries[k].key.ptr, e.key.ptr, e.key.len) == 0) {
+                doc.entries[k] = e;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) doc.entries[kept++] = e;
+    }
+    doc.count = kept;
+
     for (size_t i = 0; i < SCHEMA_COUNT; ++i) {
         const rubraview_setting_def_t *def = &SCHEMA[i];
-        char buffer[64];
-        u8str_t value = empty;
-        bool needs_copy = false;   /* the numeric cases format into `buffer` */
-
+        /* D-13: each value is written with its own type, so the file is
+           in the INI and TOML subset — a folder is a string even when its
+           name is a number, a choice is its quoted name. */
         switch (def->type) {
             case RUBRAVIEW_SETTING_PATH:
-                value = settings->texts[i];
-                if (value.len == 0) continue;   /* an unset folder is left out entirely */
+                if (settings->texts[i].len == 0) continue;   /* an unset folder is left out entirely */
+                rubraview_ini_set_string(arena, &doc, def->section, def->key, settings->texts[i]);
                 break;
             case RUBRAVIEW_SETTING_CHOICE: {
                 int32_t index = (int32_t)settings->values[i];
                 if (index < 0 || index >= def->choice_count || !def->choices[index]) continue;
-                value = (u8str_t){ .ptr = def->choices[index], .len = strlen(def->choices[index]) };
+                rubraview_ini_set_string(arena, &doc, def->section, def->key,
+                                         (u8str_t){ .ptr = def->choices[index], .len = strlen(def->choices[index]) });
                 break;
             }
             case RUBRAVIEW_SETTING_BOOL:
-                value = settings->values[i] > 0.5 ? U8("true") : U8("false");
+                rubraview_ini_set_bool(arena, &doc, def->section, def->key, settings->values[i] > 0.5);
                 break;
-            case RUBRAVIEW_SETTING_FLOAT: {
-                int written = snprintf(buffer, sizeof(buffer), "%.3f", settings->values[i]);
-                if (written <= 0) continue;
-                value = (u8str_t){ .ptr = buffer, .len = (size_t)written };
-                needs_copy = true;
+            case RUBRAVIEW_SETTING_FLOAT:
+                rubraview_ini_set_float(arena, &doc, def->section, def->key, settings->values[i]);
                 break;
-            }
             case RUBRAVIEW_SETTING_INT:
-            default: {
-                int written = snprintf(buffer, sizeof(buffer), "%lld", (long long)settings->values[i]);
-                if (written <= 0) continue;
-                value = (u8str_t){ .ptr = buffer, .len = (size_t)written };
-                needs_copy = true;
+            default:
+                rubraview_ini_set_int(arena, &doc, def->section, def->key, (long long)settings->values[i]);
                 break;
-            }
         }
-
-        /* The document keeps the slice rather than the bytes, and
-           `buffer` is gone at the end of this iteration — so a formatted
-           number has to be copied somewhere that outlives it. ASan is
-           what pointed this out. */
-        if (needs_copy) {
-            proven_result_mem_mut_t res = proven_arena_alloc(arena, value.len + 1);
-            if (!proven_is_ok(res.err)) continue;
-            char *copy = (char*)(void*)res.value.ptr;
-            memcpy(copy, value.ptr, value.len);
-            copy[value.len] = '\0';
-            value = (u8str_t){ .ptr = copy, .len = value.len };
-        }
-
-        rubraview_ini_set(arena, &doc, def->section, def->key, value);
     }
 
     return rubraview_ini_serialize(arena, &doc);

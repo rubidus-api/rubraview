@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rubraview/ini.h"
+#include "rubraview/history.h"
+#include "rubraview/settings.h"
+#include "rubraview/default_keymap.h"
 
 static u8str_t lit(const char *s) { return (u8str_t){ .ptr = s, .len = strlen(s) }; }
 
@@ -62,6 +65,26 @@ int main(int argc, char **argv) {
         "folder = D:\\Manga\\One Piece\n";
     rubraview_ini_doc_t rewritten = rubraview_ini_parse(&arena, lit(old));
     failures += write_file(argv[1], "rewritten-old.ini", rubraview_ini_serialize(&arena, &rewritten));
+
+    /* The files the viewer really writes, made by the code that makes them. */
+    failures += write_file(argv[1], "default-keymap.ini", lit(rubraview_default_keymap()));
+
+    rubraview_history_t history = {0};
+    rubraview_history_record(&arena, &history, lit("D:\\Manga\\One Piece 01.cbz"), 12, 200, 1789000000);
+    rubraview_history_record(&arena, &history, lit("C:\\책\\\"따옴표\" 권.cbz"), 0, 40, 1789000001);
+    failures += write_file(argv[1], "history.ini", rubraview_history_serialize(&arena, &history));
+
+    rubraview_settings_t settings = rubraview_settings_defaults();
+    failures += write_file(argv[1], "settings-defaults.ini", rubraview_settings_save(&arena, &settings, lit("")));
+    rubraview_settings_set(&settings, lit("video"), lit("subtitle_size"), 48.0);
+    rubraview_settings_set_text(&settings, lit("curation"), lit("dir_1"), lit("D:\\2024"));
+    failures += write_file(argv[1], "settings-changed.ini",
+                           rubraview_settings_save(&arena, &settings, lit("; old\nstartup = last\n[video]\ndecoder = ffmpeg\n")));
+
+    rubraview_ini_doc_t layout = {0};
+    rubraview_ini_set_float(&arena, &layout, lit("boxes"), lit("toolbox_x"), 804.0);
+    rubraview_ini_set_float(&arena, &layout, lit("boxes"), lit("menubox_y"), 396.5);
+    failures += write_file(argv[1], "layout.ini", rubraview_ini_serialize(&arena, &layout));
 
     free(raw);
     return failures ? 1 : 0;

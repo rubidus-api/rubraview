@@ -4,83 +4,87 @@ const char *rubraview_default_keymap(void) {
     return
 
     /* UI & Windows (§3.7.2) */
-    "toggle_fullscreen = F, F11, Alt+Enter\n"
-    "toggle_menu = Tab, F1\n"
-    "toggle_toolbox = T, F2\n"
-    "open_picker = O, Ctrl+O\n"
-    "open_folder = Ctrl+Shift+O\n"
-    "toggle_filmstrip = F4\n"
-    "toggle_osd = I\n"
+    /* D-13: every binding sits in a section (INI refuses a key before the
+       first one) and every value is a quoted string (TOML needs quotes).
+       `[ui]` is the context every other section falls back to. */
+    "[ui]\n"
+    "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
+    "toggle_menu = \"Tab, F1\"\n"
+    "toggle_toolbox = \"T, F2\"\n"
+    "open_picker = \"O, Ctrl+O\"\n"
+    "open_folder = \"Ctrl+Shift+O\"\n"
+    "toggle_filmstrip = \"F4\"\n"
+    "toggle_osd = \"I\"\n"
     /* §3.13 / §3.10 / §3.11 */
-    "open_edit = E\n"
-    "quick_export = Ctrl+E\n"
-    "save_as = Ctrl+Shift+S\n"
-    "open_batch = Ctrl+B\n"
+    "open_edit = \"E\"\n"
+    "quick_export = \"Ctrl+E\"\n"
+    "save_as = \"Ctrl+Shift+S\"\n"
+    "open_batch = \"Ctrl+B\"\n"
     /* §3.22.1 */
-    "open_settings = F10, Ctrl+Comma\n"
-    "toggle_pixel_grid = G\n"
-    "quit = Escape\n"
+    "open_settings = \"F10, Ctrl+Comma\"\n"
+    "toggle_pixel_grid = \"G\"\n"
+    "quit = \"Escape\"\n"
     /* §3.18: triage. Delete is safe — it goes to the recycle bin — and
        Shift+Delete asks before it is not. */
-    "delete_file = Delete\n"
-    "purge_file = Shift+Delete\n"
-    "undo = Ctrl+Z\n"
-    "rename_file = F2\n"
+    "delete_file = \"Delete\"\n"
+    "purge_file = \"Shift+Delete\"\n"
+    "undo = \"Ctrl+Z\"\n"
+    "rename_file = \"F2\"\n"
     "\n"
     "[navigation]\n"
     /* Owner, 2026-09-09: page turning is on these keys and nothing else
        — PageDown/PageUp, Space/Enter and Backspace. The arrows, J/K and
        A/D were bound here too; they were removed on request so that what
        moves between files is a short, deliberate list. */
-    "next_page = PageDown, Space, Enter\n"
-    "prev_page = PageUp, Backspace, Shift+Space\n"
-    "first_page = Home, Ctrl+Home\n"
-    "last_page = End, Ctrl+End\n"
-    "skip_forward = Shift+Right, Ctrl+PageDown\n"
-    "skip_backward = Shift+Left, Ctrl+PageUp\n"
+    "next_page = \"PageDown, Space, Enter\"\n"
+    "prev_page = \"PageUp, Backspace, Shift+Space\"\n"
+    "first_page = \"Home, Ctrl+Home\"\n"
+    "last_page = \"End, Ctrl+End\"\n"
+    "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
+    "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"
     /* §3.7.2 gives "up to folder" two keys, Backspace and Alt+Up, and
        both are now spoken for: Backspace turns a page (owner,
        2026-09-09) and Alt+Up pans, which is the whole Alt+Arrow set.
        So it moved to Ctrl+Up — the nearest free chord that still reads
        as "up". */
-    "up_to_folder = Ctrl+Up\n"
-    "toggle_layout = B\n"
-    "toggle_reading_order = M\n"
-    "toggle_spread_detect = Shift+B\n"
+    "up_to_folder = \"Ctrl+Up\"\n"
+    "toggle_layout = \"B\"\n"
+    "toggle_reading_order = \"M\"\n"
+    "toggle_spread_detect = \"Shift+B\"\n"
     /* §3.8.1 point 4. §3.7.2 also offers Ctrl+PageDown/PageUp here, but
        those are skipping's primary and skipping keeps them. */
-    "next_archive = Ctrl+BracketRight\n"
-    "prev_archive = Ctrl+BracketLeft\n"
+    "next_archive = \"Ctrl+BracketRight\"\n"
+    "prev_archive = \"Ctrl+BracketLeft\"\n"
     "\n"
     "[view]\n"
-    "fit_window = 1\n"
-    "fit_width = 2\n"
-    "fit_height = 3\n"
-    "actual_size = 4, 0, Ctrl+0\n"
-    "smart_fit = 5\n"
-    "fit_stretch = Ctrl+1\n"
-    "toggle_fit_lock = L\n"
-    "zoom_in = Plus\n"
-    "zoom_out = Minus\n"
+    "fit_window = \"1\"\n"
+    "fit_width = \"2\"\n"
+    "fit_height = \"3\"\n"
+    "actual_size = \"4, 0, Ctrl+0\"\n"
+    "smart_fit = \"5\"\n"
+    "fit_stretch = \"Ctrl+1\"\n"
+    "toggle_fit_lock = \"L\"\n"
+    "zoom_in = \"Plus\"\n"
+    "zoom_out = \"Minus\"\n"
     /* §3.7.2 lists both `Alt + Arrow keys` and `W A S D` for panning,
        but it also gives A and D to page navigation and S to the slide
        show. Those primary bindings win, so panning keeps the arrows. */
-    "pan_left = Alt+Left\n"
-    "pan_right = Alt+Right\n"
-    "pan_up = Alt+Up\n"
-    "pan_down = Alt+Down\n"
-    "rotate_cw = R\n"
-    "rotate_ccw = Shift+R\n"
-    "flip_horizontal = H\n"
-    "flip_vertical = V\n"
-    "toggle_nearest = N\n"
+    "pan_left = \"Alt+Left\"\n"
+    "pan_right = \"Alt+Right\"\n"
+    "pan_up = \"Alt+Up\"\n"
+    "pan_down = \"Alt+Down\"\n"
+    "rotate_cw = \"R\"\n"
+    "rotate_ccw = \"Shift+R\"\n"
+    "flip_horizontal = \"H\"\n"
+    "flip_vertical = \"V\"\n"
+    "toggle_nearest = \"N\"\n"
     "\n"
     "[slideshow]\n"
-    "toggle_slideshow = S, F5\n"
-    "interval_up = BracketRight\n"
-    "interval_down = BracketLeft\n"
-    "interval_up_fine = Shift+BracketRight\n"
-    "interval_down_fine = Shift+BracketLeft\n"
+    "toggle_slideshow = \"S, F5\"\n"
+    "interval_up = \"BracketRight\"\n"
+    "interval_down = \"BracketLeft\"\n"
+    "interval_up_fine = \"Shift+BracketRight\"\n"
+    "interval_down_fine = \"Shift+BracketLeft\"\n"
     "\n"
 
     /* §3.20.1. This context is active only while an animated image is on
@@ -93,29 +97,29 @@ const char *rubraview_default_keymap(void) {
        Nothing is unreachable: paging a folder of GIFs still works with
        Right/Left, PageDown/PageUp, J/K and D/A. */
     "[animation]\n"
-    "anim_toggle_pause = Space\n"
-    "anim_step_forward = Period\n"
-    "anim_step_back = Comma\n"
-    "anim_speed_up = Ctrl+BracketRight\n"
-    "anim_speed_down = Ctrl+BracketLeft\n"
+    "anim_toggle_pause = \"Space\"\n"
+    "anim_step_forward = \"Period\"\n"
+    "anim_step_back = \"Comma\"\n"
+    "anim_speed_up = \"Ctrl+BracketRight\"\n"
+    "anim_speed_down = \"Ctrl+BracketLeft\"\n"
     /* M5: the same context holds while a video is on screen. Ctrl+Left and
        Ctrl+Right were free; plain Left/Right keep turning pages. */
-    "media_seek_forward = Ctrl+Right\n"
-    "media_seek_back = Ctrl+Left\n"
+    "media_seek_forward = \"Ctrl+Right\"\n"
+    "media_seek_back = \"Ctrl+Left\"\n"
     /* §3.16.1 / R135: an external subtitle that runs early or late is
        nudged half a second at a time. Z and X are free — the global
        section only spends Ctrl+Z. */
-    "subtitle_earlier = Z\n"
-    "subtitle_later = X\n"
+    "subtitle_earlier = \"Z\"\n"
+    "subtitle_later = \"X\"\n"
     /* §3.16.2 / R135: the next sound track, and the next subtitle (the
        cycle includes turning them off). A and C were both free. */
-    "next_audio_track = A\n"
-    "next_subtitle_track = C\n"
+    "next_audio_track = \"A\"\n"
+    "next_subtitle_track = \"C\"\n"
     "\n"
 
     /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,
        so its sub-pages are stepped rather than played. */
     "[subpage]\n"
-    "subpage_next = Period\n"
-    "subpage_prev = Comma\n";
+    "subpage_next = \"Period\"\n"
+    "subpage_prev = \"Comma\"\n";
 }
