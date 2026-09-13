@@ -93,6 +93,12 @@ typedef struct rubraview_window_config {
     const char *title;
     int32_t width, height;  /* initial client size in logical pixels (scaled by DPI at creation) */
     bool    frameless;      /* §3.21.1: strip the OS caption and borders via WM_NCCALCSIZE */
+    /**
+     * §3.22 / D-13: a window that belongs to another — the settings
+     * window. It stays above its owner, has no taskbar button of its own,
+     * and closing it ends nothing but itself. NULL for the main window.
+     */
+    rubraview_window_t *owner;
 } rubraview_window_config_t;
 
 /* ---- §3.19 lifecycle and shell integration ---- */

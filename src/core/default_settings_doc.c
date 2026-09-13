@@ -21,6 +21,8 @@ static const char *const PARTS[] = {
 "  choice general.startup          \"On startup\"              blank | last_file | last_folder = last_folder\n"
 "  toggle general.single_instance  \"Reuse the open window\"   = true wired\n"
 "  toggle general.frameless        \"Frameless window\"        = true\n"
+"  action shell.register           \"Register file types\"\n"
+"  action shell.unregister         \"Remove file types\"\n"
 "  section \"Title bar\"\n"
 "  int    general.titlebar_trigger_px \"Titlebar trigger height\" 4..40 step 1 unit \"px\" = 12\n"
 "  int    general.titlebar_hide_ms    \"Titlebar hide delay\"     100..3000 step 50 unit \"ms\" = 500\n"

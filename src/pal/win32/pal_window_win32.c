@@ -27,6 +27,7 @@ struct rubraview_window {
     HWND hwnd;
     bool frameless;
     bool should_close;
+    bool owned;             /* §3.22: a window belonging to another; its end is not the program's */
     bool cursor_visible;
     bool fullscreen;
     int32_t width, height;
@@ -413,7 +414,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
         case WM_DESTROY:
             w->should_close = true;
-            PostQuitMessage(0);
+            /* Only the main window's end is the program's end. The
+               settings window closing must not take the viewer with it. */
+            if (!w->owned) PostQuitMessage(0);
             return 0;
 
         default:
@@ -441,7 +444,8 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     if (!proven_is_ok(res.err)) return NULL;
     struct rubraview_window *w = (struct rubraview_window*)(void*)res.value.ptr;
     memset(w, 0, sizeof(*w));
-    w->frameless = config->frameless;
+    w->frameless = config->frameless && !config->owner;
+    w->owned = config->owner != NULL;
     w->cursor_visible = true;
     w->dpi_scale = 1.0;
     w->get_dpi_for_window = get_dpi;
@@ -461,9 +465,12 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     int width = config->width > 0 ? config->width : 1280;
     int height = config->height > 0 ? config->height : 800;
 
-    DWORD style = config->frameless
+    DWORD style = w->frameless
         ? (WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX)
         : WS_OVERLAPPEDWINDOW;
+    /* An owned window: a parent handle on a top-level window makes it
+       owned (not a child) — above its owner, no taskbar button. */
+    HWND owner_hwnd = config->owner ? config->owner->hwnd : NULL;
 
     WCHAR wide_title[256];
     const char *title = config->title ? config->title : "Rubraview";
@@ -473,13 +480,13 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
 
     HWND hwnd = CreateWindowExW(0, RUBRAVIEW_WINDOW_CLASS, wide_title, style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, width, height,
-                                NULL, NULL, instance, w);
+                                owner_hwnd, NULL, instance, w);
     if (!hwnd) return NULL;
 
     w->hwnd = hwnd;
     update_dpi_scale(w);
 
-    if (config->frameless) {
+    if (w->frameless) {
         /* §3.21.1: keep the OS drop shadow even without a visible frame. */
         MARGINS margins = { 0, 0, 1, 0 };
         DwmExtendFrameIntoClientArea(hwnd, &margins);

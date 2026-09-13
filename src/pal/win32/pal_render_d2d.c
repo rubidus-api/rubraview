@@ -712,6 +712,79 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
     return true;
 }
 
+/* ---- fixed-width text for the settings window (§3.22, D-13) ---- */
+
+/* Consolas ships with every Windows since Vista. A character it has no
+   glyph for — Hangul, most of CJK — is drawn by DirectWrite's own font
+   fallback; the grid counts those as two cells, which is close to what
+   the fallback face draws. */
+#define MONO_FAMILY L"Consolas"
+
+static IDWriteTextFormat *mono_format(rubraview_renderer_t *renderer, double font_size) {
+    IDWriteTextFormat *format = NULL;
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, MONO_FAMILY, NULL,
+                                               DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                               DWRITE_FONT_STRETCH_NORMAL, (FLOAT)font_size, L"", &format)) ||
+        !format) {
+        return NULL;
+    }
+    IDWriteTextFormat_SetTextAlignment(format, DWRITE_TEXT_ALIGNMENT_LEADING);
+    IDWriteTextFormat_SetParagraphAlignment(format, DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    IDWriteTextFormat_SetWordWrapping(format, DWRITE_WORD_WRAPPING_NO_WRAP);
+    return format;
+}
+
+bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
+                                    double *out_width, double *out_height) {
+    if (!renderer || !renderer->dwrite || font_size <= 0.0) return false;
+    IDWriteTextFormat *format = mono_format(renderer, font_size);
+    if (!format) return false;
+    /* Ten characters measured, one tenth taken: a single glyph's advance
+       is rounded more coarsely than a run of them. */
+    IDWriteTextLayout *text = NULL;
+    bool ok = SUCCEEDED(IDWriteFactory_CreateTextLayout(renderer->dwrite, L"MMMMMMMMMM", 10, format,
+                                                        10000.0f, 1000.0f, &text)) && text;
+    if (ok) {
+        DWRITE_TEXT_METRICS metrics;
+        ok = SUCCEEDED(IDWriteTextLayout_GetMetrics(text, &metrics));
+        if (ok) {
+            if (out_width) *out_width = (double)metrics.widthIncludingTrailingWhitespace / 10.0;
+            if (out_height) *out_height = (double)metrics.height;
+        }
+        IDWriteTextLayout_Release(text);
+    }
+    IDWriteTextFormat_Release(format);
+    return ok;
+}
+
+bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t text,
+                                         double x, double y, double font_size, uint32_t argb) {
+    if (!renderer || !renderer->target || !renderer->dwrite) return false;
+    if (text.len == 0 || text.len > 4096 || font_size <= 0.0) return false;
+
+    WCHAR wide[4096];
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len,
+                                       wide, (int)(sizeof(wide) / sizeof(wide[0])));
+    if (wide_len <= 0) return false;
+
+    IDWriteTextFormat *format = mono_format(renderer, font_size);
+    if (!format) return false;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) || !brush) {
+        IDWriteTextFormat_Release(format);
+        return false;
+    }
+    set_identity(rt);
+    D2D1_RECT_F layout = { (FLOAT)x, (FLOAT)y, (FLOAT)(x + 100000.0), (FLOAT)(y + font_size * 2.0) };
+    ID2D1RenderTarget_DrawText(rt, wide, (UINT32)wide_len, format, &layout, (ID2D1Brush*)brush,
+                               D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+    ID2D1SolidColorBrush_Release(brush);
+    IDWriteTextFormat_Release(format);
+    return true;
+}
+
 /* ---- textures filled from memory (video frames, M5) ---- */
 
 rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *renderer,
