@@ -33,6 +33,8 @@ SOURCES = [
     "src/core/path.c",
     "src/core/utf8.c",
     "src/core/settings.c",
+    "src/core/settings_doc.c",
+    "src/core/default_settings_doc.c",
     "src/core/keymap.c",
     "src/core/default_keymap.c",
     "vendor/proven/src/proven/arena.c",

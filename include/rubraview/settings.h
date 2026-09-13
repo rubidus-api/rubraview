@@ -59,6 +59,7 @@ typedef struct rubraview_setting_def {
 
     const char *const *choices;   /* CHOICE only; NULL-terminated */
     int32_t     choice_count;
+    u8str_t     unit;             /* shown after a number: "px", "ms"; may be empty */
 
     /**
      * True when some module actually reads this key today. A setting
@@ -87,9 +88,14 @@ u8str_t rubraview_settings_tab_name(rubraview_settings_tab_t tab);
 #define RUBRAVIEW_SETTINGS_MAX 64
 
 typedef struct rubraview_settings {
-    double  values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */
-    u8str_t texts[RUBRAVIEW_SETTINGS_MAX];    /* PATH settings */
-    size_t  count;                            /* mirrors the schema's length */
+    double   values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */
+    u8str_t  texts[RUBRAVIEW_SETTINGS_MAX];    /* PATH settings */
+    size_t   count;                            /* mirrors the schema's length */
+    /* D-13: how many times each setting has changed, and all of them
+       together. The settings window and the viewer compare these to know
+       what to redraw — cheaper and surer than comparing every value. */
+    uint32_t revision[RUBRAVIEW_SETTINGS_MAX];
+    uint32_t revision_total;
 } rubraview_settings_t;
 
 /** Every setting at its default. */
