@@ -146,10 +146,11 @@ int main(void) {
             "  info   \"FFmpeg\" {media.ffmpeg}\n"
             "  preview subtitle 3\n"
             "page keys \"Keys\"\n"
-            "  table keymap\n");
+            "  table keymap\n"
+            "  action shell.register \"Register file types\"\n");
         if (d.error) fprintf(stderr, "line %u: %s\n", d.error_line, d.error);
         assert(!d.error);
-        assert(d.page_count == 2 && d.def_count == 5 && d.node_count == 11);
+        assert(d.page_count == 2 && d.def_count == 5 && d.node_count == 12);
         assert(d.nodes[0].kind == RUBRAVIEW_NODE_PAGE && eq(d.nodes[0].name, "video") && eq(d.nodes[0].text, "Video & subtitles"));
         assert(d.nodes[1].kind == RUBRAVIEW_NODE_SECTION && eq(d.nodes[1].text, "Subtitles") && d.nodes[1].line == 3);
         const rubraview_setting_def_t *size_def = &d.defs[d.nodes[2].setting];
@@ -165,6 +166,8 @@ int main(void) {
         assert(d.nodes[7].kind == RUBRAVIEW_NODE_INFO && eq(d.nodes[7].name, "media.ffmpeg") && eq(d.nodes[7].text, "FFmpeg"));
         assert(d.nodes[8].kind == RUBRAVIEW_NODE_PREVIEW && eq(d.nodes[8].name, "subtitle") && d.nodes[8].rows == 3);
         assert(d.nodes[10].kind == RUBRAVIEW_NODE_TABLE && d.nodes[10].page == 1 && eq(d.nodes[10].name, "keymap"));
+        assert(d.nodes[11].kind == RUBRAVIEW_NODE_ACTION && eq(d.nodes[11].name, "shell.register") &&
+               eq(d.nodes[11].text, "Register file types"));
     }
     printf("  [PASS] Every kind of line is read, with what it declares\n");
 
@@ -181,6 +184,7 @@ int main(void) {
     expect_error(&arena, "page p \"P\nsection \"S\"\n", 1, "not closed");
     expect_error(&arena, "page p \"P\"\ninfo \"FFmpeg\" {media.ffmpeg\n", 2, "not closed");
     expect_error(&arena, "page p \"P\"\nint a.b \"x\" 1..9\n", 2, "default");
+    expect_error(&arena, "page p \"P\"\naction shell.register\n", 2, "action needs");
     expect_error(&arena, "# nothing\n", 0, "no page");
     printf("  [PASS] A mistake names its line and stops\n");
 

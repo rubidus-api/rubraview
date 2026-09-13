@@ -39,6 +39,7 @@ typedef enum rubraview_settings_line_kind {
     RUBRAVIEW_LINE_INFO,
     RUBRAVIEW_LINE_PREVIEW,
     RUBRAVIEW_LINE_TABLE,
+    RUBRAVIEW_LINE_ACTION,
 } rubraview_settings_line_kind_t;
 
 /** One laid-out line of the current page, in content rows (before scrolling). */
@@ -104,13 +105,16 @@ typedef enum rubraview_settings_key {
     RUBRAVIEW_SKEY_TAB, RUBRAVIEW_SKEY_SHIFT_TAB,       /* the next / previous page */
     RUBRAVIEW_SKEY_HOME, RUBRAVIEW_SKEY_END,
     RUBRAVIEW_SKEY_ESCAPE,
+    RUBRAVIEW_SKEY_DELETE,                              /* empties a path */
 } rubraview_settings_key_t;
 
 typedef enum rubraview_settings_event {
     RUBRAVIEW_SEVENT_NONE = 0,
     RUBRAVIEW_SEVENT_MOVED,      /* focus, scroll or page changed: redraw */
     RUBRAVIEW_SEVENT_CHANGED,    /* a value changed: apply it and redraw */
-    RUBRAVIEW_SEVENT_EDIT_TEXT,  /* the focused setting is a path: open a text edit on it */
+    RUBRAVIEW_SEVENT_EDIT_TEXT,  /* the focused setting is a path: let the reader pick it */
+    RUBRAVIEW_SEVENT_CLEAR_TEXT, /* the focused path is to be emptied (Delete) */
+    RUBRAVIEW_SEVENT_ACTION,     /* the focused action line was pressed: do what it names */
     RUBRAVIEW_SEVENT_REVERT,
     RUBRAVIEW_SEVENT_DEFAULTS,
     RUBRAVIEW_SEVENT_CLOSE,
@@ -119,6 +123,9 @@ typedef enum rubraview_settings_event {
 rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t *view,
                                                         rubraview_settings_t *settings,
                                                         rubraview_settings_key_t key);
+
+/** The focused line's document node, or NULL when a button has focus. */
+const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view);
 
 /** A click, in cells. */
 rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view_t *view,

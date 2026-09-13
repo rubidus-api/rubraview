@@ -52,12 +52,13 @@ int main(void) {
     {
         rubraview_settings_view_t v = rubraview_settings_view_create(doc, 80, 24);
         assert(v.page == 0 && v.list_cols == 12 && v.content_col == 14);
-        assert(v.line_count == 9);
+        assert(v.line_count == 11);
         assert(v.lines[0].kind == RUBRAVIEW_LINE_SECTION && v.lines[0].row == 0);
         assert(v.lines[1].kind == RUBRAVIEW_LINE_SETTING && v.lines[1].row == 1);
-        assert(v.lines[4].kind == RUBRAVIEW_LINE_SECTION && v.lines[4].row == 5);   /* a blank row at 4 */
-        assert(v.lines[8].kind == RUBRAVIEW_LINE_INFO && v.lines[8].row == 10);
-        assert(v.content_height == 11);
+        assert(v.lines[4].kind == RUBRAVIEW_LINE_ACTION && v.lines[4].row == 4);
+        assert(v.lines[6].kind == RUBRAVIEW_LINE_SECTION && v.lines[6].row == 7);   /* a blank row at 6 */
+        assert(v.lines[10].kind == RUBRAVIEW_LINE_INFO && v.lines[10].row == 12);
+        assert(v.content_height == 13);
         assert(v.focus_line == 1 && v.focus_button == RUBRAVIEW_BUTTON_NONE);
         assert(rubraview_settings_view_screen_row(&v, 1) == 3);
     }
@@ -194,6 +195,40 @@ int main(void) {
         assert(rubraview_settings_view_scroll(&v, 5) == RUBRAVIEW_SEVENT_NONE);   /* nothing to scroll */
     }
     printf("  [PASS] A short window scrolls and keeps the focus on screen\n");
+
+    /* 6. An action line is focused like a setting and pressed like a
+          button; Delete empties a path and nothing else. */
+    {
+        rubraview_settings_t s = rubraview_settings_defaults();
+        rubraview_settings_view_t v = rubraview_settings_view_create(doc, 80, 24);
+        while (!(v.focus_line >= 0 && v.lines[v.focus_line].kind == RUBRAVIEW_LINE_ACTION)) {
+            assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        }
+        const rubraview_settings_node_t *focused = rubraview_settings_view_focused_node(&v);
+        assert(focused && focused->kind == RUBRAVIEW_NODE_ACTION && focused->name.len == 14 &&
+               memcmp(focused->name.ptr, "shell.register", 14) == 0);
+        uint32_t before = s.revision_total;
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_ENTER) == RUBRAVIEW_SEVENT_ACTION);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_RIGHT) == RUBRAVIEW_SEVENT_NONE);
+        assert(s.revision_total == before);   /* an action holds no value */
+        char buffer[256];
+        u8str_t text = rubraview_settings_line_text(&v, &s, NULL, (size_t)v.focus_line, 0, buffer, sizeof(buffer));
+        assert(has(text, "< Register file types >"));
+
+        size_t next = (size_t)v.focus_line + 1;
+        assert(rubraview_settings_view_press(&v, &s, v.content_col + v.label_cols + 2,
+                                             rubraview_settings_view_screen_row(&v, next)) == RUBRAVIEW_SEVENT_ACTION);
+        assert(rubraview_settings_view_focused_node(&v)->name.len == 16);   /* shell.unregister */
+
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DELETE) == RUBRAVIEW_SEVENT_NONE);
+        rubraview_settings_view_set_page(&v, RUBRAVIEW_TAB_FILES);
+        int32_t folder = line_for(&v, "curation", "dir_1");
+        while (v.focus_line != folder) assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DELETE) == RUBRAVIEW_SEVENT_CLEAR_TEXT);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_ENTER) == RUBRAVIEW_SEVENT_EDIT_TEXT);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_LEFT) == RUBRAVIEW_SEVENT_NONE);
+    }
+    printf("  [PASS] Actions are focused and pressed; Delete empties a path and nothing else\n");
 
     printf("[test_ui_settings] All tests passed successfully!\n");
     return 0;

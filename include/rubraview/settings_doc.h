@@ -28,6 +28,7 @@ extern "C" {
  *     info    "FFmpeg" {media.ffmpeg}
  *     preview subtitle 3
  *     table   keymap
+ *     action  shell.register "Register file types"
  *
  * `page` starts a page (an id and a title); `section` puts a heading on
  * it. `toggle`, `choice`, `int`, `float` and `path` are settings: a
@@ -36,7 +37,9 @@ extern "C" {
  * today (scripts/check-settings.py holds the document to that). `info`
  * is a read-only line filled from a named source while the window is
  * open, `preview` a block the viewer paints for a named sample, `table`
- * rows from a named source in fixed-width columns.
+ * rows from a named source in fixed-width columns. `action` is a button
+ * that does something named — registering file types — rather than
+ * holding a value.
  *
  * The document is internal (owner, 2026-09-13): it is compiled in, and a
  * file beside the executable does not replace it.
@@ -49,14 +52,15 @@ typedef enum rubraview_settings_node_kind {
     RUBRAVIEW_NODE_INFO,
     RUBRAVIEW_NODE_PREVIEW,
     RUBRAVIEW_NODE_TABLE,
+    RUBRAVIEW_NODE_ACTION,
 } rubraview_settings_node_kind_t;
 
 typedef struct rubraview_settings_node {
     rubraview_settings_node_kind_t kind;
     int32_t  page;      /* which page it is on (the page node's own index for PAGE) */
     uint32_t line;      /* where in the document, for messages */
-    u8str_t  text;      /* PAGE and SECTION: the title; INFO: the label */
-    u8str_t  name;      /* PAGE: its id; INFO and TABLE: the source; PREVIEW: the sample */
+    u8str_t  text;      /* PAGE and SECTION: the title; INFO and ACTION: the label */
+    u8str_t  name;      /* PAGE: its id; INFO and TABLE: the source; PREVIEW: the sample; ACTION: what it does */
     int32_t  setting;   /* SETTING: the index into `defs` */
     int32_t  rows;      /* PREVIEW: how many rows tall */
 } rubraview_settings_node_t;
