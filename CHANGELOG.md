@@ -23,6 +23,17 @@ This project follows Keep a Changelog.
   walking the container again, so no subtitle decoder is involved (D-12).
   Picture-based subtitle formats are not offered — nothing can draw them.
 - The floating boxes come back where they were left (layout.ini).
+- The settings window is a window of its own (F10). Its pages are laid out
+  from one internal document that also declares every setting's type, range
+  and default; a change applies to the viewer at once, the file is written when
+  the window closes, and Revert goes back to what it held (D-13). The Keys page
+  lists every binding; the Video page previews the subtitle at the chosen size
+  and outline.
+- Configuration files are written in the common subset of INI and TOML: quoted
+  strings, `true`/`false`, plain numbers, sections for everything. Older files
+  still load and are rewritten on the next save. The reading history now keeps
+  one `[entry-N]` section per book; the General settings live under
+  `[general]`; the built-in keymap's top actions under `[ui]`.
 
 ## [0.0.2] - 2026-09-11
 

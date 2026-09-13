@@ -1000,13 +1000,14 @@ To provide deep, user-friendly configuration across all multimedia viewing, comi
 1. **Invocation & Modality**:
    - Hotkeys: `F10` or `Ctrl + ,` (Universal settings shortcut).
    - Menu & Titlebar Trigger: Selecting `[ ⚙ Settings ]` in the In-Window Menu Box or Hover Titlebar.
-   - Dedicated Win32 Window: Spawns a dedicated, standalone top-level window (`WS_POPUPWINDOW | WS_CAPTION | WS_SYSMENU` or modern Metro frameless dialog) centered over the parent viewer window.
-   - Modality: Runs as an interactive dialog; changes can be previewed immediately via `[ Apply ]` without closing the window.
+   - Dedicated Win32 Window: Spawns a dedicated top-level window owned by the viewer's window — above it, no taskbar button of its own, and closing it ends only itself (D-13).
+   - Modality: Non-modal; the viewer keeps working. A change applies to the viewer at once — the subtitle on a playing video resizes while its value moves (D-13).
+   - Rendering: Every page is described in one internal document (page · section · toggle · choice · int · float · path · info · preview · table · action) that also declares each setting's type, range and default; one interpreter lays it out on a grid of fixed-width cells. A plain look — lists, tables, fixed-width text — is intended; previews and live data sit on the same grid (D-13).
 2. **Persistence & Serialization**:
-   - Writes directly to `settings.ini` using standard UTF-8 INI serialization:
+   - Writes `settings.ini` when the window closes, in the INI ∩ TOML subset (D-13): UTF-8 without a BOM, whole-line `#` comments, `[section]` and lower-case `key = value`, values `true`/`false`, integers, `1.5`-style floats or double-quoted strings escaping only `\\` and `\"`, never a key above the first section. Older files still load; the next save rewrites them:
      - If running in **Portable Mode** (`settings.ini` adjacent to `rubraview.exe`), saves exclusively to the local executable directory.
      - Otherwise, saves to `%APPDATA%\rubraview\settings.ini`.
-   - Action Bar: `[ OK ]` (Save and Close), `[ Cancel ]` (Discard pending changes), `[ Apply ]` (Save and immediately update canvas/engine without closing), `[ Reset to Defaults ]` (Restore factory settings).
+   - Action Bar: `[ Revert ]` (back to what the file held when the window opened), `[ Defaults ]` (factory settings; Revert undoes it), `[ Close ]` (write the file and close). There is no Apply: every change is already applied (D-13).
 
 #### 3.22.2 Tabbed Category Architecture
 The Settings Window features an intuitive tab strip (Horizontal Metro tab bar or vertical sidebar tab list):

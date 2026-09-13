@@ -1,6 +1,6 @@
 # T063 — settings.ini applies from the first frame
 
-Covers: R146 (§3.22.1), R135
+Covers: R148 (§3.22.1), R135
 
 Every setting the viewer reads while viewing must come from `settings.ini`
 at startup. Until 2026-09-13 the file was read only when the settings
