@@ -1,140 +1,17 @@
 #include "rubraview/settings.h"
+#include "rubraview/settings_doc.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
 
-/* The choice lists §3.22 names. Written out rather than generated so the
-   order a tab shows is the order stored in the file. */
-static const char *const FIT_MODES[] = { "window", "width", "height", "actual", "smart", "stretch", NULL };
-static const char *const LAYOUTS[] = { "single", "dual", "book", "webtoon", NULL };
-static const char *const INTERP[] = { "nearest", "bilinear", "bicubic", "lanczos3", NULL };
-static const char *const SORT_MODES[] = { "natural", "lexical", "date", "size", NULL };
-static const char *const CODEPAGES[] = { "auto", "utf8", "cp949", "shift_jis", "gbk", "big5", "cp1252", NULL };
-static const char *const STARTUP[] = { "blank", "last_file", "last_folder", NULL };
-/* D-8/D-9: which decoder to try first. The other one is still tried
-   when this one cannot open a file. */
-static const char *const DECODER[] = { "windows", "ffmpeg", NULL };
-static const char *const CURATION_MODES[] = { "move", "copy", NULL };
-static const char *const ACCENTS[] = { "crimson", "cobalt", "emerald", "amber", "teal", "purple", NULL };
-static const char *const TILE_SIZES[] = { "48", "64", "96", NULL };
-static const char *const REPLAYGAIN[] = { "off", "track", "album", NULL };
-
-/* U8() expands to a compound literal, which C forbids in a file-scope
-   initialiser, so the slices are built from the literal directly — the
-   same trick main.c's menu table uses, and it still keeps the lengths
-   out of anyone's hands. The macro parameter is `tab_` rather than `tab`
-   because `tab` is also a field name, and a designator is not immune to
-   macro substitution. */
-#define S(lit) { .ptr = (lit), .len = sizeof(lit) - 1 }
-
-#define BOOL_ROW(k, sec, lab, tab_, def, wired_) \
-    { .key = S(k), .section = S(sec), .label = S(lab), .tab = (tab_), \
-      .type = RUBRAVIEW_SETTING_BOOL, .default_value = (def), .min_value = 0.0, .max_value = 1.0, \
-      .step = 1.0, .choices = NULL, .choice_count = 0, .wired = (wired_) }
-
-#define NUM_ROW(k, sec, lab, tab_, type_, def, lo, hi, st, wired_) \
-    { .key = S(k), .section = S(sec), .label = S(lab), .tab = (tab_), \
-      .type = (type_), .default_value = (def), .min_value = (lo), .max_value = (hi), \
-      .step = (st), .choices = NULL, .choice_count = 0, .wired = (wired_) }
-
-#define CHOICE_ROW(k, sec, lab, tab_, list, n, def, wired_) \
-    { .key = S(k), .section = S(sec), .label = S(lab), .tab = (tab_), \
-      .type = RUBRAVIEW_SETTING_CHOICE, .default_value = (def), .min_value = 0.0, \
-      .max_value = (double)((n) - 1), .step = 1.0, .choices = (list), .choice_count = (n), \
-      .wired = (wired_) }
-
-#define PATH_ROW(k, sec, lab, tab_, wired_) \
-    { .key = S(k), .section = S(sec), .label = S(lab), .tab = (tab_), \
-      .type = RUBRAVIEW_SETTING_PATH, .default_value = 0.0, .min_value = 0.0, .max_value = 0.0, \
-      .step = 0.0, .choices = NULL, .choice_count = 0, .wired = (wired_) }
-
 /*
- * The schema. `wired` says whether anything reads the key today; a
- * declared-but-unwired setting is shown greyed rather than hidden,
- * because a gap nobody can see does not get closed.
+ * D-13: there is no table of settings in this file any more. The settings
+ * window's document (src/core/default_settings_doc.c) declares each one
+ * where it places it — type, range, default — and this file reads that.
+ * One list, so the window and the store cannot disagree about what exists.
  */
-static const rubraview_setting_def_t SCHEMA[] = {
-    /* Tab 1: General (§3.22.2.1) */
-    CHOICE_ROW("startup", "general", "On startup", RUBRAVIEW_TAB_GENERAL, STARTUP, 3, 2, false),
-    BOOL_ROW("single_instance", "general", "Reuse the open window", RUBRAVIEW_TAB_GENERAL, 1.0, true),
-    BOOL_ROW("frameless", "general", "Frameless window", RUBRAVIEW_TAB_GENERAL, 1.0, false),
-    NUM_ROW("titlebar_trigger_px", "general", "Titlebar trigger height", RUBRAVIEW_TAB_GENERAL,
-            RUBRAVIEW_SETTING_INT, 12.0, 4.0, 40.0, 1.0, false),
-    NUM_ROW("titlebar_hide_ms", "general", "Titlebar hide delay", RUBRAVIEW_TAB_GENERAL,
-            RUBRAVIEW_SETTING_INT, 500.0, 100.0, 3000.0, 50.0, false),
-
-    /* Tab 2: Viewer and layout (§3.22.2.2) */
-    CHOICE_ROW("fit_mode", "viewer", "Default fit", RUBRAVIEW_TAB_VIEWER, FIT_MODES, 6, 0, false),
-    CHOICE_ROW("layout", "viewer", "Default layout", RUBRAVIEW_TAB_VIEWER, LAYOUTS, 4, 0, false),
-    BOOL_ROW("spread_autosplit", "viewer", "Split wide spreads", RUBRAVIEW_TAB_VIEWER, 1.0, false),
-    NUM_ROW("gutter_px", "viewer", "Gutter", RUBRAVIEW_TAB_VIEWER,
-            RUBRAVIEW_SETTING_INT, 8.0, 0.0, 32.0, 1.0, false),
-    BOOL_ROW("portrait_collapse", "viewer", "Collapse in a portrait window", RUBRAVIEW_TAB_VIEWER, 1.0, false),
-    NUM_ROW("zoom_step_percent", "viewer", "Zoom step", RUBRAVIEW_TAB_VIEWER,
-            RUBRAVIEW_SETTING_INT, 10.0, 5.0, 50.0, 1.0, false),
-    CHOICE_ROW("interpolation", "viewer", "Scaling filter", RUBRAVIEW_TAB_VIEWER, INTERP, 4, 2, false),
-    BOOL_ROW("pixel_grid", "viewer", "Pixel grid past 400%", RUBRAVIEW_TAB_VIEWER, 0.0, false),
-
-    /* Tab 3: Files and comic archives (§3.22.2.3) */
-    CHOICE_ROW("sort_mode", "files", "Sort by", RUBRAVIEW_TAB_FILES, SORT_MODES, 4, 0, false),
-    BOOL_ROW("sort_ascending", "files", "Ascending", RUBRAVIEW_TAB_FILES, 1.0, false),
-    CHOICE_ROW("archive_codepage", "files", "Archive filenames", RUBRAVIEW_TAB_FILES, CODEPAGES, 7, 0, false),
-    BOOL_ROW("comicinfo", "files", "Read ComicInfo.xml", RUBRAVIEW_TAB_FILES, 1.0, false),
-    BOOL_ROW("reading_history", "files", "Remember the page", RUBRAVIEW_TAB_FILES, 1.0, false),
-    BOOL_ROW("resume_prompt", "files", "Offer to resume", RUBRAVIEW_TAB_FILES, 1.0, false),
-    CHOICE_ROW("curation_mode", "curation", "Number keys", RUBRAVIEW_TAB_FILES, CURATION_MODES, 2, 0, true),
-    PATH_ROW("dir_1", "curation", "Folder 1", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_2", "curation", "Folder 2", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_3", "curation", "Folder 3", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_4", "curation", "Folder 4", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_5", "curation", "Folder 5", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_6", "curation", "Folder 6", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_7", "curation", "Folder 7", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_8", "curation", "Folder 8", RUBRAVIEW_TAB_FILES, true),
-    PATH_ROW("dir_9", "curation", "Folder 9", RUBRAVIEW_TAB_FILES, true),
-
-    /* Tab 4: Music and audio (§3.22.2.4). Nothing reads these yet — the
-       audio engine is M5/M8 — but they are the keys those milestones
-       will use, and showing them greyed says so out loud. */
-    BOOL_ROW("gapless", "audio", "Gapless playback", RUBRAVIEW_TAB_AUDIO, 1.0, false),
-    NUM_ROW("crossfade_seconds", "audio", "Crossfade", RUBRAVIEW_TAB_AUDIO,
-            RUBRAVIEW_SETTING_FLOAT, 0.0, 0.0, 5.0, 0.1, false),
-    CHOICE_ROW("replaygain", "audio", "Volume levelling", RUBRAVIEW_TAB_AUDIO, REPLAYGAIN, 3, 0, false),
-    NUM_ROW("wasapi_latency_ms", "audio", "Audio latency", RUBRAVIEW_TAB_AUDIO,
-            RUBRAVIEW_SETTING_INT, 40.0, 20.0, 100.0, 5.0, false),
-    BOOL_ROW("bgm_pause_on_video", "audio", "Pause music during video", RUBRAVIEW_TAB_AUDIO, 1.0, false),
-
-    /* Tab 5: Video and subtitles (§3.22.2.5) */
-    CHOICE_ROW("decoder", "video", "Decoder", RUBRAVIEW_TAB_VIDEO, DECODER, 2, 0.0, true),
-    BOOL_ROW("hardware_decode", "video", "GPU decoding", RUBRAVIEW_TAB_VIDEO, 1.0, false),
-    NUM_ROW("subtitle_size", "video", "Subtitle size", RUBRAVIEW_TAB_VIDEO,
-            RUBRAVIEW_SETTING_INT, 24.0, 10.0, 72.0, 1.0, true),
-    NUM_ROW("subtitle_outline", "video", "Subtitle outline", RUBRAVIEW_TAB_VIDEO,
-            RUBRAVIEW_SETTING_INT, 2.0, 0.0, 8.0, 1.0, true),
-    NUM_ROW("ab_step_seconds", "video", "A-B step", RUBRAVIEW_TAB_VIDEO,
-            RUBRAVIEW_SETTING_FLOAT, 0.5, 0.1, 1.0, 0.1, false),
-    BOOL_ROW("video_wheel_zoom", "video", "Wheel zoom during video", RUBRAVIEW_TAB_VIDEO, 1.0, false),
-
-    /* Tab 6: Display, HiDPI and colour (§3.22.2.6) */
-    CHOICE_ROW("tile_base_px", "display", "Touch tile size", RUBRAVIEW_TAB_DISPLAY, TILE_SIZES, 3, 1, false),
-    BOOL_ROW("color_management", "display", "Use embedded ICC profiles", RUBRAVIEW_TAB_DISPLAY, 1.0, false),
-    CHOICE_ROW("accent", "display", "Accent colour", RUBRAVIEW_TAB_DISPLAY, ACCENTS, 6, 0, false),
-
-    /* Tab 7: Cache, memory and privacy (§3.22.2.7) */
-    NUM_ROW("memory_cap_mb", "cache", "Memory cap", RUBRAVIEW_TAB_CACHE,
-            RUBRAVIEW_SETTING_INT, 512.0, 256.0, 4096.0, 64.0, false),
-    NUM_ROW("lookahead", "cache", "Pages read ahead", RUBRAVIEW_TAB_CACHE,
-            RUBRAVIEW_SETTING_INT, 2.0, 1.0, 16.0, 1.0, false),
-    NUM_ROW("lookbehind", "cache", "Pages kept behind", RUBRAVIEW_TAB_CACHE,
-            RUBRAVIEW_SETTING_INT, 1.0, 0.0, 8.0, 1.0, false),
-    BOOL_ROW("privacy_clean", "cache", "Always strip metadata on export", RUBRAVIEW_TAB_CACHE, 0.0, false),
-
-    /* Tab 8: Keyboard (§3.22.2.8). The bindings live in keymap.ini, not
-       here; what belongs in settings.ini is whether that file is used. */
-    BOOL_ROW("use_keymap_file", "keys", "Use keymap.ini", RUBRAVIEW_TAB_KEYS, 1.0, false),
-};
-
-#define SCHEMA_COUNT (sizeof(SCHEMA) / sizeof(SCHEMA[0]))
+#define SCHEMA       (rubraview_settings_document()->defs)
+#define SCHEMA_COUNT (rubraview_settings_document()->def_count)
 
 const rubraview_setting_def_t *rubraview_settings_schema(size_t *out_count) {
     if (out_count) *out_count = SCHEMA_COUNT;
@@ -169,17 +46,7 @@ size_t rubraview_settings_for_tab(rubraview_settings_tab_t tab,
 }
 
 u8str_t rubraview_settings_tab_name(rubraview_settings_tab_t tab) {
-    switch (tab) {
-        case RUBRAVIEW_TAB_GENERAL: return U8("General");
-        case RUBRAVIEW_TAB_VIEWER:  return U8("Viewer");
-        case RUBRAVIEW_TAB_FILES:   return U8("Files");
-        case RUBRAVIEW_TAB_AUDIO:   return U8("Audio");
-        case RUBRAVIEW_TAB_VIDEO:   return U8("Video");
-        case RUBRAVIEW_TAB_DISPLAY: return U8("Display");
-        case RUBRAVIEW_TAB_CACHE:   return U8("Cache");
-        case RUBRAVIEW_TAB_KEYS:    return U8("Keys");
-        default: return U8("");
-    }
+    return rubraview_settings_page_title((size_t)tab);
 }
 
 /* ---- values ---- */
@@ -357,18 +224,36 @@ u8str_t rubraview_settings_get_text(const rubraview_settings_t *settings, u8str_
 void rubraview_settings_set(rubraview_settings_t *settings, u8str_t section, u8str_t key, double value) {
     int32_t index = index_of(section, key);
     if (!settings || index < 0) return;
-    settings->values[index] = clamp_to(&SCHEMA[index], value);
+    double clamped = clamp_to(&SCHEMA[index], value);
+    if (clamped == settings->values[index]) return;   /* not a change: nothing to redraw */
+    settings->values[index] = clamped;
+    settings->revision[index]++;
+    settings->revision_total++;
 }
 
 void rubraview_settings_set_text(rubraview_settings_t *settings, u8str_t section, u8str_t key, u8str_t text) {
     int32_t index = index_of(section, key);
     if (!settings || index < 0) return;
+    const u8str_t old = settings->texts[index];
+    if (old.len == text.len && (text.len == 0 || memcmp(old.ptr, text.ptr, text.len) == 0)) return;
     settings->texts[index] = text;
+    settings->revision[index]++;
+    settings->revision_total++;
 }
 
 void rubraview_settings_reset(rubraview_settings_t *settings) {
     if (!settings) return;
-    *settings = rubraview_settings_defaults();
+    /* Reset is a change like any other: whatever is watching the counters
+       must see it, so they move on rather than start again from zero. */
+    uint32_t total = settings->revision_total;
+    rubraview_settings_t fresh = rubraview_settings_defaults();
+    for (size_t i = 0; i < SCHEMA_COUNT; ++i) {
+        bool same_value = fresh.values[i] == settings->values[i];
+        bool same_text = fresh.texts[i].len == settings->texts[i].len;
+        fresh.revision[i] = settings->revision[i] + ((same_value && same_text) ? 0u : 1u);
+    }
+    fresh.revision_total = total + 1u;
+    *settings = fresh;
 }
 
 bool rubraview_settings_differs(const rubraview_settings_t *a, const rubraview_settings_t *b) {
