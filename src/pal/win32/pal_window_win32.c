@@ -124,6 +124,26 @@ static const char *vk_to_key_name(WPARAM vk) {
         case VK_F3:  return "F3";
         case VK_F4:  return "F4";
         case VK_F5:  return "F5";
+        /* F6–F9 had no name, so a key pressed to rebind (D-14) arrived
+           as nothing at all. */
+        case VK_F6:  return "F6";
+        case VK_F7:  return "F7";
+        case VK_F8:  return "F8";
+        case VK_F9:  return "F9";
+        case VK_OEM_1: return "Semicolon";
+        case VK_OEM_2: return "Slash";
+        case VK_OEM_3: return "Backquote";
+        case VK_OEM_7: return "Quote";
+        case VK_NUMPAD0: return "Numpad0";
+        case VK_NUMPAD1: return "Numpad1";
+        case VK_NUMPAD2: return "Numpad2";
+        case VK_NUMPAD3: return "Numpad3";
+        case VK_NUMPAD4: return "Numpad4";
+        case VK_NUMPAD5: return "Numpad5";
+        case VK_NUMPAD6: return "Numpad6";
+        case VK_NUMPAD7: return "Numpad7";
+        case VK_NUMPAD8: return "Numpad8";
+        case VK_NUMPAD9: return "Numpad9";
         case VK_F10: return "F10";
         case VK_F11: return "F11";
         case VK_F12: return "F12";

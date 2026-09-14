@@ -282,10 +282,12 @@ size_t rubraview_keymap_conflicts(const rubraview_keymap_t *keymap,
         for (size_t j = i + 1; j < keymap->count; ++j) {
             const rubraview_key_binding_t *second = &keymap->bindings[j];
 
-            /* Two contexts claiming the same chord is not a conflict —
-               it is how `Space` means one thing while a GIF plays and
-               another everywhere else (§3.20.1). */
-            if (!same(first->context, second->context)) continue;
+            /* Two contexts claiming the same chord is a conflict only
+               where one of them can never be reached (D-14): `Space`
+               meaning one thing while a GIF plays and another everywhere
+               else is by design (§3.20.1), `navigation` and `view` both
+               claiming it is not. */
+            if (!rubraview_keymap_contexts_meet(first->context, second->context)) continue;
 
             for (size_t a = 0; a < first->combo_count; ++a) {
                 for (size_t b = 0; b < second->combo_count; ++b) {
