@@ -31,6 +31,12 @@ This project follows Keep a Changelog.
   subtitle at the chosen size and outline. The window comes back where it was
   left, at the size it was left (layout.ini), pulled onto a screen if that
   place is gone. A decoder chosen there is used at the next launch too.
+- Keys are changed on the settings window's Keys page: `Enter` adds the key
+  you press to an action, `Delete` takes its last key off, Revert and Defaults
+  undo. A key another action already answers to is refused and that action
+  is named; rows whose keys clash are marked. `keymap.ini` is written next to
+  `settings.ini` when the window closes (D-14). F6–F9, `;`, `/`, `'`, `` ` ``
+  and the number pad now have key names.
 - Configuration files are written in the common subset of INI and TOML: quoted
   strings, `true`/`false`, plain numbers, sections for everything. Older files
   still load and are rewritten on the next save. The reading history now keeps

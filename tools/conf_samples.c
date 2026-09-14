@@ -11,6 +11,7 @@
 #include "rubraview/history.h"
 #include "rubraview/settings.h"
 #include "rubraview/default_keymap.h"
+#include "rubraview/keymap.h"
 
 static u8str_t lit(const char *s) { return (u8str_t){ .ptr = s, .len = strlen(s) }; }
 
@@ -81,7 +82,15 @@ int main(int argc, char **argv) {
     failures += write_file(argv[1], "settings-changed.ini",
                            rubraview_settings_save(&arena, &settings, lit("; old\nstartup = last\n[video]\ndecoder = ffmpeg\n")));
 
+    /* keymap.ini as the settings window writes it (D-14): changed, then serialised. */
+    rubraview_keymap_t keymap = rubraview_keymap_parse(&arena, lit(rubraview_default_keymap()));
+    rubraview_key_combo_t added = { .modifiers = RUBRAVIEW_MOD_CTRL | RUBRAVIEW_MOD_SHIFT, .key_name = lit("F7") };
+    if (keymap.count > 0) (void)rubraview_keymap_bind(&arena, &keymap, 0, added, NULL);
+    if (keymap.count > 1) (void)rubraview_keymap_unbind_last(&keymap, 1);
+    failures += write_file(argv[1], "keymap-edited.ini", rubraview_keymap_serialize(&arena, &keymap));
+
     rubraview_ini_doc_t layout = {0};
+    rubraview_ini_set_int(&arena, &layout, lit("settings_window"), lit("width"), 820);
     rubraview_ini_set_float(&arena, &layout, lit("boxes"), lit("toolbox_x"), 804.0);
     rubraview_ini_set_float(&arena, &layout, lit("boxes"), lit("menubox_y"), 396.5);
     failures += write_file(argv[1], "layout.ini", rubraview_ini_serialize(&arena, &layout));

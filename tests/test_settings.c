@@ -1,4 +1,5 @@
 #include "rubraview/settings.h"
+#include "rubraview/default_keymap.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -231,11 +232,27 @@ int main(void) {
         assert(is(conflicts[0].context, "navigation"));
         assert(is(conflicts[0].chord, "Right"));
 
-        /* And the shipped default keymap has none. */
         rubraview_keymap_t clean = rubraview_keymap_parse(&arena, lit("[navigation]\nnext_page = Right\n"));
         assert(rubraview_keymap_conflicts(&clean, NULL, 0) == 0);
+
+        /* navigation, the global section and view are asked one after the
+           other, so a key in two of them reaches only the first (D-14). */
+        rubraview_keymap_t layered = rubraview_keymap_parse(&arena, lit("[navigation]\nnext_page = J\n"
+                                                                        "[view]\nzoom_in = J\n"));
+        assert(rubraview_keymap_conflicts(&layered, NULL, 0) == 1);
+
+        /* The shipped default keymap, read for real — this test used to
+           parse a one-line keymap and call it the default. It holds one
+           clash, and it comes from RFC-0001 itself: §3.7.2 gives F2 to the
+           toolbox and §3.18.2 gives it to rename. Only the toolbox is
+           reached. Kept visible until the owner decides (D-14). */
+        rubraview_keymap_t shipped = rubraview_keymap_parse(&arena, lit(rubraview_default_keymap()));
+        rubraview_key_conflict_t found_shipped[4];
+        assert(rubraview_keymap_conflicts(&shipped, found_shipped, 4) == 1);
+        assert(is(found_shipped[0].chord, "F2"));
+        assert(is(found_shipped[0].action_a, "toggle_toolbox") && is(found_shipped[0].action_b, "rename_file"));
     }
-    printf("  [PASS] Conflicts are found within a context and not across contexts\n");
+    printf("  [PASS] Conflicts are found where two contexts meet, and the shipped keymap's one is known\n");
 
     free(raw);
     printf("[test_settings] All tests passed successfully!\n");

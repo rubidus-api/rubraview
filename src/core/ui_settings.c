@@ -203,8 +203,14 @@ static void keep_focus_visible(rubraview_settings_view_t *view) {
     int32_t visible = rubraview_settings_view_visible_rows(view);
     if (view->focus_line >= 0) {
         const rubraview_settings_line_t *line = &view->lines[view->focus_line];
-        if (line->row < view->scroll) view->scroll = line->row;
-        if (line->row + line->height > view->scroll + visible) view->scroll = line->row + line->height - visible;
+        int32_t top = line->row, bottom = line->row + line->height;
+        if (line->kind == RUBRAVIEW_LINE_TABLE) {
+            /* The row in focus, and the heading with the first one. */
+            top = line->row + (view->focus_row <= 1 ? 0 : view->focus_row);
+            bottom = line->row + view->focus_row + 1;
+        }
+        if (top < view->scroll) view->scroll = top;
+        if (bottom > view->scroll + visible) view->scroll = bottom - visible;
     }
     int32_t max_scroll = view->content_height - visible;
     if (max_scroll < 0) max_scroll = 0;
@@ -212,9 +218,23 @@ static void keep_focus_visible(rubraview_settings_view_t *view) {
     if (view->scroll < 0) view->scroll = 0;
 }
 
-/* What the focus can rest on: a setting, or an action. */
+/* What the focus can rest on: a setting, an action, or a row of a table. */
 static bool focusable(rubraview_settings_line_kind_t kind) {
-    return kind == RUBRAVIEW_LINE_SETTING || kind == RUBRAVIEW_LINE_ACTION;
+    return kind == RUBRAVIEW_LINE_SETTING || kind == RUBRAVIEW_LINE_ACTION || kind == RUBRAVIEW_LINE_TABLE;
+}
+
+/* Focus a line; a table is entered at its first row or, from below, its last. */
+static void focus_on(rubraview_settings_view_t *view, int32_t line, bool from_below) {
+    view->focus_line = line;
+    view->focus_button = RUBRAVIEW_BUTTON_NONE;
+    if (line >= 0 && view->lines[line].kind == RUBRAVIEW_LINE_TABLE) {
+        view->focus_row = from_below && view->lines[line].height > 1 ? view->lines[line].height - 1 : 1;
+    }
+}
+
+int32_t rubraview_settings_view_focused_table_row(const rubraview_settings_view_t *view) {
+    if (!view || view->focus_line < 0 || (size_t)view->focus_line >= view->line_count) return -1;
+    return view->lines[view->focus_line].kind == RUBRAVIEW_LINE_TABLE ? view->focus_row : -1;
 }
 
 const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view) {
@@ -245,7 +265,7 @@ rubraview_settings_view_t rubraview_settings_view_create(const rubraview_setting
     };
     if (!doc || doc->page_count == 0) return view;
     layout(&view);
-    view.focus_line = first_setting(&view);
+    focus_on(&view, first_setting(&view), false);
     if (view.focus_line < 0) view.focus_button = RUBRAVIEW_BUTTON_CLOSE;
     return view;
 }
@@ -264,6 +284,7 @@ void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int
     if (rows > RUBRAVIEW_TABLE_ROWS_MAX) rows = RUBRAVIEW_TABLE_ROWS_MAX;
     view->table_rows = rows;
     layout(view);
+    if (view->focus_row >= rows) view->focus_row = rows > 1 ? rows - 1 : 1;
     keep_focus_visible(view);
 }
 
@@ -274,7 +295,7 @@ void rubraview_settings_view_set_page(rubraview_settings_view_t *view, int32_t p
     view->scroll = 0;
     view->dragging_line = -1;
     layout(view);
-    view->focus_line = first_setting(view);
+    focus_on(view, first_setting(view), false);
     view->focus_button = view->focus_line < 0 ? RUBRAVIEW_BUTTON_CLOSE : RUBRAVIEW_BUTTON_NONE;
 }
 
@@ -379,16 +400,24 @@ static rubraview_settings_event_t move_focus(rubraview_settings_view_t *view, in
         if (direction < 0) {
             int32_t last = last_setting(view);
             if (last < 0) return RUBRAVIEW_SEVENT_NONE;
-            view->focus_button = RUBRAVIEW_BUTTON_NONE;
-            view->focus_line = last;
+            focus_on(view, last, true);
             keep_focus_visible(view);
             return RUBRAVIEW_SEVENT_MOVED;
         }
         return RUBRAVIEW_SEVENT_NONE;
     }
+    const rubraview_settings_line_t *here = view->focus_line >= 0 ? &view->lines[view->focus_line] : NULL;
+    if (here && here->kind == RUBRAVIEW_LINE_TABLE) {
+        int32_t next = view->focus_row + direction;
+        if (next >= 1 && next < here->height) {
+            view->focus_row = next;
+            keep_focus_visible(view);
+            return RUBRAVIEW_SEVENT_MOVED;
+        }
+    }
     for (int32_t i = view->focus_line + direction; i >= 0 && i < (int32_t)view->line_count; i += direction) {
         if (!focusable(view->lines[i].kind)) continue;
-        view->focus_line = i;
+        focus_on(view, i, direction < 0);
         keep_focus_visible(view);
         return RUBRAVIEW_SEVENT_MOVED;
     }
@@ -423,6 +452,7 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
             return RUBRAVIEW_SEVENT_CLOSE;
         case RUBRAVIEW_SKEY_DELETE: {
             if (on_button || view->focus_line < 0) return RUBRAVIEW_SEVENT_NONE;
+            if (view->lines[view->focus_line].kind == RUBRAVIEW_LINE_TABLE) return RUBRAVIEW_SEVENT_TABLE_CLEAR;
             const rubraview_setting_def_t *def = def_of(view, (size_t)view->focus_line);
             return def && def->type == RUBRAVIEW_SETTING_PATH ? RUBRAVIEW_SEVENT_CLEAR_TEXT : RUBRAVIEW_SEVENT_NONE;
         }
@@ -440,8 +470,7 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
         case RUBRAVIEW_SKEY_END: {
             int32_t target = key == RUBRAVIEW_SKEY_HOME ? first_setting(view) : last_setting(view);
             if (target < 0) return RUBRAVIEW_SEVENT_NONE;
-            view->focus_button = RUBRAVIEW_BUTTON_NONE;
-            view->focus_line = target;
+            focus_on(view, target, key == RUBRAVIEW_SKEY_END);
             keep_focus_visible(view);
             return RUBRAVIEW_SEVENT_MOVED;
         }
@@ -469,6 +498,7 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
             if (on_button) return press_button((rubraview_settings_button_t)view->focus_button);
             if (view->focus_line < 0) return RUBRAVIEW_SEVENT_NONE;
             if (view->lines[view->focus_line].kind == RUBRAVIEW_LINE_ACTION) return RUBRAVIEW_SEVENT_ACTION;
+            if (view->lines[view->focus_line].kind == RUBRAVIEW_LINE_TABLE) return RUBRAVIEW_SEVENT_TABLE_EDIT;
             return nudge(view, settings, (size_t)view->focus_line, +1, 1.0, true);
     }
     return RUBRAVIEW_SEVENT_NONE;
@@ -509,6 +539,15 @@ rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view
         const rubraview_settings_line_t *line = &view->lines[i];
         if (content_row < line->row || content_row >= line->row + line->height) continue;
         if (!focusable(line->kind)) return RUBRAVIEW_SEVENT_NONE;
+        if (line->kind == RUBRAVIEW_LINE_TABLE) {
+            int32_t k = content_row - line->row;
+            if (k == 0) return RUBRAVIEW_SEVENT_NONE;           /* the heading */
+            if (view->focus_line == (int32_t)i && view->focus_row == k) return RUBRAVIEW_SEVENT_TABLE_EDIT;
+            view->focus_line = (int32_t)i;
+            view->focus_button = RUBRAVIEW_BUTTON_NONE;
+            view->focus_row = k;
+            return RUBRAVIEW_SEVENT_MOVED;
+        }
         if (line->kind == RUBRAVIEW_LINE_ACTION) {
             view->focus_line = (int32_t)i;
             view->focus_button = RUBRAVIEW_BUTTON_NONE;

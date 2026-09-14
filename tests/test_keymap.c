@@ -1,4 +1,5 @@
 #include "rubraview/keymap.h"
+#include "rubraview/default_keymap.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -152,6 +153,69 @@ int main(void) {
         assert(str_eq(b->combos[0].key_name, "BracketLeft"));
     }
     printf("  [PASS] Non-modifier symbolic key names are left intact\n");
+
+    /* §3.22.2 / D-14: changing bindings in place. */
+    {
+        size_t big_size = 1024 * 1024;
+        void *big = malloc(big_size);
+        assert(big != NULL);
+        proven_arena_t a = proven_arena_create((proven_mem_mut_t){ .ptr = big, .size = big_size });
+        rubraview_key_combo_t ctrl_o = { .modifiers = RUBRAVIEW_MOD_CTRL, .key_name = lit("O") };
+        rubraview_key_combo_t j = { .key_name = lit("j") };   /* names compare without case */
+
+        /* Where two contexts meet: the three asked in turn, and a context with itself. */
+        assert(rubraview_keymap_contexts_meet(lit(""), lit("navigation")));
+        assert(rubraview_keymap_contexts_meet(lit("view"), lit("navigation")));
+        assert(rubraview_keymap_contexts_meet(lit("animation"), lit("animation")));
+        assert(!rubraview_keymap_contexts_meet(lit("animation"), lit("navigation")));
+        assert(!rubraview_keymap_contexts_meet(lit("animation"), lit("subpage")));
+        assert(!rubraview_keymap_contexts_meet(lit("slideshow"), lit("")));
+
+        rubraview_keymap_t km = rubraview_keymap_parse(&a, lit("[ui]\nopen_picker = \"O, Ctrl+O\"\ntoggle_osd = \"I\"\n"
+                                                              "[navigation]\nnext_page = \"Right, J\"\n"
+                                                              "[animation]\nanim_toggle_pause = \"Space\"\n"));
+        rubraview_keymap_t saved = rubraview_keymap_copy(&a, &km);
+        assert(rubraview_keymap_equal(&km, &saved));
+
+        const rubraview_key_binding_t *holder = NULL;
+        /* toggle_osd (global) wants Ctrl+O: open_picker has it — refused, and named. */
+        assert(rubraview_keymap_bind(&a, &km, 1, ctrl_o, &holder) == RUBRAVIEW_BIND_TAKEN);
+        assert(holder && str_eq(holder->action, "open_picker"));
+        /* J is next_page's in navigation, which meets the global section. */
+        assert(rubraview_keymap_bind(&a, &km, 1, j, &holder) == RUBRAVIEW_BIND_TAKEN && str_eq(holder->action, "next_page"));
+        /* But the animation context may give J a meaning of its own. */
+        assert(rubraview_keymap_bind(&a, &km, 3, j, &holder) == RUBRAVIEW_BIND_ADDED && holder == NULL);
+        assert(rubraview_keymap_bind(&a, &km, 3, j, NULL) == RUBRAVIEW_BIND_ALREADY);
+        assert(km.bindings[3].combo_count == 2 && str_eq(km.bindings[3].combos[1].key_name, "j"));
+        /* The copy Revert keeps did not move. */
+        assert(saved.bindings[3].combo_count == 1 && !rubraview_keymap_equal(&km, &saved));
+
+        rubraview_key_combo_t f7 = { .modifiers = RUBRAVIEW_MOD_SHIFT | RUBRAVIEW_MOD_ALT, .key_name = lit("F7") };
+        assert(rubraview_keymap_bind(&a, &km, 1, f7, NULL) == RUBRAVIEW_BIND_ADDED);
+        char text[32];
+        assert(str_eq(rubraview_key_combo_format(text, sizeof(text), f7), "Shift+Alt+F7"));
+
+        /* Written and read back, the same keymap; the global section is [ui]. */
+        u8str_t written = rubraview_keymap_serialize(&a, &km);
+        assert(strstr(written.ptr, "[ui]\n") == written.ptr);
+        assert(strstr(written.ptr, "toggle_osd = \"I, Shift+Alt+F7\"\n"));
+        assert(strstr(written.ptr, "anim_toggle_pause = \"Space, j\"\n"));
+        rubraview_keymap_t reread = rubraview_keymap_parse(&a, written);
+        assert(rubraview_keymap_equal(&km, &reread));
+
+        /* Delete takes the last key off, one at a time, and says when none is left. */
+        assert(rubraview_keymap_unbind_last(&km, 1) && km.bindings[1].combo_count == 1);
+        assert(rubraview_keymap_unbind_last(&km, 1) && !rubraview_keymap_unbind_last(&km, 1));
+        assert(!rubraview_keymap_unbind_last(&km, 99));
+        assert(rubraview_keymap_bind(&a, &km, 99, f7, NULL) == RUBRAVIEW_BIND_FAILED);
+
+        /* The whole shipped keymap goes round the writer unchanged. */
+        rubraview_keymap_t shipped = rubraview_keymap_parse(&a, lit(rubraview_default_keymap()));
+        rubraview_keymap_t round = rubraview_keymap_parse(&a, rubraview_keymap_serialize(&a, &shipped));
+        assert(shipped.count > 60 && rubraview_keymap_equal(&shipped, &round));
+        free(big);
+    }
+    printf("  [PASS] Bindings change in place: refused where another action is reached, written and read back unchanged\n");
 
     free(raw_mem);
     printf("[test_keymap] All tests passed successfully!\n");

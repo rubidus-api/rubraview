@@ -444,7 +444,7 @@ To prevent key collisions while keeping shortcuts intuitive, the input dispatche
 - **Long Press (Press & Hold)**: Opens context menu.
 
 #### 3.7.5 Plain-Text Keymap Configuration (`keymap.ini`)
-Every action identifier in Rubraview is bound via an external, human-readable configuration file (`keymap.ini`). Users can customize shortcuts without rebuilding the executable:
+Every action identifier in Rubraview is bound via an external, human-readable configuration file (`keymap.ini`). Users can customize shortcuts without rebuilding the executable. (D-14: it lives beside `settings.ini` — the program's folder in portable mode, AppData otherwise — and the settings window writes it; since D-13 values are quoted and the global section is `[ui]`.)
 ```ini
 [navigation]
 next_page = Right, PageDown, Space, J, D
@@ -1065,8 +1065,8 @@ The Settings Window features an intuitive tab strip (Horizontal Metro tab bar or
 
 8. **Tab 8: Keyboard & Shortcuts (단축키 설정)**:
    - *Interactive Keymap Table*: Visual table listing all actions (Navigation, Zoom, View Modes, Video, Audio, Bookmarks) and their assigned hotkeys.
-   - *In-Place Key Binding*: Click an action, press a new key combination to rebind.
-   - *Conflict Detection*: Highlights duplicate shortcut assignments in real time.
+   - *In-Place Key Binding*: Click an action, press a new key combination to rebind. (D-14: `Enter` or a click on the focused row adds the pressed key, `Delete` removes the last one; `keymap.ini` is written beside `settings.ini` when the window closes.)
+   - *Conflict Detection*: Highlights duplicate shortcut assignments in real time. (D-14: a key another action holds where the two contexts meet is refused and the holder named; `navigation`, the global section and `view` meet each other, while `slideshow`, `animation` and `subpage` keep their own meaning for a shared key.)
    - *Export / Import*: Save or reload custom keymaps (`keymap.ini`), `[ Reset to Default Keymap ]` button.
 
 ---

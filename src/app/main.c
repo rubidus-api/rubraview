@@ -202,6 +202,11 @@ typedef struct app_state {
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
+    /* §3.22.2 / D-14: keymap.ini sits with settings.ini; what it held when
+       the settings window opened is what Revert goes back to. */
+    rubraview_keymap_t keymap_saved;
+    u8str_t            keymap_path;
+    int32_t            key_capture;       /* a Keys row waiting for its new key (1..), or 0 */
 
     /* Pages come from a folder or a CBZ through the same source (§3.8.1). */
     rubraview_page_source_t source;
@@ -342,7 +347,7 @@ typedef struct app_state {
        hides the window rather than destroying it, so it is made once. */
     int32_t                    settings_frame[4];     /* x, y, width, height in screen pixels */
     bool                       settings_mouse_down;
-    char                       settings_message[160]; /* the last action's result, under the page */
+    char                       settings_message[240]; /* the last action's result, under the page */
 
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
@@ -2750,6 +2755,8 @@ static void settings_read_file(app_state_t *app) {
 #endif
     app->settings_path = rubraview_config_path(app->arena, app->config_mode,
                                                U8("."), appdata, U8("settings.ini"));
+    app->keymap_path = rubraview_config_path(app->arena, app->config_mode,
+                                             U8("."), appdata, U8("keymap.ini"));
 
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
@@ -2761,16 +2768,6 @@ static bool u8str_equal_lit(u8str_t s, const char *lit) {
     return s.len == n && memcmp(s.ptr, lit, n) == 0;
 }
 
-/* A binding as keymap.ini spells it: "Ctrl+Shift+O". */
-static u8str_t combo_text(char *buffer, size_t capacity, rubraview_key_combo_t combo) {
-    int n = snprintf(buffer, capacity, "%s%s%s%.*s",
-                     (combo.modifiers & RUBRAVIEW_MOD_CTRL) ? "Ctrl+" : "",
-                     (combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? "Shift+" : "",
-                     (combo.modifiers & RUBRAVIEW_MOD_ALT) ? "Alt+" : "",
-                     (int)combo.key_name.len, combo.key_name.ptr);
-    if (n <= 0) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = buffer, .len = (size_t)n < capacity ? (size_t)n : capacity - 1 };
-}
 
 #define SETTINGS_BACKGROUND  0xFF161616u
 #define SETTINGS_PANE        0xFF1E1E1Eu
@@ -2806,23 +2803,43 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
     app_state_t *app = (app_state_t*)user;
     if (!u8str_equal_lit(source, "keymap")) return 0;
     if (index == 0) {
-        int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", "keys");
-        return n > 0 ? (size_t)n : 0;
+        int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", "keys  (Enter adds a key, Delete takes the last off)");
+        return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     if (index - 1 >= app->keymap.count) return 0;
     const rubraview_key_binding_t *b = &app->keymap.bindings[index - 1];
-    char keys[128];
+    char keys[160];
     size_t used = 0;
-    for (size_t c = 0; c < b->combo_count && used + 32 < sizeof(keys); ++c) {
-        char one[64];
-        u8str_t text = combo_text(one, sizeof(one), b->combos[c]);
-        int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.len, text.ptr);
-        if (n > 0) used += (size_t)n;
+    keys[0] = '\0';
+    if (app->key_capture == (int32_t)index) {
+        used = (size_t)snprintf(keys, sizeof(keys), "> press a key (Esc: leave it)");
+    } else {
+        for (size_t c = 0; c < b->combo_count && used + 32 < sizeof(keys); ++c) {
+            char one[64];
+            u8str_t text = rubraview_key_combo_format(one, sizeof(one), b->combos[c]);
+            int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.len, text.ptr);
+            if (n > 0) used += (size_t)n;
+        }
+        /* §3.22.2: a key another action also claims where the two meet —
+           only one of them is ever reached. Named, not fixed (D-14). */
+        for (size_t i = 0; i < app->keymap.count && used + 40 < sizeof(keys); ++i) {
+            const rubraview_key_binding_t *o = &app->keymap.bindings[i];
+            if (i == index - 1 || !rubraview_keymap_contexts_meet(o->context, b->context)) continue;
+            bool clash = false;
+            for (size_t x = 0; x < b->combo_count && !clash; ++x)
+                for (size_t y = 0; y < o->combo_count && !clash; ++y)
+                    clash = rubraview_key_combo_equal(b->combos[x], o->combos[y]);
+            if (!clash) continue;
+            int n = snprintf(keys + used, sizeof(keys) - used, "  ! also %.*s", (int)o->action.len, o->action.ptr);
+            if (n > 0) used += (size_t)n;
+            break;
+        }
+        if (used >= sizeof(keys)) used = sizeof(keys) - 1;
+        if (b->combo_count == 0 && used == 0) used = (size_t)snprintf(keys, sizeof(keys), "(no key)");
     }
-    keys[used] = '\0';
-    int n = snprintf(buffer, capacity, "%-12.*s %-24.*s %s",
+    int n = snprintf(buffer, capacity, "%-12.*s %-24.*s %.*s",
                      b->context.len ? (int)b->context.len : 2, b->context.len ? b->context.ptr : "ui",
-                     (int)b->action.len, b->action.ptr, keys);
+                     (int)b->action.len, b->action.ptr, (int)used, keys);
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
 }
@@ -2851,6 +2868,8 @@ static void settings_open(app_state_t *app) {
     if (app->settings_open) return;
     /* What is on disk now — another copy of the program may have written it. */
     settings_read_file(app);
+    app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
+    app->key_capture = 0;
 
     if (app->settings_window) {
         /* Made on the first F10 and hidden on close: shown again as it was. */
@@ -2916,6 +2935,16 @@ static void settings_close(app_state_t *app) {
             osd_say(app, U8("could not write settings.ini"));
         }
     }
+    app->key_capture = 0;
+    if (!rubraview_keymap_equal(&app->keymap, &app->keymap_saved)) {
+        u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
+        if (text.len > 0 && rubraview_pal_fs_write_file(app->keymap_path, text)) {
+            app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
+            osd_say(app, U8("keys saved to keymap.ini"));
+        } else {
+            osd_say(app, U8("could not write keymap.ini"));
+        }
+    }
     int32_t *f = app->settings_frame;
     if (!rubraview_pal_window_get_frame(app->settings_window, &f[0], &f[1], &f[2], &f[3])) f[2] = f[3] = 0;
     rubraview_pal_window_set_visible(app->settings_window, false);
@@ -2948,18 +2977,44 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             uint32_t total = app->settings.revision_total;
             app->settings = app->settings_saved;
             app->settings.revision_total = total + 1;
+            app->keymap = rubraview_keymap_copy(app->arena, &app->keymap_saved);
+            app->key_capture = 0;
             settings_took_effect(app);
             settings_say(app, "back to what settings.ini held when this window opened");
             break;
         }
         case RUBRAVIEW_SEVENT_DEFAULTS:
             rubraview_settings_reset(&app->settings);
+            app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
+            app->key_capture = 0;
             settings_took_effect(app);
-            settings_say(app, "every setting is at its default (Revert undoes this)");
+            settings_say(app, "every setting and key is at its default (Revert undoes this)");
             break;
         case RUBRAVIEW_SEVENT_CLOSE:
             settings_close(app);
             return;
+        case RUBRAVIEW_SEVENT_TABLE_EDIT:
+        case RUBRAVIEW_SEVENT_TABLE_CLEAR: {
+            int32_t row = rubraview_settings_view_focused_table_row(&app->settings_view);
+            if (row < 1 || (size_t)row > app->keymap.count) break;
+            const rubraview_key_binding_t *b = &app->keymap.bindings[row - 1];
+            char text[160];
+            if (event == RUBRAVIEW_SEVENT_TABLE_EDIT) {
+                app->key_capture = row;
+                snprintf(text, sizeof(text), "press the key to add to %.*s (Esc: leave it as it is)",
+                         (int)b->action.len, b->action.ptr);
+            } else if (b->combo_count == 0) {
+                snprintf(text, sizeof(text), "%.*s has no key to take off", (int)b->action.len, b->action.ptr);
+            } else {
+                char one[64];
+                u8str_t last = rubraview_key_combo_format(one, sizeof(one), b->combos[b->combo_count - 1]);
+                rubraview_keymap_unbind_last(&app->keymap, (size_t)row - 1);
+                snprintf(text, sizeof(text), "took %.*s off %.*s (Revert puts it back)",
+                         (int)last.len, last.ptr, (int)b->action.len, b->action.ptr);
+            }
+            settings_say(app, text);
+            break;
+        }
         case RUBRAVIEW_SEVENT_EDIT_TEXT:
         case RUBRAVIEW_SEVENT_CLEAR_TEXT: {
             const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
@@ -3017,6 +3072,42 @@ static bool settings_key_of(rubraview_key_combo_t combo, rubraview_settings_key_
     return false;
 }
 
+/* The key pressed for a Keys row (D-14): added, or refused with the name
+   of the action that has it — never taken away from it (owner, 2026-09-14). */
+static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) {
+    size_t index = (size_t)app->key_capture - 1;
+    app->key_capture = 0;
+    if (index >= app->keymap.count) return;
+    if (combo.modifiers == 0 && u8str_equal_lit(combo.key_name, "Escape")) {
+        settings_say(app, "no key added");
+        return;
+    }
+    char one[64], text[200];
+    u8str_t name = rubraview_key_combo_format(one, sizeof(one), combo);
+    const rubraview_key_binding_t *holder = NULL;
+    rubraview_bind_result_t result = rubraview_keymap_bind(app->arena, &app->keymap, index, combo, &holder);
+    const rubraview_key_binding_t *b = &app->keymap.bindings[index];
+    switch (result) {
+        case RUBRAVIEW_BIND_ADDED:
+            snprintf(text, sizeof(text), "%.*s added to %.*s", (int)name.len, name.ptr, (int)b->action.len, b->action.ptr);
+            break;
+        case RUBRAVIEW_BIND_ALREADY:
+            snprintf(text, sizeof(text), "%.*s already has %.*s", (int)b->action.len, b->action.ptr, (int)name.len, name.ptr);
+            break;
+        case RUBRAVIEW_BIND_TAKEN:
+            snprintf(text, sizeof(text), "not changed: %.*s is %.*s's key%s%.*s%s", (int)name.len, name.ptr,
+                     (int)holder->action.len, holder->action.ptr,
+                     holder->context.len ? " (" : "", (int)holder->context.len, holder->context.ptr,
+                     holder->context.len ? ")" : "");
+            break;
+        case RUBRAVIEW_BIND_FAILED:
+        default:
+            snprintf(text, sizeof(text), "could not add %.*s", (int)name.len, name.ptr);
+            break;
+    }
+    settings_say(app, text);
+}
+
 /* Everything the settings window's queue holds; returns how many. */
 static size_t settings_pump(app_state_t *app) {
     size_t handled = 0;
@@ -3048,6 +3139,11 @@ static size_t settings_pump(app_state_t *app) {
                 app->settings_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                if (app->key_capture > 0) {
+                    settings_capture_key(app, event.key.combo);
+                    app->settings_dirty = true;
+                    break;
+                }
                 rubraview_settings_key_t key;
                 if (settings_key_of(event.key.combo, &key)) {
                     settings_event(app, rubraview_settings_view_key(view, &app->settings, key));
@@ -3056,6 +3152,10 @@ static size_t settings_pump(app_state_t *app) {
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (app->key_capture > 0) {
+                    app->key_capture = 0;   /* a click elsewhere is a change of mind */
+                    settings_say(app, "no key added");
+                }
                 app->settings_mouse_down = true;
                 settings_event(app, rubraview_settings_view_press(view, &app->settings,
                                    (int32_t)(event.mouse.x / app->settings_cell_w),
@@ -3153,7 +3253,7 @@ static void draw_settings_window(app_state_t *app) {
                 }
                 continue;
             }
-            if ((int32_t)i == v->focus_line) {
+            if ((int32_t)i == v->focus_line && (ln->kind != RUBRAVIEW_LINE_TABLE || k == v->focus_row)) {
                 rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 - cw * 0.5, y, cw * (v->cols - v->content_col), ch },
                                                SETTINGS_FOCUS, 0.0);
             }
@@ -3163,6 +3263,7 @@ static void draw_settings_window(app_state_t *app) {
             /* Not read by the viewer yet: dimmed, except under the focus bar, where dim text is unreadable. */
             if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired &&
                 (int32_t)i != v->focus_line) color = SETTINGS_DIM;
+            if (ln->kind == RUBRAVIEW_LINE_TABLE && k == 0) color = SETTINGS_ACCENT;
             settings_text(app, text, x0, y, color);
         }
     }
@@ -3266,9 +3367,15 @@ static void tick_timers(app_state_t *app, double dt) {
 /* ---- startup ---- */
 
 static void load_keymap(app_state_t *app) {
-    /* §3.7.5: keymap.ini beside the executable overrides the built-in
-       bindings wholesale; the defaults apply when it is absent. */
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, U8("keymap.ini"), KEYMAP_MAX_BYTES);
+    /* §3.7.5 / D-14: keymap.ini lives where settings.ini does — beside the
+       program in portable mode, in AppData otherwise — and replaces the
+       built-in bindings wholesale. Before the settings window could write
+       one it was read only from the working folder, so a file left there
+       still counts when AppData has none. */
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->keymap_path, KEYMAP_MAX_BYTES);
+    if (text.len == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
+        text = rubraview_pal_fs_read_file(app->arena, U8("keymap.ini"), KEYMAP_MAX_BYTES);
+    }
     if (text.len == 0) text = cstr(rubraview_default_keymap());
     app->keymap = rubraview_keymap_parse(app->arena, text);
 }
@@ -4624,7 +4731,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     }
 
     double dpi = rubraview_pal_window_dpi_scale(app.window);
-    load_keymap(&app);
 
     /* §3.1: no worker pool. Every decode touches WIC, Direct2D and the
        arena, none of which may be used off this thread; the ring runs
@@ -4635,6 +4741,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        other one still gets its turn when this one cannot. */
     app.media_preferred = preferred_backend(&arena);
     history_load(&app);
+    load_keymap(&app);   /* after history_load: it settles portable or AppData, and so where keymap.ini is */
     /* history_load read settings.ini from wherever it lives (beside the
        program or in AppData); the decoder choice comes from that, not
        only from a file in the working folder. */

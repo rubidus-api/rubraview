@@ -267,6 +267,48 @@ int main(void) {
     }
     printf("  [PASS] Text splits into runs on their own cells, wide characters alone\n");
 
+    /* 9. A table's rows take the focus one by one (a key binding each):
+          Enter or a second click asks to change the row, Delete to take
+          its last key off, and the focus leaves at either end. */
+    {
+        rubraview_settings_t s = rubraview_settings_defaults();
+        rubraview_settings_view_t v = rubraview_settings_view_create(doc, 80, 24);
+        rubraview_settings_view_set_page(&v, RUBRAVIEW_TAB_KEYS);
+        rubraview_settings_view_set_table_rows(&v, 67);
+        size_t table = v.line_count;
+        for (size_t i = 0; i < v.line_count; ++i) if (v.lines[i].kind == RUBRAVIEW_LINE_TABLE) table = i;
+        assert(table < v.line_count);
+        assert(rubraview_settings_view_focused_table_row(&v) == -1);            /* on "Use keymap.ini" */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(v.focus_line == (int32_t)table && rubraview_settings_view_focused_table_row(&v) == 1);
+        assert(v.scroll <= v.lines[table].row);                                 /* the heading stays in sight */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_focused_table_row(&v) == 2);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_ENTER) == RUBRAVIEW_SEVENT_TABLE_EDIT);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DELETE) == RUBRAVIEW_SEVENT_TABLE_CLEAR);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_RIGHT) == RUBRAVIEW_SEVENT_NONE);
+
+        /* End reaches the last binding and scrolls it into sight; Down then the buttons. */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_END) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_focused_table_row(&v) == 66);
+        int32_t visible = rubraview_settings_view_visible_rows(&v);
+        assert(v.lines[table].row + 66 < v.scroll + visible && v.lines[table].row + 66 >= v.scroll);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(v.focus_button == RUBRAVIEW_BUTTON_REVERT);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_UP) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_focused_table_row(&v) == 66);             /* back in at the bottom */
+
+        /* A click picks a row; a click on the row in focus asks to change it; the heading is not a row. */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_HOME) == RUBRAVIEW_SEVENT_MOVED);
+        int32_t top = rubraview_settings_view_screen_row(&v, table);
+        assert(top >= 2);
+        assert(rubraview_settings_view_press(&v, &s, v.content_col + 2, top) == RUBRAVIEW_SEVENT_NONE);
+        assert(rubraview_settings_view_press(&v, &s, v.content_col + 2, top + 3) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_focused_table_row(&v) == 3);
+        assert(rubraview_settings_view_press(&v, &s, v.content_col + 2, top + 3) == RUBRAVIEW_SEVENT_TABLE_EDIT);
+    }
+    printf("  [PASS] A table's rows take the focus one by one, and ask to be changed or cleared\n");
+
     printf("[test_ui_settings] All tests passed successfully!\n");
     return 0;
 }
