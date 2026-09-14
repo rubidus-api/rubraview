@@ -6,6 +6,16 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-09-14
+
+Video and audio (M5), the settings window as a window of its own, and keys
+changed in it.
+
+Going back to 0.0.2 after running this version: 0.0.2 does not take the
+quotes off text values, so the files this version writes read wrong there —
+`decoder = "ffmpeg"` falls back to Media Foundation and quoted folder paths
+do not resolve. Delete `settings.ini`, `history.ini` and `keymap.ini` first.
+
 ### Added
 
 - Video and audio playback (M5) is complete except the sound check that needs
