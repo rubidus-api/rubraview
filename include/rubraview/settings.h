@@ -139,10 +139,11 @@ typedef struct rubraview_key_conflict {
 } rubraview_key_conflict_t;
 
 /**
- * Find chords bound to more than one action within a context (§3.22.2's
- * live conflict highlighting). Bindings in *different* contexts are not
- * conflicts — that separation is what lets `Space` mean two things
- * (§3.20.1) — so only same-context clashes are reported.
+ * Find chords bound to more than one action where the two can meet
+ * (§3.22.2's conflict detection; rubraview_keymap_contexts_meet says
+ * where). Contexts that take over only while something is playing keep
+ * their own meaning for a key — that is what lets `Space` mean two
+ * things (§3.20.1) — so those are not reported.
  */
 size_t rubraview_keymap_conflicts(const rubraview_keymap_t *keymap,
                                   rubraview_key_conflict_t *out, size_t capacity);

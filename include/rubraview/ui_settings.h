@@ -74,6 +74,7 @@ typedef struct rubraview_settings_view {
     int32_t scroll;                  /* the first content row shown */
     int32_t dragging_line;           /* a number being dragged, or -1 */
     int32_t table_rows;              /* how tall a `table` line is, in rows */
+    int32_t focus_row;               /* on a focused table line: which row (1.., row 0 is its heading) */
 
     rubraview_settings_line_t lines[RUBRAVIEW_SETTINGS_VIEW_MAX_LINES];
     size_t line_count;
@@ -124,6 +125,8 @@ typedef enum rubraview_settings_event {
     RUBRAVIEW_SEVENT_EDIT_TEXT,  /* the focused setting is a path: let the reader pick it */
     RUBRAVIEW_SEVENT_CLEAR_TEXT, /* the focused path is to be emptied (Delete) */
     RUBRAVIEW_SEVENT_ACTION,     /* the focused action line was pressed: do what it names */
+    RUBRAVIEW_SEVENT_TABLE_EDIT, /* Enter on a table row, or a click on the focused one: change it (a key binding) */
+    RUBRAVIEW_SEVENT_TABLE_CLEAR,/* Delete on a table row: take its last value off */
     RUBRAVIEW_SEVENT_REVERT,
     RUBRAVIEW_SEVENT_DEFAULTS,
     RUBRAVIEW_SEVENT_CLOSE,
@@ -132,6 +135,9 @@ typedef enum rubraview_settings_event {
 rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t *view,
                                                         rubraview_settings_t *settings,
                                                         rubraview_settings_key_t key);
+
+/** On a focused table line, the row in focus as the `table_row` source counts it (1 = the first below the heading); otherwise -1. */
+int32_t rubraview_settings_view_focused_table_row(const rubraview_settings_view_t *view);
 
 /** The focused line's document node, or NULL when a button has focus. */
 const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view);
