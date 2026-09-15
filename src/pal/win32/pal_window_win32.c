@@ -425,6 +425,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             return 0;
         }
 
+        case WM_SYSCOMMAND:
+            /* RFC-0002 §6.2 / RFC-0003 §5.5: Alt pressed and released on its
+               own would put the window in menu mode and eat the next key.
+               lparam 0 is exactly that case; Alt+Space (the system menu)
+               arrives with the space and still opens. */
+            if ((wparam & 0xFFF0) == SC_KEYMENU && lparam == 0) return 0;
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+
         case WM_CLOSE: {
             w->should_close = true;
             rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_CLOSE };
