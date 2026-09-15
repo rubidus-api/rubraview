@@ -44,26 +44,11 @@ again and leaves nothing behind in the registry.
 
 ## Reading
 
-| Key | What it does |
-|---|---|
-| `→` `←`, `PageDown` `PageUp`, `J` `K`, `D` `A` | Next / previous page |
-| `Space` | Next page (or play/pause while an animation is on screen) |
-| `Home` `End` | First / last page |
-| `Ctrl+]` `Ctrl+[` | Next / previous archive in the folder |
-| `B` | Single page / two pages |
-| `M` | Left-to-right / right-to-left (manga) |
-| `1`–`5` | Fit to window, width, height, actual size, smart fit |
-| `Ctrl+Wheel` | Zoom at the pointer |
-| `N` | Crisp scaling for pixel art |
-| `G` | Pixel grid, once zoomed past 400% |
-| `R`, `Shift+R`, `H`, `V` | Rotate and flip the view |
-| `F`, `F11` | Full screen |
-| `S`, `F5` | Slide show; `[` and `]` change the interval |
-| `T`, `Tab`, `F4` | Toolbox, menu, filmstrip |
-| `O` | Open something |
-| `I` | Show the file's details |
+`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages; `B` shows two
+pages side by side, `M` reads right to left. Every key is in **Keys** at the
+end of this manual.
 
-Reaching the last page of `Vol 01.cbz` and pressing `→` opens
+Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
 `Vol 02.cbz`. Close the viewer partway through a book and it offers your
 place when you open it again — press `Enter` to take it.
 
@@ -72,13 +57,8 @@ Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
 
 ## Animated images
 
-While a GIF, WebP or APNG is on screen:
-
-| Key | What it does |
-|---|---|
-| `Space` | Pause and resume |
-| `.` `,` | One frame forward / back |
-| `Ctrl+]` `Ctrl+[` | Faster / slower, 0.25x to 2x |
+While a GIF, WebP or APNG is on screen, `Space` pauses it, `.` and `,`
+step a frame, and `Ctrl+]` / `Ctrl+[` change its speed.
 
 A multi-page TIFF or a multi-size `.ico` uses `.` and `,` to step
 through its pages, and opens an `.ico` at its largest layer.
@@ -98,13 +78,9 @@ it was.
 
 ## Sorting your files
 
-| Key | What it does |
-|---|---|
-| `Delete` | To the recycle bin |
-| `Shift+Delete` | Delete for good — it asks first |
-| `Ctrl+Z` | Undo a move, a copy or a rename |
-| `F2` | Rename, keeping the extension |
-| `1`–`9` | Send the file to a folder you chose |
+`Delete` sends the file to the recycle bin (`Shift+Delete` deletes for good,
+after asking), `F2` renames it keeping the extension, `Ctrl+Z` undoes a move,
+a copy or a rename, and `1`–`9` send it to a folder you chose.
 
 To use the number keys for sorting, put this in `settings.ini`:
 
@@ -153,10 +129,43 @@ does not decode the picture at all — the result is bit-for-bit the same
 image, just turned. Rotating one four times gives you back the file you
 started with.
 
+## Video and music
+
+A video or a music file in the folder plays when it is the page on screen.
+While it does:
+
+- `Space` plays and pauses, `←` / `→` jump 5 seconds, `↑` / `↓` change the
+  volume, `Shift+M` mutes.
+- `[` marks where a repeat starts and `]` where it ends; `\` turns it off.
+  `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
+  follows), `Ctrl+\` goes back to normal.
+- A strip above the information bar shows the time; click or drag on it to
+  go somewhere else.
+- `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
+  half a second earlier or later.
+
+## The floating boxes
+
+Two small anchors float over the picture: **M** opens the menu, **T** the
+toolbox. The toolbox changes with what is on screen — playing controls for a
+video or music, frame steps for an animation, layout and volumes for a comic
+archive. Hold `Alt` and turn the wheel over a box to make it more or less
+see-through (never below 30 %).
+
+`Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
+that stays on top, and `Dock` puts it back. The menu's first tile, the `Pin`
+button on the title bar (point at the top edge) and `Ctrl+Shift+T` keep the
+viewer itself on top of other windows. `Ctrl` + arrows size the window,
+`Alt` + arrows move it.
+
 ## Settings
 
-`F10` or `Ctrl+,` opens the settings window: eight tabs, `Apply` to
-save without closing, `Reset to defaults` to start over.
+`F10` or `Ctrl+,` opens the settings window, a window of its own. A change
+takes effect at once; **Revert** goes back to what was there when it
+opened, **Defaults** to the defaults, and the file is written when the
+window closes. The **Keys** page lists every key: select one and press
+`Enter`, then the key to add; `Delete` takes the last one off. A key another
+action already uses is refused, and the message says which.
 
 Settings live in `settings.ini`. If there is one **beside
 `rubraview.exe`**, that is the one used and nothing is written anywhere
@@ -168,10 +177,127 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
-- **Video and audio.** The format list mentions them; the playback
-  engine is not built.
 - **Reading a `.cbr` (RAR) archive.**
 - **Typing a Korean or Japanese filename in the rename box.** You can
   rename such a file, but not type one — the box takes plain characters
   for now.
 - **Dropping several files at once** opens the first of them.
+
+## Keys
+
+Built from the keymap itself, so it is always what the viewer does. A key
+listed under a later heading only means that while that is on screen.
+
+<!-- keys:begin — generated from src/core/default_keymap.c by scripts/check-actions.py --write; do not edit -->
+
+**Everywhere**
+
+| Keys | What it does |
+|---|---|
+| `F`, `F11`, `Alt+Enter` | Full screen |
+| `Tab`, `F1` | Open or close the menu box |
+| `T` | Open or close the toolbox |
+| `Shift+T` | Pin the toolbox open |
+| `Ctrl+T` | Give the toolbox a window of its own, or dock it |
+| `Ctrl+Shift+T` | Always on top of other windows |
+| `O`, `Ctrl+O` | Open a file |
+| `Ctrl+Shift+O` | Open a folder |
+| `F4` | Filmstrip |
+| `I` | Information bar |
+| `E` | Adjust the picture |
+| `Ctrl+E` | Export |
+| `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+B` | Convert many files |
+| `F10`, `Ctrl+,` | Settings |
+| `G` | Pixel grid past 400% |
+| `Esc` | Quit |
+| `Delete` | To the recycle bin |
+| `Shift+Delete` | Delete for good (asks first) |
+| `Ctrl+Z` | Undo a move, copy or rename |
+| `F2` | Rename, keeping the extension |
+| `Ctrl+Left` | Window narrower |
+| `Ctrl+Right` | Window wider |
+| `Ctrl+Up` | Window shorter |
+| `Ctrl+Down` | Window taller |
+| `Alt+Left` | Move the window left |
+| `Alt+Right` | Move the window right |
+| `Alt+Up` | Move the window up |
+| `Alt+Down` | Move the window down |
+
+**Moving between pages**
+
+| Keys | What it does |
+|---|---|
+| `PageDown`, `Space`, `Enter` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space` | Previous page |
+| `Home`, `Ctrl+Home` | First page |
+| `End`, `Ctrl+End` | Last page |
+| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
+| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
+| `Ctrl+Backspace` | Up to the folder |
+| `B` | Single page / two pages / book |
+| `M` | Left-to-right / right-to-left (manga) |
+| `Shift+B` | Detect two-page spreads |
+| `Ctrl+]` | Next archive in the folder |
+| `Ctrl+[` | Previous archive in the folder |
+
+**The view**
+
+| Keys | What it does |
+|---|---|
+| `1` | Fit to the window |
+| `2` | Fit to the width |
+| `3` | Fit to the height |
+| `4`, `0`, `Ctrl+0` | Actual size (1:1) |
+| `5` | Smart fit (shrink only) |
+| `Ctrl+1` | Stretch to fill |
+| `L` | Keep the fit for the next files |
+| `+` | Zoom in |
+| `-` | Zoom out |
+| `R` | Rotate clockwise |
+| `Shift+R` | Rotate anticlockwise |
+| `H` | Flip left-right |
+| `V` | Flip upside down |
+| `N` | Crisp scaling for pixel art |
+
+**While a slide show runs**
+
+| Keys | What it does |
+|---|---|
+| `S`, `F5` | Start or stop the slide show |
+| `]` | Slower slides (0.5 s) |
+| `[` | Faster slides (0.5 s) |
+| `Shift+]` | Slower slides (0.1 s) |
+| `Shift+[` | Faster slides (0.1 s) |
+
+**While a video, music or animated picture is on screen**
+
+| Keys | What it does |
+|---|---|
+| `Space` | Play / pause |
+| `.` | One frame forward |
+| `,` | One frame back |
+| `Ctrl+]` | Faster (0.25x a step) |
+| `Ctrl+[` | Slower (0.25x a step) |
+| `Right` | 5 seconds on |
+| `Left` | 5 seconds back |
+| `Up` | Volume up 5% |
+| `Down` | Volume down 5% |
+| `Shift+M` | Mute / sound |
+| `[` | Repeat from here (A) |
+| `]` | Repeat to here (B) |
+| `\` | Repeat off |
+| `Ctrl+\` | Normal speed |
+| `Z` | Subtitles half a second earlier |
+| `X` | Subtitles half a second later |
+| `A` | Next sound track |
+| `C` | Next subtitles |
+
+**A multi-page TIFF or ICO**
+
+| Keys | What it does |
+|---|---|
+| `.` | Next page of the file |
+| `,` | Previous page of the file |
+
+<!-- keys:end -->
