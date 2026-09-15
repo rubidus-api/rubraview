@@ -138,6 +138,15 @@ reproduces on the VM: turn the IME off for the viewer window
 (`ImmAssociateContextEx`) and turn it on only while the rename box is open,
 which is the one place text is typed.
 
+**Measured 2026-09-15 (K5): not reproduced, and not measurable here.** On the
+Windows 11 VM, `F` toggled full screen three times before and after the
+Hangul/English key (`VK_HANGUL`) was sent, and `I` behaved the same. But the
+taskbar kept showing `ENG`: the session is reached over remote desktop and
+runs the client's English layout, so the Korean IME was most likely never in
+Hangul mode. Switching the VM user's input layout would change it for the
+other session that shares that desktop, so it was not done. Nothing was
+changed in the viewer. Still to check on a machine typing Korean.
+
 ### 5.5 Alt
 
 `Alt` alone must not open the window's system menu (RFC-0002 §6.2 uses
