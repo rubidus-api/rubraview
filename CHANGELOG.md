@@ -6,6 +6,16 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-09-16
+
+Toolbox and menu that change with what is on screen (D-15), keys from the
+keymap alone — arrows play, Ctrl+arrows size the window, Alt+arrows move it
+(D-16) — and Always on top (D-17).
+
+Going back to 0.0.3 after running this version: a `keymap.ini` this version
+saves names its playback section `[media]`, which 0.0.3 does not read, so
+the keys in it are lost there. Delete `keymap.ini` first.
+
 ### Added
 
 - Volume and mute (D-15): `Up` / `Down` change the volume 5 % at a time

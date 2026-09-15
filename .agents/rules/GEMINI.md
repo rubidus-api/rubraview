@@ -12,7 +12,7 @@ Search with `rg` rooted at `src/`, `include/`, `tests/`; do not scan the workspa
 
 ## Tool discipline
 
-- Build: `make` (Linux host test runner) or `make win64` (linux-build cross-build)
+- Build: `make` (Linux host test runner) or `make win64` (MinGW-w64 cross-build)
 - Test (targeted): `make test`
 - Test (full, slow): `make test`
 - Gate: `scripts/gate.sh` runs the minimum tier for what changed; use it before reporting.
@@ -34,7 +34,7 @@ batch run needs interactive only.
 
 - Language/build: Pure C23 (`-std=c23`), Makefile and nob.c
 - Output goes to: `build/` (intermediate), `build/tests/` (test binaries), `dist/` (release executable)
-- Cross-build or remote machine required: Windows binary cross-compiled via MinGW-w64 on linux-build (see REMOTE.md)
+- Cross-build or remote machine required: Windows binary cross-compiled via MinGW-w64 on a Linux build host
 - Slow paths: FFmpeg dynamic loading, whole-directory batch processing
 - Do not touch: `vendor/proven/` (vendored snapshot; report defects upstream)
 
