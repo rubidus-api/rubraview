@@ -307,7 +307,7 @@ The **Toolbox** manages real-time media manipulation and playback operations:
   - **Detached Mode (`rubraview_toolbox_window`)**:
     - When the user drags the toolbox across the outer window perimeter (or clicks a `[ Detach ↗ ]` tile), it seamlessly transitions into an independent top-level Win32 tool window (`WS_POPUP | WS_EX_TOOLWINDOW | WS_EX_LAYERED`).
     - The detached window can float anywhere across the multi-monitor desktop workspace, remaining on top of other applications (`HWND_TOPMOST` optional toggle).
-    - Dragging the detached window back over the main canvas surface docks it back into the in-window Direct2D overlay mode.
+    - Dragging the detached window back over the main canvas surface docks it back into the in-window Direct2D overlay mode. (D-15: not built — a drop over a fullscreen viewer would always dock; the window docks by its Dock half, `Ctrl+T`, `T` or the titlebar's box button.)
 
 #### 3.6.2 The Menu Box (`rubraview_menubox`): In-Window Hierarchical Settings & Navigation
 The **Menu Box** manages deep configurations, layout switching, image filters, and batch pipelines:
