@@ -90,6 +90,11 @@ typedef struct rubraview_box {
     double idle_seconds;         /* time since the pointer left the box */
     int32_t tile_count;          /* how many tiles the expanded grid holds */
     rubraview_box_home_t home;   /* the corner "put it back" returns it to */
+    /* The client area the box opens in, set by the caller each frame; 0
+       when unknown. Known, an open grid sits beside its anchor instead of
+       over it — below, or above when there is no room below — and is
+       shifted to stay inside (RFC-0002 §4: ten tiles by a corner). */
+    double view_width, view_height;
 } rubraview_box_t;
 
 rubraview_box_t rubraview_box_create(rubraview_box_kind_t kind, double anchor_x, double anchor_y, int32_t tile_count);
