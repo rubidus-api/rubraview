@@ -30,6 +30,12 @@ This project follows Keep a Changelog.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and
   everything handled is reachable.
 
+### Fixed
+
+- The reading history's `time` was seconds since the machine started, so
+  after a restart "newest" meant nothing; it is the date now. Entries
+  written before sort as the oldest.
+
 ### Changed
 
 - While a video or music page is on screen, `Left` / `Right` seek 5 s
