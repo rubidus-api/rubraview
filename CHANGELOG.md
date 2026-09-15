@@ -6,6 +6,14 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dragging the toolbox's anchor past the window's edge now detaches it, as
+  §3.6.1 says: the window did not keep the mouse while a button was held,
+  so the drag stopped at the edge.
+- A floating box's anchor left near the edge of a window that then shrank
+  was out of reach outside it; anchors are pulled back in on every resize.
+
 ## [0.0.4] - 2026-09-16
 
 Toolbox and menu that change with what is on screen (D-15), keys from the

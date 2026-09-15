@@ -21,3 +21,11 @@ Covers: owner request 2026-09-15, R148 (§3.21.3)
 inside the session: `0x110` → Pin → `0x118` (`WS_EX_TOPMOST`) → Pin →
 `0x110`; menu tile → `0x118` and `On top: on`; after quitting
 `always_on_top = true`. Not measured: 4's key and 5's restart.
+
+## Key and restart measured, 2026-09-16 (0.0.4)
+
+`Ctrl+Shift+T` turned the viewer's extended style 0x110 → 0x118 (topmost).
+Closed with Alt+F4, `settings.ini` held `always_on_top = true`, and the
+viewer started again at 0x118. Killed instead of closed, the change is lost:
+settings are written when the settings window closes and when the viewer
+exits, not at each toggle.

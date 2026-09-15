@@ -27,3 +27,21 @@ test viewer fills the screen, so there is no edge to drag past.
 Changed from §3.6.1: a detached toolbox does not dock when dropped over the
 canvas. A viewer that fills the screen is under it wherever it goes, so it
 would dock at every move; it docks by `Dock`, `Ctrl+T` or the menu.
+
+## Step 3 measured, 2026-09-16 (after 0.0.4)
+
+The viewer was shrunk with Ctrl+arrows to 960x592, which found two faults
+before the step could run:
+
+- the toolbox anchor, left at the bottom-right of the larger window, stayed
+  outside the smaller one and could not be reached. Anchors are now pulled
+  inside the window (88 px across, 48 px down of room) whenever it resizes,
+  the same rule layout.ini's positions get when they are read;
+- the anchor followed the pointer only up to the window's edge: the window
+  did not capture the mouse while a button was held, so past the edge it
+  heard nothing and the toolbox never detached.
+
+With both fixed, pressing the anchor's `T` at 912,564 and dragging to
+1150,500 turned the toolbox into its own window under the pointer (`T` /
+`Dock` header, eight archive tiles). A click on the canvas still turns the
+page (2/2 → 1/2).
