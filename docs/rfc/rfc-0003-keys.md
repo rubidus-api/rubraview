@@ -1,6 +1,6 @@
 # RFC-0003: One Source for the Keys
 
-- Status: Proposed
+- Status: Accepted (2026-09-15, D-16: arrows seek 5 s and change volume while playing · Space plays/pauses, stop has no key · Ctrl+arrows resize and Alt+arrows move the window · `[media]` · generated table · 30 s seek later)
 - Date: 2026-09-15
 - Amends: RFC-0001 §3.7.1, §3.7.2, §3.7.5
 - Related: RFC-0002 (the boxes name actions; this RFC gives them keys), D-14 (keys changed in the settings window)

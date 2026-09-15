@@ -1,6 +1,6 @@
 # RFC-0002: What the Toolbox and the Menu Box Hold
 
-- Status: Proposed
+- Status: Accepted (2026-09-15, D-15: Q1 ⓐ document · Q2 ⓐ per box · Q3 30 % · Q4 ⓐ session volume · Q5 timeline with the playback tiles · Q6 nothing deferred)
 - Date: 2026-09-15
 - Amends: RFC-0001 §3.6.1–§3.6.4 (the two floating boxes)
 - Related: RFC-0003 (keys), D-13 (settings document), D-14 (keys changed in place)
