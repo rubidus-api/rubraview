@@ -165,7 +165,9 @@ takes effect at once; **Revert** goes back to what was there when it
 opened, **Defaults** to the defaults, and the file is written when the
 window closes. The **Keys** page lists every key: select one and press
 `Enter`, then the key to add; `Delete` takes the last one off. A key another
-action already uses is refused, and the message says which.
+action already uses is refused, and the message says which. **Export keys
+to a file** saves them to share or keep; **Import keys from a file** puts a
+saved set on the page, and Revert takes it back off.
 
 Settings live in `settings.ini`. If there is one **beside
 `rubraview.exe`**, that is the one used and nothing is written anywhere

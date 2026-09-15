@@ -109,6 +109,8 @@ static const char *const PARTS[] = {
 "page keys \"Keys\"\n"
 "  section \"Bindings\"\n"
 "  toggle keys.use_keymap_file     \"Use keymap.ini\"          = true\n"
+"  action keys.export              \"Export keys to a file\"\n"
+"  action keys.import              \"Import keys from a file\"\n"
 "  table  keymap\n",
 };
 
