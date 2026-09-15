@@ -4087,34 +4087,42 @@ static double ini_number(const rubraview_ini_doc_t *doc, u8str_t section, u8str_
     return (end && end != buffer) ? value : fallback;
 }
 
+/* A box saved on a larger screen, or left near the edge of a window that
+   then shrank, must not be out of reach: each anchor stays inside the
+   window with room to grab it. A toolbox that is its own window is not
+   in this window at all. */
+static void boxes_keep_in_reach(app_state_t *app) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    /* the room an anchor takes, as toolbox_dock leaves it */
+    double max_x = (double)win_w - 88.0 * dpi, max_y = (double)win_h - 48.0 * dpi;
+    rubraview_box_t *boxes[] = { &app->toolbox, &app->menubox };
+    for (size_t i = 0; i < 2; ++i) {
+        rubraview_box_t *box = boxes[i];
+        if (box->state == RUBRAVIEW_BOX_DETACHED) continue;
+        if (box->anchor_x < 0.0) box->anchor_x = 0.0;
+        if (box->anchor_y < 0.0) box->anchor_y = 0.0;
+        if (max_x > 0.0 && box->anchor_x > max_x) box->anchor_x = max_x;
+        if (max_y > 0.0 && box->anchor_y > max_y) box->anchor_y = max_y;
+    }
+}
+
 static void layout_load(app_state_t *app) {
     if (app->layout_path.len == 0) return;
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->layout_path, 8u * 1024u);
     if (text.len == 0) return;
     rubraview_ini_doc_t doc = rubraview_ini_parse(app->arena, text);
 
-    int32_t win_w = 0, win_h = 0;
-    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    /* A position saved on a larger screen must not put a box out of
-       reach; the anchor stays inside the window with room to grab it. */
-    double margin = 48.0 * dpi;
-    double max_x = (double)win_w - margin, max_y = (double)win_h - margin;
-
     struct { rubraview_box_t *box; const char *x_key, *y_key; } BOXES[] = {
         { &app->toolbox, "toolbox_x", "toolbox_y" },
         { &app->menubox, "menubox_x", "menubox_y" },
     };
     for (size_t i = 0; i < sizeof(BOXES) / sizeof(BOXES[0]); ++i) {
-        double x = ini_number(&doc, U8("boxes"), cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
-        double y = ini_number(&doc, U8("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
-        if (x < 0.0) x = 0.0;
-        if (y < 0.0) y = 0.0;
-        if (max_x > 0.0 && x > max_x) x = max_x;
-        if (max_y > 0.0 && y > max_y) y = max_y;
-        BOXES[i].box->anchor_x = x;
-        BOXES[i].box->anchor_y = y;
+        BOXES[i].box->anchor_x = ini_number(&doc, U8("boxes"), cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
+        BOXES[i].box->anchor_y = ini_number(&doc, U8("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
     }
+    boxes_keep_in_reach(app);
     /* Where the boxes were left, not a setting: layout.ini, read like the positions. */
     if (ini_number(&doc, U8("boxes"), U8("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
 
@@ -5410,6 +5418,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.filmstrip.viewport_extent = (double)event.resize.width;
                     app.needs_relayout = true;
                     panel_relayout(&app);
+                    boxes_keep_in_reach(&app);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
