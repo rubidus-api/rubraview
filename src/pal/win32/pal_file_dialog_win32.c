@@ -20,6 +20,39 @@ static u8str_t win32_wstr_to_u8str(proven_arena_t *arena, const WCHAR *wstr) {
     };
 }
 
+/* The title, the file-type list and — for a save — the extension added
+   when the reader types a name without one (the first filter's). */
+static void apply_title_and_filters(IFileDialog *pfd, const rubraview_file_dialog_opts_t *opts, bool save) {
+    if (!opts) return;
+    if (opts->title) {
+        WCHAR wtitle[256];
+        if (MultiByteToWideChar(CP_UTF8, 0, opts->title, -1, wtitle, 256) > 0) IFileDialog_SetTitle(pfd, wtitle);
+    }
+    enum { MAX_FILTERS = 8 };
+    if (!opts->filters || opts->filter_count == 0 || opts->folder_mode) return;
+    size_t n = opts->filter_count < MAX_FILTERS ? opts->filter_count : MAX_FILTERS;
+    WCHAR names[MAX_FILTERS][128], specs[MAX_FILTERS][128];
+    COMDLG_FILTERSPEC spec[MAX_FILTERS];
+    for (size_t i = 0; i < n; ++i) {
+        names[i][0] = specs[i][0] = 0;
+        if (opts->filters[i].description) MultiByteToWideChar(CP_UTF8, 0, opts->filters[i].description, -1, names[i], 128);
+        if (opts->filters[i].pattern) MultiByteToWideChar(CP_UTF8, 0, opts->filters[i].pattern, -1, specs[i], 128);
+        spec[i].pszName = names[i];
+        spec[i].pszSpec = specs[i];
+    }
+    IFileDialog_SetFileTypes(pfd, (UINT)n, spec);
+    if (save) {
+        /* "*.ini;*.txt" gives "ini" */
+        WCHAR ext[16] = {0};
+        const WCHAR *dot = wcschr(specs[0], L'.');
+        if (dot) {
+            size_t k = 0;
+            for (++dot; *dot && *dot != L';' && *dot != L'*' && k + 1 < 16; ++dot) ext[k++] = *dot;
+        }
+        if (ext[0]) IFileDialog_SetDefaultExtension(pfd, ext);
+    }
+}
+
 rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts) {
     if (!arena) return (rubraview_file_dialog_result_t){0};
 
@@ -39,14 +72,7 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *ar
     }
     IFileDialog_SetOptions(pfd, fos);
 
-    if (opts && opts->title) {
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, opts->title, -1, NULL, 0);
-        if (wlen > 0) {
-            WCHAR wtitle[256];
-            MultiByteToWideChar(CP_UTF8, 0, opts->title, -1, wtitle, 256);
-            IFileDialog_SetTitle(pfd, wtitle);
-        }
-    }
+    apply_title_and_filters((IFileDialog*)pfd, opts, false);
 
     HWND parent = opts ? (HWND)opts->parent_window_handle : NULL;
     hr = IFileDialog_Show(pfd, parent);
@@ -119,6 +145,7 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_save(proven_arena_t *ar
     IFileDialog_GetOptions(pfd, &fos);
     fos |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT;
     IFileDialog_SetOptions(pfd, fos);
+    apply_title_and_filters((IFileDialog*)pfd, opts, true);
 
     HWND parent = opts ? (HWND)opts->parent_window_handle : NULL;
     hr = IFileDialog_Show(pfd, parent);
