@@ -15,6 +15,16 @@ This project follows Keep a Changelog.
   + wheel over a box makes it more or less see-through, 5 % a step, never
   below 30 %; each box keeps its own (`[ui] menubox_opacity`,
   `toolbox_opacity`). A lone `Alt` no longer puts the window in menu mode.
+- The toolbox changes with what is on screen (RFC-0002): a video gets
+  Play/Pause, Stop, ±5 s, volume, mute, subtitles and sound track; music its
+  own row with previous and next; an animated picture frame steps; a
+  multi-page TIFF page steps; a comic archive layout, reading order and
+  volumes; a picture today's tiles. A running slide show adds Stop slides.
+- The menu box has File (Open file, Open folder, Recent, volumes, Rename,
+  Delete, Export, Batch, Settings, Quit), View, Playback (while a video or
+  music page is on screen), Show (with the boxes' opacity) and Help (Keys,
+  About). Tiles and menu come from one internal document, checked by
+  `check-actions.py`.
 - The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
   wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and
@@ -26,6 +36,9 @@ This project follows Keep a Changelog.
   (they were `Ctrl+Left` / `Ctrl+Right`, which now size the window). The
   playback context is `[media]`; a `keymap.ini` that says `[animation]`
   still loads. Up to the folder is `Ctrl+Backspace` (was `Ctrl+Up`).
+- An open box sits beside its anchor and inside the window; by the
+  bottom-right corner the toolbox used to open over its own anchor and off
+  the screen.
 - The four `Alt` + arrow "pan" bindings, which did nothing, are gone.
 - `F2` renames the file, as in Explorer; it no longer also opened the toolbox,
   which is `T` (D-14). Until now `F2` reached the toolbox and rename could not

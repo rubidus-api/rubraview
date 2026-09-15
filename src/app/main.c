@@ -49,6 +49,7 @@
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
+#include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
@@ -112,7 +113,6 @@
    cut off when the loop stops drawing. */
 #define IDLE_REDRAW_GRACE 3.0
 #define HISTORY_MAX_ENTRIES 512
-#define TOOLBOX_TILES 8
 #define MENU_MAX_TILES 12
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
@@ -126,65 +126,8 @@
 
 
 
-/*
- * The Menu Box's category tree (§3.6.2). Children are contiguous, which
- * is what rubraview_menu_tree_t indexes; every leaf names an action the
- * keyboard can already reach, so the tiles and the keymap stay in step.
- */
-enum {
-    MENU_ROOT_LAYOUT = 0, MENU_ROOT_FIT, MENU_ROOT_VIEW, MENU_ROOT_SHOW, MENU_ROOT_MEDIA,
-    MENU_ROOT_COUNT,
-};
-
-/* U8() builds a compound literal, which is not a constant initializer at
-   file scope; a brace initializer with sizeof for the length is, and it
-   still avoids hand-counting any lengths. */
-#define MENU_STR(lit) { .ptr = (lit), .len = sizeof(lit) - 1 }
-
-static const rubraview_menu_item_t MENU_ITEMS[] = {
-    /* 0 */ { .label = MENU_STR("Layout"), .action = MENU_STR(""), .first_child = 5, .child_count = 3 },
-    /* 1 */ { .label = MENU_STR("Fit"),    .action = MENU_STR(""), .first_child = 8, .child_count = 5 },
-    /* 2 */ { .label = MENU_STR("View"),   .action = MENU_STR(""), .first_child = 13, .child_count = 4 },
-    /* 3 */ { .label = MENU_STR("Show"),   .action = MENU_STR(""), .first_child = 17, .child_count = 3 },
-    /* 4 */ { .label = MENU_STR("Media"),  .action = MENU_STR(""), .first_child = 20, .child_count = 4 },
-
-    /* Layout (5..7) */
-    { .label = MENU_STR("Single"), .action = MENU_STR("layout_single"), .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Dual"),   .action = MENU_STR("layout_dual"),   .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Book"),   .action = MENU_STR("layout_book"),   .first_child = -1, .child_count = 0 },
-
-    /* Fit (8..12) */
-    { .label = MENU_STR("Window"), .action = MENU_STR("fit_window"),  .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Width"),  .action = MENU_STR("fit_width"),   .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Height"), .action = MENU_STR("fit_height"),  .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("1:1"),    .action = MENU_STR("actual_size"), .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Smart"),  .action = MENU_STR("smart_fit"),   .first_child = -1, .child_count = 0 },
-
-    /* View (13..16) */
-    { .label = MENU_STR("Rotate"), .action = MENU_STR("rotate_cw"),         .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Flip H"), .action = MENU_STR("flip_horizontal"),   .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Crisp"),  .action = MENU_STR("toggle_nearest"),    .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Grid"),   .action = MENU_STR("toggle_pixel_grid"), .first_child = -1, .child_count = 0 },
-
-    /* Show (17..19) */
-    { .label = MENU_STR("Slides"), .action = MENU_STR("toggle_slideshow"), .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Strip"),  .action = MENU_STR("toggle_filmstrip"), .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Files"),  .action = MENU_STR("open_picker"),      .first_child = -1, .child_count = 0 },
-
-    /* Media (20..23) — §3.16.2 wants these reachable from the Menu Box,
-       not only from the keyboard. */
-    { .label = MENU_STR("Sound"),  .action = MENU_STR("next_audio_track"),    .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Subs"),   .action = MENU_STR("next_subtitle_track"), .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Sub -"),  .action = MENU_STR("subtitle_earlier"),    .first_child = -1, .child_count = 0 },
-    { .label = MENU_STR("Sub +"),  .action = MENU_STR("subtitle_later"),      .first_child = -1, .child_count = 0 },
-};
-
-static const rubraview_menu_tree_t MENU_TREE = {
-    .items = MENU_ITEMS,
-    .item_count = sizeof(MENU_ITEMS) / sizeof(MENU_ITEMS[0]),
-    .root_first = 0,
-    .root_count = MENU_ROOT_COUNT,
-};
+/* The boxes' tiles and menu tree come from their document (RFC-0002,
+   D-15): src/core/default_boxes_doc.c. */
 
 /* U8() only works on string literals; this is its runtime counterpart. */
 static u8str_t cstr(const char *s) {
@@ -294,6 +237,12 @@ typedef struct app_state {
     rubraview_box_t toolbox;               /* RV-020 */
     rubraview_box_t menubox;
     rubraview_menu_state_t menu;
+    /* RFC-0002: the menu tree for this moment and the toolbox's tiles for
+       what is on screen, both built from the boxes' document. */
+    rubraview_menu_tree_t  menu_tree;
+    uint32_t               menu_when;          /* RUBRAVIEW_BOXES_WHEN_* the tree was built for */
+    rubraview_box_tile_t   toolbox_tiles[RUBRAVIEW_TOOLBOX_MAX_TILES];
+    int32_t                toolbox_tile_count;
     rubraview_filmstrip_t filmstrip;       /* RV-042 */
     rubraview_slideshow_t slideshow;       /* RV-015, state machine from RV-032 */
     rubraview_slideshow_item_t *slides;
@@ -1252,6 +1201,97 @@ static void sync_menubox_tiles(app_state_t *app) {
     app->menubox.tile_count = count;
 }
 
+static uint32_t boxes_when(const app_state_t *app) {
+    return app->media ? RUBRAVIEW_BOXES_WHEN_MEDIA : 0u;
+}
+
+/* RFC-0002 §5: the menu tree, built again from the document — with the
+   reading history's newest entries under File › Recent — and the menu
+   back at its root. */
+static unsigned char g_menu_memory[1 << 16];   /* the tree lives here until it is built again */
+
+static void menu_rebuild(app_state_t *app) {
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = g_menu_memory, .size = sizeof(g_menu_memory) });
+    enum { RECENT_MAX = 10 };
+    rubraview_recent_entry_t recent[RECENT_MAX];
+    size_t recent_count = 0;
+    bool taken[HISTORY_MAX_ENTRIES] = {0};
+    for (size_t r = 0; r < RECENT_MAX; ++r) {
+        size_t best = app->history.count;
+        for (size_t i = 0; i < app->history.count && i < HISTORY_MAX_ENTRIES; ++i) {
+            if (taken[i]) continue;
+            if (best == app->history.count || app->history.entries[i].timestamp > app->history.entries[best].timestamp) best = i;
+        }
+        if (best == app->history.count) break;
+        taken[best] = true;
+        char action[32];
+        int n = snprintf(action, sizeof(action), "open_recent:%zu", best);
+        proven_result_mem_mut_t text = proven_arena_alloc(&arena, (size_t)n + 1);
+        if (n <= 0 || !proven_is_ok(text.err)) break;
+        memcpy(text.value.ptr, action, (size_t)n + 1);
+        recent[recent_count++] = (rubraview_recent_entry_t){
+            .label = rubraview_path_basename(app->history.entries[best].path),
+            .action = { .ptr = (const char*)text.value.ptr, .len = (size_t)n },
+        };
+    }
+    app->menu_when = boxes_when(app);
+    app->menu_tree = rubraview_boxes_menu(&arena, rubraview_boxes_document(), app->menu_when,
+                                          recent, recent_count, MENU_MAX_TILES - 1);
+    app->menu = rubraview_menu_create(&app->menu_tree);
+    sync_menubox_tiles(app);
+}
+
+/* RFC-0002 §4: which toolbox profile what is on screen calls for — the
+   same tests dispatch_key uses to pick a key context. */
+static const char *toolbox_profile_name(const app_state_t *app) {
+    if (app->media) return app->media_info.has_video ? "video" : "music";
+    if (app->anim_active) return app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION ? "animation" : "multipage";
+    if (app->source.archive_path.len > 0) return "archive";
+    return "image";
+}
+
+static void toolbox_refresh(app_state_t *app) {
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    int32_t count = 0;
+    const rubraview_toolbox_profile_t *parts[2] = {
+        app->slideshow_running ? rubraview_boxes_profile(doc, U8("slideshow")) : NULL,
+        rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app))),
+    };
+    for (size_t p = 0; p < 2; ++p) {
+        if (!parts[p]) continue;
+        for (int32_t i = 0; i < parts[p]->tile_count && count < RUBRAVIEW_TOOLBOX_MAX_TILES; ++i) {
+            const rubraview_box_tile_t *tile = &doc->tiles[parts[p]->first_tile + i];
+            /* The slide show's own Stop tile stands in for the profile's Slides tile. */
+            if (p == 1 && parts[0] && action_is(tile->action, "toggle_slideshow")) continue;
+            app->toolbox_tiles[count++] = *tile;
+        }
+    }
+    app->toolbox_tile_count = count;
+    app->toolbox.tile_count = count;
+    /* The menu follows what is on screen too, but only while it is at its
+       root: a reader halfway down a submenu is not pulled back. */
+    if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
+}
+
+/* A toggle tile says what a tap will do; a tile that can do nothing now is dimmed. */
+static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
+    *out_enabled = true;
+    if (action_is(tile->action, "media_play_pause")) {
+        bool paused = app->media ? app->media_paused : app->animation.paused;
+        return paused ? U8("Play") : U8("Pause");
+    }
+    if (action_is(tile->action, "media_mute")) {
+        return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? U8("Sound") : U8("Mute");
+    }
+    if (action_is(tile->action, "next_subtitle_track")) {
+        *out_enabled = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, app->tracks.current_subtitle) >= 0;
+    } else if (action_is(tile->action, "next_audio_track")) {
+        int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO, app->tracks.current_audio);
+        *out_enabled = next >= 0 && next != app->tracks.current_audio;
+    }
+    return tile->caption;
+}
+
 /* The volume as the OSD says it: "volume 70%" or "muted (70%)". */
 static void media_say_volume(app_state_t *app) {
     char line[48];
@@ -1381,7 +1421,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->filmstrip.visible = !app->filmstrip.visible;
     } else if (action_is(action, "toggle_menu")) {
         rubraview_box_click_anchor(&app->menubox);
-        rubraview_menu_reset(&app->menu);
+        menu_rebuild(app);
         sync_menubox_tiles(app);
     } else if (action_is(action, "layout_single")) {
         app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
@@ -1443,6 +1483,30 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), muted ? 0.0 : 1.0);
         settings_took_effect(app);
         media_say_volume(app);
+    } else if (action.len > 12 && memcmp(action.ptr, "open_recent:", 12) == 0) {
+        /* File › Recent: the entry's index in the reading history. */
+        size_t index = (size_t)strtoul(action.ptr + 12, NULL, 10);
+        if (index < app->history.count) open_path(app, app->history.entries[index].path);
+    } else if (action_is(action, "open_keys")) {
+        settings_open(app);
+        if (app->settings_open) {
+            rubraview_settings_view_set_page(&app->settings_view, RUBRAVIEW_TAB_KEYS);
+            rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            app->settings_dirty = true;
+        }
+    } else if (action_is(action, "about")) {
+        char line[160];
+        int n = snprintf(line, sizeof(line), "Rubraview %s  -  FFmpeg %s", RUBRAVIEW_VERSION_STRING,
+                         rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG) ? "found beside the program" : "not found");
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    } else if (action_is(action, "boxes_opacity_100") || action_is(action, "boxes_opacity_80") ||
+               action_is(action, "boxes_opacity_60") || action_is(action, "boxes_opacity_40")) {
+        double percent = (double)strtol(action.ptr + 14, NULL, 10);
+        rubraview_settings_set(&app->settings, U8("ui"), U8("menubox_opacity"), percent);
+        rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_opacity"), percent);
+        char line[32];
+        int n = snprintf(line, sizeof(line), "both boxes %d%%", (int)percent);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     } else if (window_nudge(app, action)) {
         /* D-16: Ctrl + arrows size the window, Alt + arrows move it. */
     } else if (app->media && action_is(action, "anim_step_forward")) {
@@ -1794,7 +1858,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     /* The anchor's two buttons answer first: they sit on top of the
        box, and a click there is never a tile. */
     if (rubraview_box_click(&app->menubox, &metrics, x, y)) {
-        sync_menubox_tiles(app);
+        menu_rebuild(app);   /* opened or closed: Recent as it is now, from the root */
         return true;
     }
     if (rubraview_box_click(&app->toolbox, &metrics, x, y)) return true;
@@ -1813,12 +1877,13 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
 
     tile = rubraview_box_tile_at(&app->toolbox, &metrics, x, y);
     if (tile >= 0) {
-        /* Toolbox tiles are fixed playback and viewport controls (§3.6.1). */
-        static const char *const TOOLBOX_ACTIONS[TOOLBOX_TILES] = {
-            "prev_page", "next_page", "zoom_out", "zoom_in",
-            "actual_size", "rotate_cw", "toggle_slideshow", "toggle_fullscreen",
-        };
-        if (tile < TOOLBOX_TILES) handle_action(app, cstr(TOOLBOX_ACTIONS[tile]));
+        /* RFC-0002 §4: the tiles of the profile on screen; a dimmed one does nothing. */
+        toolbox_refresh(app);
+        if (tile < app->toolbox_tile_count) {
+            bool enabled = true;
+            (void)toolbox_caption(app, &app->toolbox_tiles[tile], &enabled);
+            if (enabled) handle_action(app, app->toolbox_tiles[tile].action);
+        }
         return true;
     }
 
@@ -1878,6 +1943,11 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 
     rubraview_pal_render_fill_rect(app->renderer, body, box_fill, 2.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, box_border, 1.0, 2.0);
+    if (box->state != RUBRAVIEW_BOX_COLLAPSED) {
+        /* Open, the grid sits beside the anchor, which keeps its own ground. */
+        rubraview_rect_t a = rubraview_box_anchor_rect(box, metrics);
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ a.x, a.y, a.width, a.height }, box_fill, 2.0);
+    }
 
     /* The anchor is two buttons, and they must not look like one. The
        left is outlined — it waits to be clicked; the right is filled —
@@ -1907,15 +1977,18 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         rubraview_pal_render_fill_rect(app->renderer, tile, tile_fill, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile, box_border, 1.0, 0.0);
         u8str_t caption = { .ptr = "", .len = 0 };
+        bool enabled = true;
         if (menu) {
             char scratch[64];
             caption = menu_tile_caption(menu, i, scratch, sizeof(scratch));
         } else if (captions && i < caption_count) {
             caption = cstr(captions[i]);
+        } else if (box == &app->toolbox && i < app->toolbox_tile_count) {
+            caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
         }
         if (caption.len > 0) {
-            rubraview_pal_render_draw_text(app->renderer, caption, tile,
-                                           metrics->tile_size * 0.22, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_draw_text(app->renderer, caption, tile, metrics->tile_size * 0.22,
+                                           enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
 }
@@ -2109,17 +2182,17 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 
     /* Floating boxes (§3.6). */
-    static const char *const TOOLBOX_CAPTIONS[TOOLBOX_TILES] = {
-        "Prev", "Next", "Zoom-", "Zoom+", "1:1", "Rotate", "Slides", "Full",
-    };
-    draw_box(app, &app->toolbox, &metrics, TOOLBOX_CAPTIONS, TOOLBOX_TILES, NULL);
+    toolbox_refresh(app);
+    draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
     draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
 
     if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
         char crumb[128];
         u8str_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
-        rubraview_rect_t bounds = rubraview_box_bounds(&app->menubox, &metrics);
-        rubraview_pal_rect_t label = { bounds.x, bounds.y - metrics.tile_size * 0.4, bounds.width, metrics.tile_size * 0.4 };
+        /* Beside the anchor, on its row: the grid is below or above it now. */
+        rubraview_rect_t anchor = rubraview_box_anchor_rect(&app->menubox, &metrics);
+        rubraview_pal_rect_t label = { anchor.x + anchor.width + metrics.gutter, anchor.y,
+                                       metrics.tile_size * 6.0, anchor.height };
         rubraview_pal_render_draw_text(app->renderer, text, label, metrics.tile_size * 0.2,
                                        COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
@@ -4857,10 +4930,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
-    app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, TOOLBOX_TILES);
-    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, MENU_ROOT_COUNT);
+    app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
+    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
     layout_load(&app);   /* §3.6: back where the reader left them */
-    app.menu = rubraview_menu_create(&MENU_TREE); /* §3.6.2 category tree */
+    menu_rebuild(&app);   /* §3.6.2, RFC-0002 §5: the tree from the boxes' document */
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
@@ -4898,6 +4971,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     while (!rubraview_pal_window_should_close(app.window)) {
         rubraview_window_event_t event;
         size_t handled = 0;
+        {
+            /* RFC-0002 §4: the boxes open inside the window, whatever its size now. */
+            int32_t view_w = 0, view_h = 0;
+            rubraview_pal_window_get_size(app.window, &view_w, &view_h);
+            app.toolbox.view_width = app.menubox.view_width = (double)view_w;
+            app.toolbox.view_height = app.menubox.view_height = (double)view_h;
+        }
         while (rubraview_pal_window_poll_event(app.window, &event)) {
             handled++;
             switch (event.kind) {

@@ -32,7 +32,6 @@ BOXES = ROOT / "src" / "core" / "default_boxes_doc.c"
 INTERNAL = {
     "resume_accept": "answered from the resume prompt, which has its own keys",
     "anim_toggle_pause": "the name media_play_pause had before D-16, kept for keymap.ini files saved earlier",
-    "media_stop": "a tile only (D-16: stop has no key); its tile arrives with RFC-0002 S3 — remove this line then",
 }
 
 

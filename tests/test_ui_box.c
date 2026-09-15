@@ -222,6 +222,30 @@ static void test_boxes(void) {
     }
     printf("  [PASS] Tiles lay out row by row and hit testing resolves them\n");
 
+    /* Test 2b: RFC-0002 §4 — with the view known, an open grid clears its
+       anchor and stays inside: below it with room, above it by the bottom
+       edge, and shifted left by the right edge. */
+    {
+        rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 100.0, 100.0, 10);
+        box.view_width = 1280.0;
+        box.view_height = 752.0;
+        rubraview_box_hover_enter(&box);
+        rubraview_rect_t anchor = rubraview_box_anchor_rect(&box, &m);
+        rubraview_rect_t body = rubraview_box_bounds(&box, &m);
+        assert(approx(body.x, 100.0) && approx(body.y, anchor.y + anchor.height + m.gutter));   /* below */
+
+        box.anchor_x = 1060.0;
+        box.anchor_y = 592.0;
+        body = rubraview_box_bounds(&box, &m);
+        assert(approx(body.y + body.height, box.anchor_y - m.gutter));                         /* above */
+        assert(approx(body.x + body.width, 1280.0));                                            /* pulled in */
+        rubraview_rect_t last = rubraview_box_tile_rect(&box, &m, 9);
+        assert(last.x >= body.x && last.x + last.width <= 1280.0 && last.y + last.height <= box.anchor_y);
+        assert(!rubraview_rect_contains(body, box.anchor_x + 1.0, box.anchor_y + 1.0));        /* the anchor stays clear */
+        assert(rubraview_box_tile_at(&box, &m, last.x + 2.0, last.y + 2.0) == 9);
+    }
+    printf("  [PASS] An open grid clears its anchor and stays inside the view\n");
+
     /* Test 3: A collapsed box has no tiles to hit. */
     {
         rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 0.0, 0.0, 6);
