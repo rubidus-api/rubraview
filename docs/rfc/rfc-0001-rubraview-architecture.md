@@ -369,56 +369,130 @@ To prevent key collisions while keeping shortcuts intuitive, the input dispatche
 
 #### 3.7.2 Comprehensive Keyboard Hotkey Reference
 
-| Category | Action | Primary Key | Alternative / Modifier | Context / Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| **Navigation** | Next Page / Frame | `Right Arrow` | `PageDown`, `Space`, `J`, `D` | Advance 1 page |
-| | Previous Page / Frame | `Left Arrow` | `PageUp`, `Shift+Space`, `K`, `A` | Step back 1 page |
-| | First / Last Page | `Home` / `End` | `Ctrl+Home` / `Ctrl+End` | Jump to beginning / end |
-| | Skip 10 Pages | `Shift + Right` / `Left` | `Ctrl + PageDown` / `PageUp` | Rapid chapter skimming |
-| | Up / Exit to Folder | `Backspace` | `Alt + Up` | Ascend to parent directory/archive |
-| | Next / Previous Archive | `Ctrl + ]` / `Ctrl + [` | `Ctrl+PageDown` / `PageUp` | Next/prev CBZ/ZIP in directory |
-| **Zoom & Fit** | Sub-pixel Zoom In / Out | `+` (or `=`) / `-` (or `_`) | `Num +` / `Num -` | Step zoom $\pm 10\%$ at center |
-| | Real-Time Live Zoom | `Ctrl + Mouse Wheel` | Touch Pinch | Continuous cursor-centered zoom |
-| | Reset Zoom to 100% (1:1) | `4` | `0`, `Ctrl + 0`, `Middle Click` | 1:1 original pixel mapping |
-| | Fit to Window (Inside) | `1` | Menu tile | Scales proportionally to fit window |
-| | Fit to Width | `2` | Menu tile | Webtoon & vertical document mode |
-| | Fit to Height | `3` | Menu tile | Panoramic landscape mode |
-| | Stretch to Fill | `Ctrl + 1` | Menu tile | Ignore aspect ratio |
-| | Smart Fit | `5` | Menu tile | Downscale only if larger than window |
-| | Toggle Fit Lock | `L` | Menu tile | Retain zoom/fit mode across files |
-| | Pan Viewport (Zoomed) | `Alt + Arrow keys` | `W`, `A`, `S`, `D` | Smooth canvas panning |
-| | Rotate 90° CW / CCW | `R` / `Shift + R` | Menu tile | Direct2D instantaneous transform |
-| | Flip Horizontal / Vert | `H` / `V` | Menu tile | Mirror canvas |
-| | Toggle Pixel Grid | `G` | Menu tile | 1px hairline grid at $\ge 400\%$ zoom |
-| **Book & Manga** | Toggle Page Layout | `B` | Menu tile | Cycle Single $\rightarrow$ Dual $\rightarrow$ Book |
-| | Toggle Reading Order | `M` | Menu tile | LTR (Western) $\leftrightarrow$ RTL (Manga) |
-| | Pre-merged Spread Auto | `Shift + B` | Menu tile | Auto full-width for $AR \ge 1.15$ |
-| **Media Playback** | Play / Pause | `Space` | `P`, `Toolbox ⏯` | Active in video/audio mode |
-| | Frame Step Forward | `.` (Period) | `Ctrl + Right` | Frame-accurate step forward |
-| | Frame Step Backward | `,` (Comma) | `Ctrl + Left` | Frame-accurate step backward |
-| | Seek Forward / Back 5s | `Right` / `Left` | `Toolbox ⏩/⏪` | Active during video playback |
-| | Seek Forward / Back 30s | `Ctrl + Right` / `Left` | — | Coarse timestamp seek |
-| | Fine Seek $\pm 1\text{s}$ | `Shift + Right` / `Left` | — | 1-second precision scrub |
-| | Set Loop Point A | `[` | `Toolbox [A]` | Marks section loop start $T_A$ |
-| | Set Loop Point B | `]` | `Toolbox [B]` | Marks section loop end $T_B$ |
-| | Clear A-B Loop | `\` | `Ctrl + \`, `Esc` | Releases section repeat |
-| | Adjust Volume $\pm 5\%$ | `Up Arrow` / `Down Arrow`| `Mouse Wheel` over volume | 0% to 100% WASAPI volume |
-| | Mute / Unmute Audio | `Shift + M` | `Toolbox 🔇` | Toggles hardware audio output |
-| | Playback Speed $\pm 0.25\text{x}$ | `}` / `{` | Menu tile | 0.25x to 4.0x dynamic pitch-shift |
-| | Capture Current Frame | `Ctrl + C` | `Ctrl + S` | Copies full-res frame to clipboard |
-| **Slideshow** | Start / Stop Slideshow | `S` | `F5` | Automated sequence presentation |
-| | Coarse Interval ($\pm 0.5\text{s}$)| `[` / `]` | Menu tile | Active when Slideshow is running |
-| | Fine Interval ($\pm 0.1\text{s}$) | `Shift + [` / `Shift + ]` | Menu tile | 0.1s to 300.0s interval control |
-| **UI & Windows** | Toggle Borderless Fullscreen | `F` | `F11`, `Alt + Enter`, `Double Click` | Zero-margin fullscreen canvas |
-| | Toggle In-Window Menu Box | `Tab` | `F1`, Anchor `[ ☰ ]` | Hierarchical Metro settings menu |
-| | Toggle Toolbox / Pin | `T` | Anchor `[ ⏯ ]` | Playback toolbox & pin status (D-14: `F2` is §3.18.2's rename, not this) |
-| | Open File Dialog | `O` | `Ctrl + O` | In-App Metro Picker or Win32 COM |
-| | Open Folder / Directory | `Ctrl + Shift + O` | Menu tile | Traverses directory |
-| | Toggle Thumbnail Filmstrip | `F4` | Menu tile | Collapsible bottom thumbnail bar |
-| | Toggle OSD Info Overlay | `I` | Menu tile | Resolution, EXIF, Bit depth, Zoom |
-| | Open Color/Tone Curves | `E` | Menu tile | Exposure, Contrast, Spline curves |
-| | Open Batch Converter | `Ctrl + B` | Menu tile | Multi-threaded export queue |
-| | Close Modal / Cancel / Exit | `Esc` | — | Closes menu $\rightarrow$ Exits fullscreen $\rightarrow$ Quit |
+(D-16, 2026-09-15.) The table below is generated from `src/core/default_keymap.c`
+by `scripts/check-actions.py --write`, and the check fails when it and the keymap
+part. The hand-written table this section held was a plan; what it planned and
+the keymap does not do is listed after it.
+
+<!-- keys:begin — generated from src/core/default_keymap.c by scripts/check-actions.py --write; do not edit -->
+
+**Everywhere**
+
+| Keys | What it does |
+|---|---|
+| `F`, `F11`, `Alt+Enter` | Full screen |
+| `Tab`, `F1` | Open or close the menu box |
+| `T` | Open or close the toolbox |
+| `Shift+T` | Pin the toolbox open |
+| `Ctrl+T` | Give the toolbox a window of its own, or dock it |
+| `Ctrl+Shift+T` | Always on top of other windows |
+| `O`, `Ctrl+O` | Open a file |
+| `Ctrl+Shift+O` | Open a folder |
+| `F4` | Filmstrip |
+| `I` | Information bar |
+| `E` | Adjust the picture |
+| `Ctrl+E` | Export |
+| `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+B` | Convert many files |
+| `F10`, `Ctrl+,` | Settings |
+| `G` | Pixel grid past 400% |
+| `Esc` | Quit |
+| `Delete` | To the recycle bin |
+| `Shift+Delete` | Delete for good (asks first) |
+| `Ctrl+Z` | Undo a move, copy or rename |
+| `F2` | Rename, keeping the extension |
+| `Ctrl+Left` | Window narrower |
+| `Ctrl+Right` | Window wider |
+| `Ctrl+Up` | Window shorter |
+| `Ctrl+Down` | Window taller |
+| `Alt+Left` | Move the window left |
+| `Alt+Right` | Move the window right |
+| `Alt+Up` | Move the window up |
+| `Alt+Down` | Move the window down |
+
+**Moving between pages**
+
+| Keys | What it does |
+|---|---|
+| `PageDown`, `Space`, `Enter` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space` | Previous page |
+| `Home`, `Ctrl+Home` | First page |
+| `End`, `Ctrl+End` | Last page |
+| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
+| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
+| `Ctrl+Backspace` | Up to the folder |
+| `B` | Single page / two pages / book |
+| `M` | Left-to-right / right-to-left (manga) |
+| `Shift+B` | Detect two-page spreads |
+| `Ctrl+]` | Next archive in the folder |
+| `Ctrl+[` | Previous archive in the folder |
+
+**The view**
+
+| Keys | What it does |
+|---|---|
+| `1` | Fit to the window |
+| `2` | Fit to the width |
+| `3` | Fit to the height |
+| `4`, `0`, `Ctrl+0` | Actual size (1:1) |
+| `5` | Smart fit (shrink only) |
+| `Ctrl+1` | Stretch to fill |
+| `L` | Keep the fit for the next files |
+| `+` | Zoom in |
+| `-` | Zoom out |
+| `R` | Rotate clockwise |
+| `Shift+R` | Rotate anticlockwise |
+| `H` | Flip left-right |
+| `V` | Flip upside down |
+| `N` | Crisp scaling for pixel art |
+
+**While a slide show runs**
+
+| Keys | What it does |
+|---|---|
+| `S`, `F5` | Start or stop the slide show |
+| `]` | Slower slides (0.5 s) |
+| `[` | Faster slides (0.5 s) |
+| `Shift+]` | Slower slides (0.1 s) |
+| `Shift+[` | Faster slides (0.1 s) |
+
+**While a video, music or animated picture is on screen**
+
+| Keys | What it does |
+|---|---|
+| `Space` | Play / pause |
+| `.` | One frame forward |
+| `,` | One frame back |
+| `Ctrl+]` | Faster (0.25x a step) |
+| `Ctrl+[` | Slower (0.25x a step) |
+| `Right` | 5 seconds on |
+| `Left` | 5 seconds back |
+| `Up` | Volume up 5% |
+| `Down` | Volume down 5% |
+| `Shift+M` | Mute / sound |
+| `[` | Repeat from here (A) |
+| `]` | Repeat to here (B) |
+| `\` | Repeat off |
+| `Ctrl+\` | Normal speed |
+| `Z` | Subtitles half a second earlier |
+| `X` | Subtitles half a second later |
+| `A` | Next sound track |
+| `C` | Next subtitles |
+
+**A multi-page TIFF or ICO**
+
+| Keys | What it does |
+|---|---|
+| `.` | Next page of the file |
+| `,` | Previous page of the file |
+
+<!-- keys:end -->
+
+**Planned here, not built:** seek ±30 s (`Ctrl+Left` / `Ctrl+Right` size the
+window instead — owner, D-16) and ±1 s; pan with `W A S D` (A and D are taken);
+capture the current frame (`Ctrl+C`, `Ctrl+S`); `P` for play/pause; the middle
+click toggling 1:1 (§3.7.3); up to the folder on `Backspace` or `Alt+Up` (it is
+`Ctrl+Backspace`).
 
 #### 3.7.3 Mouse Controls & Hit-Testing Zones
 1. **Left Click & Drag**:
