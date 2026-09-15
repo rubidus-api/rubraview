@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "rubraview/core.h"
 #include "rubraview/path.h"
@@ -3748,7 +3749,7 @@ static void history_remember(app_state_t *app) {
     /* An archive is remembered by its own path; a folder by the folder. */
     u8str_t key = app->source.archive_path.len > 0 ? app->source.archive_path : app->source_dir;
     rubraview_history_record(app->arena, &app->history, key, current, (int32_t)page_count(app),
-                             (int64_t)rubraview_pal_time_now_seconds());
+                             (int64_t)time(NULL));   /* a date: pal_time is a monotonic clock, which restarts with the machine */
     rubraview_history_prune(&app->history, HISTORY_MAX_ENTRIES);
 }
 
