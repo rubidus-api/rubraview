@@ -115,6 +115,8 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
            older keymap.ini that still does that reads the same way. */
         u8str_t context = doc.entries[i].section;
         if (context.len == 2 && memcmp(context.ptr, "ui", 2) == 0) context = (u8str_t){ .ptr = "", .len = 0 };
+        /* D-16: [animation] became [media]; a keymap.ini saved before still loads. */
+        if (context.len == 9 && memcmp(context.ptr, "animation", 9) == 0) context = (u8str_t){ .ptr = "media", .len = 5 };
         rubraview_key_binding_t binding = {
             .context = context,
             .action = doc.entries[i].key,

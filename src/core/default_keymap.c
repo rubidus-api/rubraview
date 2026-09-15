@@ -31,6 +31,16 @@ const char *rubraview_default_keymap(void) {
     "purge_file = \"Shift+Delete\"\n"
     "undo = \"Ctrl+Z\"\n"
     "rename_file = \"F2\"\n"
+    /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
+       arrows move it — everywhere, whatever is on screen. */
+    "window_narrower = \"Ctrl+Left\"\n"
+    "window_wider = \"Ctrl+Right\"\n"
+    "window_shorter = \"Ctrl+Up\"\n"
+    "window_taller = \"Ctrl+Down\"\n"
+    "window_move_left = \"Alt+Left\"\n"
+    "window_move_right = \"Alt+Right\"\n"
+    "window_move_up = \"Alt+Up\"\n"
+    "window_move_down = \"Alt+Down\"\n"
     "\n"
     "[navigation]\n"
     /* Owner, 2026-09-09: page turning is on these keys and nothing else
@@ -43,12 +53,10 @@ const char *rubraview_default_keymap(void) {
     "last_page = \"End, Ctrl+End\"\n"
     "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
     "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"
-    /* §3.7.2 gives "up to folder" two keys, Backspace and Alt+Up, and
-       both are now spoken for: Backspace turns a page (owner,
-       2026-09-09) and Alt+Up pans, which is the whole Alt+Arrow set.
-       So it moved to Ctrl+Up — the nearest free chord that still reads
-       as "up". */
-    "up_to_folder = \"Ctrl+Up\"\n"
+    /* §3.7.2 gives "up to folder" Backspace and Alt+Up; Backspace turns a
+       page (owner, 2026-09-09), Alt+Up moves the window and Ctrl+Up sizes
+       it (D-16). Ctrl+Backspace: back, one step wider. */
+    "up_to_folder = \"Ctrl+Backspace\"\n"
     "toggle_layout = \"B\"\n"
     "toggle_reading_order = \"M\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
@@ -67,13 +75,6 @@ const char *rubraview_default_keymap(void) {
     "toggle_fit_lock = \"L\"\n"
     "zoom_in = \"Plus\"\n"
     "zoom_out = \"Minus\"\n"
-    /* §3.7.2 lists both `Alt + Arrow keys` and `W A S D` for panning,
-       but it also gives A and D to page navigation and S to the slide
-       show. Those primary bindings win, so panning keeps the arrows. */
-    "pan_left = \"Alt+Left\"\n"
-    "pan_right = \"Alt+Right\"\n"
-    "pan_up = \"Alt+Up\"\n"
-    "pan_down = \"Alt+Down\"\n"
     "rotate_cw = \"R\"\n"
     "rotate_ccw = \"Shift+R\"\n"
     "flip_horizontal = \"H\"\n"
@@ -97,23 +98,27 @@ const char *rubraview_default_keymap(void) {
        animation, and everywhere else they mean what they always meant.
        Nothing is unreachable: paging a folder of GIFs still works with
        Right/Left, PageDown/PageUp, J/K and D/A. */
-    "[animation]\n"
-    "anim_toggle_pause = \"Space\"\n"
+    "[media]\n"
+    /* D-16: the context was [animation]; a keymap.ini that still says so
+       is read as [media]. Space plays and pauses; stop is a tile. */
+    "media_play_pause = \"Space\"\n"
     "anim_step_forward = \"Period\"\n"
     "anim_step_back = \"Comma\"\n"
     "anim_speed_up = \"Ctrl+BracketRight\"\n"
     "anim_speed_down = \"Ctrl+BracketLeft\"\n"
-    /* M5: the same context holds while a video is on screen. Ctrl+Left and
-       Ctrl+Right were free; plain Left/Right keep turning pages. */
-    "media_seek_forward = \"Ctrl+Right\"\n"
-    "media_seek_back = \"Ctrl+Left\"\n"
+    /* D-16 (owner, 2026-09-15): the arrows seek 5 s and change the volume
+       5 % while a video or music page is on screen. They turn no pages
+       (owner, 2026-09-09), so nothing else is lost. */
+    "media_seek_forward = \"Right\"\n"
+    "media_seek_back = \"Left\"\n"
+    "media_volume_up = \"Up\"\n"
+    "media_volume_down = \"Down\"\n"
+    "media_mute = \"Shift+M\"\n"
     /* §3.16.1 / R135: an external subtitle that runs early or late is
-       nudged half a second at a time. Z and X are free — the global
-       section only spends Ctrl+Z. */
+       nudged half a second at a time. */
     "subtitle_earlier = \"Z\"\n"
     "subtitle_later = \"X\"\n"
-    /* §3.16.2 / R135: the next sound track, and the next subtitle (the
-       cycle includes turning them off). A and C were both free. */
+    /* §3.16.2 / R135: the next sound track, and the next subtitle. */
     "next_audio_track = \"A\"\n"
     "next_subtitle_track = \"C\"\n"
     "\n"
