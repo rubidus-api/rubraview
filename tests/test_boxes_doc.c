@@ -36,8 +36,8 @@ int main(void) {
     if (doc->error) fprintf(stderr, "line %u: %s\n", doc->error_line, doc->error);
     assert(!doc->error);
     static const struct { const char *name; int32_t count; const char *first, *last; } PROFILES[] = {
-        { "video", 10, "media_play_pause", "toggle_fullscreen" },
-        { "music", 9, "prev_page", "media_mute" },
+        { "video", 12, "media_play_pause", "toggle_fullscreen" },
+        { "music", 11, "prev_page", "media_speed_cycle" },
         { "animation", 8, "prev_page", "toggle_fullscreen" },
         { "multipage", 8, "prev_page", "toggle_fullscreen" },
         { "archive", 8, "prev_page", "toggle_fullscreen" },
@@ -98,7 +98,7 @@ int main(void) {
     assert_tree_sound(&media);
     assert(media.root_count == 5 && is(media.items[2].label, "Playback"));
     const rubraview_menu_item_t *play = root_named(&media, "Playback");
-    assert(play->child_count == 9 && is(media.items[play->first_child].action, "media_play_pause"));
+    assert(play->child_count == 11 && is(media.items[play->first_child].action, "media_play_pause"));
     const rubraview_menu_item_t *vol = child_named(&media, play, "Volume");
     assert(vol && vol->child_count == 3);
     assert(child_named(&media, root_named(&media, "File"), "Recent")->child_count == 0);

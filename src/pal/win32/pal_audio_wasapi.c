@@ -9,6 +9,7 @@
 #include <math.h>
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/pal/pal_time.h"
+#include "rubraview/audio_dsp.h"
 
 /*
  * WASAPI shared-mode output (RFC-0001 §5.4). One thread per output owns
@@ -45,6 +46,14 @@ static const GUID RV_SUBTYPE_IEEE_FLOAT       = {0x00000003, 0x0000, 0x0010, {0x
 static _Atomic uint32_t volume_permille = 1000;
 static _Atomic bool volume_muted = false;
 static _Atomic uint32_t volume_generation = 1;
+
+static _Atomic uint32_t speed_permille = 1000;
+
+void rubraview_pal_audio_set_speed(double speed) {
+    if (!(speed >= 0.25)) speed = 0.25;
+    if (speed > 4.0) speed = 4.0;
+    atomic_store_explicit(&speed_permille, (uint32_t)lround(speed * 1000.0), memory_order_release);
+}
 
 void rubraview_pal_audio_set_volume(double volume, bool muted) {
     if (!(volume >= 0.0)) volume = 0.0;
@@ -109,9 +118,16 @@ static void apply_volume(ISimpleAudioVolume *volume, uint32_t *applied) {
 static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderClient *render,
                 ISimpleAudioVolume *volume, UINT32 buffer_frames) {
     uint64_t submitted = 0;
+    double source_frames = 0.0;   /* file frames read for what went to the device (D-15) */
     double base = 0.0;
     bool started = false;
     uint32_t volume_applied = 0;
+    double step = 1.0;
+    /* Speed reads up to 4 file frames per device frame; one buffer's worth, read ahead. */
+    rubraview_speed_resampler_t resampler = rubraview_speed_resampler_create(out->channels);
+    size_t scratch_frames = (size_t)buffer_frames * 4u + 2u;
+    float *scratch = (float*)malloc(scratch_frames * out->channels * sizeof(float));
+    if (!scratch) return;
     publish(out, 0.0);
 
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
@@ -126,6 +142,8 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
             IAudioClient_Reset(client);
             rubraview_pcm_ring_discard(out->ring);
             submitted = 0;
+            source_frames = 0.0;
+            resampler = rubraview_speed_resampler_create(out->channels);
             base = (double)atomic_load_explicit(&out->flush_base_100ns, memory_order_relaxed) / 1e7;
             publish(out, base);
             atomic_store_explicit(&out->flush_ack, request, memory_order_release);
@@ -136,16 +154,21 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
 
         bool want = atomic_load_explicit(&out->playing, memory_order_acquire);
         if (want) {
+            step = (double)atomic_load_explicit(&speed_permille, memory_order_acquire) / 1000.0;
             UINT32 space = buffer_frames > padding ? buffer_frames - padding : 0;
             size_t ready_frames = rubraview_pcm_ring_count(out->ring) / out->channels;
-            UINT32 n = (UINT32)(ready_frames < space ? ready_frames : space);
-            if (n > 0) {
+            /* Every write goes through the resampler; at speed 1 it hands the samples through. */
+            size_t k = rubraview_speed_source_needed(&resampler, space, step, ready_frames);
+            if (k > scratch_frames) k = scratch_frames;
+            if (space > 0 && k > 0) {
                 BYTE *data = NULL;
-                if (SUCCEEDED(IAudioRenderClient_GetBuffer(render, n, &data)) && data) {
-                    rubraview_pcm_ring_read(out->ring, (float*)(void*)data, (size_t)n * out->channels);
-                    IAudioRenderClient_ReleaseBuffer(render, n, 0);
-                    submitted += n;
-                    padding += n;
+                if (SUCCEEDED(IAudioRenderClient_GetBuffer(render, space, &data)) && data) {
+                    rubraview_pcm_ring_read(out->ring, scratch, k * out->channels);
+                    size_t m = rubraview_speed_resample(&resampler, scratch, k, step, (float*)(void*)data, space);
+                    IAudioRenderClient_ReleaseBuffer(render, (UINT32)m, 0);
+                    submitted += m;
+                    padding += (UINT32)m;
+                    source_frames += (double)k;
                 }
             }
             /* Started only after the first fill, so playback begins with
@@ -156,12 +179,14 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
             started = false;
         }
 
-        publish(out, rubraview_audio_heard_seconds(base, submitted, padding, out->rate));
+        (void)submitted;
+        publish(out, rubraview_audio_heard_media_seconds(base, source_frames, padding, step, out->rate));
         atomic_store_explicit(&out->drained,
                               rubraview_pcm_ring_count(out->ring) == 0 && padding == 0,
                               memory_order_release);
     }
     if (started) IAudioClient_Stop(client);
+    free(scratch);
 }
 
 static DWORD WINAPI audio_thread(LPVOID arg) {

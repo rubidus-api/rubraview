@@ -60,6 +60,13 @@ bool rubraview_pal_audio_drained(rubraview_audio_out_t *out);
  */
 void rubraview_pal_audio_set_volume(double volume, bool muted);
 
+/**
+ * D-15: playback speed, 0.25–4.0, for every output. The samples are read
+ * that much faster or slower (so the pitch follows), and the heard
+ * position is in file time, which is what the picture's clock follows.
+ */
+void rubraview_pal_audio_set_speed(double speed);
+
 #ifdef __cplusplus
 }
 #endif

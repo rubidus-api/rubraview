@@ -244,6 +244,52 @@ int main(void) {
     }
     printf("  [PASS] Night mode leaves quiet passages alone and pulls loud ones down\n");
 
+    /* D-15: speed. Step 1 hands the samples through; step 2 takes every
+       other one; step 0.5 puts the midpoint between each pair; and cutting
+       the stream into chunks changes nothing. */
+    {
+        float src[64];
+        for (int i = 0; i < 32; ++i) { src[2 * i] = (float)i; src[2 * i + 1] = (float)(-i); }
+        float out[256];
+
+        rubraview_speed_resampler_t same = rubraview_speed_resampler_create(2);
+        size_t need = rubraview_speed_source_needed(&same, 32, 1.0, 32);
+        assert(need == 32);
+        assert(rubraview_speed_resample(&same, src, need, 1.0, out, 32) == 32);
+        for (int i = 0; i < 32; ++i) assert(out[2 * i] == (float)i && out[2 * i + 1] == (float)(-i));
+
+        rubraview_speed_resampler_t fast = rubraview_speed_resampler_create(2);
+        need = rubraview_speed_source_needed(&fast, 16, 2.0, 32);
+        assert(need == 31);
+        size_t made = rubraview_speed_resample(&fast, src, need, 2.0, out, 16);
+        assert(made == 16);
+        for (int i = 0; i < 16; ++i) assert(out[2 * i] == (float)(2 * i));
+
+        rubraview_speed_resampler_t slow = rubraview_speed_resampler_create(2);
+        need = rubraview_speed_source_needed(&slow, 7, 0.5, 32);
+        assert(need == 4);
+        made = rubraview_speed_resample(&slow, src, need, 0.5, out, 7);
+        assert(made == 7);
+        static const float want[7] = { 0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f };
+        for (int i = 0; i < 7; ++i) assert(fabs(out[2 * i] - want[i]) < 1e-6);
+
+        /* 1.25x over the whole stream, and in chunks of 5 device frames. */
+        float whole[256], chunked[256];
+        rubraview_speed_resampler_t a = rubraview_speed_resampler_create(2), b = rubraview_speed_resampler_create(2);
+        size_t n_whole = rubraview_speed_resample(&a, src, rubraview_speed_source_needed(&a, 24, 1.25, 32), 1.25, whole, 24);
+        size_t n_chunk = 0, read = 0;
+        while (n_chunk < n_whole) {
+            size_t k = rubraview_speed_source_needed(&b, 5, 1.25, 32 - read);
+            size_t m = rubraview_speed_resample(&b, src + 2 * read, k, 1.25, chunked + 2 * n_chunk, 5);
+            if (m == 0) break;
+            read += k;
+            n_chunk += m;
+        }
+        assert(n_chunk >= n_whole);
+        for (size_t i = 0; i < n_whole * 2; ++i) assert(fabs(whole[i] - chunked[i]) < 1e-5);
+    }
+    printf("  [PASS] Speed resampling: 1x passes through, 2x and 0.5x interpolate, chunks change nothing\n");
+
     printf("[test_audio_dsp] All tests passed successfully!\n");
     return 0;
 }

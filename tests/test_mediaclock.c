@@ -308,6 +308,32 @@ int main(void) {
     }
     printf("  [PASS] The audio position runs on between records, but not while paused or stalled\n");
 
+    /* D-15: speed. The clock runs at its rate without jumping when the
+       rate changes; the heard position counts queued device frames at the
+       speed; extrapolation between records runs at the rate. */
+    {
+        rubraview_media_clock_t c = rubraview_media_clock_create(RUBRAVIEW_CLOCK_WALL, 10.0, 100.0);
+        assert(fabs(rubraview_media_clock_now(&c, 102.0) - 12.0) < 1e-9);
+        rubraview_media_clock_set_rate(&c, 2.0, 102.0);
+        assert(fabs(rubraview_media_clock_now(&c, 102.0) - 12.0) < 1e-9);
+        assert(fabs(rubraview_media_clock_now(&c, 103.0) - 14.0) < 1e-9);
+        rubraview_media_clock_pause(&c, 104.0);
+        assert(fabs(rubraview_media_clock_now(&c, 110.0) - 16.0) < 1e-9);
+        rubraview_media_clock_set_rate(&c, 0.0, 110.0);                 /* nonsense ignored */
+        assert(c.rate == 2.0);
+        rubraview_media_clock_t zero = { .anchor_media = 1.0, .anchor_wall = 0.0 };   /* rate 0 reads as 1 */
+        assert(fabs(rubraview_media_clock_now(&zero, 1.0) - 2.0) < 1e-9);
+
+        assert(fabs(rubraview_audio_heard_media_seconds(5.0, 48000.0, 0, 2.0, 48000) - 6.0) < 1e-9);
+        assert(fabs(rubraview_audio_heard_media_seconds(5.0, 48000.0, 12000, 2.0, 48000) - 5.5) < 1e-9);
+        assert(fabs(rubraview_audio_heard_media_seconds(5.0, 1000.0, 12000, 2.0, 48000) - 5.0) < 1e-9);
+        assert(fabs(rubraview_audio_heard_media_seconds(5.0, 48000.0, 24000, 1.0, 48000) -
+                    rubraview_audio_heard_seconds(5.0, 48000, 24000, 48000)) < 1e-9);
+        assert(fabs(rubraview_audio_position_now_at_rate(3.0, 10.0, 10.1, true, 0.2, 2.0) - 3.2) < 1e-9);
+        assert(fabs(rubraview_audio_position_now_at_rate(3.0, 10.0, 11.0, true, 0.2, 2.0) - 3.4) < 1e-9);
+    }
+    printf("  [PASS] The clock runs at its speed, and the heard position counts queued frames at it\n");
+
     printf("[test_mediaclock] All tests passed successfully!\n");
     return 0;
 }

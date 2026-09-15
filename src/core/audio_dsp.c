@@ -328,3 +328,50 @@ double rubraview_night_mode_gain(double magnitude, double threshold_db, double r
     double target_db = threshold_db + over / ratio;
     return pow(10.0, (target_db - level_db) / 20.0);
 }
+
+/* ---- D-15: playback speed ---- */
+
+rubraview_speed_resampler_t rubraview_speed_resampler_create(uint32_t channels) {
+    rubraview_speed_resampler_t r = { .channels = channels > RUBRAVIEW_SPEED_MAX_CHANNELS ? RUBRAVIEW_SPEED_MAX_CHANNELS : channels };
+    r.phase = 1.0;   /* the first frame read is the first one heard */
+    return r;
+}
+
+/* Output i sits at phase + i*step source frames past `prev`; source frame
+   k (1-based among those read) is at position k. Producing m outputs needs
+   positions up to phase + (m-1)*step < read + 1 with a frame on each side. */
+size_t rubraview_speed_source_needed(const rubraview_speed_resampler_t *r, size_t out_frames, double step,
+                                     size_t available) {
+    if (!r || !(step > 0.0) || out_frames == 0) return 0;
+    double last = r->phase + (double)(out_frames - 1) * step;
+    size_t needed = (size_t)ceil(last);
+    return needed < available ? needed : available;
+}
+
+size_t rubraview_speed_resample(rubraview_speed_resampler_t *r, const float *src, size_t src_frames,
+                                double step, float *dst, size_t dst_frames) {
+    if (!r || !src || !dst || !(step > 0.0) || r->channels == 0) return 0;
+    uint32_t ch = r->channels;
+    size_t written = 0;
+    /* Frame k of the stream as the interpolation sees it: 0 is `prev`, 1.. are src. */
+    while (written < dst_frames) {
+        double position = r->phase;
+        size_t below = (size_t)floor(position);
+        double t = position - (double)below;
+        if (below > src_frames || (below == src_frames && t > 0.0)) break;   /* past what was read */
+        for (uint32_t c = 0; c < ch; ++c) {
+            float a = below == 0 ? r->prev[c] : src[(below - 1) * ch + c];
+            float b = below < src_frames ? src[below * ch + c] : a;
+            dst[written * ch + c] = (float)((1.0 - t) * a + t * b);
+        }
+        written++;
+        r->phase += step;
+    }
+    /* What was read is behind us now: carry the last frame and the position. */
+    if (src_frames > 0) {
+        for (uint32_t c = 0; c < ch; ++c) r->prev[c] = src[(src_frames - 1) * ch + c];
+        r->phase -= (double)src_frames;
+        if (r->phase < 0.0) r->phase = 0.0;
+    }
+    return written;
+}

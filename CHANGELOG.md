@@ -25,6 +25,12 @@ This project follows Keep a Changelog.
   music page is on screen), Show (with the boxes' opacity) and Help (Keys,
   About). Tiles and menu come from one internal document, checked by
   `check-actions.py`.
+- A timeline above the information bar while a video or music plays:
+  elapsed, a seek bar to click or drag, total, volume and speed.
+- Playback speed 0.25x–4x (`Ctrl+]` / `Ctrl+[`, `Ctrl+\` for normal, the
+  toolbox's speed tile cycles the usual ones); the sound is resampled, so
+  its pitch follows. A-B repeat: `[` sets A, `]` sets B, `\` turns it off,
+  or the toolbox's A-B tile.
 - The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
   wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and
