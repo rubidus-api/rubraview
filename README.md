@@ -19,7 +19,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **Presentation**: Win32 GUI, Direct2D 1.1+, DirectWrite, DXGI
 - **Codecs**: Windows Imaging Component (WIC), FFmpeg (`libav*` dynamic bridge)
 - **Base Library**: `proven_c_lib` (memory arenas, `u8str`, dynamic arrays)
-- **Portability**: Headless core algorithms testable natively on Linux; Windows binary cross-compiled via MinGW-w64 on `linux-build`.
+- **Portability**: Headless core algorithms testable natively on Linux; Windows binary cross-compiled via MinGW-w64 on a Linux build host.
 
 ## Documentation
 
@@ -35,7 +35,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 make test
 ```
 
-### Windows Binary (linux-build Cross-Build)
+### Windows Binary (Cross-Build)
 ```sh
 make win64
 ```

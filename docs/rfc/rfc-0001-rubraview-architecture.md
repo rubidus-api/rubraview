@@ -23,7 +23,7 @@ Modern Windows image and media viewers often suffer from two extremes:
 - **Touch-Friendly & Remote-Desktop Optimized UI**: High-contrast, Metro-style square tile controls designed for effortless thumb tapping on mobile devices over Remote Desktop (RDP), free of laggy animations.
 - **Direct Comic Archive Ingestion**: Seamless streaming of `.cbz`, `.cbr`, and `.cb7` archives directly into memory without disk extraction.
 - **Intelligent Aspect-Ratio & Spread Adaptation**: Context-aware book/dual-page engine that intelligently detects pre-merged 2-page scans and automatically adapts between landscape and portrait window orientations.
-- **Dual-Mode Headless Core**: Image filters, geometric transformations, and batch pipelines exist in portable C23 modules that run and test natively on Linux hosts while compiling to native Windows binaries via MinGW-w64 on the `linux-build` build environment.
+- **Dual-Mode Headless Core**: Image filters, geometric transformations, and batch pipelines exist in portable C23 modules that run and test natively on Linux hosts while compiling to native Windows binaries via MinGW-w64 on the a Linux MinGW-w64 build environment.
 
 ---
 
@@ -1540,7 +1540,7 @@ rubraview/
 
 ### 8.4 Verification Ladder:
 - **T0/T1 (Host Linux)**: `make test` runs all core algorithms under `gcc -std=c23 -Wall -Wextra -pedantic -Werror` and AddressSanitizer (`-fsanitize=address,undefined`).
-- **T2 (Cross-Build)**: MinGW-w64 x86_64 cross-compilation on `linux-build` validates WinAPI headers, Direct2D/WIC COM bindings, and PE binary generation.
+- **T2 (Cross-Build)**: MinGW-w64 x86_64 cross-compilation on a Linux build host validates WinAPI headers, Direct2D/WIC COM bindings, and PE binary generation.
 - **T3 (Multi-Platform Smoke)**: Future native builds on Linux (via Wayland/Cairo) and macOS (via Metal/Cocoa).
 
 ---
@@ -1554,8 +1554,8 @@ make test         # Compiles core + host stubs, executes test suite
 make check        # Runs project-check.sh and context-budget.sh
 ```
 
-### 9.2 Remote linux-build MinGW-w64 Cross-Build
-Building the Windows executable utilizes the MinGW-w64 toolchain on `linux-build`:
+### 9.2 Remote MinGW-w64 Cross-Build
+Building the Windows executable utilizes the MinGW-w64 toolchain on a Linux build host:
 ```sh
 x86_64-w64-mingw32-gcc -std=c23 -O2 \
   -Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
@@ -1654,7 +1654,7 @@ and therefore no longer covered what §3 specifies.*
   `u8str_t` with the null-terminated allocation invariant (§7.2.3), sibling indexing,
   natural sort via RV-008 · RV-036 `pal_time_win32` (`QueryPerformanceCounter`) ·
   RV-012 multi-page compositor driven by RV-021 (§4.1.3) · RV-013 nearest-neighbour /
-  integer zoom / pixel grid (§3.5) · RV-019 `make win64` cross-build on linux-build
+  integer zoom / pixel grid (§3.5) · RV-019 `make win64` cross-build on a Linux build host
   producing a PE that links (needs `src/app/main.c`).
 - Depends on: M1 (RV-021, RV-022, RV-023, RV-029).
 - Done means: `make win64` links; on the target machine, opening a folder of JPEG/PNG
