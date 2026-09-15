@@ -88,8 +88,8 @@ static const char *const PARTS[] = {
 "\n",
 "page display \"Display\"\n"
 "  section \"Floating boxes\"\n"
-"  int    ui.menubox_opacity       \"Menu box opacity\"        30..100 step 5 unit \"%\" = 90\n"
-"  int    ui.toolbox_opacity       \"Toolbox opacity\"         30..100 step 5 unit \"%\" = 90\n"
+"  int    ui.menubox_opacity       \"Menu box opacity\"        30..100 step 5 unit \"%\" = 90 wired\n"
+"  int    ui.toolbox_opacity       \"Toolbox opacity\"         30..100 step 5 unit \"%\" = 90 wired\n"
 "  section \"Tiles and colour\"\n"
 "  choice display.tile_base_px     \"Touch tile size\"         48 | 64 | 96 = 64\n"
 "  toggle display.color_management \"Use embedded ICC profiles\" = true\n"

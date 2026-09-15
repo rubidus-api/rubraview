@@ -1,4 +1,5 @@
 #include "rubraview/ui_box.h"
+#include <math.h>
 
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
@@ -311,4 +312,22 @@ bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace
     box->state = RUBRAVIEW_BOX_COLLAPSED;
     box->idle_seconds = 0.0;
     return true;
+}
+
+double rubraview_box_opacity_step(double percent, double notches) {
+    if (!(percent == percent)) percent = RUBRAVIEW_BOX_OPACITY_MAX;   /* NaN */
+    long steps = (long)(notches > 0.0 ? notches + 0.5 : notches - 0.5);
+    double value = round(percent / RUBRAVIEW_BOX_OPACITY_STEP) * RUBRAVIEW_BOX_OPACITY_STEP
+                   + (double)steps * RUBRAVIEW_BOX_OPACITY_STEP;
+    if (value < RUBRAVIEW_BOX_OPACITY_MIN) value = RUBRAVIEW_BOX_OPACITY_MIN;
+    if (value > RUBRAVIEW_BOX_OPACITY_MAX) value = RUBRAVIEW_BOX_OPACITY_MAX;
+    return value;
+}
+
+uint32_t rubraview_box_fade(uint32_t argb, double percent) {
+    if (percent < RUBRAVIEW_BOX_OPACITY_MIN) percent = RUBRAVIEW_BOX_OPACITY_MIN;
+    if (percent > RUBRAVIEW_BOX_OPACITY_MAX) percent = RUBRAVIEW_BOX_OPACITY_MAX;
+    uint32_t alpha = (argb >> 24) & 0xFFu;
+    uint32_t faded = (uint32_t)lround((double)alpha * percent / 100.0);
+    return (faded << 24) | (argb & 0x00FFFFFFu);
 }

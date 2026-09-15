@@ -434,11 +434,26 @@ static void test_menu(void) {
     printf("  [PASS] Reset returns the menu to its root\n");
 }
 
+/* D-15: Alt + wheel opacity — the 5 % grid, the 30 % floor, alpha only. */
+static void test_opacity(void) {
+    assert(rubraview_box_opacity_step(90.0, 1.0) == 95.0);
+    assert(rubraview_box_opacity_step(95.0, 3.0) == 100.0);          /* stops at opaque */
+    assert(rubraview_box_opacity_step(40.0, -1.0) == 35.0);
+    assert(rubraview_box_opacity_step(35.0, -4.0) == 30.0);          /* never below the floor */
+    assert(rubraview_box_opacity_step(88.0, 0.0) == 90.0);           /* snapped to the grid */
+    assert(rubraview_box_opacity_step(0.0 / 0.0, -1.0) == 95.0);     /* nonsense reads as opaque */
+    assert(rubraview_box_fade(0xE01A1A1Au, 100.0) == 0xE01A1A1Au);
+    assert(rubraview_box_fade(0xE01A1A1Au, 50.0) == 0x701A1A1Au);
+    assert(rubraview_box_fade(0xFF102030u, 10.0) == ((uint32_t)lround(255 * 0.30) << 24 | 0x102030u));   /* floor applies here too */
+    printf("  [PASS] Box opacity steps 5 %% at a time and never below 30 %%\n");
+}
+
 int main(void) {
     printf("[test_ui_box] Starting floating box and menu hierarchy unit tests...\n");
     test_boxes();
     test_two_part_anchor();
     test_menu();
+    test_opacity();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;
 }

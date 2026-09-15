@@ -11,6 +11,10 @@ This project follows Keep a Changelog.
 - Volume and mute (D-15): `Up` / `Down` change the volume 5 % at a time
   while a video or music page is on screen, `Shift+M` mutes; the OSD says
   the level, and `settings.ini` keeps it (`[audio] volume`, `mute`).
+- The floating boxes' anchors read `M` (menu) and `T` (toolbox), and `Alt`
+  + wheel over a box makes it more or less see-through, 5 % a step, never
+  below 30 %; each box keeps its own (`[ui] menubox_opacity`,
+  `toolbox_opacity`). A lone `Alt` no longer puts the window in menu mode.
 - The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
   wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and

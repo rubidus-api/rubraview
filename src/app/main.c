@@ -1836,14 +1836,48 @@ static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t til
     return item ? item->label : (u8str_t){ .ptr = "", .len = 0 };
 }
 
+static u8str_t box_opacity_key(const rubraview_box_t *box) {
+    return box->kind == RUBRAVIEW_BOX_MENU ? U8("menubox_opacity") : U8("toolbox_opacity");
+}
+
+static double box_opacity(const app_state_t *app, const rubraview_box_t *box) {
+    /* Spelled out, not through box_opacity_key: check-settings.py finds reads by their literal keys. */
+    return box->kind == RUBRAVIEW_BOX_MENU ? rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_opacity"))
+                                           : rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_opacity"));
+}
+
+/* D-15: Alt + wheel over a box. Returns true when the wheel was spent on it. */
+static bool box_wheel_opacity(app_state_t *app, double x, double y, double notches, uint32_t modifiers) {
+    if (!(modifiers & RUBRAVIEW_MOD_ALT)) return false;
+    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
+    for (size_t i = 0; i < 2; ++i) {
+        if (!rubraview_rect_contains(rubraview_box_bounds(boxes[i], &metrics), x, y)) continue;
+        double next = rubraview_box_opacity_step(box_opacity(app, boxes[i]), notches);
+        rubraview_settings_set(&app->settings, U8("ui"), box_opacity_key(boxes[i]), next);
+        char line[48];
+        int n = snprintf(line, sizeof(line), "%s %d%%", boxes[i]->kind == RUBRAVIEW_BOX_MENU ? "menu box" : "toolbox", (int)next);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        note_activity(app);
+        return true;
+    }
+    return false;
+}
+
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
     rubraview_rect_t bounds = rubraview_box_bounds(box, metrics);
     rubraview_pal_rect_t body = { bounds.x, bounds.y, bounds.width, bounds.height };
 
-    rubraview_pal_render_fill_rect(app->renderer, body, COLOR_BOX_FILL, 2.0);
-    rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 2.0);
+    /* D-15: each box its own opacity; the text stays solid. */
+    double opacity = box_opacity(app, box);
+    const uint32_t box_fill = rubraview_box_fade(COLOR_BOX_FILL, opacity);
+    const uint32_t box_border = rubraview_box_fade(COLOR_BOX_BORDER, opacity);
+    const uint32_t tile_fill = rubraview_box_fade(COLOR_TILE_FILL, opacity);
+
+    rubraview_pal_render_fill_rect(app->renderer, body, box_fill, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, body, box_border, 1.0, 2.0);
 
     /* The anchor is two buttons, and they must not look like one. The
        left is outlined — it waits to be clicked; the right is filled —
@@ -1854,12 +1888,13 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     rubraview_pal_rect_t left = { click_half.x, click_half.y, click_half.width, click_half.height };
     rubraview_pal_rect_t right = { hover_half.x, hover_half.y, hover_half.width, hover_half.height };
 
-    rubraview_pal_render_stroke_rect(app->renderer, left, COLOR_BOX_BORDER, 1.0, 2.0);
-    rubraview_pal_render_fill_rect(app->renderer, right, COLOR_TILE_FILL, 2.0);
-    rubraview_pal_render_stroke_rect(app->renderer, right, COLOR_BOX_BORDER, 1.0, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, left, box_border, 1.0, 2.0);
+    rubraview_pal_render_fill_rect(app->renderer, right, tile_fill, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, right, box_border, 1.0, 2.0);
 
+    /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
     rubraview_pal_render_draw_text(app->renderer,
-                                   box->kind == RUBRAVIEW_BOX_MENU ? U8("=") : U8("<>"),
+                                   box->kind == RUBRAVIEW_BOX_MENU ? U8("M") : U8("T"),
                                    left, metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     rubraview_pal_render_draw_text(app->renderer, U8("v"), right,
                                    metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -1869,8 +1904,8 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     for (int32_t i = 0; i < box->tile_count; ++i) {
         rubraview_rect_t t = rubraview_box_tile_rect(box, metrics, i);
         rubraview_pal_rect_t tile = { t.x, t.y, t.width, t.height };
-        rubraview_pal_render_fill_rect(app->renderer, tile, COLOR_TILE_FILL, 0.0);
-        rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_BOX_BORDER, 1.0, 0.0);
+        rubraview_pal_render_fill_rect(app->renderer, tile, tile_fill, 0.0);
+        rubraview_pal_render_stroke_rect(app->renderer, tile, box_border, 1.0, 0.0);
         u8str_t caption = { .ptr = "", .len = 0 };
         if (menu) {
             char scratch[64];
@@ -4978,6 +5013,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         rubraview_picker_scroll_by(&app.picker, -event.mouse.wheel_delta * app.picker.tile_extent * 0.5);
                         break;
                     }
+                    if (box_wheel_opacity(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta, event.mouse.modifiers)) break;
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, event.mouse.modifiers));
                     break;
