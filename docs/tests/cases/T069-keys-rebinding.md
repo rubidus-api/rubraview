@@ -50,3 +50,9 @@ With no `keymap.ini`, `F2` on `c_plain.png` opened the rename box holding
 `c_plain` (the extension kept aside); `Esc` left the file as it was. Until
 this change the same key opened the toolbox.
 
+
+## The old keymap.ini place, 2026-09-16 (0.0.4)
+
+With no `keymap.ini` in AppData and one in the working folder holding only
+`[navigation] next_page = "X"`, the viewer read it: `PageDown` no longer
+turned the page and `X` did (1/2 → 2/2).
