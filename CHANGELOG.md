@@ -6,11 +6,19 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Keys can be exported to a file and imported from one, on the settings
+  window's Keys page (§3.22.2). The file dialogs now show their title and
+  file type, and a name saved without an extension gets `.ini`.
+
 ### Fixed
 
 - Dragging the toolbox's anchor past the window's edge now detaches it, as
   §3.6.1 says: the window did not keep the mouse while a button was held,
   so the drag stopped at the edge.
+- The Keys table kept its old height after Defaults or Revert changed how
+  many keys there were.
 - A floating box's anchor left near the edge of a window that then shrank
   was out of reach outside it; anchors are pulled back in on every resize.
 

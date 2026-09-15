@@ -82,3 +82,4 @@ Read this before implementing or changing behavior. Open detailed case files onl
 | T073 | R148 | Playback speed (clock and resampled sound), A-B repeat, the timeline strip with click and drag seeking | `make package`, run on Windows with a video | docs/tests/cases/T073-timeline-speed-ab.md | manual |
 | T074 | R148 | The toolbox pinned open (Shift+T), detached into its own on-top window (Ctrl+T or dragged out) and docked back | `make package`, run on Windows | docs/tests/cases/T074-toolbox-pin-detach.md | manual |
 | T075 | R148 | Always on top: the titlebar's Pin, the menu's first tile, Ctrl+Shift+T and the General setting, kept across launches | `make package`, run on Windows | docs/tests/cases/T075-always-on-top.md | manual |
+| T076 | R148 | Keys exported to a file and imported from one on the Keys page; Revert undoes an import | `make package`, run on Windows, F10, Keys page | docs/tests/cases/T076-keys-export-import.md | manual |

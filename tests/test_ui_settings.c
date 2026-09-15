@@ -280,6 +280,10 @@ int main(void) {
         assert(table < v.line_count);
         assert(rubraview_settings_view_focused_table_row(&v) == -1);            /* on "Use keymap.ini" */
         assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_ENTER) == RUBRAVIEW_SEVENT_ACTION);   /* Export */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
+        assert(rubraview_settings_view_focused_table_row(&v) == -1);            /* on Import */
+        assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);
         assert(v.focus_line == (int32_t)table && rubraview_settings_view_focused_table_row(&v) == 1);
         assert(v.scroll <= v.lines[table].row);                                 /* the heading stays in sight */
         assert(rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN) == RUBRAVIEW_SEVENT_MOVED);

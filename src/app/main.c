@@ -348,6 +348,7 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
 static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y, bool follow_pointer);
 static void toolbox_dock(app_state_t *app, double client_x, double client_y);
 static void settings_write_if_changed(app_state_t *app, bool say);
+static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
@@ -3547,6 +3548,39 @@ static void settings_took_effect(app_state_t *app) {
                                    rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5);
 }
 
+/* §3.22.2: a keymap written out to share or keep, or read back in. What
+   is imported replaces the keys shown on the Keys page only — Revert still
+   goes back to keymap.ini, and keymap.ini is written as the window closes,
+   like a key changed by hand. */
+static void keys_export_or_import(app_state_t *app, bool writing) {
+    static const rubraview_file_filter_t FILTERS[] = { { "Keymap (*.ini)", "*.ini" }, { "All files", "*.*" } };
+    rubraview_file_dialog_opts_t opts = {
+        .title = writing ? "Export keys" : "Import keys",
+        .filters = FILTERS, .filter_count = 2,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
+    };
+    app->key_capture = 0;
+    if (writing) {
+        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
+        if (!picked.accepted || picked.count == 0) return;
+        u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
+        settings_say(app, text.len > 0 && rubraview_pal_fs_write_file(picked.paths[0], text)
+                              ? "keys exported" : "could not write that file");
+        return;
+    }
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], KEYMAP_MAX_BYTES);
+    rubraview_keymap_t keymap = text.len > 0 ? rubraview_keymap_parse(app->arena, text) : (rubraview_keymap_t){0};
+    if (keymap.count == 0) {
+        settings_say(app, "that file holds no keys; nothing changed");
+        return;
+    }
+    app->keymap = keymap;
+    rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+    settings_say(app, "keys imported (Revert undoes this)");
+}
+
 static void settings_say(app_state_t *app, const char *text) {
     snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
 }
@@ -3566,6 +3600,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             app->settings = app->settings_saved;
             app->settings.revision_total = total + 1;
             app->keymap = rubraview_keymap_copy(app->arena, &app->keymap_saved);
+            rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
             app->key_capture = 0;
             settings_took_effect(app);
             settings_say(app, "back to what settings.ini held when this window opened");
@@ -3574,6 +3609,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_DEFAULTS:
             rubraview_settings_reset(&app->settings);
             app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
+            rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
             app->key_capture = 0;
             settings_took_effect(app);
             settings_say(app, "every setting and key is at its default (Revert undoes this)");
@@ -3633,6 +3669,8 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             } else if (u8str_equal_lit(node->name, "shell.unregister")) {
                 settings_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
                                       ? "file types removed" : "could not remove the file types");
+            } else if (u8str_equal_lit(node->name, "keys.export") || u8str_equal_lit(node->name, "keys.import")) {
+                keys_export_or_import(app, u8str_equal_lit(node->name, "keys.export"));
             }
             break;
         }
