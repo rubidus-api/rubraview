@@ -203,6 +203,11 @@ typedef struct app_state {
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
     bool                   timeline_dragging; /* RFC-0002 §4.2: the pointer holds the seek bar */
+    /* RFC-0002 Q6: the toolbox as a window of its own once dragged out. */
+    rubraview_window_t    *toolbox_window;
+    rubraview_renderer_t  *toolbox_renderer;
+    double                 toolbox_window_drawn;
+    double                 toolbox_window_opacity;
     double                 timeline_last_seek;/* wall time of the last seek while dragging */
     /* §3.16.1 / R135: the external subtitle file that goes with the
        video on screen. Empty when the film has none. */
@@ -339,6 +344,9 @@ static void settings_close(app_state_t *app);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
 static void media_ab_check(app_state_t *app);
+static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y, bool follow_pointer);
+static void toolbox_dock(app_state_t *app, double client_x, double client_y);
 static void settings_write_if_changed(app_state_t *app, bool say);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
@@ -1531,6 +1539,22 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* File › Recent: the entry's index in the reading history. */
         size_t index = (size_t)strtoul(action.ptr + 12, NULL, 10);
         if (index < app->history.count) open_path(app, app->history.entries[index].path);
+    } else if (action_is(action, "toggle_toolbox_pin")) {
+        rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
+        osd_say(app, app->toolbox.pinned ? U8("toolbox pinned open") : U8("toolbox unpinned"));
+    } else if (action_is(action, "toggle_toolbox_detach")) {
+        if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) {
+            int32_t w = 0, h = 0;
+            rubraview_pal_window_get_size(app->window, &w, &h);
+            double dpi = rubraview_pal_window_dpi_scale(app->window);
+            toolbox_dock(app, (double)w - 220.0 * dpi, (double)h - 160.0 * dpi);
+        } else {
+            int32_t fx = 0, fy = 0, fw = 0, fh = 0;
+            rubraview_pal_window_get_frame(app->window, &fx, &fy, &fw, &fh);
+            app->toolbox.state = RUBRAVIEW_BOX_DETACHED;
+            toolbox_detach(app, fx + fw - (int32_t)(360.0 * rubraview_pal_window_dpi_scale(app->window)),
+                           fy + fh / 2, false);
+        }
     } else if (action_is(action, "open_keys")) {
         settings_open(app);
         if (app->settings_open) {
@@ -1848,6 +1872,184 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     return false;
 }
 
+/* ---- RFC-0002 Q6: the detached toolbox ---- */
+
+/* Its size: the anchor bar on top, the profile's grid under it. */
+static void toolbox_window_size(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t *out_w, int32_t *out_h) {
+    int32_t count = app->toolbox_tile_count > 0 ? app->toolbox_tile_count : 1;
+    int32_t columns = count < m->columns ? count : m->columns;
+    int32_t rows = (count + columns - 1) / columns;
+    double grid_w = m->padding * 2.0 + columns * m->tile_size + (columns - 1) * m->gutter;
+    double grid_h = m->padding * 2.0 + rows * m->tile_size + (rows - 1) * m->gutter;
+    *out_w = (int32_t)ceil(grid_w > m->anchor_size * 2.0 ? grid_w : m->anchor_size * 2.0);
+    *out_h = (int32_t)ceil(m->anchor_size + m->gutter + grid_h);
+}
+
+static rubraview_rect_t toolbox_window_tile(const rubraview_tile_metrics_t *m, int32_t count, int32_t i) {
+    int32_t columns = count < m->columns ? (count > 0 ? count : 1) : m->columns;
+    return (rubraview_rect_t){
+        .x = m->padding + (i % columns) * (m->tile_size + m->gutter),
+        .y = m->anchor_size + m->gutter + m->padding + (i / columns) * (m->tile_size + m->gutter),
+        .width = m->tile_size, .height = m->tile_size,
+    };
+}
+
+static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y, bool follow_pointer) {
+    if (app->toolbox_window) return;
+    toolbox_refresh(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+    int32_t w = 0, h = 0;
+    toolbox_window_size(app, &m, &w, &h);
+    rubraview_window_config_t config = {
+        .title = "Rubraview toolbox", .width = (int32_t)(w / dpi), .height = (int32_t)(h / dpi),
+        .owner = app->window, .tool_window = true,
+    };
+    app->toolbox_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->toolbox_window) {
+        rubraview_box_dock(&app->toolbox);
+        osd_say(app, U8("the toolbox could not open a window of its own"));
+        return;
+    }
+    rubraview_pal_window_set_frame(app->toolbox_window, screen_x, screen_y, w, h);
+    int32_t cw = 0, ch = 0;
+    rubraview_pal_window_get_size(app->toolbox_window, &cw, &ch);
+    app->toolbox_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->toolbox_window), cw, ch);
+    app->toolbox_window_opacity = -1.0;
+    app->toolbox_window_drawn = 0.0;
+    app->toolbox.state = RUBRAVIEW_BOX_DETACHED;
+    if (follow_pointer) rubraview_pal_window_begin_drag(app->toolbox_window);
+}
+
+/* Back into the viewer's window, its anchor at a client point, open. */
+static void toolbox_dock(app_state_t *app, double client_x, double client_y) {
+    if (app->toolbox_renderer) rubraview_pal_render_destroy(app->toolbox_renderer);
+    if (app->toolbox_window) rubraview_pal_window_destroy(app->toolbox_window);
+    app->toolbox_renderer = NULL;
+    app->toolbox_window = NULL;
+    rubraview_box_dock(&app->toolbox);
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double max_x = (double)w - 88.0 * dpi, max_y = (double)h - 48.0 * dpi;
+    app->toolbox.anchor_x = client_x < 0.0 ? 0.0 : client_x > max_x ? max_x : client_x;
+    app->toolbox.anchor_y = client_y < 0.0 ? 0.0 : client_y > max_y ? max_y : client_y;
+    note_activity(app);
+}
+
+static void draw_toolbox_window(app_state_t *app) {
+    if (!app->toolbox_window || !app->toolbox_renderer) return;
+    double now = rubraview_pal_time_now_seconds();
+    if (now - app->toolbox_window_drawn < 0.1) return;
+    app->toolbox_window_drawn = now;
+    toolbox_refresh(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+    int32_t want_w = 0, want_h = 0, cw = 0, ch = 0;
+    toolbox_window_size(app, &m, &want_w, &want_h);
+    rubraview_pal_window_get_size(app->toolbox_window, &cw, &ch);
+    if (cw != want_w || ch != want_h) {
+        /* Another profile, another grid: the window follows it. */
+        int32_t fx = 0, fy = 0, fw = 0, fh = 0;
+        rubraview_pal_window_get_frame(app->toolbox_window, &fx, &fy, &fw, &fh);
+        rubraview_pal_window_set_frame(app->toolbox_window, fx, fy, want_w, want_h);
+    }
+    double opacity = rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_opacity"));
+    if (opacity != app->toolbox_window_opacity) {
+        rubraview_pal_window_set_opacity(app->toolbox_window, opacity);
+        app->toolbox_window_opacity = opacity;
+    }
+    rubraview_renderer_t *r = app->toolbox_renderer;
+    rubraview_pal_render_begin(r, 0xFF1A1A1Au);
+    rubraview_pal_rect_t left = { 0.0, 0.0, m.anchor_size, m.anchor_size };
+    rubraview_pal_rect_t right = { m.anchor_size, 0.0, m.anchor_size, m.anchor_size };
+    rubraview_pal_render_stroke_rect(r, left, COLOR_BOX_BORDER, 1.0, 2.0);
+    rubraview_pal_render_fill_rect(r, right, COLOR_TILE_FILL, 2.0);
+    rubraview_pal_render_draw_text(r, U8("T"), left, m.anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(r, U8("Dock"), right, m.anchor_size * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
+        rubraview_rect_t t = toolbox_window_tile(&m, app->toolbox_tile_count, i);
+        rubraview_pal_rect_t tile = { t.x, t.y, t.width, t.height };
+        rubraview_pal_render_fill_rect(r, tile, COLOR_TILE_FILL, 0.0);
+        rubraview_pal_render_stroke_rect(r, tile, COLOR_BOX_BORDER, 1.0, 0.0);
+        bool enabled = true;
+        u8str_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
+        rubraview_pal_render_draw_text(r, caption, tile, m.tile_size * 0.22, enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+    }
+    if (!rubraview_pal_render_end(r)) app->toolbox_window_drawn = 0.0;
+}
+
+/* Where the toolbox window is over the viewer's client area, when its middle is. */
+static bool toolbox_window_over_viewer(const app_state_t *app, double *out_x, double *out_y) {
+    int32_t tx = 0, ty = 0, tw = 0, th = 0, vx = 0, vy = 0, vw = 0, vh = 0;
+    if (!rubraview_pal_window_get_frame(app->toolbox_window, &tx, &ty, &tw, &th) ||
+        !rubraview_pal_window_get_frame(app->window, &vx, &vy, &vw, &vh)) return false;
+    double mx = tx + tw * 0.5, my = ty + th * 0.5;
+    if (mx < vx || my < vy || mx >= vx + vw || my >= vy + vh) return false;
+    *out_x = (double)(tx - vx);
+    *out_y = (double)(ty - vy);
+    return true;
+}
+
+static void toolbox_window_pump(app_state_t *app) {
+    rubraview_window_event_t event;
+    while (app->toolbox_window && rubraview_pal_window_poll_event(app->toolbox_window, &event)) {
+        double dpi = rubraview_pal_window_dpi_scale(app->window);
+        rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE: {
+                int32_t w = 0, h = 0;
+                rubraview_pal_window_get_size(app->window, &w, &h);
+                toolbox_dock(app, (double)w - 220.0 * dpi, (double)h - 160.0 * dpi);
+                return;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->toolbox_renderer, event.resize.width, event.resize.height);
+                app->toolbox_window_drawn = 0.0;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+                app->toolbox_window_drawn = 0.0;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOVED:
+                /* §3.6.1 would dock it when dropped over the canvas. A viewer
+                   filling the screen is under it wherever it goes, so that
+                   would dock it at every move: it docks by its Dock half,
+                   Ctrl+T or Show › Detach toolbox instead (D-15). */
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
+                dispatch_key(app, event.key.combo);   /* the viewer's keys work from here too */
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+                if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (event.mouse.y < m.anchor_size) {
+                    if (event.mouse.x < m.anchor_size) {
+                        rubraview_pal_window_begin_drag(app->toolbox_window);
+                    } else if (event.mouse.x < m.anchor_size * 2.0) {
+                        int32_t w = 0, h = 0;
+                        rubraview_pal_window_get_size(app->window, &w, &h);
+                        double cx = (double)w - 220.0 * dpi, cy = (double)h - 160.0 * dpi;
+                        (void)toolbox_window_over_viewer(app, &cx, &cy);
+                        toolbox_dock(app, cx, cy);
+                        return;
+                    }
+                    break;
+                }
+                for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
+                    if (!rubraview_rect_contains(toolbox_window_tile(&m, app->toolbox_tile_count, i), event.mouse.x, event.mouse.y)) continue;
+                    bool enabled = true;
+                    (void)toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
+                    if (enabled) handle_action(app, app->toolbox_tiles[i].action);
+                    app->toolbox_window_drawn = 0.0;
+                    break;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (triage_handle_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
@@ -1952,7 +2154,8 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         menu_rebuild(app);   /* opened or closed: Recent as it is now, from the root */
         return true;
     }
-    if (rubraview_box_click(&app->toolbox, &metrics, x, y)) return true;
+    bool toolbox_here = app->toolbox.state != RUBRAVIEW_BOX_DETACHED;   /* detached, it answers in its own window */
+    if (toolbox_here && rubraview_box_click(&app->toolbox, &metrics, x, y)) return true;
 
     int32_t tile = rubraview_box_tile_at(&app->menubox, &metrics, x, y);
     if (tile >= 0) {
@@ -1966,7 +2169,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         return true;
     }
 
-    tile = rubraview_box_tile_at(&app->toolbox, &metrics, x, y);
+    tile = toolbox_here ? rubraview_box_tile_at(&app->toolbox, &metrics, x, y) : -1;
     if (tile >= 0) {
         /* RFC-0002 §4: the tiles of the profile on screen; a dimmed one does nothing. */
         toolbox_refresh(app);
@@ -2008,6 +2211,7 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
+        if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
         if (!rubraview_rect_contains(rubraview_box_bounds(boxes[i], &metrics), x, y)) continue;
         double next = rubraview_box_opacity_step(box_opacity(app, boxes[i]), notches);
         rubraview_settings_set(&app->settings, U8("ui"), box_opacity_key(boxes[i]), next);
@@ -2140,7 +2344,7 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     rubraview_pal_render_draw_text(app->renderer,
                                    box->kind == RUBRAVIEW_BOX_MENU ? U8("M") : U8("T"),
                                    left, metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    rubraview_pal_render_draw_text(app->renderer, U8("v"), right,
+    rubraview_pal_render_draw_text(app->renderer, box->pinned ? U8("*") : U8("v"), right,
                                    metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
@@ -2357,7 +2561,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     /* Floating boxes (§3.6). */
     toolbox_refresh(app);
-    draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
+    if (app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
     draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
 
     if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
@@ -3884,6 +4088,8 @@ static void layout_load(app_state_t *app) {
         BOXES[i].box->anchor_x = x;
         BOXES[i].box->anchor_y = y;
     }
+    /* Where the boxes were left, not a setting: layout.ini, read like the positions. */
+    if (ini_number(&doc, U8("boxes"), U8("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
 
     /* The settings window's frame; the PAL pulls it onto a screen when it is placed. */
     static const char *const FRAME_KEYS[4] = { "x", "y", "width", "height" };
@@ -3904,6 +4110,7 @@ static void layout_save(app_state_t *app) {
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_y"), app->toolbox.anchor_y);
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_x"), app->menubox.anchor_x);
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_y"), app->menubox.anchor_y);
+    rubraview_ini_set_int(app->arena, &doc, U8("boxes"), U8("toolbox_pinned"), app->toolbox.pinned ? 1 : 0);
     if (app->settings_frame[2] > 0 && app->settings_frame[3] > 0) {
         rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("x"), app->settings_frame[0]);
         rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("y"), app->settings_frame[1]);
@@ -4877,6 +5084,7 @@ static bool box_press(app_state_t *app, double x, double y) {
         rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
+        if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
         if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) == RUBRAVIEW_ANCHOR_NONE) continue;
         app->box_drag = boxes[i];
         app->box_grab_dx = x - boxes[i]->anchor_x;
@@ -4902,6 +5110,15 @@ static void box_drag_motion(app_state_t *app, double x, double y) {
         rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_drag_to(app->box_drag, &metrics, x - app->box_grab_dx, y - app->box_grab_dy,
                           (double)win_w, (double)win_h);
+    /* §3.6.1 / RFC-0002 Q6: the toolbox dragged past the edge becomes a
+       window of its own, and the drag carries on moving that window. */
+    if (app->box_drag == &app->toolbox &&
+        rubraview_box_update_detach(&app->toolbox, &metrics, (double)win_w, (double)win_h, 24.0 * rubraview_pal_window_dpi_scale(app->window))) {
+        int32_t fx = 0, fy = 0, fw = 0, fh = 0;
+        rubraview_pal_window_get_frame(app->window, &fx, &fy, &fw, &fh);
+        app->box_drag = NULL;
+        toolbox_detach(app, fx + (int32_t)app->toolbox.anchor_x, fy + (int32_t)app->toolbox.anchor_y, true);
+    }
 }
 
 static void box_release(app_state_t *app, double x, double y) {
@@ -5355,6 +5572,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.settings_dirty = true;
         }
         draw_settings_window(&app);
+        toolbox_window_pump(&app);
+        draw_toolbox_window(&app);
 
         /* A queued decode takes the loop's idle slice. With nothing to
            get ready, a settled loop sleeps until the OS has something
@@ -5372,6 +5591,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        writes what was changed in it. */
     settings_close(&app);
     settings_write_if_changed(&app, false);   /* a volume or opacity changed with the window shut */
+    if (app.toolbox_window) {
+        rubraview_pal_render_destroy(app.toolbox_renderer);
+        rubraview_pal_window_destroy(app.toolbox_window);
+    }
     if (app.settings_window) {
         rubraview_pal_render_destroy(app.settings_renderer);
         rubraview_pal_window_destroy(app.settings_window);
