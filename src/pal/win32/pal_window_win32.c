@@ -345,6 +345,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             e.mouse.y = (double)GET_Y_LPARAM(lparam);
             e.mouse.modifiers = current_modifiers();
             queue_push(w, e);
+            /* Keep hearing the pointer while a button is held, even past the
+               window's edge: dragging the toolbox out is how it detaches
+               (§3.6.1), and a drag let go outside must still end. */
+            if (e.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN) SetCapture(hwnd);
+            else if (e.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP && GetCapture() == hwnd) ReleaseCapture();
             return 0;
         }
 
