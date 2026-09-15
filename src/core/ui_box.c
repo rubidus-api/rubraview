@@ -170,6 +170,23 @@ void rubraview_box_snap_home(rubraview_box_t *box, const rubraview_tile_metrics_
     box->anchor_y = y;
 }
 
+/* Where an open grid of this size goes. Without a known view it starts at
+   the anchor, as it always did; with one it clears the anchor bar and
+   stays inside the view. */
+static void grid_origin(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                        double width, double height, double *out_x, double *out_y) {
+    *out_x = box->anchor_x;
+    *out_y = box->anchor_y;
+    if (box->view_width <= 0.0 || box->view_height <= 0.0) return;
+    double below = box->anchor_y + metrics->anchor_size + metrics->gutter;
+    double above = box->anchor_y - metrics->gutter - height;
+    *out_y = (below + height <= box->view_height || above < 0.0) ? below : above;
+    if (*out_x + width > box->view_width) *out_x = box->view_width - width;
+    if (*out_x < 0.0) *out_x = 0.0;
+    if (*out_y + height > box->view_height && above >= 0.0) *out_y = above;
+    if (*out_y < 0.0) *out_y = 0.0;
+}
+
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
     if (!box || !metrics) return (rubraview_rect_t){0};
 
@@ -186,8 +203,10 @@ rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubravie
 
     double width = metrics->padding * 2.0 + columns * metrics->tile_size + (columns - 1) * metrics->gutter;
     double height = metrics->padding * 2.0 + rows * metrics->tile_size + (rows - 1) * metrics->gutter;
+    double x = 0.0, y = 0.0;
+    grid_origin(box, metrics, width, height, &x, &y);
 
-    return (rubraview_rect_t){ .x = box->anchor_x, .y = box->anchor_y, .width = width, .height = height };
+    return (rubraview_rect_t){ .x = x, .y = y, .width = width, .height = height };
 }
 
 rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, int32_t tile_index) {
@@ -198,10 +217,11 @@ rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubra
     int32_t columns = grid_columns(box, metrics);
     int32_t row = tile_index / columns;
     int32_t column = tile_index % columns;
+    rubraview_rect_t body = rubraview_box_bounds(box, metrics);
 
     return (rubraview_rect_t){
-        .x = box->anchor_x + metrics->padding + column * (metrics->tile_size + metrics->gutter),
-        .y = box->anchor_y + metrics->padding + row * (metrics->tile_size + metrics->gutter),
+        .x = body.x + metrics->padding + column * (metrics->tile_size + metrics->gutter),
+        .y = body.y + metrics->padding + row * (metrics->tile_size + metrics->gutter),
         .width = metrics->tile_size,
         .height = metrics->tile_size,
     };

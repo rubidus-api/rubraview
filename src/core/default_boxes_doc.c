@@ -1,0 +1,176 @@
+#include "rubraview/boxes_doc.h"
+#include <string.h>
+
+/*
+ * What the floating boxes hold (RFC-0002 §4–§5, D-15). This is the one
+ * list of tiles and menu items; scripts/check-actions.py holds every
+ * action named here to something the viewer handles.
+ *
+ * A toolbox profile is picked by what is on screen, in this order:
+ * video, music, animation, multipage, archive, image. `slideshow` is put
+ * in front of whichever it is while a slide show runs. Captions of
+ * toggles (Play/Pause, Mute/Sound) are replaced by the viewer to say what
+ * a tap will do.
+ */
+static const char *const PARTS[] = {
+"# rubraview floating boxes\n"
+"\n"
+"toolbox video\n"
+"  tile media_play_pause     \"Pause\"\n"
+"  tile media_stop           \"Stop\"\n"
+"  tile media_seek_back      \"-5 s\"\n"
+"  tile media_seek_forward   \"+5 s\"\n"
+"  tile media_volume_down    \"Vol -\"\n"
+"  tile media_volume_up      \"Vol +\"\n"
+"  tile media_mute           \"Mute\"\n"
+"  tile next_subtitle_track  \"Subs\"\n"
+"  tile next_audio_track     \"Sound\"\n"
+"  tile toggle_fullscreen    \"Full\"\n"
+"\n"
+"toolbox music\n"
+"  tile prev_page            \"Prev\"\n"
+"  tile media_play_pause     \"Pause\"\n"
+"  tile media_stop           \"Stop\"\n"
+"  tile media_seek_back      \"-5 s\"\n"
+"  tile media_seek_forward   \"+5 s\"\n"
+"  tile next_page            \"Next\"\n"
+"  tile media_volume_down    \"Vol -\"\n"
+"  tile media_volume_up      \"Vol +\"\n"
+"  tile media_mute           \"Mute\"\n"
+"\n"
+"toolbox animation\n"
+"  tile prev_page            \"Prev\"\n"
+"  tile media_play_pause     \"Pause\"\n"
+"  tile anim_step_back       \"Frame <\"\n"
+"  tile anim_step_forward    \"Frame >\"\n"
+"  tile next_page            \"Next\"\n"
+"  tile zoom_out             \"Zoom-\"\n"
+"  tile zoom_in              \"Zoom+\"\n"
+"  tile toggle_fullscreen    \"Full\"\n"
+"\n"
+"toolbox multipage\n"
+"  tile prev_page            \"Prev\"\n"
+"  tile subpage_prev         \"Page <\"\n"
+"  tile subpage_next         \"Page >\"\n"
+"  tile next_page            \"Next\"\n"
+"  tile zoom_out             \"Zoom-\"\n"
+"  tile zoom_in              \"Zoom+\"\n"
+"  tile actual_size          \"1:1\"\n"
+"  tile toggle_fullscreen    \"Full\"\n"
+"\n"
+"toolbox archive\n"
+"  tile prev_page            \"Prev\"\n"
+"  tile next_page            \"Next\"\n"
+"  tile toggle_layout        \"Layout\"\n"
+"  tile toggle_reading_order \"Order\"\n"
+"  tile prev_archive         \"Vol <\"\n"
+"  tile next_archive         \"Vol >\"\n"
+"  tile fit_window           \"Fit\"\n"
+"  tile toggle_fullscreen    \"Full\"\n"
+"\n"
+"toolbox image\n"
+"  tile prev_page            \"Prev\"\n"
+"  tile next_page            \"Next\"\n"
+"  tile zoom_out             \"Zoom-\"\n"
+"  tile zoom_in              \"Zoom+\"\n"
+"  tile actual_size          \"1:1\"\n"
+"  tile rotate_cw            \"Rotate\"\n"
+"  tile toggle_slideshow     \"Slides\"\n"
+"  tile toggle_fullscreen    \"Full\"\n"
+"\n"
+"# put in front of the profile while a slide show runs\n"
+"toolbox slideshow\n"
+"  tile toggle_slideshow     \"Stop slides\"\n"
+"\n",
+"menu \"File\"\n"
+"  item open_picker          \"Open file\"\n"
+"  item open_folder          \"Open folder\"\n"
+"  menu \"Recent\"\n"
+"    recent\n"
+"  end\n"
+"  item next_archive         \"Next volume\"\n"
+"  item prev_archive         \"Prev volume\"\n"
+"  item rename_file          \"Rename\"\n"
+"  item delete_file          \"Delete\"\n"
+"  item quick_export         \"Export\"\n"
+"  item open_batch           \"Batch\"\n"
+"  item open_settings        \"Settings\"\n"
+"  item quit                 \"Quit\"\n"
+"end\n"
+"menu \"View\"\n"
+"  menu \"Layout\"\n"
+"    item layout_single        \"Single\"\n"
+"    item layout_dual          \"Dual\"\n"
+"    item layout_book          \"Book\"\n"
+"    item toggle_reading_order \"Order\"\n"
+"    item toggle_spread_detect \"Spreads\"\n"
+"  end\n"
+"  menu \"Fit\"\n"
+"    item fit_window           \"Window\"\n"
+"    item fit_width            \"Width\"\n"
+"    item fit_height           \"Height\"\n"
+"    item actual_size          \"1:1\"\n"
+"    item smart_fit            \"Smart\"\n"
+"    item fit_stretch          \"Stretch\"\n"
+"    item toggle_fit_lock      \"Lock\"\n"
+"  end\n"
+"  item rotate_cw              \"Rotate\"\n"
+"  item rotate_ccw             \"Rotate back\"\n"
+"  item flip_horizontal        \"Flip H\"\n"
+"  item flip_vertical          \"Flip V\"\n"
+"  item toggle_nearest         \"Crisp\"\n"
+"  item toggle_pixel_grid      \"Grid\"\n"
+"end\n",
+"menu \"Playback\" when media\n"
+"  item media_play_pause       \"Play/Pause\"\n"
+"  item media_stop             \"Stop\"\n"
+"  item media_seek_back        \"-5 s\"\n"
+"  item media_seek_forward     \"+5 s\"\n"
+"  item anim_step_back         \"Frame <\"\n"
+"  item anim_step_forward      \"Frame >\"\n"
+"  menu \"Volume\"\n"
+"    item media_volume_down    \"Vol -\"\n"
+"    item media_volume_up      \"Vol +\"\n"
+"    item media_mute           \"Mute\"\n"
+"  end\n"
+"  item next_audio_track       \"Sound\"\n"
+"  menu \"Subtitles\"\n"
+"    item next_subtitle_track  \"Next\"\n"
+"    item subtitle_earlier     \"Earlier\"\n"
+"    item subtitle_later       \"Later\"\n"
+"  end\n"
+"end\n"
+"menu \"Show\"\n"
+"  item toggle_slideshow       \"Slides\"\n"
+"  item toggle_filmstrip       \"Strip\"\n"
+"  item toggle_osd             \"Info\"\n"
+"  item toggle_toolbox         \"Toolbox\"\n"
+"  item toggle_fullscreen      \"Full\"\n"
+"  menu \"Opacity\"\n"
+"    item boxes_opacity_100    \"100%\"\n"
+"    item boxes_opacity_80     \"80%\"\n"
+"    item boxes_opacity_60     \"60%\"\n"
+"    item boxes_opacity_40     \"40%\"\n"
+"  end\n"
+"end\n"
+"menu \"Help\"\n"
+"  item open_keys              \"Keys\"\n"
+"  item about                  \"About\"\n"
+"end\n",
+};
+
+static char g_document[16384];
+static size_t g_document_len;
+
+u8str_t rubraview_default_boxes_document(void) {
+    if (g_document_len == 0) {
+        for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); ++i) {
+            size_t n = strlen(PARTS[i]);
+            if (g_document_len + n >= sizeof(g_document)) break;
+            memcpy(g_document + g_document_len, PARTS[i], n);
+            g_document_len += n;
+        }
+        g_document[g_document_len] = '\0';
+    }
+    return (u8str_t){ .ptr = g_document, .len = g_document_len };
+}
