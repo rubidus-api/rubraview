@@ -411,7 +411,7 @@ To prevent key collisions while keeping shortcuts intuitive, the input dispatche
 | | Fine Interval ($\pm 0.1\text{s}$) | `Shift + [` / `Shift + ]` | Menu tile | 0.1s to 300.0s interval control |
 | **UI & Windows** | Toggle Borderless Fullscreen | `F` | `F11`, `Alt + Enter`, `Double Click` | Zero-margin fullscreen canvas |
 | | Toggle In-Window Menu Box | `Tab` | `F1`, Anchor `[ ☰ ]` | Hierarchical Metro settings menu |
-| | Toggle Toolbox / Pin | `T` | `F2`, Anchor `[ ⏯ ]` | Playback toolbox & pin status |
+| | Toggle Toolbox / Pin | `T` | Anchor `[ ⏯ ]` | Playback toolbox & pin status (D-14: `F2` is §3.18.2's rename, not this) |
 | | Open File Dialog | `O` | `Ctrl + O` | In-App Metro Picker or Win32 COM |
 | | Open Folder / Directory | `Ctrl + Shift + O` | Menu tile | Traverses directory |
 | | Toggle Thumbnail Filmstrip | `F4` | Menu tile | Collapsible bottom thumbnail bar |

@@ -19,8 +19,9 @@ and a video open in the viewer.
 
 ## Expected
 
-- Step 1: every binding is listed; `toggle_toolbox` and `rename_file` are
-  both marked `! also …` (the F2 clash in RFC-0001, D-14).
+- Step 1: every binding is listed, and none is marked `! also …`. (Measured
+  on 2026-09-14, before F2 went to rename alone, `toggle_toolbox` and
+  `rename_file` were both marked — the clash RFC-0001 had written in.)
 - Step 2: the row reads `> press a key (Esc: leave it)` after `Enter`, then
   `I, F7`; the message says `F7 added to toggle_osd`.
 - Step 3: the row stays `I, F7`; the message says
@@ -42,3 +43,10 @@ because `Enter` is `next_page`'s, which is the refusal working as designed.
 
 Not measured: a `keymap.ini` left in the working folder being read when
 AppData has none (the code path is two lines in `load_keymap`).
+
+## F2 given to rename, 2026-09-15 (v0.0.3 + D-14 amendment)
+
+With no `keymap.ini`, `F2` on `c_plain.png` opened the rename box holding
+`c_plain` (the extension kept aside); `Esc` left the file as it was. Until
+this change the same key opened the toolbox.
+

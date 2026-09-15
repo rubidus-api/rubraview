@@ -6,6 +6,13 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- `F2` renames the file, as in Explorer; it no longer also opened the toolbox,
+  which is `T` (D-14). Until now `F2` reached the toolbox and rename could not
+  be started from the keyboard. A `keymap.ini` saved earlier keeps `T, F2` for
+  the toolbox — the Keys page marks it; `Delete` on that row takes F2 off.
+
 ## [0.0.3] - 2026-09-14
 
 Video and audio (M5), the settings window as a window of its own, and keys

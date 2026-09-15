@@ -114,7 +114,7 @@ int main(void) {
         { "view", RUBRAVIEW_MOD_NONE, "Tab",    "toggle_menu" },
         { "view", RUBRAVIEW_MOD_NONE, "F1",     "toggle_menu" },
         { "view", RUBRAVIEW_MOD_NONE, "T",      "toggle_toolbox" },
-        { "view", RUBRAVIEW_MOD_NONE, "F2",     "toggle_toolbox" },
+        { "view", RUBRAVIEW_MOD_NONE, "F2",     "rename_file" },     /* not the toolbox: D-14 */
         { "view", RUBRAVIEW_MOD_NONE, "O",      "open_picker" },
         { "view", RUBRAVIEW_MOD_CTRL, "O",      "open_picker" },
         { "view", RUBRAVIEW_MOD_CTRL | RUBRAVIEW_MOD_SHIFT, "O", "open_folder" },

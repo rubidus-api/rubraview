@@ -27,7 +27,7 @@ target.
 | 5 | With the titlebar shown, hover the rightmost control | It highlights crimson; clicking it closes the application (§3.21.3). |
 | 6 | Click the other three controls in turn | Minimize, maximize/restore, fullscreen — each behaves as its glyph says. |
 | 7 | Drag the empty middle of the titlebar | The window moves, and Windows Aero Snap still works when dragged to a screen edge. |
-| 8 | Press `T` (or `F2`) | The toolbox opens as a grid of square tiles near the bottom right. Press again to close. |
+| 8 | Press `T` (`F2` renames since D-14) | The toolbox opens as a grid of square tiles near the bottom right. Press again to close. |
 | 9 | Hover over the toolbox anchor without clicking | It expands on hover, and collapses again about half a second after the pointer leaves (§3.6.3). |
 | 10 | Click a toolbox tile such as `Next` or `Zoom+` | The action fires: the page advances, the image zooms. |
 | 11 | Press `Tab` (or `F1`) | The menu box opens at the top left with a breadcrumb reading `Menu` above it (§3.6.2). |

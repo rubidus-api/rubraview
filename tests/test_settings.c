@@ -242,17 +242,13 @@ int main(void) {
         assert(rubraview_keymap_conflicts(&layered, NULL, 0) == 1);
 
         /* The shipped default keymap, read for real — this test used to
-           parse a one-line keymap and call it the default. It holds one
-           clash, and it comes from RFC-0001 itself: §3.7.2 gives F2 to the
-           toolbox and §3.18.2 gives it to rename. Only the toolbox is
-           reached. Kept visible until the owner decides (D-14). */
+           parse a one-line keymap and call it the default, and so missed
+           that F2 was both the toolbox's and rename's (RFC-0001 gave it to
+           both). F2 is rename's now (owner, 2026-09-15; D-14): none left. */
         rubraview_keymap_t shipped = rubraview_keymap_parse(&arena, lit(rubraview_default_keymap()));
-        rubraview_key_conflict_t found_shipped[4];
-        assert(rubraview_keymap_conflicts(&shipped, found_shipped, 4) == 1);
-        assert(is(found_shipped[0].chord, "F2"));
-        assert(is(found_shipped[0].action_a, "toggle_toolbox") && is(found_shipped[0].action_b, "rename_file"));
+        assert(rubraview_keymap_conflicts(&shipped, NULL, 0) == 0);
     }
-    printf("  [PASS] Conflicts are found where two contexts meet, and the shipped keymap's one is known\n");
+    printf("  [PASS] Conflicts are found where two contexts meet, and the shipped keymap has none\n");
 
     free(raw);
     printf("[test_settings] All tests passed successfully!\n");
