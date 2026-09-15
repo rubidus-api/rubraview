@@ -29,7 +29,19 @@ rubraview_media_clock_t rubraview_media_clock_create(rubraview_clock_master_t ma
         .anchor_media = media_seconds,
         .anchor_wall = wall_now,
         .paused = false,
+        .rate = 1.0,
     };
+}
+
+static double clock_rate(const rubraview_media_clock_t *clock) {
+    return clock->rate > 0.0 ? clock->rate : 1.0;
+}
+
+void rubraview_media_clock_set_rate(rubraview_media_clock_t *clock, double rate, double wall_now) {
+    if (!clock || !(rate > 0.0)) return;
+    clock->anchor_media = rubraview_media_clock_now(clock, wall_now);
+    clock->anchor_wall = wall_now;
+    clock->rate = rate;
 }
 
 double rubraview_media_clock_now(const rubraview_media_clock_t *clock, double wall_now) {
@@ -37,7 +49,7 @@ double rubraview_media_clock_now(const rubraview_media_clock_t *clock, double wa
     if (clock->paused) return clock->anchor_media;
     double elapsed = wall_now - clock->anchor_wall;
     if (elapsed < 0.0) elapsed = 0.0;
-    return clock->anchor_media + elapsed;
+    return clock->anchor_media + elapsed * clock_rate(clock);
 }
 
 void rubraview_media_clock_pause(rubraview_media_clock_t *clock, double wall_now) {
@@ -191,11 +203,26 @@ double rubraview_audio_heard_seconds(double base_seconds, uint64_t frames_submit
 
 double rubraview_audio_position_now(double recorded_position, double recorded_wall,
                                     double wall_now, bool playing, double max_extrapolation) {
+    return rubraview_audio_position_now_at_rate(recorded_position, recorded_wall, wall_now, playing,
+                                                max_extrapolation, 1.0);
+}
+
+double rubraview_audio_position_now_at_rate(double recorded_position, double recorded_wall,
+                                            double wall_now, bool playing, double max_extrapolation,
+                                            double rate) {
     if (!playing) return recorded_position;
     double elapsed = wall_now - recorded_wall;
     if (elapsed < 0.0) elapsed = 0.0;
     if (max_extrapolation >= 0.0 && elapsed > max_extrapolation) elapsed = max_extrapolation;
-    return recorded_position + elapsed;
+    return recorded_position + elapsed * (rate > 0.0 ? rate : 1.0);
+}
+
+double rubraview_audio_heard_media_seconds(double base_seconds, double source_frames,
+                                           uint64_t pending_frames, double speed, uint32_t sample_rate) {
+    if (sample_rate == 0) return base_seconds;
+    if (!(speed > 0.0)) speed = 1.0;
+    double heard = source_frames - (double)pending_frames * speed;
+    return heard > 0.0 ? base_seconds + heard / (double)sample_rate : base_seconds;
 }
 
 /* ---- backends ---- */

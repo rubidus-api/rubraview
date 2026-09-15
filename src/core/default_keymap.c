@@ -114,6 +114,13 @@ const char *rubraview_default_keymap(void) {
     "media_volume_up = \"Up\"\n"
     "media_volume_down = \"Down\"\n"
     "media_mute = \"Shift+M\"\n"
+    /* D-15 A-B repeat, the keys RFC-0001 §3.7.2 gives it. [ and ] are the
+       slide show's interval keys too; that context is asked only while a
+       slide show runs, so here they mean A and B. */
+    "media_ab_a = \"BracketLeft\"\n"
+    "media_ab_b = \"BracketRight\"\n"
+    "media_ab_clear = \"Backslash\"\n"
+    "media_speed_reset = \"Ctrl+Backslash\"\n"
     /* §3.16.1 / R135: an external subtitle that runs early or late is
        nudged half a second at a time. */
     "subtitle_earlier = \"Z\"\n"

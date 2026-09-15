@@ -146,6 +146,40 @@ bool rubraview_replaygain_parse_db(u8str_t text, double *out_db);
  */
 double rubraview_night_mode_gain(double magnitude, double threshold_db, double ratio);
 
+/* ---- D-15: playback speed ---- */
+
+#define RUBRAVIEW_SPEED_MAX_CHANNELS 8
+
+/**
+ * Playing at a speed other than 1 by reading the file's samples `step`
+ * frames per device frame, linearly interpolated — so the pitch moves
+ * with the speed (RFC-0001 §3.7.2 "dynamic pitch-shift"). The state
+ * carries the position between the last frame read and the next across
+ * calls, so a stream cut into any chunks sounds the same.
+ */
+typedef struct rubraview_speed_resampler {
+    uint32_t channels;
+    double   phase;                                   /* position after `prev`, in source frames */
+    float    prev[RUBRAVIEW_SPEED_MAX_CHANNELS];      /* the last source frame read */
+} rubraview_speed_resampler_t;
+
+rubraview_speed_resampler_t rubraview_speed_resampler_create(uint32_t channels);
+
+/**
+ * How many source frames to read so that at most `out_frames` device
+ * frames come out at `step`, given what the stream holds (`available`).
+ */
+size_t rubraview_speed_source_needed(const rubraview_speed_resampler_t *r, size_t out_frames, double step,
+                                     size_t available);
+
+/**
+ * Turn exactly the `src_frames` just read into device frames at `step`;
+ * returns how many were written to `dst` (never more than `dst_frames`
+ * when `src_frames` came from rubraview_speed_source_needed).
+ */
+size_t rubraview_speed_resample(rubraview_speed_resampler_t *r, const float *src, size_t src_frames,
+                                double step, float *dst, size_t dst_frames);
+
 #ifdef __cplusplus
 }
 #endif
