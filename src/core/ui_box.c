@@ -269,7 +269,9 @@ bool rubraview_box_update_detach(rubraview_box_t *box, const rubraview_tile_metr
     if (box->state == RUBRAVIEW_BOX_DETACHED) return false;
     if (threshold < 0.0) threshold = 0.0;
 
-    rubraview_rect_t bounds = rubraview_box_bounds(box, metrics);
+    /* The anchor, not the open grid: the grid is kept inside the view
+       (RFC-0002 §4), so only the anchor can tell it was dragged out. */
+    rubraview_rect_t bounds = rubraview_box_anchor_rect(box, metrics);
     bool beyond =
         bounds.x + bounds.width < -threshold ||
         bounds.y + bounds.height < -threshold ||
@@ -311,11 +313,14 @@ void rubraview_box_click_anchor(rubraview_box_t *box) {
     box->state = (box->state == RUBRAVIEW_BOX_LOCKED_OPEN)
         ? RUBRAVIEW_BOX_COLLAPSED
         : RUBRAVIEW_BOX_LOCKED_OPEN;
+    /* Closing it by its own anchor is the reader's explicit word: the pin goes too. */
+    if (box->state == RUBRAVIEW_BOX_COLLAPSED) box->pinned = false;
 }
 
 void rubraview_box_dismiss(rubraview_box_t *box) {
     if (!box) return;
     if (box->state == RUBRAVIEW_BOX_DETACHED) return; /* a separate window is closed, not dismissed */
+    if (box->pinned) return;                          /* §3.6.1: a pinned box stays until unpinned */
     box->state = RUBRAVIEW_BOX_COLLAPSED;
     box->idle_seconds = 0.0;
 }
@@ -350,4 +355,13 @@ uint32_t rubraview_box_fade(uint32_t argb, double percent) {
     uint32_t alpha = (argb >> 24) & 0xFFu;
     uint32_t faded = (uint32_t)lround((double)alpha * percent / 100.0);
     return (faded << 24) | (argb & 0x00FFFFFFu);
+}
+
+void rubraview_box_set_pinned(rubraview_box_t *box, bool pinned) {
+    if (!box) return;
+    box->pinned = pinned;
+    box->idle_seconds = 0.0;
+    if (pinned && (box->state == RUBRAVIEW_BOX_COLLAPSED || box->state == RUBRAVIEW_BOX_EXPANDED)) {
+        box->state = RUBRAVIEW_BOX_LOCKED_OPEN;
+    }
 }

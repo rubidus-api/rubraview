@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #include <windows.h>
+#include <math.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -28,6 +29,7 @@ struct rubraview_window {
     bool frameless;
     bool should_close;
     bool owned;             /* §3.22: a window belonging to another; its end is not the program's */
+    bool tool;              /* RFC-0002 Q6: a detached toolbox */
     bool cursor_visible;
     bool fullscreen;
     int32_t width, height;
@@ -425,6 +427,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             return 0;
         }
 
+        case WM_EXITSIZEMOVE: {
+            rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_MOVED };
+            queue_push(w, e);
+            break;
+        }
+
+        case WM_MOUSEACTIVATE:
+            /* A tool window is clicked without taking the keyboard away from the viewer. */
+            if (w->tool) return MA_NOACTIVATE;
+            break;
+
         case WM_SYSCOMMAND:
             /* RFC-0002 §6.2 / RFC-0003 §5.5: Alt pressed and released on its
                own would put the window in menu mode and eat the next key.
@@ -492,6 +505,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     memset(w, 0, sizeof(*w));
     w->frameless = config->frameless && !config->owner;
     w->owned = config->owner != NULL;
+    w->tool = config->tool_window;
     w->cursor_visible = true;
     w->dpi_scale = 1.0;
     w->get_dpi_for_window = get_dpi;
@@ -511,9 +525,10 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     int width = config->width > 0 ? config->width : 1280;
     int height = config->height > 0 ? config->height : 800;
 
-    DWORD style = w->frameless
-        ? (WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX)
+    DWORD style = w->tool ? WS_POPUP
+        : w->frameless ? (WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX)
         : WS_OVERLAPPEDWINDOW;
+    DWORD ex_style = w->tool ? (WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE) : 0;
     /* An owned window: a parent handle on a top-level window makes it
        owned (not a child) — above its owner, no taskbar button. */
     HWND owner_hwnd = config->owner ? config->owner->hwnd : NULL;
@@ -524,7 +539,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
         wcscpy(wide_title, L"Rubraview");
     }
 
-    HWND hwnd = CreateWindowExW(0, RUBRAVIEW_WINDOW_CLASS, wide_title, style,
+    HWND hwnd = CreateWindowExW(ex_style, RUBRAVIEW_WINDOW_CLASS, wide_title, style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, width, height,
                                 owner_hwnd, NULL, instance, w);
     if (!hwnd) return NULL;
@@ -566,7 +581,8 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     w->width = client.right - client.left;
     w->height = client.bottom - client.top;
 
-    ShowWindow(hwnd, SW_SHOW);
+    if (w->tool) SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    ShowWindow(hwnd, w->tool ? SW_SHOWNOACTIVATE : SW_SHOW);
     UpdateWindow(hwnd);
     return w;
 }
@@ -634,6 +650,13 @@ bool rubraview_pal_window_get_frame(const rubraview_window_t *window,
 void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32_t y, int32_t width, int32_t height) {
     if (!window || !window->hwnd || width <= 0 || height <= 0) return;
     keep_on_screen(window->hwnd, x, y, width, height);
+}
+
+void rubraview_pal_window_set_opacity(rubraview_window_t *window, double percent) {
+    if (!window || !window->hwnd || !window->tool) return;
+    if (percent < 30.0) percent = 30.0;
+    if (percent > 100.0) percent = 100.0;
+    SetLayeredWindowAttributes(window->hwnd, 0, (BYTE)lround(percent * 2.55), LWA_ALPHA);
 }
 
 void rubraview_pal_window_set_visible(rubraview_window_t *window, bool visible) {
