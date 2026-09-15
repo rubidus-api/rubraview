@@ -57,6 +57,7 @@ typedef struct rubraview_media_clock {
     double anchor_media;   /* file time at the anchor */
     double anchor_wall;    /* wall time at the anchor */
     bool   paused;
+    double rate;           /* D-15 playback speed: file seconds per wall second; 0 reads as 1 */
 } rubraview_media_clock_t;
 
 /** A clock that reads `media_seconds` at `wall_now` and runs from there. */
@@ -69,6 +70,9 @@ double rubraview_media_clock_now(const rubraview_media_clock_t *clock, double wa
 void rubraview_media_clock_pause(rubraview_media_clock_t *clock, double wall_now);
 void rubraview_media_clock_resume(rubraview_media_clock_t *clock, double wall_now);
 void rubraview_media_clock_seek(rubraview_media_clock_t *clock, double media_seconds, double wall_now);
+
+/** D-15: run at `rate` from now on (0.25–4.0 in the viewer); the time read now does not jump. */
+void rubraview_media_clock_set_rate(rubraview_media_clock_t *clock, double rate, double wall_now);
 
 /**
  * With audio as master, the device's position is the truth: re-anchor on
@@ -155,6 +159,20 @@ double rubraview_audio_heard_seconds(double base_seconds, uint64_t frames_submit
  */
 double rubraview_audio_position_now(double recorded_position, double recorded_wall,
                                     double wall_now, bool playing, double max_extrapolation);
+
+/** The same, for playback at `rate`: between records the file runs `rate` seconds per second. */
+double rubraview_audio_position_now_at_rate(double recorded_position, double recorded_wall,
+                                            double wall_now, bool playing, double max_extrapolation,
+                                            double rate);
+
+/**
+ * D-15: where in the file the listener is when playback runs at `speed`:
+ * `source_frames` of the file have gone to the device, and `pending_frames`
+ * of *device* frames are still queued — each of those stands for `speed`
+ * file frames.
+ */
+double rubraview_audio_heard_media_seconds(double base_seconds, double source_frames,
+                                           uint64_t pending_frames, double speed, uint32_t sample_rate);
 
 /* ---- which backend opens a file (D-8, D-9) ---- */
 

@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 
 #include "rubraview/core.h"
@@ -199,6 +200,10 @@ typedef struct app_state {
     double                 box_press_x, box_press_y;
     bool                   box_drag_moved;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
+    double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
+    double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
+    bool                   timeline_dragging; /* RFC-0002 §4.2: the pointer holds the seek bar */
+    double                 timeline_last_seek;/* wall time of the last seek while dragging */
     /* §3.16.1 / R135: the external subtitle file that goes with the
        video on screen. Empty when the film has none. */
     rubraview_subtitle_track_t subtitle;
@@ -333,6 +338,7 @@ static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
+static void media_ab_check(app_state_t *app);
 static void settings_write_if_changed(app_state_t *app, bool say);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
@@ -880,6 +886,10 @@ static void media_prepare(app_state_t *app) {
        wall clock is. */
     app->media_master = rubraview_media_master_for(opened.info.has_audio, opened.info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
+    if (app->media_speed <= 0.0) app->media_speed = 1.0;
+    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
+    rubraview_pal_audio_set_speed(app->media_speed);
+    app->ab_a = app->ab_b = -1.0;   /* a repeat belongs to the file it was set in */
     /* §3.2.6 / RV-061: a slide holding a film or a track waits for the
        whole of it, not for the still-image interval. */
     if (app->slides && (size_t)app->spread_index < app->layout.count) {
@@ -919,6 +929,7 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
 static void media_tick(app_state_t *app) {
     app_page_t *page = media_page_ready(app);
     if (!page) return;
+    media_ab_check(app);
     rubraview_media_t *m = app->media;
     double now = rubraview_pal_time_now_seconds();
 
@@ -927,7 +938,8 @@ static void media_tick(app_state_t *app) {
         double heard = 0.0, at = 0.0;
         if (rubraview_pal_media_audio_position(m, &heard, &at)) {
             rubraview_media_clock_sync_audio(&app->media_clock,
-                rubraview_audio_position_now(heard, at, now, !app->media_paused, MEDIA_AUDIO_EXTRAPOLATION),
+                rubraview_audio_position_now_at_rate(heard, at, now, !app->media_paused, MEDIA_AUDIO_EXTRAPOLATION,
+                                                     app->media_speed > 0.0 ? app->media_speed : 1.0),
                 now);
         }
     }
@@ -983,6 +995,19 @@ static void media_tick(app_state_t *app) {
             }
             update_window_title(app);
         }
+    }
+}
+
+/* D-15 A-B repeat: past B, back to A. */
+static void media_seek_to(app_state_t *app, double seconds);
+static void media_ab_check(app_state_t *app) {
+    if (!app->media || app->media_paused || app->ab_a < 0.0 || app->ab_b <= app->ab_a) return;
+    if (app->media_position >= app->ab_b) {
+        media_seek_to(app, app->ab_a);
+        /* The picture still shown is from past B until the next frame
+           comes; without this every tick would seek again and it would
+           never play on. */
+        app->media_position = app->ab_a;
     }
 }
 
@@ -1274,6 +1299,16 @@ static void toolbox_refresh(app_state_t *app) {
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
 }
 
+/* "1x", "1.25x", "0.5x": two decimals, trailing zeros dropped. */
+static int speed_text(char *buffer, size_t size, double speed) {
+    int n = snprintf(buffer, size, "%.2f", speed);
+    if (n <= 0 || (size_t)n >= size) return 0;
+    while (n > 0 && buffer[n - 1] == '0') buffer[--n] = '\0';
+    if (n > 0 && buffer[n - 1] == '.') buffer[--n] = '\0';
+    if ((size_t)n + 1 < size) { buffer[n++] = 'x'; buffer[n] = '\0'; }
+    return n;
+}
+
 /* A toggle tile says what a tap will do; a tile that can do nothing now is dimmed. */
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
     *out_enabled = true;
@@ -1283,6 +1318,14 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
     }
     if (action_is(tile->action, "media_mute")) {
         return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? U8("Sound") : U8("Mute");
+    }
+    if (action_is(tile->action, "media_speed_cycle")) {
+        static char speed[16];   /* drawn before the next call */
+        int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
+        return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
+    }
+    if (action_is(tile->action, "media_ab_cycle")) {
+        return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? U8("Set B") : U8("A-B off");
     }
     if (action_is(tile->action, "next_subtitle_track")) {
         *out_enabled = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, app->tracks.current_subtitle) >= 0;
@@ -1580,6 +1623,53 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (action_is(action, "anim_step_back") || action_is(action, "subpage_prev")) {
         rubraview_animation_step(&app->animation, false);
         show_frame(app, app->animation.current);
+    } else if (app->media && (action_is(action, "anim_speed_up") || action_is(action, "anim_speed_down") ||
+                              action_is(action, "media_speed_up") || action_is(action, "media_speed_down") ||
+                              action_is(action, "media_speed_reset") || action_is(action, "media_speed_cycle"))) {
+        /* D-15: 0.25x to 4x a quarter at a time; the tile cycles the usual ones. */
+        double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
+        if (action_is(action, "media_speed_reset")) {
+            speed = 1.0;
+        } else if (action_is(action, "media_speed_cycle")) {
+            static const double CYCLE[] = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
+            size_t next = 0;
+            for (size_t i = 0; i < 6; ++i) if (fabs(CYCLE[i] - speed) < 1e-6) next = (i + 1) % 6;
+            speed = CYCLE[next];
+        } else {
+            bool up = action_is(action, "anim_speed_up") || action_is(action, "media_speed_up");
+            speed += up ? 0.25 : -0.25;
+        }
+        if (speed < 0.25) speed = 0.25;
+        if (speed > 4.0) speed = 4.0;
+        app->media_speed = speed;
+        rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
+        rubraview_pal_audio_set_speed(speed);
+        char line[32];
+        char text[16];
+        speed_text(text, sizeof(text), speed);
+        int n = snprintf(line, sizeof(line), "speed %s", text);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    } else if (app->media && (action_is(action, "media_ab_a") || action_is(action, "media_ab_b") ||
+                              action_is(action, "media_ab_clear") || action_is(action, "media_ab_cycle"))) {
+        /* D-15 A-B repeat. The tile walks A, then B, then off. */
+        char line[64];
+        int n = 0;
+        bool set_a = action_is(action, "media_ab_a") || (action_is(action, "media_ab_cycle") && app->ab_a < 0.0);
+        bool set_b = action_is(action, "media_ab_b") || (action_is(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
+        if (set_a) {
+            app->ab_a = app->media_position;
+            if (app->ab_b >= 0.0 && app->ab_b <= app->ab_a) app->ab_b = -1.0;
+            n = snprintf(line, sizeof(line), "repeat from %.1f s", app->ab_a);
+        } else if (set_b && app->ab_a >= 0.0 && app->media_position > app->ab_a) {
+            app->ab_b = app->media_position;
+            n = snprintf(line, sizeof(line), "repeating %.1f - %.1f s", app->ab_a, app->ab_b);
+        } else if (set_b) {
+            n = snprintf(line, sizeof(line), "B must come after A");
+        } else {
+            app->ab_a = app->ab_b = -1.0;
+            n = snprintf(line, sizeof(line), "repeat off");
+        }
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     } else if (action_is(action, "anim_speed_up")) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, true);
     } else if (action_is(action, "anim_speed_down")) {
@@ -1930,6 +2020,89 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
     return false;
 }
 
+/* RFC-0002 §4.2: the timeline strip above the information bar while a
+   video or music page is on screen — elapsed, the seek bar, total, and the
+   volume and speed. It shows with the OSD, and stays while paused. */
+static double timeline_alpha(const app_state_t *app) {
+    if (!app->media) return 0.0;
+    if (app->media_paused || app->timeline_dragging) return 1.0;
+    return rubraview_osd_opacity(&app->osd);
+}
+
+static void timeline_geometry(const app_state_t *app, double win_w, double win_h,
+                              rubraview_pal_rect_t *out_bar, rubraview_pal_rect_t *out_track) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double bar_h = 28.0 * dpi;
+    double info_top = win_h - bar_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
+    *out_bar = (rubraview_pal_rect_t){ 0.0, info_top - bar_h, win_w, bar_h };
+    double left = 110.0 * dpi, right = 250.0 * dpi;
+    double width = win_w - left - right;
+    if (width < 40.0 * dpi) width = 40.0 * dpi;
+    *out_track = (rubraview_pal_rect_t){ left, out_bar->y + bar_h * 0.4, width, bar_h * 0.2 };
+}
+
+static bool timeline_hit(const app_state_t *app, double x, double y, rubraview_pal_rect_t *out_track) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_pal_rect_t bar, track;
+    timeline_geometry(app, (double)w, (double)h, &bar, &track);
+    if (out_track) *out_track = track;
+    return timeline_alpha(app) > 0.01 && y >= bar.y && y < bar.y + bar.height &&
+           x >= track.x - 6.0 && x <= track.x + track.width + 6.0;
+}
+
+static void timeline_seek_to_pointer(app_state_t *app, double x) {
+    rubraview_pal_rect_t track;
+    (void)timeline_hit(app, x, 0.0, &track);
+    double seconds = rubraview_seekbar_time(track.x, track.width, x, app->media_info.duration_seconds);
+    media_seek_to(app, seconds);
+    app->media_position = seconds;   /* the strip follows the pointer before the frame arrives */
+    app->timeline_last_seek = rubraview_pal_time_now_seconds();
+    note_activity(app);
+}
+
+static void draw_timeline(app_state_t *app, double win_w, double win_h) {
+    double a = timeline_alpha(app);
+    if (a <= 0.01 || app->media_info.duration_seconds <= 0.0) return;
+    uint32_t alpha = (uint32_t)(a * 255.0) & 0xFFu;
+    rubraview_pal_rect_t bar, track;
+    timeline_geometry(app, win_w, win_h, &bar, &track);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_pal_render_fill_rect(app->renderer, bar, (alpha / 2u) << 24, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, track, (alpha / 3u) << 24 | 0x00FFFFFFu, 2.0);
+    double duration = app->media_info.duration_seconds;
+    double done = rubraview_seekbar_fraction(app->media_position, duration);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ track.x, track.y, track.width * done, track.height },
+                                   (alpha << 24) | 0x006FA8DCu, 2.0);
+    /* A-B repeat: the section, marked on the bar. */
+    if (app->ab_a >= 0.0) {
+        double ax = track.x + track.width * rubraview_seekbar_fraction(app->ab_a, duration);
+        double bx = app->ab_b > app->ab_a ? track.x + track.width * rubraview_seekbar_fraction(app->ab_b, duration) : ax + 2.0 * dpi;
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ ax, bar.y + bar.height * 0.2, bx - ax, bar.height * 0.6 },
+                                       (alpha / 3u) << 24 | 0x00F0C040u, 0.0);
+    }
+    uint32_t text = (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu);
+    char elapsed[32], total[32], right[96];
+    u8str_t e = rubraview_format_timecode(elapsed, sizeof(elapsed), app->media_position, false);
+    u8str_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
+    rubraview_pal_render_draw_text(app->renderer, e, (rubraview_pal_rect_t){ 0.0, bar.y, track.x - 8.0 * dpi, bar.height },
+                                   bar.height * 0.45, text, RUBRAVIEW_TEXT_RIGHT);
+    int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
+    bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+    double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
+    int n = snprintf(right, sizeof(right), "%.*s   %s %d%%", (int)t.len, t.ptr, muted ? "muted" : "vol", volume);
+    if (n > 0 && fabs(speed - 1.0) > 1e-6 && (size_t)n + 12 < sizeof(right)) {
+        n += snprintf(right + n, sizeof(right) - (size_t)n, "   ");
+        n += speed_text(right + n, sizeof(right) - (size_t)n, speed);
+    }
+    if (app->ab_a >= 0.0 && n > 0 && (size_t)n + 8 < sizeof(right)) n += snprintf(right + n, sizeof(right) - (size_t)n, app->ab_b > app->ab_a ? "   A-B" : "   A-");
+    if (n > 0) {
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = right, .len = (size_t)n },
+                                       (rubraview_pal_rect_t){ track.x + track.width + 8.0 * dpi, bar.y, win_w, bar.height },
+                                       bar.height * 0.45, text, RUBRAVIEW_TEXT_LEFT);
+    }
+}
+
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
@@ -2248,6 +2421,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 
     draw_subtitle(app, win_w, win_h);
+    draw_timeline(app, win_w, win_h);
 
     /* OSD (§3.1), skipped once it has faded out entirely. */
     if (rubraview_osd_opacity(&app->osd) > 0.01) {
@@ -5010,6 +5184,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             panel_apply_row(&app, dragged);
                         }
                     }
+                    if (app.timeline_dragging && rubraview_pal_time_now_seconds() - app.timeline_last_seek > 0.1) {
+                        timeline_seek_to_pointer(&app, event.mouse.x);   /* a seek every tenth of a second at most */
+                    }
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
                     rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
@@ -5062,6 +5239,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    /* RFC-0002 §4.2: the seek bar, before the canvas turns a page. */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && timeline_hit(&app, event.mouse.x, event.mouse.y, NULL)) {
+                        app.timeline_dragging = true;
+                        timeline_seek_to_pointer(&app, event.mouse.x);
+                        break;
+                    }
                     /* The anchors answer before the rest of the chrome: a
                        press there is a click *or* the start of a drag. */
                     if (box_press(&app, event.mouse.x, event.mouse.y)) break;
@@ -5085,6 +5268,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    if (app.timeline_dragging) {
+                        app.timeline_dragging = false;
+                        timeline_seek_to_pointer(&app, event.mouse.x);
+                        break;
+                    }
                     rubraview_panel_release(&app.panel);
                     box_release(&app, event.mouse.x, event.mouse.y);
                     break;
