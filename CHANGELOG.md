@@ -47,6 +47,8 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- `T` or the titlebar's box button while the toolbox was its own window
+  drew a second toolbox inside the viewer; both now put the window back.
 - The reading history's `time` was seconds since the machine started, so
   after a restart "newest" meant nothing; it is the date now. Entries
   written before sort as the oldest.

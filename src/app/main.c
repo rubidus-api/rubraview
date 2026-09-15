@@ -1488,7 +1488,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->needs_relayout = true;
         reset_view(app);
     } else if (action_is(action, "toggle_toolbox")) {
-        rubraview_box_click_anchor(&app->toolbox);
+        /* A toolbox that is its own window is put back, not shown twice. */
+        if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
+        else rubraview_box_click_anchor(&app->toolbox);
     } else if (action_is(action, "open_picker")) {
         if (app->picker_open) {
             app->picker_open = false;
@@ -2147,6 +2149,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window. */
             rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
+            if (app->toolbox_window) toolbox_dock(app, 0.0, 0.0);
             rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
             osd_say(app, U8("the floating boxes are back in their corners"));
             return true;
