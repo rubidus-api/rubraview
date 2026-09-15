@@ -170,6 +170,9 @@ bool rubraview_pal_window_get_frame(const rubraview_window_t *window,
 /** Move and size the frame; a place off every screen is pulled back onto the nearest one. */
 void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32_t y, int32_t width, int32_t height);
 
+/** Always on top of other programs' windows, or not (owner, 2026-09-15). */
+void rubraview_pal_window_set_topmost(rubraview_window_t *window, bool topmost);
+
 /** RFC-0002 Q6: how opaque a tool window is, 30–100 %. Other windows ignore it. */
 void rubraview_pal_window_set_opacity(rubraview_window_t *window, double percent);
 

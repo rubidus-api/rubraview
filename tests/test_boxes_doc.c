@@ -68,9 +68,10 @@ int main(void) {
     };
     rubraview_menu_tree_t still = rubraview_boxes_menu(&arena, doc, 0, recent, 3, 11);
     assert_tree_sound(&still);
-    assert(still.root_count == 4);
-    assert(is(still.items[0].label, "File") && is(still.items[1].label, "View") &&
-           is(still.items[2].label, "Show") && is(still.items[3].label, "Help"));
+    assert(still.root_count == 5);
+    assert(is(still.items[0].action, "toggle_always_on_top"));   /* one tap from the top (owner, 2026-09-15) */
+    assert(is(still.items[1].label, "File") && is(still.items[2].label, "View") &&
+           is(still.items[3].label, "Show") && is(still.items[4].label, "Help"));
     assert(!root_named(&still, "Playback"));
     const rubraview_menu_item_t *file = root_named(&still, "File");
     assert(file->child_count == 11);
@@ -85,7 +86,7 @@ int main(void) {
     /* A menu module walks it as before: File, then Recent, then an entry. */
     rubraview_menu_state_t state = rubraview_menu_create(&still);
     u8str_t action = {0};
-    assert(rubraview_menu_activate(&state, 0, &action) == RUBRAVIEW_MENU_DESCENDED);   /* File */
+    assert(rubraview_menu_activate(&state, 1, &action) == RUBRAVIEW_MENU_DESCENDED);   /* File */
     int32_t recent_tile = 1 + 2;                                                        /* Back, Open file, Open folder, Recent */
     assert(rubraview_menu_activate(&state, recent_tile, &action) == RUBRAVIEW_MENU_DESCENDED);
     assert(rubraview_menu_activate(&state, 1, &action) == RUBRAVIEW_MENU_ACTIVATED && is(action, "open_recent:0"));
@@ -96,7 +97,7 @@ int main(void) {
     proven_arena_reset(&arena);
     rubraview_menu_tree_t media = rubraview_boxes_menu(&arena, doc, RUBRAVIEW_BOXES_WHEN_MEDIA, NULL, 0, 11);
     assert_tree_sound(&media);
-    assert(media.root_count == 5 && is(media.items[2].label, "Playback"));
+    assert(media.root_count == 6 && is(media.items[3].label, "Playback"));
     const rubraview_menu_item_t *play = root_named(&media, "Playback");
     assert(play->child_count == 11 && is(media.items[play->first_child].action, "media_play_pause"));
     const rubraview_menu_item_t *vol = child_named(&media, play, "Volume");
@@ -106,7 +107,7 @@ int main(void) {
     proven_arena_reset(&arena);
     rubraview_menu_tree_t cut = rubraview_boxes_menu(&arena, doc, RUBRAVIEW_BOXES_WHEN_MEDIA, NULL, 0, 3);
     assert_tree_sound(&cut);
-    assert(cut.root_count == 3 && root_named(&cut, "File")->child_count == 3);
+    assert(cut.root_count == 3 && root_named(&cut, "File")->child_count == 3);   /* On top, File, View */
     /* An arena too small gives an empty tree, not a broken one. */
     static unsigned char tiny[64];
     proven_arena_t small = proven_arena_create((proven_mem_mut_t){ .ptr = tiny, .size = sizeof(tiny) });

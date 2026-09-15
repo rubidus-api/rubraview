@@ -29,7 +29,13 @@ static void test_snap_button_placement(void) {
     bar.shown = false;
     assert(rubraview_titlebar_hit(&bar, snap.x + 2.0, bar.height * 0.5, win_w) == RUBRAVIEW_TITLEBAR_NONE);
 
-    printf("  [PASS] The put-the-boxes-back button is leftmost in the icon row and hit where drawn\n");
+    /* Always on top sits right after it (owner, 2026-09-15). */
+    bar.shown = true;
+    rubraview_rect_t pin = rubraview_titlebar_button_rect(&bar, RUBRAVIEW_TITLEBAR_PIN, win_w);
+    assert(pin.x > snap.x && pin.x < minimise.x && pin.width > 0.0);
+    assert(rubraview_titlebar_hit(&bar, pin.x + 2.0, bar.height * 0.5, win_w) == RUBRAVIEW_TITLEBAR_PIN);
+
+    printf("  [PASS] The put-the-boxes-back button is leftmost in the icon row, Pin next to it, both hit where drawn\n");
 }
 
 int main(void) {

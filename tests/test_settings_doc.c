@@ -29,6 +29,7 @@ typedef struct expected {
 static const expected_t EXPECTED[] = {
     { "general", "startup", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_GENERAL, 2.0, 0.0, 2.0, 1.0, "blank|last_file|last_folder", false },
     { "general", "single_instance", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_GENERAL, 1.0, 0.0, 1.0, 1.0, "", true },
+    { "general", "always_on_top", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_GENERAL, 0.0, 0.0, 1.0, 1.0, "", true },
     { "general", "frameless", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_GENERAL, 1.0, 0.0, 1.0, 1.0, "", false },
     { "general", "titlebar_trigger_px", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_GENERAL, 12.0, 4.0, 40.0, 1.0, "", false },
     { "general", "titlebar_hide_ms", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_GENERAL, 500.0, 100.0, 3000.0, 50.0, "", false },
@@ -134,7 +135,7 @@ int main(void) {
         }
         assert(eq(rubraview_settings_tab_name(RUBRAVIEW_TAB_VIDEO), "Video"));
     }
-    printf("  [PASS] The built-in document holds the 48 settings the C table held and the 4 D-15 added\n");
+    printf("  [PASS] The built-in document holds the 48 settings the C table held, the 4 D-15 added and always-on-top\n");
 
     /* 2. Every kind of line, and what each one records. */
     {

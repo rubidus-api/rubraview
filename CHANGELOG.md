@@ -35,6 +35,11 @@ This project follows Keep a Changelog.
   anchor shows `*`) and detached into a small window of its own that stays
   on top (`Ctrl+T`, Show › Detach toolbox, or drag its anchor past the edge);
   `Dock` brings it back.
+- Always on top (owner request): a `Pin` button on the hover titlebar (lit
+  while on), the menu's first tile `On top: on/off`, `Ctrl+Shift+T`, and
+  **Always on top** on the settings window's General page; it is kept.
+- The hover titlebar draws its `Box` button (put the floating boxes back),
+  which was there to click but never drawn.
 - The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
   wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and

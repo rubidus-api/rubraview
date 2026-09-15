@@ -52,13 +52,13 @@ int main(void) {
     {
         rubraview_settings_view_t v = rubraview_settings_view_create(doc, 80, 24);
         assert(v.page == 0 && v.list_cols == 12 && v.content_col == 14);
-        assert(v.line_count == 11);
+        assert(v.line_count == 12);
         assert(v.lines[0].kind == RUBRAVIEW_LINE_SECTION && v.lines[0].row == 0);
         assert(v.lines[1].kind == RUBRAVIEW_LINE_SETTING && v.lines[1].row == 1);
-        assert(v.lines[4].kind == RUBRAVIEW_LINE_ACTION && v.lines[4].row == 4);
-        assert(v.lines[6].kind == RUBRAVIEW_LINE_SECTION && v.lines[6].row == 7);   /* a blank row at 6 */
-        assert(v.lines[10].kind == RUBRAVIEW_LINE_INFO && v.lines[10].row == 12);
-        assert(v.content_height == 13);
+        assert(v.lines[5].kind == RUBRAVIEW_LINE_ACTION && v.lines[5].row == 5);
+        assert(v.lines[7].kind == RUBRAVIEW_LINE_SECTION && v.lines[7].row == 8);   /* a blank row at 7 */
+        assert(v.lines[11].kind == RUBRAVIEW_LINE_INFO && v.lines[11].row == 13);
+        assert(v.content_height == 14);
         assert(v.focus_line == 1 && v.focus_button == RUBRAVIEW_BUTTON_NONE);
         assert(rubraview_settings_view_screen_row(&v, 1) == 3);
     }

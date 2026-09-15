@@ -114,7 +114,6 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         p->open_menu = (int32_t)p->doc->node_count - 1;
         return true;
     } else if (is_word(word, "item")) {
-        if (p->open_menu < 0) return box_fail(p, "an `item` outside any `menu`");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`item` needs an action id");
         if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`item` needs a \"label\"");
         if (!add_box_node(p, (rubraview_box_node_t){ .kind = RUBRAVIEW_BOX_NODE_ITEM, .label = third, .action = second })) return false;
