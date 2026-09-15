@@ -15,6 +15,8 @@ const char *rubraview_default_keymap(void) {
     /* RFC-0002 Q6: pin it open, or give it a window of its own. */
     "toggle_toolbox_pin = \"Shift+T\"\n"
     "toggle_toolbox_detach = \"Ctrl+T\"\n"
+    /* Owner, 2026-09-15: always on top, one chord away as well as in the menu and the titlebar. */
+    "toggle_always_on_top = \"Ctrl+Shift+T\"\n"
     "open_picker = \"O, Ctrl+O\"\n"
     "open_folder = \"Ctrl+Shift+O\"\n"
     "toggle_filmstrip = \"F4\"\n"

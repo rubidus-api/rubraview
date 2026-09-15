@@ -652,6 +652,12 @@ void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32
     keep_on_screen(window->hwnd, x, y, width, height);
 }
 
+void rubraview_pal_window_set_topmost(rubraview_window_t *window, bool topmost) {
+    if (!window || !window->hwnd) return;
+    SetWindowPos(window->hwnd, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 void rubraview_pal_window_set_opacity(rubraview_window_t *window, double percent) {
     if (!window || !window->hwnd || !window->tool) return;
     if (percent < 30.0) percent = 30.0;

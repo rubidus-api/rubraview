@@ -30,7 +30,8 @@ extern "C" {
  *
  * `toolbox <profile>` starts a profile; its `tile` lines follow, each an
  * action id and a caption. `menu "<label>"` opens a submenu, `end` closes
- * it; menus nest. `item` is a leaf. `recent` stands for the reading
+ * it; menus nest. `item` is a leaf — at the top level too, for what must
+ * be one tap away (Always on top). `recent` stands for the reading
  * history's entries, filled in when the menu is built. `when media` shows
  * a menu only while a video or music page is on screen.
  *

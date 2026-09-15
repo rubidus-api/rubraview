@@ -1539,6 +1539,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* File › Recent: the entry's index in the reading history. */
         size_t index = (size_t)strtoul(action.ptr + 12, NULL, 10);
         if (index < app->history.count) open_path(app, app->history.entries[index].path);
+    } else if (action_is(action, "toggle_always_on_top")) {
+        bool on = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
+        rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
+        settings_took_effect(app);
+        osd_say(app, on ? U8("no longer on top of other windows") : U8("always on top of other windows"));
     } else if (action_is(action, "toggle_toolbox_pin")) {
         rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
         osd_say(app, app->toolbox.pinned ? U8("toolbox pinned open") : U8("toolbox unpinned"));
@@ -2138,6 +2143,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_FULLSCREEN:
             rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
             return true;
+        case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window. */
             rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
@@ -2186,12 +2192,20 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
 
 /* ---- rendering ---- */
 
+/* The viewer the menu's toggle captions read their state from. */
+static const app_state_t *g_caption_app;
+
 /* Tile captions for the menu box come from the current menu level, with
    the Back tile at index 0 below the root (§3.6.2). */
 static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size) {
     (void)scratch; (void)scratch_size;
     if (rubraview_menu_has_back_tile(menu) && tile == 0) return U8("< Back");
     const rubraview_menu_item_t *item = rubraview_menu_item_at(menu, tile);
+    /* A toggle in the menu says whether it is on. */
+    if (item && g_caption_app && action_is(item->action, "toggle_always_on_top")) {
+        return rubraview_settings_get(&g_caption_app->settings, U8("general"), U8("always_on_top")) > 0.5
+            ? U8("On top: on") : U8("On top: off");
+    }
     return item ? item->label : (u8str_t){ .ptr = "", .len = 0 };
 }
 
@@ -2588,15 +2602,22 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                            app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
 
+        /* The box rescue button was hit-tested but never drawn; now it shows. */
         static const rubraview_titlebar_button_t BUTTONS[] = {
+            RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN,
             RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE,
             RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_CLOSE,
         };
-        static const char *const GLYPHS[] = { "_", "[]", "[ ]", "X" };
+        static const char *const GLYPHS[] = { "Box", "Pin", "_", "[]", "[ ]", "X" };
+        bool on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
         for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); ++i) {
             rubraview_rect_t r = rubraview_titlebar_button_rect(&app->titlebar, BUTTONS[i], win_w);
             rubraview_pal_rect_t br = { r.x, r.y, r.width, r.height };
             bool hovered = rubraview_rect_contains(r, app->pointer_x, app->pointer_y);
+            if (BUTTONS[i] == RUBRAVIEW_TITLEBAR_PIN && on_top) {
+                /* On: lit, so the state is visible at a glance. */
+                rubraview_pal_render_fill_rect(app->renderer, br, 0xFF2D4A6Eu, 0.0);
+            }
             if (hovered) {
                 rubraview_pal_render_fill_rect(app->renderer, br,
                                                BUTTONS[i] == RUBRAVIEW_TITLEBAR_CLOSE ? COLOR_CLOSE_HOVER : COLOR_TILE_FILL,
@@ -3515,6 +3536,9 @@ static void settings_close(app_state_t *app) {
 static void settings_took_effect(app_state_t *app) {
     app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    /* Owner, 2026-09-15: always on top follows the setting, whichever way it was changed. */
+    rubraview_pal_window_set_topmost(app->window,
+                                     rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5);
     /* D-15: the session volume follows the setting. */
     rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, U8("audio"), U8("volume")) / 100.0,
                                    rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5);
@@ -5326,6 +5350,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
     layout_load(&app);   /* §3.6: back where the reader left them */
     menu_rebuild(&app);   /* §3.6.2, RFC-0002 §5: the tree from the boxes' document */
+    g_caption_app = &app;
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
