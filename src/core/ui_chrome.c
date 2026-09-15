@@ -112,6 +112,7 @@ bool rubraview_titlebar_tick(rubraview_titlebar_t *bar, double delta_seconds) {
 static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
     /* First in the order is leftmost on screen. */
     RUBRAVIEW_TITLEBAR_SNAP_BOXES,
+    RUBRAVIEW_TITLEBAR_PIN,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,

@@ -86,6 +86,7 @@ static const char *const PARTS[] = {
 "toolbox slideshow\n"
 "  tile toggle_slideshow     \"Stop slides\"\n"
 "\n",
+"item toggle_always_on_top \"On top\"\n"
 "menu \"File\"\n"
 "  item open_picker          \"Open file\"\n"
 "  item open_folder          \"Open folder\"\n"

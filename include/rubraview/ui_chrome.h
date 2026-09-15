@@ -60,6 +60,9 @@ typedef enum rubraview_titlebar_button {
        window is wrong, and a box that has wandered off is exactly
        that. */
     RUBRAVIEW_TITLEBAR_SNAP_BOXES,
+    /* Always on top (owner, 2026-09-15): next to the rescue button, where a
+       reader reaches for what the window does. */
+    RUBRAVIEW_TITLEBAR_PIN,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
