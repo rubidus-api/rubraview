@@ -6,8 +6,23 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Volume and mute (D-15): `Up` / `Down` change the volume 5 % at a time
+  while a video or music page is on screen, `Shift+M` mutes; the OSD says
+  the level, and `settings.ini` keeps it (`[audio] volume`, `mute`).
+- The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
+  wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
+- `scripts/check-actions.py`: every key, tile and menu item is handled, and
+  everything handled is reachable.
+
 ### Changed
 
+- While a video or music page is on screen, `Left` / `Right` seek 5 s
+  (they were `Ctrl+Left` / `Ctrl+Right`, which now size the window). The
+  playback context is `[media]`; a `keymap.ini` that says `[animation]`
+  still loads. Up to the folder is `Ctrl+Backspace` (was `Ctrl+Up`).
+- The four `Alt` + arrow "pan" bindings, which did nothing, are gone.
 - `F2` renames the file, as in Explorer; it no longer also opened the toolbox,
   which is `T` (D-14). Until now `F2` reached the toolbox and rename could not
   be started from the keyboard. A `keymap.ini` saved earlier keeps `T, F2` for

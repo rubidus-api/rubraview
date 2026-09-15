@@ -70,7 +70,7 @@ int main(void) {
         { "navigation", RUBRAVIEW_MOD_CTRL,  "PageDown",     "skip_forward" },
         { "navigation", RUBRAVIEW_MOD_SHIFT, "Left",         "skip_backward" },
         { "navigation", RUBRAVIEW_MOD_CTRL,  "PageUp",       "skip_backward" },
-        { "navigation", RUBRAVIEW_MOD_CTRL,  "Up",           "up_to_folder" },
+        { "navigation", RUBRAVIEW_MOD_CTRL,  "Backspace",    "up_to_folder" },   /* D-16: Ctrl+Up sizes the window */
 
         /* Zoom & Fit */
         { "view", RUBRAVIEW_MOD_NONE, "Plus",   "zoom_in" },
@@ -84,10 +84,16 @@ int main(void) {
         { "view", RUBRAVIEW_MOD_CTRL, "1",      "fit_stretch" },
         { "view", RUBRAVIEW_MOD_NONE, "5",      "smart_fit" },
         { "view", RUBRAVIEW_MOD_NONE, "L",      "toggle_fit_lock" },
-        { "view", RUBRAVIEW_MOD_ALT,  "Left",   "pan_left" },
-        { "view", RUBRAVIEW_MOD_ALT,  "Right",  "pan_right" },
-        { "view", RUBRAVIEW_MOD_ALT,  "Up",     "pan_up" },
-        { "view", RUBRAVIEW_MOD_ALT,  "Down",   "pan_down" },
+        /* D-16: Alt+arrows move the window, Ctrl+arrows size it. */
+        { "view", RUBRAVIEW_MOD_ALT,  "Left",   "window_move_left" },
+        { "view", RUBRAVIEW_MOD_ALT,  "Up",     "window_move_up" },
+        { "view", RUBRAVIEW_MOD_CTRL, "Right",  "window_wider" },
+        { "view", RUBRAVIEW_MOD_CTRL, "Down",   "window_taller" },
+        /* D-16: while a video or music page is on screen the arrows play. */
+        { "media", RUBRAVIEW_MOD_NONE, "Right", "media_seek_forward" },
+        { "media", RUBRAVIEW_MOD_NONE, "Left",  "media_seek_back" },
+        { "media", RUBRAVIEW_MOD_NONE, "Up",    "media_volume_up" },
+        { "media", RUBRAVIEW_MOD_NONE, "Down",  "media_volume_down" },
         { "view", RUBRAVIEW_MOD_NONE, "R",      "rotate_cw" },
         { "view", RUBRAVIEW_MOD_SHIFT,"R",      "rotate_ccw" },
         { "view", RUBRAVIEW_MOD_NONE, "H",      "flip_horizontal" },
@@ -190,20 +196,20 @@ int main(void) {
 
         u8str_t nav_space = resolve(&keymap, "navigation", space);
         assert(nav_space.len == 9 && memcmp(nav_space.ptr, "next_page", 9) == 0);
-        u8str_t anim_space = resolve(&keymap, "animation", space);
-        assert(anim_space.len == 17 && memcmp(anim_space.ptr, "anim_toggle_pause", 17) == 0);
+        u8str_t anim_space = resolve(&keymap, "media", space);
+        assert(anim_space.len == 16 && memcmp(anim_space.ptr, "media_play_pause", 16) == 0);
 
         u8str_t nav_next = resolve(&keymap, "navigation", ctrl_rb);
         assert(nav_next.len == 12 && memcmp(nav_next.ptr, "next_archive", 12) == 0);
         u8str_t nav_prev = resolve(&keymap, "navigation", ctrl_lb);
         assert(nav_prev.len == 12 && memcmp(nav_prev.ptr, "prev_archive", 12) == 0);
 
-        u8str_t anim_faster = resolve(&keymap, "animation", ctrl_rb);
+        u8str_t anim_faster = resolve(&keymap, "media", ctrl_rb);
         assert(anim_faster.len == 13 && memcmp(anim_faster.ptr, "anim_speed_up", 13) == 0);
-        u8str_t anim_slower = resolve(&keymap, "animation", ctrl_lb);
+        u8str_t anim_slower = resolve(&keymap, "media", ctrl_lb);
         assert(anim_slower.len == 15 && memcmp(anim_slower.ptr, "anim_speed_down", 15) == 0);
 
-        u8str_t step_fwd = resolve(&keymap, "animation", period);
+        u8str_t step_fwd = resolve(&keymap, "media", period);
         assert(step_fwd.len == 17 && memcmp(step_fwd.ptr, "anim_step_forward", 17) == 0);
         u8str_t sub_next = resolve(&keymap, "subpage", period);
         assert(sub_next.len == 12 && memcmp(sub_next.ptr, "subpage_next", 12) == 0);

@@ -76,6 +76,7 @@
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/pal/pal_media.h"
+#include "rubraview/pal/pal_audio.h"
 #include "rubraview/mediaclock.h"
 #include "rubraview/playback.h"
 
@@ -381,6 +382,8 @@ static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void layout_save(app_state_t *app);
+static void settings_took_effect(app_state_t *app);
+static void settings_write_if_changed(app_state_t *app, bool say);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
@@ -1249,6 +1252,46 @@ static void sync_menubox_tiles(app_state_t *app) {
     app->menubox.tile_count = count;
 }
 
+/* The volume as the OSD says it: "volume 70%" or "muted (70%)". */
+static void media_say_volume(app_state_t *app) {
+    char line[48];
+    int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
+    bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+    int n = muted ? snprintf(line, sizeof(line), "muted (%d%%)", volume)
+                  : snprintf(line, sizeof(line), "volume %d%%", volume);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+}
+
+/* D-16: one step of moving or sizing the window from the keyboard. The
+   frame stays on a screen (the PAL pulls it back) and never smaller than
+   a usable minimum; a fullscreen window is left alone. */
+static bool window_nudge(app_state_t *app, u8str_t action) {
+    static const struct { const char *name; int dx, dy, dw, dh; } STEPS[] = {
+        { "window_move_left", -1, 0, 0, 0 }, { "window_move_right", 1, 0, 0, 0 },
+        { "window_move_up", 0, -1, 0, 0 },   { "window_move_down", 0, 1, 0, 0 },
+        { "window_narrower", 0, 0, -1, 0 },  { "window_wider", 0, 0, 1, 0 },
+        { "window_shorter", 0, 0, 0, -1 },   { "window_taller", 0, 0, 0, 1 },
+    };
+    for (size_t i = 0; i < sizeof(STEPS) / sizeof(STEPS[0]); ++i) {
+        if (!action_is(action, STEPS[i].name)) continue;
+        if (rubraview_pal_window_is_fullscreen(app->window)) return true;
+        int32_t x = 0, y = 0, w = 0, h = 0;
+        if (!rubraview_pal_window_get_frame(app->window, &x, &y, &w, &h)) return true;
+        int32_t step = (int32_t)(40.0 * rubraview_pal_window_dpi_scale(app->window));
+        int32_t min_w = (int32_t)(320.0 * rubraview_pal_window_dpi_scale(app->window));
+        int32_t min_h = (int32_t)(240.0 * rubraview_pal_window_dpi_scale(app->window));
+        x += STEPS[i].dx * step;
+        y += STEPS[i].dy * step;
+        w += STEPS[i].dw * step;
+        h += STEPS[i].dh * step;
+        if (w < min_w) w = min_w;
+        if (h < min_h) h = min_h;
+        rubraview_pal_window_set_frame(app->window, x, y, w, h);
+        return true;
+    }
+    return false;
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -1381,8 +1424,27 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (action_is(action, "open_batch")) {
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
-    } else if (app->media && action_is(action, "anim_toggle_pause")) {
-        media_toggle_pause(app);
+    } else if (app->media && (action_is(action, "media_play_pause") || action_is(action, "anim_toggle_pause"))) {
+        media_toggle_pause(app);   /* anim_toggle_pause: the name before D-16, in keymap.ini files saved earlier */
+    } else if (app->media && action_is(action, "media_stop")) {
+        /* Stop: back to the start and paused, the first frame on screen. */
+        if (!app->media_paused) media_toggle_pause(app);
+        media_seek_to(app, 0.0);
+        osd_say(app, U8("stopped"));
+    } else if (action_is(action, "media_volume_up") || action_is(action, "media_volume_down")) {
+        double volume = rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
+        rubraview_settings_set(&app->settings, U8("audio"), U8("volume"),
+                               volume + (action_is(action, "media_volume_up") ? 5.0 : -5.0));
+        rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), 0.0);   /* turning it up or down unmutes */
+        settings_took_effect(app);
+        media_say_volume(app);
+    } else if (action_is(action, "media_mute")) {
+        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+        rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), muted ? 0.0 : 1.0);
+        settings_took_effect(app);
+        media_say_volume(app);
+    } else if (window_nudge(app, action)) {
+        /* D-16: Ctrl + arrows size the window, Alt + arrows move it. */
     } else if (app->media && action_is(action, "anim_step_forward")) {
         media_step(app, true);
     } else if (app->media && action_is(action, "anim_step_back")) {
@@ -1444,7 +1506,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (action_is(action, "anim_toggle_pause")) {
+    } else if (action_is(action, "anim_toggle_pause") || action_is(action, "media_play_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
     } else if (action_is(action, "anim_step_forward") || action_is(action, "subpage_next")) {
@@ -1648,7 +1710,7 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
        src/core/default_keymap.c. */
     if (app->anim_active || app->media) {
         u8str_t context = (app->media || app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION)
-                            ? U8("animation") : U8("subpage");
+                            ? U8("media") : U8("subpage");
         u8str_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
         if (action.len > 0) { handle_action(app, action); return; }
     }
@@ -2866,8 +2928,11 @@ static void settings_grid(const app_state_t *app, int32_t *out_cols, int32_t *ou
 
 static void settings_open(app_state_t *app) {
     if (app->settings_open) return;
-    /* What is on disk now — another copy of the program may have written it. */
+    /* What changed outside the window goes to disk first, then what is on
+       disk now is read — another copy of the program may have written it. */
+    settings_write_if_changed(app, false);
     settings_read_file(app);
+    settings_took_effect(app);
     app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
     app->key_capture = 0;
 
@@ -2918,23 +2983,29 @@ static void settings_open(app_state_t *app) {
     app->settings_message[0] = '\0';
 }
 
+/* settings.ini is written when something in it changed: as the settings
+   window closes (1a), before it opens again, and as the viewer quits —
+   the volume and the boxes' opacity change outside the window (D-15). */
+static void settings_write_if_changed(app_state_t *app, bool say) {
+    if (!rubraview_settings_differs(&app->settings, &app->settings_saved)) return;
+    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
+    if (text.len > 0 && rubraview_pal_fs_write_file(app->settings_path, text)) {
+        app->settings_saved = app->settings;
+        /* §3.18.3's folders are read from the same file, so they follow
+           at once rather than at the next launch. */
+        app->curation = rubraview_curation_parse(app->arena, text);
+        if (say) osd_say(app, U8("settings saved"));
+    } else if (say) {
+        osd_say(app, U8("could not write settings.ini"));
+    }
+}
+
 /* 1a: the file is written as the window closes, and only when something
    in it changed. */
 static void settings_close(app_state_t *app) {
     if (!app->settings_open) return;
-    if (rubraview_settings_differs(&app->settings, &app->settings_saved)) {
-        u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
-        u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
-        if (text.len > 0 && rubraview_pal_fs_write_file(app->settings_path, text)) {
-            app->settings_saved = app->settings;
-            /* §3.18.3's folders are read from the same file, so they follow
-               at once rather than at the next launch. */
-            app->curation = rubraview_curation_parse(app->arena, text);
-            osd_say(app, U8("settings saved"));
-        } else {
-            osd_say(app, U8("could not write settings.ini"));
-        }
-    }
+    settings_write_if_changed(app, true);
     app->key_capture = 0;
     if (!rubraview_keymap_equal(&app->keymap, &app->keymap_saved)) {
         u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
@@ -2957,6 +3028,9 @@ static void settings_close(app_state_t *app) {
 static void settings_took_effect(app_state_t *app) {
     app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    /* D-15: the session volume follows the setting. */
+    rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, U8("audio"), U8("volume")) / 100.0,
+                                   rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5);
 }
 
 static void settings_say(app_state_t *app, const char *text) {
@@ -4992,6 +5066,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     /* §3.22: closing the viewer with the settings window open still
        writes what was changed in it. */
     settings_close(&app);
+    settings_write_if_changed(&app, false);   /* a volume or opacity changed with the window shut */
     if (app.settings_window) {
         rubraview_pal_render_destroy(app.settings_renderer);
         rubraview_pal_window_destroy(app.settings_window);

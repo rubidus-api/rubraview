@@ -66,4 +66,10 @@ if command -v python3 >/dev/null 2>&1 && command -v cc >/dev/null 2>&1 && [ -x s
   python3 scripts/check-conf-format.py || fail "a configuration file is not in the INI and TOML subset"
 fi
 
+# RFC-0003 / D-16: every key, tile and menu item is handled, and everything
+# handled is reachable.
+if command -v python3 >/dev/null 2>&1 && [ -x scripts/check-actions.py ]; then
+  python3 scripts/check-actions.py || fail "an action is bound but not handled, or handled but not reachable"
+fi
+
 printf '%s\n' "project-check: ok"

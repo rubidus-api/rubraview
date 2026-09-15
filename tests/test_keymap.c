@@ -215,6 +215,13 @@ int main(void) {
         assert(shipped.count > 60 && rubraview_keymap_equal(&shipped, &round));
         free(big);
     }
+    /* D-16: a keymap.ini saved while the context was [animation] loads as [media]. */
+    {
+        rubraview_keymap_t old = rubraview_keymap_parse(&arena, lit("[animation]\nanim_toggle_pause = \"Space\"\n"));
+        assert(old.count == 1 && str_eq(old.bindings[0].context, "media"));
+        rubraview_key_combo_t space = { .key_name = lit("Space") };
+        assert(str_eq(rubraview_keymap_find_action(&old, lit("media"), space), "anim_toggle_pause"));
+    }
     printf("  [PASS] Bindings change in place: refused where another action is reached, written and read back unchanged\n");
 
     free(raw_mem);

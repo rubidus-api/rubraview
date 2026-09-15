@@ -13,6 +13,7 @@ Reusable local automation for mechanical project work. Tokens are for judgment; 
 | `changelog-entry.sh` | one public changelog line |
 | `check-tools.sh` | required local tools |
 | `check-settings.py` | every setting read somewhere is offered in the settings window, and every "wired" one is read |
+| `check-actions.py` | every action a key, tile or menu item names is handled, and every handled action is reachable (RFC-0003, D-16) |
 | `check-conf-format.py` | every configuration file the viewer writes parses the same under TOML (`tomllib`) and INI (`configparser`) — D-13 |
 
 POSIX shell, Linux only. Scripts must not print secrets or local absolute paths, must check required tools before working, must keep generated output under declared project paths, and must not use the network unless the user asks.

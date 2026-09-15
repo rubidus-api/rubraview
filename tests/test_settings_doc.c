@@ -56,6 +56,8 @@ static const expected_t EXPECTED[] = {
     { "curation", "dir_7", RUBRAVIEW_SETTING_PATH, RUBRAVIEW_TAB_FILES, 0.0, 0.0, 0.0, 0.0, "", true },
     { "curation", "dir_8", RUBRAVIEW_SETTING_PATH, RUBRAVIEW_TAB_FILES, 0.0, 0.0, 0.0, 0.0, "", true },
     { "curation", "dir_9", RUBRAVIEW_SETTING_PATH, RUBRAVIEW_TAB_FILES, 0.0, 0.0, 0.0, 0.0, "", true },
+    { "audio", "volume", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_AUDIO, 100.0, 0.0, 100.0, 5.0, "", true },
+    { "audio", "mute", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_AUDIO, 0.0, 0.0, 1.0, 1.0, "", true },
     { "audio", "gapless", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_AUDIO, 1.0, 0.0, 1.0, 1.0, "", false },
     { "audio", "crossfade_seconds", RUBRAVIEW_SETTING_FLOAT, RUBRAVIEW_TAB_AUDIO, 0.0, 0.0, 5.0, 0.1, "", false },
     { "audio", "replaygain", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_AUDIO, 0.0, 0.0, 2.0, 1.0, "off|track|album", false },
@@ -67,6 +69,8 @@ static const expected_t EXPECTED[] = {
     { "video", "subtitle_outline", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_VIDEO, 2.0, 0.0, 8.0, 1.0, "", true },
     { "video", "ab_step_seconds", RUBRAVIEW_SETTING_FLOAT, RUBRAVIEW_TAB_VIDEO, 0.5, 0.1, 1.0, 0.1, "", false },
     { "video", "video_wheel_zoom", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_VIDEO, 1.0, 0.0, 1.0, 1.0, "", false },
+    { "ui", "menubox_opacity", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_DISPLAY, 90.0, 30.0, 100.0, 5.0, "", false },
+    { "ui", "toolbox_opacity", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_DISPLAY, 90.0, 30.0, 100.0, 5.0, "", false },
     { "display", "tile_base_px", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_DISPLAY, 1.0, 0.0, 2.0, 1.0, "48|64|96", false },
     { "display", "color_management", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_DISPLAY, 1.0, 0.0, 1.0, 1.0, "", false },
     { "display", "accent", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_DISPLAY, 0.0, 0.0, 5.0, 1.0, "crimson|cobalt|emerald|amber|teal|purple", false },
@@ -130,7 +134,7 @@ int main(void) {
         }
         assert(eq(rubraview_settings_tab_name(RUBRAVIEW_TAB_VIDEO), "Video"));
     }
-    printf("  [PASS] The built-in document holds exactly the 48 settings the C table held\n");
+    printf("  [PASS] The built-in document holds the 48 settings the C table held and the 4 D-15 added\n");
 
     /* 2. Every kind of line, and what each one records. */
     {
