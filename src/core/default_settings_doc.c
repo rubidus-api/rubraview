@@ -63,6 +63,9 @@ static const char *const PARTS[] = {
 "  path   curation.dir_9           \"Folder 9\"                wired\n"
 "\n",
 "page audio \"Audio\"\n"
+"  section \"Volume\"\n"
+"  int    audio.volume             \"Volume\"                  0..100 step 5 unit \"%\" = 100 wired\n"
+"  toggle audio.mute               \"Mute\"                    = false wired\n"
 "  section \"Playback\"\n"
 "  toggle audio.gapless            \"Gapless playback\"        = true\n"
 "  float  audio.crossfade_seconds  \"Crossfade\"               0.0..5.0 step 0.1 unit \"s\" = 0.0\n"
@@ -84,6 +87,9 @@ static const char *const PARTS[] = {
 "  toggle video.video_wheel_zoom   \"Wheel zoom during video\" = true\n"
 "\n",
 "page display \"Display\"\n"
+"  section \"Floating boxes\"\n"
+"  int    ui.menubox_opacity       \"Menu box opacity\"        30..100 step 5 unit \"%\" = 90\n"
+"  int    ui.toolbox_opacity       \"Toolbox opacity\"         30..100 step 5 unit \"%\" = 90\n"
 "  section \"Tiles and colour\"\n"
 "  choice display.tile_base_px     \"Touch tile size\"         48 | 64 | 96 = 64\n"
 "  toggle display.color_management \"Use embedded ICC profiles\" = true\n"

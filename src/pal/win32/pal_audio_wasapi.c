@@ -31,12 +31,28 @@
 static const GUID RV_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
 static const GUID RV_IID_IMMDeviceEnumerator  = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
 static const GUID RV_IID_IAudioClient         = {0x1CB9AD4C, 0xDBFA, 0x4C32, {0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2}};
+static const GUID RV_IID_ISimpleAudioVolume   = {0x87CE5498, 0x68D6, 0x44E5, {0x92, 0x15, 0x6D, 0xA4, 0x7E, 0xF8, 0x83, 0xD8}};
 static const GUID RV_IID_IAudioRenderClient   = {0xF294ACFC, 0x3146, 0x4483, {0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2}};
 static const GUID RV_SUBTYPE_IEEE_FLOAT       = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
 #define DEVICE_BUFFER_100NS 1000000   /* 100 ms: generous for a viewer, never a glitch */
 #define OPEN_TIMEOUT_MS 3000
 #define FLUSH_TIMEOUT_MS 2000
+
+/* D-15: the session volume, for every output of this process. A change
+   bumps the generation; each output thread applies it when it sees a
+   generation newer than the one it applied. */
+static _Atomic uint32_t volume_permille = 1000;
+static _Atomic bool volume_muted = false;
+static _Atomic uint32_t volume_generation = 1;
+
+void rubraview_pal_audio_set_volume(double volume, bool muted) {
+    if (!(volume >= 0.0)) volume = 0.0;
+    if (volume > 1.0) volume = 1.0;
+    atomic_store_explicit(&volume_permille, (uint32_t)lround(volume * 1000.0), memory_order_relaxed);
+    atomic_store_explicit(&volume_muted, muted, memory_order_relaxed);
+    atomic_fetch_add_explicit(&volume_generation, 1, memory_order_release);
+}
 
 struct rubraview_audio_out {
     HANDLE thread;
@@ -80,14 +96,26 @@ static void publish(rubraview_audio_out_t *out, double heard_seconds) {
     atomic_store_explicit(&out->seq, s + 2, memory_order_release);
 }
 
+static void apply_volume(ISimpleAudioVolume *volume, uint32_t *applied) {
+    uint32_t generation = atomic_load_explicit(&volume_generation, memory_order_acquire);
+    if (!volume || generation == *applied) return;
+    float level = (float)atomic_load_explicit(&volume_permille, memory_order_relaxed) / 1000.0f;
+    bool muted = atomic_load_explicit(&volume_muted, memory_order_relaxed);
+    ISimpleAudioVolume_SetMasterVolume(volume, level, NULL);
+    ISimpleAudioVolume_SetMute(volume, muted ? TRUE : FALSE, NULL);
+    *applied = generation;
+}
+
 static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderClient *render,
-                UINT32 buffer_frames) {
+                ISimpleAudioVolume *volume, UINT32 buffer_frames) {
     uint64_t submitted = 0;
     double base = 0.0;
     bool started = false;
+    uint32_t volume_applied = 0;
     publish(out, 0.0);
 
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
+        apply_volume(volume, &volume_applied);   /* before the wait: a new output starts at the right level */
         WaitForSingleObject(out->wake, 50);
 
         uint64_t request = atomic_load_explicit(&out->flush_request, memory_order_acquire);
@@ -144,6 +172,7 @@ static DWORD WINAPI audio_thread(LPVOID arg) {
     IMMDevice *device = NULL;
     IAudioClient *client = NULL;
     IAudioRenderClient *render = NULL;
+    ISimpleAudioVolume *volume = NULL;
     UINT32 buffer_frames = 0;
 
     bool ok = SUCCEEDED(CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
@@ -170,11 +199,15 @@ static DWORD WINAPI audio_thread(LPVOID arg) {
              SUCCEEDED(IAudioClient_SetEventHandle(client, out->wake)) &&
              SUCCEEDED(IAudioClient_GetBufferSize(client, &buffer_frames)) && buffer_frames > 0 &&
              SUCCEEDED(IAudioClient_GetService(client, &RV_IID_IAudioRenderClient, (void**)&render)) && render;
+        /* Volume is a nicety: an output that cannot give it still plays. */
+        if (ok && FAILED(IAudioClient_GetService(client, &RV_IID_ISimpleAudioVolume, (void**)&volume))) volume = NULL;
     }
 
     out->opened = ok;
     SetEvent(out->ready);
-    if (ok) run(out, client, render, buffer_frames);
+    if (ok) run(out, client, render, volume, buffer_frames);
+
+    if (volume) ISimpleAudioVolume_Release(volume);
 
     if (render) IAudioRenderClient_Release(render);
     if (client) IAudioClient_Release(client);

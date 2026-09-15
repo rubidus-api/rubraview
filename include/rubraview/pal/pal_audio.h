@@ -52,6 +52,14 @@ bool rubraview_pal_audio_position(rubraview_audio_out_t *out, double *out_positi
 /** Everything written has been played: the ring is empty and so is the device buffer. */
 bool rubraview_pal_audio_drained(rubraview_audio_out_t *out);
 
+/**
+ * D-15: the program's volume, 0.0–1.0, and whether it is muted. It is the
+ * Windows audio session's (`ISimpleAudioVolume`) — one for the whole
+ * process, so it holds across files and outputs — and every open output,
+ * and every one opened later, applies it. Safe from any thread.
+ */
+void rubraview_pal_audio_set_volume(double volume, bool muted);
+
 #ifdef __cplusplus
 }
 #endif

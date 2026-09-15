@@ -82,7 +82,7 @@ bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b)
  * actions unreachable. The rule follows the viewer's dispatch: the
  * `navigation` context is asked first, then the global one, then `view`
  * — so a key in two of those three always reaches the same action and
- * never the other. `slideshow`, `animation` and `subpage` are asked
+ * never the other. `slideshow`, `media` and `subpage` are asked
  * *before* them only while a slide show runs or an animation or
  * multi-page file is open; a key they share with the rest keeps both
  * meanings (Space pauses a GIF and turns a page), so that is not a clash.
