@@ -175,6 +175,22 @@ void rubraview_box_dismiss(rubraview_box_t *box);      /* Esc, or a click outsid
  */
 bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace_seconds);
 
+/* ---- D-15: how see-through a box is ---- */
+
+#define RUBRAVIEW_BOX_OPACITY_MIN 30.0    /* percent: never so faint the box cannot be found */
+#define RUBRAVIEW_BOX_OPACITY_MAX 100.0
+#define RUBRAVIEW_BOX_OPACITY_STEP 5.0
+
+/**
+ * Alt + wheel over a box: `notches` wheel notches (positive away from the
+ * reader, more opaque) from `percent`, on the 5 % grid, kept within
+ * 30–100 %.
+ */
+double rubraview_box_opacity_step(double percent, double notches);
+
+/** A colour with its alpha scaled by `percent` (of what it had); red, green and blue untouched. */
+uint32_t rubraview_box_fade(uint32_t argb, double percent);
+
 #ifdef __cplusplus
 }
 #endif
