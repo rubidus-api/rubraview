@@ -10,7 +10,8 @@ const char *rubraview_default_keymap(void) {
     "[ui]\n"
     "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
     "toggle_menu = \"Tab, F1\"\n"
-    "toggle_toolbox = \"T, F2\"\n"
+    /* F2 is rename's (§3.18.2), as in Explorer — owner, 2026-09-15 (D-14). */
+    "toggle_toolbox = \"T\"\n"
     "open_picker = \"O, Ctrl+O\"\n"
     "open_folder = \"Ctrl+Shift+O\"\n"
     "toggle_filmstrip = \"F4\"\n"
