@@ -171,7 +171,10 @@ bool rubraview_box_dock(rubraview_box_t *box);
 void rubraview_box_hover_enter(rubraview_box_t *box);
 void rubraview_box_hover_leave(rubraview_box_t *box);
 void rubraview_box_click_anchor(rubraview_box_t *box); /* toggles the click-to-lock state */
-void rubraview_box_dismiss(rubraview_box_t *box);      /* Esc, or a click outside */
+void rubraview_box_dismiss(rubraview_box_t *box);      /* Esc, or a click outside; a pinned box stays */
+
+/** §3.6.1 pin: pinned, the box is open and stays open — no idle collapse, no dismissal. */
+void rubraview_box_set_pinned(rubraview_box_t *box, bool pinned);
 
 /**
  * §3.6.3: advance the idle timer; an unpinned, hover-expanded box

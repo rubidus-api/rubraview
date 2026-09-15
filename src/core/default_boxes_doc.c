@@ -159,6 +159,8 @@ static const char *const PARTS[] = {
 "  item toggle_filmstrip       \"Strip\"\n"
 "  item toggle_osd             \"Info\"\n"
 "  item toggle_toolbox         \"Toolbox\"\n"
+"  item toggle_toolbox_pin     \"Pin toolbox\"\n"
+"  item toggle_toolbox_detach  \"Detach toolbox\"\n"
 "  item toggle_fullscreen      \"Full\"\n"
 "  menu \"Opacity\"\n"
 "    item boxes_opacity_100    \"100%\"\n"

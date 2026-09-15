@@ -12,6 +12,9 @@ const char *rubraview_default_keymap(void) {
     "toggle_menu = \"Tab, F1\"\n"
     /* F2 is rename's (§3.18.2), as in Explorer — owner, 2026-09-15 (D-14). */
     "toggle_toolbox = \"T\"\n"
+    /* RFC-0002 Q6: pin it open, or give it a window of its own. */
+    "toggle_toolbox_pin = \"Shift+T\"\n"
+    "toggle_toolbox_detach = \"Ctrl+T\"\n"
     "open_picker = \"O, Ctrl+O\"\n"
     "open_folder = \"Ctrl+Shift+O\"\n"
     "toggle_filmstrip = \"F4\"\n"

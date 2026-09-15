@@ -31,6 +31,10 @@ This project follows Keep a Changelog.
   toolbox's speed tile cycles the usual ones); the sound is resampled, so
   its pitch follows. A-B repeat: `[` sets A, `]` sets B, `\` turns it off,
   or the toolbox's A-B tile.
+- The toolbox can be pinned open (`Shift+T`, Show › Pin toolbox; its
+  anchor shows `*`) and detached into a small window of its own that stays
+  on top (`Ctrl+T`, Show › Detach toolbox, or drag its anchor past the edge);
+  `Dock` brings it back.
 - The window from the keyboard (D-16): `Ctrl` + arrows make it narrower,
   wider, shorter or taller, `Alt` + arrows move it, 40 px a step.
 - `scripts/check-actions.py`: every key, tile and menu item is handled, and

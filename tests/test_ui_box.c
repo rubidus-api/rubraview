@@ -458,6 +458,33 @@ static void test_menu(void) {
     printf("  [PASS] Reset returns the menu to its root\n");
 }
 
+/* §3.6.1 pin and detach, as RFC-0002 Q6 builds them. */
+static void test_pin_and_detach(void) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
+    rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 100.0, 100.0, 8);
+    rubraview_box_set_pinned(&box, true);
+    assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN && box.pinned);
+    rubraview_box_dismiss(&box);
+    assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);                 /* Esc and outside clicks leave it */
+    assert(!rubraview_box_tick(&box, 10.0, 0.5));
+    rubraview_box_click_anchor(&box);
+    assert(box.state == RUBRAVIEW_BOX_COLLAPSED && !box.pinned);    /* its own anchor closes it, pin and all */
+
+    /* Open, and dragged by its anchor past the right edge, it detaches —
+       even though the open grid itself is kept inside the view. */
+    box.view_width = 1000.0;
+    box.view_height = 800.0;
+    rubraview_box_click_anchor(&box);
+    rubraview_box_drag_to(&box, &m, 1100.0, 300.0, 1000.0, 800.0);
+    assert(rubraview_box_bounds(&box, &m).x + rubraview_box_bounds(&box, &m).width <= 1000.0);
+    assert(rubraview_box_update_detach(&box, &m, 1000.0, 800.0, 24.0));
+    assert(box.state == RUBRAVIEW_BOX_DETACHED);
+    rubraview_box_dismiss(&box);
+    assert(box.state == RUBRAVIEW_BOX_DETACHED);
+    assert(rubraview_box_dock(&box) && box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+    printf("  [PASS] A pinned box stays; dragged out by its anchor the toolbox detaches, and docks back open\n");
+}
+
 /* D-15: Alt + wheel opacity — the 5 % grid, the 30 % floor, alpha only. */
 static void test_opacity(void) {
     assert(rubraview_box_opacity_step(90.0, 1.0) == 95.0);
@@ -478,6 +505,7 @@ int main(void) {
     test_two_part_anchor();
     test_menu();
     test_opacity();
+    test_pin_and_detach();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;
 }

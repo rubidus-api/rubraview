@@ -41,6 +41,7 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN,  /* §3.6.5 GID_PAN: two-finger drag */
     RUBRAVIEW_WINDOW_EVENT_DROP,         /* §3.19.2: files dropped on the window */
     RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST, /* §3.19.1: another instance handed us a path */
+    RUBRAVIEW_WINDOW_EVENT_MOVED,        /* the reader finished moving the window (RFC-0002 Q6: docking) */
 } rubraview_window_event_kind_t;
 
 typedef enum rubraview_mouse_button {
@@ -99,6 +100,12 @@ typedef struct rubraview_window_config {
      * and closing it ends nothing but itself. NULL for the main window.
      */
     rubraview_window_t *owner;
+    /**
+     * RFC-0002 Q6: a detached toolbox — a small popup with no frame, on top
+     * of other windows, without a taskbar button, that does not take the
+     * keyboard from the viewer when clicked, and can be made see-through.
+     */
+    bool tool_window;
 } rubraview_window_config_t;
 
 /* ---- §3.19 lifecycle and shell integration ---- */
@@ -162,6 +169,9 @@ bool rubraview_pal_window_get_frame(const rubraview_window_t *window,
                                     int32_t *out_x, int32_t *out_y, int32_t *out_width, int32_t *out_height);
 /** Move and size the frame; a place off every screen is pulled back onto the nearest one. */
 void rubraview_pal_window_set_frame(rubraview_window_t *window, int32_t x, int32_t y, int32_t width, int32_t height);
+
+/** RFC-0002 Q6: how opaque a tool window is, 30–100 %. Other windows ignore it. */
+void rubraview_pal_window_set_opacity(rubraview_window_t *window, double percent);
 
 /** Hide a window without destroying it, or show it again in front. */
 void rubraview_pal_window_set_visible(rubraview_window_t *window, bool visible);
