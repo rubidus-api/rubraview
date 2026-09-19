@@ -8,11 +8,26 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The batch dialog's **Run on this folder** runs (RV-068). It builds the
+  same job `--batch` builds and hands it to the same engine, over the
+  folder being read, writing into a `rubraview-out` folder beside those
+  pictures so a run can never overwrite an original. The viewer does not
+  answer while the run goes; it says how many were written, skipped and
+  failed when it ends.
+
 - Keys can be exported to a file and imported from one, on the settings
   window's Keys page (§3.22.2). The file dialogs now show their title and
   file type, and a name saved without an extension gets `.ini`.
 
 ### Fixed
+
+- With a Korean IME in Hangul mode, letter shortcuts did nothing: the IME
+  took the keys and the window never saw them. The viewer's window is no
+  longer attached to the IME, so `F`, `T` and the rest work in either mode
+  (RFC-0003 K5).
+- A batch run that converts the format wrote the new bytes under the old
+  extension — a PNG inside a `.jpg`. The output is named after the format
+  it actually holds. This was true of `--batch --format=` too.
 
 - Dragging the toolbox's anchor past the window's edge now detaches it, as
   §3.6.1 says: the window did not keep the mouse while a button was held,

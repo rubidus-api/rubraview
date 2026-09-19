@@ -59,5 +59,11 @@ Run after T025, T031 and T037.
   only the ratio choice is reachable from the panel.
 - **The curve widget is not drawn.** Same situation: the curve model is
   complete and tested (T039), the widget is not built.
-- **The batch dialog's `Run` button closes the dialog without running.**
-  The command line is the working path; the dialog builds no job yet.
+- ~~**The batch dialog's `Run` button closes the dialog without running.**~~
+  Built 2026-09-20 (RV-068) and measured on the VM: with **Resize %** near
+  50, `Run on this folder` wrote three files into `<folder>\rubraview-out\`
+  at exactly half the pixels (4032x3024 → 2016x1512, 1600x1200 → 800x600,
+  800x600 → 400x300); with **Format** on PNG it wrote `a_photo.png` and
+  `b_exif6.png`, PNG bytes under PNG names. Not measured: a folder large
+  enough to show how long the viewer stays unresponsive, and Grayscale and
+  Privacy clean through the dialog.
