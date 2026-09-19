@@ -107,6 +107,12 @@ rubraview.exe --batch --resize=50% --format=webp "D:\Photos"
 No window opens. It prints how many files it converted, skipped and
 failed.
 
+`Ctrl+B` does the same thing from the viewer, over the folder you are
+reading: choose a size, a format, grayscale or privacy clean, then **Run on
+this folder**. The results go into a `rubraview-out` folder beside those
+pictures, so a run never overwrites an original. The viewer does not answer
+while it runs, and says what it did when it ends.
+
 | Option | What it does |
 |---|---|
 | `--resize=50%` `--resize=1920x1080` `--resize=w800` `--resize=h600` | How to resize |
@@ -182,7 +188,8 @@ listed rather than hidden so you can see what is coming.
 - **Reading a `.cbr` (RAR) archive.**
 - **Typing a Korean or Japanese filename in the rename box.** You can
   rename such a file, but not type one — the box takes plain characters
-  for now.
+  for now. (The keys themselves work with the Korean IME in Hangul mode:
+  `F` is still full screen.)
 - **Dropping several files at once** opens the first of them.
 
 ## Keys

@@ -147,6 +147,21 @@ Hangul mode. Switching the VM user's input layout would change it for the
 other session that shares that desktop, so it was not done. Nothing was
 changed in the viewer. Still to check on a machine typing Korean.
 
+**Measured again 2026-09-20 (K5): it does reproduce, and it is fixed.** The
+VM had been logged in again with the Korean IME (`hkl=0x04120412`), so the
+Hangul key now really switches the session between modes. In Hangul mode
+`F` did nothing at all — not full screen, not anything — and `T` and
+`Ctrl+B` were dead too; in English mode the same keys worked. The IME was
+taking the keys to compose Hangul with and the window never saw them; asking
+for the key behind `VK_PROCESSKEY` did not help, because no key message
+arrived. The fix is that the viewer's window is detached from the IME at
+creation (`ImmAssociateContext(hwnd, NULL)`), since nothing in it is a text
+field — the rename box draws its own characters. In Hangul mode `F` now
+turns full screen on and off, and `T` and `Ctrl+B` open their windows. The
+context is kept on the window so a real text field can be given it back.
+Typing Hangul into the rename box is still not possible; that is the
+separate gap the manual lists.
+
 ### 5.5 Alt
 
 `Alt` alone must not open the window's system menu (RFC-0002 §6.2 uses
