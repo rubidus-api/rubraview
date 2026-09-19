@@ -352,6 +352,7 @@ static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
+static void panel_run_batch(app_state_t *app);
 
 static size_t page_count(const app_state_t *app) {
     return app->source.page_count;
@@ -3187,6 +3188,7 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_BATCH_RUN:
             /* The dialog builds the same job the command line builds,
                and hands it to the same engine (§3.11). */
+            panel_run_batch(app);
             panel_close(app);
             break;
         default: break;
@@ -4472,6 +4474,25 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
                           const rubraview_batch_input_t *input, u8str_t output_name, void *ctx) {
     batch_ctx_t *bc = (batch_ctx_t*)ctx;
     u8str_t out_dir = bc->output_dir.len > 0 ? bc->output_dir : rubraview_path_dirname(input->path);
+    /* The name carries the source's extension. When the job converts, the
+       file must be named after what is actually written, or a PNG lands
+       in a .jpg and nothing can open it. */
+    if (bc->cli->export_options.format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
+        u8str_t want = rubraview_export_extension(bc->cli->export_options.format);
+        u8str_t stem = rubraview_path_stem(output_name);
+        if (want.len > 0 && stem.len > 0) {
+            size_t n = stem.len + 1 + want.len;
+            proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
+            if (proven_is_ok(res.err)) {
+                char *p = (char*)res.value.ptr;
+                memcpy(p, stem.ptr, stem.len);
+                p[stem.len] = '.';
+                memcpy(p + stem.len + 1, want.ptr, want.len);
+                p[n] = '\0';
+                output_name = (u8str_t){ .ptr = p, .len = n };
+            }
+        }
+    }
     u8str_t out_path = rubraview_path_join(arena, out_dir, output_name);
     if (out_path.len == 0) return false;
 
@@ -4604,6 +4625,120 @@ static void append_number(char *buf, size_t cap, size_t *pos, size_t value) {
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text) {
     while (*text && *pos + 1 < cap) buf[(*pos)++] = *text++;
     buf[*pos] = '\0';
+}
+
+/* RV-068: the batch dialog's Run. It builds the same job `--batch`
+   builds and hands it to the same engine, so the dialog cannot drift
+   from the command line. Two deliberate differences: the run is over
+   the folder being read (not a path typed anywhere), and it writes into
+   a `rubraview-out` folder beside those pictures, so pressing Run can
+   never overwrite an original. The pass happens on this thread — the
+   viewer does not answer until it ends. */
+static double panel_value_of(const rubraview_panel_t *panel, int32_t id, double fallback) {
+    for (size_t i = 0; i < panel->row_count; ++i) {
+        if (panel->rows[i].id == id) return panel->rows[i].value;
+    }
+    return fallback;
+}
+
+static void panel_run_batch(app_state_t *app) {
+    if (app->source_dir.len == 0 || app->archive_bytes.len > 0) {
+        osd_say(app, U8("batch runs on a folder of pictures, not on an archive"));
+        return;
+    }
+
+    rubraview_cli_result_t cli = {0};
+    cli.export_options = app->export_options;
+    cli.input = app->source_dir;
+    cli.job.actions = cli.actions;
+    cli.job.naming_pattern = U8("{name}.{ext}");
+    cli.job.include_pattern = U8(IMAGE_FILTER);
+
+    double percent = panel_value_of(&app->panel, PANEL_BATCH_RESIZE, 100.0);
+    int32_t filter = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FILTER, 3.0);
+    int32_t format = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FORMAT, 0.0);
+    bool grayscale = panel_value_of(&app->panel, PANEL_BATCH_GRAY, 0.0) > 0.5;
+    bool privacy = panel_value_of(&app->panel, PANEL_PRIVACY, 0.0) > 0.5;
+
+    if (percent < 99.99 || percent > 100.01) {
+        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
+        a->kind = RUBRAVIEW_BATCH_RESIZE;
+        a->params.resize.mode = RUBRAVIEW_RESIZE_PERCENT;
+        a->params.resize.value_a = percent;
+        a->params.resize.filter = (rubraview_resample_filter_t)
+            (filter < 0 ? 0 : filter > RUBRAVIEW_FILTER_LANCZOS3 ? RUBRAVIEW_FILTER_LANCZOS3 : filter);
+    }
+    if (grayscale) {
+        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
+        a->kind = RUBRAVIEW_BATCH_COLOR_ADJUST;
+        a->params.color.grayscale = true;
+    }
+    if (privacy) {
+        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
+        a->kind = RUBRAVIEW_BATCH_PRIVACY_SCRUB;
+        a->params.privacy.strip_all_exif = true;
+        a->params.privacy.strip_xmp = true;
+        a->params.privacy.strip_iptc = true;
+        cli.export_options.privacy_clean = true;
+    }
+    if (format > 0 && format <= RUBRAVIEW_EXPORT_ICO) {
+        cli.export_options.format = (rubraview_export_format_t)format;
+    }
+    if (cli.job.action_count == 0 && cli.export_options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
+        osd_say(app, U8("nothing to do: choose a size, a format, grayscale or privacy clean"));
+        return;
+    }
+
+    u8str_t out_dir = rubraview_path_join(app->arena, app->source_dir, U8("rubraview-out"));
+    if (out_dir.len == 0 || !rubraview_pal_fs_make_dirs(out_dir)) {
+        osd_say(app, U8("could not make the rubraview-out folder"));
+        return;
+    }
+
+    void *list_memory = malloc(BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t) + 1024u * 1024u);
+    void *work_memory = malloc(BATCH_WORK_ARENA_BYTES);
+    if (!list_memory || !work_memory) {
+        free(list_memory); free(work_memory);
+        osd_say(app, U8("out of memory for the batch run"));
+        return;
+    }
+    proven_arena_t list = proven_arena_create(
+        (proven_mem_mut_t){ .ptr = (proven_byte_t*)list_memory,
+                            .size = BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t) + 1024u * 1024u });
+    proven_result_mem_mut_t res = proven_arena_alloc(&list, BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t));
+    size_t count = 0;
+    rubraview_batch_input_t *inputs = NULL;
+    if (proven_is_ok(res.err)) {
+        inputs = (rubraview_batch_input_t*)(void*)res.value.ptr;
+        count = collect_inputs(&list, app->source_dir, false, inputs, BATCH_MAX_INPUTS, 0);
+    }
+    if (count == 0) {
+        free(list_memory); free(work_memory);
+        osd_say(app, U8("no files in this folder to work on"));
+        return;
+    }
+
+    osd_say(app, U8("working…"));
+    render_frame(app);
+
+    proven_arena_t work = proven_arena_create(
+        (proven_mem_mut_t){ .ptr = (proven_byte_t*)work_memory, .size = BATCH_WORK_ARENA_BYTES });
+    batch_ctx_t ctx = { .cli = &cli, .output_dir = out_dir, .written = 0 };
+    rubraview_batch_report_t report = rubraview_batch_run(&work, &cli.job, inputs, count,
+                                                          U8(""), batch_process, &ctx, NULL, 0);
+    free(list_memory);
+    free(work_memory);
+
+    char line[160];
+    size_t pos = 0;
+    line[0] = '\0';
+    append_number(line, sizeof(line), &pos, report.processed);
+    append_text(line, sizeof(line), &pos, " written to rubraview-out, ");
+    append_number(line, sizeof(line), &pos, report.skipped);
+    append_text(line, sizeof(line), &pos, " skipped, ");
+    append_number(line, sizeof(line), &pos, report.failed);
+    append_text(line, sizeof(line), &pos, " failed");
+    osd_say(app, cstr(line));
 }
 
 static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {

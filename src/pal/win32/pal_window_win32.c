@@ -5,6 +5,7 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <windowsx.h>
+#include <imm.h>
 #include <dwmapi.h>
 #include <string.h>
 #include "rubraview/pal/pal_window.h"
@@ -45,6 +46,10 @@ struct rubraview_window {
     ULONGLONG last_zoom_distance;
     POINT     last_pan_point;
     bool      gesture_in_progress;
+
+    /* K5: the IME context this window was born with, taken off it so the
+       shortcuts work in Hangul mode. */
+    HIMC      saved_imc;
 
     /* §3.19: dropped and handed-over paths, held until the next poll.
        The event carries pointers into this, so it has to outlive the
@@ -314,7 +319,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN: {
-            const char *name = vk_to_key_name(wparam);
+            /* RFC-0003 K5: with a Korean IME in Hangul mode, every letter
+               key arrives as VK_PROCESSKEY — the IME took it to compose
+               with, and `F` stopped meaning fullscreen. The key the reader
+               actually pressed is still there to be asked for, so the
+               shortcuts work in either mode. */
+            WPARAM key = wparam;
+            if (key == VK_PROCESSKEY) {
+                UINT real = ImmGetVirtualKey(hwnd);
+                if (real != 0 && real != VK_PROCESSKEY) key = (WPARAM)real;
+            }
+            const char *name = vk_to_key_name(key);
             if (name) {
                 rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_KEY_DOWN };
                 e.key.combo.modifiers = current_modifiers();
@@ -551,6 +566,14 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
 
     w->hwnd = hwnd;
     update_dpi_scale(w);
+
+    /* RFC-0003 K5: with a Korean IME in Hangul mode the letters never
+       reached this window at all — the IME took them to compose with, so
+       `F` and `T` did nothing. Nothing here is a text field (the rename
+       box draws its own characters), so the window is detached from the
+       IME and the keys arrive as keys. The context is kept, so a text
+       field can have it back when there is one to give it to. */
+    w->saved_imc = ImmAssociateContext(hwnd, NULL);
 
     if (w->frameless) {
         /* §3.21.1: keep the OS drop shadow even without a visible frame. */
