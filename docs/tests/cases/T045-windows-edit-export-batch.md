@@ -67,3 +67,17 @@ Run after T025, T031 and T037.
   `b_exif6.png`, PNG bytes under PNG names. Not measured: a folder large
   enough to show how long the viewer stays unresponsive, and Grayscale and
   Privacy clean through the dialog.
+
+## Still to measure on the VM (2026-09-20)
+
+Written and built, but not yet run on the Windows VM — the desktop was in
+use by someone else and sending input would have disturbed them:
+
+- the batch run as a **separate process in its own console window**
+  (`--pause` holding it open), and that it carries on when the viewer is
+  closed or hangs;
+- the **crop overlay** dragged on the picture;
+- the **curve widget** under the workbench panel;
+- **several files dropped at once** opening as one set. (A drop cannot be
+  sent from a script the way keys and clicks can, so this one needs a
+  person at the machine.)
