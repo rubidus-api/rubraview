@@ -8,12 +8,23 @@ This project follows Keep a Changelog.
 
 ### Added
 
-- The batch dialog's **Run on this folder** runs (RV-068). It builds the
-  same job `--batch` builds and hands it to the same engine, over the
-  folder being read, writing into a `rubraview-out` folder beside those
-  pictures so a run can never overwrite an original. The viewer does not
-  answer while the run goes; it says how many were written, skipped and
-  failed when it ends.
+- The batch dialog's **Run on this folder** runs (RV-068). It writes the
+  command line `--batch` already understands and starts a second copy of
+  the program with it, in a console window of its own, over the folder
+  being read and into a `rubraview-out` folder beside those pictures — so
+  a run can never overwrite an original, keeps going when the viewer is
+  closed, and survives a viewer that hangs (owner, 2026-09-20). The window
+  stays open at the end (`--pause`) so the counts can be read.
+- The crop rectangle can be dragged on the picture (§3.13): what is cut
+  away is dimmed, the corners carry grips, and the size is written above
+  it. The model — normalising, the ratio lock, staying inside the image —
+  was already there; this is the overlay that drives it.
+- The curve widget is drawn, under the workbench panel: the active
+  channel's curve over a quarters grid, its control points as handles.
+  Drag one to move it, right-click an interior one to take it off.
+- Several files dropped together open as a set of exactly those files,
+  in natural name order, instead of only the first one (§3.19.2). They
+  may come from different folders.
 
 - Keys can be exported to a file and imported from one, on the settings
   window's Keys page (§3.22.2). The file dialogs now show their title and

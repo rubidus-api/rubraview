@@ -147,6 +147,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (equals(arg, "--probe-media")) { result.probe_media = true; continue; }
         if (equals(arg, "--probe-gpu")) { result.probe_gpu = true; continue; }
         if (equals(arg, "--recursive")) { result.recursive = true; continue; }
+        if (equals(arg, "--pause")) { result.pause_at_end = true; continue; }
         if (equals(arg, "--grayscale")) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_COLOR_ADJUST);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
