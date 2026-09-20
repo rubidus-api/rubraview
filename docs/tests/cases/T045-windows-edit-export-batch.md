@@ -68,16 +68,37 @@ Run after T025, T031 and T037.
   enough to show how long the viewer stays unresponsive, and Grayscale and
   Privacy clean through the dialog.
 
+## Measured on the Windows 11 VM, 2026-09-20 (after 0.0.4)
+
+- **The batch run is its own process, in its own window.** Run on a folder
+  of 12 photos started a second `rubraview-v0.0.4.exe`; the viewer was then
+  **killed** and the run carried on and finished all 12 at half size
+  (4032x3024 → 2016x1512). Its console window printed
+  `rubraview: 12 converted, 0 skipped, 0 failed` / `press a key to close
+  this window` and stayed open.
+  - Two faults found and fixed on the way: the command line was built with
+    a leading space, so `CreateProcess` refused it ("could not start the
+    batch run" on screen, nothing written); and a GUI-subsystem program
+    started with a console of its own has empty standard handles, so
+    nothing was printed and nothing waited — the console is now opened by
+    name (`CONOUT$` / `CONIN$`) when there is no standard handle.
+- **The curve widget** is drawn beside the workbench panel (under it when
+  the window is tall enough). Dragging the middle of the line added a
+  control point and bent the curve.
+  - Fault found and fixed: the box is outside the panel's rectangle, and
+    "a click outside closes the panel" shut the workbench the moment a
+    point was grabbed. The widget is asked before that rule now, and so is
+    the crop drag.
+- **The crop overlay**: dragging 300,200 → 700,480 on the picture drew the
+  rectangle with the rest of the picture dimmed, corner grips, and
+  `1608 x 1126` above it — the size in the image's own pixels.
+
 ## Still to measure on the VM (2026-09-20)
 
 Written and built, but not yet run on the Windows VM — the desktop was in
 use by someone else and sending input would have disturbed them:
 
-- the batch run as a **separate process in its own console window**
-  (`--pause` holding it open), and that it carries on when the viewer is
-  closed or hangs;
-- the **crop overlay** dragged on the picture;
-- the **curve widget** under the workbench panel;
-- **several files dropped at once** opening as one set. (A drop cannot be
-  sent from a script the way keys and clicks can, so this one needs a
-  person at the machine.)
+- **several files dropped at once** opening as one set. A drop cannot be
+  sent from a script the way keys and clicks can — `WM_DROPFILES` carries a
+  handle that only means something inside the process that made it — so
+  this one needs a person to drag files onto the window.
