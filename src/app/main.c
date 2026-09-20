@@ -344,6 +344,11 @@ static void rename_commit(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
 static void panel_close(app_state_t *app);
+static bool curve_widget_press(app_state_t *app, double px, double py, bool remove);
+static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app);
+static bool edit_panel_open(const app_state_t *app);
+static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x, int32_t *out_y);
+static bool point_in_curve_widget(const app_state_t *app, double px, double py);
 static void append_number(char *buf, size_t cap, size_t *pos, size_t value);
 static void history_remember(app_state_t *app);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
@@ -3253,6 +3258,11 @@ static void panel_button(app_state_t *app, int32_t index) {
 static bool panel_handle_press(app_state_t *app, double px, double py) {
     if (!app->panel.open) return false;
 
+    /* The curve box is drawn outside the panel's own rectangle, so the
+       rule below ("a click outside closes it") would shut the workbench
+       the moment a point was grabbed. It is asked first. */
+    if (curve_widget_press(app, px, py, false)) return true;
+
     int32_t row = -1;
     rubraview_panel_event_t event = rubraview_panel_press(&app->panel, px, py, &row);
     if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) {
@@ -4093,11 +4103,21 @@ static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double side = 168.0 * dpi;
     double gap = 8.0 * dpi;
-    double x = app->panel.bounds.x;
-    double y = app->panel.bounds.y + app->panel.bounds.height + gap;
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
-    if (y + side > (double)win_h) y = (double)win_h - side - gap;   /* keep it on screen */
+
+    /* Under the panel when there is room for the whole box; beside it
+       otherwise, which is what a short window gives (measured on the VM:
+       under a full-height workbench the box ran off the bottom edge and
+       lay over the panel's last rows). */
+    double x = app->panel.bounds.x;
+    double y = app->panel.bounds.y + app->panel.bounds.height + gap;
+    if (y + side + gap > (double)win_h) {
+        x = app->panel.bounds.x - side - gap;
+        y = app->panel.bounds.y;
+    }
+    if (x < gap) x = gap;
+    if (y + side > (double)win_h) y = (double)win_h - side - gap;
     if (y < 0.0) y = 0.0;
     if (x + side > (double)win_w) x = (double)win_w - side - gap;
     if (x < 0.0) x = 0.0;
@@ -4150,6 +4170,13 @@ static void draw_curve_widget(app_state_t *app) {
 /* A press inside the widget: the nearest point, or a new one. The right
    button takes an interior point off, which is how every curve editor
    does it and what rubraview_edit_curve_remove is for. */
+/* Inside the curve box? The crop drag asks before it claims a press. */
+static bool point_in_curve_widget(const app_state_t *app, double px, double py) {
+    rubraview_pal_rect_t box = curve_widget_rect(app);
+    return box.width > 0.0 && px >= box.x && px <= box.x + box.width &&
+           py >= box.y && py <= box.y + box.height;
+}
+
 static bool curve_widget_press(app_state_t *app, double px, double py, bool remove) {
     rubraview_pal_rect_t box = curve_widget_rect(app);
     if (box.width <= 0.0) return false;
@@ -4626,14 +4653,38 @@ static void open_sibling_archive(app_state_t *app, bool forward) {
 /* Writes a line to the console the shell already owns, if there is one.
    A GUI subsystem program has no stdout until it asks for its parent's,
    which is what makes `rubraview.exe --batch ... | more` work at all. */
-static void console_line(const char *text) {
+/* Where a batch run's report goes. Three cases, and they are not the
+   same handle:
+
+   - started from a command prompt: the parent's console, and a redirect
+     (`> log.txt`) must still reach the file, so the standard handle wins
+     when there is one;
+   - started by the dialog with a console of its own (CREATE_NEW_CONSOLE):
+     this is a GUI-subsystem program, so its standard handles are empty
+     and the console has to be opened by name — CONOUT$;
+   - no console anywhere: nothing is written, and nothing waits.
+
+   This was found on the VM: the run in its own window printed nothing and
+   the window closed the moment it finished. */
+static HANDLE console_handle(bool input) {
+    HANDLE std = GetStdHandle(input ? STD_INPUT_HANDLE : STD_OUTPUT_HANDLE);
+    if (std && std != INVALID_HANDLE_VALUE) return std;
+
     static bool attached = false;
     if (!attached) {
-        AttachConsole(ATTACH_PARENT_PROCESS);
         attached = true;
+        if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetConsoleWindow() == NULL) AllocConsole();
     }
-    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (out == INVALID_HANDLE_VALUE || !out) return;
+    if (GetConsoleWindow() == NULL) return NULL;
+    HANDLE named = CreateFileW(input ? L"CONIN$" : L"CONOUT$",
+                               GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               NULL, OPEN_EXISTING, 0, NULL);
+    return named == INVALID_HANDLE_VALUE ? NULL : named;
+}
+
+static void console_line(const char *text) {
+    HANDLE out = console_handle(false);
+    if (!out) return;
 
     /* A console takes UTF-16: writing UTF-8 bytes into one leaves them to
        be read as the code page of the day, which turned an em dash into
@@ -4914,7 +4965,10 @@ static double panel_value_of(const rubraview_panel_t *panel, int32_t id, double 
 static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text) {
     bool quote = false;
     for (size_t i = 0; i < text.len; ++i) if (text.ptr[i] == ' ') { quote = true; break; }
-    if (*pos + 1 < cap) buf[(*pos)++] = ' ';
+    /* No separator before the first token: a command line that starts
+       with a space has no program name in it, and CreateProcess refuses
+       it — which is exactly how this was found. */
+    if (*pos > 0 && *pos + 1 < cap) buf[(*pos)++] = ' ';
     if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
     for (size_t i = 0; i < text.len && *pos + 1 < cap; ++i) buf[(*pos)++] = text.ptr[i];
     if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
@@ -5055,8 +5109,8 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
        counts above can be read. */
     if (cli->pause_at_end) {
         console_line("press a key to close this window");
-        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
-        if (in && in != INVALID_HANDLE_VALUE) {
+        HANDLE in = console_handle(true);
+        if (in) {
             FlushConsoleInputBuffer(in);
             for (;;) {
                 INPUT_RECORD record;
@@ -5966,6 +6020,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    /* §3.13: with the workbench open, a drag on the picture
+                       is the crop rectangle. It is asked before the panel,
+                       whose "a click outside closes it" rule would otherwise
+                       shut the workbench at the first press on the picture. */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
+                        !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y) &&
+                        !point_in_curve_widget(&app, event.mouse.x, event.mouse.y) &&
+                        crop_point_to_image(&app, event.mouse.x, event.mouse.y,
+                                            &app.crop_drag_x0, &app.crop_drag_y0)) {
+                        app.crop_dragging = true;
+                        rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0,
+                                                 app.crop_drag_x0, app.crop_drag_y0);
+                        break;
+                    }
+
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     /* RFC-0002 §4.2: the seek bar, before the canvas turns a page. */
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && timeline_hit(&app, event.mouse.x, event.mouse.y, NULL)) {
@@ -5978,26 +6047,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (box_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
-                    if ((event.mouse.button == RUBRAVIEW_MOUSE_LEFT ||
-                         event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) &&
-                        curve_widget_press(&app, event.mouse.x, event.mouse.y,
-                                           event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) {
-                        break;
-                    }
-
-                    /* §3.13: with the workbench open, a drag on the
-                       picture is the crop rectangle rather than a page
-                       turn. Every other press below still means what it
-                       meant. */
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
-                        crop_point_to_image(&app, event.mouse.x, event.mouse.y,
-                                            &app.crop_drag_x0, &app.crop_drag_y0)) {
-                        app.crop_dragging = true;
-                        rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0,
-                                                 app.crop_drag_x0, app.crop_drag_y0);
-                        break;
-                    }
-
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     rubraview_pointer_intent_t intent;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_MIDDLE) {
@@ -6006,6 +6055,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         intent = rubraview_pointer_side_button(false);
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_X2) {
                         intent = rubraview_pointer_side_button(true);
+                    } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT &&
+                               curve_widget_press(&app, event.mouse.x, event.mouse.y, true)) {
+                        break;   /* a point taken off the curve */
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
                         intent = rubraview_pointer_right_click(&ctx);
                     } else {
