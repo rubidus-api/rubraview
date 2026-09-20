@@ -83,7 +83,8 @@ SRCS_PAL_COMMON = src/pal/pal_fs_common.c
 # window/render/image backends that only exist on Windows.
 SRCS_PAL_HOST = src/pal/host/pal_fs_posix.c \
                 src/pal/host/pal_time_posix.c \
-                src/pal/host/pal_file_dialog_host.c
+                src/pal/host/pal_file_dialog_host.c \
+                src/pal/host/pal_process_posix.c
 
 # Windows PAL: Win32, Direct2D, and WIC backends.
 SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
@@ -95,7 +96,8 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_media_mf.c \
                  src/pal/win32/pal_audio_wasapi.c \
                  src/pal/win32/pal_media_win32.c \
-                 src/pal/win32/pal_media_ffmpeg.c
+                 src/pal/win32/pal_media_ffmpeg.c \
+                 src/pal/win32/pal_process_win32.c
 
 SRCS_APP = src/app/main.c
 

@@ -110,8 +110,12 @@ failed.
 `Ctrl+B` does the same thing from the viewer, over the folder you are
 reading: choose a size, a format, grayscale or privacy clean, then **Run on
 this folder**. The results go into a `rubraview-out` folder beside those
-pictures, so a run never overwrites an original. The viewer does not answer
-while it runs, and says what it did when it ends.
+pictures, so a run never overwrites an original.
+
+The run gets a window of its own and is a separate program: you can go on
+reading, close the viewer, or have it hang, and the conversion carries on.
+Its window prints how many files were written, skipped and failed, and
+waits for a key before it closes.
 
 | Option | What it does |
 |---|---|
@@ -190,7 +194,6 @@ listed rather than hidden so you can see what is coming.
   rename such a file, but not type one — the box takes plain characters
   for now. (The keys themselves work with the Korean IME in Hangul mode:
   `F` is still full screen.)
-- **Dropping several files at once** opens the first of them.
 
 ## Keys
 
