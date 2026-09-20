@@ -51,6 +51,7 @@ typedef struct rubraview_cli_result {
     bool                probe_media;       /* --probe-media: open the file with each media backend and report */
     bool                probe_gpu;         /* --probe-gpu: what graphics card is here, and will Media Foundation decode on it */
     bool                recursive;  /* --recursive */
+    bool                pause_at_end; /* --pause: wait for a key before the window closes */
     u8str_t             input;      /* the file or directory to work on */
     u8str_t             output_dir; /* --out=..., empty for "beside the source" */
 

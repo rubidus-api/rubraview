@@ -68,6 +68,7 @@
 #include "rubraview/settings_doc.h"
 #include "rubraview/ui_settings.h"
 #include "rubraview/pal/pal_file_dialog.h"
+#include "rubraview/pal/pal_process.h"
 #include "rubraview/version.h"
 #include "rubraview/export.h"
 #include "rubraview/jpegtran.h"
@@ -268,6 +269,11 @@ typedef struct app_state {
     rubraview_panel_t         panel;
     bool                      panel_is_export;   /* which of the three the panel currently is */
     bool                      panel_is_batch;
+    /* §3.13: a crop being dragged on the picture — where it started, in image pixels. */
+    bool                      crop_dragging;
+    /* §3.13: the curve widget — which point is being dragged, or -1. */
+    int32_t                   curve_dragging;
+    int32_t                   crop_drag_x0, crop_drag_y0;
     rubraview_edit_session_t  edit;
     rubraview_export_options_t export_options;
     rubraview_batch_job_t      batch_job;
@@ -338,6 +344,9 @@ static void rename_commit(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
 static void panel_close(app_state_t *app);
+static void append_number(char *buf, size_t cap, size_t *pos, size_t value);
+static void history_remember(app_state_t *app);
+static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
@@ -2941,6 +2950,55 @@ static void rename_commit(app_state_t *app) {
 }
 
 /* §3.19.2: what to do with what was dropped. */
+/* §3.19.2: the files that were dropped, in natural name order, as a
+   source of their own. They may come from different folders; the page
+   list holds full paths, so that costs nothing. Directories among them
+   are left out — rubraview_drop_classify sends a lone folder down the
+   other path, and a folder dropped together with files has no obvious
+   place in a sequence of pages. */
+static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *items, size_t count) {
+    if (count == 0) return;
+
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, count * sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+
+    size_t n = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (items[i].is_directory) continue;
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, items[i].path, &entry)) continue;
+        if (entry.is_directory) continue;
+        entries[n++] = entry;
+    }
+    if (n == 0) return;
+
+    history_remember(app);
+    rubraview_page_source_close(&app->source);
+    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+
+    rubraview_fs_listing_t listing = { .entries = entries, .count = n };
+    app->source = rubraview_page_source_from_listing(app->arena, &listing,
+                                                     U8(IMAGE_FILTER ";" MEDIA_FILTER),
+                                                     RUBRAVIEW_SORT_NAME_NATURAL, true);
+    if (app->source.page_count == 0) {
+        osd_say(app, U8("none of those files is a picture or a film"));
+        return;
+    }
+    /* The folder of the first one is where Rename, Delete and a batch
+       run work; a dropped set has no folder of its own. */
+    app->source_dir = rubraview_path_dirname(entries[0].path);
+    app->resume_offer = false;
+    finish_open(app, 0);
+
+    char line[96];
+    size_t pos = 0;
+    line[0] = '\0';
+    append_number(line, sizeof(line), &pos, app->source.page_count);
+    append_text(line, sizeof(line), &pos, " dropped files opened as one set");
+    osd_say(app, cstr(line));
+}
+
 static void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
     rubraview_drop_item_t items[16];
     size_t count = event->drop.count < 16 ? event->drop.count : 16;
@@ -2959,13 +3017,10 @@ static void handle_drop(app_state_t *app, const rubraview_window_event_t *event)
             open_path(app, items[0].path);
             break;
         case RUBRAVIEW_DROP_PLAYLIST:
-            /* §3.19.2: several things become a temporary sequence of
-               exactly those things. Opening the first one's folder would
-               show files the reader did not drop, so the first item is
-               opened and the rest are left for the playlist work in
-               §3.12 — recorded as a limitation rather than guessed at. */
-            open_path(app, items[0].path);
-            osd_say(app, U8("opened the first of the dropped files"));
+            /* §3.19.2: several things dropped together become a sequence
+               of exactly those things — not the folder they came from,
+               which would show files the reader did not drop. */
+            open_dropped_files(app, items, count);
             break;
         case RUBRAVIEW_DROP_NOTHING:
         default:
@@ -3914,6 +3969,214 @@ static void draw_settings_window(app_state_t *app) {
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }
 
+/* Where the page on screen sits, in client pixels, and how many client
+   pixels one of its own pixels takes. The crop overlay needs both to
+   turn a drag into image coordinates; it asks the compositor the same
+   question draw_spread asks, so the rectangle it draws is the one the
+   picture is in. Returns false when nothing is drawn. */
+static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale) {
+    int32_t page_index = current_page_index(app);
+    if (page_index < 0 || app->spread_index >= app->layout.count) return false;
+
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) return false;
+
+    const rubraview_spread_t *spread = &app->layout.spreads[app->spread_index];
+    app_page_t *left = ensure_page_loaded(app, spread->left_index);
+    app_page_t *right = ensure_page_loaded(app, spread->right_index);
+    rubraview_page_size_t left_size = {0}, right_size = {0};
+    if (left && left->loaded) {
+        rubraview_orientation_apply_size(app->orientation, (double)left->width, (double)left->height,
+                                         &left_size.width, &left_size.height);
+    }
+    if (right && right->loaded) {
+        rubraview_orientation_apply_size(app->orientation, (double)right->width, (double)right->height,
+                                         &right_size.width, &right_size.height);
+    }
+    rubraview_composition_t comp = rubraview_compose_spread(
+        spread, (left && left->loaded) ? &left_size : NULL, (right && right->loaded) ? &right_size : NULL,
+        (double)win_w, (double)win_h, app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
+
+    for (size_t i = 0; i < comp.count; ++i) {
+        const rubraview_draw_command_t *cmd = &comp.commands[i];
+        if (cmd->page_index != page_index) continue;
+        double x0 = cmd->transform.e, y0 = cmd->transform.f;
+        double w = (cmd->src_right - cmd->src_left) * cmd->transform.a;
+        double h = (cmd->src_bottom - cmd->src_top) * cmd->transform.d;
+        if (w <= 0.0 || h <= 0.0) return false;
+        *out_rect = (rubraview_pal_rect_t){ .x = x0, .y = y0, .width = w, .height = h };
+        *out_scale = cmd->transform.a;
+        return true;
+    }
+    return false;
+}
+
+/* §3.13: the crop rectangle, dragged on the picture itself. The model
+   (normalising, the ratio lock, staying inside the image) is
+   rubraview_edit_crop_drag's; this turns client pixels into image
+   pixels and back, and draws what the model then holds. */
+static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x, int32_t *out_y) {
+    rubraview_pal_rect_t rect;
+    double scale = 1.0;
+    if (!page_screen_rect(app, &rect, &scale) || scale <= 0.0) return false;
+    double ix = (px - rect.x) / scale;
+    double iy = (py - rect.y) / scale;
+    if (ix < 0.0) ix = 0.0;
+    if (iy < 0.0) iy = 0.0;
+    if (ix > (double)app->edit.image_width) ix = (double)app->edit.image_width;
+    if (iy > (double)app->edit.image_height) iy = (double)app->edit.image_height;
+    *out_x = (int32_t)(ix + 0.5);
+    *out_y = (int32_t)(iy + 0.5);
+    return true;
+}
+
+static bool edit_panel_open(const app_state_t *app) {
+    return app->panel.open && !app->panel_is_export && !app->panel_is_batch;
+}
+
+static void draw_crop_overlay(app_state_t *app) {
+    if (!edit_panel_open(app) || !app->edit.crop_active) return;
+    rubraview_pal_rect_t rect;
+    double scale = 1.0;
+    if (!page_screen_rect(app, &rect, &scale)) return;
+
+    rubraview_crop_rect_t c = app->edit.crop;
+    double x = rect.x + (double)c.x * scale, y = rect.y + (double)c.y * scale;
+    double w = (double)c.width * scale, h = (double)c.height * scale;
+    if (w <= 0.0 || h <= 0.0) return;
+
+    /* What is being cut away is dimmed, which is the part a reader
+       actually looks at when judging a crop. */
+    const uint32_t shade = 0x80000000u;
+    rubraview_pal_render_fill_rect(app->renderer,
+        (rubraview_pal_rect_t){ rect.x, rect.y, rect.width, y - rect.y }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer,
+        (rubraview_pal_rect_t){ rect.x, y + h, rect.width, rect.y + rect.height - (y + h) }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer,
+        (rubraview_pal_rect_t){ rect.x, y, x - rect.x, h }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer,
+        (rubraview_pal_rect_t){ x + w, y, rect.x + rect.width - (x + w), h }, shade, 0.0);
+
+    rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ x, y, w, h }, 0xFFFFFFFFu, 1.0, 0.0);
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double grip = 10.0 * dpi;
+    const double corners[4][2] = { { x, y }, { x + w - grip, y }, { x, y + h - grip }, { x + w - grip, y + h - grip } };
+    for (size_t i = 0; i < 4; ++i) {
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ corners[i][0], corners[i][1], grip, grip }, 0xFFFFFFFFu, 0.0);
+    }
+
+    char line[96];
+    size_t pos = 0;
+    line[0] = '\0';
+    append_number(line, sizeof(line), &pos, (size_t)(c.width < 0 ? 0 : c.width));
+    append_text(line, sizeof(line), &pos, " x ");
+    append_number(line, sizeof(line), &pos, (size_t)(c.height < 0 ? 0 : c.height));
+    rubraview_pal_rect_t label = { x, y - 22.0 * dpi, 160.0 * dpi, 20.0 * dpi };
+    if (label.y < rect.y) label.y = y + 2.0 * dpi;
+    rubraview_pal_render_fill_rect(app->renderer, label, 0xC0000000u, 0.0);
+    rubraview_pal_render_draw_text(app->renderer, cstr(line), label, 13.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* §3.13's curve widget. The model is already there and tested — points
+   sorted, endpoints kept, neighbours not crossed (rubraview_edit_curve_*);
+   what was missing was a box to see it in. It sits under the workbench
+   panel, 0,0 at the bottom left like every curve editor, and draws the
+   line by sampling the same LUT the commit uses, so what is on screen is
+   what will be applied. */
+static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
+    if (!app->panel.open || app->panel_is_export || app->panel_is_batch) {
+        return (rubraview_pal_rect_t){0};
+    }
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double side = 168.0 * dpi;
+    double gap = 8.0 * dpi;
+    double x = app->panel.bounds.x;
+    double y = app->panel.bounds.y + app->panel.bounds.height + gap;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (y + side > (double)win_h) y = (double)win_h - side - gap;   /* keep it on screen */
+    if (y < 0.0) y = 0.0;
+    if (x + side > (double)win_w) x = (double)win_w - side - gap;
+    if (x < 0.0) x = 0.0;
+    return (rubraview_pal_rect_t){ x, y, side, side };
+}
+
+static void draw_curve_widget(app_state_t *app) {
+    rubraview_pal_rect_t box = curve_widget_rect(app);
+    if (box.width <= 0.0) return;
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+
+    /* quarters, so a point's height can be judged without a ruler */
+    for (int i = 1; i < 4; ++i) {
+        double t = (double)i / 4.0;
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ box.x + box.width * t, box.y, 1.0, box.height }, 0x30FFFFFFu, 0.0);
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ box.x, box.y + box.height * t, box.width, 1.0 }, 0x30FFFFFFu, 0.0);
+    }
+
+    const rubraview_edit_curve_t *curve = &app->edit.curves[app->edit.active_channel];
+    uint8_t lut[256];
+    rubraview_curve_build_lut(lut, curve->points, curve->point_count);
+
+    double dot = 2.0 * dpi;
+    for (int i = 0; i < 256; ++i) {
+        double px = box.x + box.width * ((double)i / 255.0);
+        double py = box.y + box.height * (1.0 - (double)lut[i] / 255.0);
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ px - dot * 0.5, py - dot * 0.5, dot, dot }, 0xFFFFFFFFu, 0.0);
+    }
+
+    double grip = 7.0 * dpi;
+    for (size_t i = 0; i < curve->point_count; ++i) {
+        double px = box.x + box.width * ((double)curve->points[i].x / 255.0);
+        double py = box.y + box.height * (1.0 - (double)curve->points[i].y / 255.0);
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ px - grip * 0.5, py - grip * 0.5, grip, grip }, 0xFFFFD000u, 0.0);
+    }
+
+    static const char *const CHANNEL_NAMES[5] = { "RGB", "Red", "Green", "Blue", "Luma" };
+    rubraview_pal_rect_t label = { box.x + 6.0 * dpi, box.y + 4.0 * dpi, box.width - 12.0 * dpi, 18.0 * dpi };
+    rubraview_pal_render_draw_text(app->renderer, cstr(CHANNEL_NAMES[app->edit.active_channel]),
+                                   label, 12.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* A press inside the widget: the nearest point, or a new one. The right
+   button takes an interior point off, which is how every curve editor
+   does it and what rubraview_edit_curve_remove is for. */
+static bool curve_widget_press(app_state_t *app, double px, double py, bool remove) {
+    rubraview_pal_rect_t box = curve_widget_rect(app);
+    if (box.width <= 0.0) return false;
+    if (px < box.x || px > box.x + box.width || py < box.y || py > box.y + box.height) return false;
+
+    float x = (float)((px - box.x) / box.width * 255.0);
+    float y = (float)((1.0 - (py - box.y) / box.height) * 255.0);
+    int32_t index = rubraview_edit_curve_grab(&app->edit, x, y, 10.0f);
+    if (index < 0) return true;   /* inside the box, but the curve is full */
+    if (remove) {
+        rubraview_edit_curve_remove(&app->edit, index);
+        app->curve_dragging = -1;
+        return true;
+    }
+    rubraview_edit_curve_move(&app->edit, index, x, y);
+    app->curve_dragging = index;
+    return true;
+}
+
+static void curve_widget_drag(app_state_t *app, double px, double py) {
+    rubraview_pal_rect_t box = curve_widget_rect(app);
+    if (box.width <= 0.0 || app->curve_dragging < 0) return;
+    float x = (float)((px - box.x) / box.width * 255.0);
+    float y = (float)((1.0 - (py - box.y) / box.height) * 255.0);
+    rubraview_edit_curve_move(&app->edit, app->curve_dragging, x, y);
+}
+
 static void render_frame(app_state_t *app) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -3941,8 +4204,10 @@ static void render_frame(app_state_t *app) {
     if (app->picker_open) {
         draw_picker(app, (double)win_w, (double)win_h);
     } else {
+        draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_panel(app);
+        draw_curve_widget(app);
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
@@ -4627,18 +4892,37 @@ static void append_text(char *buf, size_t cap, size_t *pos, const char *text) {
     buf[*pos] = '\0';
 }
 
-/* RV-068: the batch dialog's Run. It builds the same job `--batch`
-   builds and hands it to the same engine, so the dialog cannot drift
-   from the command line. Two deliberate differences: the run is over
-   the folder being read (not a path typed anywhere), and it writes into
-   a `rubraview-out` folder beside those pictures, so pressing Run can
-   never overwrite an original. The pass happens on this thread — the
-   viewer does not answer until it ends. */
+/* RV-068: the batch dialog's Run. The dialog does not convert anything
+   itself: it writes the command line `--batch` already understands and
+   starts a second copy of the program with it, in a console window of
+   its own (owner, 2026-09-20). A run then keeps going when the viewer is
+   closed, a viewer that hangs does not take it down, and the window it
+   reports into can be read afterwards — `--pause` holds it open.
+
+   Two things are decided here rather than asked: the run is over the
+   folder being read, and it writes into a `rubraview-out` folder beside
+   those pictures, so pressing Run can never overwrite an original. */
 static double panel_value_of(const rubraview_panel_t *panel, int32_t id, double fallback) {
     for (size_t i = 0; i < panel->row_count; ++i) {
         if (panel->rows[i].id == id) return panel->rows[i].value;
     }
     return fallback;
+}
+
+/* Appends `text`, in quotes when it holds a space, so a folder with one
+   in its name survives the command line. */
+static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text) {
+    bool quote = false;
+    for (size_t i = 0; i < text.len; ++i) if (text.ptr[i] == ' ') { quote = true; break; }
+    if (*pos + 1 < cap) buf[(*pos)++] = ' ';
+    if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
+    for (size_t i = 0; i < text.len && *pos + 1 < cap; ++i) buf[(*pos)++] = text.ptr[i];
+    if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
+    buf[*pos] = '\0';
+}
+
+static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text) {
+    append_arg(buf, cap, pos, cstr(text));
 }
 
 static void panel_run_batch(app_state_t *app) {
@@ -4647,44 +4931,20 @@ static void panel_run_batch(app_state_t *app) {
         return;
     }
 
-    rubraview_cli_result_t cli = {0};
-    cli.export_options = app->export_options;
-    cli.input = app->source_dir;
-    cli.job.actions = cli.actions;
-    cli.job.naming_pattern = U8("{name}.{ext}");
-    cli.job.include_pattern = U8(IMAGE_FILTER);
+    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    if (exe.len == 0) {
+        osd_say(app, U8("could not find this program to start a batch run"));
+        return;
+    }
 
     double percent = panel_value_of(&app->panel, PANEL_BATCH_RESIZE, 100.0);
     int32_t filter = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FILTER, 3.0);
     int32_t format = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FORMAT, 0.0);
     bool grayscale = panel_value_of(&app->panel, PANEL_BATCH_GRAY, 0.0) > 0.5;
     bool privacy = panel_value_of(&app->panel, PANEL_PRIVACY, 0.0) > 0.5;
+    bool resizing = percent < 99.99 || percent > 100.01;
 
-    if (percent < 99.99 || percent > 100.01) {
-        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
-        a->kind = RUBRAVIEW_BATCH_RESIZE;
-        a->params.resize.mode = RUBRAVIEW_RESIZE_PERCENT;
-        a->params.resize.value_a = percent;
-        a->params.resize.filter = (rubraview_resample_filter_t)
-            (filter < 0 ? 0 : filter > RUBRAVIEW_FILTER_LANCZOS3 ? RUBRAVIEW_FILTER_LANCZOS3 : filter);
-    }
-    if (grayscale) {
-        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
-        a->kind = RUBRAVIEW_BATCH_COLOR_ADJUST;
-        a->params.color.grayscale = true;
-    }
-    if (privacy) {
-        rubraview_batch_action_t *a = &cli.actions[cli.job.action_count++];
-        a->kind = RUBRAVIEW_BATCH_PRIVACY_SCRUB;
-        a->params.privacy.strip_all_exif = true;
-        a->params.privacy.strip_xmp = true;
-        a->params.privacy.strip_iptc = true;
-        cli.export_options.privacy_clean = true;
-    }
-    if (format > 0 && format <= RUBRAVIEW_EXPORT_ICO) {
-        cli.export_options.format = (rubraview_export_format_t)format;
-    }
-    if (cli.job.action_count == 0 && cli.export_options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
+    if (!resizing && !grayscale && !privacy && format <= 0) {
         osd_say(app, U8("nothing to do: choose a size, a format, grayscale or privacy clean"));
         return;
     }
@@ -4695,50 +4955,58 @@ static void panel_run_batch(app_state_t *app) {
         return;
     }
 
-    void *list_memory = malloc(BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t) + 1024u * 1024u);
-    void *work_memory = malloc(BATCH_WORK_ARENA_BYTES);
-    if (!list_memory || !work_memory) {
-        free(list_memory); free(work_memory);
-        osd_say(app, U8("out of memory for the batch run"));
-        return;
-    }
-    proven_arena_t list = proven_arena_create(
-        (proven_mem_mut_t){ .ptr = (proven_byte_t*)list_memory,
-                            .size = BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t) + 1024u * 1024u });
-    proven_result_mem_mut_t res = proven_arena_alloc(&list, BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t));
-    size_t count = 0;
-    rubraview_batch_input_t *inputs = NULL;
-    if (proven_is_ok(res.err)) {
-        inputs = (rubraview_batch_input_t*)(void*)res.value.ptr;
-        count = collect_inputs(&list, app->source_dir, false, inputs, BATCH_MAX_INPUTS, 0);
-    }
-    if (count == 0) {
-        free(list_memory); free(work_memory);
-        osd_say(app, U8("no files in this folder to work on"));
-        return;
-    }
-
-    osd_say(app, U8("working…"));
-    render_frame(app);
-
-    proven_arena_t work = proven_arena_create(
-        (proven_mem_mut_t){ .ptr = (proven_byte_t*)work_memory, .size = BATCH_WORK_ARENA_BYTES });
-    batch_ctx_t ctx = { .cli = &cli, .output_dir = out_dir, .written = 0 };
-    rubraview_batch_report_t report = rubraview_batch_run(&work, &cli.job, inputs, count,
-                                                          U8(""), batch_process, &ctx, NULL, 0);
-    free(list_memory);
-    free(work_memory);
-
-    char line[160];
+    static const char *const FILTER_NAMES[4] = { "nearest", "bilinear", "bicubic", "lanczos3" };
+    char line[2048];
     size_t pos = 0;
     line[0] = '\0';
-    append_number(line, sizeof(line), &pos, report.processed);
-    append_text(line, sizeof(line), &pos, " written to rubraview-out, ");
-    append_number(line, sizeof(line), &pos, report.skipped);
-    append_text(line, sizeof(line), &pos, " skipped, ");
-    append_number(line, sizeof(line), &pos, report.failed);
-    append_text(line, sizeof(line), &pos, " failed");
-    osd_say(app, cstr(line));
+    append_arg(line, sizeof(line), &pos, exe);
+    append_arg_cstr(line, sizeof(line), &pos, "--batch");
+    append_arg_cstr(line, sizeof(line), &pos, "--pause");
+    if (resizing) {
+        char resize_arg[32];
+        size_t rp = 0;
+        resize_arg[0] = '\0';
+        append_text(resize_arg, sizeof(resize_arg), &rp, "--resize=");
+        append_number(resize_arg, sizeof(resize_arg), &rp, (size_t)(percent + 0.5));
+        append_text(resize_arg, sizeof(resize_arg), &rp, "%");
+        append_arg_cstr(line, sizeof(line), &pos, resize_arg);
+        if (filter >= 0 && filter <= 3) {
+            char filter_arg[32];
+            size_t fp = 0;
+            filter_arg[0] = '\0';
+            append_text(filter_arg, sizeof(filter_arg), &fp, "--filter=");
+            append_text(filter_arg, sizeof(filter_arg), &fp, FILTER_NAMES[filter]);
+            append_arg_cstr(line, sizeof(line), &pos, filter_arg);
+        }
+    }
+    if (grayscale) append_arg_cstr(line, sizeof(line), &pos, "--grayscale");
+    if (privacy) append_arg_cstr(line, sizeof(line), &pos, "--privacy-clean");
+    if (format > 0 && format <= RUBRAVIEW_EXPORT_ICO) {
+        u8str_t ext = rubraview_export_extension((rubraview_export_format_t)format);
+        char format_arg[32];
+        size_t gp = 0;
+        format_arg[0] = '\0';
+        append_text(format_arg, sizeof(format_arg), &gp, "--format=");
+        for (size_t i = 0; i < ext.len && gp + 1 < sizeof(format_arg); ++i) format_arg[gp++] = ext.ptr[i];
+        format_arg[gp] = '\0';
+        append_arg_cstr(line, sizeof(line), &pos, format_arg);
+    }
+    {
+        char out_arg[1024];
+        size_t op = 0;
+        out_arg[0] = '\0';
+        append_text(out_arg, sizeof(out_arg), &op, "--out=");
+        for (size_t i = 0; i < out_dir.len && op + 1 < sizeof(out_arg); ++i) out_arg[op++] = out_dir.ptr[i];
+        out_arg[op] = '\0';
+        append_arg_cstr(line, sizeof(line), &pos, out_arg);
+    }
+    append_arg(line, sizeof(line), &pos, app->source_dir);
+
+    if (rubraview_pal_process_start_console((u8str_t){ .ptr = line, .len = pos })) {
+        osd_say(app, U8("batch started in a window of its own"));
+    } else {
+        osd_say(app, U8("could not start the batch run"));
+    }
 }
 
 static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
@@ -4781,6 +5049,23 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     append_number(line, sizeof(line), &pos, report.failed);
     append_text(line, sizeof(line), &pos, " failed");
     console_line(line);
+
+    /* --pause: a run started from the dialog has a console of its own,
+       and that window closes with the process. Wait for a key so the
+       counts above can be read. */
+    if (cli->pause_at_end) {
+        console_line("press a key to close this window");
+        HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+        if (in && in != INVALID_HANDLE_VALUE) {
+            FlushConsoleInputBuffer(in);
+            for (;;) {
+                INPUT_RECORD record;
+                DWORD read = 0;
+                if (!ReadConsoleInputW(in, &record, 1, &read) || read == 0) break;
+                if (record.EventType == KEY_EVENT && record.Event.KeyEvent.bKeyDown) break;
+            }
+        }
+    }
 
     return report.failed > 0 ? 1 : 0;
 }
@@ -5482,6 +5767,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.arena = &arena;
     app.fit_mode = RUBRAVIEW_FIT_WINDOW;
     app.zoom = 1.0;
+    app.curve_dragging = -1;   /* no point held; 0 would mean the first one */
     app.orientation = rubraview_orientation_identity();
     app.spread_detect = true; /* §3.3.4 default */
     app.layout_opts = rubraview_layout_opts_default(RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_READING_LTR);
@@ -5604,6 +5890,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                    if (app.curve_dragging >= 0) {
+                        curve_widget_drag(&app, event.mouse.x, event.mouse.y);
+                        app.pointer_x = event.mouse.x;
+                        app.pointer_y = event.mouse.y;
+                        break;
+                    }
+                    if (app.crop_dragging) {
+                        int32_t ix = 0, iy = 0;
+                        if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
+                            rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0, ix, iy);
+                        }
+                        app.pointer_x = event.mouse.x;
+                        app.pointer_y = event.mouse.y;
+                        break;
+                    }
                     if (app.panel.open && app.panel.active_row >= 0) {
                         int32_t dragged = -1;
                         if (rubraview_panel_drag(&app.panel, event.mouse.x, event.mouse.y, &dragged)
@@ -5677,6 +5978,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (box_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
 
+                    if ((event.mouse.button == RUBRAVIEW_MOUSE_LEFT ||
+                         event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) &&
+                        curve_widget_press(&app, event.mouse.x, event.mouse.y,
+                                           event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) {
+                        break;
+                    }
+
+                    /* §3.13: with the workbench open, a drag on the
+                       picture is the crop rectangle rather than a page
+                       turn. Every other press below still means what it
+                       meant. */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
+                        crop_point_to_image(&app, event.mouse.x, event.mouse.y,
+                                            &app.crop_drag_x0, &app.crop_drag_y0)) {
+                        app.crop_dragging = true;
+                        rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0,
+                                                 app.crop_drag_x0, app.crop_drag_y0);
+                        break;
+                    }
+
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     rubraview_pointer_intent_t intent;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_MIDDLE) {
@@ -5695,6 +6016,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    app.curve_dragging = -1;
+                    if (app.crop_dragging) {
+                        app.crop_dragging = false;
+                        int32_t ix = 0, iy = 0;
+                        if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
+                            rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0, ix, iy);
+                        }
+                        /* A click without a drag clears the rectangle rather
+                           than leaving a one-pixel crop behind. */
+                        if (app.edit.crop.width < 4 || app.edit.crop.height < 4) {
+                            app.edit.crop_active = false;
+                        }
+                        break;
+                    }
                     if (app.timeline_dragging) {
                         app.timeline_dragging = false;
                         timeline_seek_to_pointer(&app, event.mouse.x);
