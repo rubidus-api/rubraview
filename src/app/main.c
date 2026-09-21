@@ -188,6 +188,7 @@ typedef struct app_state {
     int32_t                media_page;        /* -1 when no video is open */
     bool                   media_paused;
     bool                   media_has_frame;   /* false until the first picture after opening or seeking */
+    bool                   media_new_picture; /* a picture went up since the last redraw */
     bool                   media_skip_pending;/* D-9: a file nothing could open; move past it */
     double                 media_position;    /* pts of the picture on screen */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
@@ -940,6 +941,7 @@ static void media_prepare(app_state_t *app) {
 static void media_show(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame) {
     rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
     app->media_has_frame = true;
+    app->media_new_picture = true;
     app->media_position = frame->pts;
     int64_t tenth = (int64_t)(frame->pts * 10.0);
     if (app->media_paused || tenth != app->media_title_tenth) {
@@ -5908,6 +5910,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.last_frame_seconds = rubraview_pal_time_now_seconds();
     double last_busy_seconds = app.last_frame_seconds;
     double last_idle_frame_seconds = app.last_frame_seconds;
+    double last_render_seconds = app.last_frame_seconds;
+    double last_input_seconds = app.last_frame_seconds;
 
     while (!rubraview_pal_window_should_close(app.window)) {
         rubraview_window_event_t event;
@@ -6154,13 +6158,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         /* Redraw only while something can change on screen. Without a
            GPU, Direct2D rasterises on the CPU, and a loop that redrew
            the same still image kept two cores busy doing it. */
-        bool animating = app.slideshow_running || app.anim_active ||
-                         (app.media && !app.media_paused) ||
-                         app.notice_seconds > 0.0 || app.pending_decode_count > 0;
-        if (handled > 0 || animating) last_busy_seconds = now;
+        bool media_playing = app.media && !app.media_paused;
+        bool others_moving = app.slideshow_running || app.anim_active ||
+                             app.notice_seconds > 0.0 || app.pending_decode_count > 0;
+        if (handled > 0) last_input_seconds = now;
+        if (handled > 0 || media_playing || others_moving) last_busy_seconds = now;
         bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;
-        if (!settled || now - last_idle_frame_seconds >= 1.0) {
+        /* Only the film or the sound moves: draw a new picture when one
+           is up and the seek bar four times a second, not on every pass
+           (T058 on the VM: every pass kept 1.75 of 2 cores busy on a
+           sound-only page, and the keys waited behind it). For the grace
+           after an input every pass still draws, as the chrome's fades
+           expect. */
+        bool paced = media_playing && !others_moving && now - last_input_seconds > IDLE_REDRAW_GRACE;
+        bool draw = paced ? rubraview_media_redraw_due(app.media_new_picture, now - last_render_seconds)
+                          : (!settled || now - last_idle_frame_seconds >= 1.0);
+        if (draw) {
             render_frame(&app);
+            last_render_seconds = now;
+            app.media_new_picture = false;
             if (settled) last_idle_frame_seconds = now;
         }
         if (app.settings_open && now - app.settings_info_seconds >= 1.0) {
@@ -6179,6 +6195,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             last_busy_seconds = now;
         } else if (settled && settings_pump(&app) == 0) {
             rubraview_pal_window_wait_event(app.window, 250);
+        } else if (paced && !app.media_info.has_video) {
+            /* Sound only: nothing is due before the next redraw, but the
+               end and the A-B point are checked at least every 20 ms. */
+            double wait = rubraview_media_redraw_wait(now - last_render_seconds) * 1000.0;
+            rubraview_pal_window_wait_event(app.window, wait < 1.0 ? 1u : wait > 20.0 ? 20u : (uint32_t)wait);
         } else {
             rubraview_pal_time_sleep_ms(4);
         }

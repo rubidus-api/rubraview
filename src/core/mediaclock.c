@@ -295,3 +295,15 @@ rubraview_media_failure_t rubraview_media_failure_pick(rubraview_media_failure_t
                                                        rubraview_media_failure_t b) {
     return failure_rank(b) > failure_rank(a) ? b : a;
 }
+
+/* ---- redraw pacing ---- */
+
+bool rubraview_media_redraw_due(bool new_picture, double seconds_since_render) {
+    return new_picture || rubraview_media_redraw_wait(seconds_since_render) <= 0.0;
+}
+
+double rubraview_media_redraw_wait(double seconds_since_render) {
+    if (!(seconds_since_render >= 0.0)) return 0.0;   /* backwards or NaN */
+    double left = RUBRAVIEW_MEDIA_HUD_REDRAW_SECONDS - seconds_since_render;
+    return left > 0.0 ? left : 0.0;
+}
