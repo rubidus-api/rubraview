@@ -75,12 +75,27 @@ flashes white for two frames and beeps 1 kHz for 80 ms at the start of
 every second. Inside the session one program records, on one clock (QPC),
 the loopback sound with each packet's time and the brightness of the
 pixel in the middle of the screen (`avsync.ps1`); the beep's start minus
-the flash's start is the offset. Media Foundation, 19 beeps: the sound
-led the picture by 27 ms (median). The RDP session's screen changes only
-about 32 times a second, so every value is exact to one 31 ms step: the
-offset lies between 27 ms sound-first and 4 ms sound-late, well inside
-what broadcast practice allows (125 ms early, 45 ms late). The first three
-beeps after opening read 89 ms.
+the flash's start is the offset. The RDP session's screen changes only
+about 32 times a second, so every value is exact to one 31 ms step, and
+runs differ by about as much.
+
+- The VM has no GPU: Direct2D draws on the CPU, about 0.1 s of CPU for a
+  full 1280x752 frame. In a full-size window the picture came 90-120 ms
+  after its beep, old build and new alike; with the window at 320x200 it
+  was within one step of the beep. A plain window painted by GDI showed
+  up 20 ms (median) after it painted, so that lag is the software
+  drawing, not the screen path — a machine with a GPU draws a frame in
+  about a millisecond.
+- In the small window: 0 ms and -15 ms (sound first) with the clock
+  change below, -14 ms and -23 ms without it, +37 ms once without it —
+  all within what broadcast practice allows (125 ms sound-first, 45 ms
+  sound-late).
+- The audio clock now counts what the device has actually played
+  (`IAudioClock`) rather than what is still in the client buffer, so the
+  engine's and the device's own latency hold the picture back too. The VM
+  cannot show the difference (its steps are as large); on a Bluetooth
+  headset, whose latency is 150-250 ms, the picture would otherwise run
+  that far ahead of the sound.
 
 **Clicks (step 2, 3).** On a recorded tone a click is the waveform jumping
 to or from silence mid-wave. Pause and play: ten edges out of ten at 0 —

@@ -55,6 +55,10 @@ This project follows Keep a Changelog.
   cut mid-wave. The sound now fades in over 5 ms after a seek, and the
   stream is stopped and given 30 ms to end quietly before its queue is
   thrown away (T058, measured on 12 seeks: no click left).
+- The picture waits for the sound as it is played, not as it is handed to
+  Windows: the audio clock follows the device's own position
+  (`IAudioClock`), which includes the engine's and the device's latency —
+  a Bluetooth headset's 150-250 ms among them.
 - Short drop-outs (10 ms of silence, a click) when the machine was busy:
   the thread that feeds the sound device now runs under Windows'
   multimedia scheduler (MMCSS "Playback").
