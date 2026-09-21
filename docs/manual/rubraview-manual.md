@@ -166,7 +166,11 @@ The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use
 have a blue edge, and a grey tile cannot do anything with what is on screen
 (`Next archive` in a plain folder, `Track` on a film with one sound track).
-The menu always opens at its top level.
+The menu always opens at its top level. `Delete` in the menu asks first:
+its tile turns into `Delete?`, and a second tap within five seconds moves
+the file to the recycle bin. The reading-order tile says which way pages
+run (`Order: L>R` or `Order: R>L`). Open folder lists folders and the files
+the viewer can open, and says how many others it left out.
 
 `Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
 that stays on top, and `Dock` puts it back. The menu's first tile, the `Pin`

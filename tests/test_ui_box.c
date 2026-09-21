@@ -520,14 +520,14 @@ static void test_just_opened(void) {
 
 static void test_action_tiles(void) {
     char buf[64];
-    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, buf, sizeof(buf)), "File >"));
-    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_ON, buf, sizeof(buf)), "Crisp: on"));
-    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_OFF, buf, sizeof(buf)), "Crisp: off"));
-    assert(str_eq(rubraview_tile_caption(U8("Single"), false, RUBRAVIEW_MARK_CURRENT, buf, sizeof(buf)), "Single"));
-    assert(str_eq(rubraview_tile_caption(U8("Rotate"), false, RUBRAVIEW_MARK_NONE, buf, sizeof(buf)), "Rotate"));
+    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, NULL, buf, sizeof(buf)), "File >"));
+    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_ON, NULL, buf, sizeof(buf)), "Crisp: on"));
+    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_OFF, NULL, buf, sizeof(buf)), "Crisp: off"));
+    assert(str_eq(rubraview_tile_caption(U8("Single"), false, RUBRAVIEW_MARK_CURRENT, NULL, buf, sizeof(buf)), "Single"));
+    assert(str_eq(rubraview_tile_caption(U8("Rotate"), false, RUBRAVIEW_MARK_NONE, NULL, buf, sizeof(buf)), "Rotate"));
     /* Too small a buffer gives the plain label rather than a cut one. */
     char tiny[4];
-    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, tiny, sizeof(tiny)), "File"));
+    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, NULL, tiny, sizeof(tiny)), "File"));
 
     rubraview_action_facts_t f = { .has_page = true };
     rubraview_action_state_t st;
@@ -578,7 +578,36 @@ static void test_action_tiles(void) {
     t.fit = RUBRAVIEW_FIT_ACTUAL_SIZE;
     st = rubraview_action_state(U8("actual_size"), &t);
     assert(st.mark == RUBRAVIEW_MARK_CURRENT && st.enabled);
+    /* The reading order says which way it runs (owner, 2026-09-21). */
+    rubraview_action_facts_t o = { .has_page = true };
+    st = rubraview_action_state(U8("toggle_reading_order"), &o);
+    assert(st.value && strcmp(st.value, "L>R") == 0);
+    o.rtl = true;
+    st = rubraview_action_state(U8("toggle_reading_order"), &o);
+    assert(st.value && strcmp(st.value, "R>L") == 0);
+    assert(str_eq(rubraview_tile_caption(U8("Order"), false, st.mark, st.value, buf, sizeof(buf)), "Order: R>L"));
+    assert(rubraview_action_state(U8("rotate_cw"), &o).value == NULL);
     printf("  [PASS] Tiles say submenu, on/off and the current choice; what cannot act here is dimmed\n");
+}
+
+/* A destructive menu item asks first: the first tap arms it, a second
+   tap on the same item within the window acts (owner, 2026-09-21). */
+static void test_confirm(void) {
+    rubraview_confirm_t c = {0};
+    assert(!rubraview_confirm_press(&c, 7, 10.0));            /* armed, not fired */
+    assert(rubraview_confirm_armed(&c, 7, 11.0));
+    assert(!rubraview_confirm_armed(&c, 8, 11.0));
+    assert(rubraview_confirm_press(&c, 7, 12.0));             /* second tap: fires */
+    assert(!rubraview_confirm_armed(&c, 7, 12.0));            /* and disarms */
+    assert(!rubraview_confirm_press(&c, 7, 20.0));            /* arms again */
+    assert(!rubraview_confirm_press(&c, 7, 20.0 + RUBRAVIEW_CONFIRM_SECONDS + 0.1)); /* too late: re-arms */
+    assert(rubraview_confirm_press(&c, 7, 20.0 + RUBRAVIEW_CONFIRM_SECONDS + 1.0));
+    assert(!rubraview_confirm_press(&c, 3, 30.0));
+    assert(!rubraview_confirm_press(&c, 4, 30.5));            /* another item takes the arm over */
+    assert(!rubraview_confirm_armed(&c, 3, 30.5));
+    rubraview_confirm_clear(&c);
+    assert(!rubraview_confirm_armed(&c, 4, 30.6));
+    printf("  [PASS] A destructive item fires on the second tap only, and only soon after the first\n");
 }
 
 int main(void) {
@@ -590,6 +619,7 @@ int main(void) {
     test_pin_and_detach();
     test_action_tiles();
     test_just_opened();
+    test_confirm();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;
 }

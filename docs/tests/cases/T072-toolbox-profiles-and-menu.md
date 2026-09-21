@@ -24,6 +24,10 @@ Open each file, click the toolbox anchor's `T`:
   and fit in use have a blue edge; a tile that cannot act is grey and a
   click on it does nothing. Close the menu one level down and open it
   again: it opens at `Menu`, not where it was left.
+- (D-18) Up to 16 tiles a level. File's `Delete` once: `Delete?` and an OSD
+  line, nothing deleted; `Back`: `Delete` again. Twice within 5 s: the file
+  goes to the recycle bin. Layout's `Order: L>R` / `R>L`. Open folder lists
+  folders and openable files only, and the bar says "N other files hidden".
 
 ## Measured on the Windows 11 VM, 2026-09-21
 
@@ -45,3 +49,12 @@ corner opened over its own anchor with two tiles off the screen.
 
 Found on the way: `history.ini`'s `time` held seconds since the machine
 started (`14496`), not a date — fixed in the next change.
+
+## Measured on the Windows 11 VM, 2026-09-21 (D-18)
+
+By screenshot: Layout `Order: L>R`; File `Delete` tapped once read `Delete?`
+with "tap Delete again to move it to the recycle bin", `a_photo.jpg` still
+there; after `< Back` and File again it read `Delete`. In a throwaway folder,
+two taps moved `zz_delete_me.png` to the bin and the viewer went on to
+`zz_keep.png (1/1)`. Open folder on `rbtest`: `7 items | 32 other files hidden`
+(the `.log`, `.ps1`, `.txt` and `.srt` files).

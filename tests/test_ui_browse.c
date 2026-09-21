@@ -228,11 +228,38 @@ static void test_picker(void) {
     printf("  [PASS] An empty listing leaves the picker inert, no crash\n");
 }
 
+/* The picker lists folders and what the viewer can open; the rest is
+   counted, not shown (owner, 2026-09-21). */
+static void test_picker_keep_openable(void) {
+    rubraview_fs_entry_t entries[] = {
+        { .name = U8("comic"),      .is_directory = true },
+        { .name = U8("a_photo.jpg") },
+        { .name = U8("drop.log") },
+        { .name = U8("E_UPPER.JPG") },
+        { .name = U8("keys.ps1") },
+        { .name = U8("film.mp4") },
+        { .name = U8("notes.txt"),  .is_directory = true },   /* a folder, whatever its name */
+    };
+    rubraview_fs_listing_t listing = { .entries = entries, .count = 7 };
+    size_t hidden = rubraview_picker_keep_openable(&listing, U8("*.jpg;*.png;*.mp4"));
+    assert(hidden == 2 && listing.count == 5);
+    const char *want[] = { "comic", "a_photo.jpg", "E_UPPER.JPG", "film.mp4", "notes.txt" };
+    for (size_t i = 0; i < 5; ++i) {
+        assert(listing.entries[i].name.len == strlen(want[i]) &&
+               memcmp(listing.entries[i].name.ptr, want[i], strlen(want[i])) == 0);
+    }
+    rubraview_fs_listing_t empty = { .entries = NULL, .count = 0 };
+    assert(rubraview_picker_keep_openable(&empty, U8("*.jpg")) == 0);
+    assert(rubraview_picker_keep_openable(NULL, U8("*.jpg")) == 0);
+    printf("  [PASS] The picker keeps folders and openable files, and counts what it hides\n");
+}
+
 int main(void) {
     printf("[test_ui_browse] Starting virtual scrolling, filmstrip and picker unit tests...\n");
     test_virtual();
     test_filmstrip();
     test_picker();
+    test_picker_keep_openable();
     printf("[test_ui_browse] All tests passed successfully!\n");
     return 0;
 }

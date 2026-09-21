@@ -38,6 +38,11 @@ This project follows Keep a Changelog.
   edge, and whatever cannot do anything with what is on screen is grey and
   ignores a tap — in the menu as the toolbox already did (`Next archive` in
   a plain folder, `Frame >` on music, `Track` with one sound track).
+- (D-18, owner) A menu level holds up to 16 tiles instead of 12. The
+  menu's `Delete` asks first: one tap turns it into `Delete?`, a second tap
+  within five seconds acts. The reading-order tile says `Order: L>R` or
+  `Order: R>L`. Open folder lists folders and the files the viewer opens,
+  and says how many others it left out.
 - Names that meant two things: a comic's next or previous *archive* is
   called that (the menu said "volume", the toolbox "Vol <" beside the sound's
   "Vol -"); the sound-track tile is `Track` and the mute tile says `Unmute`
