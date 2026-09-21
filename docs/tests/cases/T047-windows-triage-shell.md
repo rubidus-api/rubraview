@@ -63,6 +63,14 @@ Windows calls behind them do what they say.
   it has no IME, no selection and no clipboard: it takes plain
   characters and Backspace. A Korean or Japanese name cannot be typed
   into it yet, though one can be renamed *from*.
-- **A multi-file drop opens the first file** rather than building a
-  temporary playlist. The routing decision is implemented and tested
-  (T046); what is missing is the temporary-playlist plumbing from §3.12.
+- ~~A multi-file drop opens the first file~~ — since 2026-09-20 several
+  files dropped together open as a set of exactly those files. Measured on
+  the VM on 2026-09-21 with a real drag out of an Explorer window
+  (`vmdrop.sh`: the files are selected through Shell COM, found on screen
+  with UI Automation and dragged with the mouse, so Explorer builds the
+  `WM_DROPFILES` itself): three of six pictures dropped gave
+  `b_exif6.jpg (1/3)`, `Next` went to `c_plain.png (2/3)`; two gave
+  `(1/2)`; the set is in name order whatever order they were selected in.
+  A set whose first picture is `b_exif6.jpg` took about 6.5 s to show —
+  that picture takes as long when the viewer is started on it, so it is
+  the picture, not the drop (BACKLOGS).

@@ -32,6 +32,17 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- A playing sound kept the viewer redrawing its window on every pass of
+  its loop. Without a GPU (Direct2D then draws on the CPU) that was most
+  of two cores for a picture that did not change, and on the test VM it
+  slowed everything else down: key presses sent by the test tools took
+  half a minute to arrive. While only the film or the sound moves, the
+  window is now redrawn for each new picture and otherwise four times a
+  second for the seek bar; a sound-only page used a fifth of the CPU it
+  did (measured on the VM, T058).
+- T058 named the seek keys from before D-16 (`Ctrl+Right` / `Ctrl+Left`,
+  which now size the window); it says `Right` / `Left` now.
+
 - With a Korean IME in Hangul mode, letter shortcuts did nothing: the IME
   took the keys and the window never saw them. The viewer's window is no
   longer attached to the IME, so `F`, `T` and the rest work in either mode

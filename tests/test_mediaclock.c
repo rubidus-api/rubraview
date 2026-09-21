@@ -56,6 +56,32 @@ static int pcm_producer(void *arg) {
 int main(void) {
     printf("[test_mediaclock] Starting media clock tests...\n");
 
+    /* Redraw pacing while a film or a sound plays and nothing else moves:
+       a new picture is drawn at once, otherwise the seek bar and the time
+       are redrawn four times a second, not on every pass of the loop
+       (measured on the VM, 2026-09-21: a sound-only page redrawn on every
+       pass kept 1.75 of 2 cores busy). */
+    {
+        const double hud = RUBRAVIEW_MEDIA_HUD_REDRAW_SECONDS;
+        assert(near(hud, 0.25));
+        assert(rubraview_media_redraw_due(true, 0.0));
+        assert(rubraview_media_redraw_due(true, 0.001));
+        assert(!rubraview_media_redraw_due(false, 0.0));
+        assert(!rubraview_media_redraw_due(false, hud * 0.5));
+        assert(rubraview_media_redraw_due(false, hud));
+        assert(rubraview_media_redraw_due(false, 5.0));
+        /* A clock that went backwards, or garbage, redraws rather than freezes. */
+        assert(rubraview_media_redraw_due(false, -1.0));
+        assert(rubraview_media_redraw_due(false, NAN));
+        /* How long the loop may sleep before the next redraw is due. */
+        assert(near(rubraview_media_redraw_wait(0.0), hud));
+        assert(near(rubraview_media_redraw_wait(0.04), hud - 0.04));
+        assert(near(rubraview_media_redraw_wait(hud), 0.0));
+        assert(near(rubraview_media_redraw_wait(3.0), 0.0));
+        assert(near(rubraview_media_redraw_wait(-1.0), 0.0));
+        assert(near(rubraview_media_redraw_wait(NAN), 0.0));
+    }
+
     /* Test 1: §5.3 frame scheduling — early frames wait, due frames show,
        frames whose interval has passed are dropped. */
     {
