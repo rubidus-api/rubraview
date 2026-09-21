@@ -365,3 +365,11 @@ void rubraview_box_set_pinned(rubraview_box_t *box, bool pinned) {
         box->state = RUBRAVIEW_BOX_LOCKED_OPEN;
     }
 }
+
+bool rubraview_box_just_opened(const rubraview_box_t *box, bool *was_open) {
+    if (!box || !was_open) return false;
+    bool open = box->state != RUBRAVIEW_BOX_COLLAPSED;
+    bool opened = open && !*was_open;
+    *was_open = open;
+    return opened;
+}

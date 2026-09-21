@@ -30,8 +30,26 @@ This project follows Keep a Changelog.
   window's Keys page (§3.22.2). The file dialogs now show their title and
   file type, and a name saved without an extension gets `.ini`.
 
+### Changed
+
+- The menu and the toolbox say more before they are tapped: a tile that
+  opens a submenu ends in `>`, a switch says whether it is on
+  (`Crisp: off`, `Spreads: on`), the layout and the fit in use have a blue
+  edge, and whatever cannot do anything with what is on screen is grey and
+  ignores a tap — in the menu as the toolbox already did (`Next archive` in
+  a plain folder, `Frame >` on music, `Track` with one sound track).
+- Names that meant two things: a comic's next or previous *archive* is
+  called that (the menu said "volume", the toolbox "Vol <" beside the sound's
+  "Vol -"); the sound-track tile is `Track` and the mute tile says `Unmute`
+  while muted (a film's toolbox showed two tiles called `Sound`); the menu's
+  `Full` is `Fullscreen`.
+
 ### Fixed
 
+- The menu reopened on the level it was closed on, so a tap meant for the
+  top level landed on whatever sat in that place one level down (`Delete`
+  where the top level has `Show`). It opens at its top level again, however
+  it is opened.
 - A playing sound kept the viewer redrawing its window on every pass of
   its loop. Without a GPU (Direct2D then draws on the CPU) that was most
   of two cores for a picture that did not change, and on the test VM it

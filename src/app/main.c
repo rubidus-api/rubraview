@@ -51,6 +51,7 @@
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
+#include "rubraview/ui_actions.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
@@ -126,6 +127,7 @@
 #define COLOR_TEXT        0xFFF0F0F0u
 #define COLOR_BAR_FILL    0xE1141414u
 #define COLOR_CLOSE_HOVER 0xFFE81123u
+#define COLOR_TILE_CURRENT 0xFF5B9BD5u   /* the choice in use among several (a layout, a fit) */
 
 
 
@@ -249,6 +251,7 @@ typedef struct app_state {
     rubraview_titlebar_t titlebar;         /* RV-040 */
     rubraview_box_t toolbox;               /* RV-020 */
     rubraview_box_t menubox;
+    bool            menubox_was_open;   /* for rubraview_box_just_opened */
     rubraview_menu_state_t menu;
     /* RFC-0002: the menu tree for this moment and the toolbox's tiles for
        what is on screen, both built from the boxes' document. */
@@ -1143,6 +1146,9 @@ static void prev_spread(app_state_t *app) {
     open_sibling_archive(app, false);
 }
 
+static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+                                 bool *out_enabled, bool *out_current);
+
 static bool action_is(u8str_t action, const char *name) {
     size_t n = strlen(name);
     return action.len == n && memcmp(action.ptr, name, n) == 0;
@@ -1336,14 +1342,45 @@ static int speed_text(char *buffer, size_t size, double speed) {
 }
 
 /* A toggle tile says what a tap will do; a tile that can do nothing now is dimmed. */
+/* What a tile or a menu item can tell about its action: the facts of the
+   page on screen, read the same way for both boxes. */
+static rubraview_action_facts_t action_facts(const app_state_t *app) {
+    return (rubraview_action_facts_t){
+        .has_page = page_count(app) > 0,
+        .archive_series = app->source.archive_path.len > 0,
+        .media = app->media != NULL,
+        .video = app->media != NULL && app->media_info.has_video,
+        .frames = app->anim_active,
+        .other_audio_track = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO, app->tracks.current_audio) >= 0 &&
+                             rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO, app->tracks.current_audio) != app->tracks.current_audio,
+        .other_subtitle = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, app->tracks.current_subtitle) >= 0,
+        .subtitle_shown = app->tracks.current_subtitle >= 0,
+        .slideshow = app->slideshow_running,
+        .filmstrip = app->filmstrip.visible,
+        .osd = app->osd.always_on,
+        .toolbox_pinned = app->toolbox.pinned,
+        .toolbox_detached = app->toolbox.state == RUBRAVIEW_BOX_DETACHED,
+        .fullscreen = rubraview_pal_window_is_fullscreen(app->window),
+        .nearest = app->force_nearest,
+        .pixel_grid = app->pixel_grid,
+        .spread_detect = app->spread_detect,
+        .fit_lock = app->fit_lock,
+        .always_on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5,
+        .muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5,
+        .layout = app->layout_opts.mode,
+        .fit = app->fit_mode,
+    };
+}
+
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
-    *out_enabled = true;
+    rubraview_action_facts_t facts = action_facts(app);
+    *out_enabled = rubraview_action_state(tile->action, &facts).enabled;
     if (action_is(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? U8("Play") : U8("Pause");
     }
     if (action_is(tile->action, "media_mute")) {
-        return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? U8("Sound") : U8("Mute");
+        return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? U8("Unmute") : U8("Mute");
     }
     if (action_is(tile->action, "media_speed_cycle")) {
         static char speed[16];   /* drawn before the next call */
@@ -1352,12 +1389,6 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
     }
     if (action_is(tile->action, "media_ab_cycle")) {
         return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? U8("Set B") : U8("A-B off");
-    }
-    if (action_is(tile->action, "next_subtitle_track")) {
-        *out_enabled = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, app->tracks.current_subtitle) >= 0;
-    } else if (action_is(tile->action, "next_audio_track")) {
-        int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO, app->tracks.current_audio);
-        *out_enabled = next >= 0 && next != app->tracks.current_audio;
     }
     return tile->caption;
 }
@@ -2186,6 +2217,11 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
 
     int32_t tile = rubraview_box_tile_at(&app->menubox, &metrics, x, y);
     if (tile >= 0) {
+        /* A dimmed item does nothing, as a dimmed toolbox tile does. */
+        bool enabled = true;
+        char scratch[64];
+        (void)menu_tile_caption(&app->menu, tile, scratch, sizeof(scratch), &enabled, NULL);
+        if (!enabled) return true;
         u8str_t action;
         rubraview_menu_result_t result = rubraview_menu_activate(&app->menu, tile, &action);
         if (result == RUBRAVIEW_MENU_ACTIVATED) {
@@ -2217,17 +2253,25 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
 static const app_state_t *g_caption_app;
 
 /* Tile captions for the menu box come from the current menu level, with
-   the Back tile at index 0 below the root (§3.6.2). */
-static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size) {
-    (void)scratch; (void)scratch_size;
+   the Back tile at index 0 below the root (§3.6.2). A submenu ends in
+   ">", a toggle says whether it is on, the choice in use is marked, and
+   what cannot act on the page on screen is dimmed. */
+static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+                                 bool *out_enabled, bool *out_current) {
+    if (out_enabled) *out_enabled = true;
+    if (out_current) *out_current = false;
     if (rubraview_menu_has_back_tile(menu) && tile == 0) return U8("< Back");
     const rubraview_menu_item_t *item = rubraview_menu_item_at(menu, tile);
-    /* A toggle in the menu says whether it is on. */
-    if (item && g_caption_app && action_is(item->action, "toggle_always_on_top")) {
-        return rubraview_settings_get(&g_caption_app->settings, U8("general"), U8("always_on_top")) > 0.5
-            ? U8("On top: on") : U8("On top: off");
+    if (!item) return (u8str_t){ .ptr = "", .len = 0 };
+    bool submenu = item->child_count > 0;
+    rubraview_action_state_t st = { .enabled = true, .mark = RUBRAVIEW_MARK_NONE };
+    if (!submenu && g_caption_app) {
+        rubraview_action_facts_t facts = action_facts(g_caption_app);
+        st = rubraview_action_state(item->action, &facts);
     }
-    return item ? item->label : (u8str_t){ .ptr = "", .len = 0 };
+    if (out_enabled) *out_enabled = st.enabled;
+    if (out_current) *out_current = st.mark == RUBRAVIEW_MARK_CURRENT;
+    return rubraview_tile_caption(item->label, submenu, st.mark, scratch, scratch_size);
 }
 
 static u8str_t box_opacity_key(const rubraview_box_t *box) {
@@ -2390,14 +2434,17 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         rubraview_pal_render_fill_rect(app->renderer, tile, tile_fill, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile, box_border, 1.0, 0.0);
         u8str_t caption = { .ptr = "", .len = 0 };
-        bool enabled = true;
+        bool enabled = true, current = false;
+        char scratch[64];
         if (menu) {
-            char scratch[64];
-            caption = menu_tile_caption(menu, i, scratch, sizeof(scratch));
+            caption = menu_tile_caption(menu, i, scratch, sizeof(scratch), &enabled, &current);
         } else if (captions && i < caption_count) {
             caption = cstr(captions[i]);
         } else if (box == &app->toolbox && i < app->toolbox_tile_count) {
             caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
+        }
+        if (current) {
+            rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_TILE_CURRENT, 2.0, 0.0);
         }
         if (caption.len > 0) {
             rubraview_pal_render_draw_text(app->renderer, caption, tile, metrics->tile_size * 0.22,
@@ -4271,6 +4318,8 @@ static void tick_timers(app_state_t *app, double dt) {
     rubraview_box_pointer(&app->menubox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_tick(&app->toolbox, dt, grace);
     rubraview_box_tick(&app->menubox, dt, grace);
+    /* However it was opened, the menu opens at its root, Recent as it is now. */
+    if (rubraview_box_just_opened(&app->menubox, &app->menubox_was_open)) menu_rebuild(app);
 
     if (app->slideshow_running) {
         if (rubraview_cursor_hide_tick(&app->cursor, dt)) {

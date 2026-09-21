@@ -1,5 +1,6 @@
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
+#include "rubraview/ui_actions.h"
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
@@ -499,6 +500,87 @@ static void test_opacity(void) {
     printf("  [PASS] Box opacity steps 5 %% at a time and never below 30 %%\n");
 }
 
+/* What a tile says about its action: a submenu says so, a toggle says
+   whether it is on, and what cannot do anything here is dimmed — the
+   same rules for the menu box and the toolbox. */
+static void test_just_opened(void) {
+    rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_MENU, 0.0, 0.0, 4);
+    bool was_open = false;
+    assert(!rubraview_box_just_opened(&box, &was_open));      /* collapsed */
+    rubraview_box_click_anchor(&box);
+    assert(rubraview_box_just_opened(&box, &was_open));       /* opened: once */
+    assert(!rubraview_box_just_opened(&box, &was_open));
+    rubraview_box_click_anchor(&box);
+    assert(!rubraview_box_just_opened(&box, &was_open));      /* closed */
+    rubraview_box_click_anchor(&box);
+    assert(rubraview_box_just_opened(&box, &was_open));       /* and again */
+    assert(!rubraview_box_just_opened(NULL, &was_open));
+    printf("  [PASS] Opening a box is noticed once, however often it is asked\n");
+}
+
+static void test_action_tiles(void) {
+    char buf[64];
+    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, buf, sizeof(buf)), "File >"));
+    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_ON, buf, sizeof(buf)), "Crisp: on"));
+    assert(str_eq(rubraview_tile_caption(U8("Crisp"), false, RUBRAVIEW_MARK_OFF, buf, sizeof(buf)), "Crisp: off"));
+    assert(str_eq(rubraview_tile_caption(U8("Single"), false, RUBRAVIEW_MARK_CURRENT, buf, sizeof(buf)), "Single"));
+    assert(str_eq(rubraview_tile_caption(U8("Rotate"), false, RUBRAVIEW_MARK_NONE, buf, sizeof(buf)), "Rotate"));
+    /* Too small a buffer gives the plain label rather than a cut one. */
+    char tiny[4];
+    assert(str_eq(rubraview_tile_caption(U8("File"), true, RUBRAVIEW_MARK_NONE, tiny, sizeof(tiny)), "File"));
+
+    rubraview_action_facts_t f = { .has_page = true };
+    rubraview_action_state_t st;
+    /* A single picture: nothing to go to beyond it, no frames, no sound. */
+    assert(!rubraview_action_state(U8("next_archive"), &f).enabled);
+    assert(!rubraview_action_state(U8("prev_archive"), &f).enabled);
+    assert(rubraview_action_state(U8("rotate_cw"), &f).enabled);
+    assert(rubraview_action_state(U8("quick_export"), &f).enabled);
+    f.archive_series = true;
+    assert(rubraview_action_state(U8("next_archive"), &f).enabled);
+
+    /* Sound only: no frames to step, nothing to export. */
+    rubraview_action_facts_t music = { .has_page = true, .media = true };
+    assert(!rubraview_action_state(U8("anim_step_forward"), &music).enabled);
+    assert(!rubraview_action_state(U8("quick_export"), &music).enabled);
+    assert(!rubraview_action_state(U8("next_audio_track"), &music).enabled);
+    assert(!rubraview_action_state(U8("subtitle_later"), &music).enabled);
+    music.other_audio_track = true;
+    assert(rubraview_action_state(U8("next_audio_track"), &music).enabled);
+    rubraview_action_facts_t film = { .has_page = true, .media = true, .video = true, .subtitle_shown = true };
+    assert(rubraview_action_state(U8("anim_step_forward"), &film).enabled);
+    assert(rubraview_action_state(U8("subtitle_later"), &film).enabled);
+    assert(!rubraview_action_state(U8("next_subtitle_track"), &film).enabled);
+
+    /* Nothing on screen: the view's own actions wait for a picture. */
+    rubraview_action_facts_t empty = {0};
+    assert(!rubraview_action_state(U8("fit_width"), &empty).enabled);
+    assert(!rubraview_action_state(U8("rename_file"), &empty).enabled);
+    assert(rubraview_action_state(U8("open_picker"), &empty).enabled);
+    assert(rubraview_action_state(U8("quit"), &empty).enabled);
+    assert(rubraview_action_state(U8("an_action_nobody_knows"), &empty).enabled);
+
+    /* Toggles say on or off. */
+    rubraview_action_facts_t t = { .has_page = true, .nearest = true, .always_on_top = false, .muted = true };
+    assert(rubraview_action_state(U8("toggle_nearest"), &t).mark == RUBRAVIEW_MARK_ON);
+    assert(rubraview_action_state(U8("toggle_pixel_grid"), &t).mark == RUBRAVIEW_MARK_OFF);
+    assert(rubraview_action_state(U8("toggle_always_on_top"), &t).mark == RUBRAVIEW_MARK_OFF);
+    assert(rubraview_action_state(U8("media_mute"), &t).mark == RUBRAVIEW_MARK_ON);
+    assert(rubraview_action_state(U8("rotate_cw"), &t).mark == RUBRAVIEW_MARK_NONE);
+
+    /* Of several, the one in use is marked. */
+    t.layout = RUBRAVIEW_PAGE_LAYOUT_DUAL;
+    t.fit = RUBRAVIEW_FIT_WIDTH;
+    assert(rubraview_action_state(U8("layout_dual"), &t).mark == RUBRAVIEW_MARK_CURRENT);
+    assert(rubraview_action_state(U8("layout_single"), &t).mark == RUBRAVIEW_MARK_NONE);
+    assert(rubraview_action_state(U8("fit_width"), &t).mark == RUBRAVIEW_MARK_CURRENT);
+    assert(rubraview_action_state(U8("actual_size"), &t).mark == RUBRAVIEW_MARK_NONE);
+    t.fit = RUBRAVIEW_FIT_ACTUAL_SIZE;
+    st = rubraview_action_state(U8("actual_size"), &t);
+    assert(st.mark == RUBRAVIEW_MARK_CURRENT && st.enabled);
+    printf("  [PASS] Tiles say submenu, on/off and the current choice; what cannot act here is dimmed\n");
+}
+
 int main(void) {
     printf("[test_ui_box] Starting floating box and menu hierarchy unit tests...\n");
     test_boxes();
@@ -506,6 +588,8 @@ int main(void) {
     test_menu();
     test_opacity();
     test_pin_and_detach();
+    test_action_tiles();
+    test_just_opened();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;
 }
