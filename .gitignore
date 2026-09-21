@@ -53,3 +53,6 @@ resources/cache/
 *.tmp
 *.log
 build/
+
+# agy-only customization layer (local; see rootsator RFC-0001)
+/.agents/
