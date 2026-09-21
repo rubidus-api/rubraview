@@ -38,6 +38,20 @@ typedef enum rubraview_frame_decision {
 rubraview_frame_decision_t rubraview_media_schedule(double frame_pts, double frame_duration,
                                                      double clock_seconds);
 
+/**
+ * Redraw pacing while a film or a sound plays and nothing else on screen
+ * moves. A new picture is drawn at once; otherwise only the seek bar and
+ * the time (minutes and seconds) change, and four times a second is plenty
+ * for them. Redrawing on every pass of the loop instead kept 1.75 of the
+ * VM's 2 cores busy on a sound-only page: Direct2D rasterises on the CPU
+ * there, about 0.1 s of CPU a frame, so even ten a second cost a core. A negative or
+ * NaN interval counts as due: better one redraw too many than a frozen bar.
+ */
+#define RUBRAVIEW_MEDIA_HUD_REDRAW_SECONDS 0.25
+bool   rubraview_media_redraw_due(bool new_picture, double seconds_since_render);
+/* How long the loop may wait for input before that redraw is due (0 = now). */
+double rubraview_media_redraw_wait(double seconds_since_render);
+
 /* ---- the playback clock ---- */
 
 typedef enum rubraview_clock_master {
