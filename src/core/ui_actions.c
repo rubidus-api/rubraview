@@ -55,6 +55,8 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         }
     }
 
+    if (is(action, "toggle_reading_order")) st.value = f->rtl ? "R>L" : "L>R";
+
     static const struct { const char *action; rubraview_page_layout_t layout; } LAYOUTS[] = {
         { "layout_single", RUBRAVIEW_PAGE_LAYOUT_SINGLE },
         { "layout_dual",   RUBRAVIEW_PAGE_LAYOUT_DUAL },
@@ -77,14 +79,36 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     return st;
 }
 
-u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark,
+u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
                                char *buffer, size_t buffer_size) {
-    const char *suffix = submenu ? " >"
-                       : mark == RUBRAVIEW_MARK_ON ? ": on"
-                       : mark == RUBRAVIEW_MARK_OFF ? ": off" : "";
-    size_t extra = strlen(suffix);
-    if (extra == 0 || !buffer || label.len + extra + 1 > buffer_size) return label;
+    const char *sep = submenu ? " >" : (value || mark == RUBRAVIEW_MARK_ON || mark == RUBRAVIEW_MARK_OFF) ? ": " : "";
+    const char *word = submenu ? ""
+                     : value ? value
+                     : mark == RUBRAVIEW_MARK_ON ? "on"
+                     : mark == RUBRAVIEW_MARK_OFF ? "off" : "";
+    size_t a = strlen(sep), b = strlen(word);
+    if (a + b == 0 || !buffer || label.len + a + b + 1 > buffer_size) return label;
     memcpy(buffer, label.ptr, label.len);
-    memcpy(buffer + label.len, suffix, extra + 1);
-    return (u8str_t){ .ptr = buffer, .len = label.len + extra };
+    memcpy(buffer + label.len, sep, a);
+    memcpy(buffer + label.len + a, word, b + 1);
+    return (u8str_t){ .ptr = buffer, .len = label.len + a + b };
+}
+
+bool rubraview_confirm_press(rubraview_confirm_t *c, int64_t key, double now) {
+    if (!c) return true;
+    if (rubraview_confirm_armed(c, key, now)) {
+        rubraview_confirm_clear(c);
+        return true;
+    }
+    c->key = key;
+    c->until = now + RUBRAVIEW_CONFIRM_SECONDS;
+    return false;
+}
+
+bool rubraview_confirm_armed(const rubraview_confirm_t *c, int64_t key, double now) {
+    return c && c->key == key && now <= c->until && c->until > 0.0;
+}
+
+void rubraview_confirm_clear(rubraview_confirm_t *c) {
+    if (c) *c = (rubraview_confirm_t){0};
 }

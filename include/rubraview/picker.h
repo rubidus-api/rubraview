@@ -70,6 +70,13 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter);
 /** Toggle one item's selection; a no-op outside multi-select mode. */
 void rubraview_picker_toggle(rubraview_picker_t *picker, size_t index);
 
+/**
+ * Keep the folders and the files whose names match `patterns` (a glob
+ * list, "*.jpg;*.png"), in their order, and return how many files were
+ * dropped (owner, 2026-09-21: the picker shows only what can be opened).
+ */
+size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, u8str_t patterns);
+
 /** §3.15.2: the bottom bar's "N files (M bytes)" metrics. */
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
                                         size_t *out_count, uint64_t *out_total_bytes);
