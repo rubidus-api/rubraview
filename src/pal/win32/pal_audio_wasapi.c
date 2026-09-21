@@ -33,6 +33,7 @@ static const GUID RV_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x
 static const GUID RV_IID_IMMDeviceEnumerator  = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
 static const GUID RV_IID_IAudioClient         = {0x1CB9AD4C, 0xDBFA, 0x4C32, {0xB1, 0x78, 0xC2, 0xF5, 0x68, 0xA7, 0x03, 0xB2}};
 static const GUID RV_IID_ISimpleAudioVolume   = {0x87CE5498, 0x68D6, 0x44E5, {0x92, 0x15, 0x6D, 0xA4, 0x7E, 0xF8, 0x83, 0xD8}};
+static const GUID RV_IID_IAudioClock          = {0xCD63314F, 0x3FBA, 0x4A1B, {0x81, 0x2C, 0xEF, 0x96, 0x35, 0x87, 0x28, 0xE7}};
 static const GUID RV_IID_IAudioRenderClient   = {0xF294ACFC, 0x3146, 0x4483, {0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2}};
 static const GUID RV_SUBTYPE_IEEE_FLOAT       = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
@@ -129,10 +130,13 @@ typedef struct device {
     IAudioClient *client;
     IAudioRenderClient *render;
     ISimpleAudioVolume *volume;
+    IAudioClock *clock;           /* where the device is playing; NULL where not given */
+    UINT64 clock_frequency;
     UINT32 buffer_frames;
 } device_t;
 
 static void close_device(device_t *d) {
+    if (d->clock) IAudioClock_Release(d->clock);
     if (d->volume) ISimpleAudioVolume_Release(d->volume);
     if (d->render) IAudioRenderClient_Release(d->render);
     if (d->client) IAudioClient_Release(d->client);
@@ -170,6 +174,13 @@ static bool open_device(rubraview_audio_out_t *out, device_t *d) {
              SUCCEEDED(IAudioClient_GetService(d->client, &RV_IID_IAudioRenderClient, (void**)&d->render)) && d->render;
         /* Volume is a nicety: an output that cannot give it still plays. */
         if (ok && FAILED(IAudioClient_GetService(d->client, &RV_IID_ISimpleAudioVolume, (void**)&d->volume))) d->volume = NULL;
+        /* The clock too: without it the heard position leaves out what the
+           engine and the device still hold. */
+        if (ok && SUCCEEDED(IAudioClient_GetService(d->client, &RV_IID_IAudioClock, (void**)&d->clock)) && d->clock &&
+            (FAILED(IAudioClock_GetFrequency(d->clock, &d->clock_frequency)) || d->clock_frequency == 0)) {
+            IAudioClock_Release(d->clock);
+            d->clock = NULL;
+        }
     }
     if (!ok) close_device(d);
     return ok;
@@ -263,8 +274,17 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
             started = false;
         }
 
-        (void)submitted;
-        publish(out, rubraview_audio_heard_media_seconds(base, source_frames, padding, step, out->rate));
+        /* What is not heard yet: everything sent that the device has not
+           played. The padding alone left out what the engine and the device
+           hold, and the picture ran that far ahead of the sound (T058 on
+           the VM: a flash 37 ms before its beep). */
+        uint64_t pending = padding;
+        UINT64 played_at = 0, played_qpc = 0;
+        if (d->clock && SUCCEEDED(IAudioClock_GetPosition(d->clock, &played_at, &played_qpc))) {
+            double played = (double)played_at * (double)out->rate / (double)d->clock_frequency;
+            if (played >= 0.0 && played <= (double)submitted) pending = (uint64_t)((double)submitted - played);
+        }
+        publish(out, rubraview_audio_heard_media_seconds(base, source_frames, pending, step, out->rate));
         atomic_store_explicit(&out->drained,
                               rubraview_pcm_ring_count(out->ring) == 0 && padding == 0,
                               memory_order_release);
