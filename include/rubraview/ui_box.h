@@ -177,6 +177,15 @@ void rubraview_box_dismiss(rubraview_box_t *box);      /* Esc, or a click outsid
 void rubraview_box_set_pinned(rubraview_box_t *box, bool pinned);
 
 /**
+ * True once for each time the box goes from collapsed to open, however it
+ * was opened (a click, hovering, a key). `was_open` is the caller's memory
+ * of the last answer. The menu box starts again at its root there: a menu
+ * that reopened where it was left put the reader's next tap on whatever
+ * sat in that place one level down (Delete, where the root had Show).
+ */
+bool rubraview_box_just_opened(const rubraview_box_t *box, bool *was_open);
+
+/**
  * §3.6.3: advance the idle timer; an unpinned, hover-expanded box
  * collapses after `grace_seconds` (0.5 s in the RFC). Returns true when
  * this call collapsed it.

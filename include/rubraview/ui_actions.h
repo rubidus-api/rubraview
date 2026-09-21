@@ -1,0 +1,67 @@
+#ifndef RUBRAVIEW_UI_ACTIONS_H
+#define RUBRAVIEW_UI_ACTIONS_H
+
+#include "rubraview/core.h"
+#include "rubraview/layout.h"
+#include "rubraview/viewport.h"
+#include <stddef.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * What a menu item or a toolbox tile tells the reader about its action
+ * before it is tapped: whether it can do anything on the page on screen,
+ * whether a toggle is on, and which of several choices is the one in
+ * use. The same rules serve both boxes, so a tile and a menu item for
+ * the same action never disagree.
+ */
+
+typedef enum rubraview_tile_mark {
+    RUBRAVIEW_MARK_NONE = 0,
+    RUBRAVIEW_MARK_ON,        /* a toggle that is on: "Crisp: on" */
+    RUBRAVIEW_MARK_OFF,       /* a toggle that is off */
+    RUBRAVIEW_MARK_CURRENT,   /* the choice in use among several (a layout, a fit) */
+} rubraview_tile_mark_t;
+
+/* What the viewer knows about the page on screen, as plain facts. */
+typedef struct rubraview_action_facts {
+    bool has_page;            /* something is shown */
+    bool archive_series;      /* reading an archive: there are archives to step through */
+    bool media;               /* a film or a sound is open */
+    bool video;               /* ... and it has pictures */
+    bool frames;              /* an animation or a multi-page file */
+    bool other_audio_track;   /* `A` would change the sound track */
+    bool other_subtitle;      /* `C` would change the subtitles */
+    bool subtitle_shown;      /* subtitles are being drawn */
+    /* toggles */
+    bool slideshow, filmstrip, osd, toolbox_pinned, toolbox_detached, fullscreen;
+    bool nearest, pixel_grid, spread_detect, fit_lock, always_on_top, muted;
+    /* choices */
+    rubraview_page_layout_t layout;
+    rubraview_fit_mode_t fit;
+} rubraview_action_facts_t;
+
+typedef struct rubraview_action_state {
+    bool enabled;                 /* false: the tile is dimmed and a tap does nothing */
+    rubraview_tile_mark_t mark;
+} rubraview_action_state_t;
+
+/** An action nobody lists here is enabled and unmarked. */
+rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_action_facts_t *facts);
+
+/**
+ * The caption a tile shows: "File >" for a submenu, "Crisp: on" or
+ * "Crisp: off" for a toggle, the label itself otherwise. Written into
+ * `buffer`; when it does not fit, the plain label is returned instead.
+ */
+u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark,
+                               char *buffer, size_t buffer_size);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* RUBRAVIEW_UI_ACTIONS_H */
