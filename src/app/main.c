@@ -117,7 +117,7 @@
    cut off when the loop stops drawing. */
 #define IDLE_REDRAW_GRACE 3.0
 #define HISTORY_MAX_ENTRIES 512
-#define MENU_MAX_TILES 12
+#define MENU_MAX_TILES 16   /* 4 x 4; the owner chose a larger grid over splitting File (2026-09-21) */
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
 #define COLOR_CANVAS      0xFF101010u
@@ -324,6 +324,8 @@ typedef struct app_state {
     bool                   picker_open;
     u8str_t                picker_dir;
     rubraview_fs_listing_t picker_listing;
+    size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
+    rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
     rubraview_picker_t     picker;
 } app_state_t;
 
@@ -1176,7 +1178,13 @@ static void toggle_slideshow(app_state_t *app) {
    the picker and the page sequence agree. */
 static void picker_navigate(app_state_t *app, u8str_t dir) {
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
-    if (listing.count == 0) return;
+    /* Only folders and what the viewer opens (owner, 2026-09-21). */
+    size_t hidden = rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
+    if (listing.count == 0) {
+        if (hidden > 0) osd_say(app, U8("nothing in that folder can be opened here"));
+        return;
+    }
+    app->picker_hidden = hidden;
 
     /* Directories first, then files, each in natural order — folders are
        what a reader scans for first on a touch screen. */
@@ -1296,6 +1304,7 @@ static void menu_rebuild(app_state_t *app) {
     app->menu_tree = rubraview_boxes_menu(&arena, rubraview_boxes_document(), app->menu_when,
                                           recent, recent_count, MENU_MAX_TILES - 1);
     app->menu = rubraview_menu_create(&app->menu_tree);
+    rubraview_confirm_clear(&app->menu_confirm);
     sync_menubox_tiles(app);
 }
 
@@ -1369,12 +1378,19 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5,
         .layout = app->layout_opts.mode,
         .fit = app->fit_mode,
+        .rtl = app->layout_opts.direction == RUBRAVIEW_READING_RTL,
     };
 }
 
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
     rubraview_action_facts_t facts = action_facts(app);
-    *out_enabled = rubraview_action_state(tile->action, &facts).enabled;
+    rubraview_action_state_t st = rubraview_action_state(tile->action, &facts);
+    *out_enabled = st.enabled;
+    if (st.value) {
+        /* A setting the tile names, "Order: R>L": drawn before the next call. */
+        static char named[48];
+        return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
+    }
     if (action_is(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? U8("Play") : U8("Pause");
@@ -2222,6 +2238,19 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         char scratch[64];
         (void)menu_tile_caption(&app->menu, tile, scratch, sizeof(scratch), &enabled, NULL);
         if (!enabled) return true;
+        /* Delete asks first (owner, 2026-09-21): the first tap arms it and
+           its tile says "Delete?"; a second tap on it within five seconds
+           acts. Any other tap disarms it. */
+        const rubraview_menu_item_t *item = rubraview_menu_item_at(&app->menu, tile);
+        if (item && action_is(item->action, "delete_file")) {
+            if (!rubraview_confirm_press(&app->menu_confirm, item - app->menu.tree->items,
+                                         rubraview_pal_time_now_seconds())) {
+                osd_say(app, U8("tap Delete again to move it to the recycle bin"));
+                return true;
+            }
+        } else {
+            rubraview_confirm_clear(&app->menu_confirm);
+        }
         u8str_t action;
         rubraview_menu_result_t result = rubraview_menu_activate(&app->menu, tile, &action);
         if (result == RUBRAVIEW_MENU_ACTIVATED) {
@@ -2271,7 +2300,11 @@ static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t til
     }
     if (out_enabled) *out_enabled = st.enabled;
     if (out_current) *out_current = st.mark == RUBRAVIEW_MARK_CURRENT;
-    return rubraview_tile_caption(item->label, submenu, st.mark, scratch, scratch_size);
+    if (g_caption_app && rubraview_confirm_armed(&g_caption_app->menu_confirm, item - menu->tree->items,
+                                                 rubraview_pal_time_now_seconds())) {
+        return U8("Delete?");
+    }
+    return rubraview_tile_caption(item->label, submenu, st.mark, st.value, scratch, scratch_size);
 }
 
 static u8str_t box_opacity_key(const rubraview_box_t *box) {
@@ -2513,13 +2546,15 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_rect_t bar = { 0.0, win_h - action_h, win_w, action_h };
     rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
 
-    char status[160];
+    char status[224];
     size_t selected = 0;
     uint64_t bytes = 0;
     rubraview_picker_selection_metrics(&app->picker, &selected, &bytes);
+    char hidden[48] = "";
+    if (app->picker_hidden > 0) snprintf(hidden, sizeof(hidden), "   |   %zu other files hidden", app->picker_hidden);
     int written = snprintf(status, sizeof(status),
-                           "%zu items   |   selected %zu (%llu bytes)   |   Enter opens, Esc closes",
-                           app->picker_listing.count, selected, (unsigned long long)bytes);
+                           "%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Esc closes",
+                           app->picker_listing.count, hidden, selected, (unsigned long long)bytes);
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
                                        (u8str_t){ .ptr = status, .len = (size_t)written },
