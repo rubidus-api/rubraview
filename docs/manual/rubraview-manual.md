@@ -158,9 +158,15 @@ While it does:
 
 Two small anchors float over the picture: **M** opens the menu, **T** the
 toolbox. The toolbox changes with what is on screen — playing controls for a
-video or music, frame steps for an animation, layout and volumes for a comic
-archive. Hold `Alt` and turn the wheel over a box to make it more or less
-see-through (never below 30 %).
+video or music, frame steps for an animation, layout and the next or previous
+archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
+it more or less see-through (never below 30 %).
+
+The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
+a switch says whether it is on (`Crisp: off`), the layout and fit in use
+have a blue edge, and a grey tile cannot do anything with what is on screen
+(`Next archive` in a plain folder, `Track` on a film with one sound track).
+The menu always opens at its top level.
 
 `Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
 that stays on top, and `Dock` puts it back. The menu's first tile, the `Pin`
