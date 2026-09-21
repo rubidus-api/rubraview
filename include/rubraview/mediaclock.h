@@ -52,6 +52,13 @@ bool   rubraview_media_redraw_due(bool new_picture, double seconds_since_render)
 /* How long the loop may wait for input before that redraw is due (0 = now). */
 double rubraview_media_redraw_wait(double seconds_since_render);
 
+/**
+ * RV-062: whether to hand the graphics card to the decoder. `mode` is
+ * [video] hardware_decode: 0 off, 1 on where the card offers decoders
+ * (`decoder_profiles` > 0), 2 always (diagnostic). Anything else is off.
+ */
+bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_profiles);
+
 /* ---- the playback clock ---- */
 
 typedef enum rubraview_clock_master {
