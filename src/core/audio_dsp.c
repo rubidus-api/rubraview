@@ -375,3 +375,27 @@ size_t rubraview_speed_resample(rubraview_speed_resampler_t *r, const float *src
     }
     return written;
 }
+
+/* ---- fade-in after the output was emptied ---- */
+
+void rubraview_fade_in(float *d, size_t frames, uint32_t channels, uint32_t *remaining, uint32_t length) {
+    if (!d || !remaining || length == 0) return;
+    for (size_t f = 0; f < frames && *remaining > 0; ++f) {
+        float gain = (float)(length - *remaining) / (float)length;
+        for (uint32_t c = 0; c < channels; ++c) d[f * channels + c] *= gain;
+        *remaining -= 1;
+    }
+}
+
+/* ---- no device: sound used up on the wall clock ---- */
+
+size_t rubraview_silent_frames_due(double elapsed, double rate, double speed, double *carry) {
+    if (!(elapsed > 0.0) || !(rate > 0.0)) return 0;
+    if (!(speed > 0.0)) speed = 1.0;
+    double frames = elapsed * rate * speed + (carry ? *carry : 0.0);
+    double cap = rate * speed;
+    if (frames > cap) frames = cap;
+    size_t whole = (size_t)frames;
+    if (carry) *carry = frames - (double)whole;
+    return whole;
+}

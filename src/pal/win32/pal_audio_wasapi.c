@@ -115,20 +115,90 @@ static void apply_volume(ISimpleAudioVolume *volume, uint32_t *applied) {
     *applied = generation;
 }
 
-static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderClient *render,
-                ISimpleAudioVolume *volume, UINT32 buffer_frames) {
+/* The device went away: unplugged, disabled, or a remote session's sound
+   turned off. Not every audio call says so the same way. */
+#define RV_AUDCLNT_E_DEVICE_INVALIDATED ((HRESULT)0x88890004L)
+#define RV_AUDCLNT_E_SERVICE_NOT_RUNNING ((HRESULT)0x88890010L)
+static bool device_gone(HRESULT hr) {
+    return hr == RV_AUDCLNT_E_DEVICE_INVALIDATED || hr == RV_AUDCLNT_E_SERVICE_NOT_RUNNING;
+}
+
+typedef struct device {
+    IMMDeviceEnumerator *enumerator;
+    IMMDevice *device;
+    IAudioClient *client;
+    IAudioRenderClient *render;
+    ISimpleAudioVolume *volume;
+    UINT32 buffer_frames;
+} device_t;
+
+static void close_device(device_t *d) {
+    if (d->volume) ISimpleAudioVolume_Release(d->volume);
+    if (d->render) IAudioRenderClient_Release(d->render);
+    if (d->client) IAudioClient_Release(d->client);
+    if (d->device) IMMDevice_Release(d->device);
+    if (d->enumerator) IMMDeviceEnumerator_Release(d->enumerator);
+    *d = (device_t){0};
+}
+
+/* The default output device, opened in our format. */
+static bool open_device(rubraview_audio_out_t *out, device_t *d) {
+    *d = (device_t){0};
+    bool ok = SUCCEEDED(CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+                                         &RV_IID_IMMDeviceEnumerator, (void**)&d->enumerator)) && d->enumerator &&
+              SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &d->device)) && d->device &&
+              SUCCEEDED(IMMDevice_Activate(d->device, &RV_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&d->client)) && d->client;
+    if (ok) {
+        WAVEFORMATEXTENSIBLE format = {0};
+        format.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        format.Format.nChannels = (WORD)out->channels;
+        format.Format.nSamplesPerSec = out->rate;
+        format.Format.wBitsPerSample = 32;
+        format.Format.nBlockAlign = (WORD)(out->channels * 4u);
+        format.Format.nAvgBytesPerSec = out->rate * format.Format.nBlockAlign;
+        format.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        format.Samples.wValidBitsPerSample = 32;
+        format.dwChannelMask = channel_mask(out->channels);
+        format.SubFormat = RV_SUBTYPE_IEEE_FLOAT;
+
+        DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                      AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+        ok = SUCCEEDED(IAudioClient_Initialize(d->client, AUDCLNT_SHAREMODE_SHARED, flags, DEVICE_BUFFER_100NS, 0,
+                                               (WAVEFORMATEX*)&format, NULL)) &&
+             SUCCEEDED(IAudioClient_SetEventHandle(d->client, out->wake)) &&
+             SUCCEEDED(IAudioClient_GetBufferSize(d->client, &d->buffer_frames)) && d->buffer_frames > 0 &&
+             SUCCEEDED(IAudioClient_GetService(d->client, &RV_IID_IAudioRenderClient, (void**)&d->render)) && d->render;
+        /* Volume is a nicety: an output that cannot give it still plays. */
+        if (ok && FAILED(IAudioClient_GetService(d->client, &RV_IID_ISimpleAudioVolume, (void**)&d->volume))) d->volume = NULL;
+    }
+    if (!ok) close_device(d);
+    return ok;
+}
+
+/* Feeds the device until quit (false) or until the device goes away
+   (true). `io_base` comes in as the position to start from and goes out
+   as the position of the first sound not yet read from the ring. */
+static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
+    IAudioClient *client = d->client;
+    IAudioRenderClient *render = d->render;
+    ISimpleAudioVolume *volume = d->volume;
+    UINT32 buffer_frames = d->buffer_frames;
     uint64_t submitted = 0;
     double source_frames = 0.0;   /* file frames read for what went to the device (D-15) */
-    double base = 0.0;
-    bool started = false;
+    double base = *io_base;
+    bool started = false, lost = false;
     uint32_t volume_applied = 0;
     double step = 1.0;
+    /* After the device was emptied (a seek) the sound fades in over 5 ms
+       instead of starting mid-wave (T058 on the VM: a click). */
+    const uint32_t fade_length = out->rate / 200u;
+    uint32_t fade_left = 0;
     /* Speed reads up to 4 file frames per device frame; one buffer's worth, read ahead. */
     rubraview_speed_resampler_t resampler = rubraview_speed_resampler_create(out->channels);
     size_t scratch_frames = (size_t)buffer_frames * 4u + 2u;
     float *scratch = (float*)malloc(scratch_frames * out->channels * sizeof(float));
-    if (!scratch) return;
-    publish(out, 0.0);
+    if (!scratch) return false;
+    publish(out, base);
 
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
         apply_volume(volume, &volume_applied);   /* before the wait: a new output starts at the right level */
@@ -138,19 +208,28 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
         if (request != atomic_load_explicit(&out->flush_ack, memory_order_relaxed)) {
             /* A seek. The producer is waiting for our answer and not
                writing, so emptying the ring cannot lose new samples. */
-            if (started) { IAudioClient_Stop(client); started = false; }
+            /* Stopped and left alone, the stream ends quietly (every pause
+               measured on the VM ended at 0); reset at once, it was cut
+               mid-wave. So the engine gets a few periods to finish before
+               what was queued is thrown away (T058). */
+            if (started) { IAudioClient_Stop(client); started = false; Sleep(30); }
             IAudioClient_Reset(client);
             rubraview_pcm_ring_discard(out->ring);
             submitted = 0;
             source_frames = 0.0;
             resampler = rubraview_speed_resampler_create(out->channels);
             base = (double)atomic_load_explicit(&out->flush_base_100ns, memory_order_relaxed) / 1e7;
+            fade_left = fade_length;
             publish(out, base);
             atomic_store_explicit(&out->flush_ack, request, memory_order_release);
         }
 
         UINT32 padding = 0;
-        if (FAILED(IAudioClient_GetCurrentPadding(client, &padding))) padding = 0;
+        HRESULT hr = IAudioClient_GetCurrentPadding(client, &padding);
+        if (FAILED(hr)) {
+            if (device_gone(hr)) { lost = true; break; }
+            padding = 0;
+        }
 
         bool want = atomic_load_explicit(&out->playing, memory_order_acquire);
         if (want) {
@@ -162,13 +241,18 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
             if (k > scratch_frames) k = scratch_frames;
             if (space > 0 && k > 0) {
                 BYTE *data = NULL;
-                if (SUCCEEDED(IAudioRenderClient_GetBuffer(render, space, &data)) && data) {
+                hr = IAudioRenderClient_GetBuffer(render, space, &data);
+                if (SUCCEEDED(hr) && data) {
                     rubraview_pcm_ring_read(out->ring, scratch, k * out->channels);
                     size_t m = rubraview_speed_resample(&resampler, scratch, k, step, (float*)(void*)data, space);
+                    rubraview_fade_in((float*)(void*)data, m, out->channels, &fade_left, fade_length);
                     IAudioRenderClient_ReleaseBuffer(render, (UINT32)m, 0);
                     submitted += m;
                     padding += (UINT32)m;
                     source_frames += (double)k;
+                } else if (device_gone(hr)) {
+                    lost = true;
+                    break;
                 }
             }
             /* Started only after the first fill, so playback begins with
@@ -185,60 +269,100 @@ static void run(rubraview_audio_out_t *out, IAudioClient *client, IAudioRenderCl
                               rubraview_pcm_ring_count(out->ring) == 0 && padding == 0,
                               memory_order_release);
     }
-    if (started) IAudioClient_Stop(client);
+    if (started && !lost) IAudioClient_Stop(client);
     free(scratch);
+    /* What the device had queued is gone with it: go on from the ring. */
+    *io_base = base + source_frames / (double)out->rate;
+    return lost;
+}
+
+/* No device (T058 on the VM: with the remote session's sound turned off
+   mid-film, the position froze, since the clock follows the sound). The
+   sound is used up on the wall clock instead, so the clock, the picture
+   and the end of the file go on, silently; seeks are still answered.
+   Once a second the default device is tried again, and playing carries
+   on there. Returns true with `d` open, false on quit. */
+static bool run_silent(rubraview_audio_out_t *out, device_t *d, double *io_base) {
+    enum { CHUNK = 4096 };
+    float scratch[CHUNK];
+    double base = *io_base, used = 0.0, carry = 0.0;
+    double last = rubraview_pal_time_now_seconds(), next_try = last + 1.0;
+    publish(out, base);
+    while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
+        WaitForSingleObject(out->wake, 10);
+        uint64_t request = atomic_load_explicit(&out->flush_request, memory_order_acquire);
+        if (request != atomic_load_explicit(&out->flush_ack, memory_order_relaxed)) {
+            rubraview_pcm_ring_discard(out->ring);
+            base = (double)atomic_load_explicit(&out->flush_base_100ns, memory_order_relaxed) / 1e7;
+            used = 0.0;
+            carry = 0.0;
+            publish(out, base);
+            atomic_store_explicit(&out->flush_ack, request, memory_order_release);
+        }
+        double now = rubraview_pal_time_now_seconds();
+        double elapsed = now - last;
+        last = now;
+        if (atomic_load_explicit(&out->playing, memory_order_acquire)) {
+            double step = (double)atomic_load_explicit(&speed_permille, memory_order_acquire) / 1000.0;
+            size_t due = rubraview_silent_frames_due(elapsed, (double)out->rate, step, &carry);
+            size_t ready = rubraview_pcm_ring_count(out->ring) / out->channels;
+            if (due > ready) due = ready;
+            while (due > 0) {
+                size_t n = due < CHUNK / out->channels ? due : CHUNK / out->channels;
+                rubraview_pcm_ring_read(out->ring, scratch, n * out->channels);
+                due -= n;
+                used += (double)n;
+            }
+        } else {
+            carry = 0.0;
+        }
+        publish(out, base + used / (double)out->rate);
+        atomic_store_explicit(&out->drained, rubraview_pcm_ring_count(out->ring) == 0, memory_order_release);
+        if (now >= next_try) {
+            next_try = now + 1.0;
+            if (open_device(out, d)) {
+                *io_base = base + used / (double)out->rate;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 static DWORD WINAPI audio_thread(LPVOID arg) {
     rubraview_audio_out_t *out = (rubraview_audio_out_t*)arg;
     bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
 
-    IMMDeviceEnumerator *enumerator = NULL;
-    IMMDevice *device = NULL;
-    IAudioClient *client = NULL;
-    IAudioRenderClient *render = NULL;
-    ISimpleAudioVolume *volume = NULL;
-    UINT32 buffer_frames = 0;
+    /* Windows' multimedia scheduler (MMCSS) gives the thread that feeds
+       the device the CPU ahead of ordinary work. Without it, a busy
+       machine let the 100 ms buffer run dry (T058 on the 2-core VM, while
+       a helper script compiled: 10 ms of silence, a click). avrt.dll is
+       looked up by name, so a Windows without it still plays, at a raised
+       priority instead. */
+    typedef HANDLE (WINAPI *mmcss_set_fn)(LPCWSTR, LPDWORD);
+    typedef BOOL (WINAPI *mmcss_revert_fn)(HANDLE);
+    HMODULE avrt = LoadLibraryW(L"avrt.dll");
+    mmcss_set_fn mmcss_set = avrt ? (mmcss_set_fn)(void*)GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW") : NULL;
+    mmcss_revert_fn mmcss_revert = avrt ? (mmcss_revert_fn)(void*)GetProcAddress(avrt, "AvRevertMmThreadCharacteristics") : NULL;
+    DWORD mmcss_task = 0;
+    HANDLE mmcss = mmcss_set ? mmcss_set(L"Playback", &mmcss_task) : NULL;
+    if (!mmcss) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
-    bool ok = SUCCEEDED(CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
-                                         &RV_IID_IMMDeviceEnumerator, (void**)&enumerator)) && enumerator &&
-              SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(enumerator, eRender, eConsole, &device)) && device &&
-              SUCCEEDED(IMMDevice_Activate(device, &RV_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&client)) && client;
-    if (ok) {
-        WAVEFORMATEXTENSIBLE format = {0};
-        format.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-        format.Format.nChannels = (WORD)out->channels;
-        format.Format.nSamplesPerSec = out->rate;
-        format.Format.wBitsPerSample = 32;
-        format.Format.nBlockAlign = (WORD)(out->channels * 4u);
-        format.Format.nAvgBytesPerSec = out->rate * format.Format.nBlockAlign;
-        format.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-        format.Samples.wValidBitsPerSample = 32;
-        format.dwChannelMask = channel_mask(out->channels);
-        format.SubFormat = RV_SUBTYPE_IEEE_FLOAT;
-
-        DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
-                      AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-        ok = SUCCEEDED(IAudioClient_Initialize(client, AUDCLNT_SHAREMODE_SHARED, flags, DEVICE_BUFFER_100NS, 0,
-                                               (WAVEFORMATEX*)&format, NULL)) &&
-             SUCCEEDED(IAudioClient_SetEventHandle(client, out->wake)) &&
-             SUCCEEDED(IAudioClient_GetBufferSize(client, &buffer_frames)) && buffer_frames > 0 &&
-             SUCCEEDED(IAudioClient_GetService(client, &RV_IID_IAudioRenderClient, (void**)&render)) && render;
-        /* Volume is a nicety: an output that cannot give it still plays. */
-        if (ok && FAILED(IAudioClient_GetService(client, &RV_IID_ISimpleAudioVolume, (void**)&volume))) volume = NULL;
-    }
-
+    device_t d = {0};
+    bool ok = open_device(out, &d);
     out->opened = ok;
     SetEvent(out->ready);
-    if (ok) run(out, client, render, volume, buffer_frames);
+    double base = 0.0;
+    while (ok) {
+        if (!run(out, &d, &base)) break;   /* quit */
+        close_device(&d);                  /* the device went away */
+        ok = run_silent(out, &d, &base);
+    }
+    close_device(&d);
 
-    if (volume) ISimpleAudioVolume_Release(volume);
-
-    if (render) IAudioRenderClient_Release(render);
-    if (client) IAudioClient_Release(client);
-    if (device) IMMDevice_Release(device);
-    if (enumerator) IMMDeviceEnumerator_Release(enumerator);
     if (com) CoUninitialize();
+    if (mmcss && mmcss_revert) mmcss_revert(mmcss);
+    if (avrt) FreeLibrary(avrt);
     return 0;
 }
 
