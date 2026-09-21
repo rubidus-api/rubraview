@@ -564,7 +564,11 @@ static void ff_close(void *handle) {
     free(m);
 }
 
-static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info) {
+static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+                     const rubraview_media_gpu_t *gpu) {
+    /* RV-062: D3D11VA hands back NV12 textures, which need a colour
+       conversion on the card of their own; FFmpeg decodes in software. */
+    (void)gpu;
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!ff_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 

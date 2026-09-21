@@ -82,6 +82,20 @@ int main(void) {
         assert(near(rubraview_media_redraw_wait(NAN), 0.0));
     }
 
+    /* RV-062 step 1: when the graphics card is handed to the decoder. Off
+       by default; "on" only where the card offers decoders (T065 on the
+       VM: a card with none stops the decode); "always" is the diagnostic
+       that forces the fall-back path. No device, nothing to hand over. */
+    {
+        assert(!rubraview_media_gpu_attach(0, true, 17));
+        assert(rubraview_media_gpu_attach(1, true, 17));
+        assert(!rubraview_media_gpu_attach(1, true, 0));
+        assert(rubraview_media_gpu_attach(2, true, 0));
+        assert(!rubraview_media_gpu_attach(2, false, 17));
+        assert(!rubraview_media_gpu_attach(1, false, 17));
+        assert(!rubraview_media_gpu_attach(-1, true, 17) && !rubraview_media_gpu_attach(3, true, 17));
+    }
+
     /* Test 1: §5.3 frame scheduling — early frames wait, due frames show,
        frames whose interval has passed are dropped. */
     {

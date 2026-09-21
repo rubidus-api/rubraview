@@ -724,9 +724,13 @@ static app_page_t *media_page_ready(app_state_t *app) {
     app_page_t *page = &app->pages[app->media_page];
     if (!page->texture) {
         int32_t w = app->media_info.width, h = app->media_info.height;
-        page->texture = app->media_info.has_video
-            ? rubraview_pal_texture_create_bgra(app->renderer, w, h)
-            : audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h);
+        /* RV-062: a film decoded on the card gets a texture on the card,
+           and its frames are copied into it there. */
+        page->texture = !app->media_info.has_video
+            ? audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h)
+            : app->media_info.hardware_decode
+                ? rubraview_pal_texture_create_video(app->renderer, w, h)
+                : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!page->texture) return NULL;
         page->width = w;
         page->height = h;
@@ -890,8 +894,15 @@ static void media_prepare(app_state_t *app) {
                                                  order);
     rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     rubraview_media_failure_t why = RUBRAVIEW_MEDIA_FAIL_FILE;
+    /* RV-062: decoding on the graphics card, as [video] hardware_decode
+       says — off (the default until it has been measured on a real card),
+       on where the card offers decoders, or always (diagnostic). */
+    rubraview_media_gpu_t gpu = {
+        .mode = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hardware_decode"))),
+    };
+    if (gpu.mode > 0) gpu.device = rubraview_pal_render_video_device(app->renderer, &gpu.decoder_profiles);
     for (size_t i = 0; i < count; ++i) {
-        opened = rubraview_pal_media_open(path, order[i]);
+        opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
         why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
     }
@@ -944,7 +955,11 @@ static void media_prepare(app_state_t *app) {
 }
 
 static void media_show(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame) {
-    rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
+    if (frame->gpu_texture) {
+        rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
+    } else {
+        rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
+    }
     app->media_has_frame = true;
     app->media_new_picture = true;
     app->media_position = frame->pts;
@@ -5283,7 +5298,7 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     size_t count = rubraview_media_backend_order(preferred, ffmpeg_here, order);
     for (size_t i = 0; i < count; ++i) {
         const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
-        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i]);
+        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) {
             u8str_t why = rubraview_media_failure_text(opened.failure);
             snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.len, why.ptr);
@@ -5429,8 +5444,10 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
 
     /* 2. Does it offer decoders at all? */
     ID3D11VideoDevice *video = NULL;
+    UINT profile_count = 0;
     if (SUCCEEDED(ID3D11Device_QueryInterface(device, &IID_ID3D11VideoDevice, (void**)&video)) && video) {
         UINT profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
+        profile_count = profiles;
         snprintf(line, sizeof(line), "Decoder profiles the card offers: %u", profiles);
         console_line(line);
         ID3D11VideoDevice_Release(video);
@@ -5527,6 +5544,41 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
     }
     if (manager) IMFDXGIDeviceManager_Release(manager);
     mf_shutdown();
+
+    /* 4. The viewer's own path (RV-062): the media PAL handed this device
+          the way [video] hardware_decode = on and = always hand it over.
+          Whether the film decodes on the card, whether pictures come, and
+          whether they arrive as textures (zero copy) or as pixels. */
+    static const char *const MODE_NAMES[] = { "off", "on", "always" };
+    for (int32_t mode = 1; mode <= 2; ++mode) {
+        rubraview_media_gpu_t gpu = { .device = device, .decoder_profiles = profile_count, .mode = mode };
+        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, &gpu);
+        if (!opened.media) {
+            snprintf(line, sizeof(line), "hardware_decode = %s: the film did not open", MODE_NAMES[mode]);
+            console_line(line);
+            code = 2;
+            continue;
+        }
+        int pictures = 0, on_card = 0;
+        double start = rubraview_pal_time_now_seconds();
+        while (rubraview_pal_time_now_seconds() - start < 3.0 && pictures < 30) {
+            rubraview_video_frame_t frame;
+            if (rubraview_pal_media_peek_frame(opened.media, &frame)) {
+                pictures++;
+                if (frame.gpu_texture) on_card++;
+                rubraview_pal_media_pop_frame(opened.media);
+            } else {
+                rubraview_pal_time_sleep_ms(10);
+            }
+        }
+        snprintf(line, sizeof(line), "hardware_decode = %s: decoded %s; %d pictures in 3 s, %d of them on the card",
+                 MODE_NAMES[mode], opened.info.hardware_decode ? "on the card" : "in software",
+                 pictures, on_card);
+        console_line(line);
+        if (pictures == 0 && opened.info.has_video) code = 2;
+        rubraview_pal_media_close(opened.media);
+    }
+
     ID3D11DeviceContext_Release(context);
     ID3D11Device_Release(device);
     return code;

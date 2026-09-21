@@ -4,6 +4,7 @@
 #include <d2d1.h>
 #include <d2d1_1.h>
 #include <d3d11.h>
+#include <d3d11_4.h>   /* ID3D11Multithread (RV-062) */
 #include <dxgi1_2.h>
 #include <dwrite.h>
 #include <string.h>
@@ -36,6 +37,7 @@ static const GUID RV_IID_IDXGISurface =
 
 struct rubraview_texture {
     ID2D1Bitmap *bitmap;
+    ID3D11Texture2D *d3d;                /* RV-062: a film's texture on the card; NULL otherwise */
     int32_t width, height;
     struct rubraview_renderer *owner;    /* so destroy can recycle without a global */
     struct rubraview_texture *next_free; /* recycled struct free list */
@@ -117,6 +119,7 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
     /* The size comes from the caller, not from GetPixelSize — see the
        note on this function in pal_render_d2d_internal.h. */
     tex->bitmap = bitmap;
+    tex->d3d = NULL;
     tex->width = width;
     tex->height = height;
     tex->owner = renderer;
@@ -183,7 +186,10 @@ static void release_back_buffer(struct rubraview_renderer *r) {
    tried first and WARP — the software rasteriser — second, so a machine
    with no usable GPU still shows images rather than failing to start. */
 static bool create_device(struct rubraview_renderer *r) {
-    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT; /* required by Direct2D */
+    /* BGRA is required by Direct2D; video support lets the device be lent
+       to a decoder (RV-062). A driver that refuses the second gets the
+       first alone. */
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT;
     D3D_FEATURE_LEVEL levels[] = {
         D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
@@ -194,6 +200,12 @@ static bool create_device(struct rubraview_renderer *r) {
     HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags,
                                    levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
                                    D3D11_SDK_VERSION, &r->d3d, &g_feature_level, NULL);
+    if (FAILED(hr)) {
+        flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, flags,
+                               levels, (UINT)(sizeof(levels) / sizeof(levels[0])),
+                               D3D11_SDK_VERSION, &r->d3d, &g_feature_level, NULL);
+    }
     if (FAILED(hr)) {
         g_used_warp = true;
         hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL, flags,
@@ -577,6 +589,10 @@ void rubraview_pal_texture_destroy(rubraview_texture_t *texture) {
         ID2D1Bitmap_Release(texture->bitmap);
         texture->bitmap = NULL;
     }
+    if (texture->d3d) {
+        ID3D11Texture2D_Release(texture->d3d);
+        texture->d3d = NULL;
+    }
     if (texture->owner) {
         texture_recycle(texture->owner, texture);
     }
@@ -810,6 +826,83 @@ rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *ren
 bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture, const uint8_t *pixels, int32_t stride) {
     if (!texture || !texture->bitmap || !pixels || stride <= 0) return false;
     return SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, pixels, (UINT32)stride));
+}
+
+/* ---- RV-062: a film decoded on the card ---- */
+
+static const GUID RV_IID_ID3D11VideoDevice =
+    { 0x10ec4d5b, 0x975a, 0x4689, { 0xb9, 0xe4, 0xd0, 0xaa, 0xc3, 0x0f, 0xe3, 0x33 } };
+static const GUID RV_IID_ID3D11Multithread =
+    { 0x9b7e4e00, 0x342c, 0x4106, { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
+
+void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t *out_decoder_profiles) {
+    if (out_decoder_profiles) *out_decoder_profiles = 0;
+    if (!renderer || !renderer->d3d) return NULL;
+    ID3D11VideoDevice *video = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->d3d, &RV_IID_ID3D11VideoDevice, (void**)&video)) && video) {
+        if (out_decoder_profiles) *out_decoder_profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
+        ID3D11VideoDevice_Release(video);
+    }
+    /* The decoder uses the device from its own threads. */
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device_GetImmediateContext(renderer->d3d, &context);
+    if (context) {
+        ID3D11Multithread *mt = NULL;
+        if (SUCCEEDED(ID3D11DeviceContext_QueryInterface(context, &RV_IID_ID3D11Multithread, (void**)&mt)) && mt) {
+            ID3D11Multithread_SetMultithreadProtected(mt, TRUE);
+            ID3D11Multithread_Release(mt);
+        }
+        ID3D11DeviceContext_Release(context);
+    }
+    return renderer->d3d;
+}
+
+rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
+    if (!renderer || !renderer->d3d || !renderer->target || width <= 0 || height <= 0) return NULL;
+    D3D11_TEXTURE2D_DESC desc = {
+        .Width = (UINT)width, .Height = (UINT)height, .MipLevels = 1, .ArraySize = 1,
+        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+    };
+    ID3D11Texture2D *d3d = NULL;
+    if (FAILED(ID3D11Device_CreateTexture2D(renderer->d3d, &desc, NULL, &d3d)) || !d3d) return NULL;
+    IDXGISurface *surface = NULL;
+    ID2D1Bitmap1 *bitmap = NULL;
+    if (SUCCEEDED(ID3D11Texture2D_QueryInterface(d3d, &RV_IID_IDXGISurface, (void**)&surface)) && surface) {
+        D2D1_BITMAP_PROPERTIES1 props = {
+            .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_IGNORE },
+            .dpiX = 96.0f, .dpiY = 96.0f, .bitmapOptions = D2D1_BITMAP_OPTIONS_NONE,
+        };
+        if (FAILED(ID2D1DeviceContext_CreateBitmapFromDxgiSurface(renderer->target, surface, &props, &bitmap))) bitmap = NULL;
+        IDXGISurface_Release(surface);
+    }
+    if (!bitmap) { ID3D11Texture2D_Release(d3d); return NULL; }
+    rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, (ID2D1Bitmap*)bitmap, width, height);
+    if (!texture) { ID2D1Bitmap_Release((ID2D1Bitmap*)bitmap); ID3D11Texture2D_Release(d3d); return NULL; }
+    texture->d3d = d3d;
+    return texture;
+}
+
+bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
+                                            uint32_t subresource) {
+    if (!texture || !texture->d3d || !texture->owner || !frame_texture) return false;
+    ID3D11Texture2D *source = (ID3D11Texture2D*)(void*)(uintptr_t)frame_texture;
+    /* A frame decoded on another device (the renderer was rebuilt after a
+       lost device) cannot be copied here; the caller reopens the film. */
+    ID3D11Device *device = NULL;
+    ID3D11Texture2D_GetDevice(source, &device);
+    bool same = device == texture->owner->d3d;
+    if (device) ID3D11Device_Release(device);
+    if (!same) return false;
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device_GetImmediateContext(texture->owner->d3d, &context);
+    if (!context) return false;
+    D3D11_BOX box = { .left = 0, .top = 0, .front = 0,
+                      .right = (UINT)texture->width, .bottom = (UINT)texture->height, .back = 1 };
+    ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)texture->d3d, 0, 0, 0, 0,
+                                              (ID3D11Resource*)source, subresource, &box);
+    ID3D11DeviceContext_Release(context);
+    return true;
 }
 
 #endif /* _WIN32 */

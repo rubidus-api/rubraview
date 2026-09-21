@@ -8,6 +8,14 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Video can be decoded on the graphics card (RV-062), behind the Video
+  page's **GPU decoding** setting: `off` (the default until it has been
+  measured on a real card), `on` where the card offers decoders, `always`
+  for diagnosis. A decoded frame stays on the card and is copied into the
+  picture there — no trip through system memory (on the test VM that alone
+  took 30 % off the CPU a film uses). A device the decoder cannot use is
+  not handed over, and one that fails is dropped: the film plays in
+  software as before. `--probe-gpu` says what this machine will do with it.
 - The batch dialog's **Run on this folder** runs (RV-068). It writes the
   command line `--batch` already understands and starts a second copy of
   the program with it, in a console window of its own, over the folder

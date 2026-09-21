@@ -19,7 +19,8 @@ typedef struct rubraview_media_backend_api {
     bool (*available)(void);
 
     /** Opens a file, or returns NULL and says why. */
-    void *(*open)(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info);
+    void *(*open)(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+                  const rubraview_media_gpu_t *gpu);
 
     void  (*close)(void *impl);
     bool  (*peek_frame)(void *impl, rubraview_video_frame_t *out_frame);

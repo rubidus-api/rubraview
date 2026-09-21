@@ -123,10 +123,11 @@ int main(void) {
         rubraview_settings_view_release(&v);
         assert(rubraview_settings_view_drag(&v, &s, 78) == RUBRAVIEW_SEVENT_NONE);   /* released: no longer follows */
 
-        int32_t gpu = line_for(&v, "video", "hardware_decode");
+        /* (hardware_decode was the toggle here until RV-062 made it a choice.) */
+        int32_t wheel = line_for(&v, "video", "video_wheel_zoom");
         assert(rubraview_settings_view_press(&v, &s, v.content_col + v.label_cols + 1,
-                                             rubraview_settings_view_screen_row(&v, (size_t)gpu)) == RUBRAVIEW_SEVENT_CHANGED);
-        assert(rubraview_settings_get(&s, lit("video"), lit("hardware_decode")) == 0.0);
+                                             rubraview_settings_view_screen_row(&v, (size_t)wheel)) == RUBRAVIEW_SEVENT_CHANGED);
+        assert(rubraview_settings_get(&s, lit("video"), lit("video_wheel_zoom")) == 0.0);
 
         int32_t col = 0, width = 0;
         rubraview_settings_view_button_cells(&v, RUBRAVIEW_BUTTON_CLOSE, &col, &width);
@@ -157,7 +158,7 @@ int main(void) {
         u8str_t decoder = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "decoder"), 0, buffer, sizeof(buffer));
         assert(has(decoder, "Decoder") && has(decoder, "< windows >  1/2"));
         u8str_t gpu = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "hardware_decode"), 0, buffer, sizeof(buffer));
-        assert(has(gpu, "[x] on"));
+        assert(has(gpu, "GPU decoding") && has(gpu, "< off >  1/3"));   /* RV-062: a choice, off by default */
         u8str_t size = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "subtitle_size"), 0, buffer, sizeof(buffer));
         assert(has(size, "[####") && has(size, "] 24 pt"));
         u8str_t info = rubraview_settings_line_text(&v, &s, &sources, 3, 0, buffer, sizeof(buffer));

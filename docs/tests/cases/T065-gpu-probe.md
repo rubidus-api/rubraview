@@ -48,3 +48,23 @@ observations:
 
 The zero-copy path itself cannot be tried on this VM. D-11 keeps RV-062
 outside M5 for exactly this reason.
+
+## The viewer's own path (RV-062, 2026-09-22)
+
+The probe now ends with two more lines: the media PAL opening the file with
+the device, as `[video] hardware_decode = on` and `= always` would:
+
+```
+hardware_decode = on: decoded in software; 30 pictures in 3 s, 0 of them on the card
+hardware_decode = always: decoded on the card; 30 pictures in 3 s, 30 of them on the card
+```
+
+That is the VM. On a machine with a GPU, `on` should read "decoded on the
+card" with pictures on the card; if it reads "in software" there, the reader
+refused the device and the fall-back did its job — say so in the report.
+
+Step 3 on a real card, beyond these lines: the same clip with
+`hardware_decode = off` and `= on`, CPU per second of playing (both), the
+same paused frame compared, a 4K HEVC file, and sleep/resume while a film
+plays (a rebuilt renderer is not handled yet — the picture holds until the
+film is reopened).

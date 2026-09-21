@@ -307,3 +307,10 @@ double rubraview_media_redraw_wait(double seconds_since_render) {
     double left = RUBRAVIEW_MEDIA_HUD_REDRAW_SECONDS - seconds_since_render;
     return left > 0.0 ? left : 0.0;
 }
+
+/* ---- RV-062: hardware decode ---- */
+
+bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_profiles) {
+    if (!has_device) return false;
+    return mode == 2 || (mode == 1 && decoder_profiles > 0);
+}
