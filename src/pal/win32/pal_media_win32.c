@@ -23,13 +23,14 @@ bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend) {
     return api && api->available && api->available();
 }
 
-rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend) {
+rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend,
+                                                       const rubraview_media_gpu_t *gpu) {
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     const rubraview_media_backend_api_t *api = backend_api(backend);
     if (!api || !api->open) return result;
 
     rubraview_media_info_t info = {0};
-    void *impl = api->open(path, &result.failure, &info);
+    void *impl = api->open(path, &result.failure, &info, gpu);
     if (!impl) return result;
 
     rubraview_media_t *media = (rubraview_media_t*)calloc(1, sizeof(*media));

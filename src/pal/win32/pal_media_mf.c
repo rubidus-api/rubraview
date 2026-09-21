@@ -5,6 +5,7 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mferror.h>
+#include <d3d11.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +42,8 @@
 
 typedef struct media_slot {
     uint8_t *pixels;       /* width * height * 4, top row first */
+    ID3D11Texture2D *texture;   /* RV-062: the picture kept on the card; made on first use */
+    bool on_gpu;                /* this frame is in `texture`, not in `pixels` */
     double pts, duration;
     uint64_t generation;   /* which seek this frame belongs to */
 } media_slot_t;
@@ -74,6 +77,11 @@ typedef struct mf_media {
 
     uint64_t consumer_generation;           /* caller's thread only */
 
+    /* RV-062: decoding on the graphics card. */
+    rubraview_media_gpu_t gpu;              /* what the caller offered */
+    IMFDXGIDeviceManager *manager;          /* NULL unless the device was handed over */
+    bool gpu_active;                        /* the reader decodes on the card */
+
     /* §3.16.2: what the container holds, worked out once while opening.
        The strings live here so the set can be copied out by value. */
     rubraview_track_set_t tracks;
@@ -92,6 +100,11 @@ typedef HRESULT (WINAPI *mf_shutdown_fn)(void);
 typedef HRESULT (WINAPI *mf_create_attributes_fn)(IMFAttributes**, UINT32);
 typedef HRESULT (WINAPI *mf_create_media_type_fn)(IMFMediaType**);
 typedef HRESULT (WINAPI *mf_create_reader_fn)(LPCWSTR, IMFAttributes*, IMFSourceReader**);
+typedef HRESULT (WINAPI *mf_create_dxgi_manager_fn)(UINT*, IMFDXGIDeviceManager**);
+
+/* RV-062. Spelled out here: the import libraries do not carry all of them. */
+static const GUID RV_IID_IMFDXGIBuffer = { 0xe7174cfa, 0x1c9e, 0x48b1, { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
+static const GUID RV_IID_ID3D11Texture2D = { 0x6f15aaf2, 0xd208, 0x4e89, { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
 
 static struct {
     bool tried, ok;
@@ -100,6 +113,7 @@ static struct {
     mf_create_attributes_fn create_attributes;
     mf_create_media_type_fn create_media_type;
     mf_create_reader_fn create_reader;
+    mf_create_dxgi_manager_fn create_dxgi_manager;   /* optional: without it, no GPU decode */
 } g_mf;
 
 /* Called on the caller's thread before any decode thread exists, so the
@@ -115,6 +129,7 @@ static bool mf_load(void) {
     g_mf.create_attributes = (mf_create_attributes_fn)(void*)GetProcAddress(plat, "MFCreateAttributes");
     g_mf.create_media_type = (mf_create_media_type_fn)(void*)GetProcAddress(plat, "MFCreateMediaType");
     g_mf.create_reader = (mf_create_reader_fn)(void*)GetProcAddress(rw, "MFCreateSourceReaderFromURL");
+    g_mf.create_dxgi_manager = (mf_create_dxgi_manager_fn)(void*)GetProcAddress(plat, "MFCreateDXGIDeviceManager");
     g_mf.ok = g_mf.startup && g_mf.shutdown && g_mf.create_attributes &&
               g_mf.create_media_type && g_mf.create_reader;
     return g_mf.ok;
@@ -239,14 +254,22 @@ static bool mf_negotiate_audio(IMFSourceReader *reader, DWORD stream,
     return *out_rate > 0 && *out_channels > 0 && *out_channels <= 8;
 }
 
-static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
+static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu) {
     *out_reader = NULL;
 
     IMFAttributes *attrs = NULL;
-    if (FAILED(g_mf.create_attributes(&attrs, 1)) || !attrs) { fail(m, RUBRAVIEW_MEDIA_FAIL_FILE); return false; }
-    /* Lets the reader convert YUV to RGB32 itself, so the caller gets
-       pixels Direct2D can take as they are. */
-    IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+    if (FAILED(g_mf.create_attributes(&attrs, 3)) || !attrs) { fail(m, RUBRAVIEW_MEDIA_FAIL_FILE); return false; }
+    if (on_gpu) {
+        /* RV-062: decode on the card, and let the reader's video processor
+           turn the picture into BGRA there too. */
+        IMFAttributes_SetUnknown(attrs, &MF_SOURCE_READER_D3D_MANAGER, (IUnknown*)m->manager);
+        IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+        IMFAttributes_SetUINT32(attrs, &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    } else {
+        /* Lets the reader convert YUV to RGB32 itself, so the caller gets
+           pixels Direct2D can take as they are. */
+        IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+    }
 
     IMFSourceReader *reader = NULL;
     HRESULT hr = g_mf.create_reader(m->path, attrs, &reader);
@@ -310,7 +333,9 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader) {
         bool decodable = false;
         if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
             IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
-            IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, &MFVideoFormat_RGB32);
+            /* On the card, ARGB32 is B8G8R8A8 — the format Direct2D's
+               bitmaps take, so a frame can be copied into one as it is. */
+            IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, on_gpu ? &MFVideoFormat_ARGB32 : &MFVideoFormat_RGB32);
             decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want));
             IMFMediaType_Release(want);
         }
@@ -445,6 +470,86 @@ static bool copy_sample(mf_media_t *m, IMFSample *sample, uint8_t *dst) {
     }
     IMFMediaBuffer_Release(buffer);
     return ok;
+}
+
+/* RV-062: a picture decoded on the card goes into the slot's own texture
+   there, and the sample goes straight back to the decoder (holding it
+   would starve the decoder's small pool of surfaces). A texture in some
+   other format is read back into the slot's pixels instead. */
+static bool store_gpu_picture(mf_media_t *m, media_slot_t *slot, ID3D11Texture2D *source, UINT subresource) {
+    ID3D11Device *device = (ID3D11Device*)m->gpu.device;
+    D3D11_TEXTURE2D_DESC desc;
+    ID3D11Texture2D_GetDesc(source, &desc);
+    if ((int32_t)desc.Width < m->width || (int32_t)desc.Height < m->height) return false;
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device_GetImmediateContext(device, &context);
+    if (!context) return false;
+    D3D11_BOX box = { .left = 0, .top = 0, .front = 0, .right = (UINT)m->width, .bottom = (UINT)m->height, .back = 1 };
+    bool ok = false;
+    if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM) {
+        if (!slot->texture) {
+            D3D11_TEXTURE2D_DESC own = {
+                .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
+                .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+                .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE,
+            };
+            if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &slot->texture))) slot->texture = NULL;
+        }
+        if (slot->texture) {
+            ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)slot->texture, 0, 0, 0, 0,
+                                                      (ID3D11Resource*)source, subresource, &box);
+            slot->on_gpu = true;
+            ok = true;
+        }
+    } else if (desc.Format == DXGI_FORMAT_B8G8R8X8_UNORM) {
+        D3D11_TEXTURE2D_DESC staging = {
+            .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
+            .Format = desc.Format, .SampleDesc = { .Count = 1, .Quality = 0 },
+            .Usage = D3D11_USAGE_STAGING, .CPUAccessFlags = D3D11_CPU_ACCESS_READ,
+        };
+        ID3D11Texture2D *copy = NULL;
+        if (SUCCEEDED(ID3D11Device_CreateTexture2D(device, &staging, NULL, &copy)) && copy) {
+            ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)copy, 0, 0, 0, 0,
+                                                      (ID3D11Resource*)source, subresource, &box);
+            D3D11_MAPPED_SUBRESOURCE mapped;
+            if (SUCCEEDED(ID3D11DeviceContext_Map(context, (ID3D11Resource*)copy, 0, D3D11_MAP_READ, 0, &mapped))) {
+                const size_t row = (size_t)m->width * 4u;
+                for (int32_t y = 0; y < m->height; ++y) {
+                    memcpy(slot->pixels + (size_t)y * row, (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch, row);
+                }
+                ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)copy, 0);
+                slot->on_gpu = false;
+                ok = true;
+            }
+            ID3D11Texture2D_Release(copy);
+        }
+    }
+    ID3D11DeviceContext_Release(context);
+    return ok;
+}
+
+static bool store_picture(mf_media_t *m, IMFSample *sample, media_slot_t *slot) {
+    if (m->gpu_active) {
+        IMFMediaBuffer *buffer = NULL;
+        if (SUCCEEDED(IMFSample_GetBufferByIndex(sample, 0, &buffer)) && buffer) {
+            IMFDXGIBuffer *dxgi = NULL;
+            bool on_card = SUCCEEDED(IMFMediaBuffer_QueryInterface(buffer, &RV_IID_IMFDXGIBuffer, (void**)&dxgi)) && dxgi;
+            bool ok = false;
+            if (on_card) {
+                ID3D11Texture2D *source = NULL;
+                UINT subresource = 0;
+                ok = SUCCEEDED(IMFDXGIBuffer_GetResource(dxgi, &RV_IID_ID3D11Texture2D, (void**)&source)) && source &&
+                     SUCCEEDED(IMFDXGIBuffer_GetSubresourceIndex(dxgi, &subresource)) &&
+                     store_gpu_picture(m, slot, source, subresource);
+                if (source) ID3D11Texture2D_Release(source);
+                IMFDXGIBuffer_Release(dxgi);
+            }
+            IMFMediaBuffer_Release(buffer);
+            if (on_card) return ok;
+        }
+    }
+    slot->on_gpu = false;
+    return copy_sample(m, sample, slot->pixels);
 }
 
 /* Writes decoded samples to the ring, waiting for room. A seek or quit
@@ -621,7 +726,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                         pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_video + 1e-4;
                     if (!before) {
                         skip_video = -1.0;
-                        if (copy_sample(m, sample, m->slots[slot].pixels)) {
+                        if (store_picture(m, sample, &m->slots[slot])) {
                             m->slots[slot].pts = pts;
                             m->slots[slot].duration = frame_duration;
                             m->slots[slot].generation = generation;
@@ -642,6 +747,62 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     }
 }
 
+static bool gpu_wanted(const mf_media_t *m) {
+    return g_mf.create_dxgi_manager &&
+           rubraview_media_gpu_attach(m->gpu.mode, m->gpu.device != NULL, m->gpu.decoder_profiles);
+}
+
+static bool make_manager(mf_media_t *m) {
+    UINT token = 0;
+    if (FAILED(g_mf.create_dxgi_manager(&token, &m->manager)) || !m->manager) { m->manager = NULL; return false; }
+    if (FAILED(IMFDXGIDeviceManager_ResetDevice(m->manager, (IUnknown*)m->gpu.device, token))) {
+        IMFDXGIDeviceManager_Release(m->manager);
+        m->manager = NULL;
+        return false;
+    }
+    return true;
+}
+
+/* Whatever a failed open_reader left behind, so it can be tried again. */
+static void undo_open(mf_media_t *m) {
+    rubraview_pal_audio_close(m->audio);
+    m->audio = NULL;
+    free(m->pcm_storage);
+    m->pcm_storage = NULL;
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        free(m->slots[i].pixels);
+        m->slots[i].pixels = NULL;
+    }
+    m->video_stream = NO_STREAM;
+    m->audio_stream = NO_STREAM;
+    m->ok = false;
+    m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+}
+
+/* Reads until the first picture comes out, then goes back to the start. */
+static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader) {
+    for (int i = 0; i < 200; ++i) {
+        DWORD actual = 0, flags = 0;
+        LONGLONG timestamp = 0;
+        IMFSample *sample = NULL;
+        HRESULT hr = IMFSourceReader_ReadSample(reader, (DWORD)MF_SOURCE_READER_ANY_STREAM, 0, &actual, &flags,
+                                                &timestamp, &sample);
+        bool picture = sample && actual == m->video_stream;
+        if (sample) IMFSample_Release(sample);
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return false;
+        if (picture) {
+            PROPVARIANT start;
+            PropVariantInit(&start);
+            start.vt = VT_I8;
+            start.hVal.QuadPart = 0;
+            IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &start);
+            return true;
+        }
+        if ((flags & MF_SOURCE_READERF_ENDOFSTREAM) && actual == m->video_stream) return false;
+    }
+    return false;
+}
+
 static DWORD WINAPI decode_thread(LPVOID arg) {
     mf_media_t *m = (mf_media_t*)arg;
 
@@ -649,7 +810,29 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     bool mf = SUCCEEDED(g_mf.startup(MF_VERSION, MFSTARTUP_LITE));
 
     IMFSourceReader *reader = NULL;
-    bool opened = mf && open_reader(m, &reader);
+    bool opened = false;
+    /* RV-062: the card, where it was offered and it has decoders (or the
+       diagnostic mode says to try anyway). If the reader will not open
+       with it, or no picture comes out of it (T065 on the VM: a card with
+       no decoders stops the decode), the film opens again without it. */
+    if (mf && gpu_wanted(m) && make_manager(m)) {
+        opened = open_reader(m, &reader, true);
+        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader)) {
+            IMFSourceReader_Release(reader);
+            reader = NULL;
+            undo_open(m);
+            opened = false;
+        }
+        if (opened) {
+            m->gpu_active = m->video_stream != NO_STREAM;
+            m->info.hardware_decode = m->gpu_active;
+        } else {
+            undo_open(m);
+            IMFDXGIDeviceManager_Release(m->manager);
+            m->manager = NULL;
+        }
+    }
+    if (mf && !opened) opened = open_reader(m, &reader, false);
     if (!mf) fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
     SetEvent(m->opened);
 
@@ -675,16 +858,22 @@ static void mf_close(void *handle) {
     /* The output thread reads the PCM storage, so it goes before the storage does. */
     rubraview_pal_audio_close(media->audio);
     free(media->pcm_storage);
-    for (int i = 0; i < SLOT_COUNT; ++i) free(media->slots[i].pixels);
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        free(media->slots[i].pixels);
+        if (media->slots[i].texture) ID3D11Texture2D_Release(media->slots[i].texture);
+    }
+    if (media->manager) IMFDXGIDeviceManager_Release(media->manager);
     free(media);
 }
 
-static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info) {
+static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+                     const rubraview_media_gpu_t *gpu) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!mf_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 
     mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
     if (!m) return NULL;
+    if (gpu) m->gpu = *gpu;
 
     char narrow[MAX_PATH * 4];
     memcpy(narrow, path.ptr, path.len);
@@ -735,7 +924,9 @@ static bool mf_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
             continue;
         }
         *out_frame = (rubraview_video_frame_t){
-            .pixels = s->pixels,
+            .pixels = s->on_gpu ? NULL : s->pixels,
+            .gpu_texture = s->on_gpu ? (const void*)s->texture : NULL,
+            .gpu_subresource = 0,
             .width = media->width,
             .height = media->height,
             .stride = media->width * 4,

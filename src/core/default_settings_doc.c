@@ -77,7 +77,7 @@ static const char *const PARTS[] = {
 "page video \"Video\"\n"
 "  section \"Decoding\"\n"
 "  choice video.decoder            \"Decoder\"                 windows | ffmpeg = windows wired\n"
-"  toggle video.hardware_decode    \"GPU decoding\"            = true\n"
+"  choice video.hardware_decode    \"GPU decoding\"            off | on | always = off wired\n"
 "  info   \"FFmpeg\"                  {media.ffmpeg}\n"
 "  section \"Subtitles\"\n"
 "  int    video.subtitle_size      \"Subtitle size\"           10..72 step 1 unit \"pt\" = 24 wired\n"

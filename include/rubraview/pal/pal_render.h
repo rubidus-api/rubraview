@@ -127,6 +127,21 @@ rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *ren
 bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture,
                                        const uint8_t *pixels, int32_t stride);
 
+/*
+ * RV-062, a film decoded on the graphics card. The renderer lends its
+ * device to the decoder (an opaque pointer here; D-1 keeps Win32 types out
+ * of PAL headers) and says how many decoder profiles the card offers — 0
+ * means the device must not be lent (T065: attaching it then breaks the
+ * decode). A film's texture made by create_video lives on the card, and a
+ * decoded frame is copied into it there, never through system memory.
+ */
+void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t *out_decoder_profiles);
+rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer,
+                                                        int32_t width, int32_t height);
+/** False when the frame was decoded on another device, or the texture is not a video one. */
+bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
+                                            uint32_t subresource);
+
 void rubraview_pal_texture_size(const rubraview_texture_t *texture, int32_t *out_width, int32_t *out_height);
 void rubraview_pal_texture_destroy(rubraview_texture_t *texture);
 

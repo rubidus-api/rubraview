@@ -36,7 +36,21 @@ typedef struct rubraview_media_info {
     bool     has_audio;
     bool     audio_output;               /* the sound reaches a device (false on a machine without one) */
     uint32_t video_fourcc;               /* the native codec, for messages (RUBRAVIEW_FOURCC order) */
+    bool     hardware_decode;            /* RV-062: the pictures are decoded on the graphics card */
 } rubraview_media_info_t;
+
+/*
+ * RV-062: what the caller offers for decoding on the graphics card.
+ * `device` is the renderer's (rubraview_pal_render_video_device), opaque.
+ * `mode`: 0 never, 1 when the card offers decoders, 2 always (diagnostic —
+ * it takes the fall-back path on a card with none). A backend that cannot
+ * use it, or finds it fails, decodes in software as before.
+ */
+typedef struct rubraview_media_gpu {
+    void    *device;
+    uint32_t decoder_profiles;
+    int32_t  mode;
+} rubraview_media_gpu_t;
 
 typedef struct rubraview_media_open_result {
     rubraview_media_t        *media;     /* NULL on failure */
@@ -52,7 +66,8 @@ bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend);
  * Blocks until the backend has said yes or no. The caller tries the
  * backends in rubraview_media_backend_order and reports the last failure.
  */
-rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend);
+rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend,
+                                                       const rubraview_media_gpu_t *gpu);
 
 /** Stops the decode thread and frees everything. NULL is ignored. */
 void rubraview_pal_media_close(rubraview_media_t *media);
@@ -64,6 +79,11 @@ typedef struct rubraview_video_frame {
     int32_t stride;           /* bytes from one row to the next */
     double  pts;              /* presentation time, seconds from the file's start */
     double  duration;         /* seconds; 0 when unknown */
+    /* RV-062: a frame still on the graphics card — `pixels` is NULL and
+       this texture (opaque) at `gpu_subresource` holds the picture, BGRA,
+       at least width x height. Copy it with rubraview_pal_texture_copy_video_frame. */
+    const void *gpu_texture;
+    uint32_t    gpu_subresource;
 } rubraview_video_frame_t;
 
 /**
