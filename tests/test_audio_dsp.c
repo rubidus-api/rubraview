@@ -290,6 +290,46 @@ int main(void) {
     }
     printf("  [PASS] Speed resampling: 1x passes through, 2x and 0.5x interpolate, chunks change nothing\n");
 
+    /* After a seek the sound starts from silence, not mid-wave: the first
+       frames written after the device was emptied rise from 0 over the
+       fade's length (T058 on the VM: the new position began at full
+       amplitude, a click). Every channel of a frame gets the same gain. */
+    {
+        float d[2 * 8];
+        for (size_t i = 0; i < 16; ++i) d[i] = 1.0f;
+        uint32_t left = 4;
+        rubraview_fade_in(d, 3, 2, &left, 4);             /* frames 0..2 of a 4-frame fade */
+        assert(d[0] == 0.0f && d[1] == 0.0f);             /* gain 0/4 */
+        assert(fabsf(d[2] - 0.25f) < 1e-6f && fabsf(d[3] - 0.25f) < 1e-6f);
+        assert(fabsf(d[4] - 0.5f) < 1e-6f);
+        assert(left == 1);
+        rubraview_fade_in(d + 6, 5, 2, &left, 4);         /* the fade carries on across calls */
+        assert(fabsf(d[6] - 0.75f) < 1e-6f && fabsf(d[7] - 0.75f) < 1e-6f);
+        assert(d[8] == 1.0f && d[15] == 1.0f);            /* then untouched */
+        assert(left == 0);
+        rubraview_fade_in(d, 8, 2, &left, 4);             /* nothing left: no-op */
+        assert(d[0] == 0.0f && d[8] == 1.0f);
+        rubraview_fade_in(NULL, 8, 2, &left, 4);          /* and safe */
+        printf("  [PASS] After a seek the sound fades in instead of starting mid-wave\n");
+    }
+
+    /* With the device gone the sound is consumed on the wall clock, so the
+       picture, the clock and the end of the file keep going (T058 on the
+       VM: the position froze when the device went away). Whole frames per
+       call, the fraction carried to the next; speed counts. */
+    {
+        double carry = 0.0;
+        assert(rubraview_silent_frames_due(0.010, 48000, 1.0, &carry) == 480);
+        assert(rubraview_silent_frames_due(0.0104, 44100, 1.0, &carry) == 458);   /* 458.64 */
+        assert(rubraview_silent_frames_due(0.0104, 44100, 1.0, &carry) == 459);   /* .64 + .64 */
+        carry = 0.0;
+        assert(rubraview_silent_frames_due(0.010, 48000, 2.0, &carry) == 960);
+        assert(rubraview_silent_frames_due(-1.0, 48000, 1.0, &carry) == 0);        /* clock went back */
+        assert(rubraview_silent_frames_due(5.0, 48000, 1.0, &carry) == 48000);     /* a stall: at most a second */
+        assert(rubraview_silent_frames_due(0.010, 48000, 1.0, NULL) == 480);
+        printf("  [PASS] Without a device the sound is used up on the wall clock, at its speed\n");
+    }
+
     printf("[test_audio_dsp] All tests passed successfully!\n");
     return 0;
 }

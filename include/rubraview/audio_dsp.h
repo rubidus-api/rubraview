@@ -177,6 +177,21 @@ size_t rubraview_speed_source_needed(const rubraview_speed_resampler_t *r, size_
  * returns how many were written to `dst` (never more than `dst_frames`
  * when `src_frames` came from rubraview_speed_source_needed).
  */
+/**
+ * Fade in the first `length` frames written after the output was emptied
+ * (a seek): frame k of the fade is multiplied by k/length. `remaining`
+ * counts down across calls, starting at `length`; at 0 nothing changes.
+ */
+void rubraview_fade_in(float *interleaved, size_t frames, uint32_t channels, uint32_t *remaining, uint32_t length);
+
+/**
+ * How many whole frames of sound to use up after `elapsed` seconds when
+ * there is no device to play them (it went away): rate x speed x elapsed,
+ * the fraction kept in `carry` for the next call, at most one second's
+ * worth, nothing for a clock that went backwards.
+ */
+size_t rubraview_silent_frames_due(double elapsed, double rate, double speed, double *carry);
+
 size_t rubraview_speed_resample(rubraview_speed_resampler_t *r, const float *src, size_t src_frames,
                                 double step, float *dst, size_t dst_frames);
 

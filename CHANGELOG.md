@@ -51,6 +51,17 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- Clicks on a seek: the new position started mid-wave and the old one was
+  cut mid-wave. The sound now fades in over 5 ms after a seek, and the
+  stream is stopped and given 30 ms to end quietly before its queue is
+  thrown away (T058, measured on 12 seeks: no click left).
+- Short drop-outs (10 ms of silence, a click) when the machine was busy:
+  the thread that feeds the sound device now runs under Windows'
+  multimedia scheduler (MMCSS "Playback").
+- A sound device that went away during playback (unplugged, disabled, a
+  remote session's sound turned off) froze the film or music where it
+  was. It now plays on silently at the right speed, seeks still work, and
+  when a device comes back the sound carries on there.
 - The menu reopened on the level it was closed on, so a tap meant for the
   top level landed on whatever sat in that place one level down (`Delete`
   where the top level has `Show`). It opens at its top level again, however

@@ -3,8 +3,9 @@
 The test VM has no audio device of its own, but a session opened over RDP
 with the sound channel on has one ("Remote Audio"), and what the viewer
 plays there can be recorded and measured — see "Measured on the VM" at
-the end. What still needs ears is below: lip sync, clicks, and how it
-sounds on a real device.
+the end: every step below, lip sync and clicks included, has been
+measured there from the recording. A real device adds its own latency
+(Bluetooth most of all), which no recording inside the machine sees.
 
 ## Running it
 
@@ -64,7 +65,42 @@ its own lost frames (none in these runs).
 | End of file | silence held; `Space` starts again at 0 |
 | `A` on a two-track file (T062's 440/880 Hz) | 880 -> 440 -> 880 Hz: the track really changes |
 
-Not measured here: lip sync against the picture (step 1), clicks (step
-2), and a device being unplugged (step 8). Seen on the way: the
-two-track file opened on its `kor` track, not `eng` as T062 expects — on
-a Korean Windows, Media Foundation's default pick.
+Seen on the way: the two-track file opened on its `kor` track, not `eng`
+as T062 expects — on a Korean Windows, Media Foundation's default pick.
+
+### Lip sync, clicks and a lost device (2026-09-21, second pass)
+
+**Lip sync (step 1).** A generated film (160x90, 25 fps, uncompressed AVI)
+flashes white for two frames and beeps 1 kHz for 80 ms at the start of
+every second. Inside the session one program records, on one clock (QPC),
+the loopback sound with each packet's time and the brightness of the
+pixel in the middle of the screen (`avsync.ps1`); the beep's start minus
+the flash's start is the offset. Media Foundation, 19 beeps: the sound
+led the picture by 27 ms (median). The RDP session's screen changes only
+about 32 times a second, so every value is exact to one 31 ms step: the
+offset lies between 27 ms sound-first and 4 ms sound-late, well inside
+what broadcast practice allows (125 ms early, 45 ms late). The first three
+beeps after opening read 89 ms.
+
+**Clicks (step 2, 3).** On a recorded tone a click is the waveform jumping
+to or from silence mid-wave. Pause and play: ten edges out of ten at 0 —
+Windows' own stop and start are quiet. Seeks were not: the new position
+began at up to full amplitude and the old one was cut mid-wave in half
+the cases, and three 10 ms drop-outs appeared while a helper script
+compiled on the 2-core VM. Fixed and measured again (12 seeks, both edges
+of every one at 0, no step anywhere larger than the tone's own):
+
+- the thread that feeds the device joins Windows' multimedia scheduler
+  (MMCSS "Playback"), so a busy machine does not starve it;
+- after a seek the sound fades in over 5 ms;
+- a seek stops the stream and waits 30 ms before throwing the queue away,
+  so the stream ends the quiet way a pause does.
+
+**The device goes away (step 8).** Opening a file with no device plays it
+silently at 1 s per second (as before). Losing it *while playing* — the
+remote session reconnected without sound — froze the position: the clock
+follows the sound, and no sound was being used up. Now the sound is used
+up on the wall clock while there is no device (the position ran at 1.0 s
+per second; a seek was answered), the default device is tried again once a
+second, and when the sound came back the position went on and the tone
+heard matched the position shown.
