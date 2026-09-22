@@ -86,6 +86,37 @@ static int32_t read_orientation(IWICBitmapFrameDecode *frame) {
     return orientation;
 }
 
+/* The frame turned upright. The flip/rotator is never put straight on the
+   frame: a quarter turn makes every output row a column of the source, and
+   a JPEG frame cannot hand out a column without decoding the whole file
+   again — row after row. On the VM a 1600x1200 photo with EXIF 6 took
+   6.5 s that way and a 4032x3024 one 92 s; decoded into memory first, 22
+   and 228 ms. The frame is decoded once, into `*out_cached`, and turned
+   there. Returns the frame itself when upright or when anything fails. */
+static IWICBitmapSource *upright_source(IWICImagingFactory *factory, IWICBitmapFrameDecode *frame,
+                                        int32_t orientation, IWICBitmap **out_cached,
+                                        IWICBitmapFlipRotator **out_rotator) {
+    *out_cached = NULL;
+    *out_rotator = NULL;
+    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    if (orientation == 1) return source;
+
+    IWICBitmap *cached = NULL;
+    if (FAILED(IWICImagingFactory_CreateBitmapFromSource(factory, source, WICBitmapCacheOnLoad, &cached)) || !cached) {
+        return source;
+    }
+    IWICBitmapFlipRotator *rotator = NULL;
+    if (FAILED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) || !rotator ||
+        FAILED(IWICBitmapFlipRotator_Initialize(rotator, (IWICBitmapSource*)cached, exif_to_transform(orientation)))) {
+        if (rotator) IWICBitmapFlipRotator_Release(rotator);
+        IWICBitmap_Release(cached);
+        return source;
+    }
+    *out_cached = cached;
+    *out_rotator = rotator;
+    return (IWICBitmapSource*)rotator;
+}
+
 /*
  * §4.3: a photo from a modern camera or phone often carries a Display P3
  * or Adobe RGB profile. Ignoring it is what makes such pictures look
@@ -196,22 +227,12 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
 
     result.exif_orientation = read_orientation(frame);
 
-    /* The source handed to the converter is either the frame itself or a
-       flip/rotator wrapping it. */
-    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    /* The source handed to the converter is either the frame itself or
+       the frame decoded and turned upright. */
+    IWICBitmap *cached = NULL;
     IWICBitmapFlipRotator *rotator = NULL;
-
-    if (apply_exif_orientation && result.exif_orientation != 1) {
-        if (SUCCEEDED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) && rotator) {
-            if (SUCCEEDED(IWICBitmapFlipRotator_Initialize(rotator, (IWICBitmapSource*)frame,
-                                                           exif_to_transform(result.exif_orientation)))) {
-                source = (IWICBitmapSource*)rotator;
-            } else {
-                IWICBitmapFlipRotator_Release(rotator);
-                rotator = NULL;
-            }
-        }
-    }
+    IWICBitmapSource *source = upright_source(factory, frame, apply_exif_orientation ? result.exif_orientation : 1,
+                                              &cached, &rotator);
 
     IWICColorTransform *color_transform = NULL;
     source = apply_color_management(factory, frame, source, &color_transform);
@@ -220,6 +241,7 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
     if (FAILED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) || !converter) {
         if (color_transform) IWICColorTransform_Release(color_transform);
         if (rotator) IWICBitmapFlipRotator_Release(rotator);
+        if (cached) IWICBitmap_Release(cached);
         IWICBitmapFrameDecode_Release(frame);
         return result;
     }
@@ -259,6 +281,7 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
     IWICFormatConverter_Release(converter);
     if (color_transform) IWICColorTransform_Release(color_transform);
     if (rotator) IWICBitmapFlipRotator_Release(rotator);
+    if (cached) IWICBitmap_Release(cached);
     IWICBitmapFrameDecode_Release(frame);
     return result;
 }
@@ -540,20 +563,11 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
         return empty;
     }
 
-    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    IWICBitmap *cached = NULL;
     IWICBitmapFlipRotator *rotator = NULL;
-    int orientation = read_orientation(frame);
-    if (apply_exif_orientation && orientation != 1) {
-        if (SUCCEEDED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) && rotator) {
-            if (SUCCEEDED(IWICBitmapFlipRotator_Initialize(rotator, (IWICBitmapSource*)frame,
-                                                           exif_to_transform(orientation)))) {
-                source = (IWICBitmapSource*)rotator;
-            } else {
-                IWICBitmapFlipRotator_Release(rotator);
-                rotator = NULL;
-            }
-        }
-    }
+    int32_t orientation = read_orientation(frame);
+    IWICBitmapSource *source = upright_source(factory, frame, apply_exif_orientation ? orientation : 1,
+                                              &cached, &rotator);
 
     /* The core engine works in RGBA8, so the conversion happens here
        rather than being a special case inside every filter. */
@@ -580,6 +594,7 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
 
     if (converter) IWICFormatConverter_Release(converter);
     if (rotator) IWICBitmapFlipRotator_Release(rotator);
+    if (cached) IWICBitmap_Release(cached);
     IWICBitmapFrameDecode_Release(frame);
     IWICBitmapDecoder_Release(decoder);
     if (stream) IWICStream_Release(stream);
