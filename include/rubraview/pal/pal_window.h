@@ -42,6 +42,8 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_DROP,         /* §3.19.2: files dropped on the window */
     RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST, /* §3.19.1: another instance handed us a path */
     RUBRAVIEW_WINDOW_EVENT_MOVED,        /* the reader finished moving the window (RFC-0002 Q6: docking) */
+    RUBRAVIEW_WINDOW_EVENT_TEXT,         /* text typed or finished by the IME, while text input is on */
+    RUBRAVIEW_WINDOW_EVENT_COMPOSITION,  /* the IME's unfinished text changed (may become empty) */
 } rubraview_window_event_kind_t;
 
 typedef enum rubraview_mouse_button {
@@ -82,6 +84,13 @@ typedef struct rubraview_window_event {
         size_t      path_lengths[16];
         size_t      count;
     } drop;
+
+    struct {
+        /* TEXT and COMPOSITION: UTF-8, held in the event itself so that
+           several can wait in the queue. */
+        char   utf8[64];
+        size_t length;
+    } text;
 
     struct {
         double scale_ratio;   /* pinch: >1 spreading apart, <1 pinching together; 1.0 for a pan */
@@ -126,6 +135,16 @@ bool rubraview_pal_instance_hand_over(u8str_t path);
 
 /** §3.19.2: accept files dropped on this window. */
 void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept);
+
+/**
+ * Text input on or off (RFC-0003 K5's rename-box hole, 2026-09-22). The
+ * window is kept away from the IME so that shortcuts work in Hangul mode;
+ * while a text field is open it gets the IME back, characters arrive as
+ * TEXT events and the unfinished syllable as COMPOSITION events (the
+ * field draws it; the IME draws no window of its own), and keys the IME
+ * is using do not also arrive as KEY_DOWN. Off drops any unfinished text.
+ */
+void rubraview_pal_window_text_input(rubraview_window_t *window, bool on);
 
 /**
  * §3.19.3: register or remove this program's file associations under

@@ -50,6 +50,8 @@ struct rubraview_window {
     /* K5: the IME context this window was born with, taken off it so the
        shortcuts work in Hangul mode. */
     HIMC      saved_imc;
+    bool      text_input;      /* a text field is open: the IME is attached */
+    WCHAR     high_surrogate;  /* the first half of a character WM_CHAR split in two */
 
     /* §3.19: dropped and handed-over paths, held until the next poll.
        The event carries pointers into this, so it has to outlive the
@@ -325,6 +327,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                actually pressed is still there to be asked for, so the
                shortcuts work in either mode. */
             WPARAM key = wparam;
+            /* A text field is open and the IME is using this key (a jamo,
+               or Backspace inside a syllable): it is the IME's, and
+               handing it on as a key too would delete a letter twice. */
+            if (key == VK_PROCESSKEY && w->text_input) return 0;
             if (key == VK_PROCESSKEY) {
                 UINT real = ImmGetVirtualKey(hwnd);
                 if (real != 0 && real != VK_PROCESSKEY) key = (WPARAM)real;
@@ -339,6 +345,64 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (msg == WM_SYSKEYDOWN) break; /* let Alt+F4 and friends reach DefWindowProc */
             return 0;
         }
+
+        case WM_CHAR: {
+            if (!w->text_input) return 0;
+            WCHAR unit = (WCHAR)wparam;
+            WCHAR pair[2] = { unit, 0 };
+            int units = 1;
+            if (unit >= 0xD800 && unit <= 0xDBFF) { w->high_surrogate = unit; return 0; }
+            if (unit >= 0xDC00 && unit <= 0xDFFF) {
+                if (!w->high_surrogate) return 0;
+                pair[0] = w->high_surrogate;
+                pair[1] = unit;
+                units = 2;
+            }
+            w->high_surrogate = 0;
+            if (units == 1 && (unit < 0x20 || unit == 0x7F)) return 0;   /* Enter, Backspace, Esc come as keys */
+            rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_TEXT };
+            int n = WideCharToMultiByte(CP_UTF8, 0, pair, units, e.text.utf8, (int)sizeof(e.text.utf8) - 1, NULL, NULL);
+            if (n > 0) { e.text.length = (size_t)n; queue_push(w, e); }
+            return 0;
+        }
+
+        case WM_IME_SETCONTEXT:
+            /* The field draws the unfinished syllable itself. */
+            lparam &= ~(LPARAM)ISC_SHOWUICOMPOSITIONWINDOW;
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+
+        case WM_IME_STARTCOMPOSITION:
+            if (w->text_input) return 0;   /* no IME window of its own */
+            break;
+
+        case WM_IME_COMPOSITION: {
+            if (!w->text_input) break;
+            HIMC imc = ImmGetContext(hwnd);
+            if (!imc) break;
+            /* The finished part first, then what is still being built. */
+            static const DWORD PARTS[2] = { GCS_RESULTSTR, GCS_COMPSTR };
+            for (int p = 0; p < 2; ++p) {
+                if (!(lparam & (LPARAM)PARTS[p]) && !(p == 1 && (lparam & (LPARAM)GCS_RESULTSTR))) continue;
+                WCHAR wide[32];
+                LONG bytes = ImmGetCompositionStringW(imc, PARTS[p], wide, sizeof(wide));
+                int units = bytes > 0 ? (int)(bytes / (LONG)sizeof(WCHAR)) : 0;
+                rubraview_window_event_t e = { .kind = p == 0 ? RUBRAVIEW_WINDOW_EVENT_TEXT : RUBRAVIEW_WINDOW_EVENT_COMPOSITION };
+                int n = units > 0 ? WideCharToMultiByte(CP_UTF8, 0, wide, units, e.text.utf8, (int)sizeof(e.text.utf8) - 1, NULL, NULL) : 0;
+                e.text.length = n > 0 ? (size_t)n : 0;
+                if (p == 0 && e.text.length == 0) continue;
+                queue_push(w, e);
+            }
+            ImmReleaseContext(hwnd, imc);
+            return 0;   /* handled: no WM_IME_CHAR, so the text does not come twice */
+        }
+
+        case WM_IME_ENDCOMPOSITION:
+            if (w->text_input) {
+                rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_COMPOSITION };
+                queue_push(w, e);   /* nothing left unfinished */
+                return 0;
+            }
+            break;
 
         case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN: case WM_LBUTTONUP:
@@ -820,6 +884,23 @@ bool rubraview_pal_instance_hand_over(u8str_t path) {
     };
     SendMessageW(target, WM_COPYDATA, 0, (LPARAM)&data);
     return true;
+}
+
+void rubraview_pal_window_text_input(rubraview_window_t *window, bool on) {
+    if (!window || !window->hwnd || window->text_input == on) return;
+    if (on) {
+        window->text_input = true;
+        if (window->saved_imc) ImmAssociateContext(window->hwnd, window->saved_imc);
+    } else {
+        HIMC imc = ImmGetContext(window->hwnd);
+        if (imc) {
+            ImmNotifyIME(imc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+            ImmReleaseContext(window->hwnd, imc);
+        }
+        window->text_input = false;
+        window->high_surrogate = 0;
+        ImmAssociateContext(window->hwnd, NULL);   /* K5: keys are keys again */
+    }
 }
 
 void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept) {

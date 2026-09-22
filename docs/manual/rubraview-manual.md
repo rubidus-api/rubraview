@@ -211,10 +211,10 @@ listed rather than hidden so you can see what is coming.
 ## What is not there yet
 
 - **Reading a `.cbr` (RAR) archive.**
-- **Typing a Korean or Japanese filename in the rename box.** You can
-  rename such a file, but not type one — the box takes plain characters
-  for now. (The keys themselves work with the Korean IME in Hangul mode:
-  `F` is still full screen.)
+- **Selecting or pasting in the rename box.** It takes typing — Korean
+  and other IMEs included — and Backspace, but no selection, arrow keys or
+  clipboard yet. (The keys themselves work with the Korean IME in Hangul
+  mode: `F` is still full screen.)
 
 ## Keys
 
