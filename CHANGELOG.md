@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-09-22
+
 ### Changed
 
 - The pin no longer takes a row at the top of an open box: it appears as a
