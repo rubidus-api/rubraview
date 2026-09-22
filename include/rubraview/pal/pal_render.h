@@ -138,6 +138,9 @@ bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture,
 void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t *out_decoder_profiles);
 rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer,
                                                         int32_t width, int32_t height);
+/** Diagnostic (--probe-gpu): the average brightness, 0-255, of a video texture. */
+bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness);
+
 /** False when the frame was decoded on another device, or the texture is not a video one. */
 bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
                                             uint32_t subresource);
