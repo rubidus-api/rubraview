@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-09-23
+
 ### Fixed
 
 - Korean (and any IME) can be typed into the rename box (F2): the syllable
