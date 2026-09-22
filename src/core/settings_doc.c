@@ -283,6 +283,10 @@ static bool one_line(parser_t *p, u8str_t line) {
             .kind = RUBRAVIEW_NODE_INFO, .page = p->page, .text = t[1].text, .name = t[2].text,
         });
     }
+    if (word_is(t[0], "note")) {
+        if (n != 2 || t[1].kind != TOKEN_QUOTED) return fail(p, "note needs its \"text\"");
+        return add_node(p, (rubraview_settings_node_t){ .kind = RUBRAVIEW_NODE_NOTE, .page = p->page, .text = t[1].text });
+    }
     if (word_is(t[0], "preview")) {
         double rows = 1.0;
         if (n < 2 || n > 3 || t[1].kind != TOKEN_WORD || (n == 3 && (!number(t[2].text, &rows) || rows < 1.0 || rows > 20.0))) {

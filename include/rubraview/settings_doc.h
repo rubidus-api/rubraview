@@ -26,6 +26,7 @@ extern "C" {
  *     float   video.ab_step_seconds "A-B step" 0.1..1.0 step 0.1 unit "s" = 0.5
  *     path    curation.dir_1 "Folder 1" wired
  *     info    "FFmpeg" {media.ffmpeg}
+ *     note    "Put FFmpeg's DLLs beside rubraview.exe."
  *     preview subtitle 3
  *     table   keymap
  *     action  shell.register "Register file types"
@@ -36,7 +37,7 @@ extern "C" {
  * the kind needs. `wired` says something in the viewer reads the key
  * today (scripts/check-settings.py holds the document to that). `info`
  * is a read-only line filled from a named source while the window is
- * open, `preview` a block the viewer paints for a named sample, `table`
+ * open, `note` a line of fixed help text across the page, `preview` a block the viewer paints for a named sample, `table`
  * rows from a named source in fixed-width columns. `action` is a button
  * that does something named — registering file types — rather than
  * holding a value.
@@ -53,6 +54,7 @@ typedef enum rubraview_settings_node_kind {
     RUBRAVIEW_NODE_PREVIEW,
     RUBRAVIEW_NODE_TABLE,
     RUBRAVIEW_NODE_ACTION,
+    RUBRAVIEW_NODE_NOTE,       /* a line of help text, the page's full width */
 } rubraview_settings_node_kind_t;
 
 typedef struct rubraview_settings_node {

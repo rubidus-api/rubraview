@@ -78,6 +78,11 @@ typedef struct rubraview_tile_metrics {
     double gutter;       /* spacing between tiles, e.g. 8 */
     double padding;      /* box padding around the grid */
     int32_t columns;     /* tiles per row when expanded */
+    /* The toolbox strip and the boxes' header row (owner, 2026-09-22). */
+    double button_size;  /* a toolbox button: half a tile wide, a quarter of its area */
+    double header_height;/* the row holding the pin (and, in the toolbox, the seek bar) */
+    double title_height; /* the toolbox row with the file's name */
+    int32_t strip_columns; /* toolbox buttons per row */
 } rubraview_tile_metrics_t;
 
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale);
@@ -95,7 +100,26 @@ typedef struct rubraview_box {
        over it — below, or above when there is no room below — and is
        shifted to stay inside (RFC-0002 §4: ten tiles by a corner). */
     double view_width, view_height;
+    bool timeline;               /* toolbox: a seek bar in the header row (a film or music) */
 } rubraview_box_t;
+
+/*
+ * The toolbox strip (owner, 2026-09-22): the pin and, for a film or
+ * music, the seek bar on the top row; the file's name under them; then
+ * the buttons, `strip_columns` to a row, as many rows as they need. All
+ * rectangles are relative to the body's top-left, so the detached window
+ * lays itself out with the same numbers.
+ */
+typedef struct rubraview_toolbox_layout {
+    double width, height;
+    rubraview_rect_t pin, timeline, title;
+    double buttons_y;
+    int32_t columns, rows;
+} rubraview_toolbox_layout_t;
+
+rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics_t *metrics, int32_t count, bool timeline);
+rubraview_rect_t rubraview_toolbox_button_rect(const rubraview_toolbox_layout_t *layout,
+                                               const rubraview_tile_metrics_t *metrics, int32_t index);
 
 rubraview_box_t rubraview_box_create(rubraview_box_kind_t kind, double anchor_x, double anchor_y, int32_t tile_count);
 
@@ -164,6 +188,23 @@ void rubraview_box_drag_to(rubraview_box_t *box, const rubraview_tile_metrics_t 
  */
 bool rubraview_box_update_detach(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                                  double window_width, double window_height, double threshold);
+
+/* The pin at an open box's top-left (owner, 2026-09-22), in client
+   coordinates; empty while the box is folded. The toolbox's seek bar and
+   name rows likewise (empty for the menu, or with no film). */
+rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
+rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
+rubraview_rect_t rubraview_box_title_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
+
+/** The pin reads "on" for a pinned box and for one the left half's click opened. */
+bool rubraview_box_pin_shown_on(const rubraview_box_t *box);
+
+/**
+ * A click on the pin: on, the box stays open when the pointer leaves;
+ * off, it is an ordinary hover-opened box again and folds when left.
+ * False (nothing done) when the click is not on the pin.
+ */
+bool rubraview_box_pin_click(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, double px, double py);
 
 /** Dragging a detached toolbox back over the canvas docks it again. */
 bool rubraview_box_dock(rubraview_box_t *box);

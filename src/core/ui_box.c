@@ -11,6 +11,10 @@ rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale) {
         .gutter = 8.0 * dpi_scale,
         .padding = 8.0 * dpi_scale,
         .columns = 4,
+        .button_size = 32.0 * dpi_scale,
+        .header_height = 20.0 * dpi_scale,
+        .title_height = 18.0 * dpi_scale,
+        .strip_columns = 8,
     };
 }
 
@@ -128,14 +132,9 @@ bool rubraview_box_click(rubraview_box_t *box, const rubraview_tile_metrics_t *m
             rubraview_box_click_anchor(box);
             return true;
         case RUBRAVIEW_ANCHOR_HOVER:
-            /* Hover already opened it; clicking says "keep it". */
-            if (box->state == RUBRAVIEW_BOX_EXPANDED) {
-                box->state = RUBRAVIEW_BOX_LOCKED_OPEN;
-            } else if (box->state == RUBRAVIEW_BOX_LOCKED_OPEN) {
-                box->state = RUBRAVIEW_BOX_COLLAPSED;
-            } else {
-                rubraview_box_click_anchor(box);
-            }
+            /* The hover half only hovers (owner, 2026-09-22): the click is
+               taken, so it does not reach the canvas, and changes nothing.
+               Keeping a box open is the pin's job. */
             return true;
         case RUBRAVIEW_ANCHOR_NONE:
         default:
@@ -187,6 +186,30 @@ static void grid_origin(const rubraview_box_t *box, const rubraview_tile_metrics
     if (*out_y < 0.0) *out_y = 0.0;
 }
 
+rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics_t *m, int32_t count, bool timeline) {
+    rubraview_toolbox_layout_t l = {0};
+    if (!m) return l;
+    double pad = m->padding, g = m->gutter / 2.0, b = m->button_size, head = m->header_height;
+    l.columns = m->strip_columns > 0 ? m->strip_columns : 8;
+    l.rows = count > 0 ? (count + l.columns - 1) / l.columns : 0;
+    l.width = pad * 2.0 + l.columns * b + (l.columns - 1) * g;
+    l.pin = (rubraview_rect_t){ pad, pad, head, head };
+    if (timeline) {
+        l.timeline = (rubraview_rect_t){ pad + head + g, pad + head * 0.25, l.width - pad * 2.0 - head - g, head * 0.5 };
+    }
+    l.title = (rubraview_rect_t){ pad, pad + head + g, l.width - pad * 2.0, m->title_height };
+    l.buttons_y = l.title.y + l.title.height + g;
+    l.height = l.rows > 0 ? l.buttons_y + l.rows * b + (l.rows - 1) * g + pad : l.title.y + l.title.height + pad;
+    return l;
+}
+
+rubraview_rect_t rubraview_toolbox_button_rect(const rubraview_toolbox_layout_t *l,
+                                               const rubraview_tile_metrics_t *m, int32_t i) {
+    if (!l || !m || i < 0 || l->columns <= 0) return (rubraview_rect_t){0};
+    double g = m->gutter / 2.0, b = m->button_size;
+    return (rubraview_rect_t){ m->padding + (i % l->columns) * (b + g), l->buttons_y + (i / l->columns) * (b + g), b, b };
+}
+
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
     if (!box || !metrics) return (rubraview_rect_t){0};
 
@@ -198,11 +221,19 @@ rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubravie
         };
     }
 
-    int32_t columns = grid_columns(box, metrics);
-    int32_t rows = grid_rows(box, metrics);
-
-    double width = metrics->padding * 2.0 + columns * metrics->tile_size + (columns - 1) * metrics->gutter;
-    double height = metrics->padding * 2.0 + rows * metrics->tile_size + (rows - 1) * metrics->gutter;
+    double width = 0.0, height = 0.0;
+    if (box->kind == RUBRAVIEW_BOX_TOOLBOX) {
+        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        width = l.width;
+        height = l.height;
+    } else {
+        int32_t columns = grid_columns(box, metrics);
+        int32_t rows = grid_rows(box, metrics);
+        width = metrics->padding * 2.0 + columns * metrics->tile_size + (columns - 1) * metrics->gutter;
+        /* The header row holds the pin. */
+        height = metrics->padding * 2.0 + metrics->header_height + metrics->gutter / 2.0 +
+                 rows * metrics->tile_size + (rows - 1) * metrics->gutter;
+    }
     double x = 0.0, y = 0.0;
     grid_origin(box, metrics, width, height, &x, &y);
 
@@ -214,14 +245,20 @@ rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubra
         return (rubraview_rect_t){0};
     }
 
+    rubraview_rect_t body = rubraview_box_bounds(box, metrics);
+    if (box->kind == RUBRAVIEW_BOX_TOOLBOX) {
+        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        rubraview_rect_t b = rubraview_toolbox_button_rect(&l, metrics, tile_index);
+        return (rubraview_rect_t){ body.x + b.x, body.y + b.y, b.width, b.height };
+    }
     int32_t columns = grid_columns(box, metrics);
     int32_t row = tile_index / columns;
     int32_t column = tile_index % columns;
-    rubraview_rect_t body = rubraview_box_bounds(box, metrics);
 
     return (rubraview_rect_t){
         .x = body.x + metrics->padding + column * (metrics->tile_size + metrics->gutter),
-        .y = body.y + metrics->padding + row * (metrics->tile_size + metrics->gutter),
+        .y = body.y + metrics->padding + metrics->header_height + metrics->gutter / 2.0 +
+             row * (metrics->tile_size + metrics->gutter),
         .width = metrics->tile_size,
         .height = metrics->tile_size,
     };
@@ -372,4 +409,45 @@ bool rubraview_box_just_opened(const rubraview_box_t *box, bool *was_open) {
     bool opened = open && !*was_open;
     *was_open = open;
     return opened;
+}
+
+/* ---- the pin and the toolbox's rows (owner, 2026-09-22) ---- */
+
+static rubraview_rect_t body_relative(const rubraview_box_t *box, const rubraview_tile_metrics_t *m, rubraview_rect_t r) {
+    if (!box || !m || !is_open(box) || r.width <= 0.0) return (rubraview_rect_t){0};
+    rubraview_rect_t body = rubraview_box_bounds(box, m);
+    return (rubraview_rect_t){ body.x + r.x, body.y + r.y, r.width, r.height };
+}
+
+rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
+    if (!m) return (rubraview_rect_t){0};
+    return body_relative(box, m, (rubraview_rect_t){ m->padding, m->padding, m->header_height, m->header_height });
+}
+
+rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
+    if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
+    return body_relative(box, m, rubraview_toolbox_layout(m, box->tile_count, box->timeline).timeline);
+}
+
+rubraview_rect_t rubraview_box_title_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
+    if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
+    return body_relative(box, m, rubraview_toolbox_layout(m, box->tile_count, box->timeline).title);
+}
+
+bool rubraview_box_pin_shown_on(const rubraview_box_t *box) {
+    return box && (box->pinned || box->state == RUBRAVIEW_BOX_LOCKED_OPEN || box->state == RUBRAVIEW_BOX_DETACHED);
+}
+
+bool rubraview_box_pin_click(rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
+    if (!box || !m || box->state == RUBRAVIEW_BOX_DETACHED) return false;
+    if (!rubraview_rect_contains(rubraview_box_pin_rect(box, m), px, py)) return false;
+    if (rubraview_box_pin_shown_on(box)) {
+        box->pinned = false;
+        box->state = RUBRAVIEW_BOX_EXPANDED;   /* folds once the pointer leaves */
+    } else {
+        box->pinned = true;
+        box->state = RUBRAVIEW_BOX_LOCKED_OPEN;
+    }
+    box->idle_seconds = 0.0;
+    return true;
 }
