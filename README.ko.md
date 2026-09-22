@@ -1,12 +1,12 @@
 # Rubraview
 
-**Rubraview v0.0.5**(최신 판) 내려받기 — [rubraview-v0.0.5.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.5/rubraview-v0.0.5.zip) · [모든 판](https://github.com/rubidus-api/rubraview/releases)
+**Rubraview v0.0.6**(최신 판) 내려받기 — [rubraview-v0.0.6.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.6/rubraview-v0.0.6.zip) · [모든 판](https://github.com/rubidus-api/rubraview/releases)
 
 [English](README.md) · **한국어**
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview-v0.0.5.exe` 를 실행하면 됩니다. 설치 프로그램도, 옆에 둬야 하는 파일도 없습니다. 예외는 FFmpeg 의 DLL 하나뿐이고, 그것도 Media Foundation 이 못 여는 형식에만 필요합니다.
+압축을 풀고 `rubraview-v0.0.6.exe` 를 실행하면 됩니다. 설치 프로그램도, 옆에 둬야 하는 파일도 없습니다. 예외는 FFmpeg 의 DLL 하나뿐이고, 그것도 Media Foundation 이 못 여는 형식에만 필요합니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 

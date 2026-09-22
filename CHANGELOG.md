@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-09-22
+
 ### Changed
 
 - `--probe-gpu` (and so `gpu-check.cmd`) tries `hardware_decode = off` as
