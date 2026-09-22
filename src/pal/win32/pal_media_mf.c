@@ -42,7 +42,9 @@
 
 typedef struct media_slot {
     uint8_t *pixels;       /* width * height * 4, top row first */
-    ID3D11Texture2D *texture;   /* RV-062: the picture kept on the card; made on first use */
+    ID3D11Texture2D *texture;   /* RV-062: the picture kept on the card; made on first use,
+                                   shared with the renderer's device under a keyed mutex */
+    IDXGIKeyedMutex *mutex;
     bool on_gpu;                /* this frame is in `texture`, not in `pixels` */
     double pts, duration;
     uint64_t generation;   /* which seek this frame belongs to */
@@ -105,6 +107,7 @@ typedef HRESULT (WINAPI *mf_create_dxgi_manager_fn)(UINT*, IMFDXGIDeviceManager*
 /* RV-062. Spelled out here: the import libraries do not carry all of them. */
 static const GUID RV_IID_IMFDXGIBuffer = { 0xe7174cfa, 0x1c9e, 0x48b1, { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
 static const GUID RV_IID_ID3D11Texture2D = { 0x6f15aaf2, 0xd208, 0x4e89, { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
+static const GUID RV_IID_IDXGIKeyedMutex = { 0x9d8e1289, 0xd7b3, 0x465f, { 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d } };
 
 static struct {
     bool tried, ok;
@@ -488,16 +491,24 @@ static bool store_gpu_picture(mf_media_t *m, media_slot_t *slot, ID3D11Texture2D
     bool ok = false;
     if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM) {
         if (!slot->texture) {
+            /* Shared: the renderer draws with a device of its own and opens
+               this one by its handle; the keyed mutex orders the two. */
             D3D11_TEXTURE2D_DESC own = {
                 .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
                 .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
-                .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE,
+                .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+                .MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
             };
             if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &slot->texture))) slot->texture = NULL;
+            if (slot->texture &&
+                FAILED(ID3D11Texture2D_QueryInterface(slot->texture, &RV_IID_IDXGIKeyedMutex, (void**)&slot->mutex))) {
+                slot->mutex = NULL;
+            }
         }
-        if (slot->texture) {
+        if (slot->texture && slot->mutex && IDXGIKeyedMutex_AcquireSync(slot->mutex, 0, 500) == S_OK) {
             ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)slot->texture, 0, 0, 0, 0,
                                                       (ID3D11Resource*)source, subresource, &box);
+            IDXGIKeyedMutex_ReleaseSync(slot->mutex, 0);
             slot->on_gpu = true;
             ok = true;
         }
@@ -860,9 +871,12 @@ static void mf_close(void *handle) {
     free(media->pcm_storage);
     for (int i = 0; i < SLOT_COUNT; ++i) {
         free(media->slots[i].pixels);
+        if (media->slots[i].mutex) IDXGIKeyedMutex_Release(media->slots[i].mutex);
         if (media->slots[i].texture) ID3D11Texture2D_Release(media->slots[i].texture);
     }
     if (media->manager) IMFDXGIDeviceManager_Release(media->manager);
+    /* The decoder's device outlives a renderer rebuilt meanwhile: held here. */
+    if (media->gpu.device) IUnknown_Release((IUnknown*)media->gpu.device);
     free(media);
 }
 
@@ -874,6 +888,7 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
     if (!m) return NULL;
     if (gpu) m->gpu = *gpu;
+    if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
 
     char narrow[MAX_PATH * 4];
     memcpy(narrow, path.ptr, path.len);

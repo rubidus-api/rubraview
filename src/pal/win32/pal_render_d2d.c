@@ -35,9 +35,13 @@ static const GUID RV_IID_IDXGISurface =
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 
+#define VIDEO_SOURCES 8   /* the decoder's slot textures a film's texture has opened (4 slots, a spare) */
+
 struct rubraview_texture {
     ID2D1Bitmap *bitmap;
     ID3D11Texture2D *d3d;                /* RV-062: a film's texture on the card; NULL otherwise */
+    /* RV-062: the decoder's shared slot textures, opened on this device. */
+    struct { const void *source; ID3D11Texture2D *opened; IDXGIKeyedMutex *mutex; } sources[VIDEO_SOURCES];
     int32_t width, height;
     struct rubraview_renderer *owner;    /* so destroy can recycle without a global */
     struct rubraview_texture *next_free; /* recycled struct free list */
@@ -84,6 +88,7 @@ struct rubraview_renderer {
     ID2D1Device *device;
     ID2D1DeviceContext *target;    /* the render target, and the effect graph's owner */
     ID3D11Device *d3d;
+    ID3D11Device *decode_d3d;      /* RV-062: the decoder's own device, same card; made on first use */
     IDXGISwapChain1 *swap_chain;
     ID2D1Bitmap1 *back_buffer;
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
@@ -120,6 +125,7 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
        note on this function in pal_render_d2d_internal.h. */
     tex->bitmap = bitmap;
     tex->d3d = NULL;
+    memset(tex->sources, 0, sizeof(tex->sources));
     tex->width = width;
     tex->height = height;
     tex->owner = renderer;
@@ -340,6 +346,8 @@ void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
     if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
     if (renderer->d3d) { ID3D11Device_Release(renderer->d3d); renderer->d3d = NULL; }
+    /* A film still open holds its own reference to the decoder's device. */
+    if (renderer->decode_d3d) { ID3D11Device_Release(renderer->decode_d3d); renderer->decode_d3d = NULL; }
     if (renderer->dwrite) {
         IDWriteFactory_Release(renderer->dwrite);
         renderer->dwrite = NULL;
@@ -593,6 +601,13 @@ void rubraview_pal_texture_destroy(rubraview_texture_t *texture) {
         ID3D11Texture2D_Release(texture->d3d);
         texture->d3d = NULL;
     }
+    for (int i = 0; i < VIDEO_SOURCES; ++i) {
+        if (texture->sources[i].mutex) IDXGIKeyedMutex_Release(texture->sources[i].mutex);
+        if (texture->sources[i].opened) ID3D11Texture2D_Release(texture->sources[i].opened);
+        texture->sources[i].source = NULL;
+        texture->sources[i].opened = NULL;
+        texture->sources[i].mutex = NULL;
+    }
     if (texture->owner) {
         texture_recycle(texture->owner, texture);
     }
@@ -835,26 +850,62 @@ static const GUID RV_IID_ID3D11VideoDevice =
 static const GUID RV_IID_ID3D11Multithread =
     { 0x9b7e4e00, 0x342c, 0x4106, { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
 
+/* RV-062: the decoder gets a device of its own on the same card, not the
+   renderer's. Lent the renderer's, Media Foundation's threads and the
+   decode thread used the device Direct2D draws with from this thread, and
+   on a real card (the owner's Intel UHD 730, 0.0.7) the whole window went
+   black and the film timed out opening; the probe, which always used a
+   device of its own, played the same file. Frames cross between the two
+   devices as shared textures, on the card. */
 void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t *out_decoder_profiles) {
     if (out_decoder_profiles) *out_decoder_profiles = 0;
     if (!renderer || !renderer->d3d) return NULL;
+    if (!renderer->decode_d3d) {
+        IDXGIDevice *dxgi = NULL;
+        IDXGIAdapter *adapter = NULL;
+        if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi)) && dxgi) {
+            IDXGIDevice_GetAdapter(dxgi, &adapter);
+            IDXGIDevice_Release(dxgi);
+        }
+        /* The renderer's card first, with video support; then without it
+           (a software adapter has none — Media Foundation's processor still
+           turns frames into textures there); then the default card. */
+        const struct { bool on_adapter; UINT flags; } TRIES[] = {
+            { true,  D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT },
+            { true,  D3D11_CREATE_DEVICE_BGRA_SUPPORT },
+            { false, D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_VIDEO_SUPPORT },
+        };
+        HRESULT hr = E_FAIL;
+        for (size_t i = 0; i < sizeof(TRIES) / sizeof(TRIES[0]) && !renderer->decode_d3d; ++i) {
+            if (TRIES[i].on_adapter && !adapter) continue;
+            IDXGIAdapter *a = TRIES[i].on_adapter ? adapter : NULL;
+            hr = D3D11CreateDevice(a, a ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
+                                   TRIES[i].flags, NULL, 0, D3D11_SDK_VERSION, &renderer->decode_d3d, NULL, NULL);
+            if (FAILED(hr)) renderer->decode_d3d = NULL;
+        }
+        if (adapter) IDXGIAdapter_Release(adapter);
+        if (!renderer->decode_d3d) {
+            g_last_hresult = hr;   /* --probe-gpu prints it */
+            return NULL;
+        }
+        /* Media Foundation uses it from its own threads. */
+        ID3D11DeviceContext *context = NULL;
+        ID3D11Device_GetImmediateContext(renderer->decode_d3d, &context);
+        if (context) {
+            ID3D11Multithread *mt = NULL;
+            if (SUCCEEDED(ID3D11DeviceContext_QueryInterface(context, &RV_IID_ID3D11Multithread, (void**)&mt)) && mt) {
+                ID3D11Multithread_SetMultithreadProtected(mt, TRUE);
+                ID3D11Multithread_Release(mt);
+            }
+            ID3D11DeviceContext_Release(context);
+        }
+    }
     ID3D11VideoDevice *video = NULL;
-    if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->d3d, &RV_IID_ID3D11VideoDevice, (void**)&video)) && video) {
+    if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->decode_d3d, &RV_IID_ID3D11VideoDevice, (void**)&video)) && video) {
         if (out_decoder_profiles) *out_decoder_profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
         ID3D11VideoDevice_Release(video);
     }
-    /* The decoder uses the device from its own threads. */
-    ID3D11DeviceContext *context = NULL;
-    ID3D11Device_GetImmediateContext(renderer->d3d, &context);
-    if (context) {
-        ID3D11Multithread *mt = NULL;
-        if (SUCCEEDED(ID3D11DeviceContext_QueryInterface(context, &RV_IID_ID3D11Multithread, (void**)&mt)) && mt) {
-            ID3D11Multithread_SetMultithreadProtected(mt, TRUE);
-            ID3D11Multithread_Release(mt);
-        }
-        ID3D11DeviceContext_Release(context);
-    }
-    return renderer->d3d;
+    return renderer->decode_d3d;
 }
 
 rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
@@ -883,26 +934,92 @@ rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *re
     return texture;
 }
 
+static const GUID RV_IID_IDXGIResource =
+    { 0x035f3ab4, 0x482e, 0x4e50, { 0xb4, 0x1f, 0x8a, 0x7f, 0x8b, 0xd8, 0x96, 0x0b } };
+static const GUID RV_IID_IDXGIKeyedMutex =
+    { 0x9d8e1289, 0xd7b3, 0x465f, { 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d } };
+static const GUID RV_IID_ID3D11Texture2D =
+    { 0x6f15aaf2, 0xd208, 0x4e89, { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
+
 bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
                                             uint32_t subresource) {
     if (!texture || !texture->d3d || !texture->owner || !frame_texture) return false;
-    ID3D11Texture2D *source = (ID3D11Texture2D*)(void*)(uintptr_t)frame_texture;
-    /* A frame decoded on another device (the renderer was rebuilt after a
-       lost device) cannot be copied here; the caller reopens the film. */
-    ID3D11Device *device = NULL;
-    ID3D11Texture2D_GetDevice(source, &device);
-    bool same = device == texture->owner->d3d;
-    if (device) ID3D11Device_Release(device);
-    if (!same) return false;
+    ID3D11Device *device = texture->owner->d3d;
+    /* The decoder's slot texture, opened here once through its shared handle. */
+    int slot = -1, free_slot = -1;
+    for (int i = 0; i < VIDEO_SOURCES; ++i) {
+        if (texture->sources[i].source == frame_texture) { slot = i; break; }
+        if (!texture->sources[i].source && free_slot < 0) free_slot = i;
+    }
+    if (slot < 0) {
+        if (free_slot < 0) return false;
+        ID3D11Texture2D *source = (ID3D11Texture2D*)(void*)(uintptr_t)frame_texture;
+        IDXGIResource *resource = NULL;
+        HANDLE shared = NULL;
+        if (SUCCEEDED(ID3D11Texture2D_QueryInterface(source, &RV_IID_IDXGIResource, (void**)&resource)) && resource) {
+            IDXGIResource_GetSharedHandle(resource, &shared);
+            IDXGIResource_Release(resource);
+        }
+        ID3D11Texture2D *opened = NULL;
+        if (!shared || FAILED(ID3D11Device_OpenSharedResource(device, shared, &RV_IID_ID3D11Texture2D, (void**)&opened)) || !opened) {
+            return false;
+        }
+        IDXGIKeyedMutex *mutex = NULL;
+        if (FAILED(ID3D11Texture2D_QueryInterface(opened, &RV_IID_IDXGIKeyedMutex, (void**)&mutex))) mutex = NULL;
+        texture->sources[free_slot].source = frame_texture;
+        texture->sources[free_slot].opened = opened;
+        texture->sources[free_slot].mutex = mutex;
+        slot = free_slot;
+    }
     ID3D11DeviceContext *context = NULL;
-    ID3D11Device_GetImmediateContext(texture->owner->d3d, &context);
+    ID3D11Device_GetImmediateContext(device, &context);
     if (!context) return false;
-    D3D11_BOX box = { .left = 0, .top = 0, .front = 0,
-                      .right = (UINT)texture->width, .bottom = (UINT)texture->height, .back = 1 };
-    ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)texture->d3d, 0, 0, 0, 0,
-                                              (ID3D11Resource*)source, subresource, &box);
+    IDXGIKeyedMutex *mutex = texture->sources[slot].mutex;
+    /* The decode thread writes the slot under the same key: a frame is read
+       only once the other device has finished writing it. */
+    bool held = !mutex || IDXGIKeyedMutex_AcquireSync(mutex, 0, 100) == S_OK;
+    if (held) {
+        D3D11_BOX box = { .left = 0, .top = 0, .front = 0,
+                          .right = (UINT)texture->width, .bottom = (UINT)texture->height, .back = 1 };
+        ID3D11DeviceContext_CopySubresourceRegion(context, (ID3D11Resource*)texture->d3d, 0, 0, 0, 0,
+                                                  (ID3D11Resource*)texture->sources[slot].opened, subresource, &box);
+        if (mutex) IDXGIKeyedMutex_ReleaseSync(mutex, 0);
+    }
     ID3D11DeviceContext_Release(context);
-    return true;
+    return held;
+}
+
+bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness) {
+    if (!texture || !texture->d3d || !texture->owner || !out_brightness) return false;
+    ID3D11Device *device = texture->owner->d3d;
+    D3D11_TEXTURE2D_DESC desc = {
+        .Width = (UINT)texture->width, .Height = (UINT)texture->height, .MipLevels = 1, .ArraySize = 1,
+        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Usage = D3D11_USAGE_STAGING, .CPUAccessFlags = D3D11_CPU_ACCESS_READ,
+    };
+    ID3D11Texture2D *staging = NULL;
+    if (FAILED(ID3D11Device_CreateTexture2D(device, &desc, NULL, &staging)) || !staging) return false;
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device_GetImmediateContext(device, &context);
+    bool ok = false;
+    if (context) {
+        ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)staging, (ID3D11Resource*)texture->d3d);
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        if (SUCCEEDED(ID3D11DeviceContext_Map(context, (ID3D11Resource*)staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+            double sum = 0.0;
+            long n = 0;
+            for (int32_t y = 0; y < texture->height; y += 8) {
+                const uint8_t *row = (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch;
+                for (int32_t x = 0; x < texture->width; x += 8, ++n) sum += (row[x * 4] + row[x * 4 + 1] + row[x * 4 + 2]) / 3.0;
+            }
+            ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)staging, 0);
+            *out_brightness = n > 0 ? sum / (double)n : 0.0;
+            ok = true;
+        }
+        ID3D11DeviceContext_Release(context);
+    }
+    ID3D11Texture2D_Release(staging);
+    return ok;
 }
 
 #endif /* _WIN32 */
