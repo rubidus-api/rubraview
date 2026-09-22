@@ -5601,6 +5601,75 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
 
     ID3D11DeviceContext_Release(context);
     ID3D11Device_Release(device);
+
+    /* 5. The viewer's own renderer (0.0.7 on the owner's card: the probe
+          played the film, the viewer showed a black window). A hidden
+          window and the real renderer; the decoder's device from it, the
+          film opened with it, frames copied into a film texture and drawn
+          once, and what was drawn read back. */
+    HWND hidden = CreateWindowExW(0, L"STATIC", L"rubraview probe", WS_POPUP, 0, 0, 320, 240, NULL, NULL,
+                                  GetModuleHandleW(NULL), NULL);
+    rubraview_renderer_t *renderer = hidden ? rubraview_pal_render_create(arena, hidden, 320, 240) : NULL;
+    if (!renderer) {
+        console_line("viewer path: the renderer would not start here");
+        if (hidden) DestroyWindow(hidden);
+        return 2;
+    }
+    uint32_t viewer_profiles = 0;
+    void *decode_device = rubraview_pal_render_video_device(renderer, &viewer_profiles);
+    snprintf(line, sizeof(line), "viewer path: the decoder's own device %s, %u decoder profiles",
+             decode_device ? "made" : "NOT made", (unsigned)viewer_profiles);
+    if (!decode_device) {
+        console_line(line);
+        snprintf(line, sizeof(line), "viewer path: the last Direct3D answer was 0x%08X",
+                 (unsigned)rubraview_pal_render_last_hresult());
+    }
+    console_line(line);
+  for (int32_t vmode = 1; vmode <= 2; ++vmode) {
+    rubraview_media_gpu_t vgpu = { .device = decode_device, .decoder_profiles = viewer_profiles, .mode = vmode };
+    double opened_in = rubraview_pal_time_now_seconds();
+    rubraview_media_open_result_t vopen = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, &vgpu);
+    opened_in = rubraview_pal_time_now_seconds() - opened_in;
+    if (!vopen.media) {
+        u8str_t why = rubraview_media_failure_text(vopen.failure);
+        snprintf(line, sizeof(line), "viewer path (%s): the film did not open (%.1f s) - %.*s", MODE_NAMES[vmode], opened_in, (int)why.len, why.ptr);
+        console_line(line);
+        code = 2;
+    } else {
+        rubraview_texture_t *page = vopen.info.hardware_decode
+            ? rubraview_pal_texture_create_video(renderer, vopen.info.width, vopen.info.height) : NULL;
+        int pictures = 0, copied = 0, drawn = 0;
+        double brightness = -1.0;
+        double start = rubraview_pal_time_now_seconds();
+        while (rubraview_pal_time_now_seconds() - start < 3.0 && pictures < 60) {
+            rubraview_video_frame_t frame;
+            if (!rubraview_pal_media_peek_frame(vopen.media, &frame)) { rubraview_pal_time_sleep_ms(2); continue; }
+            pictures++;
+            if (page && frame.gpu_texture &&
+                rubraview_pal_texture_copy_video_frame(page, frame.gpu_texture, frame.gpu_subresource)) {
+                copied++;
+                rubraview_pal_render_begin(renderer, 0xFF000000u);
+                rubraview_pal_render_draw_texture(renderer, page,
+                    (rubraview_mat3x2_t){ .a = 320.0 / vopen.info.width, .d = 240.0 / vopen.info.height },
+                    RUBRAVIEW_INTERP_LINEAR);
+                if (rubraview_pal_render_end(renderer)) drawn++;
+                if (pictures > 20) rubraview_pal_texture_video_brightness(page, &brightness);
+            }
+            rubraview_pal_media_pop_frame(vopen.media);
+        }
+        snprintf(line, sizeof(line),
+                 "viewer path (%s): opened in %.1f s, decoded %s; %d pictures, %d copied to the screen texture, "
+                 "%d drawn; brightness of the picture %.0f of 255",
+                 MODE_NAMES[vmode], opened_in, vopen.info.hardware_decode ? "on the card" : "in software", pictures, copied, drawn,
+                 brightness);
+        console_line(line);
+        if (vopen.info.hardware_decode && (copied == 0 || drawn == 0)) code = 2;
+        if (page) rubraview_pal_texture_destroy(page);
+        rubraview_pal_media_close(vopen.media);
+    }
+  }
+    rubraview_pal_render_destroy(renderer);
+    DestroyWindow(hidden);
     return code;
 }
 
@@ -5790,7 +5859,9 @@ static bool box_press(app_state_t *app, double x, double y) {
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
-        if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) == RUBRAVIEW_ANCHOR_NONE) continue;
+        /* Only the left half is a handle (owner, 2026-09-22): the right
+           one only hovers. */
+        if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) != RUBRAVIEW_ANCHOR_CLICK) continue;
         app->box_drag = boxes[i];
         app->box_grab_dx = x - boxes[i]->anchor_x;
         app->box_grab_dy = y - boxes[i]->anchor_y;

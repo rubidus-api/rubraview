@@ -6,6 +6,22 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- With GPU decoding on, a real graphics card (the owner's Intel UHD 730)
+  showed a black window — seek bar and boxes too — and the film timed out
+  opening: the decoder was lent the very device Direct2D draws with, and
+  Media Foundation's threads used it alongside. The decoder now has a
+  device of its own on the same card, and each frame crosses to the
+  renderer as a shared texture under a keyed mutex — still on the card.
+  `--probe-gpu` gains a last step that runs this whole path through the
+  real renderer (a hidden window) and reads back what was drawn.
+
+### Changed
+
+- The floating boxes' right-hand anchor button only hovers; dragging and
+  clicking are the left one's.
+
 ## [0.0.7] - 2026-09-22
 
 ### Fixed
