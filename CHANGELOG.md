@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-09-22
+
 ### Fixed
 
 - With GPU decoding on, a real graphics card (the owner's Intel UHD 730)
