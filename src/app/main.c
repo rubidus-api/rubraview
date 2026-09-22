@@ -2553,12 +2553,15 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
 
-    /* The pin at the top-left (owner, 2026-09-22): filled while the box
-       stays open, an outline while it folds when the pointer leaves. */
+    /* The pin, a third square beside the anchor while the box is open
+       (owner, 2026-09-22): filled while the box stays open, an outline
+       while it folds when the pointer leaves. */
     rubraview_rect_t pr = rubraview_box_pin_rect(box, metrics);
     rubraview_pal_rect_t pin = { pr.x, pr.y, pr.width, pr.height };
     bool pinned = rubraview_box_pin_shown_on(box);
-    if (!rubraview_pal_render_draw_icon(app->renderer, rubraview_pin_icon(pinned), pin, pr.height * 0.7,
+    rubraview_pal_render_fill_rect(app->renderer, pin, box_fill, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, pin, box_border, 1.0, 2.0);
+    if (!rubraview_pal_render_draw_icon(app->renderer, rubraview_pin_icon(pinned), pin, pr.height * 0.45,
                                         pinned ? COLOR_TILE_CURRENT : COLOR_TEXT)) {
         rubraview_pal_render_draw_text(app->renderer, pinned ? U8("*") : U8("o"), pin, pr.height * 0.8,
                                        pinned ? COLOR_TILE_CURRENT : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -2799,7 +2802,9 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         u8str_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
         /* Beside the anchor, on its row: the grid is below or above it now. */
         rubraview_rect_t anchor = rubraview_box_anchor_rect(&app->menubox, &metrics);
-        rubraview_pal_rect_t label = { anchor.x + anchor.width + metrics.gutter, anchor.y,
+        rubraview_rect_t pin = rubraview_box_pin_rect(&app->menubox, &metrics);
+        double after = pin.x > anchor.x ? pin.x + pin.width : anchor.x + anchor.width;   /* past the pin */
+        rubraview_pal_rect_t label = { after + metrics.gutter, anchor.y,
                                        metrics.tile_size * 6.0, anchor.height };
         rubraview_pal_render_draw_text(app->renderer, text, label, metrics.tile_size * 0.2,
                                        COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
