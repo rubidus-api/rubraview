@@ -77,6 +77,49 @@ size_t rubraview_rename_stem_length(u8str_t filename) {
     return rubraview_path_stem(filename).len;
 }
 
+/* The length of the UTF-8 character that starts with `lead`, or 0 for a
+   byte that cannot start one. */
+static size_t utf8_char_length(unsigned char lead) {
+    if (lead < 0x80u) return 1;
+    if ((lead & 0xE0u) == 0xC0u) return 2;
+    if ((lead & 0xF0u) == 0xE0u) return 3;
+    if ((lead & 0xF8u) == 0xF0u) return 4;
+    return 0;
+}
+
+size_t rubraview_rename_append(char *buffer, size_t capacity, size_t *length, u8str_t text) {
+    if (!buffer || !length || capacity == 0 || *length >= capacity) return 0;
+    size_t added = 0;
+    size_t i = 0;
+    while (i < text.len) {
+        unsigned char lead = (unsigned char)text.ptr[i];
+        size_t n = utf8_char_length(lead);
+        if (n == 0 || i + n > text.len) break;                  /* not UTF-8: stop rather than guess */
+        bool whole = true;
+        for (size_t k = 1; k < n; ++k) whole = whole && (((unsigned char)text.ptr[i + k] & 0xC0u) == 0x80u);
+        if (!whole) break;
+        bool control = n == 1 && (lead < 0x20u || lead == 0x7Fu);
+        if (!control) {
+            if (*length + n + 1 > capacity) break;                /* no room: leave it out, not half of it */
+            memcpy(buffer + *length, text.ptr + i, n);
+            *length += n;
+            added += n;
+        }
+        i += n;
+    }
+    buffer[*length] = '\0';
+    return added;
+}
+
+void rubraview_rename_backspace(char *buffer, size_t *length) {
+    if (!buffer || !length || *length == 0) return;
+    size_t at = *length;
+    while (at > 0 && ((unsigned char)buffer[at - 1] & 0xC0u) == 0x80u) at--;
+    if (at > 0) at--;
+    *length = at;
+    buffer[at] = '\0';
+}
+
 u8str_t rubraview_rename_compose(proven_arena_t *arena, u8str_t old_filename, u8str_t new_stem) {
     u8str_t empty = { .ptr = "", .len = 0 };
     if (!arena) return empty;
