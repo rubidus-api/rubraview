@@ -1,12 +1,12 @@
 # Rubraview
 
-**Rubraview v0.0.9** (latest release) download — [rubraview-v0.0.9.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.9/rubraview-v0.0.9.zip) · [all releases](https://github.com/rubidus-api/rubraview/releases)
+**Rubraview v0.0.10** (latest release) download — [rubraview-v0.0.10.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.10/rubraview-v0.0.10.zip) · [all releases](https://github.com/rubidus-api/rubraview/releases)
 
 **English** · [한국어](README.ko.md)
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview-v0.0.9.exe`: there is no installer and nothing to place beside it. FFmpeg's DLLs are the one exception, and only for the formats Media Foundation cannot open.
+Unzip and run `rubraview-v0.0.10.exe`: there is no installer and nothing to place beside it. FFmpeg's DLLs are the one exception, and only for the formats Media Foundation cannot open.
 
 > This English README is the canonical version; the Korean one is its translation.
 
