@@ -6,6 +6,21 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- The toolbox is a strip: a seek bar on top, the file's name under it,
+  then small icon buttons in rows — previous and next file, −5 s, +5 s,
+  play/pause, stop, volume, and so on. Pointing at a button shows what it
+  does in place of the name. The detached toolbox window shows the same.
+- Both floating boxes have a pin at their top-left: pinned, a box stays
+  open when the pointer leaves. Clicking an anchor's left half opens the
+  box pinned; dragging it moves the box; the right half opens on hover.
+
+### Added
+
+- Settings › Video explains how to add FFmpeg: which DLLs (not the exe),
+  where they go, which version (8.1) and where to download it.
+
 ## [0.0.8] - 2026-09-22
 
 ### Fixed

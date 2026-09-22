@@ -70,7 +70,7 @@ typedef struct rubraview_box_node {
 #define RUBRAVIEW_BOXES_MAX_TILES 128
 #define RUBRAVIEW_BOXES_MAX_PROFILES 16
 #define RUBRAVIEW_BOXES_MAX_NODES 160
-#define RUBRAVIEW_TOOLBOX_MAX_TILES 12    /* in one profile */
+#define RUBRAVIEW_TOOLBOX_MAX_TILES 24    /* in one profile: three rows of the strip */
 
 typedef struct rubraview_boxes_doc {
     rubraview_box_tile_t        tiles[RUBRAVIEW_BOXES_MAX_TILES];

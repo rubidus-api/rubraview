@@ -211,6 +211,7 @@ typedef struct app_state {
     rubraview_window_t    *toolbox_window;
     rubraview_renderer_t  *toolbox_renderer;
     double                 toolbox_window_drawn;
+    double                 toolbox_window_pointer_x, toolbox_window_pointer_y;   /* for the hovered button's caption */
     double                 toolbox_window_opacity;
     double                 timeline_last_seek;/* wall time of the last seek while dragging */
     /* §3.16.1 / R135: the external subtitle file that goes with the
@@ -1350,6 +1351,7 @@ static void toolbox_refresh(app_state_t *app) {
     }
     app->toolbox_tile_count = count;
     app->toolbox.tile_count = count;
+    app->toolbox.timeline = app->media != NULL;   /* the strip's seek bar, for a film or music */
     /* The menu follows what is on screen too, but only while it is at its
        root: a reader halfway down a submenu is not pulled back. */
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
@@ -1394,6 +1396,7 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .layout = app->layout_opts.mode,
         .fit = app->fit_mode,
         .rtl = app->layout_opts.direction == RUBRAVIEW_READING_RTL,
+        .playing = app->media ? !app->media_paused : (app->anim_active && !app->animation.paused),
     };
 }
 
@@ -1962,23 +1965,27 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 /* ---- RFC-0002 Q6: the detached toolbox ---- */
 
 /* Its size: the anchor bar on top, the profile's grid under it. */
-static void toolbox_window_size(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t *out_w, int32_t *out_h) {
-    int32_t count = app->toolbox_tile_count > 0 ? app->toolbox_tile_count : 1;
-    int32_t columns = count < m->columns ? count : m->columns;
-    int32_t rows = (count + columns - 1) / columns;
-    double grid_w = m->padding * 2.0 + columns * m->tile_size + (columns - 1) * m->gutter;
-    double grid_h = m->padding * 2.0 + rows * m->tile_size + (rows - 1) * m->gutter;
-    *out_w = (int32_t)ceil(grid_w > m->anchor_size * 2.0 ? grid_w : m->anchor_size * 2.0);
-    *out_h = (int32_t)ceil(m->anchor_size + m->gutter + grid_h);
+static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
+                            double ox, double oy, int32_t hovered);
+static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubraview_pal_rect_t tile, int32_t i,
+                              const rubraview_action_facts_t *facts, bool hovered, uint32_t fill, uint32_t border);
+
+/* Detached, the strip sits under the window's own anchor bar. */
+static rubraview_toolbox_layout_t toolbox_window_layout(const app_state_t *app, const rubraview_tile_metrics_t *m) {
+    return rubraview_toolbox_layout(m, app->toolbox_tile_count, app->media != NULL);
 }
 
-static rubraview_rect_t toolbox_window_tile(const rubraview_tile_metrics_t *m, int32_t count, int32_t i) {
-    int32_t columns = count < m->columns ? (count > 0 ? count : 1) : m->columns;
-    return (rubraview_rect_t){
-        .x = m->padding + (i % columns) * (m->tile_size + m->gutter),
-        .y = m->anchor_size + m->gutter + m->padding + (i / columns) * (m->tile_size + m->gutter),
-        .width = m->tile_size, .height = m->tile_size,
-    };
+static void toolbox_window_size(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t *out_w, int32_t *out_h) {
+    rubraview_toolbox_layout_t l = toolbox_window_layout(app, m);
+    *out_w = (int32_t)ceil(l.width > m->anchor_size * 2.0 ? l.width : m->anchor_size * 2.0);
+    *out_h = (int32_t)ceil(m->anchor_size + l.height);
+}
+
+static rubraview_rect_t toolbox_window_tile(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t i) {
+    rubraview_toolbox_layout_t l = toolbox_window_layout(app, m);
+    rubraview_rect_t b = rubraview_toolbox_button_rect(&l, m, i);
+    b.y += m->anchor_size;
+    return b;
 }
 
 static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y, bool follow_pointer) {
@@ -2004,6 +2011,7 @@ static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y,
     app->toolbox_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->toolbox_window), cw, ch);
     app->toolbox_window_opacity = -1.0;
     app->toolbox_window_drawn = 0.0;
+    app->toolbox_window_pointer_x = app->toolbox_window_pointer_y = -1.0;
     app->toolbox.state = RUBRAVIEW_BOX_DETACHED;
     if (follow_pointer) rubraview_pal_window_begin_drag(app->toolbox_window);
 }
@@ -2054,14 +2062,17 @@ static void draw_toolbox_window(app_state_t *app) {
     rubraview_pal_render_fill_rect(r, right, COLOR_TILE_FILL, 2.0);
     rubraview_pal_render_draw_text(r, U8("T"), left, m.anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     rubraview_pal_render_draw_text(r, U8("Dock"), right, m.anchor_size * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_toolbox_layout_t l = toolbox_window_layout(app, &m);
+    rubraview_action_facts_t facts = action_facts(app);
+    int32_t hovered = -1;
     for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
-        rubraview_rect_t t = toolbox_window_tile(&m, app->toolbox_tile_count, i);
-        rubraview_pal_rect_t tile = { t.x, t.y, t.width, t.height };
-        rubraview_pal_render_fill_rect(r, tile, COLOR_TILE_FILL, 0.0);
-        rubraview_pal_render_stroke_rect(r, tile, COLOR_BOX_BORDER, 1.0, 0.0);
-        bool enabled = true;
-        u8str_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
-        rubraview_pal_render_draw_text(r, caption, tile, m.tile_size * 0.22, enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        if (rubraview_rect_contains(toolbox_window_tile(app, &m, i), app->toolbox_window_pointer_x, app->toolbox_window_pointer_y)) hovered = i;
+    }
+    draw_strip_head(app, r, &l, 0.0, m.anchor_size, hovered);
+    for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
+        rubraview_rect_t t = toolbox_window_tile(app, &m, i);
+        draw_strip_button(app, r, (rubraview_pal_rect_t){ t.x, t.y, t.width, t.height }, i, &facts, i == hovered,
+                          COLOR_TILE_FILL, COLOR_BOX_BORDER);
     }
     if (!rubraview_pal_render_end(r)) app->toolbox_window_drawn = 0.0;
 }
@@ -2103,6 +2114,11 @@ static void toolbox_window_pump(app_state_t *app) {
                    would dock it at every move: it docks by its Dock half,
                    Ctrl+T or Show › Detach toolbox instead (D-15). */
                 break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                app->toolbox_window_pointer_x = event.mouse.x;
+                app->toolbox_window_pointer_y = event.mouse.y;
+                app->toolbox_window_drawn = 0.0;
+                break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                 dispatch_key(app, event.key.combo);   /* the viewer's keys work from here too */
                 break;
@@ -2121,8 +2137,19 @@ static void toolbox_window_pump(app_state_t *app) {
                     }
                     break;
                 }
+                rubraview_toolbox_layout_t l = toolbox_window_layout(app, &m);
+                if (app->media && app->media_info.duration_seconds > 0.0 && l.timeline.width > 0.0 &&
+                    event.mouse.x >= l.timeline.x && event.mouse.x < l.timeline.x + l.timeline.width &&
+                    event.mouse.y >= m.anchor_size + l.timeline.y - l.timeline.height &&
+                    event.mouse.y < m.anchor_size + l.timeline.y + l.timeline.height * 2.0) {
+                    double seconds = rubraview_seekbar_time(l.timeline.x, l.timeline.width, event.mouse.x, app->media_info.duration_seconds);
+                    media_seek_to(app, seconds);
+                    app->media_position = seconds;
+                    app->toolbox_window_drawn = 0.0;
+                    break;
+                }
                 for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
-                    if (!rubraview_rect_contains(toolbox_window_tile(&m, app->toolbox_tile_count, i), event.mouse.x, event.mouse.y)) continue;
+                    if (!rubraview_rect_contains(toolbox_window_tile(app, &m, i), event.mouse.x, event.mouse.y)) continue;
                     bool enabled = true;
                     (void)toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
                     if (enabled) handle_action(app, app->toolbox_tiles[i].action);
@@ -2245,6 +2272,22 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     }
     bool toolbox_here = app->toolbox.state != RUBRAVIEW_BOX_DETACHED;   /* detached, it answers in its own window */
     if (toolbox_here && rubraview_box_click(&app->toolbox, &metrics, x, y)) return true;
+
+    /* The pins at the boxes' top-left (owner, 2026-09-22). */
+    if (rubraview_box_pin_click(&app->menubox, &metrics, x, y)) return true;
+    if (toolbox_here && rubraview_box_pin_click(&app->toolbox, &metrics, x, y)) return true;
+    /* The strip's seek bar: a click puts the film there. */
+    if (toolbox_here && app->media && app->media_info.duration_seconds > 0.0) {
+        rubraview_rect_t bar = rubraview_box_timeline_rect(&app->toolbox, &metrics);
+        if (bar.width > 0.0 && x >= bar.x && x < bar.x + bar.width &&
+            y >= bar.y - bar.height && y < bar.y + bar.height * 2.0) {   /* a little taller than drawn: easier to hit */
+            double seconds = rubraview_seekbar_time(bar.x, bar.width, x, app->media_info.duration_seconds);
+            media_seek_to(app, seconds);
+            app->media_position = seconds;
+            note_activity(app);
+            return true;
+        }
+    }
 
     int32_t tile = rubraview_box_tile_at(&app->menubox, &metrics, x, y);
     if (tile >= 0) {
@@ -2434,6 +2477,40 @@ static void draw_timeline(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* The strip's seek bar and the line under it: the file's name or, under
+   the pointer, what the button does. Offsets put the layout on screen. */
+static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
+                            double ox, double oy, int32_t hovered) {
+    if (l->timeline.width > 0.0) {
+        rubraview_pal_rect_t track = { ox + l->timeline.x, oy + l->timeline.y + l->timeline.height * 0.35,
+                                       l->timeline.width, l->timeline.height * 0.3 };
+        rubraview_pal_render_fill_rect(r, track, 0x60FFFFFFu, track.height * 0.5);
+        double duration = app->media_info.duration_seconds;
+        double f = duration > 0.0 ? app->media_position / duration : 0.0;
+        if (f < 0.0) f = 0.0;
+        if (f > 1.0) f = 1.0;
+        rubraview_pal_rect_t done = { track.x, track.y, track.width * f, track.height };
+        rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, track.height * 0.5);
+    }
+    rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
+    u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
+                                                                      : page_display_name(app, (size_t)current_page_index(app));
+    rubraview_pal_render_draw_text(r, label, name, l->title.height * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* A strip button's face: its icon, or a short caption where the icon font is missing. */
+static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubraview_pal_rect_t tile, int32_t i,
+                              const rubraview_action_facts_t *facts, bool hovered, uint32_t fill, uint32_t border) {
+    rubraview_pal_render_fill_rect(r, tile, hovered ? 0xE0343434u : fill, 3.0);
+    rubraview_pal_render_stroke_rect(r, tile, hovered ? COLOR_TILE_CURRENT : border, 1.0, 3.0);
+    bool enabled = true;
+    u8str_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
+    uint32_t ink = enabled ? COLOR_TEXT : 0x70F0F0F0u;
+    uint32_t icon = rubraview_action_icon(app->toolbox_tiles[i].action, facts);
+    if (icon && rubraview_pal_render_draw_icon(r, icon, tile, tile.height * 0.5, ink)) return;
+    rubraview_pal_render_draw_text(r, caption, tile, tile.height * 0.34, ink, RUBRAVIEW_TEXT_CENTER);
+}
+
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
@@ -2476,9 +2553,32 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
 
+    /* The pin at the top-left (owner, 2026-09-22): filled while the box
+       stays open, an outline while it folds when the pointer leaves. */
+    rubraview_rect_t pr = rubraview_box_pin_rect(box, metrics);
+    rubraview_pal_rect_t pin = { pr.x, pr.y, pr.width, pr.height };
+    bool pinned = rubraview_box_pin_shown_on(box);
+    if (!rubraview_pal_render_draw_icon(app->renderer, rubraview_pin_icon(pinned), pin, pr.height * 0.7,
+                                        pinned ? COLOR_TILE_CURRENT : COLOR_TEXT)) {
+        rubraview_pal_render_draw_text(app->renderer, pinned ? U8("*") : U8("o"), pin, pr.height * 0.8,
+                                       pinned ? COLOR_TILE_CURRENT : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    bool strip = box == &app->toolbox;
+    rubraview_action_facts_t facts = action_facts(app);
+    int32_t hovered = rubraview_box_tile_at(box, metrics, app->pointer_x, app->pointer_y);
+    if (strip) {
+        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        draw_strip_head(app, app->renderer, &l, bounds.x, bounds.y, hovered);
+    }
+
     for (int32_t i = 0; i < box->tile_count; ++i) {
         rubraview_rect_t t = rubraview_box_tile_rect(box, metrics, i);
         rubraview_pal_rect_t tile = { t.x, t.y, t.width, t.height };
+        if (strip && i < app->toolbox_tile_count) {
+            draw_strip_button(app, app->renderer, tile, i, &facts, i == hovered, tile_fill, box_border);
+            continue;
+        }
         rubraview_pal_render_fill_rect(app->renderer, tile, tile_fill, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile, box_border, 1.0, 0.0);
         u8str_t caption = { .ptr = "", .len = 0 };
@@ -2488,8 +2588,6 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
             caption = menu_tile_caption(menu, i, scratch, sizeof(scratch), &enabled, &current);
         } else if (captions && i < caption_count) {
             caption = cstr(captions[i]);
-        } else if (box == &app->toolbox && i < app->toolbox_tile_count) {
-            caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
         }
         if (current) {
             rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_TILE_CURRENT, 2.0, 0.0);
@@ -3526,7 +3624,7 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
     } else if (u8str_equal_lit(source, "media.ffmpeg")) {
         n = snprintf(buffer, capacity, "%s",
                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
-                         ? "its DLLs are beside the program" : "not found - Media Foundation only");
+                         ? "its DLLs are beside the program" : "not found (or not 8.x) - Media Foundation only");
     } else if (u8str_equal_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, "run rubraview --probe-gpu <video> for the details");
     } else if (u8str_equal_lit(source, "cache.used")) {

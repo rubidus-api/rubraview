@@ -113,13 +113,15 @@ static void test_two_part_anchor(void) {
         assert(box.state == RUBRAVIEW_BOX_EXPANDED);
 
         assert(rubraview_box_click(&box, &m, m.anchor_size * 1.5, m.anchor_size * 0.5));
-        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED);   /* taken, but changes nothing */
 
         rubraview_box_pointer(&box, &m, 900.0, 900.0);
-        assert(!rubraview_box_tick(&box, 5.0, 0.5));
-        assert(box.state == RUBRAVIEW_BOX_LOCKED_OPEN);
+        assert(rubraview_box_tick(&box, 5.0, 0.5));
+        assert(box.state == RUBRAVIEW_BOX_COLLAPSED);  /* leaving still folds it */
+        assert(rubraview_box_click(&box, &m, m.anchor_size * 1.5, m.anchor_size * 0.5));
+        assert(box.state == RUBRAVIEW_BOX_COLLAPSED);  /* and a click there does not open it */
     }
-    printf("  [PASS] Clicking the hover half keeps what hovering opened\n");
+    printf("  [PASS] The hover half only hovers: a click there opens and pins nothing\n");
 
     /* Test: putting the boxes back. This is the answer to a floating
        box dragged somewhere the reader cannot reach. */
@@ -199,7 +201,8 @@ static void test_boxes(void) {
         /* 7 tiles at 4 columns = 2 rows. */
         rubraview_rect_t expanded = rubraview_box_bounds(&box, &m);
         assert(approx(expanded.width, 8.0 * 2 + 64.0 * 4 + 8.0 * 3));
-        assert(approx(expanded.height, 8.0 * 2 + 64.0 * 2 + 8.0 * 1));
+        /* ... under a header row that holds the pin (owner, 2026-09-22). */
+        assert(approx(expanded.height, 8.0 * 2 + m.header_height + m.gutter / 2.0 + 64.0 * 2 + 8.0 * 1));
     }
     printf("  [PASS] Collapsed anchor expands into a correctly sized tile grid\n");
 
@@ -212,10 +215,14 @@ static void test_boxes(void) {
         rubraview_rect_t t1 = rubraview_box_tile_rect(&box, &m, 1);
         rubraview_rect_t t4 = rubraview_box_tile_rect(&box, &m, 4); /* second row, first column */
 
-        assert(approx(t1.x - t0.x, m.tile_size + m.gutter));
+        /* The toolbox's buttons are half a menu tile wide, a quarter of its
+           area, eight to a row (owner, 2026-09-22): tile 4 is still on the
+           first row. */
+        assert(approx(t0.width, m.tile_size / 2.0) && approx(t0.height, m.tile_size / 2.0));
+        assert(approx(t1.x - t0.x, m.button_size + m.gutter / 2.0));
         assert(approx(t1.y, t0.y));
-        assert(approx(t4.x, t0.x));
-        assert(approx(t4.y - t0.y, m.tile_size + m.gutter));
+        assert(approx(t4.y, t0.y));
+        assert(approx(t4.x - t0.x, 4.0 * (m.button_size + m.gutter / 2.0)));
 
         assert(rubraview_box_tile_at(&box, &m, t4.x + 1.0, t4.y + 1.0) == 4);
         assert(rubraview_box_tile_at(&box, &m, t0.x - 5.0, t0.y - 5.0) == -1); /* in the padding */
@@ -610,6 +617,98 @@ static void test_confirm(void) {
     printf("  [PASS] A destructive item fires on the second tap only, and only soon after the first\n");
 }
 
+/* The toolbox is a strip (owner, 2026-09-22): a pin and the seek bar on
+   top, the file's name under them, then small buttons, eight a row. */
+static void test_toolbox_strip(void) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
+    assert(approx(m.button_size, 32.0) && approx(m.button_size * m.button_size * 4.0, m.tile_size * m.tile_size));
+    rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&m, 14, true);
+    assert(l.columns == 8 && l.rows == 2);
+    assert(approx(l.width, 2.0 * m.padding + 8.0 * 32.0 + 7.0 * 4.0));
+    assert(approx(l.pin.x, m.padding) && approx(l.pin.y, m.padding) && approx(l.pin.width, m.header_height));
+    assert(l.timeline.width > 0.0 && l.timeline.x > l.pin.x + l.pin.width);                 /* beside the pin */
+    assert(approx(l.timeline.x + l.timeline.width, l.width - m.padding));
+    assert(l.title.y >= l.pin.y + l.pin.height && approx(l.title.width, l.width - 2.0 * m.padding)); /* under it */
+    rubraview_rect_t b0 = rubraview_toolbox_button_rect(&l, &m, 0), b8 = rubraview_toolbox_button_rect(&l, &m, 8);
+    assert(b0.y >= l.title.y + l.title.height);                                              /* buttons below the name */
+    assert(approx(b8.x, b0.x) && approx(b8.y - b0.y, 32.0 + 4.0));                             /* second row */
+    assert(approx(l.height, b8.y + 32.0 + m.padding));
+    /* No film: no seek bar, the rest as before. */
+    rubraview_toolbox_layout_t still = rubraview_toolbox_layout(&m, 8, false);
+    assert(still.timeline.width == 0.0 && still.rows == 1);
+
+    /* The box uses it, and keeps it inside the window like any box. */
+    rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 1060.0, 700.0, 14);
+    box.timeline = true;
+    box.view_width = 1280.0;
+    box.view_height = 752.0;
+    rubraview_box_hover_enter(&box);
+    rubraview_rect_t body = rubraview_box_bounds(&box, &m);
+    assert(approx(body.width, l.width) && approx(body.height, l.height));
+    assert(body.x >= 0.0 && body.x + body.width <= 1280.0 && body.y >= 0.0 && body.y + body.height <= 752.0);
+    rubraview_rect_t tl = rubraview_box_timeline_rect(&box, &m);
+    assert(approx(tl.x, body.x + l.timeline.x) && approx(tl.y, body.y + l.timeline.y));
+    assert(rubraview_box_tile_at(&box, &m, body.x + b8.x + 2.0, body.y + b8.y + 2.0) == 8);
+    printf("  [PASS] The toolbox is a strip: pin and seek bar, the name, then small buttons in rows\n");
+}
+
+/* Each box has a pin at its top left (owner, 2026-09-22): pinned, the
+   box stays open when the pointer leaves; unpinned, it folds again. */
+static void test_box_pin(void) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
+    rubraview_box_kind_t kinds[2] = { RUBRAVIEW_BOX_MENU, RUBRAVIEW_BOX_TOOLBOX };
+    for (int k = 0; k < 2; ++k) {
+        rubraview_box_t box = rubraview_box_create(kinds[k], 100.0, 100.0, 6);
+        assert(rubraview_box_pin_rect(&box, &m).width == 0.0);        /* collapsed: no pin */
+        rubraview_box_hover_enter(&box);
+        rubraview_rect_t body = rubraview_box_bounds(&box, &m);
+        rubraview_rect_t pin = rubraview_box_pin_rect(&box, &m);
+        assert(approx(pin.x, body.x + m.padding) && approx(pin.y, body.y + m.padding));
+        assert(!rubraview_box_pin_shown_on(&box));
+
+        assert(rubraview_box_pin_click(&box, &m, pin.x + 2.0, pin.y + 2.0));
+        assert(rubraview_box_pin_shown_on(&box) && box.pinned);
+        rubraview_box_pointer(&box, &m, 3000.0, 3000.0);
+        assert(!rubraview_box_tick(&box, 5.0, 0.5));                    /* stays when the pointer leaves */
+
+        assert(rubraview_box_pin_click(&box, &m, pin.x + 2.0, pin.y + 2.0));
+        assert(!rubraview_box_pin_shown_on(&box) && box.state == RUBRAVIEW_BOX_EXPANDED);
+        assert(rubraview_box_tick(&box, 5.0, 0.5));                     /* unpinned: folds */
+        assert(!rubraview_box_pin_click(&box, &m, pin.x + 2.0, pin.y + 2.0));   /* folded: nothing there */
+
+        /* Opened by the left half's click, it shows pinned, and the pin undoes it. */
+        rubraview_box_click_anchor(&box);
+        assert(rubraview_box_pin_shown_on(&box));
+        pin = rubraview_box_pin_rect(&box, &m);
+        assert(rubraview_box_pin_click(&box, &m, pin.x + 1.0, pin.y + 1.0));
+        assert(box.state == RUBRAVIEW_BOX_EXPANDED && !box.pinned);
+    }
+    printf("  [PASS] Each box has a pin: on, it stays open; off, it folds when left\n");
+}
+
+/* Toolbox buttons draw an icon (owner, 2026-09-22), from the Segoe MDL2
+   Assets font; the ones that change with state say what a tap does. An
+   action with no icon returns 0 and keeps its short caption. */
+static void test_action_icons(void) {
+    rubraview_action_facts_t f = { .has_page = true, .media = true, .video = true, .playing = true };
+    assert(rubraview_action_icon(U8("media_play_pause"), &f) == 0xE769);   /* playing: the pause sign */
+    f.playing = false;
+    assert(rubraview_action_icon(U8("media_play_pause"), &f) == 0xE768);   /* paused: the play sign */
+    assert(rubraview_action_icon(U8("media_stop"), &f) == 0xE71A);
+    assert(rubraview_action_icon(U8("prev_page"), &f) == 0xE892 && rubraview_action_icon(U8("next_page"), &f) == 0xE893);
+    assert(rubraview_action_icon(U8("media_seek_back"), &f) == 0xEB9E && rubraview_action_icon(U8("media_seek_forward"), &f) == 0xEB9D);
+    assert(rubraview_action_icon(U8("media_mute"), &f) == 0xE74F);         /* sound on: tap mutes */
+    f.muted = true;
+    assert(rubraview_action_icon(U8("media_mute"), &f) == 0xE767);         /* muted: tap brings it back */
+    assert(rubraview_action_icon(U8("toggle_fullscreen"), &f) == 0xE740);
+    f.fullscreen = true;
+    assert(rubraview_action_icon(U8("toggle_fullscreen"), &f) == 0xE73F);
+    assert(rubraview_action_icon(U8("media_speed_cycle"), &f) == 0);       /* "1x" says more than an icon */
+    assert(rubraview_action_icon(U8("no_such_action"), &f) == 0);
+    assert(rubraview_pin_icon(false) == 0xE718 && rubraview_pin_icon(true) == 0xE840);
+    printf("  [PASS] Toolbox buttons have icons that follow the state; captions stay where there is none\n");
+}
+
 int main(void) {
     printf("[test_ui_box] Starting floating box and menu hierarchy unit tests...\n");
     test_boxes();
@@ -620,6 +719,9 @@ int main(void) {
     test_action_tiles();
     test_just_opened();
     test_confirm();
+    test_toolbox_strip();
+    test_box_pin();
+    test_action_icons();
     printf("[test_ui_box] All tests passed successfully!\n");
     return 0;
 }

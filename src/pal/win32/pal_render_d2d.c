@@ -694,6 +694,52 @@ void rubraview_pal_render_stroke_rect(rubraview_renderer_t *renderer,
     ID2D1SolidColorBrush_Release(brush);
 }
 
+/* Whether Segoe MDL2 Assets is installed: asked once. */
+static int g_icon_font = -1;
+
+static bool icon_font_present(IDWriteFactory *dwrite) {
+    if (g_icon_font >= 0) return g_icon_font == 1;
+    g_icon_font = 0;
+    IDWriteFontCollection *fonts = NULL;
+    if (SUCCEEDED(IDWriteFactory_GetSystemFontCollection(dwrite, &fonts, FALSE)) && fonts) {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        if (SUCCEEDED(IDWriteFontCollection_FindFamilyName(fonts, L"Segoe MDL2 Assets", &index, &exists)) && exists) {
+            g_icon_font = 1;
+        }
+        IDWriteFontCollection_Release(fonts);
+    }
+    return g_icon_font == 1;
+}
+
+bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t code_point,
+                                    rubraview_pal_rect_t rect, double size, uint32_t argb) {
+    if (!renderer || !renderer->target || !renderer->dwrite || code_point == 0 || code_point > 0xFFFF) return false;
+    if (!icon_font_present(renderer->dwrite)) return false;
+    IDWriteTextFormat *format = NULL;
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe MDL2 Assets", NULL, DWRITE_FONT_WEIGHT_NORMAL,
+                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                               (FLOAT)(size > 0.0 ? size : 16.0), L"", &format)) || !format) {
+        return false;
+    }
+    IDWriteTextFormat_SetTextAlignment(format, DWRITE_TEXT_ALIGNMENT_CENTER);
+    IDWriteTextFormat_SetParagraphAlignment(format, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    bool ok = SUCCEEDED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) && brush;
+    if (ok) {
+        set_identity(rt);
+        WCHAR glyph = (WCHAR)code_point;
+        D2D1_RECT_F layout = to_d2d_rect(rect);
+        ID2D1RenderTarget_DrawText(rt, &glyph, 1, format, &layout, (ID2D1Brush*)brush,
+                                   D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+        ID2D1SolidColorBrush_Release(brush);
+    }
+    IDWriteTextFormat_Release(format);
+    return ok;
+}
+
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     u8str_t text,
                                     rubraview_pal_rect_t rect,

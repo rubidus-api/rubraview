@@ -36,7 +36,7 @@ int main(void) {
     if (doc->error) fprintf(stderr, "line %u: %s\n", doc->error_line, doc->error);
     assert(!doc->error);
     static const struct { const char *name; int32_t count; const char *first, *last; } PROFILES[] = {
-        { "video", 12, "media_play_pause", "toggle_fullscreen" },
+        { "video", 14, "prev_page", "toggle_fullscreen" },
         { "music", 11, "prev_page", "media_speed_cycle" },
         { "animation", 8, "prev_page", "toggle_fullscreen" },
         { "multipage", 8, "prev_page", "toggle_fullscreen" },

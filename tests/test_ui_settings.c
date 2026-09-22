@@ -163,6 +163,19 @@ int main(void) {
         assert(has(size, "[####") && has(size, "] 24 pt"));
         u8str_t info = rubraview_settings_line_text(&v, &s, &sources, 3, 0, buffer, sizeof(buffer));
         assert(has(info, "FFmpeg") && has(info, "8.1, beside the program"));
+        /* The FFmpeg help (owner, 2026-09-22): notes, whole at 80 columns, never focused. */
+        bool files = false, zip = false;
+        for (size_t i = 0; i < v.line_count; ++i) {
+            if (v.lines[i].kind != RUBRAVIEW_LINE_NOTE) continue;
+            u8str_t t = rubraview_settings_line_text(&v, &s, &sources, i, 0, buffer, sizeof(buffer));
+            files = files || has(t, "avcodec-62  avformat-62  avutil-60  swscale-9  swresample-6");
+            zip = zip || has(t, "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip");
+        }
+        assert(files && zip);
+        for (int32_t k = 0; k < 40; ++k) {
+            (void)rubraview_settings_view_key(&v, &s, RUBRAVIEW_SKEY_DOWN);
+            assert(v.focus_line < 0 || v.lines[v.focus_line].kind != RUBRAVIEW_LINE_NOTE);
+        }
 
         rubraview_settings_view_set_page(&v, RUBRAVIEW_TAB_FILES);
         u8str_t folder = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "curation", "dir_1"), 0, buffer, sizeof(buffer));

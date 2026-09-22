@@ -162,6 +162,17 @@ video or music, frame steps for an animation, layout and the next or previous
 archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
 it more or less see-through (never below 30 %).
 
+Each anchor has two halves. Point at the right one and the box opens; move
+away and it folds again. Click the left one and the box opens and stays;
+drag the left one to move the box. A box never opens past the window's
+edge. The small pin at a box's top-left says whether it stays open when
+the pointer leaves: click it to switch.
+
+The toolbox is a strip: the seek bar (click to go there) with the file's
+name under it, then small icon buttons — previous and next file, back and
+forward 5 s, play or pause, stop, volume, and so on. Pointing at a button
+puts what it does where the name was.
+
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use
 have a blue edge, and a grey tile cannot do anything with what is on screen

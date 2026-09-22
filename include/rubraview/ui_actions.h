@@ -41,6 +41,7 @@ typedef struct rubraview_action_facts {
     bool slideshow, filmstrip, osd, toolbox_pinned, toolbox_detached, fullscreen;
     bool nearest, pixel_grid, spread_detect, fit_lock, always_on_top, muted;
     bool rtl;                 /* pages read right to left */
+    bool playing;             /* a film, music or animation is running (not paused) */
     /* choices */
     rubraview_page_layout_t layout;
     rubraview_fit_mode_t fit;
@@ -63,6 +64,16 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
  */
 u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
                                char *buffer, size_t buffer_size);
+
+/**
+ * The icon a toolbox button draws (owner, 2026-09-22): a code point in the
+ * Segoe MDL2 Assets font, chosen by what a tap will do now (the pause sign
+ * while playing, the play sign while paused). 0 for an action whose short
+ * caption says it better ("1x", "1:1", "A-B"); the caller draws that.
+ */
+uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *facts);
+/** The pin at a box's top-left: an outline when off, filled when on. */
+uint32_t rubraview_pin_icon(bool on);
 
 /*
  * A destructive menu item asks first (owner, 2026-09-21): the first tap
