@@ -151,6 +151,16 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     memcpy(path_z, path.ptr, path.len);
     path_z[path.len] = '\0';
 
+    /* The folder the file goes in is made first: on a first run the
+       settings folder does not exist yet (0.0.6: "could not write
+       settings.ini" on every change). */
+    for (size_t i = 1; i < path.len; ++i) {
+        if (path_z[i] != '/') continue;
+        path_z[i] = '\0';
+        mkdir(path_z, 0777);   /* an existing level is fine; a real failure shows at fopen */
+        path_z[i] = '/';
+    }
+
     FILE *file = fopen(path_z, "wb");
     if (!file) return false;
 
