@@ -111,3 +111,26 @@ file: 15158346_3840_2160_60fps.mp4
 - Still open from 0.0.5: the owner's phone mp4 that did not open with the
   device; 0.0.6's probe on that file is the next measurement.
 
+### AMD Radeon (integrated), 0.0.8 probe, 2026-09-22 — the viewer's path on a real card
+
+```
+Adapter: AMD Radeon(TM) Graphics (485 MB of its own memory)
+Decoder profiles the card offers: 20
+hardware_decode = off: H264 3840x2160, decoded in software; 66 pictures in 4.0 s (16 a second), 0 of them on the card; CPU 10.78 s (269% of one core)
+hardware_decode = on: H264 3840x2160, decoded on the card; 709 pictures in 4.0 s (177 a second), 709 of them on the card; CPU 0.84 s (21% of one core)
+hardware_decode = always: H264 3840x2160, decoded on the card; 708 pictures in 4.0 s (177 a second), 708 of them on the card; CPU 0.77 s (19% of one core)
+viewer path: the decoder's own device made, 20 decoder profiles
+viewer path (on): opened in 0.5 s, decoded on the card; 60 pictures, 60 copied to the screen texture, 60 drawn; brightness of the picture 47 of 255
+viewer path (always): opened in 0.4 s, decoded on the card; 60 pictures, 60 copied to the screen texture, 60 drawn; brightness of the picture 47 of 255
+
+file: 4K_5_Thetestdata.mp4
+```
+
+- The first real card through the whole viewer path (0.0.8: the
+  decoder's own device, shared textures): every frame copied and drawn,
+  and the picture read back is not black (47 is the scene's own level).
+- 177 decoded a second at 4K is three times real time; the Intel UHD 730's
+  41 now looks like that card's limit, not this path's.
+- Still to see: the Intel PC with 0.0.8 (the black window was there), and
+  playing in the viewer itself on both.
+
