@@ -6,6 +6,14 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- `--probe-gpu` (and so `gpu-check.cmd`) tries `hardware_decode = off` as
+  well as `on` and `always`, says why a film did not open (HEVC without
+  the extension, no decoder, …), and for each one decodes flat out for
+  four seconds and reports pictures per second and the CPU it cost — one
+  run compares software and the card.
+
 ## [0.0.5] - 2026-09-22
 
 ### Added
