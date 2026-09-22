@@ -5550,30 +5550,50 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
           Whether the film decodes on the card, whether pictures come, and
           whether they arrive as textures (zero copy) or as pixels. */
     static const char *const MODE_NAMES[] = { "off", "on", "always" };
-    for (int32_t mode = 1; mode <= 2; ++mode) {
+    for (int32_t mode = 0; mode <= 2; ++mode) {
         rubraview_media_gpu_t gpu = { .device = device, .decoder_profiles = profile_count, .mode = mode };
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, &gpu);
         if (!opened.media) {
-            snprintf(line, sizeof(line), "hardware_decode = %s: the film did not open", MODE_NAMES[mode]);
+            /* Why, so "cannot open" and "the card broke it" read differently. */
+            u8str_t why = rubraview_media_failure_text(opened.failure);
+            snprintf(line, sizeof(line), "hardware_decode = %s: the film did not open - %.*s",
+                     MODE_NAMES[mode], (int)why.len, why.ptr);
             console_line(line);
             code = 2;
             continue;
         }
+        /* As fast as it decodes, for four seconds: pictures per second and
+           the CPU the whole program spent on them, so off and on compare. */
+        FILETIME created, exited, kernel0, user0, kernel1, user1;
+        GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel0, &user0);
         int pictures = 0, on_card = 0;
-        double start = rubraview_pal_time_now_seconds();
-        while (rubraview_pal_time_now_seconds() - start < 3.0 && pictures < 30) {
+        double start = rubraview_pal_time_now_seconds(), elapsed = 0.0;
+        while ((elapsed = rubraview_pal_time_now_seconds() - start) < 4.0) {
             rubraview_video_frame_t frame;
             if (rubraview_pal_media_peek_frame(opened.media, &frame)) {
                 pictures++;
                 if (frame.gpu_texture) on_card++;
                 rubraview_pal_media_pop_frame(opened.media);
+            } else if (rubraview_pal_media_finished(opened.media)) {
+                break;
             } else {
-                rubraview_pal_time_sleep_ms(10);
+                rubraview_pal_time_sleep_ms(1);
             }
         }
-        snprintf(line, sizeof(line), "hardware_decode = %s: decoded %s; %d pictures in 3 s, %d of them on the card",
-                 MODE_NAMES[mode], opened.info.hardware_decode ? "on the card" : "in software",
-                 pictures, on_card);
+        GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel1, &user1);
+        #define RV_FT(ft) ((double)(((uint64_t)(ft).dwHighDateTime << 32) | (ft).dwLowDateTime) / 1e7)
+        double cpu = RV_FT(kernel1) - RV_FT(kernel0) + RV_FT(user1) - RV_FT(user0);
+        #undef RV_FT
+        uint32_t cc = opened.info.video_fourcc;
+        char codec[5] = { (char)(cc & 0xFF), (char)((cc >> 8) & 0xFF), (char)((cc >> 16) & 0xFF), (char)(cc >> 24), 0 };
+        for (int k = 0; k < 4; ++k) if (codec[k] < 32 || codec[k] > 126) codec[k] = '?';
+        snprintf(line, sizeof(line),
+                 "hardware_decode = %s: %s %dx%d, decoded %s; %d pictures in %.1f s (%.0f a second), "
+                 "%d of them on the card; CPU %.2f s (%.0f%% of one core)",
+                 MODE_NAMES[mode], codec, opened.info.width, opened.info.height,
+                 opened.info.hardware_decode ? "on the card" : "in software",
+                 pictures, elapsed, elapsed > 0.0 ? pictures / elapsed : 0.0, on_card,
+                 cpu, elapsed > 0.0 ? 100.0 * cpu / elapsed : 0.0);
         console_line(line);
         if (pictures == 0 && opened.info.has_video) code = 2;
         rubraview_pal_media_close(opened.media);
