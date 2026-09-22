@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-09-22
+
 ### Changed
 
 - The toolbox is a strip: a seek bar on top, the file's name under it,
