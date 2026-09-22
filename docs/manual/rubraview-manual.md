@@ -165,8 +165,8 @@ it more or less see-through (never below 30 %).
 Each anchor has two halves. Point at the right one and the box opens; move
 away and it folds again. Click the left one and the box opens and stays;
 drag the left one to move the box. A box never opens past the window's
-edge. The small pin at a box's top-left says whether it stays open when
-the pointer leaves: click it to switch.
+edge. While a box is open, a pin appears beside its anchor: it says
+whether the box stays open when the pointer leaves — click it to switch.
 
 The toolbox is a strip: the seek bar (click to go there) with the file's
 name under it, then small icon buttons — previous and next file, back and

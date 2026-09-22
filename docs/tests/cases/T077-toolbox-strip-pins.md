@@ -5,7 +5,7 @@ Covers: RFC-0002 §6.3, D-20
 ## Steps and expected
 
 1. Open a film. Point at the toolbox anchor's right half: the toolbox opens
-   as a strip — a pin and the seek bar on top, the file's name under them,
+   as a strip — the seek bar on top, the file's name under it,
    then small icon buttons in rows of eight: previous and next file,
    −5 s, +5 s, play/pause, stop, volume down and up, mute, subtitles,
    sound track, A-B, speed, full screen. Near the window's edge the strip
@@ -14,9 +14,11 @@ Covers: RFC-0002 §6.3, D-20
    does (`-5 s`, `Mute`, ...).
 3. Click the seek bar: the film goes to that point.
 4. Move the pointer away: an unpinned box folds back to its anchor.
-5. Click a box's pin (top-left): it turns blue and filled, and the box
-   stays open when the pointer leaves. Click it again: outline, and the box
-   folds when the pointer leaves.
+5. While a box is open a pin square shows beside its anchor (right of it;
+   left against the window's right edge), and goes when the box folds.
+   Click it: blue and filled, and the box stays open when the pointer
+   leaves. Click it again: outline, and the box folds when the pointer
+   leaves.
 6. Click an anchor's left half: the box opens pinned. Drag the left half:
    the box moves. Clicking the right half does nothing more than hovering.
 7. `Ctrl+T`: the detached toolbox window shows the same strip under its
@@ -41,3 +43,13 @@ All eight by screenshot (two_audio.mkv / clip_h264.mp4, WARP):
 A first try clicked 16 px too high (screen and client rows differ by less
 than assumed) and landed on the canvas, turning the page: the test's
 coordinates, not the viewer.
+
+## The pin beside the anchor, measured on the VM, 2026-09-22
+
+After the owner moved the pin out of the box: hovering the toolbox anchor
+(1060,592) showed the pin at 1140..1180 beside it and a strip with no pin
+row; the menu's pin sat right of `M v`, with the `Menu` breadcrumb after
+it; leaving, box and pin went together. Clicking the toolbox pin kept the
+box open 1.5 s after the pointer left (pin blue, anchor `*`); clicking it
+again and leaving folded both. The flip to the left at the right edge is
+checked by `test_ui_box` (not on the VM: the anchors there have room).

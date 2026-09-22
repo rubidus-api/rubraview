@@ -193,16 +193,18 @@ The right half, which opens on hover, keeps `v`. This is a label: pressing
 
 ### 6.3 The strip and the pins (owner, 2026-09-22, D-20)
 
-The toolbox is no longer a grid of menu-sized tiles. It is a strip: the
-pin and a seek bar (film or music) on the top row, the file's name under
+The toolbox is no longer a grid of menu-sized tiles. It is a strip: a
+seek bar (film or music) on the top row, the file's name under
 it — or, under the pointer, the hovered button's caption — then buttons a
 quarter of a menu tile's area (32 px), icons rather than words, eight to a
 row and as many rows as needed. The video and music profiles run: previous
 file, next file, −5 s, +5 s, play/pause, stop, then the rest. A profile
 holds up to 24 buttons (three rows).
 
-Both boxes get a pin at the top-left. Pinned, a box stays open when the
-pointer leaves; unpinned, it folds back to its anchor. The anchor's left
+Both boxes get a pin: while a box is open, a third square beside its
+anchor (right of it, or left when the window has no room), gone when the
+box folds. Pinned, a box stays open when the pointer leaves; unpinned, it
+folds back to its anchor. The anchor's left
 half drags the box, and a click there opens and pins it; the right half
 opens on hover only. The detached toolbox window (§3.6.1) shows the same
 strip under its own `T` / `Dock` bar.

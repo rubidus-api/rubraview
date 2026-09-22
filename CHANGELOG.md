@@ -6,6 +6,12 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- The pin no longer takes a row at the top of an open box: it appears as a
+  third square beside the anchor (to its left when the window has no room
+  on the right) while the box is open, and goes with it.
+
 ### Fixed
 
 - A photo stored sideways (an EXIF orientation such as a phone's portrait

@@ -201,8 +201,8 @@ static void test_boxes(void) {
         /* 7 tiles at 4 columns = 2 rows. */
         rubraview_rect_t expanded = rubraview_box_bounds(&box, &m);
         assert(approx(expanded.width, 8.0 * 2 + 64.0 * 4 + 8.0 * 3));
-        /* ... under a header row that holds the pin (owner, 2026-09-22). */
-        assert(approx(expanded.height, 8.0 * 2 + m.header_height + m.gutter / 2.0 + 64.0 * 2 + 8.0 * 1));
+        /* ... with no header row: the pin is beside the anchor (owner, 2026-09-22). */
+        assert(approx(expanded.height, 8.0 * 2 + 64.0 * 2 + 8.0 * 1));
     }
     printf("  [PASS] Collapsed anchor expands into a correctly sized tile grid\n");
 
@@ -243,7 +243,7 @@ static void test_boxes(void) {
         assert(approx(body.x, 100.0) && approx(body.y, anchor.y + anchor.height + m.gutter));   /* below */
 
         box.anchor_x = 1060.0;
-        box.anchor_y = 592.0;
+        box.anchor_y = 680.0;   /* the strip is short: only this low is there no room below */
         body = rubraview_box_bounds(&box, &m);
         assert(approx(body.y + body.height, box.anchor_y - m.gutter));                         /* above */
         assert(approx(body.x + body.width, 1280.0));                                            /* pulled in */
@@ -617,18 +617,16 @@ static void test_confirm(void) {
     printf("  [PASS] A destructive item fires on the second tap only, and only soon after the first\n");
 }
 
-/* The toolbox is a strip (owner, 2026-09-22): a pin and the seek bar on
-   top, the file's name under them, then small buttons, eight a row. */
+/* The toolbox is a strip (owner, 2026-09-22): the seek bar on top, the
+   file's name under it, then small buttons, eight a row. */
 static void test_toolbox_strip(void) {
     rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
     assert(approx(m.button_size, 32.0) && approx(m.button_size * m.button_size * 4.0, m.tile_size * m.tile_size));
     rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&m, 14, true);
     assert(l.columns == 8 && l.rows == 2);
     assert(approx(l.width, 2.0 * m.padding + 8.0 * 32.0 + 7.0 * 4.0));
-    assert(approx(l.pin.x, m.padding) && approx(l.pin.y, m.padding) && approx(l.pin.width, m.header_height));
-    assert(l.timeline.width > 0.0 && l.timeline.x > l.pin.x + l.pin.width);                 /* beside the pin */
-    assert(approx(l.timeline.x + l.timeline.width, l.width - m.padding));
-    assert(l.title.y >= l.pin.y + l.pin.height && approx(l.title.width, l.width - 2.0 * m.padding)); /* under it */
+    assert(approx(l.timeline.x, m.padding) && approx(l.timeline.x + l.timeline.width, l.width - m.padding)); /* the whole row */
+    assert(l.title.y >= l.timeline.y + l.timeline.height && approx(l.title.width, l.width - 2.0 * m.padding)); /* under it */
     rubraview_rect_t b0 = rubraview_toolbox_button_rect(&l, &m, 0), b8 = rubraview_toolbox_button_rect(&l, &m, 8);
     assert(b0.y >= l.title.y + l.title.height);                                              /* buttons below the name */
     assert(approx(b8.x, b0.x) && approx(b8.y - b0.y, 32.0 + 4.0));                             /* second row */
@@ -636,6 +634,7 @@ static void test_toolbox_strip(void) {
     /* No film: no seek bar, the rest as before. */
     rubraview_toolbox_layout_t still = rubraview_toolbox_layout(&m, 8, false);
     assert(still.timeline.width == 0.0 && still.rows == 1);
+    assert(approx(still.title.y, m.padding));                                                   /* the name comes first */
 
     /* The box uses it, and keeps it inside the window like any box. */
     rubraview_box_t box = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 1060.0, 700.0, 14);
@@ -649,22 +648,30 @@ static void test_toolbox_strip(void) {
     rubraview_rect_t tl = rubraview_box_timeline_rect(&box, &m);
     assert(approx(tl.x, body.x + l.timeline.x) && approx(tl.y, body.y + l.timeline.y));
     assert(rubraview_box_tile_at(&box, &m, body.x + b8.x + 2.0, body.y + b8.y + 2.0) == 8);
-    printf("  [PASS] The toolbox is a strip: pin and seek bar, the name, then small buttons in rows\n");
+    printf("  [PASS] The toolbox is a strip: the seek bar, the name, then small buttons in rows\n");
 }
 
-/* Each box has a pin at its top left (owner, 2026-09-22): pinned, the
-   box stays open when the pointer leaves; unpinned, it folds again. */
+/* Each box has a pin beside its anchor while open (owner, 2026-09-22):
+   pinned, the box stays open when the pointer leaves; unpinned, it folds. */
 static void test_box_pin(void) {
     rubraview_tile_metrics_t m = rubraview_tile_metrics_default(1.0);
     rubraview_box_kind_t kinds[2] = { RUBRAVIEW_BOX_MENU, RUBRAVIEW_BOX_TOOLBOX };
     for (int k = 0; k < 2; ++k) {
         rubraview_box_t box = rubraview_box_create(kinds[k], 100.0, 100.0, 6);
+        box.view_width = 1280.0;
+        box.view_height = 752.0;
         assert(rubraview_box_pin_rect(&box, &m).width == 0.0);        /* collapsed: no pin */
         rubraview_box_hover_enter(&box);
-        rubraview_rect_t body = rubraview_box_bounds(&box, &m);
         rubraview_rect_t pin = rubraview_box_pin_rect(&box, &m);
-        assert(approx(pin.x, body.x + m.padding) && approx(pin.y, body.y + m.padding));
+        assert(approx(pin.x, 100.0 + 2.0 * m.anchor_size) && approx(pin.y, 100.0));   /* right of the anchor */
+        assert(approx(pin.width, m.anchor_size) && approx(pin.height, m.anchor_size));
+        assert(!rubraview_rect_contains(rubraview_box_bounds(&box, &m), pin.x + 2.0, pin.y + 2.0)); /* not in the popup */
         assert(!rubraview_box_pin_shown_on(&box));
+        /* On the way to the pin the box does not fold. */
+        for (int f = 0; f < 50; ++f) {                                  /* 5 s of frames, resting on it */
+            rubraview_box_pointer(&box, &m, pin.x + 2.0, pin.y + 2.0);
+            assert(!rubraview_box_tick(&box, 0.1, 0.5));
+        }
 
         assert(rubraview_box_pin_click(&box, &m, pin.x + 2.0, pin.y + 2.0));
         assert(rubraview_box_pin_shown_on(&box) && box.pinned);
@@ -683,7 +690,14 @@ static void test_box_pin(void) {
         assert(rubraview_box_pin_click(&box, &m, pin.x + 1.0, pin.y + 1.0));
         assert(box.state == RUBRAVIEW_BOX_EXPANDED && !box.pinned);
     }
-    printf("  [PASS] Each box has a pin: on, it stays open; off, it folds when left\n");
+    /* Against the window's right edge, the pin goes to the anchor's left. */
+    rubraview_box_t edge = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, 1280.0 - 2.0 * m.anchor_size, 600.0, 6);
+    edge.view_width = 1280.0;
+    edge.view_height = 752.0;
+    rubraview_box_hover_enter(&edge);
+    rubraview_rect_t left = rubraview_box_pin_rect(&edge, &m);
+    assert(approx(left.x, edge.anchor_x - m.anchor_size) && approx(left.y, 600.0));
+    printf("  [PASS] Each box has a pin beside its anchor: on, it stays open; off, it folds when left\n");
 }
 
 /* Toolbox buttons draw an icon (owner, 2026-09-22), from the Segoe MDL2

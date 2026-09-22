@@ -80,7 +80,7 @@ typedef struct rubraview_tile_metrics {
     int32_t columns;     /* tiles per row when expanded */
     /* The toolbox strip and the boxes' header row (owner, 2026-09-22). */
     double button_size;  /* a toolbox button: half a tile wide, a quarter of its area */
-    double header_height;/* the row holding the pin (and, in the toolbox, the seek bar) */
+    double header_height;/* the toolbox's seek-bar row */
     double title_height; /* the toolbox row with the file's name */
     int32_t strip_columns; /* toolbox buttons per row */
 } rubraview_tile_metrics_t;
@@ -104,15 +104,15 @@ typedef struct rubraview_box {
 } rubraview_box_t;
 
 /*
- * The toolbox strip (owner, 2026-09-22): the pin and, for a film or
- * music, the seek bar on the top row; the file's name under them; then
+ * The toolbox strip (owner, 2026-09-22): for a film or music, the seek
+ * bar on the top row; the file's name under it; then
  * the buttons, `strip_columns` to a row, as many rows as they need. All
  * rectangles are relative to the body's top-left, so the detached window
  * lays itself out with the same numbers.
  */
 typedef struct rubraview_toolbox_layout {
     double width, height;
-    rubraview_rect_t pin, timeline, title;
+    rubraview_rect_t timeline, title;
     double buttons_y;
     int32_t columns, rows;
 } rubraview_toolbox_layout_t;
@@ -189,8 +189,9 @@ void rubraview_box_drag_to(rubraview_box_t *box, const rubraview_tile_metrics_t 
 bool rubraview_box_update_detach(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                                  double window_width, double window_height, double threshold);
 
-/* The pin at an open box's top-left (owner, 2026-09-22), in client
-   coordinates; empty while the box is folded. The toolbox's seek bar and
+/* The pin, a square beside the anchor while the box is open (owner,
+   2026-09-22: right of it, left when the window has no room), in client
+   coordinates; empty while the box is folded or detached. The toolbox's seek bar and
    name rows likewise (empty for the menu, or with no film). */
 rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
 rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
