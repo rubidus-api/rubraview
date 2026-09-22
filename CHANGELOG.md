@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-09-22
+
 ### Fixed
 
 - On a PC where the viewer had never run, a change in the settings window
