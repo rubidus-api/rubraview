@@ -112,3 +112,43 @@ bool rubraview_confirm_armed(const rubraview_confirm_t *c, int64_t key, double n
 void rubraview_confirm_clear(rubraview_confirm_t *c) {
     if (c) *c = (rubraview_confirm_t){0};
 }
+
+/* ---- toolbox icons (Segoe MDL2 Assets) ---- */
+
+uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f) {
+    static const struct { const char *action; uint32_t icon; } ICONS[] = {
+        { "media_stop", 0xE71A },            /* Stop */
+        { "prev_page", 0xE892 },             /* Previous */
+        { "next_page", 0xE893 },             /* Next */
+        { "media_seek_back", 0xEB9E },       /* Rewind */
+        { "media_seek_forward", 0xEB9D },    /* FastForward */
+        { "media_volume_down", 0xE993 },     /* Volume1 */
+        { "media_volume_up", 0xE995 },       /* Volume3 */
+        { "next_subtitle_track", 0xE7F0 },   /* ClosedCaption */
+        { "next_audio_track", 0xE8D6 },      /* Audio */
+        { "zoom_in", 0xE8A3 },               /* ZoomIn */
+        { "zoom_out", 0xE71F },              /* ZoomOut */
+        { "rotate_cw", 0xE7AD },             /* Rotate */
+        { "toggle_slideshow", 0xE786 },      /* Slideshow */
+        { "anim_step_back", 0xE76B },        /* ChevronLeft */
+        { "anim_step_forward", 0xE76C },     /* ChevronRight */
+        { "subpage_prev", 0xE76B },
+        { "subpage_next", 0xE76C },
+        { "prev_archive", 0xE8AC },          /* folder with a way back: "Back" to the previous book */
+        { "next_archive", 0xE8AD },
+        { "toggle_layout", 0xE89A },         /* TwoPage */
+        { "fit_window", 0xE9A6 },            /* FitPage */
+    };
+    if (!f) return 0;
+    if (is(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */
+    if (is(action, "media_mute")) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
+    if (is(action, "toggle_fullscreen")) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */
+    for (size_t i = 0; i < sizeof(ICONS) / sizeof(ICONS[0]); ++i) {
+        if (is(action, ICONS[i].action)) return ICONS[i].icon;
+    }
+    return 0;
+}
+
+uint32_t rubraview_pin_icon(bool on) {
+    return on ? 0xE840 : 0xE718;   /* Pinned / Pin */
+}

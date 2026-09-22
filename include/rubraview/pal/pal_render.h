@@ -191,6 +191,15 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     rubraview_text_align_t align);
 
 /**
+ * Draw one icon, centred in `rect`: a code point of the Segoe MDL2 Assets
+ * font that Windows 10 and 11 carry (the toolbox's buttons, the boxes'
+ * pins). False when that font is not on this machine; the caller then
+ * draws a caption instead.
+ */
+bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t code_point,
+                                    rubraview_pal_rect_t rect, double size, uint32_t argb);
+
+/**
  * §3.22 / D-13: the settings window is a grid of fixed-width cells. This
  * is how big one cell is at `font_size` in the fixed-width face — the
  * width of one character and the height of one line.

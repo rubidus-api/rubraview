@@ -183,6 +183,9 @@ static void layout(rubraview_settings_view_t *view) {
             case RUBRAVIEW_NODE_ACTION:
                 line.kind = RUBRAVIEW_LINE_ACTION;
                 break;
+            case RUBRAVIEW_NODE_NOTE:
+                line.kind = RUBRAVIEW_LINE_NOTE;
+                break;
             default:
                 continue;
         }
@@ -645,6 +648,10 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             put_text(&w, n > 0 ? (u8str_t){ .ptr = value, .len = n } : U8("-"), width - w.cells);
             break;
         }
+
+        case RUBRAVIEW_LINE_NOTE:
+            put_text(&w, node->text, width);
+            break;
 
         case RUBRAVIEW_LINE_TABLE: {
             char row[512];

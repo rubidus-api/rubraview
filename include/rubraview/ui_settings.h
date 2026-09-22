@@ -40,6 +40,7 @@ typedef enum rubraview_settings_line_kind {
     RUBRAVIEW_LINE_PREVIEW,
     RUBRAVIEW_LINE_TABLE,
     RUBRAVIEW_LINE_ACTION,
+    RUBRAVIEW_LINE_NOTE,
 } rubraview_settings_line_kind_t;
 
 /** One laid-out line of the current page, in content rows (before scrolling). */
