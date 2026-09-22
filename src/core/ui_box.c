@@ -97,7 +97,8 @@ bool rubraview_box_pointer(rubraview_box_t *box, const rubraview_tile_metrics_t 
     if (!box || !metrics) return false;
 
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, metrics, px, py);
-    bool inside_body = rubraview_rect_contains(rubraview_box_bounds(box, metrics), px, py);
+    bool inside_body = rubraview_rect_contains(rubraview_box_bounds(box, metrics), px, py) ||
+                       rubraview_rect_contains(rubraview_box_pin_rect(box, metrics), px, py);
 
     /* Only the hover half opens. Resting on the click half deliberately
        does nothing: that is the difference the reader can rely on. */
@@ -193,11 +194,15 @@ rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics
     l.columns = m->strip_columns > 0 ? m->strip_columns : 8;
     l.rows = count > 0 ? (count + l.columns - 1) / l.columns : 0;
     l.width = pad * 2.0 + l.columns * b + (l.columns - 1) * g;
-    l.pin = (rubraview_rect_t){ pad, pad, head, head };
+    /* The pin sits beside the anchor, not in here (owner, 2026-09-22):
+       the top row is the seek bar's alone, and without one the name
+       comes first. */
+    double top = pad;
     if (timeline) {
-        l.timeline = (rubraview_rect_t){ pad + head + g, pad + head * 0.25, l.width - pad * 2.0 - head - g, head * 0.5 };
+        l.timeline = (rubraview_rect_t){ pad, pad + head * 0.25, l.width - pad * 2.0, head * 0.5 };
+        top = pad + head + g;
     }
-    l.title = (rubraview_rect_t){ pad, pad + head + g, l.width - pad * 2.0, m->title_height };
+    l.title = (rubraview_rect_t){ pad, top, l.width - pad * 2.0, m->title_height };
     l.buttons_y = l.title.y + l.title.height + g;
     l.height = l.rows > 0 ? l.buttons_y + l.rows * b + (l.rows - 1) * g + pad : l.title.y + l.title.height + pad;
     return l;
@@ -230,9 +235,7 @@ rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubravie
         int32_t columns = grid_columns(box, metrics);
         int32_t rows = grid_rows(box, metrics);
         width = metrics->padding * 2.0 + columns * metrics->tile_size + (columns - 1) * metrics->gutter;
-        /* The header row holds the pin. */
-        height = metrics->padding * 2.0 + metrics->header_height + metrics->gutter / 2.0 +
-                 rows * metrics->tile_size + (rows - 1) * metrics->gutter;
+        height = metrics->padding * 2.0 + rows * metrics->tile_size + (rows - 1) * metrics->gutter;
     }
     double x = 0.0, y = 0.0;
     grid_origin(box, metrics, width, height, &x, &y);
@@ -257,8 +260,7 @@ rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubra
 
     return (rubraview_rect_t){
         .x = body.x + metrics->padding + column * (metrics->tile_size + metrics->gutter),
-        .y = body.y + metrics->padding + metrics->header_height + metrics->gutter / 2.0 +
-             row * (metrics->tile_size + metrics->gutter),
+        .y = body.y + metrics->padding + row * (metrics->tile_size + metrics->gutter),
         .width = metrics->tile_size,
         .height = metrics->tile_size,
     };
@@ -419,9 +421,15 @@ static rubraview_rect_t body_relative(const rubraview_box_t *box, const rubravie
     return (rubraview_rect_t){ body.x + r.x, body.y + r.y, r.width, r.height };
 }
 
+/* The pin is a third square on the anchor's row, there only while the box
+   is open (owner, 2026-09-22): to the anchor's right, or to its left when
+   the window has no room on the right. */
 rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
-    if (!m) return (rubraview_rect_t){0};
-    return body_relative(box, m, (rubraview_rect_t){ m->padding, m->padding, m->header_height, m->header_height });
+    if (!box || !m || !is_open(box) || box->state == RUBRAVIEW_BOX_DETACHED) return (rubraview_rect_t){0};
+    double a = m->anchor_size;
+    double x = box->anchor_x + a * 2.0;
+    if (box->view_width > 0.0 && x + a > box->view_width && box->anchor_x - a >= 0.0) x = box->anchor_x - a;
+    return (rubraview_rect_t){ x, box->anchor_y, a, a };
 }
 
 rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
