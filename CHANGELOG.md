@@ -6,6 +6,14 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- A photo stored sideways (an EXIF orientation such as a phone's portrait
+  shot) took seconds to open — 6.5 s for 1600x1200, 90 s for 12 megapixels
+  on the test VM: turning it re-decoded the whole JPEG for every row. It is
+  now decoded once and turned in memory (22 ms and 0.2 s). The editor's
+  pixel path had the same fault.
+
 ## [0.0.9] - 2026-09-22
 
 ### Changed

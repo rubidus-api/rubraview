@@ -134,3 +134,12 @@ file: 4K_5_Thetestdata.mp4
 - Still to see: the Intel PC with 0.0.8 (the black window was there), and
   playing in the viewer itself on both.
 
+### AMD Radeon, 0.0.9, 2026-09-22 — playing in the viewer
+
+The owner: "굉장히 재생이 잘 됩니다" — playing in the viewer itself with GPU
+decoding on. The probe on another 4K H.264 file: off 19 a second (197% of
+a core), on 196 a second (11%), viewer path 60 copied / 60 drawn,
+brightness 91. The probe's early line "no picture came out of it
+(hr=0xC00D36B4)" is the step that lends the *renderer's* device to Media
+Foundation — the path 0.0.8 stopped using — so it says nothing about
+playback. Still to see: the Intel PC with 0.0.8 or later.

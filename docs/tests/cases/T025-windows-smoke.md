@@ -35,7 +35,7 @@ This procedure is that missing check. Run it on the Windows target.
 | 9 | `Ctrl` + mouse wheel | Zooms in and out. Plain mouse wheel moves to the next/previous page. |
 | 10 | Press `4` (1:1), then zoom past 400%, then press `G` | A one-pixel grid appears over pixel boundaries. Press `G` again to remove it. It must not appear below 400% (§3.5). |
 | 11 | Press `N` | Interpolation switches to nearest-neighbour: at high zoom the pixels become crisp squares rather than smooth (§3.5). |
-| 12 | Open the sideways photo | It appears **upright**: the EXIF orientation tag was applied during decode (§3.9, RV-014/RV-029). |
+| 12 | Open the sideways photo | It appears **upright**: the EXIF orientation tag was applied during decode (§3.9, RV-014/RV-029) — and **at once**, not seconds later (2026-09-22: turning the JPEG frame directly re-decoded it per row, 6.5 s for 1600x1200 on the VM; now 22 ms). |
 | 13 | Press `B` | Layout cycles Single → Dual → Book. In Dual/Book two pages appear side by side with a small gap; in Book the first page stands alone as a cover (§3.3). |
 | 14 | Press `M` while in Book mode | Reading order flips: the lower page number moves to the right side (manga order, §3.3). |
 | 15 | Drag the window between two monitors with different scaling | The image stays sharp and correctly sized (§4.2 Per-Monitor V2). |
