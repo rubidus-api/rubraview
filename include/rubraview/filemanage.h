@@ -54,6 +54,18 @@ size_t rubraview_rename_stem_length(u8str_t filename);
 /** Join a new stem to the old extension. */
 u8str_t rubraview_rename_compose(proven_arena_t *arena, u8str_t old_filename, u8str_t new_stem);
 
+/**
+ * The rename box's text: typed or composed text appended to `buffer`
+ * (`*length` bytes used, room for `capacity` with its terminator). Only
+ * whole UTF-8 characters go in — a character that would not fit is left
+ * out rather than cut — and control characters are skipped. Returns the
+ * bytes added. The buffer stays NUL-terminated.
+ */
+size_t rubraview_rename_append(char *buffer, size_t capacity, size_t *length, u8str_t text);
+
+/** Backspace: one whole UTF-8 character off the end (a Hangul syllable is three bytes). */
+void rubraview_rename_backspace(char *buffer, size_t *length);
+
 /* ---- §3.18.1 / §3.18.3 the undo stack ---- */
 
 typedef enum rubraview_file_op {

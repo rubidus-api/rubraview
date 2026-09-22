@@ -291,6 +291,8 @@ typedef struct app_state {
     bool                   rename_active;
     char                   rename_buffer[256];
     size_t                 rename_length;
+    char                   rename_composing[64];   /* the IME's unfinished syllable, drawn after the text */
+    size_t                 rename_composing_length;
     bool                   confirm_purge;   /* §3.18.1's Y/N dialog is showing */
 
     /* A short-lived message: "moved to Best", "cannot be brought back".
@@ -348,6 +350,7 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
+static void rename_end(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
 static void panel_close(app_state_t *app);
@@ -1914,34 +1917,18 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 
     if (app->rename_active) {
         if (key_is(combo, "Enter")) { rename_commit(app); return true; }
-        if (key_is(combo, "Escape")) { app->rename_active = false; return true; }
+        if (key_is(combo, "Escape")) { rename_end(app); return true; }
         if (key_is(combo, "Backspace")) {
-            if (app->rename_length > 0) {
-                /* Step back over a whole UTF-8 character, not one byte:
-                   deleting half of a Hangul syllable would leave the
-                   name unwritable. */
-                size_t at = app->rename_length;
-                while (at > 0 && ((unsigned char)app->rename_buffer[at - 1] & 0xC0u) == 0x80u) at--;
-                if (at > 0) at--;
-                app->rename_length = at;
-                app->rename_buffer[at] = '\0';
-            }
+            /* A whole character, not one byte: half a Hangul syllable
+               would leave the name unwritable. (Inside a syllable the
+               IME takes Backspace itself and it never comes here.) */
+            rubraview_rename_backspace(app->rename_buffer, &app->rename_length);
             return true;
         }
-
-        /* A single printable key extends the name. Text entry beyond
-           this — IME, selection, the clipboard — belongs to the native
-           EDIT control §3.18.2 names, which is not built yet. */
-        if (combo.key_name.len == 1 && combo.modifiers == RUBRAVIEW_MOD_NONE) {
-            char c = combo.key_name.ptr[0];
-            if (app->rename_length + 1 < sizeof(app->rename_buffer)) {
-                if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-                app->rename_buffer[app->rename_length++] = c;
-                app->rename_buffer[app->rename_length] = '\0';
-            }
-            return true;
-        }
-        return true;   /* while renaming, nothing else gets through */
+        /* The characters themselves arrive as text (rename_text), in
+           either case and from the IME; the keys that make them are
+           swallowed here, as is everything else while renaming. */
+        return true;
     }
 
     /* §3.18.3: 1-9 curate — but only where a folder is actually bound.
@@ -2752,8 +2739,12 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        /* The name, then the syllable the IME is still building. */
+        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
+        memcpy(shown, app->rename_buffer, app->rename_length);
+        memcpy(shown + app->rename_length, app->rename_composing, app->rename_composing_length);
         rubraview_pal_render_draw_text(app->renderer,
-                                       (u8str_t){ .ptr = app->rename_buffer, .len = app->rename_length },
+                                       (u8str_t){ .ptr = shown, .len = app->rename_length + app->rename_composing_length },
                                        box, 18.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
@@ -3103,10 +3094,30 @@ static void triage_undo(app_state_t *app) {
     reopen_after_removal(app, action.playlist_index);
 }
 
-/* §3.18.2's inline rename. The text is collected by the key handler
-   rather than by a child EDIT control: the control the RFC names brings
-   native IME with it, and adding it is a separate piece of work, so the
-   limitation is written down rather than hidden. */
+/* §3.18.2's inline rename. The box is drawn here, not a child EDIT
+   control; its text comes from the window's text input (TEXT events,
+   with the IME attached only while the box is open, K5), so Hangul,
+   capitals and symbols go in as typed. No selection or clipboard yet. */
+/* The box closes: the window goes back to keys only (K5). */
+static void rename_end(app_state_t *app) {
+    app->rename_active = false;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, false);
+}
+
+/* Text typed or finished by the IME, and the IME's unfinished part. */
+static void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
+    if (!app->rename_active) return;
+    u8str_t text = { .ptr = event->text.utf8, .len = event->text.length };
+    if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+        (void)rubraview_rename_append(app->rename_buffer, sizeof(app->rename_buffer), &app->rename_length, text);
+    } else {
+        size_t n = text.len < sizeof(app->rename_composing) ? text.len : sizeof(app->rename_composing) - 1;
+        memcpy(app->rename_composing, text.ptr, n);
+        app->rename_composing_length = n;
+    }
+}
+
 static void rename_begin(app_state_t *app) {
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
@@ -3119,11 +3130,16 @@ static void rename_begin(app_state_t *app) {
     app->rename_length = stem;
     app->rename_buffer[stem] = '\0';
     app->rename_active = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);   /* Hangul, capitals, symbols (K5's hole) */
 }
 
 static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
-    app->rename_active = false;
+    /* Enter with a syllable still being built: it is part of the name. */
+    (void)rubraview_rename_append(app->rename_buffer, sizeof(app->rename_buffer), &app->rename_length,
+                                  (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_end(app);
 
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
@@ -6275,6 +6291,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                     dispatch_key(&app, event.key.combo);
+                    break;
+
+                case RUBRAVIEW_WINDOW_EVENT_TEXT:
+                case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+                    rename_text(&app, &event);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {

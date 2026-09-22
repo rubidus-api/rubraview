@@ -67,6 +67,31 @@ int main(void) {
     }
     printf("  [PASS] Renaming replaces the stem and keeps the extension\n");
 
+    /* Test 4b: the rename box's text (RFC-0003 K5's hole, 2026-09-22):
+       whatever Windows and the IME hand over goes in whole — Hangul,
+       capitals, symbols — control characters do not, a character that
+       would not fit is left out entire, and Backspace takes one back. */
+    {
+        char box[11];
+        size_t n = 0;
+        box[0] = '\0';
+        assert(rubraview_rename_append(box, sizeof(box), &n, lit("A")) == 1);
+        assert(rubraview_rename_append(box, sizeof(box), &n, lit("\xEC\x97\xAC\xEB\xA6\x84")) == 6);   /* 여름 */
+        assert(rubraview_rename_append(box, sizeof(box), &n, lit("\r\b\x1B")) == 0);                      /* Enter, Backspace, Esc */
+        assert(n == 7 && strcmp(box, "A\xEC\x97\xAC\xEB\xA6\x84") == 0);
+        assert(rubraview_rename_append(box, sizeof(box), &n, lit("_\xEA\xB0\x80")) == 1);  /* "_" fits; 가 would need 3 more with 2 left */
+        assert(n == 8 && box[n] == '\0');
+        rubraview_rename_backspace(box, &n);                                                   /* the "_" */
+        rubraview_rename_backspace(box, &n);                                                   /* all of 름 */
+        assert(n == 4 && strcmp(box, "A\xEC\x97\xAC") == 0);
+        rubraview_rename_backspace(box, &n);
+        rubraview_rename_backspace(box, &n);
+        rubraview_rename_backspace(box, &n);                                                   /* empty: nothing happens */
+        assert(n == 0 && box[0] == '\0');
+        assert(rubraview_rename_append(box, sizeof(box), &n, (u8str_t){ .ptr = "\xEC\x97", .len = 2 }) == 0); /* half a character */
+    }
+    printf("  [PASS] The rename box takes whole characters from the IME and gives one back on Backspace\n");
+
     /* Test 5: the undo stack returns actions newest first. */
     {
         rubraview_undo_stack_t stack = {0};

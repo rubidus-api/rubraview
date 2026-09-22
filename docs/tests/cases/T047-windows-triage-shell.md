@@ -60,9 +60,17 @@ Windows calls behind them do what they say.
   so and points at the bin. Moves, copies and renames **are** undone
   properly.
 - **The rename box is not the native `EDIT` control** §3.18.2 names, so
-  it has no IME, no selection and no clipboard: it takes plain
-  characters and Backspace. A Korean or Japanese name cannot be typed
-  into it yet, though one can be renamed *from*.
+  it has no selection and no clipboard. Since 2026-09-22 it does take the
+  IME: the window gets its IME context back while the box is open (K5
+  keeps it off otherwise), characters come as typed (capitals and symbols
+  too, not lowercased key names) and the unfinished syllable is drawn in
+  the box. Measured on the VM with the Microsoft Korean IME, keys sent
+  over RDP (`xdotool key`, the session connected with `RDP_KBD=0x412`):
+  `g k s g k` showed `한하`; one Backspace took the syllable being built,
+  the next the finished one; `e k` then `Enter` renamed the file to
+  `다.png` — the syllable still being built went into the name.
+  In-guest `keybd_event` (keys.ps1) does not compose: every jamo came
+  out alone (`ㅎㅏㄶ`) — a test-tool limit, not the viewer's.
 - ~~A multi-file drop opens the first file~~ — since 2026-09-20 several
   files dropped together open as a set of exactly those files. Measured on
   the VM on 2026-09-21 with a real drag out of an Explorer window

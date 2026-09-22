@@ -6,6 +6,13 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- Korean (and any IME) can be typed into the rename box (F2): the syllable
+  being composed shows in the box, Enter keeps it. Capitals and symbols go
+  in as typed — before, every letter was lowercased and only letters and
+  digits went in.
+
 ## [0.0.10] - 2026-09-22
 
 ### Changed
