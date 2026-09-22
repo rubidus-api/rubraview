@@ -56,3 +56,12 @@ which is right for this machine: the VM has no audio device.
 > The audible half of step 3 — the other language actually coming out of the
 > speakers, in sync, without the picture stopping — can only be checked where
 > there is sound. It is part of T058.
+
+## Which sound opens, 2026-09-23 (D-21)
+
+The file's tracks (read from its `moov`): 1 video, 2 sound `eng`, 3 sound
+`kor`. On the Korean-language VM, Media Foundation numbered them kor, eng,
+video and the viewer used to start on kor; the stream Media Foundation
+selects by itself was eng. Now `--probe-media`: Media Foundation `* #1 en`,
+`#2 ko`; FFmpeg `* #1 eng`, `#2 kor`. Played in the viewer and recorded
+over RDP (`vmrecord.sh`): 440 Hz — the `eng` tone (`kor` is 880 Hz).

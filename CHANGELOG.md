@@ -6,6 +6,14 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- A film with several sound tracks starts on the one the file lists first.
+  On a Korean Windows, Media Foundation numbered the tracks its own way and
+  the viewer took the Korean track of a file whose first track is English;
+  the FFmpeg backend picked by its own "best" rule. Both now go by the
+  file, and the track list starts with that track.
+
 ## [0.0.11] - 2026-09-23
 
 ### Fixed

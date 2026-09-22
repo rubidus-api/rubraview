@@ -314,7 +314,14 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     }
 
     m->video_stream = g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
-    m->audio_stream = g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    /* The sound: the file's first track that can be decoded, in the
+       file's own order (owner, 2026-09-22) — not FFmpeg's "best", which
+       weighs flags and bit rates. */
+    m->audio_stream = -1;
+    for (unsigned i = 0; i < d->format->nb_streams && m->audio_stream < 0; ++i) {
+        AVCodecParameters *par = d->format->streams[i]->codecpar;
+        if (par->codec_type == AVMEDIA_TYPE_AUDIO && g_ff.avcodec_find_decoder(par->codec_id)) m->audio_stream = (int)i;
+    }
     if (m->video_stream < 0 && m->audio_stream < 0) {
         m->failure = RUBRAVIEW_MEDIA_FAIL_CODEC;
         return false;
