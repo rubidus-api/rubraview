@@ -284,29 +284,53 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     }
 
     /* Find the first stream of each kind, and note every one of them
-       for the track menu on the way past (§3.16.2). */
+       for the track menu on the way past (§3.16.2).
+       The sound is the one the file puts first (owner, 2026-09-22: "그냥
+       트랙 순서로"). Media Foundation does not number streams in the
+       file's order — for two_audio.mp4 (tracks: video, eng, kor) it gave
+       kor, eng, video, on a Korean Windows — but the stream it selects by
+       itself is the file's first sound track (eng there). So that one
+       plays and is listed first; the rest follow in the reader's order. */
     m->tracks = rubraview_tracks_create();
-    DWORD video_stream = NO_STREAM, audio_stream = NO_STREAM;
+    DWORD video_stream = NO_STREAM, audio_stream = NO_STREAM, first_audio = NO_STREAM;
     uint32_t fourcc = 0;
     for (DWORD s = 0; ; ++s) {
         IMFMediaType *type = NULL;
         hr = IMFSourceReader_GetNativeMediaType(reader, s, 0, &type);
         if (hr == (HRESULT)MF_E_INVALIDSTREAMNUMBER) break;
         if (FAILED(hr) || !type) continue;
-        GUID major = {0}, subtype = {0};
+        GUID major = {0};
         IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
-        IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
-        if (IsEqualGUID(&major, &MFMediaType_Video)) {
-            mf_track_add(m, reader, s, RUBRAVIEW_TRACK_VIDEO, type, &subtype);
-            if (video_stream == NO_STREAM) {
-                video_stream = s;
-                fourcc = (uint32_t)subtype.Data1;   /* Media Foundation subtypes carry the FOURCC here */
-            }
-        } else if (IsEqualGUID(&major, &MFMediaType_Audio)) {
-            mf_track_add(m, reader, s, RUBRAVIEW_TRACK_AUDIO, type, &subtype);
-            if (audio_stream == NO_STREAM) audio_stream = s;
-        }
         IMFMediaType_Release(type);
+        if (!IsEqualGUID(&major, &MFMediaType_Audio)) continue;
+        if (first_audio == NO_STREAM) first_audio = s;
+        BOOL selected = FALSE;
+        if (audio_stream == NO_STREAM && SUCCEEDED(IMFSourceReader_GetStreamSelection(reader, s, &selected)) && selected) {
+            audio_stream = s;
+        }
+    }
+    if (audio_stream == NO_STREAM) audio_stream = first_audio;
+    for (int pass = 0; pass < 2; ++pass) {   /* the chosen sound first, then everything else */
+        for (DWORD s = 0; ; ++s) {
+            IMFMediaType *type = NULL;
+            hr = IMFSourceReader_GetNativeMediaType(reader, s, 0, &type);
+            if (hr == (HRESULT)MF_E_INVALIDSTREAMNUMBER) break;
+            if (FAILED(hr) || !type) continue;
+            if ((pass == 0) != (s == audio_stream)) { IMFMediaType_Release(type); continue; }
+            GUID major = {0}, subtype = {0};
+            IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
+            IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
+            if (IsEqualGUID(&major, &MFMediaType_Video)) {
+                mf_track_add(m, reader, s, RUBRAVIEW_TRACK_VIDEO, type, &subtype);
+                if (video_stream == NO_STREAM) {
+                    video_stream = s;
+                    fourcc = (uint32_t)subtype.Data1;   /* Media Foundation subtypes carry the FOURCC here */
+                }
+            } else if (IsEqualGUID(&major, &MFMediaType_Audio)) {
+                mf_track_add(m, reader, s, RUBRAVIEW_TRACK_AUDIO, type, &subtype);
+            }
+            IMFMediaType_Release(type);
+        }
     }
     for (size_t i = 0; i < m->tracks.count; ++i) {
         if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_VIDEO &&
