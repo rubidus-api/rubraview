@@ -35,6 +35,10 @@ cp "dist/$exe" "$out/"
 probe="rubraview-mfprobe-v$version.exe"
 [ -f "dist/$probe" ] && cp "dist/$probe" "$out/" || true
 
+# RV-062 step 3 on the reader's own PC: drag a video onto it, get a text
+# file with what this machine does with decoding on the graphics card.
+cp tools/gpu-check.cmd "$out/"
+
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
 cp CHANGELOG.md "$out/"

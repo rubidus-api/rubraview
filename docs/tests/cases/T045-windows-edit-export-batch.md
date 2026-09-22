@@ -71,7 +71,7 @@ Run after T025, T031 and T037.
 ## Measured on the Windows 11 VM, 2026-09-20 (after 0.0.4)
 
 - **The batch run is its own process, in its own window.** Run on a folder
-  of 12 photos started a second `rubraview-v0.0.4.exe`; the viewer was then
+  of 12 photos started a second copy of the viewer (the 0.0.4 build); the viewer was then
   **killed** and the run carried on and finished all 12 at half size
   (4032x3024 → 2016x1512). Its console window printed
   `rubraview: 12 converted, 0 skipped, 0 failed` / `press a key to close

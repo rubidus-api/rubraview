@@ -6,8 +6,13 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-09-22
+
 ### Added
 
+- `gpu-check.cmd` in the release folder: drag a video onto it and it writes
+  `gpu-check.txt` — what this PC does with decoding on the graphics card
+  (T065), to send back.
 - Video can be decoded on the graphics card (RV-062), behind the Video
   page's **GPU decoding** setting: `off` (the default until it has been
   measured on a real card), `on` where the card offers decoders, `always`
