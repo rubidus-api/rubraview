@@ -92,3 +92,22 @@ file: sample_960x400_ocean_with_audio (5).mkv
 - Not answered by this run: speed (the probe stops at 30 pictures), how
   the picture looks, 4K HEVC, sleep/resume. Those decide the default.
 
+### 4K 60 fps H.264 on the same card (0.0.6 probe, 2026-09-22)
+
+```
+hardware_decode = off: H264 3840x2160, decoded in software; 88 pictures in 4.0 s (22 a second), 0 of them on the card; CPU 9.31 s (233% of one core)
+hardware_decode = on: H264 3840x2160, decoded on the card; 165 pictures in 4.0 s (41 a second), 165 of them on the card; CPU 0.28 s (7% of one core)
+hardware_decode = always: H264 3840x2160, decoded on the card; 167 pictures in 4.0 s (42 a second), 167 of them on the card; CPU 0.12 s (3% of one core)
+
+file: 15158346_3840_2160_60fps.mp4
+```
+
+- Software cannot play this file in real time (22 of 60 a second) and
+  takes 2.3 cores; the card nearly doubles the rate at 7 % of one core.
+- Even on the card it is 41 a second, short of 60 — the card's limit or
+  this path's (the reader's 4K NV12->BGRA conversion, two copies on the
+  card per frame, four slots) is not known yet. Played in real time, some
+  frames would be dropped.
+- Still open from 0.0.5: the owner's phone mp4 that did not open with the
+  device; 0.0.6's probe on that file is the next measurement.
+
