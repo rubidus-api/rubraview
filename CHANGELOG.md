@@ -6,6 +6,16 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- On a PC where the viewer had never run, a change in the settings window
+  ended in "could not write settings.ini" and was lost — and the reading
+  history, box positions and keys were not kept either: the folder they
+  live in (`%APPDATA%\rubraview`) did not exist yet, and nothing made it.
+  Writing a file now makes its folder first.
+- Files are read and written by their UTF-16 path, so a Windows user name
+  in Hangul (which puts Hangul in `%APPDATA%`) no longer breaks them.
+
 ## [0.0.6] - 2026-09-22
 
 ### Changed

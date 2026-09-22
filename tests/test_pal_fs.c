@@ -8,6 +8,7 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #endif
 
 static u8str_t lit(const char *s) {
@@ -147,6 +148,27 @@ int main(void) {
     rubraview_fs_listing_t missing_dir = rubraview_pal_fs_list_dir(&arena, lit(FIXTURE_DIR "/no_such_dir"));
     assert(missing_dir.count == 0);
     printf("  [PASS] Missing directory yields an empty listing without crashing\n");
+
+    /* Writing a file makes the folder it goes in (0.0.6 on a PC used for
+       the first time: %APPDATA%\\rubraview did not exist yet, and every
+       change in the settings window ended in "could not write settings.ini"). */
+    {
+        const char *nested = FIXTURE_DIR "/first-run/rubraview/settings.ini";
+        remove(nested);
+        rmdir(FIXTURE_DIR "/first-run/rubraview");
+        rmdir(FIXTURE_DIR "/first-run");
+        u8str_t path = { .ptr = nested, .len = strlen(nested) };
+        assert(rubraview_pal_fs_write_file(path, U8("[video]\nhardware_decode = on\n")));
+        u8str_t back = rubraview_pal_fs_read_file(&arena, path, 1024);
+        assert(back.len == strlen("[video]\nhardware_decode = on\n"));
+        /* And again, now that the folder is there. */
+        assert(rubraview_pal_fs_write_file(path, U8("x")));
+        /* Leave the fixture folder as the listing test expects it. */
+        assert(remove(nested) == 0);
+        assert(rmdir(FIXTURE_DIR "/first-run/rubraview") == 0);
+        assert(rmdir(FIXTURE_DIR "/first-run") == 0);
+        printf("  [PASS] Writing a file creates the folders it goes in\n");
+    }
 
     free(raw_mem);
     printf("[test_pal_fs] All tests passed successfully!\n");
