@@ -68,3 +68,27 @@ Step 3 on a real card, beyond these lines: the same clip with
 same paused frame compared, a 4K HEVC file, and sleep/resume while a film
 plays (a rebuilt renderer is not handled yet — the picture holds until the
 film is reopened).
+
+## Measured on a real card, 2026-09-22 (0.0.5, the owner's PC, `gpu-check.cmd`)
+
+```
+Device: hardware, feature level 11.0
+Adapter: Intel(R) UHD Graphics 730 (128 MB of its own memory)
+Decoder profiles the card offers: 80
+The reader took the device.
+but no picture came out of it (hr=0xC00D36B4, last flags=0x1)
+hardware_decode = on: decoded on the card; 30 pictures in 3 s, 30 of them on the card
+hardware_decode = always: decoded on the card; 30 pictures in 3 s, 30 of them on the card
+
+file: sample_960x400_ocean_with_audio (5).mkv
+```
+
+- The first run of RV-062 on a card with decoders: with `on` the device is
+  handed over, the reader keeps it (no fall-back needed), and every picture
+  arrives as a texture — the zero-copy path end to end.
+- The "no picture" line is the 2026-09-13 raw test, which asks the reader
+  for no output format; the viewer's path asks for ARGB32 and works. Both
+  lines are expected.
+- Not answered by this run: speed (the probe stops at 30 pictures), how
+  the picture looks, 4K HEVC, sleep/resume. Those decide the default.
+
