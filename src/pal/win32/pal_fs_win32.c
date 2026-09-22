@@ -199,7 +199,10 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
     u8str_t path_z = arena_dup(arena, path.ptr, path.len);
     if (path_z.len == 0) return empty;
 
-    FILE *file = fopen(path_z.ptr, "rb");
+    /* UTF-16 for the same reason as writing: a Hangul user name. */
+    WCHAR wide[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, path_z.ptr, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return empty;
+    FILE *file = _wfopen(wide, L"rb");
     if (!file) return empty;
 
     if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return empty; }
@@ -220,11 +223,26 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
 bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
 
+    /* UTF-16, not the ANSI code page fopen would use: a user name in
+       Hangul puts Hangul in %APPDATA%. */
+    WCHAR wide[4096];
     char path_z[4096];
     memcpy(path_z, path.ptr, path.len);
     path_z[path.len] = '\0';
+    if (MultiByteToWideChar(CP_UTF8, 0, path_z, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
 
-    FILE *file = fopen(path_z, "wb");
+    /* The folder the file goes in is made first: on a first run the
+       settings folder does not exist yet (0.0.6 on the owner's PC: "could
+       not write settings.ini" on every change in the settings window). */
+    for (size_t i = 3; wide[i] != L'\0'; ++i) {
+        if (wide[i] != L'\\' && wide[i] != L'/') continue;
+        WCHAR saved = wide[i];
+        wide[i] = L'\0';
+        CreateDirectoryW(wide, NULL);   /* an existing level is fine; a real failure shows below */
+        wide[i] = saved;
+    }
+
+    FILE *file = _wfopen(wide, L"wb");
     if (!file) return false;
 
     size_t written = contents.len > 0 ? fwrite(contents.ptr, 1, contents.len, file) : 0;
