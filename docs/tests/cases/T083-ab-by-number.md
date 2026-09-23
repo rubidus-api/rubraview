@@ -39,6 +39,26 @@ This case is about the box.
 11. While the box is open, the keys that normally turn pages or play do
     nothing: a box taking a number must not also drive the viewer.
 
-## Measured on the Windows 11 VM
+## Measured on the Windows 11 VM, 2026-09-24
 
-NOT RUN YET — to be run on the packaged build from its own folder.
+The build run from its own folder, on a ten-second film.
+
+1. `[` at 4.938 s and `]` at 9.938 s, as before, and then `Shift+\`: the
+   box opened reading `A [00:04.938]  B  00:09.938` — the tapped points,
+   as numbers, A in hand.
+2. Typing over A: `0:01.200`. Typed characters replace what is there and
+   only digits, `:` and `.` are taken.
+3. `Tab` to B, then `]`: the field took `00:04.938`, the moment the film
+   was paused at — the crossing over the owner asked for, in the
+   direction number → key.
+4. `Enter`: the box closed and the seek bar showed the shaded region from
+   about 12 % to 49 % of its width, which is 1.2 s to 4.938 s of ten
+   seconds, with `A-B` beside the volume.
+5. B before A (`0.5` against A's `00:01.200`) and `Enter`: the box stayed
+   open with the value unapplied, as it should.
+
+Found while measuring, and not in the viewer: the digits were not
+arriving at all through `keys.ps1`, which sent every key with scan code
+zero. That is fixed in the tool (`MapVirtualKeyW`), and it is what had
+made T031 report a rotation defect that does not exist. Steps 6 (`Esc`),
+8 (nonsense refused) and 11 (other keys swallowed) were not measured.

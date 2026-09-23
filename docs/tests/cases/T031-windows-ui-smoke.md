@@ -125,38 +125,28 @@ or a hover are not reachable that way and are marked so.
 | 8 | PASS, with the step's words now stale: since D-20 the toolbox opens as a **horizontal strip** — name row, then icon buttons — not a grid of tiles, and the pin sits beside the anchor (D-20, owner 2026-09-22). |
 | 11 | PASS. The menu opens at the top left with the breadcrumb `Menu` and the tiles `On top`, `File >`, `View >`, `Show >`, `Help >` (D-18's tree, not the older one this step describes). |
 | 14 | PASS. The filmstrip appears along the bottom with thumbnails of the pages already decoded, and the current page is in it. |
-| 15, 16 | **FAIL — see the defect below.** |
+| 15 | PASS (after the tooling was fixed — see below). One `R` turns the picture a quarter; four turns bring back a screen identical to the first, pixel for pixel. |
+| 16 | NOT RUN: `H` then `R` was not re-tested after the tooling was fixed. |
 | 25-28 | NOT RUN (the picker's own case is T079, measured 2026-09-23). |
 | 17-19 | NOT RUN this pass. |
 | 29 | Not applicable: the VM has no digitiser. |
-| 7, 12, 13, 20, 21, 29, 33 | NOT RUN: a drag, a hover or a modifier, none of which the in-session key path can send. The boxes' own placement is covered on the host by T009 and T030. |
+| 7, 12, 13, 20, 21, 33 | NOT RUN: a drag or a hover, which the in-session key path cannot send. (Modifiers it can: `keys.ps1` takes `ctrl+`, `shift+` and `alt+` prefixes — an earlier note here saying otherwise was wrong.) The boxes' own placement is covered on the host by T009 and T030. |
 | Boxes 1 | PASS by eye: each collapsed box is a wide bar of two buttons — the left outlined, the right filled — not one square. |
 
 Also seen: `F1` opens the help window and it lists 95 keys, grouped
 (T080 again, on this build); `E` opens the edit workbench and `Esc`
 closes it.
 
-### Defect found by this case: rotation and flipping do nothing (2026-09-24)
+### What this case actually found (2026-09-24): the test tool, not the viewer
 
-`R`, `H` and the other keys of the "Looking at a picture" group change
-nothing on screen. This is not the key lookup and not the core:
+The first pass reported that rotation and flipping did nothing. It was the
+tool: `keys.ps1` sent every key with scan code zero, and on this guest
+keys sent that way arrive for some virtual keys and not at all for
+others — the digit row among them, which is why the fit keys seemed dead
+too. With the real scan code (`MapVirtualKeyW`): `4` changes 246,780
+pixels, one `R` turns the picture a quarter, and four `R` return a screen
+identical to the first, pixel for pixel. There is no defect in the viewer
+here.
 
-- the F1 help, which is built from the keymap in force, lists `R` as
-  Rotate, and a host check of `rubraview_keymap_find_action` returns
-  `rotate_cw` for `R` in the `view` context;
-- `rubraview_orientation_rotate_cw` and `rubraview_orientation_matrix`
-  are right on the host (one press turns 800x600 into 600x800 with the
-  matrix `0 1 -1 0 600 0`);
-- the action *is* reached: pressing `R` wakes the OSD, which only
-  `handle_action` does — 18200 pixels of the status strip change and not
-  one pixel of the picture;
-- binding `rotate_cw` in the global section of a `keymap.ini` beside the
-  program changes nothing either, so it is not the context;
-- measured on both a large photo (4032x3024) and a small one (800x600),
-  windowed, with the same result: the canvas is identical to the pixel
-  before and after.
-
-So `app->orientation` is set and the drawing does not follow it. The next
-step is to instrument `draw_spread` — it is the only place that consults
-the orientation, and either it is not the path this page takes or the
-transform it builds is discarded. Recorded in `BACKLOGS.md`.
+The lesson: an input path that reports success is not an input path that
+delivered. When a key "does nothing", prove the key arrived first.
