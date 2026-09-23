@@ -263,6 +263,15 @@ typedef struct app_state {
     int32_t                    next_page;
     bool                       next_playing;
     bool                       music_overlapping;  /* both tracks are sounding */
+    /* RV-081: music that outlives the page it came from — the background
+       music of §3.14.6. It is the same player, moved out of the page's
+       hands rather than opened again. */
+    rubraview_media_t         *bgm_media;
+    rubraview_media_info_t     bgm_info;
+    int32_t                    bgm_page;
+    double                     bgm_position;
+    bool                       bgm_paused;
+    rubraview_bgm_t            bgm;
     double                     music_end_seen;     /* wall time the backend first said "finished", or 0 */
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
@@ -710,6 +719,7 @@ static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
 static void music_clear(app_state_t *app);
 static void music_next_close(app_state_t *app);
+static bool bgm_adopt(app_state_t *app);
 static void music_transition_tick(app_state_t *app);
 static void music_promote_next(app_state_t *app);
 static void go_to_spread(app_state_t *app, size_t index);
@@ -717,6 +727,10 @@ static void update_precache(app_state_t *app);
 static void ab_edit_close(app_state_t *app);
 
 static void media_close(app_state_t *app) {
+    /* §3.14.6: a track that is still playing does not die because its
+       page is leaving — it becomes the background music. This is here
+       rather than in the caller so that no path can forget it. */
+    if (bgm_adopt(app)) return;
     vobsub_clear(app);
     pgs_clear(app);
     music_clear(app);
@@ -1175,14 +1189,130 @@ static void subtitle_load(app_state_t *app, u8str_t video_path) {
                                                  (u8str_t){ .ptr = "", .len = 0 }));
 }
 
+/* ---- RV-081: music that outlives its page ---- */
+
+static bool bgm_pause_for_sound(const app_state_t *app) {
+    return rubraview_settings_get(&app->settings, U8("audio"), U8("bgm_pause_on_video")) != 0.0;
+}
+
+static void bgm_do(app_state_t *app, rubraview_bgm_action_t action) {
+    if (!app->bgm_media) return;
+    if (action == RUBRAVIEW_BGM_DO_PAUSE && !app->bgm_paused) {
+        rubraview_pal_media_set_paused(app->bgm_media, true);
+        app->bgm_paused = true;
+    } else if (action == RUBRAVIEW_BGM_DO_RESUME && app->bgm_paused) {
+        rubraview_pal_media_set_paused(app->bgm_media, false);
+        app->bgm_paused = false;
+    }
+}
+
+static void bgm_close(app_state_t *app) {
+    if (app->bgm_media) rubraview_pal_media_close(app->bgm_media);
+    app->bgm_media = NULL;
+    app->bgm_info = (rubraview_media_info_t){0};
+    app->bgm_page = -1;
+    app->bgm_position = 0.0;
+    app->bgm_paused = false;
+    (void)rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_CLOSED, bgm_pause_for_sound(app));
+}
+
+/* The page is leaving but the track is not: the player is moved out of
+   the page's hands and goes on playing behind whatever is opened next.
+   Nothing is opened or decoded again — it is the same player. */
+static bool bgm_adopt(app_state_t *app) {
+    if (!app->media || app->media_info.has_video || app->media_ended) return false;
+    if (!app->media_info.has_audio) return false;
+    if (app->media_page < 0 || (size_t)app->media_page >= page_count(app)) return false;
+    if (!rubraview_tags_is_music_name(rubraview_path_basename(app->source.pages[app->media_page].path))) return false;
+
+    bgm_close(app);                 /* only one piece of background music at a time */
+    music_next_close(app);          /* and no track waiting behind it */
+
+    app->bgm_media = app->media;
+    app->bgm_info = app->media_info;
+    app->bgm_page = app->media_page;
+    app->bgm_position = app->media_position;
+    app->bgm_paused = app->media_paused;
+    app->media = NULL;
+    app->media_page = -1;
+    app->media_ended = false;
+    app->media_has_frame = false;
+
+    /* The page it came from is gone, so nothing is sounding on screen —
+       otherwise the arbiter would see the track's own page as a rival
+       and stand the music aside from itself. */
+    (void)rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app));
+    bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_OPENED, bgm_pause_for_sound(app)));
+    return true;
+}
+
+/* Back to the page the music came from: the same player takes its place
+   again, at the moment it has reached. */
+static bool bgm_release_to_page(app_state_t *app, int32_t index) {
+    if (!app->bgm_media || index < 0 || index != app->bgm_page) return false;
+    app->media = app->bgm_media;
+    app->media_info = app->bgm_info;
+    app->media_page = index;
+    app->media_paused = app->bgm_paused;
+    app->media_position = app->bgm_position;
+    app->media_ended = false;
+    app->media_has_frame = false;
+    app->media_title_tenth = -1;
+    app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
+    app->media_clock = rubraview_media_clock_create(app->media_master, app->bgm_position,
+                                                    rubraview_pal_time_now_seconds());
+    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
+    if (!app->media_paused) rubraview_media_clock_resume(&app->media_clock, rubraview_pal_time_now_seconds());
+
+    app->bgm_media = NULL;
+    app->bgm_page = -1;
+    app->bgm_paused = false;
+    (void)rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_CLOSED, bgm_pause_for_sound(app));
+
+    music_load(app, app->source.pages[index].path);
+    subtitle_load(app, app->source.pages[index].path);
+    (void)media_page_ready(app);
+    return true;
+}
+
+/* Once a pass: keep the background music's own position, and notice when
+   it has played itself out. */
+static void bgm_tick(app_state_t *app) {
+    if (!app->bgm_media) return;
+    if (!app->bgm_paused) {
+        double heard = 0.0, at = 0.0;
+        if (rubraview_pal_media_audio_position(app->bgm_media, &heard, &at)) app->bgm_position = heard;
+        /* The backend says "finished" before the device has been heard
+           out (the same early word the crossfade ran into, T084), so the
+           track is only let go once it has actually reached its end. */
+        if (rubraview_pal_media_finished(app->bgm_media) &&
+            (app->bgm_info.duration_seconds <= 0.0 ||
+             app->bgm_position >= app->bgm_info.duration_seconds - 0.25)) {
+            bgm_close(app);
+        }
+    }
+}
+
 /* Opens the video when the page on screen is one, and closes the old one. */
 static void media_prepare(app_state_t *app) {
     int32_t index = current_page_index(app);
     if (app->media && index == app->media_page) return;
-    media_close(app);
-    if (index < 0 || (size_t)index >= page_count(app)) return;
+
+    media_close(app);   /* which hands a playing track to the background */
+
+    /* Back on the music's own page: the same player, where it had got to. */
+    if (bgm_release_to_page(app, index)) return;
+
+    if (index < 0 || (size_t)index >= page_count(app)) {
+        bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
+        return;
+    }
     u8str_t path = app->source.pages[index].path;
-    if (!is_media_path(path)) return;
+    if (!is_media_path(path)) {
+        /* A picture or a comic makes no sound: the music has the floor. */
+        bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
+        return;
+    }
 
     /* D-9: the preferred backend first, the other one when it cannot. */
     rubraview_media_backend_t order[2];
@@ -1233,6 +1363,10 @@ static void media_prepare(app_state_t *app) {
     if (app->slides && (size_t)app->spread_index < app->layout.count) {
         app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_VIDEO;
         app->slides[app->spread_index].duration_seconds = opened.info.duration_seconds;
+    }
+    /* §3.14.6: something with sound of its own is on screen now. */
+    if (opened.info.has_audio) {
+        bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, bgm_pause_for_sound(app)));
     }
     if (!opened.info.has_video) music_load(app, path);
     subtitle_load(app, path);
@@ -1358,6 +1492,9 @@ static void media_tick(app_state_t *app) {
             rubraview_pal_media_set_paused(m, true);
             app->media_paused = true;
             app->media_ended = true;
+            /* §3.14.6: the film is over; the music that stood aside for
+               it may come back. */
+            bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
             if (!app->media_info.has_video && app->media_info.duration_seconds > 0.0 &&
                 app->media_position > app->media_info.duration_seconds) {
                 app->media_position = app->media_info.duration_seconds;   /* the clock overshoots by a pass */
@@ -2437,6 +2574,17 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
+    } else if (!app->media && app->bgm_media && action_is(action, "media_play_pause")) {
+        /* §3.14.6: with a picture on screen and music behind it, the
+           play key is the music's — and the listener's own pause
+           outranks the arbiter from then on. */
+        bool pausing = !app->bgm_paused;
+        rubraview_pal_media_set_paused(app->bgm_media, pausing);
+        app->bgm_paused = pausing;
+        (void)rubraview_bgm_event(&app->bgm,
+                                  pausing ? RUBRAVIEW_BGM_READER_PAUSED : RUBRAVIEW_BGM_READER_RESUMED,
+                                  bgm_pause_for_sound(app));
+        osd_say(app, pausing ? U8("the music is paused") : U8("the music plays on"));
     } else if (action_is(action, "anim_toggle_pause") || action_is(action, "media_play_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
@@ -7906,6 +8054,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             next_spread(&app);
         }
         media_tick(&app);
+        bgm_tick(&app);
 
         /* Redraw only while something can change on screen. Without a
            GPU, Direct2D rasterises on the CPU, and a loop that redrew

@@ -72,7 +72,7 @@ static const char *const PARTS[] = {
 "  float  audio.crossfade_seconds  \"Crossfade\"               0.0..5.0 step 0.1 unit \"s\" = 0.0 wired\n"
 "  choice audio.replaygain         \"Volume levelling\"        off | track | album = off\n"
 "  int    audio.wasapi_latency_ms  \"Audio latency\"           20..100 step 5 unit \"ms\" = 40\n"
-"  toggle audio.bgm_pause_on_video \"Pause music during video\" = true\n"
+"  toggle audio.bgm_pause_on_video \"Pause music during video\" = true wired\n"
 "\n",
 "page video \"Video\"\n"
 "  section \"Decoding\"\n"
