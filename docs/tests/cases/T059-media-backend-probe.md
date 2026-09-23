@@ -27,3 +27,12 @@ tried; without them, only Media Foundation.
 
 Measured on the Win11 VM, 2026-09-12: FLV — Media Foundation cannot open,
 FFmpeg decodes; MP4, Ogg/Theora, Opus — both backends open and decode.
+
+## FFmpeg 9.0, 2026-09-24 (D-26)
+
+With the five 9.0 DLLs (BtbN's `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0`)
+beside the program, `--probe-media two_audio.mkv` said "its DLLs are here,
+at a version these headers know" and decoded 24 pictures. With 8.1's DLLs
+beside it instead, the same build said "no usable DLLs beside the program
+(Media Foundation alone)" and played the file with Windows' decoders —
+which is what a version it cannot read must look like.

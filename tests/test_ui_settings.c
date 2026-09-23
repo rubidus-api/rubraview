@@ -175,8 +175,8 @@ int main(void) {
         for (size_t i = 0; i < v.line_count; ++i) {
             if (v.lines[i].kind != RUBRAVIEW_LINE_NOTE) continue;
             u8str_t t = rubraview_settings_line_text(&v, &s, &sources, i, 0, buffer, sizeof(buffer));
-            files = files || has(t, "avcodec-62  avformat-62  avutil-60  swscale-9  swresample-6");
-            zip = zip || has(t, "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip");
+            files = files || has(t, "avcodec-63  avformat-63  avutil-61  swscale-10  swresample-7");
+            zip = zip || has(t, "ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip");
         }
         assert(files && zip);
         for (int32_t k = 0; k < 40; ++k) {

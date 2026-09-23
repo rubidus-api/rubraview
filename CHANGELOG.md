@@ -6,6 +6,14 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+
+- FFmpeg 9.0 is the version to put beside the program (owner, 2026-09-24).
+  The headers here are 9.0.2's, so the DLLs are `avcodec-63`,
+  `avformat-63`, `avutil-61`, `swscale-10` and `swresample-7`. FFmpeg 8.1's
+  DLLs are refused as any other version is — the viewer says so and uses
+  Windows' own decoders, as it does when FFmpeg is absent.
+
 ### Fixed
 
 - A subtitle file is read whatever order it is written in (owner,
