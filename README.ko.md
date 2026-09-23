@@ -1,12 +1,12 @@
 # Rubraview
 
-**Rubraview v0.0.16**(최신 판) 내려받기 — [rubraview-v0.0.16.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.16/rubraview-v0.0.16.zip) · [모든 판](https://github.com/rubidus-api/rubraview/releases)
+**Rubraview v0.0.17**(최신 판) 내려받기 — [rubraview-v0.0.17.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.17/rubraview-v0.0.17.zip) · [모든 판](https://github.com/rubidus-api/rubraview/releases)
 
 [English](README.md) · **한국어**
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview-v0.0.16.exe` 를 실행하면 됩니다. 설치 프로그램도, 옆에 둬야 하는 파일도 없습니다. 예외는 FFmpeg 의 DLL 하나뿐이고, 그것도 Media Foundation 이 못 여는 형식에만 필요합니다.
+압축을 풀고 `rubraview-v0.0.17.exe` 를 실행하면 됩니다. 설치 프로그램도, 옆에 둬야 하는 파일도 없습니다. 예외는 FFmpeg 의 DLL 하나뿐이고, 그것도 Media Foundation 이 못 여는 형식에만 필요합니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
@@ -163,7 +163,7 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip` 을 받으세요. 반드시 **9.0**
 이어야 하고 이름에 **shared** 가 있어야 합니다. `shared` 가 없는 판에는 실행
 파일만 있고 DLL 이 없으며, 다른 판은 DLL 이름의 번호가 달라 루브라뷰가 쓰지
-않습니다. 압축 속 `bin` 폴더의 다섯 개를 `rubraview-v0.0.16.exe` 옆에 복사하고
+않습니다. 압축 속 `bin` 폴더의 다섯 개를 `rubraview-v0.0.17.exe` 옆에 복사하고
 루브라뷰를 다시 실행하면 됩니다. `lib` 폴더의 `.dll.a`, `.lib` 는 FFmpeg 을
 링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
 

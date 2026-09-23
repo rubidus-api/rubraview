@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-09-24
+
 ### Changed
 
 - FFmpeg 9.0 is the version to put beside the program (owner, 2026-09-24).
