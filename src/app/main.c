@@ -1001,6 +1001,15 @@ static void pgs_load(app_state_t *app, u8str_t sup_path) {
     app->pgs = rubraview_pgs_index(app->arena, (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.len);
 }
 
+/* The sync the reader set by hand for this film comes back — for a text
+   track and for a picture one alike, since one offset moves them all. */
+static void subtitle_restore_offset(app_state_t *app) {
+    if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
+        same_text(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
+        app->subtitle.offset_seconds = app->subtitle_offset_seconds;
+    }
+}
+
 static void subtitle_select(app_state_t *app, int32_t index) {
     vobsub_clear(app);
     pgs_clear(app);
@@ -1021,6 +1030,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
                                                           &app->tracks, index);
             app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
+            subtitle_restore_offset(app);
             return;
         }
         if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_PGS) {
@@ -1030,6 +1040,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
                                                           &app->tracks, index);
             app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
+            subtitle_restore_offset(app);
             return;
         }
         app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
@@ -1057,11 +1068,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
                                           &app->tracks, index);
     app->subtitle_name = track->title.len > 0 ? track->title : label;
     app->tracks.current_subtitle = index;
-    /* The same film again: the sync the reader set by hand comes back. */
-    if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
-        same_text(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
-        app->subtitle.offset_seconds = app->subtitle_offset_seconds;
-    }
+    subtitle_restore_offset(app);
 }
 
 static void subtitle_load(app_state_t *app, u8str_t video_path) {
@@ -2175,7 +2182,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (app->media && (action_is(action, "subtitle_earlier") || action_is(action, "subtitle_later"))) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
-        if (app->subtitle.count == 0) {
+        /* A DVD's or a Blu-ray's pictures are subtitles too, and they are
+           moved by the same offset (found while measuring T081). */
+        if (app->subtitle.count == 0 && app->vobsub.count == 0 && app->pgs.count == 0) {
             osd_say(app, U8("no subtitles are showing"));
         } else {
             rubraview_subtitle_nudge(&app->subtitle, action_is(action, "subtitle_later"));
