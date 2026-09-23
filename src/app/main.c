@@ -211,6 +211,13 @@ typedef struct app_state {
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
+    /* The same two points, typed (owner, 2026-09-24). The box holds one
+       field per point; a key stamps the playhead into the one in hand,
+       and what is typed goes back to the points when it closes. */
+    bool                   ab_edit_open;
+    int32_t                ab_edit_field;     /* 0 = A, 1 = B */
+    char                   ab_edit_text[2][32];
+    size_t                 ab_edit_length[2];
     bool                   timeline_dragging; /* RFC-0002 §4.2: the pointer holds the seek bar */
     /* RFC-0002 Q6: the toolbox as a window of its own once dragged out. */
     rubraview_window_t    *toolbox_window;
@@ -408,6 +415,8 @@ static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void help_show(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
+static void ab_edit_begin(app_state_t *app);
 static void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi);
 static void rename_end(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
@@ -2299,6 +2308,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         speed_text(text, sizeof(text), speed);
         int n = snprintf(line, sizeof(line), "speed %s", text);
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    } else if (action_is(action, "media_ab_edit")) {
+        ab_edit_begin(app);
     } else if (app->media && (action_is(action, "media_ab_a") || action_is(action, "media_ab_b") ||
                               action_is(action, "media_ab_clear") || action_is(action, "media_ab_cycle"))) {
         /* D-15 A-B repeat. The tile walks A, then B, then off. */
@@ -2499,6 +2510,116 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
 
     return false;
+}
+
+/* ---- A-B by hand (owner, 2026-09-24) ---- */
+
+/* One point as text, the way the timeline writes it. An unset point is
+   an empty field rather than a nought: nought is a time. */
+static void ab_edit_fill(app_state_t *app, int32_t field, double seconds) {
+    char buffer[32];
+    if (seconds < 0.0) {
+        app->ab_edit_length[field] = 0;
+        app->ab_edit_text[field][0] = '\0';
+        return;
+    }
+    u8str_t text = rubraview_format_timecode(buffer, sizeof(buffer), seconds, true);
+    size_t n = text.len < sizeof(app->ab_edit_text[0]) - 1 ? text.len : sizeof(app->ab_edit_text[0]) - 1;
+    memcpy(app->ab_edit_text[field], text.ptr, n);
+    app->ab_edit_text[field][n] = '\0';
+    app->ab_edit_length[field] = n;
+}
+
+static void ab_edit_begin(app_state_t *app) {
+    if (!app->media) { osd_say(app, U8("nothing is playing")); return; }
+    app->ab_edit_open = true;
+    app->ab_edit_field = 0;
+    ab_edit_fill(app, 0, app->ab_a);
+    ab_edit_fill(app, 1, app->ab_b);
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+static void ab_edit_close(app_state_t *app) {
+    app->ab_edit_open = false;
+    rubraview_pal_window_text_input(app->window, false);
+}
+
+/* What was typed becomes the points — or says why it cannot, and keeps
+   the box open so the reader can fix it rather than start again. */
+static bool ab_edit_commit(app_state_t *app) {
+    double a = -1.0, b = -1.0;
+    for (int32_t field = 0; field < 2; ++field) {
+        u8str_t text = { .ptr = app->ab_edit_text[field], .len = app->ab_edit_length[field] };
+        double *into = field == 0 ? &a : &b;
+        if (text.len == 0) continue;            /* left empty: that point is unset */
+        if (!rubraview_parse_timecode(text, into)) {
+            osd_say(app, field == 0 ? U8("A is not a time — try 1:23.5")
+                                    : U8("B is not a time — try 1:23.5"));
+            app->ab_edit_field = field;
+            return false;
+        }
+    }
+    if (a >= 0.0 && b >= 0.0 && b <= a) {
+        osd_say(app, U8("B has to come after A"));
+        app->ab_edit_field = 1;
+        return false;
+    }
+    app->ab_a = a;
+    app->ab_b = b;
+    char line[96];
+    int n = a < 0.0 ? snprintf(line, sizeof(line), "repeat off")
+          : b < 0.0 ? snprintf(line, sizeof(line), "repeat from %.3f s", a)
+                    : snprintf(line, sizeof(line), "repeating %.3f - %.3f s", a, b);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    return true;
+}
+
+/* The keys the box takes. Everything else is swallowed while it is open:
+   a box that is taking a number must not also turn pages. */
+static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->ab_edit_open) return false;
+    if (key_is(combo, "Escape")) { ab_edit_close(app); return true; }
+    if (key_is(combo, "Enter")) {
+        if (ab_edit_commit(app)) ab_edit_close(app);
+        return true;
+    }
+    if (key_is(combo, "Tab") || key_is(combo, "Up") || key_is(combo, "Down")) {
+        app->ab_edit_field = app->ab_edit_field == 0 ? 1 : 0;
+        return true;
+    }
+    if (key_is(combo, "Backspace")) {
+        int32_t f = app->ab_edit_field;
+        if (app->ab_edit_length[f] > 0) app->ab_edit_text[f][--app->ab_edit_length[f]] = '\0';
+        return true;
+    }
+    /* The crossing-over the owner asked for: the keys that set a point
+       put the playhead into the field in hand, as a number, and it can
+       then be typed over. */
+    if (key_is(combo, "BracketLeft") || key_is(combo, "BracketRight")) {
+        int32_t f = key_is(combo, "BracketLeft") ? 0 : 1;
+        app->ab_edit_field = f;
+        ab_edit_fill(app, f, app->media_position);
+        return true;
+    }
+    if (key_is(combo, "Backslash")) {
+        app->ab_edit_length[0] = app->ab_edit_length[1] = 0;
+        app->ab_edit_text[0][0] = app->ab_edit_text[1][0] = '\0';
+        return true;
+    }
+    return true;   /* the digits arrive as text; the rest is swallowed */
+}
+
+/* The characters themselves: only what a time is made of. */
+static void ab_edit_text_typed(app_state_t *app, u8str_t text) {
+    int32_t f = app->ab_edit_field;
+    for (size_t i = 0; i < text.len; ++i) {
+        char c = text.ptr[i];
+        bool wanted = (c >= '0' && c <= '9') || c == ':' || c == '.' || c == ',';
+        if (!wanted) continue;
+        if (app->ab_edit_length[f] + 1 >= sizeof(app->ab_edit_text[0])) return;
+        app->ab_edit_text[f][app->ab_edit_length[f]++] = c;
+        app->ab_edit_text[f][app->ab_edit_length[f]] = '\0';
+    }
 }
 
 /* ---- RFC-0002 Q6: the detached toolbox ---- */
@@ -2704,6 +2825,7 @@ static void toolbox_window_pump(app_state_t *app) {
 }
 
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (ab_edit_handle_key(app, combo)) return;
     if (triage_handle_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
     /* §3.7.1: the slide show's own bindings win while it is running,
@@ -3421,6 +3543,35 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
     }
 }
 
+/* The two points as text, side by side, with the one in hand marked and
+   a line saying how the keys and the numbers cross over. */
+static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->ab_edit_open) return;
+    double box_w = 560.0 * dpi, box_h = 96.0 * dpi;
+    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.62, box_w, box_h };
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+
+    bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+    char line[160];
+    int n = snprintf(line, sizeof(line), "A  %s%.*s%s     B  %s%.*s%s",
+                     app->ab_edit_field == 0 ? "[" : " ",
+                     (int)app->ab_edit_length[0], app->ab_edit_text[0],
+                     app->ab_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ",
+                     app->ab_edit_field == 1 ? "[" : " ",
+                     (int)app->ab_edit_length[1], app->ab_edit_text[1],
+                     app->ab_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ");
+    if (n > 0) {
+        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                                       top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
+    rubraview_pal_render_draw_text(app->renderer,
+                                   U8("[ or ] takes this moment  ·  Tab swaps  ·  \\ empties  ·  Enter keeps"),
+                                   hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -3438,6 +3589,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 
     draw_rename_box(app, win_w, win_h, chrome_dpi);
+    draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
 
     draw_notice(app, win_w, win_h, chrome_dpi);
 
@@ -3889,6 +4041,12 @@ static void rename_end(app_state_t *app) {
 
 /* Text typed or finished by the IME, and the IME's unfinished part. */
 static void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
+    if (app->ab_edit_open) {
+        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+            ab_edit_text_typed(app, (u8str_t){ .ptr = event->text.utf8, .len = event->text.length });
+        }
+        return;
+    }
     if (!app->rename_active) return;
     u8str_t text = { .ptr = event->text.utf8, .len = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {

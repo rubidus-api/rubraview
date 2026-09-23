@@ -79,6 +79,23 @@ double rubraview_seekbar_fraction(double position_seconds, double duration_secon
  */
 u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds);
 
+/**
+ * The other way round (owner, 2026-09-24: the A-B points should be
+ * settable by typing a time as well as by tapping a key, and the two
+ * should cross over freely). Reads what `rubraview_format_timecode`
+ * writes, and the shorter forms a person types:
+ *
+ *   `83`            83 seconds
+ *   `1:23`          a minute and 23 seconds
+ *   `1:23.5`        and a half
+ *   `1:02:03.500`   an hour in
+ *
+ * Blanks around it are ignored. False — and `*out` untouched — when the
+ * text is not a time: a field is either a time or it is not, and a
+ * half-read one would move the loop somewhere nobody asked for.
+ */
+bool rubraview_parse_timecode(u8str_t text, double *out_seconds);
+
 /* ---- §3.16.2 track switching ---- */
 
 typedef enum rubraview_track_kind {
