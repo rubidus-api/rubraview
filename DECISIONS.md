@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-29 The next track is opened early, and the two overlap on an equal-power curve
+
+- Status: Accepted (owner 2026-09-24: "E도 진행해 주세요", RV-075 being the gapless and crossfade part of it)
+- Decision: while a track plays, the next page is opened as a second player — two seconds before it is wanted, plus the crossfade — and takes over at the end without anything being opened at that moment. The overlap uses `cos`/`sin` of the same quarter turn rather than a straight line, because two sounds at half amplitude are not half as loud together and a linear fade dips audibly in the middle. The deciding is a pure function (`rubraview_track_plan`, `src/core/music.c`) and is tested on the host; the viewer only carries it out.
+- Consequences: two players are alive at once, which needs a level per player — `rubraview_pal_media_set_gain`, applied where the WASAPI output fills the device buffer. The process-wide volume of D-15 is untouched. "The next track" is the next *page*, and only when it is a music file: a picture or a film is never slid into. A crossfade is never more than half of the track it is leaving, so a short one is still heard by itself. A file that does not say how long it is gets no transition at all, since one can only be timed against a known end. `audio.gapless` and `audio.crossfade_seconds` are now live settings.
+
 ## 2026-09-24: D-28 The A-B points are named by key and by number, and the two cross over
 
 - Status: Accepted (owner 2026-09-24, relayed: "A B 반복을 수동으로 시간을 입력할 수 있으면 좋겠네요 ... 서로 교차해서 지정할 수 있게요")

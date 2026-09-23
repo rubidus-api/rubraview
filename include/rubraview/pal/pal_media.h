@@ -117,6 +117,13 @@ bool rubraview_pal_media_finished(rubraview_media_t *media);
 void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused);
 
 /**
+ * RV-075: how loud this player is, 0.0 to 1.0, on top of the program's
+ * volume — what a crossfade between two tracks is made of. A player with
+ * no sound, or none reaching a device, takes it and does nothing.
+ */
+void rubraview_pal_media_set_gain(rubraview_media_t *media, double gain);
+
+/**
  * Where the listener is and when that was measured — the §5.3 master
  * clock. False when the file's sound is not playing on a device.
  */

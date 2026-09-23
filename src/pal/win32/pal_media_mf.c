@@ -1043,6 +1043,13 @@ static bool mf_tracks(void *handle, rubraview_track_set_t *out_set) {
     return media->tracks.count > 0;
 }
 
+
+/* RV-075: this player's own level, so two tracks can cross over. */
+static void mf_set_gain(void *handle, double gain) {
+    mf_media_t *media = (mf_media_t*)handle;
+    if (media) rubraview_pal_audio_set_gain(media->audio, gain);
+}
+
 static const rubraview_media_backend_api_t MF_API = {
     .available = mf_available,
     .open = mf_open,
@@ -1056,6 +1063,7 @@ static const rubraview_media_backend_api_t MF_API = {
     .audio_position = mf_audio_position,
     .tracks = mf_tracks,
     .select_audio_track = mf_select_audio_track,
+    .set_gain = mf_set_gain,
 };
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void) {
