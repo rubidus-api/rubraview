@@ -52,6 +52,7 @@
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
 #include "rubraview/ui_actions.h"
+#include "rubraview/vobsub.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
@@ -218,6 +219,19 @@ typedef struct app_state {
        video on screen. Empty when the film has none. */
     rubraview_subtitle_track_t subtitle;
     u8str_t                    subtitle_name;   /* what to say in the OSD */
+    /* A DVD's picture subtitles (owner, 2026-09-23). The index is held
+       whole; one picture at a time is decoded into `vobsub_pixels` and
+       uploaded, and the texture is kept while that subtitle is up. */
+    rubraview_vobsub_track_t   vobsub;
+    u8str_t                    vobsub_sub;          /* the `.sub` file's bytes */
+    uint8_t                   *vobsub_pixels;
+    rubraview_texture_t       *vobsub_texture;
+    int32_t                    vobsub_texture_cue;  /* which one the texture holds, -1 for none */
+    int32_t                    vobsub_texture_w, vobsub_texture_h;
+    rubraview_vobsub_cue_t     vobsub_cue;
+    rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
+    bool                       video_transform_ok;
+    int32_t                    video_page_w, video_page_h;
     /* §3.16.2: the sound tracks the file holds and the subtitle files
        beside it, in one list — what the reader cycles through. */
     rubraview_track_set_t         tracks;
@@ -628,7 +642,11 @@ static void update_window_title(app_state_t *app) {
 
 static void osd_say(app_state_t *app, u8str_t text);
 
+static void vobsub_clear(app_state_t *app);
+
 static void media_close(app_state_t *app) {
+    vobsub_clear(app);
+    app->video_transform_ok = false;
     if (app->media) {
         rubraview_pal_media_close(app->media);
         app->media = NULL;
@@ -749,6 +767,10 @@ static app_page_t *media_page_ready(app_state_t *app) {
 }
 
 #define SUBTITLE_MAX_BYTES (2u * 1024u * 1024u)
+/* A DVD's index is text, its pictures are not: a feature film's worth of
+   subpictures runs to a few tens of megabytes. */
+#define VOBSUB_MAX_IDX_BYTES (4u * 1024u * 1024u)
+#define VOBSUB_MAX_SUB_BYTES (192u * 1024u * 1024u)
 #define SUBTITLE_MAX_CANDIDATES 8
 
 /* §3.16.1 / R135: the subtitle files that share the film's name. The
@@ -817,7 +839,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
 
     app->subtitle_count = subtitle_candidates(app->arena, video_path, app->subtitle_files,
                                               SUBTITLE_MAX_CANDIDATES, NULL);
-    static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass" };
+    static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx" };
     for (size_t i = 0; i < app->subtitle_count; ++i) {
         rubraview_track_t track = {
             .kind = RUBRAVIEW_TRACK_SUBTITLE,
@@ -825,7 +847,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             .stream_index = (int32_t)i,   /* into app->subtitle_files, not the container */
             .language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path),
             .title = rubraview_path_basename(app->subtitle_files[i].path),
-            .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 5
+            .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 6
                                       ? (size_t)app->subtitle_files[i].format : 0]),
         };
         rubraview_tracks_add(&app->tracks, track);
@@ -837,7 +859,43 @@ static bool same_text(u8str_t a, u8str_t b) {
 }
 
 /* Shows one subtitle track, or none when `index` is -1. */
+/* The picture subtitles go with the film they belong to. */
+static void vobsub_clear(app_state_t *app) {
+    if (app->vobsub_texture) rubraview_pal_texture_destroy(app->vobsub_texture);
+    app->vobsub_texture = NULL;
+    app->vobsub_texture_cue = -1;
+    app->vobsub_texture_w = app->vobsub_texture_h = 0;
+    app->vobsub = (rubraview_vobsub_track_t){0};
+    app->vobsub_sub = (u8str_t){ .ptr = "", .len = 0 };
+}
+
+/* `movie.idx` names the index; its pictures are in `movie.sub` beside it. */
+static void vobsub_load(app_state_t *app, u8str_t idx_path) {
+    vobsub_clear(app);
+    u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, idx_path, VOBSUB_MAX_IDX_BYTES);
+    if (idx_text.len == 0) return;
+
+    char sub_path[1024];
+    u8str_t stem = rubraview_path_stem(idx_path);
+    if (stem.len == 0 || stem.len + 5 >= sizeof(sub_path)) return;
+    memcpy(sub_path, stem.ptr, stem.len);
+    memcpy(sub_path + stem.len, ".sub", 4);
+    app->vobsub_sub = rubraview_pal_fs_read_file(app->arena, (u8str_t){ .ptr = sub_path, .len = stem.len + 4 },
+                                                 VOBSUB_MAX_SUB_BYTES);
+    if (app->vobsub_sub.len == 0) {
+        osd_say(app, U8("the .sub file beside the index is missing"));
+        return;
+    }
+    if (!app->vobsub_pixels) {
+        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, RUBRAVIEW_VOBSUB_MAX_PIXELS);
+        if (!proven_is_ok(mem.err)) return;
+        app->vobsub_pixels = (uint8_t*)mem.value.ptr;
+    }
+    app->vobsub = rubraview_vobsub_index(app->arena, idx_text, 0);
+}
+
 static void subtitle_select(app_state_t *app, int32_t index) {
+    vobsub_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
     app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
     app->tracks.current_subtitle = -1;
@@ -847,6 +905,15 @@ static void subtitle_select(app_state_t *app, int32_t index) {
 
     if (track->is_external) {
         if (track->stream_index < 0 || (size_t)track->stream_index >= app->subtitle_count) return;
+        if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
+            vobsub_load(app, app->subtitle_files[track->stream_index].path);
+            if (app->vobsub.count == 0) return;
+            u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+                                                          &app->tracks, index);
+            app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
+            app->tracks.current_subtitle = index;
+            return;
+        }
         app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
     } else {
         /* §3.16.1 / D-12: a stream inside the file. Reading it walks the
@@ -2688,7 +2755,56 @@ static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rub
 
 /* §3.16.1 / R135: the line of dialogue for where the film is now, laid
    over the picture with a dark outline so it reads on any background. */
+/* A DVD subtitle: the picture for this moment, drawn over the film in
+   the place the disc put it (owner, 2026-09-23). */
+static void draw_vobsub(app_state_t *app) {
+    if (!app->media || app->vobsub.count == 0 || !app->vobsub_pixels || !app->video_transform_ok) return;
+    if (app->vobsub.frame_width <= 0 || app->vobsub.frame_height <= 0) return;
+
+    double when = app->media_position - app->subtitle.offset_seconds;   /* Z / X move these too */
+    int32_t index = rubraview_vobsub_at(&app->vobsub, when);
+    if (index < 0) return;
+
+    if (index != app->vobsub_texture_cue) {
+        /* A new one: decode it, and make a texture of its own size. */
+        if (!rubraview_vobsub_decode(&app->vobsub, (size_t)index, (const uint8_t*)app->vobsub_sub.ptr,
+                                     app->vobsub_sub.len, app->vobsub_pixels, &app->vobsub_cue)) {
+            app->vobsub_texture_cue = index;   /* a torn one: do not try it again every frame */
+            if (app->vobsub_texture) { rubraview_pal_texture_destroy(app->vobsub_texture); app->vobsub_texture = NULL; }
+            return;
+        }
+        app->vobsub_texture_cue = index;
+        if (!app->vobsub_texture || app->vobsub_texture_w != app->vobsub_cue.width ||
+            app->vobsub_texture_h != app->vobsub_cue.height) {
+            if (app->vobsub_texture) rubraview_pal_texture_destroy(app->vobsub_texture);
+            app->vobsub_texture = rubraview_pal_texture_create_bgra(app->renderer, app->vobsub_cue.width,
+                                                                    app->vobsub_cue.height);
+            app->vobsub_texture_w = app->vobsub_cue.width;
+            app->vobsub_texture_h = app->vobsub_cue.height;
+        }
+        if (!app->vobsub_texture) return;
+        size_t pixels = (size_t)app->vobsub_cue.width * (size_t)app->vobsub_cue.height;
+        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, pixels * 4);
+        if (!proven_is_ok(mem.err)) return;
+        uint32_t *bgra = (uint32_t*)mem.value.ptr;
+        rubraview_vobsub_pixels(&app->vobsub_cue, bgra);
+        rubraview_pal_texture_upload_bgra(app->vobsub_texture, (const uint8_t*)bgra, app->vobsub_cue.width * 4);
+    }
+    if (!app->vobsub_texture || app->vobsub_cue.width <= 0) return;
+    /* The picture's own frame — 720x480 and such — onto the film's. */
+    if (app->media_position >= app->vobsub_cue.end_seconds + app->subtitle.offset_seconds) return;
+    double sx = (double)app->video_page_w / (double)app->vobsub.frame_width;
+    double sy = (double)app->video_page_h / (double)app->vobsub.frame_height;
+    rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+        rubraview_mat3x2_scale(sx, sy),
+        rubraview_mat3x2_translate((double)app->vobsub_cue.x * sx, (double)app->vobsub_cue.y * sy));
+    rubraview_pal_render_draw_texture(app->renderer, app->vobsub_texture,
+                                      rubraview_mat3x2_multiply(place, app->video_transform),
+                                      RUBRAVIEW_INTERP_LINEAR);
+}
+
 static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
+    draw_vobsub(app);
     if (!app->media || app->subtitle.count == 0) return;
     const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
     if (!cue || cue->text.len == 0) return;
@@ -2933,6 +3049,14 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                 rubraview_mat3x2_t oriented = rubraview_mat3x2_multiply(
                     rubraview_orientation_matrix(app->orientation, (double)page->width, (double)page->height),
                     cmd->transform);
+                if (cmd->page_index == app->media_page) {
+                    /* A DVD's picture subtitles are drawn in the film's
+                       own frame, so they need the film's place on screen. */
+                    app->video_transform = oriented;
+                    app->video_transform_ok = true;
+                    app->video_page_w = page->width;
+                    app->video_page_h = page->height;
+                }
                 rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
 
                 if (app->pixel_grid && comp.scale >= PIXEL_GRID_MIN_SCALE) {
