@@ -111,3 +111,52 @@ The placement rules, the two halves and the corner each box goes home to
 are checked on the host by T009 and T030; what needs a machine is
 whether the two buttons are visibly different and whether the hover feels
 right.
+
+## Measured on the Windows 11 VM, 2026-09-24
+
+The first run of this case. The build was 0.0.17 run from its own folder,
+on `rbtest` (six images) at 1280x752. Keys were sent into the interactive
+session; the steps that need a modifier (`Ctrl`, `Shift`, `Alt`), a drag,
+or a hover are not reachable that way and are marked so.
+
+| # | Result |
+|---|---|
+| 1, 2 | PASS. The line reads `a_photo.jpg \| 4032 x 3024 \| 100% \| 1 / 6`, and `I` pins it on. |
+| 8 | PASS, with the step's words now stale: since D-20 the toolbox opens as a **horizontal strip** — name row, then icon buttons — not a grid of tiles, and the pin sits beside the anchor (D-20, owner 2026-09-22). |
+| 11 | PASS. The menu opens at the top left with the breadcrumb `Menu` and the tiles `On top`, `File >`, `View >`, `Show >`, `Help >` (D-18's tree, not the older one this step describes). |
+| 14 | PASS. The filmstrip appears along the bottom with thumbnails of the pages already decoded, and the current page is in it. |
+| 15, 16 | **FAIL — see the defect below.** |
+| 25-28 | NOT RUN (the picker's own case is T079, measured 2026-09-23). |
+| 17-19 | NOT RUN this pass. |
+| 29 | Not applicable: the VM has no digitiser. |
+| 7, 12, 13, 20, 21, 29, 33 | NOT RUN: a drag, a hover or a modifier, none of which the in-session key path can send. The boxes' own placement is covered on the host by T009 and T030. |
+| Boxes 1 | PASS by eye: each collapsed box is a wide bar of two buttons — the left outlined, the right filled — not one square. |
+
+Also seen: `F1` opens the help window and it lists 95 keys, grouped
+(T080 again, on this build); `E` opens the edit workbench and `Esc`
+closes it.
+
+### Defect found by this case: rotation and flipping do nothing (2026-09-24)
+
+`R`, `H` and the other keys of the "Looking at a picture" group change
+nothing on screen. This is not the key lookup and not the core:
+
+- the F1 help, which is built from the keymap in force, lists `R` as
+  Rotate, and a host check of `rubraview_keymap_find_action` returns
+  `rotate_cw` for `R` in the `view` context;
+- `rubraview_orientation_rotate_cw` and `rubraview_orientation_matrix`
+  are right on the host (one press turns 800x600 into 600x800 with the
+  matrix `0 1 -1 0 600 0`);
+- the action *is* reached: pressing `R` wakes the OSD, which only
+  `handle_action` does — 18200 pixels of the status strip change and not
+  one pixel of the picture;
+- binding `rotate_cw` in the global section of a `keymap.ini` beside the
+  program changes nothing either, so it is not the context;
+- measured on both a large photo (4032x3024) and a small one (800x600),
+  windowed, with the same result: the canvas is identical to the pixel
+  before and after.
+
+So `app->orientation` is set and the drawing does not follow it. The next
+step is to instrument `draw_spread` — it is the only place that consults
+the orientation, and either it is not the path this page takes or the
+transform it builds is discarded. Recorded in `BACKLOGS.md`.

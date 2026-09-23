@@ -70,3 +70,31 @@ Note the Windows version and which steps passed. A failure in 1-4 points
 at the archive wiring in `main.c`, since the ZIP reading itself is proven
 by T014 and T034; 9-10 at the history wiring, proven by T033; 11 at the
 WIC colour transform, which has no host coverage at all.
+
+## Measured on the Windows 11 VM, 2026-09-24
+
+The first run of this case. There was no comic on the machine, so the
+archives were made on purpose (`Vol 01.cbz` with its pages named `1`,
+`2`, `9`, `10`; `Vol 02.cbz`; `manga.cbz` carrying a `ComicInfo.xml` with
+`YesAndRightToLeft` and a `FrontCover`; `cp949raw.cbz` whose names are
+CP949 bytes with the UTF-8 flag clear, written by hand because Python's
+own zip writer sets that flag).
+
+| # | Result |
+|---|---|
+| 1 | PASS. `%TEMP%` holds nothing of ours while the archive is open or after it closes. |
+| 4 | PASS. The fourth page is the one named `10`, so the order is 1, 2, 9, 10 and not 1, 10, 2, 9. |
+| 5 | PASS. The status line reads `둘째장.png`: the host code page was applied. (The first attempt "failed" against a fixture that was wrong — Python had set the UTF-8 flag and encoded the mojibake, so the viewer was right to show what the file claimed. A fixture is evidence only when it is the thing it imitates.) |
+| 6 | PASS. `Right` on the last page of `Vol 01` opens `Vol 02` at its first page. |
+| 8 | PASS. `manga.cbz` opens right to left with no key press: the cover is alone, and the next spread has page 2 on the **right** and page 3 on the left. |
+| 9 | PASS. Left on page 3 of 4 and reopened, the viewer offers `Resume page 3 / 4 (Enter)`. A two-page volume left on its last page offers nothing, which is right. |
+| 10 | PASS, both halves. With no `settings.ini` beside the program, `history.ini` and `layout.ini` are written to `%APPDATA%\rubraview` — on a clean exit, not while running. With an empty `settings.ini` beside it, they are written **there** and the ones in `%APPDATA%` are left alone. |
+| 12 | PASS: folders behave as they did. |
+| 2, 3, 13 | NOT RUN: these need a volume of hundreds of pages, which this machine has not got. |
+| 7 | NOT RUN: `Ctrl+]` cannot be sent through the in-session key path. |
+| 11 | NOT RUN: no wide-gamut photo on the machine. |
+
+Also seen: the window title is empty where an archive page's name would
+go (`(2/2) - Rubraview 0.0.17`), while the status line names the page
+properly. Noted in `BACKLOGS.md` as a small blemish, not a defect of the
+archive path.

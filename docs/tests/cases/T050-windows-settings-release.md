@@ -46,3 +46,18 @@ was not built.
   ranges and defaults, and the gate makes sure the ones marked live
   really are — but the modules that would read them are M5 and M8, or
   are still reading their values from constants.
+
+## Measured on the Windows 11 VM, 2026-09-24
+
+The first run of this case, on 0.0.17 from its own folder.
+
+| # | Result |
+|---|---|
+| 1 | PASS. `F10` opens a separate window titled `Rubraview settings` over the viewer. |
+| 2 | PASS. Eight pages down the left — General, Viewer, Files, Audio, Video, Display, Cache, Keys — and General shows Window, Title bar and "Where this is kept", none of them empty. |
+| 3, 4 | PASS. `Down` then `Space` turned "Reuse the open window" off; `Esc` closed the window and `settings.ini` then held `single_instance = false` under `[general]`. |
+| 5 | PASS, and this is the one worth keeping: a line written by hand — `made_up = 1` under `[viewer]` — was **still there** after the window rewrote the file. A key this version does not know survives being opened by it. |
+| 12 | PASS. The General page names the file it is using — the `settings.ini` in the program's own folder, marked `(portable)` — and nothing new appeared under `%APPDATA%`. |
+| 11 | PASS by the same evidence as T037 step 10: with no `settings.ini` beside the program the files go to `%APPDATA%\rubraview`. |
+| 6, 7, 8, 9, 10 | NOT RUN: Revert, Defaults, the grey rows, registering file types and picking a curation folder all need the pointer or a folder dialog. |
+| 13, 14, 15 | NOT RUN: there is no second Windows machine and no USB stick here. `imports.txt` is checked by the packaging step itself. |
