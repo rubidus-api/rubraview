@@ -45,6 +45,10 @@ typedef struct rubraview_subtitle_track {
     rubraview_subtitle_cue_t   *cues;    /* sorted by start time */
     size_t                      count;
     u8str_t                     language;
+    /* One SAMI file often holds several languages, one class each
+       (owner, 2026-09-23). When this is set, only the cues of that
+       language are shown; empty means every cue, as before. */
+    u8str_t                     shown_language;
     double                      offset_seconds;  /* §3.16.1's Z/X adjustment */
 } rubraview_subtitle_track_t;
 
@@ -70,6 +74,13 @@ rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str
  */
 const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_track_t *track,
                                                       double time_seconds);
+
+/**
+ * The languages a parsed file holds, in the order they first appear
+ * (SAMI's classes; one entry, empty, for a file that names none).
+ * Returns how many were written to `out`.
+ */
+size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, u8str_t *out, size_t max);
 
 /** §3.16.1: Z and X move the whole track in half-second steps. */
 void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later);

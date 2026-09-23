@@ -65,7 +65,7 @@ static const expected_t EXPECTED[] = {
     { "audio", "wasapi_latency_ms", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_AUDIO, 40.0, 20.0, 100.0, 5.0, "", false },
     { "audio", "bgm_pause_on_video", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_AUDIO, 1.0, 0.0, 1.0, 1.0, "", false },
     { "video", "decoder", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_VIDEO, 0.0, 0.0, 1.0, 1.0, "windows|ffmpeg", true },
-    { "video", "hardware_decode", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_VIDEO, 0.0, 0.0, 2.0, 1.0, "off|on|always", true },   /* RV-062 */
+    { "video", "hardware_decode", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_VIDEO, 1.0, 0.0, 2.0, 1.0, "off|on|always", true },   /* RV-062; `on` since two real cards were measured (2026-09-23) */
     { "video", "subtitle_size", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_VIDEO, 24.0, 10.0, 72.0, 1.0, "", true },
     { "video", "subtitle_outline", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_VIDEO, 2.0, 0.0, 8.0, 1.0, "", true },
     { "video", "ab_step_seconds", RUBRAVIEW_SETTING_FLOAT, RUBRAVIEW_TAB_VIDEO, 0.5, 0.1, 1.0, 0.1, "", false },

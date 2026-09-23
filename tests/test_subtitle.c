@@ -82,6 +82,48 @@ int main(void) {
     }
     printf("  [PASS] SAMI parses, ends each caption at the next, and reads its language class\n");
 
+    /* Test 3b: one SAMI file, two languages (owner, 2026-09-23). Each
+       language is its own class, and the reader picks one; only that
+       one's captions are shown, at the moments that language has. */
+    {
+        u8str_t text = lit("<SAMI>\n<BODY>\n"
+                           "<SYNC Start=1000><P Class=ENCC>Hello\n"
+                           "<SYNC Start=1000><P Class=KRCC>\xEC\x95\x88\xEB\x85\x95\n"
+                           "<SYNC Start=4000><P Class=ENCC>&nbsp;\n"
+                           "<SYNC Start=4000><P Class=KRCC>&nbsp;\n"
+                           "</BODY>\n</SAMI>\n");
+        rubraview_subtitle_track_t t = rubraview_subtitle_parse(&arena, text, RUBRAVIEW_SUBTITLE_SMI);
+        assert(t.count == 2);
+
+        u8str_t languages[4];
+        size_t n = rubraview_subtitle_languages(&t, languages, 4);
+        assert(n == 2 && is(languages[0], "ENCC") && is(languages[1], "KRCC"));
+
+        /* Both last until their own language's next caption — before
+           2026-09-23 each ended at the next caption of any language, so
+           both were of zero length and neither was ever shown. */
+        assert(near(t.cues[0].end_seconds, 4.0) && near(t.cues[1].end_seconds, 4.0));
+
+        /* With nothing chosen, whichever is last at that moment shows. */
+        const rubraview_subtitle_cue_t *any = rubraview_subtitle_at(&t, 2.0);
+        assert(any != NULL);
+
+        t.shown_language = languages[1];               /* Korean */
+        const rubraview_subtitle_cue_t *ko = rubraview_subtitle_at(&t, 2.0);
+        assert(ko && is(ko->language, "KRCC") && !is(ko->text, "Hello"));
+
+        t.shown_language = languages[0];               /* English */
+        const rubraview_subtitle_cue_t *en = rubraview_subtitle_at(&t, 2.0);
+        assert(en && is(en->text, "Hello"));
+        assert(rubraview_subtitle_at(&t, 6.0) == NULL);   /* both ended at 4 s */
+
+        /* A file of one language answers whatever is asked of it. */
+        u8str_t one = lit("1\n00:00:01,000 --> 00:00:02,000\nplain\n");
+        rubraview_subtitle_track_t srt = rubraview_subtitle_parse(&arena, one, RUBRAVIEW_SUBTITLE_SRT);
+        assert(rubraview_subtitle_languages(&srt, languages, 4) == 1 && languages[0].len == 0);
+    }
+    printf("  [PASS] One SAMI file holding two languages shows only the one chosen\n");
+
     /* Test 4: SubStation Alpha. The text is everything after the ninth
        comma, so a line with commas in it must survive. */
     {

@@ -56,3 +56,14 @@ film and comes back with it (measured 2026-09-13: `+2.5 s`, replay, one more
 > you mean: `vmkeys.sh <keys> 1 50 <ms>` photographs the screen `<ms>` after the
 > last key. A separate screenshot run arrives about two seconds later, by which
 > time the OSD has faded.
+
+## Several languages in one file, 2026-09-23 (D-25)
+
+A `.smi` with `ENCC` and `KRCC` classes, both captioning the same
+moments, put beside `clip_h264.mkv` on the VM. The track list held one
+entry per class, and `C` walked them: English text at 1.479 s, then the
+Korean line at the same moment, then off, then English again.
+
+Before this, such a file showed nothing at all: the reader ended each
+caption where the next caption of *any* class began, which made every one
+of them zero seconds long. `test_subtitle` now holds that case.

@@ -339,13 +339,22 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         i = body_start;
     }
 
-    /* A SAMI caption ends where the next one starts. */
-    for (size_t k = 0; k + 1 < cues->count; ++k) {
-        cues->data[k].end_seconds = cues->data[k + 1].start_seconds;
-    }
-    if (cues->count > 0) {
-        rubraview_subtitle_cue_t *last = &cues->data[cues->count - 1];
-        if (last->end_seconds <= last->start_seconds) last->end_seconds = last->start_seconds + 3.0;
+    /* A SAMI caption ends where the next one of *its own language*
+       starts (owner, 2026-09-23). One file often carries several
+       languages, a class each, interleaved at the same moments; ending
+       each caption at the next of any class gave every one of them a
+       length of zero, and nothing was ever shown. */
+    for (size_t k = 0; k < cues->count; ++k) {
+        rubraview_subtitle_cue_t *cue = &cues->data[k];
+        double end = -1.0;
+        for (size_t n = k + 1; n < cues->count; ++n) {
+            const rubraview_subtitle_cue_t *later = &cues->data[n];
+            if (later->language.len != cue->language.len) continue;
+            if (later->language.len > 0 && memcmp(later->language.ptr, cue->language.ptr, cue->language.len) != 0) continue;
+            end = later->start_seconds;
+            break;
+        }
+        cue->end_seconds = end > cue->start_seconds ? end : cue->start_seconds + 3.0;
     }
 }
 
@@ -462,6 +471,27 @@ rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str
     return track;
 }
 
+size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, u8str_t *out, size_t max) {
+    if (!track || !out || max == 0) return 0;
+    size_t count = 0;
+    for (size_t i = 0; i < track->count && count < max; ++i) {
+        u8str_t language = track->cues[i].language;
+        bool seen = false;
+        for (size_t k = 0; k < count && !seen; ++k) {
+            seen = out[k].len == language.len &&
+                   (language.len == 0 || memcmp(out[k].ptr, language.ptr, language.len) == 0);
+        }
+        if (!seen) out[count++] = language;
+    }
+    return count;
+}
+
+static bool cue_is_shown(const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *cue) {
+    if (track->shown_language.len == 0) return true;
+    return cue->language.len == track->shown_language.len &&
+           memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.len) == 0;
+}
+
 const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_track_t *track,
                                                       double time_seconds) {
     if (!track || track->count == 0) return NULL;
@@ -479,8 +509,15 @@ const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_t
     }
     if (low == 0) return NULL;
 
-    const rubraview_subtitle_cue_t *cue = &track->cues[low - 1];
-    return t < cue->end_seconds ? cue : NULL;
+    /* Back over the cues that belong to another language: in a SAMI file
+       every language has a cue at the same moment, and only one of them
+       is the reader's (owner, 2026-09-23). */
+    for (size_t i = low; i > 0; --i) {
+        const rubraview_subtitle_cue_t *cue = &track->cues[i - 1];
+        if (!cue_is_shown(track, cue)) continue;
+        return t < cue->end_seconds ? cue : NULL;
+    }
+    return NULL;
 }
 
 void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later) {

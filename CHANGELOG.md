@@ -6,6 +6,27 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- A subtitle file holding several languages at once — a SAMI `.smi` with
+  a class per language, which is how Korean subtitles usually come — now
+  shows. Every caption used to end where the next one of *any* language
+  began, so each was of zero length and none of them ever appeared. Each
+  language is now its own track: `C` walks them, named by the class.
+
+### Changed
+
+- GPU decoding ships **on** (owner, 2026-09-23), now that two real cards
+  have been measured: at 4K, 196 pictures a second on an AMD Radeon and 43
+  on an Intel UHD 730, against 16-21 in software, with a tenth of the
+  processor. `off` and `always` are still there, and the settings window
+  now says what each of the three means — `always` is for testing.
+
+### Added
+
+- Both READMEs say where FFmpeg's DLLs come from, which five they are, and
+  that the `lib` folder's `.dll.a` files are not them.
+
 ### Added
 
 - A DVD index that holds several languages now gives one subtitle track

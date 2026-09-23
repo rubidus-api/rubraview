@@ -158,11 +158,18 @@ int main(void) {
         u8str_t decoder = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "decoder"), 0, buffer, sizeof(buffer));
         assert(has(decoder, "Decoder") && has(decoder, "< windows >  1/2"));
         u8str_t gpu = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "hardware_decode"), 0, buffer, sizeof(buffer));
-        assert(has(gpu, "GPU decoding") && has(gpu, "< off >  1/3"));   /* RV-062: a choice, off by default */
+        assert(has(gpu, "GPU decoding") && has(gpu, "< on >  2/3"));   /* RV-062: on by default since two cards were measured */
         u8str_t size = rubraview_settings_line_text(&v, &s, &sources, (size_t)line_for(&v, "video", "subtitle_size"), 0, buffer, sizeof(buffer));
         assert(has(size, "[####") && has(size, "] 24 pt"));
-        u8str_t info = rubraview_settings_line_text(&v, &s, &sources, 3, 0, buffer, sizeof(buffer));
-        assert(has(info, "FFmpeg") && has(info, "8.1, beside the program"));
+        /* The FFmpeg line, found by what it says rather than by where it
+           sits: notes were added above it (2026-09-23). */
+        bool ffmpeg_line = false;
+        for (size_t i = 0; i < v.line_count && !ffmpeg_line; ++i) {
+            if (v.lines[i].kind != RUBRAVIEW_LINE_INFO) continue;
+            u8str_t info = rubraview_settings_line_text(&v, &s, &sources, i, 0, buffer, sizeof(buffer));
+            ffmpeg_line = has(info, "FFmpeg") && has(info, "8.1, beside the program");
+        }
+        assert(ffmpeg_line);
         /* The FFmpeg help (owner, 2026-09-22): notes, whole at 80 columns, never focused. */
         bool files = false, zip = false;
         for (size_t i = 0; i < v.line_count; ++i) {
