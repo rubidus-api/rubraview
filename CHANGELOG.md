@@ -6,6 +6,21 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- `F1` opens the help: a window of its own, which stays open while the
+  viewer is used. It lists every key that is bound, grouped by where it
+  works, named the way the menu names it — and it is read from the keymap
+  in force, so a rebound key shows its own binding. The wheel, `PageUp`
+  and `PageDown` scroll it; `F1` or `Esc` closes it.
+- Both READMEs gain a **Keyboard shortcuts** section. The table is
+  generated from the shipped keymap by `scripts/check-actions.py --write`,
+  in English and in Korean, so it cannot drift from the program.
+
+### Changed
+
+- `F1` was a second key for the menu box; the menu keeps `Tab`.
+
 ## [0.0.14] - 2026-09-23
 
 ### Added

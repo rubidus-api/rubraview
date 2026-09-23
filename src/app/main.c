@@ -58,6 +58,7 @@
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/playlist.h"
+#include "rubraview/help.h"
 #include "rubraview/default_keymap.h"
 #include "rubraview/pagesource.h"
 #include "rubraview/precache.h"
@@ -328,6 +329,19 @@ typedef struct app_state {
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
        from the settings document. */
+    /* The help (owner, 2026-09-23): a window of its own that the reader
+       can leave open while using the viewer, holding the keys in force. */
+    rubraview_window_t        *help_window;
+    rubraview_renderer_t      *help_renderer;
+    bool                       help_open;
+    bool                       help_dirty;
+    int32_t                    help_scroll;      /* the first line on screen */
+    double                     help_font, help_cell_w, help_cell_h;
+    rubraview_help_line_t      help_lines[512];
+    size_t                     help_count;
+    int32_t                    help_key_cols;    /* the widest key list, so nothing overlaps */
+    int32_t                    help_frame[4];    /* where it was last put */
+
     rubraview_window_t        *settings_window;
     rubraview_renderer_t      *settings_renderer;
     rubraview_settings_view_t  settings_view;
@@ -373,6 +387,7 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
+static void help_show(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi);
 static void rename_end(app_state_t *app);
@@ -1995,6 +2010,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
             app->settings_dirty = true;
         }
+    } else if (action_is(action, "toggle_help")) {
+        help_show(app);
     } else if (action_is(action, "about")) {
         char line[160];
         int n = snprintf(line, sizeof(line), "Rubraview %s  -  FFmpeg %s", RUBRAVIEW_VERSION_STRING,
@@ -4670,6 +4687,192 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
     }
 }
 
+/* ---- the help window (owner, 2026-09-23) ---- */
+
+#define HELP_BACKGROUND 0xFF141414u
+#define HELP_HEADING    0xFF6FA8DCu
+#define HELP_KEYS       0xFFE8C46Fu
+#define HELP_TEXT       0xFFE8E8E8u
+
+static void help_measure(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->help_window);
+    app->help_font = 15.0 * dpi;
+    if (!rubraview_pal_render_mono_cell(app->help_renderer, app->help_font,
+                                        &app->help_cell_w, &app->help_cell_h) ||
+        app->help_cell_w <= 0.0 || app->help_cell_h <= 0.0) {
+        app->help_cell_w = 8.3 * dpi;
+        app->help_cell_h = 17.6 * dpi;
+    }
+}
+
+/* The lines are built from the keymap in force, so a rebound key shows
+   its new binding the next time the window is opened or the keys change. */
+static void help_rebuild(app_state_t *app) {
+    app->help_count = rubraview_help_build(app->arena, &app->keymap, rubraview_boxes_document(),
+                                           app->help_lines, sizeof(app->help_lines) / sizeof(app->help_lines[0]));
+    /* The second column starts after the longest key list there is, so a
+       binding with three keys does not run into what it does. */
+    size_t widest = 0;
+    for (size_t i = 0; i < app->help_count; ++i) {
+        if (app->help_lines[i].keys.len > widest) widest = app->help_lines[i].keys.len;
+    }
+    app->help_key_cols = (int32_t)widest + 4;
+    if (app->help_key_cols < 20) app->help_key_cols = 20;
+    if (app->help_key_cols > 48) app->help_key_cols = 48;
+    app->help_dirty = true;
+}
+
+static void help_close(app_state_t *app) {
+    if (!app->help_open) return;
+    rubraview_pal_window_get_frame(app->help_window, &app->help_frame[0], &app->help_frame[1],
+                                   &app->help_frame[2], &app->help_frame[3]);
+    if (app->help_renderer) rubraview_pal_render_destroy(app->help_renderer);
+    if (app->help_window) rubraview_pal_window_destroy(app->help_window);
+    app->help_renderer = NULL;
+    app->help_window = NULL;
+    app->help_open = false;
+}
+
+static void help_show(app_state_t *app) {
+    if (app->help_open) { help_close(app); return; }   /* F1 again puts it away */
+
+    rubraview_window_config_t config = {
+        .title = "Rubraview help - keys", .width = 860, .height = 720, .owner = app->window,
+    };
+    app->help_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->help_window) {
+        osd_say(app, U8("the help window could not be opened"));
+        return;
+    }
+    if (app->help_frame[2] > 0 && app->help_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->help_window, app->help_frame[0], app->help_frame[1],
+                                       app->help_frame[2], app->help_frame[3]);
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->help_window, &w, &h);
+    app->help_renderer = rubraview_pal_render_create(app->arena,
+                                                     rubraview_pal_window_native_handle(app->help_window), w, h);
+    if (!app->help_renderer) {
+        rubraview_pal_window_destroy(app->help_window);
+        app->help_window = NULL;
+        osd_say(app, U8("the help window could not be drawn"));
+        return;
+    }
+    help_measure(app);
+    app->help_open = true;
+    app->help_scroll = 0;
+    help_rebuild(app);
+}
+
+/* How many lines fit, and how far the reader may scroll. */
+static int32_t help_rows(const app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->help_window, &w, &h);
+    int32_t rows = (int32_t)((double)h / app->help_cell_h) - 1;
+    return rows > 1 ? rows : 1;
+}
+
+static void help_scroll_by(app_state_t *app, int32_t lines) {
+    int32_t last = (int32_t)app->help_count - help_rows(app);
+    if (last < 0) last = 0;
+    app->help_scroll += lines;
+    if (app->help_scroll > last) app->help_scroll = last;
+    if (app->help_scroll < 0) app->help_scroll = 0;
+    app->help_dirty = true;
+}
+
+static void draw_help_window(app_state_t *app) {
+    if (!app->help_open || !app->help_dirty) return;
+    app->help_dirty = false;
+    rubraview_renderer_t *r = app->help_renderer;
+    const double cw = app->help_cell_w, ch = app->help_cell_h, fs = app->help_font;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->help_window, &w, &h);
+
+    rubraview_pal_render_begin(r, HELP_BACKGROUND);
+
+    int32_t rows = help_rows(app);
+    double keys_col = cw * 2.0;
+    double text_col = cw * (double)app->help_key_cols;
+    for (int32_t row = 0; row < rows; ++row) {
+        size_t index = (size_t)(app->help_scroll + row);
+        if (index >= app->help_count) break;
+        const rubraview_help_line_t *line = &app->help_lines[index];
+        double y = ch * (double)row;
+        switch (line->kind) {
+            case RUBRAVIEW_HELP_HEADING:
+                rubraview_pal_render_draw_text_mono(r, line->text, keys_col, y, fs, HELP_HEADING);
+                rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ keys_col, y + ch * 0.92,
+                                                                          (double)w - keys_col * 2.0, 1.0 },
+                                               HELP_HEADING, 0.0);
+                break;
+            case RUBRAVIEW_HELP_ENTRY:
+                rubraview_pal_render_draw_text_mono(r, line->keys, keys_col, y, fs, HELP_KEYS);
+                rubraview_pal_render_draw_text_mono(r, line->text, text_col, y, fs, HELP_TEXT);
+                break;
+            case RUBRAVIEW_HELP_NOTE:
+                rubraview_pal_render_draw_text_mono(r, line->text, keys_col, y, fs, HELP_TEXT);
+                break;
+            case RUBRAVIEW_HELP_BLANK:
+            default:
+                break;
+        }
+    }
+
+    /* The bottom line says how to move and how to leave. */
+    char foot[128];
+    int written = snprintf(foot, sizeof(foot), " %zu keys   |   wheel or PageUp/PageDown scrolls   |   F1 or Esc closes",
+                           app->help_count);
+    if (written > 0) {
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
+                                       0xFF1E1E1Eu, 0.0);
+        rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = foot, .len = (size_t)written },
+                                            0.0, (double)h - ch, fs, HELP_HEADING);
+    }
+    rubraview_pal_render_end(r);
+}
+
+static size_t help_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->help_open && rubraview_pal_window_poll_event(app->help_window, &event)) {
+        handled++;
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                help_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->help_renderer, event.resize.width, event.resize.height);
+                help_scroll_by(app, 0);   /* the last line may have moved */
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
+                help_measure(app);
+                app->help_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+                app->help_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                help_scroll_by(app, (int32_t)(-event.mouse.wheel_delta * 3.0));
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_key_combo_t combo = event.key.combo;
+                if (key_is(combo, "Escape") || key_is(combo, "F1")) { help_close(app); return handled; }
+                else if (key_is(combo, "Down")) help_scroll_by(app, 1);
+                else if (key_is(combo, "Up")) help_scroll_by(app, -1);
+                else if (key_is(combo, "PageDown") || key_is(combo, "Space")) help_scroll_by(app, help_rows(app) - 1);
+                else if (key_is(combo, "PageUp")) help_scroll_by(app, -(help_rows(app) - 1));
+                else if (key_is(combo, "Home")) help_scroll_by(app, -(int32_t)app->help_count);
+                else if (key_is(combo, "End")) help_scroll_by(app, (int32_t)app->help_count);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return handled;
+}
+
 static void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -7045,6 +7248,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         /* §3.22 / D-13: the settings window's own queue. Polling the main
            window pumped the thread's messages into it. */
         handled += settings_pump(&app);
+        handled += help_pump(&app);
 
         if (app.needs_relayout) {
             int32_t page = current_page_index(&app);
@@ -7095,6 +7299,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.settings_dirty = true;
         }
         draw_settings_window(&app);
+        draw_help_window(&app);
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 

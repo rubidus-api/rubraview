@@ -118,7 +118,7 @@ int main(void) {
         { "view", RUBRAVIEW_MOD_NONE, "F11",    "toggle_fullscreen" },
         { "view", RUBRAVIEW_MOD_ALT,  "Enter",  "toggle_fullscreen" },
         { "view", RUBRAVIEW_MOD_NONE, "Tab",    "toggle_menu" },
-        { "view", RUBRAVIEW_MOD_NONE, "F1",     "toggle_menu" },
+        { "view", RUBRAVIEW_MOD_NONE, "F1",     "toggle_help" },   /* the help window (owner, 2026-09-23); Tab opens the menu */
         { "view", RUBRAVIEW_MOD_NONE, "T",      "toggle_toolbox" },
         { "view", RUBRAVIEW_MOD_NONE, "F2",     "rename_file" },     /* not the toolbox: D-14 */
         { "view", RUBRAVIEW_MOD_NONE, "O",      "open_picker" },

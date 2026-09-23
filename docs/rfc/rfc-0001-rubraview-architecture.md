@@ -381,7 +381,7 @@ the keymap does not do is listed after it.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `Tab`, `F1` | Open or close the menu box |
+| `Tab` | Open or close the menu box |
 | `T` | Open or close the toolbox |
 | `Shift+T` | Pin the toolbox open |
 | `Ctrl+T` | Give the toolbox a window of its own, or dock it |
@@ -395,6 +395,7 @@ the keymap does not do is listed after it.
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
+| `F1` | This help, in a window of its own |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
 | `Delete` | To the recycle bin |

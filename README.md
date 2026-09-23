@@ -21,6 +21,128 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **Batch Processing Engine**: Multi-threaded batch converter and resizer accessible via UI dialog and headless CLI.
 - **Pure C23 Architecture**: Built upon vendored `proven_c_lib` arenas, string slices, and dynamic arrays with zero heap fragmentation.
 
+## Keyboard shortcuts
+
+`F1` opens this same list in a window of its own, which stays open while
+you read. Every key here can be changed on the settings window's Keys
+page (`F10`), and the table below is generated from the keys the viewer
+ships with, so it cannot drift from them.
+
+<!-- keys:begin — generated from src/core/default_keymap.c by scripts/check-actions.py --write; do not edit -->
+
+**Everywhere**
+
+| Keys | What it does |
+|---|---|
+| `F`, `F11`, `Alt+Enter` | Full screen |
+| `Tab` | Open or close the menu box |
+| `T` | Open or close the toolbox |
+| `Shift+T` | Pin the toolbox open |
+| `Ctrl+T` | Give the toolbox a window of its own, or dock it |
+| `Ctrl+Shift+T` | Always on top of other windows |
+| `O`, `Ctrl+O` | Open a file |
+| `Ctrl+Shift+O` | Open a folder |
+| `F4` | Filmstrip |
+| `I` | Information bar |
+| `E` | Adjust the picture |
+| `Ctrl+E` | Export |
+| `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+B` | Convert many files |
+| `F10`, `Ctrl+,` | Settings |
+| `F1` | This help, in a window of its own |
+| `G` | Pixel grid past 400% |
+| `Esc` | Quit |
+| `Delete` | To the recycle bin |
+| `Shift+Delete` | Delete for good (asks first) |
+| `Ctrl+Z` | Undo a move, copy or rename |
+| `F2` | Rename, keeping the extension |
+| `Ctrl+Left` | Window narrower |
+| `Ctrl+Right` | Window wider |
+| `Ctrl+Up` | Window shorter |
+| `Ctrl+Down` | Window taller |
+| `Alt+Left` | Move the window left |
+| `Alt+Right` | Move the window right |
+| `Alt+Up` | Move the window up |
+| `Alt+Down` | Move the window down |
+
+**Moving between pages**
+
+| Keys | What it does |
+|---|---|
+| `PageDown`, `Space`, `Enter` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space` | Previous page |
+| `Home`, `Ctrl+Home` | First page |
+| `End`, `Ctrl+End` | Last page |
+| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
+| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
+| `Ctrl+Backspace` | Up to the folder |
+| `B` | Single page / two pages / book |
+| `M` | Left-to-right / right-to-left (manga) |
+| `Shift+B` | Detect two-page spreads |
+| `Ctrl+]` | Next archive in the folder |
+| `Ctrl+[` | Previous archive in the folder |
+
+**The view**
+
+| Keys | What it does |
+|---|---|
+| `1` | Fit to the window |
+| `2` | Fit to the width |
+| `3` | Fit to the height |
+| `4`, `0`, `Ctrl+0` | Actual size (1:1) |
+| `5` | Smart fit (shrink only) |
+| `Ctrl+1` | Stretch to fill |
+| `L` | Keep the fit for the next files |
+| `+` | Zoom in |
+| `-` | Zoom out |
+| `R` | Rotate clockwise |
+| `Shift+R` | Rotate anticlockwise |
+| `H` | Flip left-right |
+| `V` | Flip upside down |
+| `N` | Crisp scaling for pixel art |
+
+**While a slide show runs**
+
+| Keys | What it does |
+|---|---|
+| `S`, `F5` | Start or stop the slide show |
+| `]` | Slower slides (0.5 s) |
+| `[` | Faster slides (0.5 s) |
+| `Shift+]` | Slower slides (0.1 s) |
+| `Shift+[` | Faster slides (0.1 s) |
+
+**While a video, music or animated picture is on screen**
+
+| Keys | What it does |
+|---|---|
+| `Space` | Play / pause |
+| `.` | One frame forward |
+| `,` | One frame back |
+| `Ctrl+]` | Faster (0.25x a step) |
+| `Ctrl+[` | Slower (0.25x a step) |
+| `Right` | 5 seconds on |
+| `Left` | 5 seconds back |
+| `Up` | Volume up 5% |
+| `Down` | Volume down 5% |
+| `Shift+M` | Mute / sound |
+| `[` | Repeat from here (A) |
+| `]` | Repeat to here (B) |
+| `\` | Repeat off |
+| `Ctrl+\` | Normal speed |
+| `Z` | Subtitles half a second earlier |
+| `X` | Subtitles half a second later |
+| `A` | Next sound track |
+| `C` | Next subtitles |
+
+**A multi-page TIFF or ICO**
+
+| Keys | What it does |
+|---|---|
+| `.` | Next page of the file |
+| `,` | Previous page of the file |
+
+<!-- keys:end -->
+
 ## Stack & Architecture
 
 - **Language**: Pure ISO C23 (`-std=c23`)
