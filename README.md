@@ -157,14 +157,14 @@ Rubraview plays most files with Windows' own decoders. FFmpeg is only for
 what they cannot open, and it is **five DLLs, not `ffmpeg.exe`**:
 
 ```
-avcodec-62.dll  avformat-62.dll  avutil-60.dll  swscale-9.dll  swresample-6.dll
+avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 ```
 
 Get them from [BtbN's Windows builds](https://github.com/BtbN/FFmpeg-Builds/releases) —
-the file named `ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip`. It must be
-**8.1** and the name must say **shared**: a build without `shared` holds
-only the programs, and 9.x names its DLLs differently, so Rubraview will
-not use them. Copy the five files out of the zip's `bin` folder and put
+the file named `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`. It must be
+**9.0** and the name must say **shared**: a build without `shared` holds
+only the programs, and another version names its DLLs differently, so
+Rubraview will not use them. Copy the five files out of the zip's `bin` folder and put
 them beside `rubraview-v0.0.16.exe`, then start Rubraview again. The
 `lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
 not for running it — leave them.

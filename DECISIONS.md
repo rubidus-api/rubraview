@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-26 FFmpeg is pinned to a release, and that release is 9.0
+
+- Status: Accepted (owner 2026-09-24, after asking what to use: "9.0으로 올리고 0.0.17로 릴리즈 바랍니다"; the question before it was whether master would be better)
+- Decision: the vendored headers follow the newest FFmpeg **release** — 9.0.2 today — and never `master`. The viewer reads FFmpeg's structures by the layout its headers describe and only checks the major version at run time, so a build whose major matches but whose layout has moved would be read wrongly. A release branch does not move that way; master does, daily.
+- Consequences: the DLLs to fetch are now `avcodec-63`, `avformat-63`, `avutil-61`, `swscale-10`, `swresample-7`, and every place that names them was changed together (both readmes, the settings window's help, the vendored notes). A reader who already had 8.1's DLLs has to fetch 9.0's; the old ones are refused rather than misread. The next major will be the same small piece of work: swap the headers, change the names in those four places, measure on the VM.
+
 ## 2026-09-23: D-25 GPU decoding is on by default, and a file's languages are separate tracks
 
 - Status: Accepted (owner 2026-09-23: "기본값 on 으로 바꾸고 릴리즈 바랍니다", and "smi나 srt 등의 다른 자막들도 멀티 언어인 경우가 있습니다 ... 선택한 언어 자막만 잘 보여줄 수 있게")

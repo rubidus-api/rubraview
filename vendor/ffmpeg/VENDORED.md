@@ -5,9 +5,12 @@ the user puts its DLLs beside the executable (D-8, RV-016). No FFmpeg code
 is compiled into or shipped with rubraview: every function is looked up at
 run time with `GetProcAddress`.
 
-- Upstream: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
-  (SHA-256 `464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c`,
-  retrieved 2026-09-12)
+- Upstream: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`,
+  retrieved 2026-09-24). ffmpeg.org publishes no checksum file beside it,
+  and this box has no `gpg` for the `.asc`, so the headers were checked
+  against the same tag on GitHub (`n9.0.2`): all five libraries' public
+  headers are byte for byte identical in both copies.
 - Contents: the headers each library's `Makefile` installs, for libavutil,
   libavcodec, libavformat, libswscale and libswresample, unmodified.
 - Added here, not from the tarball: `include/libavutil/avconfig.h`, which
@@ -15,7 +18,7 @@ run time with `GetProcAddress`.
   vendored without building FFmpeg.
 - Licence: LGPL-2.1-or-later (`COPYING.LGPLv2.1`). The GPL-only parts of
   FFmpeg are not here and are not used.
-- **The version matters.** These headers describe FFmpeg 8.1's structures.
+- **The version matters.** These headers describe FFmpeg 9.0's structures.
   `pal_media_ffmpeg.c` checks the DLLs' own version at run time and refuses
   a different major version rather than reading their memory wrongly.
 
