@@ -446,6 +446,7 @@ rubraview_subtitle_format_t rubraview_subtitle_format_for_name(u8str_t filename)
     if (starts_with_ci(ext, "ass") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
     if (starts_with_ci(ext, "ssa") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
     if (starts_with_ci(ext, "idx") && ext.len == 3) return RUBRAVIEW_SUBTITLE_VOBSUB;
+    if (starts_with_ci(ext, "sup") && ext.len == 3) return RUBRAVIEW_SUBTITLE_PGS;
     return RUBRAVIEW_SUBTITLE_UNKNOWN;
 }
 

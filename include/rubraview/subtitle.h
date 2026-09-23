@@ -31,6 +31,9 @@ typedef enum rubraview_subtitle_format {
        2026-09-23). Not text, so `rubraview_subtitle_parse` says nothing
        about it — `vobsub.h` reads it. */
     RUBRAVIEW_SUBTITLE_VOBSUB,
+    /* A Blu-ray's pictures: `movie.sup` beside the film (owner,
+       2026-09-24). Not text either — `pgs.h` reads it. */
+    RUBRAVIEW_SUBTITLE_PGS,
 } rubraview_subtitle_format_t;
 
 typedef struct rubraview_subtitle_cue {
