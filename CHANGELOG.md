@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-09-23
+
 ### Added
 
 - `F1` opens the help: a window of its own, which stays open while the
