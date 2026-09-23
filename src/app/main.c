@@ -238,6 +238,9 @@ typedef struct app_state {
        beside it, in one list — what the reader cycles through. */
     rubraview_track_set_t         tracks;
     rubraview_subtitle_candidate_t subtitle_files[8];
+    /* A DVD index holds one list per language, so one file can be several
+       tracks; this says which language each track reads (D-22's backlog). */
+    int32_t                    subtitle_vobsub_stream[8];
     size_t                         subtitle_count;
     /* §3.16.1: a sync the reader set by hand belongs to that film, not
        to the moment — playing it again must not throw it away. */
@@ -863,15 +866,43 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     app->tracks = rubraview_tracks_create();
     if (app->media) rubraview_pal_media_tracks(app->media, &app->tracks);
 
-    app->subtitle_count = subtitle_candidates(app->arena, video_path, app->subtitle_files,
-                                              SUBTITLE_MAX_CANDIDATES, NULL);
+    rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
+    size_t found_count = subtitle_candidates(app->arena, video_path, found, SUBTITLE_MAX_CANDIDATES, NULL);
+
+    /* One entry per track: a text file is one, a DVD index is one for
+       each language it lists, so `C` walks them like any other track. */
+    app->subtitle_count = 0;
+    for (size_t i = 0; i < found_count && app->subtitle_count < SUBTITLE_MAX_CANDIDATES; ++i) {
+        size_t languages = 1;
+        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        if (found[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
+            u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, found[i].path, VOBSUB_MAX_IDX_BYTES);
+            size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
+            if (n > 0) languages = n;
+        }
+        for (size_t k = 0; k < languages && app->subtitle_count < SUBTITLE_MAX_CANDIDATES; ++k) {
+            app->subtitle_files[app->subtitle_count] = found[i];
+            app->subtitle_vobsub_stream[app->subtitle_count] = (int32_t)k;
+            app->subtitle_count++;
+        }
+    }
+
     static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx" };
     for (size_t i = 0; i < app->subtitle_count; ++i) {
+        u8str_t language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path);
+        if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
+            /* The index names its own languages; the file's name does not. */
+            u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
+            u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+            size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
+            size_t which = (size_t)app->subtitle_vobsub_stream[i];
+            if (which < n) language = tags[which];
+        }
         rubraview_track_t track = {
             .kind = RUBRAVIEW_TRACK_SUBTITLE,
             .is_external = true,          /* a file beside the video, not a stream in it */
             .stream_index = (int32_t)i,   /* into app->subtitle_files, not the container */
-            .language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path),
+            .language = language,
             .title = rubraview_path_basename(app->subtitle_files[i].path),
             .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 6
                                       ? (size_t)app->subtitle_files[i].format : 0]),
@@ -896,7 +927,7 @@ static void vobsub_clear(app_state_t *app) {
 }
 
 /* `movie.idx` names the index; its pictures are in `movie.sub` beside it. */
-static void vobsub_load(app_state_t *app, u8str_t idx_path) {
+static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
     vobsub_clear(app);
     u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, idx_path, VOBSUB_MAX_IDX_BYTES);
     if (idx_text.len == 0) return;
@@ -915,7 +946,7 @@ static void vobsub_load(app_state_t *app, u8str_t idx_path) {
         if (!proven_is_ok(mem.err)) return;
         app->vobsub_pixels = (uint8_t*)mem.value.ptr;
     }
-    app->vobsub = rubraview_vobsub_index(app->arena, idx_text, 0);
+    app->vobsub = rubraview_vobsub_index(app->arena, idx_text, language);
 }
 
 static void subtitle_select(app_state_t *app, int32_t index) {
@@ -930,7 +961,8 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     if (track->is_external) {
         if (track->stream_index < 0 || (size_t)track->stream_index >= app->subtitle_count) return;
         if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
-            vobsub_load(app, app->subtitle_files[track->stream_index].path);
+            vobsub_load(app, app->subtitle_files[track->stream_index].path,
+                        (size_t)app->subtitle_vobsub_stream[track->stream_index]);
             if (app->vobsub.count == 0) return;
             u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
                                                           &app->tracks, index);
