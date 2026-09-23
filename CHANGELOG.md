@@ -8,6 +8,13 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The music page shows the record (owner, 2026-09-24, RV-076): the cover
+  in the middle, the same cover blurred behind it, and what the file says
+  about the track — title, artist, record, year, track number, codec,
+  bitrate, sample rate and channels — along the bottom. All of it is read
+  from the file's own bytes (`src/core/tags.c`: ID3v2.2/2.3/2.4, ID3v1,
+  FLAC, MP4/M4A, Ogg Vorbis, Opus, WAV), so it does not depend on which
+  backend is playing.
 - Blu-ray picture subtitles (owner, 2026-09-24). A `.sup` file beside the
   film is offered as a subtitle track and drawn over the picture in the
   frame the disc authored it for, the way a DVD's `.idx`/`.sub` pair is
@@ -25,6 +32,9 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- `Z` and `X` move a DVD's or a Blu-ray's picture subtitles too. They
+  moved only text before, and said "no subtitles are showing" while a
+  subtitle was plainly on screen (found measuring T081).
 - A subtitle file is read whatever order it is written in (owner,
   2026-09-23): the captions are put in time order before anything else is
   worked out, so a SAMI whose languages do not take turns, or a SubRip
