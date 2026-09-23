@@ -145,6 +145,56 @@ u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double secon
     return (u8str_t){ .ptr = buffer, .len = (size_t)written };
 }
 
+bool rubraview_parse_timecode(u8str_t text, double *out_seconds) {
+    if (!out_seconds || text.len == 0) return false;
+
+    /* Up to three parts divided by colons — seconds, or minutes and
+       seconds, or hours, minutes and seconds — and the last of them may
+       carry a fraction. */
+    double part[3] = { 0.0, 0.0, 0.0 };
+    size_t count = 0;
+    size_t i = 0;
+    while (i < text.len && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
+
+    bool any_digit = false;
+    while (i <= text.len) {
+        double whole = 0.0;
+        bool digits = false;
+        while (i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
+            whole = whole * 10.0 + (double)(text.ptr[i] - '0');
+            digits = true;
+            any_digit = true;
+            i++;
+        }
+        if (i < text.len && (text.ptr[i] == '.' || text.ptr[i] == ',')) {
+            i++;
+            double scale = 0.1;
+            while (i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
+                whole += (double)(text.ptr[i] - '0') * scale;
+                scale *= 0.1;
+                digits = true;
+                any_digit = true;
+                i++;
+            }
+        }
+        if (!digits) return false;
+        if (count >= 3) return false;
+        part[count++] = whole;
+        if (i < text.len && text.ptr[i] == ':') { i++; continue; }
+        break;
+    }
+    while (i < text.len && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
+    if (i != text.len || !any_digit) return false;   /* something else is in there */
+
+    double seconds = 0.0;
+    for (size_t k = 0; k < count; ++k) {
+        seconds = seconds * 60.0 + part[k];
+    }
+    if (seconds < 0.0) seconds = 0.0;
+    *out_seconds = seconds;
+    return true;
+}
+
 /* ---- §3.16.2 tracks ---- */
 
 rubraview_track_set_t rubraview_tracks_create(void) {

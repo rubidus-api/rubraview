@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-28 The A-B points are named by key and by number, and the two cross over
+
+- Status: Accepted (owner 2026-09-24, relayed: "A B 반복을 수동으로 시간을 입력할 수 있으면 좋겠네요 ... 서로 교차해서 지정할 수 있게요")
+- Decision: `[` and `]` keep setting A and B where the playhead is. `Shift+\` opens a box holding both points as text in the timeline's own spelling, and inside it `[` and `]` stamp the playhead into the field in hand while the keyboard types over it. `Enter` keeps what is written, `Esc` leaves the points as they were, `\` empties both fields, `Tab` swaps. So neither way of naming a moment is the primary one: a tapped point can be corrected to the millisecond, and a typed point can be re-tapped.
+- Consequences: reading a time is core and tested (`rubraview_parse_timecode`, `test_playback`) — it accepts `83`, `1:23`, `1:23.5` and `1:02:03.500`, and refuses anything else rather than half-reading it, because a field is either a time or it is not. A field left empty unsets that point. While the box is open every other key is swallowed, the way the rename box swallows them. The box takes only digits, `:`, `.` and `,`.
+
 ## 2026-09-24: D-27 Blu-ray picture subtitles are read here too
 
 - Status: Accepted (owner 2026-09-24: "D 구현 바랍니다", D being Blu-ray `.sup` subtitles)

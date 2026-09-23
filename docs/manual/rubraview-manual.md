@@ -147,6 +147,11 @@ While it does:
 - `Space` plays and pauses, `←` / `→` jump 5 seconds, `↑` / `↓` change the
   volume, `Shift+M` mutes.
 - `[` marks where a repeat starts and `]` where it ends; `\` turns it off.
+- `Shift+\` opens the same two points as numbers, so a repeat can be set
+  to the millisecond. Inside that box `[` and `]` put the moment you are
+  at into the field you are in — so you can tap a point, correct the
+  number, and tap it again, whichever way round suits you. `Tab` swaps
+  fields, `Enter` keeps them, `Esc` leaves them as they were.
   `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
 - A strip above the information bar shows the time; click or drag on it to
@@ -345,6 +350,7 @@ listed under a later heading only means that while that is on screen.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
+| `Shift+\` | Repeat by number |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |

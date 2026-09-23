@@ -209,6 +209,42 @@ int main(void) {
     }
     printf("  [PASS] A track's label numbers it among its own kind\n");
 
+
+    /* A time typed by hand (owner, 2026-09-24): the A-B points are set
+       by key and by number, and the two must agree about what a time
+       is. Everything the formatter writes must read back. */
+    {
+        double t = 0.0;
+        assert(rubraview_parse_timecode(U8("83"), &t) && t > 82.99 && t < 83.01);
+        assert(rubraview_parse_timecode(U8("1:23"), &t) && t > 82.99 && t < 83.01);
+        assert(rubraview_parse_timecode(U8("1:23.5"), &t) && t > 83.49 && t < 83.51);
+        assert(rubraview_parse_timecode(U8("1:02:03.500"), &t) && t > 3723.49 && t < 3723.51);
+        assert(rubraview_parse_timecode(U8("  12.25  "), &t) && t > 12.24 && t < 12.26);
+        assert(rubraview_parse_timecode(U8("0"), &t) && t == 0.0);
+        assert(rubraview_parse_timecode(U8("1:23,5"), &t) && t > 83.49 && t < 83.51);   /* a comma is a point here */
+
+        /* Not a time: left alone rather than half-read. */
+        double keep = 7.0;
+        assert(!rubraview_parse_timecode(U8(""), &keep));
+        assert(!rubraview_parse_timecode(U8("abc"), &keep));
+        assert(!rubraview_parse_timecode(U8("1:"), &keep));
+        assert(!rubraview_parse_timecode(U8("1:2:3:4"), &keep));
+        assert(!rubraview_parse_timecode(U8("12s"), &keep));
+        assert(!rubraview_parse_timecode(U8("-5"), &keep));
+        assert(keep == 7.0);
+
+        /* What the timeline writes is what the box reads. */
+        char buffer[32];
+        const double MOMENTS[] = { 0.0, 1.5, 59.999, 83.5, 3723.5 };
+        for (size_t i = 0; i < sizeof(MOMENTS) / sizeof(MOMENTS[0]); ++i) {
+            u8str_t written = rubraview_format_timecode(buffer, sizeof(buffer), MOMENTS[i], true);
+            double back = -1.0;
+            assert(rubraview_parse_timecode(written, &back));
+            assert(back > MOMENTS[i] - 0.002 && back < MOMENTS[i] + 0.002);
+        }
+    }
+    printf("  [PASS] A time typed by hand reads back as the timeline writes it\n");
+
     printf("[test_playback] All tests passed successfully!\n");
     return 0;
 }

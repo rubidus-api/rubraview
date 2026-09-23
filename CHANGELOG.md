@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The A-B repeat points can be typed as well as tapped (owner,
+  2026-09-24, D-28). `Shift+\` opens a box holding both as numbers;
+  inside it `[` and `]` put the playhead into the field in hand, and the
+  keyboard types over it — so a point tapped in can be corrected to the
+  millisecond and a typed one can be re-tapped.
 - The music page shows the record (owner, 2026-09-24, RV-076): the cover
   in the middle, the same cover blurred behind it, and what the file says
   about the track — title, artist, record, year, track number, codec,

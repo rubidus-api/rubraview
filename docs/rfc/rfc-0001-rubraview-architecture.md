@@ -474,6 +474,7 @@ the keymap does not do is listed after it.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
+| `Shift+\` | Repeat by number |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
