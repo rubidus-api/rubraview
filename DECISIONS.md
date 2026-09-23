@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-27 Blu-ray picture subtitles are read here too
+
+- Status: Accepted (owner 2026-09-24: "D 구현 바랍니다", D being Blu-ray `.sup` subtitles)
+- Decision: PGS (`movie.sup` beside the film) is supported the way VobSub is (D-22): `src/core/pgs.c` walks the segments, notes when each display set is shown and where it begins, and decodes one picture at a time — the palette from Y'CbCr, the picture from its run-length coding. No FFmpeg and no decoder, so it works with the Windows backend alone. A `.sup` appears among the subtitle tracks (its kind reads `sup`) and is chosen like any other; `Z`/`X` move it in time like text.
+- Consequences: only the index of times and offsets is held, because a feature film's subtitles are hundreds of megabytes of pictures. A display set that only sends a new palette is a step of a fade and neither starts nor ends a subtitle. A set that composes two objects is drawn as its first one, and a composition that refers to a picture an earlier set sent is not drawn — both are written down in T081 rather than guessed at. A damaged subtitle costs that subtitle, not the file.
+
 ## 2026-09-24: D-26 FFmpeg is pinned to a release, and that release is 9.0
 
 - Status: Accepted (owner 2026-09-24, after asking what to use: "9.0으로 올리고 0.0.17로 릴리즈 바랍니다"; the question before it was whether master would be better)

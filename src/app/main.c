@@ -53,6 +53,7 @@
 #include "rubraview/ui_menu.h"
 #include "rubraview/ui_actions.h"
 #include "rubraview/vobsub.h"
+#include "rubraview/pgs.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
@@ -231,6 +232,15 @@ typedef struct app_state {
     int32_t                    vobsub_texture_cue;  /* which one the texture holds, -1 for none */
     int32_t                    vobsub_texture_w, vobsub_texture_h;
     rubraview_vobsub_cue_t     vobsub_cue;
+    /* A Blu-ray's picture subtitles (owner, 2026-09-24). The same shape
+       as the DVD's above, over a `.sup` file instead of an index pair. */
+    rubraview_pgs_track_t      pgs;
+    u8str_t                    pgs_bytes;           /* the `.sup` file itself */
+    uint8_t                   *pgs_pixels;
+    rubraview_texture_t       *pgs_texture;
+    int32_t                    pgs_texture_cue;
+    int32_t                    pgs_texture_w, pgs_texture_h;
+    rubraview_pgs_cue_t        pgs_cue;
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
     int32_t                    video_page_w, video_page_h;
@@ -672,9 +682,11 @@ static void update_window_title(app_state_t *app) {
 static void osd_say(app_state_t *app, u8str_t text);
 
 static void vobsub_clear(app_state_t *app);
+static void pgs_clear(app_state_t *app);
 
 static void media_close(app_state_t *app) {
     vobsub_clear(app);
+    pgs_clear(app);
     app->video_transform_ok = false;
     if (app->media) {
         rubraview_pal_media_close(app->media);
@@ -800,6 +812,7 @@ static app_page_t *media_page_ready(app_state_t *app) {
    subpictures runs to a few tens of megabytes. */
 #define VOBSUB_MAX_IDX_BYTES (4u * 1024u * 1024u)
 #define VOBSUB_MAX_SUB_BYTES (192u * 1024u * 1024u)
+#define PGS_MAX_SUP_BYTES    (192u * 1024u * 1024u)
 #define SUBTITLE_MAX_CANDIDATES 8
 
 /* §3.16.1 / R135: the subtitle files that share the film's name. The
@@ -879,6 +892,8 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, found[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (n > 0) languages = n;
+        } else if (found[i].format == RUBRAVIEW_SUBTITLE_PGS) {
+            languages = 1;     /* one `.sup` is one language, and it is not text */
         } else {
             /* A SAMI file usually holds every language at once, a class
                each (owner, 2026-09-23); the others hold one. */
@@ -893,7 +908,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
         }
     }
 
-    static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx" };
+    static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx", "sup" };
     for (size_t i = 0; i < app->subtitle_count; ++i) {
         u8str_t language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path);
         u8str_t tags[SUBTITLE_MAX_CANDIDATES];
@@ -903,6 +918,8 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (which < n) language = tags[which];
+        } else if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_PGS) {
+            /* Its name is all there is to go on, which `language` already has. */
         } else if (which > 0 || app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_SMI) {
             rubraview_subtitle_track_t peek = subtitle_read(app->arena, app->subtitle_files[i], NULL);
             size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
@@ -914,7 +931,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             .stream_index = (int32_t)i,   /* into app->subtitle_files, not the container */
             .language = language,
             .title = rubraview_path_basename(app->subtitle_files[i].path),
-            .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 6
+            .codec = cstr(FORMAT_NAME[(size_t)app->subtitle_files[i].format < 7
                                       ? (size_t)app->subtitle_files[i].format : 0]),
         };
         rubraview_tracks_add(&app->tracks, track);
@@ -959,8 +976,34 @@ static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
     app->vobsub = rubraview_vobsub_index(app->arena, idx_text, language);
 }
 
+/* `movie.sup` is the whole of it: no index, no second file. */
+static void pgs_clear(app_state_t *app) {
+    if (app->pgs_texture) rubraview_pal_texture_destroy(app->pgs_texture);
+    app->pgs_texture = NULL;
+    app->pgs_texture_cue = -1;
+    app->pgs_texture_w = app->pgs_texture_h = 0;
+    app->pgs = (rubraview_pgs_track_t){0};
+    app->pgs_bytes = (u8str_t){ .ptr = "", .len = 0 };
+}
+
+static void pgs_load(app_state_t *app, u8str_t sup_path) {
+    pgs_clear(app);
+    app->pgs_bytes = rubraview_pal_fs_read_file(app->arena, sup_path, PGS_MAX_SUP_BYTES);
+    if (app->pgs_bytes.len == 0) {
+        osd_say(app, U8("the subtitle file could not be read"));
+        return;
+    }
+    if (!app->pgs_pixels) {
+        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, RUBRAVIEW_PGS_MAX_PIXELS);
+        if (!proven_is_ok(mem.err)) return;
+        app->pgs_pixels = (uint8_t*)mem.value.ptr;
+    }
+    app->pgs = rubraview_pgs_index(app->arena, (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.len);
+}
+
 static void subtitle_select(app_state_t *app, int32_t index) {
     vobsub_clear(app);
+    pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
     app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
     app->tracks.current_subtitle = -1;
@@ -974,6 +1017,15 @@ static void subtitle_select(app_state_t *app, int32_t index) {
             vobsub_load(app, app->subtitle_files[track->stream_index].path,
                         (size_t)app->subtitle_vobsub_stream[track->stream_index]);
             if (app->vobsub.count == 0) return;
+            u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+                                                          &app->tracks, index);
+            app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
+            app->tracks.current_subtitle = index;
+            return;
+        }
+        if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_PGS) {
+            pgs_load(app, app->subtitle_files[track->stream_index].path);
+            if (app->pgs.count == 0) return;
             u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
                                                           &app->tracks, index);
             app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
@@ -3176,8 +3228,56 @@ static void draw_vobsub(app_state_t *app) {
                                       RUBRAVIEW_INTERP_LINEAR);
 }
 
+/* A Blu-ray subtitle: the same idea as the DVD's above — decode the one
+   this moment wants, keep its texture while it is up, and put it where
+   the disc put it on its own frame (owner, 2026-09-24). */
+static void draw_pgs(app_state_t *app) {
+    if (!app->media || app->pgs.count == 0 || !app->pgs_pixels || !app->video_transform_ok) return;
+    if (app->pgs.frame_width <= 0 || app->pgs.frame_height <= 0) return;
+
+    double when = app->media_position - app->subtitle.offset_seconds;   /* Z / X move these too */
+    int32_t index = rubraview_pgs_at(&app->pgs, when);
+    if (index < 0) return;
+
+    if (index != app->pgs_texture_cue) {
+        if (!rubraview_pgs_decode(&app->pgs, (size_t)index, (const uint8_t*)app->pgs_bytes.ptr,
+                                  app->pgs_bytes.len, app->pgs_pixels, &app->pgs_cue)) {
+            app->pgs_texture_cue = index;      /* a torn one: do not try it again every frame */
+            if (app->pgs_texture) { rubraview_pal_texture_destroy(app->pgs_texture); app->pgs_texture = NULL; }
+            return;
+        }
+        app->pgs_texture_cue = index;
+        if (!app->pgs_texture || app->pgs_texture_w != app->pgs_cue.width ||
+            app->pgs_texture_h != app->pgs_cue.height) {
+            if (app->pgs_texture) rubraview_pal_texture_destroy(app->pgs_texture);
+            app->pgs_texture = rubraview_pal_texture_create_bgra(app->renderer, app->pgs_cue.width,
+                                                                 app->pgs_cue.height);
+            app->pgs_texture_w = app->pgs_cue.width;
+            app->pgs_texture_h = app->pgs_cue.height;
+        }
+        if (!app->pgs_texture) return;
+        size_t pixels = (size_t)app->pgs_cue.width * (size_t)app->pgs_cue.height;
+        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, pixels * 4);
+        if (!proven_is_ok(mem.err)) return;
+        uint32_t *bgra = (uint32_t*)mem.value.ptr;
+        rubraview_pgs_pixels(&app->pgs_cue, bgra);
+        rubraview_pal_texture_upload_bgra(app->pgs_texture, (const uint8_t*)bgra, app->pgs_cue.width * 4);
+    }
+    if (!app->pgs_texture || app->pgs_cue.width <= 0) return;
+    if (app->media_position >= app->pgs_cue.end_seconds + app->subtitle.offset_seconds) return;
+    double sx = (double)app->video_page_w / (double)app->pgs.frame_width;
+    double sy = (double)app->video_page_h / (double)app->pgs.frame_height;
+    rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+        rubraview_mat3x2_scale(sx, sy),
+        rubraview_mat3x2_translate((double)app->pgs_cue.x * sx, (double)app->pgs_cue.y * sy));
+    rubraview_pal_render_draw_texture(app->renderer, app->pgs_texture,
+                                      rubraview_mat3x2_multiply(place, app->video_transform),
+                                      RUBRAVIEW_INTERP_LINEAR);
+}
+
 static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     draw_vobsub(app);
+    draw_pgs(app);
     if (!app->media || app->subtitle.count == 0) return;
     const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
     if (!cue || cue->text.len == 0) return;
