@@ -6,6 +6,17 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Fixed
+
+- A subtitle file is read whatever order it is written in (owner,
+  2026-09-23): the captions are put in time order before anything else is
+  worked out, so a SAMI whose languages do not take turns, or a SubRip
+  numbered out of sequence, reads the same as a tidy one.
+- A SAMI caption now ends where its own language says `&nbsp;` — it used
+  to hang on until the next caption, showing text the file had cleared.
+- The last caption of a SAMI file is kept. Nothing closed it before, so a
+  file that does not end with a blank lost its final line.
+
 ## [0.0.16] - 2026-09-23
 
 ### Fixed

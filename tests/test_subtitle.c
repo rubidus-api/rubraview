@@ -63,8 +63,10 @@ int main(void) {
     }
     printf("  [PASS] WebVTT parses, with its header, cue settings and optional hours\n");
 
-    /* Test 3: SAMI. Its captions have no end time — each lasts until
-       the next one — and `&nbsp;` means nothing is showing. */
+    /* Test 3: SAMI. Its captions have no end time — each lasts until the
+       next moment its own language says something, and `&nbsp;` is that
+       language saying "nothing now" (2026-09-23: a caption used to hang
+       on past its own `&nbsp;` until the next caption). */
     {
         u8str_t text = lit("<SAMI>\n<BODY>\n"
                            "<SYNC Start=1000><P Class=KRCC>\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94\n"
@@ -76,7 +78,7 @@ int main(void) {
 
         assert(t.count == 2);
         assert(near(t.cues[0].start_seconds, 1.0));
-        assert(near(t.cues[0].end_seconds, 5.0)); /* runs to the next real caption */
+        assert(near(t.cues[0].end_seconds, 3.0)); /* the `&nbsp;` at 3 s clears it */
         assert(is(t.cues[0].language, "KRCC"));
         assert(is(t.cues[1].text, "Second line\nand more"));
     }
@@ -123,6 +125,71 @@ int main(void) {
         assert(rubraview_subtitle_languages(&srt, languages, 4) == 1 && languages[0].len == 0);
     }
     printf("  [PASS] One SAMI file holding two languages shows only the one chosen\n");
+
+    /* Test 3c: nothing says a subtitle file is written in time order, or
+       that its languages come in turns (owner, 2026-09-23). */
+    {
+        /* SubRip, shuffled. */
+        u8str_t text = lit("2\n00:00:05,000 --> 00:00:06,000\nthird\n\n"
+                           "1\n00:00:01,000 --> 00:00:02,000\nfirst\n\n"
+                           "3\n00:00:03,000 --> 00:00:04,000\nsecond\n");
+        rubraview_subtitle_track_t t = rubraview_subtitle_parse(&arena, text, RUBRAVIEW_SUBTITLE_SRT);
+        assert(t.count == 3);
+        assert(is(t.cues[0].text, "first") && is(t.cues[1].text, "second") && is(t.cues[2].text, "third"));
+        const rubraview_subtitle_cue_t *at = rubraview_subtitle_at(&t, 3.5);
+        assert(at && is(at->text, "second"));
+    }
+    {
+        /* SAMI, two languages, the moments out of order and the classes
+           not taking turns. Each caption must still end where the next
+           one of its own language starts. */
+        u8str_t text = lit("<SAMI>\n<BODY>\n"
+                           "<SYNC Start=5000><P Class=KRCC>ko two\n"
+                           "<SYNC Start=1000><P Class=ENCC>en one\n"
+                           "<SYNC Start=5000><P Class=ENCC>en two\n"
+                           "<SYNC Start=1000><P Class=KRCC>ko one\n"
+                           "<SYNC Start=9000><P Class=ENCC>&nbsp;\n"
+                           "<SYNC Start=9000><P Class=KRCC>&nbsp;\n"
+                           "</BODY>\n</SAMI>\n");
+        rubraview_subtitle_track_t t = rubraview_subtitle_parse(&arena, text, RUBRAVIEW_SUBTITLE_SMI);
+        assert(t.count == 4);
+        for (size_t i = 1; i < t.count; ++i) assert(t.cues[i - 1].start_seconds <= t.cues[i].start_seconds);
+
+        u8str_t languages[4];
+        size_t n = rubraview_subtitle_languages(&t, languages, 4);
+        assert(n == 2);
+
+        for (size_t k = 0; k < n; ++k) {
+            t.shown_language = languages[k];
+            const rubraview_subtitle_cue_t *one = rubraview_subtitle_at(&t, 2.0);
+            const rubraview_subtitle_cue_t *two = rubraview_subtitle_at(&t, 6.0);
+            assert(one && two);
+            assert(one->language.len == languages[k].len &&
+                   memcmp(one->language.ptr, languages[k].ptr, languages[k].len) == 0);
+            assert(one->text.len != two->text.len ||
+                   memcmp(one->text.ptr, two->text.ptr, one->text.len) != 0);   /* two different moments */
+            assert(near(one->end_seconds, 5.0));                     /* to the next of its own language */
+            assert(near(two->end_seconds, 9.0));
+            assert(rubraview_subtitle_at(&t, 9.5) == NULL);
+        }
+    }
+    printf("  [PASS] A file written out of order, or with its languages jumbled, still reads right\n");
+
+    /* Test 3d: a SAMI file whose last caption is a caption, not a blank.
+       It used to be dropped: nothing closed it (2026-09-23). */
+    {
+        u8str_t text = lit("<SAMI>\n<BODY>\n"
+                           "<SYNC Start=1000><P Class=ENCC>first\n"
+                           "<SYNC Start=4000><P Class=ENCC>last one\n"
+                           "</BODY>\n</SAMI>\n");
+        rubraview_subtitle_track_t t = rubraview_subtitle_parse(&arena, text, RUBRAVIEW_SUBTITLE_SMI);
+        assert(t.count == 2);
+        assert(is(t.cues[1].text, "last one"));
+        assert(near(t.cues[1].end_seconds, 7.0));   /* nothing says when: three seconds */
+        const rubraview_subtitle_cue_t *at = rubraview_subtitle_at(&t, 5.0);
+        assert(at && is(at->text, "last one"));
+    }
+    printf("  [PASS] The last caption of a SAMI file is kept, blank or not\n");
 
     /* Test 4: SubStation Alpha. The text is everything after the ninth
        comma, so a line with commas in it must survive. */

@@ -67,3 +67,16 @@ Korean line at the same moment, then off, then English again.
 Before this, such a file showed nothing at all: the reader ended each
 caption where the next caption of *any* class began, which made every one
 of them zero seconds long. `test_subtitle` now holds that case.
+
+## Written out of order, 2026-09-23
+
+The same two-language `.smi`, deliberately jumbled — the 5 s Korean line
+first, then the 1 s English one, then 5 s English, then 1 s Korean — and
+`&nbsp;` for both at 4 s. On the VM: "ENGLISH FIRST" at 1.479 s, and `C`
+gave the Korean line of the same moment. The captions are sorted before
+the ends are worked out, so the order in the file does not matter.
+
+Two faults were found while doing this, both fixed and covered by
+`test_subtitle`: a caption used to outlive its own `&nbsp;` (it ended at
+the next caption instead), and the final caption of a file was dropped
+because nothing closed it.
