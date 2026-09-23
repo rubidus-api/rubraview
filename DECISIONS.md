@@ -184,7 +184,8 @@ Do not store credentials, private infrastructure details, personal data, private
   - `..` is the picker's first entry wherever there is a parent, so going up needs no keyboard.
   - The rename box holds the whole name; the extension may be changed and nothing is asked. The box draws a blinking caret.
   - One typed extension can be given to every picked file at once, each rename its own undo entry.
-- Consequences: the action bar is two rows now. What else a picked set can do — a new playlist (`PlaylistNNNN.m3u8`, then opened), the recycle bin, move and copy — is the next slice of the same plan (`docs/plans/active/2026-09-23-picker-selection.md`).
+  - A picked set can be sent to a new playlist (`PlaylistNNNN.m3u8` beside the files, then opened — the owner preferred this to opening them loose), to the recycle bin (a second press confirms), or moved or copied to one of the numbered folders, chosen by pressing 1-9 after the button. Each file is its own undo entry.
+- Consequences: the action bar is two rows and nine buttons. The picker now draws the OSD and the text box itself, having covered both. Two faults surfaced while measuring: the config files were found by name alone rather than beside the executable (so the numbered folders never worked at all), and a number key reached §3.18.3 while the picker was open.
 
 ## 2026-09-23: D-22 DVD picture subtitles are read here, not by a decoder
 

@@ -198,8 +198,12 @@ In the file picker, the bottom row picks several files without holding a
 key: **Individual** makes every tap turn one file on or off, **Range**
 takes two taps and turns over everything between them, **Same type**
 takes every file with the same extension as the one in focus, **Change
-ext** gives all the picked files one extension you type, and **Clear**
-lets them all go. A mode stays on until you press its button again, and
+ext** gives all the picked files one extension you type, **Playlist**
+writes them as a playlist file beside themselves and opens them as one
+sequence, **Recycle** bins them (press it twice), **Move to** and **Copy
+to** send them to one of the numbered folders — press the number after
+the button — and **Clear** lets them all go. `Ctrl+Z` undoes any of it,
+one file at a time. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
 
 `F2` renames the file, the extension included — correcting `.jgp` to
