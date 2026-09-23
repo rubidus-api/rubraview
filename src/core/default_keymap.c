@@ -126,6 +126,8 @@ const char *rubraview_default_keymap(void) {
     "media_ab_a = \"BracketLeft\"\n"
     "media_ab_b = \"BracketRight\"\n"
     "media_ab_clear = \"Backslash\"\n"
+    /* The same two points, typed (owner, 2026-09-24). */
+    "media_ab_edit = \"Shift+Backslash\"\n"
     "media_speed_reset = \"Ctrl+Backslash\"\n"
     /* §3.16.1 / R135: an external subtitle that runs early or late is
        nudged half a second at a time. */
