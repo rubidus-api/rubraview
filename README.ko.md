@@ -150,6 +150,26 @@
 - **바탕 라이브러리**: `proven_c_lib`(메모리 아레나, `u8str`, 동적 배열)
 - **이식성**: 핵심 알고리즘은 리눅스에서 그대로 시험하고, 윈도우 실행 파일은 리눅스 빌드 기계에서 MinGW-w64 로 교차 빌드합니다.
 
+## FFmpeg (선택)
+
+대부분의 파일은 윈도우 자체 디코더로 재생됩니다. FFmpeg 은 그것으로 못 여는
+형식에만 필요하고, **`ffmpeg.exe` 가 아니라 DLL 다섯 개**입니다.
+
+```
+avcodec-62.dll  avformat-62.dll  avutil-60.dll  swscale-9.dll  swresample-6.dll
+```
+
+[BtbN 의 윈도우 빌드](https://github.com/BtbN/FFmpeg-Builds/releases) 에서
+`ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip` 을 받으세요. 반드시 **8.1**
+이어야 하고 이름에 **shared** 가 있어야 합니다. `shared` 가 없는 판에는 실행
+파일만 있고 DLL 이 없으며, 9.x 는 DLL 이름의 번호가 달라 루브라뷰가 쓰지
+않습니다. 압축 속 `bin` 폴더의 다섯 개를 `rubraview-v0.0.15.exe` 옆에 복사하고
+루브라뷰를 다시 실행하면 됩니다. `lib` 폴더의 `.dll.a`, `.lib` 는 FFmpeg 을
+링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
+
+설정(`F10`) › Video 에서 인식 여부를 보여 주고, 같은 안내를 그 쪽 아래에도
+적어 두었습니다.
+
 ## 문서
 
 - [RFC-0001: 구조와 멀티미디어 파이프라인](docs/rfc/rfc-0001-rubraview-architecture.md)

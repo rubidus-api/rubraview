@@ -175,6 +175,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-23: D-25 GPU decoding is on by default, and a file's languages are separate tracks
+
+- Status: Accepted (owner 2026-09-23: "기본값 on 으로 바꾸고 릴리즈 바랍니다", and "smi나 srt 등의 다른 자막들도 멀티 언어인 경우가 있습니다 ... 선택한 언어 자막만 잘 보여줄 수 있게")
+- Decision:
+  - `[video] hardware_decode` ships `on`, which D-19 left to be decided once a real card had been measured. T065 measured two: AMD Radeon 196 pictures a second at 4K and Intel UHD 730 43, against 16-21 in software, the picture right on both. `always` stays as a diagnostic and the settings window now says so in as many words ("for testing only").
+  - A subtitle file that holds several languages gives one track per language, as a DVD index already does. For SAMI that is its classes; the track is named after the class, and only that language's captions are shown.
+- Consequences: the SAMI reader was wrong before this, not merely limited — it ended every caption at the next caption of any language, so a two-language file showed nothing at all. `rubraview_subtitle_languages` and the track's `shown_language` are the core of it, covered by `test_subtitle`.
+
 ## 2026-09-23: D-24 The help is a window of its own, and the keys in it are generated
 
 - Status: Accepted (owner 2026-09-23: "모달리스 창으로 F1 도움말 넣어주세요 도움말의 가장 중요한건 단축키입니다", and "readme 에 단축키맵 항목 ... 한국어판 영어판 두개")
