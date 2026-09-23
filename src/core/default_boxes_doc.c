@@ -173,7 +173,8 @@ static const char *const PARTS[] = {
 "  end\n"
 "end\n"
 "menu \"Help\"\n"
-"  item open_keys              \"Keys\"\n"
+"  item toggle_help            \"Shortcuts (F1)\"\n"
+"  item open_keys              \"Change keys\"\n"
 "  item about                  \"About\"\n"
 "end\n",
 };
