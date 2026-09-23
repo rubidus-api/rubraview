@@ -37,6 +37,8 @@ rubraview_picker_t rubraview_picker_create(const rubraview_fs_listing_t *listing
         .focus = 0,
         .multi_select = false,
         .selected = NULL,
+        .mode = RUBRAVIEW_PICK_SINGLE,
+        .range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR,
     };
 }
 
@@ -103,6 +105,74 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
         }
     }
     return false;
+}
+
+static bool pickable(const rubraview_picker_t *picker, size_t index) {
+    return picker && picker->listing && picker->selected && index < picker->listing->count &&
+           !picker->listing->entries[index].is_directory;
+}
+
+void rubraview_picker_set_mode(rubraview_picker_t *picker, rubraview_picker_mode_t mode) {
+    if (!picker) return;
+    picker->mode = mode;
+    picker->range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
+    picker->multi_select = mode != RUBRAVIEW_PICK_SINGLE;
+}
+
+bool rubraview_picker_tap(rubraview_picker_t *picker, size_t index) {
+    if (!picker || picker->mode == RUBRAVIEW_PICK_SINGLE) return false;
+    if (!pickable(picker, index)) return false;
+
+    if (picker->mode == RUBRAVIEW_PICK_INDIVIDUAL) {
+        picker->selected[index] = !picker->selected[index];
+        return true;
+    }
+
+    /* A range: the first tap marks where it starts and turns that one
+       over, so the reader can see it; the second turns over the rest of
+       the way there. Between them, every item is inverted exactly once. */
+    if (picker->range_anchor == RUBRAVIEW_PICKER_NO_ANCHOR) {
+        picker->range_anchor = index;
+        picker->selected[index] = !picker->selected[index];
+        return true;
+    }
+    size_t from = picker->range_anchor < index ? picker->range_anchor : index;
+    size_t to = picker->range_anchor < index ? index : picker->range_anchor;
+    for (size_t i = from; i <= to; ++i) {
+        if (i == picker->range_anchor) continue;   /* already turned over by the first tap */
+        if (!pickable(picker, i)) continue;
+        picker->selected[i] = !picker->selected[i];
+    }
+    picker->range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
+    return true;
+}
+
+size_t rubraview_picker_select_extension(rubraview_picker_t *picker, u8str_t ext, bool on) {
+    if (!picker || !picker->listing || !picker->selected || ext.len == 0) return 0;
+    size_t changed = 0;
+    for (size_t i = 0; i < picker->listing->count; ++i) {
+        if (!pickable(picker, i)) continue;
+        u8str_t name = picker->listing->entries[i].name;
+        if (name.len < ext.len) continue;
+        const char *tail = name.ptr + (name.len - ext.len);
+        bool same = true;
+        for (size_t k = 0; k < ext.len && same; ++k) {
+            char a = tail[k], b = ext.ptr[k];
+            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+            same = a == b;
+        }
+        if (!same || picker->selected[i] == on) continue;
+        picker->selected[i] = on;
+        changed++;
+    }
+    return changed;
+}
+
+void rubraview_picker_clear_selection(rubraview_picker_t *picker) {
+    if (!picker || !picker->listing || !picker->selected) return;
+    for (size_t i = 0; i < picker->listing->count; ++i) picker->selected[i] = false;
+    picker->range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
 }
 
 void rubraview_picker_toggle(rubraview_picker_t *picker, size_t index) {

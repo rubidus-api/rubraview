@@ -38,6 +38,20 @@ typedef struct rubraview_breadcrumbs {
 /** Split a path into tappable segments. Slices point into `path`. */
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path);
 
+/*
+ * How a tap picks (owner, 2026-09-23: "쉬프트나 컨트롤 입력 없이"). A mode
+ * is turned on by its own button and stays on until it is turned off, so
+ * a reader on a touch screen never holds a modifier down.
+ */
+typedef enum rubraview_picker_mode {
+    RUBRAVIEW_PICK_SINGLE = 0,   /* a tap opens the item */
+    RUBRAVIEW_PICK_INDIVIDUAL,   /* a tap turns one item's selection on or off */
+    RUBRAVIEW_PICK_RANGE,        /* two taps invert everything between them */
+} rubraview_picker_mode_t;
+
+/** No range is being marked out. */
+#define RUBRAVIEW_PICKER_NO_ANCHOR ((size_t)-1)
+
 typedef struct rubraview_picker {
     const rubraview_fs_listing_t *listing; /* the current directory, already sorted by the caller */
     double tile_extent;      /* one tile's height plus gutter, along the scroll axis */
@@ -47,6 +61,8 @@ typedef struct rubraview_picker {
     size_t  focus;           /* the item type-ahead and the keyboard move */
     bool    multi_select;
     bool   *selected;        /* caller-owned, listing->count entries, or NULL when single-select */
+    rubraview_picker_mode_t mode;
+    size_t  range_anchor;    /* the first tap of a range, or RUBRAVIEW_PICKER_NO_ANCHOR */
 } rubraview_picker_t;
 
 rubraview_picker_t rubraview_picker_create(const rubraview_fs_listing_t *listing,
@@ -69,6 +85,27 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter);
 
 /** Toggle one item's selection; a no-op outside multi-select mode. */
 void rubraview_picker_toggle(rubraview_picker_t *picker, size_t index);
+
+/** Turn a mode on or off. Switching forgets a half-marked range; the selection stays. */
+void rubraview_picker_set_mode(rubraview_picker_t *picker, rubraview_picker_mode_t mode);
+
+/**
+ * A tap on an item. True when the tap picked (so the caller does not open
+ * it): in `INDIVIDUAL` it turned that one on or off; in `RANGE` it either
+ * marked the start — which is inverted at once, so the reader sees it —
+ * or inverted the rest of the way to it. False in `SINGLE`, and for a
+ * folder, which is opened rather than picked.
+ */
+bool rubraview_picker_tap(rubraview_picker_t *picker, size_t index);
+
+/**
+ * Every file whose name ends in `ext` (".jpg", case does not matter) is
+ * turned on, or off. Returns how many changed.
+ */
+size_t rubraview_picker_select_extension(rubraview_picker_t *picker, u8str_t ext, bool on);
+
+/** Nothing selected, and no range half-marked. */
+void rubraview_picker_clear_selection(rubraview_picker_t *picker);
 
 /**
  * Keep the folders and the files whose names match `patterns` (a glob
