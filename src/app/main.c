@@ -699,11 +699,15 @@ static void osd_say(app_state_t *app, u8str_t text);
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
 static void music_clear(app_state_t *app);
+static void ab_edit_close(app_state_t *app);
 
 static void media_close(app_state_t *app) {
     vobsub_clear(app);
     pgs_clear(app);
     music_clear(app);
+    /* Nothing is playing now, so there is nothing for the points to be
+       in: a box left open would apply them to the next file. */
+    if (app->ab_edit_open) ab_edit_close(app);
     app->video_transform_ok = false;
     if (app->media) {
         rubraview_pal_media_close(app->media);
