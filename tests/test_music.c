@@ -126,6 +126,61 @@ int main(void) {
     }
     printf("  [PASS] The crossfade curve is equal-power at every point asked of it\n");
 
+
+    /* 6. Who gets the speakers (RV-081). The round trip, and the rule
+          every player gets wrong: the listener's own pause outranks the
+          arbiter, so music stopped by hand does not come back to life
+          because a film ended. */
+    {
+        rubraview_bgm_t bgm = {0};
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_MUSIC_OPENED, true) == RUBRAVIEW_BGM_DO_NOTHING);
+
+        /* A film with sound: the music stands aside, and is owed a resume. */
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_PAUSE);
+        /* Another page with sound before the first is gone does not pause
+           twice, and does not owe two resumes. */
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_RESUME);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_NOTHING);
+    }
+    {
+        /* The listener stopped it: a film comes and goes, and it stays stopped. */
+        rubraview_bgm_t bgm = {0};
+        (void)rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_MUSIC_OPENED, true);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_READER_PAUSED, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_NOTHING);
+
+        /* And once the listener starts it again, the arbiter is back in
+           charge from there. */
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_READER_RESUMED, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_PAUSE);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_RESUME);
+    }
+    {
+        /* Music opened while a film is already sounding stands aside at
+           once rather than talking over it. */
+        rubraview_bgm_t bgm = {0};
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_MUSIC_OPENED, true) == RUBRAVIEW_BGM_DO_PAUSE);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_RESUME);
+
+        /* Music that has gone is not paused or resumed. */
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_MUSIC_CLOSED, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, true) == RUBRAVIEW_BGM_DO_NOTHING);
+    }
+    {
+        /* With the setting off the two simply play together. */
+        rubraview_bgm_t bgm = {0};
+        (void)rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_MUSIC_OPENED, false);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, false) == RUBRAVIEW_BGM_DO_NOTHING);
+        assert(rubraview_bgm_event(&bgm, RUBRAVIEW_BGM_PAGE_QUIET, false) == RUBRAVIEW_BGM_DO_NOTHING);
+
+        assert(rubraview_bgm_event(NULL, RUBRAVIEW_BGM_PAGE_SOUNDS, true) == RUBRAVIEW_BGM_DO_NOTHING);
+    }
+    printf("  [PASS] The music stands aside for a film, and the listener's own pause outranks that\n");
+
     printf("[test_music] All tests passed successfully!\n");
     return 0;
 }

@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Music plays on while pictures are looked at or a comic is read, and
+  stands aside for a film with sound of its own (owner, 2026-09-24,
+  D-30, RV-081). The listener's own pause outranks that: music stopped by
+  hand stays stopped. `Space` with no player on the page is the
+  background music's.
 - One track runs into the next (owner, 2026-09-24, D-29, RV-075). The
   next file in the folder is opened while the current one still plays and
   takes over at its end with no gap; with `[audio] crossfade_seconds` set

@@ -52,3 +52,59 @@ rubraview_track_plan_t rubraview_track_plan(rubraview_track_change_t how,
     }
     return plan;
 }
+
+/* ---- §3.14.6: who gets the speakers ---- */
+
+rubraview_bgm_action_t rubraview_bgm_event(rubraview_bgm_t *state,
+                                            rubraview_bgm_event_t event,
+                                            bool pause_for_sound) {
+    if (!state) return RUBRAVIEW_BGM_DO_NOTHING;
+
+    switch (event) {
+        case RUBRAVIEW_BGM_MUSIC_OPENED:
+            state->holds_music = true;
+            state->reader_paused = false;
+            state->stood_aside = false;
+            /* Opened while a film is already sounding: it stands aside
+               at once rather than talking over it. */
+            if (state->page_sounds && pause_for_sound) {
+                state->stood_aside = true;
+                return RUBRAVIEW_BGM_DO_PAUSE;
+            }
+            return RUBRAVIEW_BGM_DO_NOTHING;
+
+        case RUBRAVIEW_BGM_MUSIC_CLOSED:
+            state->holds_music = false;
+            state->reader_paused = false;
+            state->stood_aside = false;
+            return RUBRAVIEW_BGM_DO_NOTHING;
+
+        case RUBRAVIEW_BGM_PAGE_SOUNDS:
+            state->page_sounds = true;
+            if (!pause_for_sound || !state->holds_music) return RUBRAVIEW_BGM_DO_NOTHING;
+            /* Already paused by the listener: leave it alone, and do not
+               pretend the arbiter owes it a resume. */
+            if (state->reader_paused || state->stood_aside) return RUBRAVIEW_BGM_DO_NOTHING;
+            state->stood_aside = true;
+            return RUBRAVIEW_BGM_DO_PAUSE;
+
+        case RUBRAVIEW_BGM_PAGE_QUIET: {
+            state->page_sounds = false;
+            bool owed = state->stood_aside && state->holds_music && !state->reader_paused;
+            state->stood_aside = false;
+            return owed ? RUBRAVIEW_BGM_DO_RESUME : RUBRAVIEW_BGM_DO_NOTHING;
+        }
+
+        case RUBRAVIEW_BGM_READER_PAUSED:
+            state->reader_paused = true;
+            /* The listener has taken it over; the arbiter owes nothing. */
+            state->stood_aside = false;
+            return RUBRAVIEW_BGM_DO_NOTHING;
+
+        case RUBRAVIEW_BGM_READER_RESUMED:
+            state->reader_paused = false;
+            state->stood_aside = false;
+            return RUBRAVIEW_BGM_DO_NOTHING;
+    }
+    return RUBRAVIEW_BGM_DO_NOTHING;
+}
