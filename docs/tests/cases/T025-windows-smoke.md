@@ -25,14 +25,14 @@ This procedure is that missing check. Run it on the Windows target.
 | # | Action | Expected |
 |---|---|---|
 | 1 | `rubraview.exe "page (2).jpg"` | A window opens with **no title bar and no border** — the image reaches every edge (§3.21.1). `page (2).jpg` is displayed. |
-| 2 | Press `Right`, then `Right` again | Advances to `page (9).jpg`, then `page (10).jpg` — natural order, not `(10)` before `(2)` (§3.2.3). |
-| 3 | Press `Left` repeatedly to reach the first page, then `Left` once more | Stops at `page (1).jpg`; it does not wrap or crash. |
+| 2 | Press `PageDown`, then `PageDown` again | Advances to `page (9).jpg`, then `page (10).jpg` — natural order, not `(10)` before `(2)` (§3.2.3). (Written as `Right` until 2026-09-24: RFC-0003 gave the arrows to the window and to playback, and paging to `PageDown` / `Space` / `Enter`.) |
+| 3 | Press `PageUp` repeatedly to reach the first page, then `PageUp` once more | Stops at `page (1).jpg`; it does not wrap or crash. |
 | 4 | Press `Home`, then `End` | Jumps to the first, then the last page. |
 | 5 | Press `1`, `2`, `3`, `4`, `5` in turn | Fit to window / width / height / 1:1 actual size / smart fit. **The window's own size and position must not change for any of them** (§3.4, R117). |
 | 6 | Drag a window edge or corner | The window resizes, even though no border is visible (§3.21.1 hit-testing). |
 | 7 | Maximize the window | It fills the work area and **does not cover the taskbar** (§3.21.1). |
 | 8 | Press `F` (or `F11`) | True fullscreen covering the whole monitor, taskbar included. Press again to restore the previous size and position exactly. |
-| 9 | `Ctrl` + mouse wheel | Zooms in and out. Plain mouse wheel moves to the next/previous page. |
+| 9 | `Ctrl` + mouse wheel | Zooms in and out. A plain wheel notch does **not** turn the page (owner, 2026-09-09: the wheel would otherwise mean two things depending on whether the picture overflows); it scrolls a picture that is taller than the window. |
 | 10 | Press `4` (1:1), then zoom past 400%, then press `G` | A one-pixel grid appears over pixel boundaries. Press `G` again to remove it. It must not appear below 400% (§3.5). |
 | 11 | Press `N` | Interpolation switches to nearest-neighbour: at high zoom the pixels become crisp squares rather than smooth (§3.5). |
 | 12 | Open the sideways photo | It appears **upright**: the EXIF orientation tag was applied during decode (§3.9, RV-014/RV-029) — and **at once**, not seconds later (2026-09-22: turning the JPEG frame directly re-decoded it per row, 6.5 s for 1600x1200 on the VM; now 22 ms). |
@@ -40,6 +40,31 @@ This procedure is that missing check. Run it on the Windows target.
 | 14 | Press `M` while in Book mode | Reading order flips: the lower page number moves to the right side (manga order, §3.3). |
 | 15 | Drag the window between two monitors with different scaling | The image stays sharp and correctly sized (§4.2 Per-Monitor V2). |
 | 16 | Press `Escape` | The application exits cleanly. |
+
+## Measured on the Windows 11 VM, 2026-09-24
+
+Steps 1-14 and 16, with `page (1|2|9|10).png`, `photo.jpg` and a sideways
+`sideways.jpg` in one folder. Evidence, in the order the steps run:
+
+- 1: the window opened frameless on `page (2).png`, listed 2 of 6;
+- 2-4: `PageDown` walked (1), (2), (9), (10) — natural order — `PageUp`
+  came back and stopped at the first without wrapping; `Home` and `End`
+  jumped to first and last;
+- 5: the five fit keys left the window at `0,0 1280x752` exactly;
+- 6: dragging the invisible right edge resized it to 1001x752;
+- 7: `Win`+`Up` maximised to 1280x752, the work area — the taskbar stayed;
+- 8: `F` filled 1280x800, the whole screen, and `F` again restored
+  1280x752 to the pixel;
+- 9: `Ctrl`+wheel took the zoom 121% → 146%; a plain wheel notch did
+  nothing, which is what the owner asked for in 2026-09-09;
+- 10: at 459% `G` changed 417,507 pixels (the grid); at 314% it changed
+  none, so it keeps to its own rule;
+- 12: the sideways photo stood upright at once (T078 measures the speed);
+- 15: not run — this machine has one screen.
+
+Two steps of this case were written for M2's keymap and were corrected
+here rather than reported as faults: paging is `PageDown` / `PageUp`
+since RFC-0003, and the plain wheel deliberately does not page.
 
 ## Known M2 limitations (not defects)
 
