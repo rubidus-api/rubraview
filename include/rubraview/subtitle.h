@@ -27,6 +27,10 @@ typedef enum rubraview_subtitle_format {
     RUBRAVIEW_SUBTITLE_SMI,
     RUBRAVIEW_SUBTITLE_VTT,
     RUBRAVIEW_SUBTITLE_ASS,
+    /* A DVD's pictures: `movie.idx` beside `movie.sub` (owner,
+       2026-09-23). Not text, so `rubraview_subtitle_parse` says nothing
+       about it — `vobsub.h` reads it. */
+    RUBRAVIEW_SUBTITLE_VOBSUB,
 } rubraview_subtitle_format_t;
 
 typedef struct rubraview_subtitle_cue {
