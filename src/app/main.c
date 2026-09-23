@@ -262,6 +262,8 @@ typedef struct app_state {
     rubraview_media_info_t     next_info;
     int32_t                    next_page;
     bool                       next_playing;
+    bool                       music_overlapping;  /* both tracks are sounding */
+    double                     music_end_seen;     /* wall time the backend first said "finished", or 0 */
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
     int32_t                    video_page_w, video_page_h;
@@ -1331,10 +1333,25 @@ static void media_tick(app_state_t *app) {
             ? rubraview_pal_media_finished(m)
             : (app->media_info.duration_seconds > 0.0 && clock >= app->media_info.duration_seconds);
         if (at_end && app->next_media && app->next_playing) {
-            /* One was already playing under it: hand over rather than stop. */
-            music_promote_next(app);
-            return;
+            /* One was already playing under it: hand over rather than
+               stop — but not in the middle of a crossfade. The backend
+               says "finished" when its decoder has run out, which is
+               about a second before the sound the device still holds has
+               been heard; handing over there closes the output and cuts
+               both the tail and the fade (measured, T084). So the
+               overlap is allowed to finish, with a wall-clock guard in
+               case the position stops moving. */
+            if (app->music_end_seen == 0.0) app->music_end_seen = now;
+            double waited = now - app->music_end_seen;
+            double crossfade = rubraview_settings_get(&app->settings, U8("audio"), U8("crossfade_seconds"));
+            if (!app->music_overlapping || waited > crossfade + 1.0) {
+                music_promote_next(app);
+                return;
+            }
+        } else if (!at_end) {
+            app->music_end_seen = 0.0;
         }
+        if (at_end && app->music_overlapping) return;   /* the overlap has the floor */
         if (at_end) {
             /* The end: hold the last picture. Slice 4 hands this to the slide show. */
             rubraview_media_clock_pause(&app->media_clock, now);
@@ -1370,6 +1387,8 @@ static void music_next_close(app_state_t *app) {
     app->next_info = (rubraview_media_info_t){0};
     app->next_page = -1;
     app->next_playing = false;
+    app->music_overlapping = false;
+    app->music_end_seen = 0.0;
 }
 
 /* The one that was waiting becomes the one that is playing. Nothing is
@@ -1390,6 +1409,8 @@ static void music_promote_next(app_state_t *app) {
     app->next_media = NULL;
     app->next_page = -1;
     app->next_playing = false;
+    app->music_overlapping = false;
+    app->music_end_seen = 0.0;
 
     rubraview_pal_media_set_gain(app->media, 1.0);
     app->media_paused = false;
@@ -1460,6 +1481,7 @@ static void music_transition_tick(app_state_t *app) {
 
     rubraview_pal_media_set_gain(app->media, plan.gain_current);
     if (app->next_media) rubraview_pal_media_set_gain(app->next_media, plan.gain_next);
+    app->music_overlapping = app->next_playing && !plan.close_current;
 
     if (plan.close_current && app->next_playing) music_promote_next(app);
 }
