@@ -152,8 +152,8 @@ While it does:
 - A strip above the information bar shows the time; click or drag on it to
   go somewhere else.
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
-  `.ass`, and a DVD's pictures as `.idx` with its `.sub`) or from inside
-  the film itself.
+  `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
+  `.sup`) or from inside the film itself.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later.
 

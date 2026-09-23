@@ -6,6 +6,13 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Blu-ray picture subtitles (owner, 2026-09-24). A `.sup` file beside the
+  film is offered as a subtitle track and drawn over the picture in the
+  frame the disc authored it for, the way a DVD's `.idx`/`.sub` pair is
+  (D-27). Reading it needs neither FFmpeg nor a decoder.
+
 ## [0.0.17] - 2026-09-24
 
 ### Changed
