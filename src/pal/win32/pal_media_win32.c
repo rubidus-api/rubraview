@@ -78,6 +78,10 @@ void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused) {
     if (media) media->api->set_paused(media->impl, paused);
 }
 
+void rubraview_pal_media_set_gain(rubraview_media_t *media, double gain) {
+    if (media && media->api->set_gain) media->api->set_gain(media->impl, gain);
+}
+
 bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall) {
     return media && media->api->audio_position(media->impl, out_position, out_wall);
 }

@@ -36,6 +36,9 @@ typedef struct rubraview_media_backend_api {
 
     /** Ask the decode thread to play another sound track (§3.16.2). */
     bool  (*select_audio_track)(void *impl, int32_t stream_index);
+    /* RV-075: this player's own level, for a crossfade. May be NULL —
+       a backend without one simply plays at full. */
+    void  (*set_gain)(void *impl, double gain);
 
     /** A subtitle stream inside the file, as SubRip text (D-12). */
     u8str_t (*read_subtitle_stream)(void *impl, proven_arena_t *arena, int32_t stream_index);

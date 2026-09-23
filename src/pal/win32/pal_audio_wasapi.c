@@ -74,6 +74,7 @@ struct rubraview_audio_out {
 
     _Atomic bool quit;
     _Atomic bool playing;
+    _Atomic uint32_t gain_permille;   /* RV-075: this output's own level */
     _Atomic uint64_t flush_request;
     _Atomic uint64_t flush_ack;
     _Atomic int64_t flush_base_100ns;
@@ -257,6 +258,15 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
                     rubraview_pcm_ring_read(out->ring, scratch, k * out->channels);
                     size_t m = rubraview_speed_resample(&resampler, scratch, k, step, (float*)(void*)data, space);
                     rubraview_fade_in((float*)(void*)data, m, out->channels, &fade_left, fade_length);
+                    /* RV-075: this output's own level, for a crossfade
+                       between two tracks that are both playing. */
+                    uint32_t gain_permille = atomic_load_explicit(&out->gain_permille, memory_order_relaxed);
+                    if (gain_permille != 1000u) {
+                        float gain = (float)gain_permille / 1000.0f;
+                        float *samples = (float*)(void*)data;
+                        size_t count = m * out->channels;
+                        for (size_t i = 0; i < count; ++i) samples[i] *= gain;
+                    }
                     IAudioRenderClient_ReleaseBuffer(render, (UINT32)m, 0);
                     submitted += m;
                     padding += (UINT32)m;
@@ -409,6 +419,7 @@ rubraview_audio_out_t *rubraview_pal_audio_open(uint32_t sample_rate, uint32_t c
     out->ring = ring;
     atomic_init(&out->quit, false);
     atomic_init(&out->playing, false);
+    atomic_init(&out->gain_permille, 1000u);   /* whole, until a crossfade says otherwise */
     atomic_init(&out->flush_request, 0);
     atomic_init(&out->flush_ack, 0);
     atomic_init(&out->flush_base_100ns, 0);
@@ -431,6 +442,13 @@ void rubraview_pal_audio_set_playing(rubraview_audio_out_t *out, bool playing) {
     if (!out) return;
     atomic_store_explicit(&out->playing, playing, memory_order_release);
     SetEvent(out->wake);
+}
+
+void rubraview_pal_audio_set_gain(rubraview_audio_out_t *out, double gain) {
+    if (!out) return;
+    if (!(gain >= 0.0)) gain = 0.0;      /* a NaN is not a level */
+    if (gain > 1.0) gain = 1.0;
+    atomic_store_explicit(&out->gain_permille, (uint32_t)lround(gain * 1000.0), memory_order_relaxed);
 }
 
 void rubraview_pal_audio_flush(rubraview_audio_out_t *out, double base_seconds) {
