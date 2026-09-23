@@ -1,12 +1,12 @@
 # Rubraview
 
-**Rubraview v0.0.15** (latest release) download — [rubraview-v0.0.15.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.15/rubraview-v0.0.15.zip) · [all releases](https://github.com/rubidus-api/rubraview/releases)
+**Rubraview v0.0.16** (latest release) download — [rubraview-v0.0.16.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.16/rubraview-v0.0.16.zip) · [all releases](https://github.com/rubidus-api/rubraview/releases)
 
 **English** · [한국어](README.ko.md)
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview-v0.0.15.exe`: there is no installer and nothing to place beside it. FFmpeg's DLLs are the one exception, and only for the formats Media Foundation cannot open.
+Unzip and run `rubraview-v0.0.16.exe`: there is no installer and nothing to place beside it. FFmpeg's DLLs are the one exception, and only for the formats Media Foundation cannot open.
 
 > This English README is the canonical version; the Korean one is its translation.
 
@@ -165,7 +165,7 @@ the file named `ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip`. It must be
 **8.1** and the name must say **shared**: a build without `shared` holds
 only the programs, and 9.x names its DLLs differently, so Rubraview will
 not use them. Copy the five files out of the zip's `bin` folder and put
-them beside `rubraview-v0.0.15.exe`, then start Rubraview again. The
+them beside `rubraview-v0.0.16.exe`, then start Rubraview again. The
 `lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
 not for running it — leave them.
 
