@@ -875,13 +875,11 @@ static void vobsub_load(app_state_t *app, u8str_t idx_path) {
     u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, idx_path, VOBSUB_MAX_IDX_BYTES);
     if (idx_text.len == 0) return;
 
-    char sub_path[1024];
-    u8str_t stem = rubraview_path_stem(idx_path);
-    if (stem.len == 0 || stem.len + 5 >= sizeof(sub_path)) return;
-    memcpy(sub_path, stem.ptr, stem.len);
-    memcpy(sub_path + stem.len, ".sub", 4);
-    app->vobsub_sub = rubraview_pal_fs_read_file(app->arena, (u8str_t){ .ptr = sub_path, .len = stem.len + 4 },
-                                                 VOBSUB_MAX_SUB_BYTES);
+    /* The whole path, not just the name: the viewer is not always
+       started in the film's folder. */
+    u8str_t sub_path = rubraview_path_with_ext(app->arena, idx_path, ".sub");
+    if (sub_path.len == 0) return;
+    app->vobsub_sub = rubraview_pal_fs_read_file(app->arena, sub_path, VOBSUB_MAX_SUB_BYTES);
     if (app->vobsub_sub.len == 0) {
         osd_say(app, U8("the .sub file beside the index is missing"));
         return;

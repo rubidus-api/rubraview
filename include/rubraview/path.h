@@ -57,6 +57,15 @@ bool rubraview_path_has_ext(u8str_t path, const char *ext);
  */
 u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename);
 
+/**
+ * The file beside this one with another extension, as a whole path:
+ * "D:/films/movie.idx" + ".sub" -> "D:/films/movie.sub". The folder is
+ * kept, so the answer does not depend on where the program was started
+ * from (a bug that cost the DVD subtitles their pictures, 2026-09-23).
+ * `new_ext` carries its own dot.
+ */
+u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext);
+
 #ifdef __cplusplus
 }
 #endif

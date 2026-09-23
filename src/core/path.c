@@ -97,6 +97,23 @@ bool rubraview_path_has_ext(u8str_t path, const char *ext) {
     return true;
 }
 
+u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || path.len == 0 || !new_ext) return empty;
+
+    u8str_t ext = rubraview_path_ext(path);
+    proven_size_t keep = path.len - ext.len;          /* the path without its extension */
+    proven_size_t add = (proven_size_t)strlen(new_ext);
+
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, keep + add + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *dst = (char*)res.value.ptr;
+    memcpy(dst, path.ptr, keep);
+    memcpy(dst + keep, new_ext, add);
+    dst[keep + add] = '\0';
+    return (u8str_t){ .ptr = dst, .len = keep + add };
+}
+
 u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename) {
     if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
     if (dir.len == 0) return filename;
