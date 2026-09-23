@@ -54,6 +54,7 @@
 #include "rubraview/ui_actions.h"
 #include "rubraview/vobsub.h"
 #include "rubraview/pgs.h"
+#include "rubraview/tags.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
@@ -241,6 +242,11 @@ typedef struct app_state {
     int32_t                    pgs_texture_cue;
     int32_t                    pgs_texture_w, pgs_texture_h;
     rubraview_pgs_cue_t        pgs_cue;
+    /* RV-076: what a music file says about itself, and the backdrop made
+       from its cover. Both belong to the track on screen. */
+    rubraview_tags_t           music_tags;
+    bool                       music_tags_read;
+    rubraview_texture_t       *music_backdrop;
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
     int32_t                    video_page_w, video_page_h;
@@ -683,10 +689,12 @@ static void osd_say(app_state_t *app, u8str_t text);
 
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
+static void music_clear(app_state_t *app);
 
 static void media_close(app_state_t *app) {
     vobsub_clear(app);
     pgs_clear(app);
+    music_clear(app);
     app->video_transform_ok = false;
     if (app->media) {
         rubraview_pal_media_close(app->media);
@@ -718,6 +726,54 @@ static const GUID RV_IID_IShellItemImageFactory = {0xBCC18B79, 0xBA16, 0x442F, {
    own shell finds in it (ID3, MP4 and FLAC tags alike), or a plain dark
    square when it has none. Main thread only: the shell wants the
    apartment this thread already runs. */
+/* RV-076: the head of a music file is where its tags and its cover live,
+   so a 300 MB record is not read to find out who is singing. */
+#define MUSIC_MAX_HEAD_BYTES (4u * 1024u * 1024u)
+
+static void music_clear(app_state_t *app) {
+    if (app->music_backdrop) rubraview_pal_texture_destroy(app->music_backdrop);
+    app->music_backdrop = NULL;
+    app->music_tags = (rubraview_tags_t){0};
+    app->music_tags_read = false;
+}
+
+/* The cover, blurred: a small copy of it, softened, and left for the
+   renderer to stretch — which is the blur a backdrop actually wants and
+   costs a few thousand pixels rather than a few million. */
+static void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) {
+    if (!tags->art || tags->art_size == 0) return;
+    rubraview_pixbuf_t art = rubraview_pal_image_read_pixels(app->arena, (u8str_t){ .ptr = "", .len = 0 },
+                                                             tags->art, tags->art_size, false);
+    if (!rubraview_pixbuf_is_valid(&art)) return;
+
+    rubraview_pixbuf_t small = rubraview_pixbuf_resample(app->arena, &art, 64, 64, RUBRAVIEW_FILTER_BILINEAR);
+    if (!rubraview_pixbuf_is_valid(&small)) return;
+    rubraview_pixbuf_t soft = rubraview_filter_box_blur(app->arena, &small, 6);
+    if (!rubraview_pixbuf_is_valid(&soft)) soft = small;
+    rubraview_pixbuf_t bgra = soft.format == RUBRAVIEW_PIXFMT_BGRA8
+        ? soft : rubraview_pixbuf_convert(app->arena, &soft, RUBRAVIEW_PIXFMT_BGRA8);
+    if (!rubraview_pixbuf_is_valid(&bgra)) return;
+
+    app->music_backdrop = rubraview_pal_texture_create_bgra(app->renderer, bgra.width, bgra.height);
+    if (!app->music_backdrop) return;
+    if (!rubraview_pal_texture_upload_bgra(app->music_backdrop, bgra.pixels, bgra.stride)) {
+        rubraview_pal_texture_destroy(app->music_backdrop);
+        app->music_backdrop = NULL;
+    }
+}
+
+/* Read the file's own words once per track. */
+static void music_load(app_state_t *app, u8str_t path) {
+    music_clear(app);
+    if (path.len == 0) return;
+    u8str_t head = rubraview_pal_fs_read_file(app->arena, path, MUSIC_MAX_HEAD_BYTES);
+    if (head.len == 0) return;      /* a record too large for the head budget: no tags, and it still plays */
+    app->music_tags = rubraview_tags_read(app->arena, (rubraview_tags_source_t){
+        .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
+    app->music_tags_read = true;
+    music_make_backdrop(app, &app->music_tags);
+}
+
 static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
     rubraview_texture_t *texture = NULL;
     char narrow[MAX_PATH * 4];
@@ -761,6 +817,17 @@ static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, i
                 DeleteObject(bitmap);
             }
             factory->lpVtbl->Release(factory);
+        }
+    }
+    /* The shell knows the common formats; when it does not (FLAC and
+       Opus often), the cover this file carries is read here instead. */
+    if (!texture && app->music_tags_read && app->music_tags.art_size > 0) {
+        rubraview_image_load_result_t art = rubraview_pal_image_load_texture_from_memory(
+            app->renderer, app->music_tags.art, app->music_tags.art_size, false);
+        if (art.texture) {
+            texture = art.texture;
+            *out_w = art.width;
+            *out_h = art.height;
         }
     }
     if (!texture) {
@@ -1138,6 +1205,7 @@ static void media_prepare(app_state_t *app) {
         app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_VIDEO;
         app->slides[app->spread_index].duration_seconds = opened.info.duration_seconds;
     }
+    if (!opened.info.has_video) music_load(app, path);
     subtitle_load(app, path);
     if (app->subtitle.count > 0) {
         char line[256];
@@ -3500,6 +3568,95 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* RV-076: the cover, blurred, filling the window behind the track — the
+   thing that makes a music player look like one rather than like a
+   viewer with nothing on screen. Nothing is drawn for a film, or for a
+   track whose file carries no cover. */
+static void draw_music_backdrop(app_state_t *app, int32_t win_w, int32_t win_h) {
+    if (!app->media || app->media_info.has_video || !app->music_backdrop) return;
+    rubraview_mat3x2_t place = rubraview_mat3x2_scale((double)win_w / 64.0, (double)win_h / 64.0);
+    rubraview_pal_render_draw_texture_opacity(app->renderer, app->music_backdrop, place,
+                                              RUBRAVIEW_INTERP_LINEAR, 0.45);
+}
+
+/* What the file says about the track, along the bottom: the name and who
+   made it, then the record it came from, then what the sound itself is.
+   A line the file does not answer is left out rather than shown empty. */
+static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
+    if (!app->media || app->media_info.has_video || !app->music_tags_read) return;
+    const rubraview_tags_t *t = &app->music_tags;
+    if (t->title.len == 0 && t->artist.len == 0 && t->album.len == 0 && t->codec.len == 0) return;
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double size = 17.0 * dpi;
+
+    /* The block sits **above** the seek bar and the status line, not
+       across them: how many lines there are is known first, and the
+       whole thing is placed from the bottom up. */
+    bool has_name = t->title.len > 0 || t->artist.len > 0;
+    bool has_record = t->album.len > 0 || t->year.len > 0 || t->track_number.len > 0;
+    double height = (has_name ? size * 1.6 : 0.0) + (has_record ? size * 1.4 : 0.0) + size * 1.4;
+    double chrome = 56.0 * dpi + (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
+    double bottom = (double)win_h - chrome - height - 8.0 * dpi;
+    if (bottom < 0.0) bottom = 0.0;
+
+    char line[320];
+    int n = 0;
+    /* The name, and who made it. */
+    if (has_name) {
+        if (t->title.len > 0 && t->artist.len > 0) {
+            n = snprintf(line, sizeof(line), "%.*s  —  %.*s",
+                         (int)t->title.len, t->title.ptr, (int)t->artist.len, t->artist.ptr);
+        } else {
+            u8str_t one = t->title.len > 0 ? t->title : t->artist;
+            n = snprintf(line, sizeof(line), "%.*s", (int)one.len, one.ptr);
+        }
+        if (n > 0) {
+            rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.6 };
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                                           rect, size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            bottom += size * 1.6;
+        }
+    }
+    /* The record, its year, and the track's number on it. */
+    if (has_record) {
+        n = snprintf(line, sizeof(line), "%.*s%s%.*s%s%s%.*s",
+                     (int)t->album.len, t->album.ptr,
+                     t->album.len > 0 && t->year.len > 0 ? "  (" : "",
+                     (int)t->year.len, t->year.ptr,
+                     t->album.len > 0 && t->year.len > 0 ? ")" : "",
+                     t->track_number.len > 0 ? "   no. " : "",
+                     (int)t->track_number.len, t->track_number.ptr);
+        if (n > 0) {
+            rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                                           rect, size * 0.8, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            bottom += size * 1.4;
+        }
+    }
+    /* What the sound is. */
+    {
+        char what[160];
+        int w = 0;
+        if (t->codec.len > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "%.*s", (int)t->codec.len, t->codec.ptr);
+        if (t->bitrate_kbps > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "%s%u kbps", w > 0 ? "  ·  " : "", t->bitrate_kbps);
+        if (t->sample_rate > 0) {
+            w += snprintf(what + w, sizeof(what) - (size_t)w, "%s%.1f kHz", w > 0 ? "  ·  " : "",
+                          (double)t->sample_rate / 1000.0);
+        }
+        if (t->bits_per_sample > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "  ·  %u bit", t->bits_per_sample);
+        if (t->channels > 0) {
+            w += snprintf(what + w, sizeof(what) - (size_t)w, "  ·  %s",
+                          t->channels == 1 ? "mono" : t->channels == 2 ? "stereo" : "multi");
+        }
+        if (w > 0) {
+            rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = what, .len = (size_t)w },
+                                           rect, size * 0.75, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+}
+
 /* Draws one spread at a given opacity. Splitting this out is what makes
    §3.2.5's cross-fade possible: the outgoing spread is drawn first at a
    falling opacity and the incoming one over it at a rising one. */
@@ -5335,6 +5492,8 @@ static void render_frame(app_state_t *app) {
 
     rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
 
+    draw_music_backdrop(app, win_w, win_h);
+
     if (app->layout.count > 0) {
         /* §3.2.5: while a transition runs, both spreads are on screen —
            the old one fading out under the new one fading in. M3 had the
@@ -5351,6 +5510,8 @@ static void render_frame(app_state_t *app) {
             draw_spread(app, app->spread_index, 1.0, win_w, win_h);
         }
     }
+
+    draw_music_words(app, win_w, win_h);
 
     if (app->picker_open) {
         draw_picker(app, (double)win_w, (double)win_h);
