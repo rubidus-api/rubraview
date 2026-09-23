@@ -6,6 +6,15 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- DVD picture subtitles: a `.idx` beside a `.sub` is listed with the other
+  subtitle tracks, and its pictures are drawn over the film where the disc
+  put them. The index is read whole; each picture is decoded only while it
+  is on screen. `Z` / `X` move them in time like any other subtitles.
+
+## [0.0.12] - 2026-09-23
+
 ### Fixed
 
 - A film with several sound tracks starts on the one the file lists first.
