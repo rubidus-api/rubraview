@@ -209,6 +209,12 @@ one file at a time. A mode stays on until you press its button again, and
 `F2` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
 
+`F1` opens the help in a window of its own. It lists every key that is
+bound, grouped by where it works, and it stays open while you use the
+viewer, so you can try a key with the list in front of you. The wheel or
+`PageUp` / `PageDown` scrolls it, `F1` or `Esc` closes it. The keys it
+shows are the ones in force, so a key you change appears changed.
+
 `F10` or `Ctrl+,` opens the settings window, a window of its own. A change
 takes effect at once; **Revert** goes back to what was there when it
 opened, **Defaults** to the defaults, and the file is written when the
@@ -246,7 +252,7 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `Tab`, `F1` | Open or close the menu box |
+| `Tab` | Open or close the menu box |
 | `T` | Open or close the toolbox |
 | `Shift+T` | Pin the toolbox open |
 | `Ctrl+T` | Give the toolbox a window of its own, or dock it |
@@ -260,6 +266,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
+| `F1` | This help, in a window of its own |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
 | `Delete` | To the recycle bin |

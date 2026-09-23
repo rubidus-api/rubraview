@@ -9,7 +9,7 @@ const char *rubraview_default_keymap(void) {
        `[ui]` is the context every other section falls back to. */
     "[ui]\n"
     "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
-    "toggle_menu = \"Tab, F1\"\n"
+    "toggle_menu = \"Tab\"\n"   /* F1 is the help now (owner, 2026-09-23); Tab still opens the menu */
     /* F2 is rename's (§3.18.2), as in Explorer — owner, 2026-09-15 (D-14). */
     "toggle_toolbox = \"T\"\n"
     /* RFC-0002 Q6: pin it open, or give it a window of its own. */
@@ -28,6 +28,7 @@ const char *rubraview_default_keymap(void) {
     "open_batch = \"Ctrl+B\"\n"
     /* §3.22.1 */
     "open_settings = \"F10, Ctrl+Comma\"\n"
+    "toggle_help = \"F1\"\n"
     "toggle_pixel_grid = \"G\"\n"
     "quit = \"Escape\"\n"
     /* §3.18: triage. Delete is safe — it goes to the recycle bin — and
