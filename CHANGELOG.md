@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-09-23
+
 ### Fixed
 
 - A subtitle file holding several languages at once — a SAMI `.smi` with
