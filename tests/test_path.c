@@ -80,6 +80,22 @@ int main(void) {
     assert(joined.ptr[joined.len] == '\0');
     printf("  [PASS] Path join with null-terminated allocation invariant\n");
 
+    /* The file beside another with a different extension keeps the folder
+       (2026-09-23: building it from the stem alone made a relative path,
+       and a DVD's `.sub` was then only found when the viewer happened to
+       be started in the film's folder). */
+    {
+        u8str_t idx = { .ptr = "D:/films/holiday movie.idx", .len = 26 };
+        u8str_t sub = rubraview_path_with_ext(&arena, idx, ".sub");
+        assert(str_eq(sub, "D:/films/holiday movie.sub"));
+        assert(sub.ptr[sub.len] == '\0');
+        assert(str_eq(rubraview_path_with_ext(&arena, (u8str_t){ .ptr = "movie.idx", .len = 9 }, ".sub"), "movie.sub"));
+        assert(str_eq(rubraview_path_with_ext(&arena, (u8str_t){ .ptr = "/tmp/README", .len = 11 }, ".md"), "/tmp/README.md"));
+        assert(str_eq(rubraview_path_with_ext(&arena, (u8str_t){ .ptr = "a.tar.gz", .len = 8 }, ".sub"), "a.tar.sub"));
+        assert(rubraview_path_with_ext(&arena, (u8str_t){ .ptr = "", .len = 0 }, ".sub").len == 0);
+    }
+    printf("  [PASS] A sibling path with another extension keeps the folder\n");
+
     free(raw_mem);
     printf("[test_path] All tests passed successfully!\n");
     return 0;

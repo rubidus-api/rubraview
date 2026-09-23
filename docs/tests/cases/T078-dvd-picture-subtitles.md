@@ -44,6 +44,13 @@ the pixel in the middle of the bar:
 - `C`: the bar goes (the pixel is the film's own again); `C` again brings
   it back, and 1.479 s is red once more.
 
+Found by this case (2026-09-23): the `.sub` was looked for by name alone,
+so it was found only when the viewer happened to be started in the film's
+folder — the release build, run from its own folder, showed no pictures at
+all. The path now keeps the folder (`rubraview_path_with_ext`, checked in
+`test_path`), and the packaged build was re-run from its own folder: red
+bar at 1.479 s.
+
 Step 2 (the same place whatever the window) and step 5 (a real rip with
 several languages) are not measured: the test viewer fills the screen, and
 there is no rip on this machine.

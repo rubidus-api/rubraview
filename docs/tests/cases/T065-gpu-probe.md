@@ -143,3 +143,25 @@ brightness 91. The probe's early line "no picture came out of it
 (hr=0xC00D36B4)" is the step that lends the *renderer's* device to Media
 Foundation — the path 0.0.8 stopped using — so it says nothing about
 playback. Still to see: the Intel PC with 0.0.8 or later.
+
+### Intel UHD 730, 0.0.12, 2026-09-23 — the black window is gone there too
+
+The owner's Intel PC, the machine 0.0.7 drew black on, with a 4K 60 fps
+H.264 file:
+
+```
+Adapter: Intel(R) UHD Graphics 730 (128 MB of its own memory)
+Decoder profiles the card offers: 80
+hardware_decode = off: 85 pictures in 4.0 s (21 a second), CPU 8.34 s (209% of one core)
+hardware_decode = on: 171 pictures in 4.0 s (43 a second), 171 on the card; CPU 0.42 s (11%)
+viewer path (on): opened in 0.1 s; 60 pictures, 60 copied to the screen texture, 60 drawn; brightness 72 of 255
+```
+
+- Both cards measured are now through the whole viewer path with a picture
+  that is not black (Intel 72, AMD 91), which closes what 0.0.8 set out to
+  fix.
+- 43 a second at 4K on the UHD 730 against 21 in software, at a ninth of
+  the processor. The AMD's 177-196 says the 43 is this card's limit.
+- The line "no picture came out of it (hr=0xC00D36B4)" above the table is
+  the step that lends the *renderer's* device to Media Foundation — the
+  path 0.0.8 stopped using. It says nothing about playback.

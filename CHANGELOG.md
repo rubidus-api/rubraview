@@ -6,6 +6,8 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-09-23
+
 ### Added
 
 - DVD picture subtitles: a `.idx` beside a `.sub` is listed with the other
