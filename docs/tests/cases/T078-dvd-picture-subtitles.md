@@ -54,3 +54,12 @@ bar at 1.479 s.
 Step 2 (the same place whatever the window) and step 5 (a real rip with
 several languages) are not measured: the test viewer fills the screen, and
 there is no rip on this machine.
+
+## Several languages in one index, 2026-09-23
+
+`tools/mkvobsub.py` makes a one-language pair; the fixture for this was a
+two-language one (a bar low on the picture for `en`, a smaller one higher
+up for `ko`). Opened beside the film, the track list held both, and `C`
+moved from one to the other: at 1.5 s the `en` bar was red at the lower
+place, and after `C` the `ko` bar was black at the higher one with the
+first gone. The name of each track comes from the index's own `id:`.

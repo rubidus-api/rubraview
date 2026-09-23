@@ -6,6 +6,12 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- A DVD index that holds several languages now gives one subtitle track
+  per language, named by the `id:` in the index, so `C` walks them like
+  any other subtitles. Before, only the first language could be shown.
+
 ## [0.0.15] - 2026-09-23
 
 ### Added
