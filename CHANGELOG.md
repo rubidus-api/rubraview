@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- One track runs into the next (owner, 2026-09-24, D-29, RV-075). The
+  next file in the folder is opened while the current one still plays and
+  takes over at its end with no gap; with `[audio] crossfade_seconds` set
+  the two overlap on an equal-power curve instead. Both settings are live
+  on the Audio page.
 - The A-B repeat points can be typed as well as tapped (owner,
   2026-09-24, D-28). `Shift+\` opens a box holding both as numbers;
   inside it `[` and `]` put the playhead into the field in hand, and the

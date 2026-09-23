@@ -55,6 +55,7 @@
 #include "rubraview/vobsub.h"
 #include "rubraview/pgs.h"
 #include "rubraview/tags.h"
+#include "rubraview/music.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
@@ -254,6 +255,13 @@ typedef struct app_state {
     rubraview_tags_t           music_tags;
     bool                       music_tags_read;
     rubraview_texture_t       *music_backdrop;
+    /* RV-075: the next track, opened while this one still plays, so one
+       runs into the next without a gap — and, when the reader asks for
+       one, across a crossfade. */
+    rubraview_media_t         *next_media;
+    rubraview_media_info_t     next_info;
+    int32_t                    next_page;
+    bool                       next_playing;
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
     int32_t                    video_page_w, video_page_h;
@@ -699,12 +707,18 @@ static void osd_say(app_state_t *app, u8str_t text);
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
 static void music_clear(app_state_t *app);
+static void music_next_close(app_state_t *app);
+static void music_transition_tick(app_state_t *app);
+static void music_promote_next(app_state_t *app);
+static void go_to_spread(app_state_t *app, size_t index);
+static void update_precache(app_state_t *app);
 static void ab_edit_close(app_state_t *app);
 
 static void media_close(app_state_t *app) {
     vobsub_clear(app);
     pgs_clear(app);
     music_clear(app);
+    music_next_close(app);
     /* Nothing is playing now, so there is nothing for the points to be
        in: a box left open would apply them to the next file. */
     if (app->ab_edit_open) ab_edit_close(app);
@@ -1306,11 +1320,21 @@ static void media_tick(app_state_t *app) {
         }
     }
 
+    /* RV-075: the next track is opened while this one still plays, and
+       takes over when it is due. */
+    music_transition_tick(app);
+    if (app->media != m) return;      /* it took over; the rest is the new track's */
+
     if (!app->media_paused) {
         /* A sound-only file with no device decodes nothing; its end is its duration. */
         bool at_end = (app->media_info.has_video || app->media_info.audio_output)
             ? rubraview_pal_media_finished(m)
             : (app->media_info.duration_seconds > 0.0 && clock >= app->media_info.duration_seconds);
+        if (at_end && app->next_media && app->next_playing) {
+            /* One was already playing under it: hand over rather than stop. */
+            music_promote_next(app);
+            return;
+        }
         if (at_end) {
             /* The end: hold the last picture. Slice 4 hands this to the slide show. */
             rubraview_media_clock_pause(&app->media_clock, now);
@@ -1324,6 +1348,120 @@ static void media_tick(app_state_t *app) {
             update_window_title(app);
         }
     }
+}
+
+/* ---- RV-075: one track running into the next ---- */
+
+/* The page after this one, when it is a music file. A folder holds
+   pictures and films too, and neither is something to slide into: the
+   next track is the next *page*, and only when it is a track. */
+static int32_t music_next_page(const app_state_t *app) {
+    if (app->media_page < 0) return -1;
+    size_t next = (size_t)app->media_page + 1;
+    if (next >= page_count(app)) return -1;
+    u8str_t path = app->source.pages[next].path;
+    if (!is_media_path(path) || !rubraview_tags_is_music_name(rubraview_path_basename(path))) return -1;
+    return (int32_t)next;
+}
+
+static void music_next_close(app_state_t *app) {
+    if (app->next_media) rubraview_pal_media_close(app->next_media);
+    app->next_media = NULL;
+    app->next_info = (rubraview_media_info_t){0};
+    app->next_page = -1;
+    app->next_playing = false;
+}
+
+/* The one that was waiting becomes the one that is playing. Nothing is
+   opened here — that is the whole point — so the page moves to it with
+   the player it already has. */
+static void music_promote_next(app_state_t *app) {
+    if (!app->next_media) return;
+    int32_t page = app->next_page;
+
+    if (app->media) rubraview_pal_media_close(app->media);
+    vobsub_clear(app);
+    pgs_clear(app);
+    music_clear(app);
+
+    app->media = app->next_media;
+    app->media_info = app->next_info;
+    app->media_page = page;
+    app->next_media = NULL;
+    app->next_page = -1;
+    app->next_playing = false;
+
+    rubraview_pal_media_set_gain(app->media, 1.0);
+    app->media_paused = false;
+    app->media_ended = false;
+    app->media_has_frame = false;
+    app->media_position = 0.0;
+    app->media_title_tenth = -1;
+    app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
+    app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
+    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
+    app->ab_a = app->ab_b = -1.0;      /* a repeat belongs to the track it was set in */
+
+    music_load(app, app->source.pages[page].path);
+    subtitle_load(app, app->source.pages[page].path);
+    (void)media_page_ready(app);
+
+    /* And the page on screen follows. `media_prepare` sees that the
+       player is already this page's and leaves it alone. */
+    go_to_spread(app, spread_index_for_page(app, page));
+    update_precache(app);
+}
+
+/* Called once a tick while a track plays: open the next one in time,
+   start it when it is due, and hold both at the levels the plan says. */
+static void music_transition_tick(app_state_t *app) {
+    if (!app->media || app->media_info.has_video || app->media_paused) return;
+
+    rubraview_track_change_t how = {
+        .gapless = rubraview_settings_get(&app->settings, U8("audio"), U8("gapless")) != 0.0,
+        .crossfade_seconds = rubraview_settings_get(&app->settings, U8("audio"), U8("crossfade_seconds")),
+    };
+    int32_t next = music_next_page(app);
+    /* The track that was waiting is no longer the one that follows —
+       the reader moved on by hand — so it is let go. */
+    if (app->next_media && app->next_page != next) music_next_close(app);
+
+    rubraview_track_plan_t plan = rubraview_track_plan(how, app->media_position,
+                                                       app->media_info.duration_seconds, next >= 0);
+
+    if (plan.open_next && !app->next_media && next >= 0) {
+        u8str_t path = app->source.pages[next].path;
+        rubraview_media_backend_t order[2];
+        size_t count = rubraview_media_backend_order(app->media_preferred,
+                                                     rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
+                                                     order);
+        for (size_t i = 0; i < count; ++i) {
+            /* No graphics card for a track: there are no pictures in it. */
+            rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
+            if (opened.media) {
+                app->next_media = opened.media;
+                app->next_info = opened.info;
+                app->next_page = next;
+                app->next_playing = false;
+                rubraview_pal_media_set_gain(app->next_media, 0.0);
+                rubraview_pal_media_set_paused(app->next_media, true);
+                break;
+            }
+        }
+        /* One that cannot be opened is not tried again every tick: the
+           end of this track will move to it in the ordinary way. */
+        if (!app->next_media) app->next_page = next;
+    }
+
+    if (plan.start_next && app->next_media && !app->next_playing) {
+        rubraview_pal_media_set_paused(app->next_media, false);
+        app->next_playing = true;
+    }
+
+    rubraview_pal_media_set_gain(app->media, plan.gain_current);
+    if (app->next_media) rubraview_pal_media_set_gain(app->next_media, plan.gain_next);
+
+    if (plan.close_current && app->next_playing) music_promote_next(app);
 }
 
 /* D-15 A-B repeat: past B, back to A. */

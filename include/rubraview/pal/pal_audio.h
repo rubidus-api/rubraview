@@ -39,6 +39,15 @@ void rubraview_pal_audio_close(rubraview_audio_out_t *out);
 void rubraview_pal_audio_set_playing(rubraview_audio_out_t *out, bool playing);
 
 /**
+ * RV-075: how loud this one output is, 0.0 to 1.0, on top of the
+ * program's own volume. It exists so two tracks can be heard at once
+ * while one gives way to the other — the process-wide volume of D-15
+ * cannot do that, being one for the whole program. Safe from any thread;
+ * it takes effect on the next buffer the device asks for.
+ */
+void rubraview_pal_audio_set_gain(rubraview_audio_out_t *out, double gain);
+
+/**
  * A seek: the device buffer and the ring are emptied, and the heard
  * position restarts at `base_seconds`. Blocks until the output thread has
  * done it. Call it from the producer while it is not writing — that is
