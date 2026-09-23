@@ -57,6 +57,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
+#include "rubraview/playlist.h"
 #include "rubraview/default_keymap.h"
 #include "rubraview/pagesource.h"
 #include "rubraview/precache.h"
@@ -323,6 +324,7 @@ typedef struct app_state {
     rubraview_settings_t     settings;
     rubraview_settings_t     settings_saved;   /* what the file held when the window opened — Revert goes back to it */
     u8str_t                  settings_path;
+    u8str_t                  config_beside;   /* the executable's own folder: portable mode's home */
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
        from the settings document. */
@@ -346,6 +348,11 @@ typedef struct app_state {
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
     rubraview_picker_t     picker;
     bool                  *picker_selected;   /* one per listed item, remade on every folder */
+    /* Move and Copy wait for the digit that names a curation folder;
+       Recycle waits to be pressed a second time (§3.18.1's rule). */
+    int32_t                picker_pending;     /* a picker_button_t, waiting for its digit */
+    bool                   picker_has_pending;
+    rubraview_confirm_t    picker_confirm;
 } app_state_t;
 
 static void open_path(app_state_t *app, u8str_t path);
@@ -367,6 +374,7 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+static void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi);
 static void rename_end(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
@@ -1269,12 +1277,17 @@ typedef enum picker_button {
     PICKER_BTN_RANGE,
     PICKER_BTN_SAME_TYPE,
     PICKER_BTN_EXTENSION,
+    PICKER_BTN_PLAYLIST,
+    PICKER_BTN_RECYCLE,
+    PICKER_BTN_MOVE,
+    PICKER_BTN_COPY,
     PICKER_BTN_CLEAR,
     PICKER_BTN_COUNT,
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
-    "Individual", "Range", "Same type", "Change ext", "Clear",
+    "Individual", "Range", "Same type", "Change ext",
+    "Playlist", "Recycle", "Move to", "Copy to", "Clear",
 };
 
 /* Where a button sits, in client coordinates. */
@@ -1397,6 +1410,131 @@ static u8str_t picker_focus_extension(const app_state_t *app) {
 }
 
 static void rename_extension_begin(app_state_t *app);
+static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said);
+
+/* The picked files, gathered as a listing the page source can take. */
+static size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
+    size_t picked = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (app->picker_selected && app->picker_selected[i] && !app->picker_listing.entries[i].is_directory) picked++;
+    }
+    if (picked == 0) return 0;
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, picked * sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return 0;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    size_t n = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (!app->picker_selected || !app->picker_selected[i]) continue;
+        if (app->picker_listing.entries[i].is_directory) continue;
+        entries[n++] = app->picker_listing.entries[i];
+    }
+    *out = entries;
+    return n;
+}
+
+/* The picked files as a playlist of their own, then opened (owner,
+   2026-09-23, who preferred this to opening them loose). The file is
+   `PlaylistNNNN.m3u8` in this folder — the first number not taken. */
+static void picker_make_playlist(app_state_t *app) {
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries);
+    if (n == 0) { osd_say(app, U8("pick some files first")); return; }
+
+    rubraview_playlist_t list = {0};
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, n * sizeof(rubraview_playlist_entry_t));
+    if (!proven_is_ok(res.err)) return;
+    list.entries = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < n; ++i) {
+        list.entries[i] = (rubraview_playlist_entry_t){ .path = entries[i].name };   /* beside the file */
+    }
+    list.count = n;
+
+    u8str_t text = rubraview_playlist_serialize_m3u8(app->arena, &list);
+    if (text.len == 0) { osd_say(app, U8("could not write the playlist")); return; }
+
+    char name[32];
+    u8str_t target = { .ptr = "", .len = 0 };
+    for (int number = 1; number <= 9999; ++number) {
+        int written = snprintf(name, sizeof(name), "Playlist%04d.m3u8", number);
+        if (written <= 0) return;
+        u8str_t candidate = rubraview_path_join(app->arena, app->picker_dir,
+                                                (u8str_t){ .ptr = name, .len = (size_t)written });
+        rubraview_fs_entry_t taken;
+        if (!rubraview_pal_fs_stat(app->arena, candidate, &taken)) { target = candidate; break; }
+    }
+    if (target.len == 0) { osd_say(app, U8("too many playlists in this folder")); return; }
+    if (!rubraview_pal_fs_write_file(target, text)) { osd_say(app, U8("could not write the playlist")); return; }
+
+    char line[96];
+    int written = snprintf(line, sizeof(line), "%zu file(s) in %s", n, name);
+    open_set_from_entries(app, entries, n, written > 0 ? (u8str_t){ .ptr = line, .len = (size_t)written }
+                                                       : U8("playlist opened"));
+}
+
+/* The picked files to the recycle bin, once the button has been pressed
+   twice (§3.18.1 asks before anything leaves the disk). */
+static void picker_recycle(app_state_t *app) {
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries);
+    if (n == 0) { osd_say(app, U8("pick some files first")); return; }
+
+    double now = rubraview_pal_time_now_seconds();
+    if (!rubraview_confirm_armed(&app->picker_confirm, PICKER_BTN_RECYCLE, now)) {
+        rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, now);
+        char line[96];
+        int written = snprintf(line, sizeof(line), "press Recycle again to bin %zu file(s)", n);
+        if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+        return;
+    }
+    rubraview_confirm_clear(&app->picker_confirm);
+
+    size_t done = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (!rubraview_pal_fs_recycle(entries[i].path)) continue;
+        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+            .op = RUBRAVIEW_FILE_OP_RECYCLE,
+            .source_path = entries[i].path,
+            .target_path = entries[i].path,
+        });
+        done++;
+    }
+    rubraview_undo_commit(&app->undo);
+    char line[96];
+    int written = snprintf(line, sizeof(line), "%zu file(s) in the recycle bin", done);
+    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+    picker_navigate(app, app->picker_dir);
+}
+
+/* Move or copy the picked files into the curation folder a digit names. */
+static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
+    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
+    if (target_dir.len == 0) { osd_say(app, U8("no folder is bound to that number")); return; }
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries);
+    if (n == 0) { osd_say(app, U8("pick some files first")); return; }
+
+    rubraview_pal_fs_make_dirs(target_dir);
+    size_t done = 0;
+    for (size_t i = 0; i < n; ++i) {
+        u8str_t target = rubraview_path_join(app->arena, target_dir, entries[i].name);
+        if (target.len == 0) continue;
+        bool ok = moving ? rubraview_pal_fs_move(entries[i].path, target)
+                         : rubraview_pal_fs_copy(entries[i].path, target);
+        if (!ok) continue;
+        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+            .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+            .source_path = entries[i].path,
+            .target_path = target,
+        });
+        done++;
+    }
+    rubraview_undo_commit(&app->undo);
+    char line[128];
+    int written = snprintf(line, sizeof(line), "%zu file(s) %s %.*s", done, moving ? "moved to" : "copied to",
+                           (int)target_dir.len, target_dir.ptr);
+    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+    if (moving) picker_navigate(app, app->picker_dir);
+}
 
 /* One of the buttons along the bottom was pressed. */
 static void picker_button(app_state_t *app, picker_button_t button) {
@@ -1428,7 +1566,22 @@ static void picker_button(app_state_t *app, picker_button_t button) {
         case PICKER_BTN_EXTENSION:
             rename_extension_begin(app);
             break;
+        case PICKER_BTN_PLAYLIST:
+            picker_make_playlist(app);
+            break;
+        case PICKER_BTN_RECYCLE:
+            picker_recycle(app);
+            break;
+        case PICKER_BTN_MOVE:
+        case PICKER_BTN_COPY:
+            app->picker_pending = (int32_t)button;
+            app->picker_has_pending = true;
+            osd_say(app, button == PICKER_BTN_MOVE ? U8("press 1-9 for the folder to move them to")
+                                                   : U8("press 1-9 for the folder to copy them to"));
+            break;
         case PICKER_BTN_CLEAR:
+            app->picker_has_pending = false;
+            rubraview_confirm_clear(&app->picker_confirm);
             rubraview_picker_clear_selection(&app->picker);
             osd_say(app, U8("nothing picked"));
             break;
@@ -2021,6 +2174,21 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 
     if (combo.key_name.len == 1) {
         char c = combo.key_name.ptr[0];
+        if (app->picker_has_pending && c >= '1' && c <= '9') {
+            /* A number with no folder behind it leaves the picker waiting
+               rather than letting the next one fall through to §3.18.3's
+               own meaning, which would move the page on screen. */
+            if (rubraview_curation_target(&app->curation, c - '0').len == 0) {
+                osd_say(app, U8("no folder is bound to that number - Settings > Files"));
+                return true;
+            }
+            app->picker_has_pending = false;
+            picker_curate(app, c - '0', app->picker_pending == (int32_t)PICKER_BTN_MOVE);
+            return true;
+        }
+        if (app->picker_has_pending && (c == 'A' || c == 'Z')) {
+            app->picker_has_pending = false;   /* any letter gives up waiting */
+        }
         if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
             rubraview_picker_type_ahead(&app->picker, c);
             return true;
@@ -2122,7 +2290,10 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        §3.7.2 gives 1-5 to the fit modes, and an unconfigured viewer must
        keep them; a reader who has set up triage folders has said which
        meaning they want. */
-    if (combo.modifiers == RUBRAVIEW_MOD_NONE && combo.key_name.len == 1) {
+    if (combo.modifiers == RUBRAVIEW_MOD_NONE && combo.key_name.len == 1 && !app->picker_open) {
+        /* Not while the picker is open: there a number answers its own
+           "Move to" or "Copy to", and curating the page behind it would
+           move a file the reader is not looking at (2026-09-23). */
         char c = combo.key_name.ptr[0];
         if (c >= '1' && c <= '9') {
             int32_t digit = c - '0';
@@ -2130,6 +2301,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
                 triage_curate(app, digit);
                 return true;
             }
+
         }
     }
 
@@ -2864,8 +3036,9 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        bar, action_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
-    /* The picker covers the chrome, so its own text box is drawn here. */
+    /* The picker covers the chrome: its text box and its messages are drawn here. */
     draw_rename_box(app, win_w, win_h, dpi);
+    draw_notice(app, win_w, win_h, dpi);
 }
 
 /* Text with a dark outline around it, for subtitles and their preview.
@@ -2972,6 +3145,18 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
 
 /* The text box: renaming a file, or giving the picked files one
    extension. Drawn by the chrome and by the picker, which covers it. */
+/* The OSD line. The picker covers the chrome, so it draws this itself. */
+static void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi) {
+    if (app->notice_seconds > 0.0 && app->notice_length > 0) {
+        double box_h = 44.0 * chrome_dpi;
+        rubraview_pal_rect_t box = { win_w * 0.2, win_h * 0.08, win_w * 0.6, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BAR_FILL, 3.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       (u8str_t){ .ptr = app->notice, .len = app->notice_length },
+                                       box, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->rename_active) return;
     {
@@ -3013,14 +3198,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     draw_rename_box(app, win_w, win_h, chrome_dpi);
 
-    if (app->notice_seconds > 0.0 && app->notice_length > 0) {
-        double box_h = 44.0 * chrome_dpi;
-        rubraview_pal_rect_t box = { win_w * 0.2, win_h * 0.08, win_w * 0.6, box_h };
-        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BAR_FILL, 3.0);
-        rubraview_pal_render_draw_text(app->renderer,
-                                       (u8str_t){ .ptr = app->notice, .len = app->notice_length },
-                                       box, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    }
+    draw_notice(app, win_w, win_h, chrome_dpi);
 
     /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
        low-resolution thumbnail decoding arrives with the asynchronous
@@ -3542,11 +3720,24 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
     }
     if (n == 0) return;
 
+    char line[96];
+    size_t pos = 0;
+    line[0] = '\0';
+    append_number(line, sizeof(line), &pos, n);
+    append_text(line, sizeof(line), &pos, " dropped files opened as one set");
+    open_set_from_entries(app, entries, n, cstr(line));
+}
+
+/* A given set of files becomes the page sequence — a drop, or what the
+   picker picked. `said` goes to the OSD when it opens. */
+static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said) {
+    if (!entries || count == 0) return;
+
     history_remember(app);
     rubraview_page_source_close(&app->source);
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
 
-    rubraview_fs_listing_t listing = { .entries = entries, .count = n };
+    rubraview_fs_listing_t listing = { .entries = entries, .count = count };
     app->source = rubraview_page_source_from_listing(app->arena, &listing,
                                                      U8(IMAGE_FILTER ";" MEDIA_FILTER),
                                                      RUBRAVIEW_SORT_NAME_NATURAL, true);
@@ -3555,22 +3746,18 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
         return;
     }
     /* The folder of the first one is where Rename, Delete and a batch
-       run work; a dropped set has no folder of its own. */
+       run work; a set of files has no folder of its own. */
     app->source_dir = rubraview_path_dirname(entries[0].path);
     app->resume_offer = false;
+    app->picker_open = false;
     finish_open(app, 0);
-
-    char line[96];
-    size_t pos = 0;
-    line[0] = '\0';
-    append_number(line, sizeof(line), &pos, app->source.page_count);
-    append_text(line, sizeof(line), &pos, " dropped files opened as one set");
-    osd_say(app, cstr(line));
+    osd_say(app, said);
 }
 
 static void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
     rubraview_drop_item_t items[16];
     size_t count = event->drop.count < 16 ? event->drop.count : 16;
+    if (count == 0) return;   /* nothing was dropped: there is no first item to open */
 
     for (size_t i = 0; i < count; ++i) {
         items[i].path = (u8str_t){ .ptr = event->drop.paths[i], .len = event->drop.path_lengths[i] };
@@ -3950,6 +4137,20 @@ static void draw_panel(app_state_t *app) {
    nothing until the reader pressed F10: every setting read while
    viewing came back 0. */
 static void settings_read_file(app_state_t *app) {
+    /* §3.17.2: a settings.ini *beside the executable* means portable mode,
+       and then nothing is written to the host machine. Beside the
+       executable, not in the folder the viewer was started in: until
+       2026-09-23 this asked for the plain name `settings.ini`, so both
+       portable mode and §3.18.3's triage folders followed the working
+       directory — which is why the number keys curated nothing. */
+    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
+    if (beside.len == 0) beside = U8(".");
+    u8str_t portable_ini = rubraview_path_join(app->arena, beside, U8("settings.ini"));
+    app->config_mode = rubraview_config_mode_for(portable_ini.len > 0 &&
+                                                 rubraview_pal_fs_exists(portable_ini));
+    app->config_beside = beside;
+
     u8str_t appdata = U8(".");
 #ifdef _WIN32
     char appdata_utf8[1024];
@@ -3959,9 +4160,9 @@ static void settings_read_file(app_state_t *app) {
     }
 #endif
     app->settings_path = rubraview_config_path(app->arena, app->config_mode,
-                                               U8("."), appdata, U8("settings.ini"));
+                                               beside, appdata, U8("settings.ini"));
     app->keymap_path = rubraview_config_path(app->arena, app->config_mode,
-                                             U8("."), appdata, U8("keymap.ini"));
+                                             beside, appdata, U8("keymap.ini"));
 
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
@@ -4944,10 +5145,10 @@ static void update_precache(app_state_t *app) {
 /* ---- reading history (§3.17) ---- */
 
 static void history_load(app_state_t *app) {
-    /* §3.17.2: a settings.ini beside the executable means portable mode,
-       and then nothing at all is written to the host machine. */
-    bool portable = rubraview_pal_fs_exists(U8("settings.ini"));
-    app->config_mode = rubraview_config_mode_for(portable);
+    /* The settings are read first: they decide portable mode, and the
+       reader's settings apply from the first frame rather than from the
+       first time the settings window is opened. */
+    settings_read_file(app);
 
     u8str_t appdata = U8(".");
 #ifdef _WIN32
@@ -4957,17 +5158,12 @@ static void history_load(app_state_t *app) {
         appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
     }
 #endif
-
     app->history_path = rubraview_config_path(app->arena, app->config_mode,
-                                              U8("."), appdata, U8("history.ini"));
+                                              app->config_beside, appdata, U8("history.ini"));
     app->layout_path = rubraview_config_path(app->arena, app->config_mode,
-                                             U8("."), appdata, U8("layout.ini"));
+                                             app->config_beside, appdata, U8("layout.ini"));
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
-
-    /* The reader's settings apply from the first frame, not from the
-       first time the settings window is opened. */
-    settings_read_file(app);
 }
 
 /* §3.6: "Positions persisted across sessions". The two floating boxes
@@ -6573,9 +6769,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
 
-    /* §3.18.3: the triage folders, and §3.19.2: accept drops. */
+    /* §3.18.3: the triage folders, and §3.19.2: accept drops. The folders
+       are read from the settings file the viewer actually uses — until
+       2026-09-23 this said `settings.ini`, a name with no folder, so the
+       numbers only curated when the viewer happened to be started in a
+       folder holding one, which is to say almost never. */
     {
-        u8str_t settings = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
+        u8str_t settings = rubraview_pal_fs_read_file(&arena, app.settings_path, 256u * 1024u);
         app.curation = rubraview_curation_parse(&arena, settings);
     }
     rubraview_pal_window_accept_drops(app.window, true);
