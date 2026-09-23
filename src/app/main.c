@@ -879,6 +879,12 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, found[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (n > 0) languages = n;
+        } else {
+            /* A SAMI file usually holds every language at once, a class
+               each (owner, 2026-09-23); the others hold one. */
+            rubraview_subtitle_track_t peek = subtitle_read(app->arena, found[i], NULL);
+            size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
+            if (n > 1) languages = n;
         }
         for (size_t k = 0; k < languages && app->subtitle_count < SUBTITLE_MAX_CANDIDATES; ++k) {
             app->subtitle_files[app->subtitle_count] = found[i];
@@ -890,13 +896,17 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx" };
     for (size_t i = 0; i < app->subtitle_count; ++i) {
         u8str_t language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path);
+        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        size_t which = (size_t)app->subtitle_vobsub_stream[i];
         if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
             /* The index names its own languages; the file's name does not. */
             u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
-            u8str_t tags[SUBTITLE_MAX_CANDIDATES];
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
-            size_t which = (size_t)app->subtitle_vobsub_stream[i];
             if (which < n) language = tags[which];
+        } else if (which > 0 || app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_SMI) {
+            rubraview_subtitle_track_t peek = subtitle_read(app->arena, app->subtitle_files[i], NULL);
+            size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
+            if (which < n && tags[which].len > 0) language = tags[which];
         }
         rubraview_track_t track = {
             .kind = RUBRAVIEW_TRACK_SUBTITLE,
@@ -971,6 +981,11 @@ static void subtitle_select(app_state_t *app, int32_t index) {
             return;
         }
         app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
+        /* One file, several languages: show the one this track stands for. */
+        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        size_t n = rubraview_subtitle_languages(&app->subtitle, tags, SUBTITLE_MAX_CANDIDATES);
+        size_t which = (size_t)app->subtitle_vobsub_stream[track->stream_index];
+        if (n > 1 && which < n) app->subtitle.shown_language = tags[which];
     } else {
         /* §3.16.1 / D-12: a stream inside the file. Reading it walks the
            whole container once, so say what is happening first. */

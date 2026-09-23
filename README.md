@@ -151,6 +151,27 @@ ships with, so it cannot drift from them.
 - **Base Library**: `proven_c_lib` (memory arenas, `u8str`, dynamic arrays)
 - **Portability**: Headless core algorithms testable natively on Linux; Windows binary cross-compiled via MinGW-w64 on a Linux build host.
 
+## FFmpeg (optional)
+
+Rubraview plays most files with Windows' own decoders. FFmpeg is only for
+what they cannot open, and it is **five DLLs, not `ffmpeg.exe`**:
+
+```
+avcodec-62.dll  avformat-62.dll  avutil-60.dll  swscale-9.dll  swresample-6.dll
+```
+
+Get them from [BtbN's Windows builds](https://github.com/BtbN/FFmpeg-Builds/releases) —
+the file named `ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip`. It must be
+**8.1** and the name must say **shared**: a build without `shared` holds
+only the programs, and 9.x names its DLLs differently, so Rubraview will
+not use them. Copy the five files out of the zip's `bin` folder and put
+them beside `rubraview-v0.0.15.exe`, then start Rubraview again. The
+`lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
+not for running it — leave them.
+
+Settings (`F10`) › Video says whether they were found, and repeats all of
+this at the bottom of the page.
+
 ## Documentation
 
 - [RFC-0001: Architecture & Multimedia Pipeline](docs/rfc/rfc-0001-rubraview-architecture.md)
