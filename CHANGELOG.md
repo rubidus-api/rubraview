@@ -6,6 +6,22 @@ This project follows Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Picking several files without holding a key (owner, 2026-09-23): the
+  picker's bottom bar gains **Individual** (every tap turns one file on or
+  off), **Range** (tap two, and everything between them turns over),
+  **Same type** (every file with the focused file's extension), **Change
+  ext** (the picked files all take one typed extension) and **Clear**. A
+  mode stays on until it is turned off.
+- The picker lists `..` first wherever there is a folder above.
+
+### Changed
+
+- The rename box (`F2`) holds the whole name, extension included, so an
+  extension can be corrected. It is not asked about (owner).
+- The rename box draws a caret, which blinks.
+
 ## [0.0.13] - 2026-09-23
 
 ### Added

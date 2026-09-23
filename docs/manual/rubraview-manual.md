@@ -194,6 +194,17 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 
 ## Settings
 
+In the file picker, the bottom row picks several files without holding a
+key: **Individual** makes every tap turn one file on or off, **Range**
+takes two taps and turns over everything between them, **Same type**
+takes every file with the same extension as the one in focus, **Change
+ext** gives all the picked files one extension you type, and **Clear**
+lets them all go. A mode stays on until you press its button again, and
+`..` at the start of the list goes up a folder.
+
+`F2` renames the file, the extension included — correcting `.jgp` to
+`.jpg` is a rename like any other, and nothing is asked.
+
 `F10` or `Ctrl+,` opens the settings window, a window of its own. A change
 takes effect at once; **Revert** goes back to what was there when it
 opened, **Defaults** to the defaults, and the file is written when the

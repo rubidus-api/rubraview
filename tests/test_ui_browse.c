@@ -254,11 +254,82 @@ static void test_picker_keep_openable(void) {
     printf("  [PASS] The picker keeps folders and openable files, and counts what it hides\n");
 }
 
+/* Picking several without a modifier key (owner, 2026-09-23): a mode is
+   turned on and stays on, individual taps turn one over, a range turns
+   over everything between two taps, and one extension can be taken at
+   once. A folder is never picked — it is opened. */
+static void test_picker_selection(void) {
+    rubraview_fs_entry_t entries[6] = {
+        { .name = U8(".."),         .path = U8("/"),             .is_directory = true },
+        { .name = U8("apple.jpg"),  .path = U8("/d/apple.jpg"),  .size_bytes = 100 },
+        { .name = U8("banana.jpg"), .path = U8("/d/banana.jpg"), .size_bytes = 200 },
+        { .name = U8("cherry.png"), .path = U8("/d/cherry.png"), .size_bytes = 300 },
+        { .name = U8("date.JPG"),   .path = U8("/d/date.JPG"),   .size_bytes = 400 },
+        { .name = U8("elder.bmp"),  .path = U8("/d/elder.bmp"),  .size_bytes = 500 },
+    };
+    rubraview_fs_listing_t listing = { .entries = entries, .count = 6 };
+    bool selected[6] = { false };
+    rubraview_picker_t picker = rubraview_picker_create(&listing, 160.0, 400.0, 3);
+    picker.selected = selected;
+
+    /* In the ordinary mode a tap is not a pick: the caller opens it. */
+    assert(!rubraview_picker_tap(&picker, 1));
+    assert(!selected[1]);
+
+    /* Individual: each tap turns one over, and it stays that way. */
+    rubraview_picker_set_mode(&picker, RUBRAVIEW_PICK_INDIVIDUAL);
+    assert(rubraview_picker_tap(&picker, 1) && selected[1]);
+    assert(rubraview_picker_tap(&picker, 3) && selected[3]);
+    assert(rubraview_picker_tap(&picker, 1) && !selected[1]);   /* off again */
+    assert(!rubraview_picker_tap(&picker, 0));                  /* `..` is opened, not picked */
+
+    /* Range: tap two, and everything between them turns over — what was
+       on goes off (owner: "선택과 비선택이 서로 반전"). */
+    rubraview_picker_set_mode(&picker, RUBRAVIEW_PICK_RANGE);
+    assert(selected[3] && !selected[2] && !selected[4]);
+    assert(rubraview_picker_tap(&picker, 2));                   /* the start, turned over at once */
+    assert(selected[2]);
+    assert(rubraview_picker_tap(&picker, 4));
+    assert(selected[2] && !selected[3] && selected[4]);         /* each one inverted exactly once */
+    assert(picker.range_anchor == RUBRAVIEW_PICKER_NO_ANCHOR);  /* the next tap starts a new range */
+
+    /* A range the other way round, and over the folder, which is left alone. */
+    rubraview_picker_clear_selection(&picker);
+    assert(rubraview_picker_tap(&picker, 5));
+    assert(rubraview_picker_tap(&picker, 0) == false);          /* a folder does not end a range */
+    assert(rubraview_picker_tap(&picker, 1));
+    assert(selected[1] && selected[2] && selected[3] && selected[4] && selected[5]);
+    assert(!selected[0]);
+
+    /* One extension at a time, whatever the case it is written in. */
+    rubraview_picker_clear_selection(&picker);
+    assert(rubraview_picker_select_extension(&picker, U8(".jpg"), true) == 3);   /* two .jpg and one .JPG */
+    assert(selected[1] && selected[2] && selected[4] && !selected[3] && !selected[5]);
+    assert(rubraview_picker_select_extension(&picker, U8(".jpg"), true) == 0);   /* already on */
+    size_t count = 0;
+    uint64_t bytes = 0;
+    rubraview_picker_selection_metrics(&picker, &count, &bytes);
+    assert(count == 3 && bytes == 100 + 200 + 400);
+    assert(rubraview_picker_select_extension(&picker, U8(".jpg"), false) == 3);
+    rubraview_picker_selection_metrics(&picker, &count, &bytes);
+    assert(count == 0 && bytes == 0);
+
+    /* Turning a mode off keeps what was picked; clearing is its own act. */
+    rubraview_picker_set_mode(&picker, RUBRAVIEW_PICK_INDIVIDUAL);
+    assert(rubraview_picker_tap(&picker, 2));
+    rubraview_picker_set_mode(&picker, RUBRAVIEW_PICK_SINGLE);
+    assert(selected[2]);
+    rubraview_picker_clear_selection(&picker);
+    assert(!selected[2]);
+    printf("  [PASS] Taps pick one at a time or a whole range, and one extension at once\n");
+}
+
 int main(void) {
     printf("[test_ui_browse] Starting virtual scrolling, filmstrip and picker unit tests...\n");
     test_virtual();
     test_filmstrip();
     test_picker();
+    test_picker_selection();
     test_picker_keep_openable();
     printf("[test_ui_browse] All tests passed successfully!\n");
     return 0;

@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-23: D-23 Picking several files by tapping, and renaming the whole name
+
+- Status: Accepted (owner 2026-09-23, six requests and four answers: modes stay on until turned off, a new extension is typed, the picked files can be renamed by extension / opened / recycled / moved / copied / sent to a new playlist, and changing an extension is not asked about)
+- Decision:
+  - The picker has three modes (`rubraview_picker_mode_t`): a tap opens, a tap picks one, or two taps invert a range. A mode stays on until its button is pressed again, because the viewer is used over Remote Desktop where holding Ctrl or Shift is awkward. A range inverts — what was picked inside it is unpicked.
+  - Folders, `..` included, are opened, never picked.
+  - `..` is the picker's first entry wherever there is a parent, so going up needs no keyboard.
+  - The rename box holds the whole name; the extension may be changed and nothing is asked. The box draws a blinking caret.
+  - One typed extension can be given to every picked file at once, each rename its own undo entry.
+- Consequences: the action bar is two rows now. What else a picked set can do — a new playlist (`PlaylistNNNN.m3u8`, then opened), the recycle bin, move and copy — is the next slice of the same plan (`docs/plans/active/2026-09-23-picker-selection.md`).
+
 ## 2026-09-23: D-22 DVD picture subtitles are read here, not by a decoder
 
 - Status: Accepted (owner 2026-09-23: "dvd그림자막도 지원하게 해 주세요", after asking which subtitle formats work)

@@ -303,6 +303,7 @@ typedef struct app_state {
     rubraview_undo_stack_t undo;
     rubraview_curation_t   curation;
     bool                   rename_active;
+    bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     char                   rename_buffer[256];
     size_t                 rename_length;
     char                   rename_composing[64];   /* the IME's unfinished syllable, drawn after the text */
@@ -344,6 +345,7 @@ typedef struct app_state {
     size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
     rubraview_picker_t     picker;
+    bool                  *picker_selected;   /* one per listed item, remade on every folder */
 } app_state_t;
 
 static void open_path(app_state_t *app, u8str_t path);
@@ -364,6 +366,7 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
+static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void rename_end(app_state_t *app);
 static void finish_open(app_state_t *app, size_t start_page);
 
@@ -1256,7 +1259,33 @@ static void toggle_slideshow(app_state_t *app) {
 
 #define PICKER_COLUMNS 4
 #define PICKER_CRUMB_HEIGHT 44.0
-#define PICKER_ACTION_HEIGHT 48.0
+#define PICKER_ACTION_HEIGHT 96.0   /* two rows: the buttons, then what is picked */
+#define PICKER_BUTTON_ROW 48.0
+
+/* The buttons along the bottom of the picker (owner, 2026-09-23). The
+   first three are modes and switches; the rest act on what is picked. */
+typedef enum picker_button {
+    PICKER_BTN_INDIVIDUAL = 0,
+    PICKER_BTN_RANGE,
+    PICKER_BTN_SAME_TYPE,
+    PICKER_BTN_EXTENSION,
+    PICKER_BTN_CLEAR,
+    PICKER_BTN_COUNT,
+} picker_button_t;
+
+static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
+    "Individual", "Range", "Same type", "Change ext", "Clear",
+};
+
+/* Where a button sits, in client coordinates. */
+static rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index) {
+    double row_h = PICKER_BUTTON_ROW * dpi;
+    double top = win_h - PICKER_ACTION_HEIGHT * dpi;
+    double gap = 6.0 * dpi;
+    double width = (win_w - gap * (PICKER_BTN_COUNT + 1)) / (double)PICKER_BTN_COUNT;
+    return (rubraview_pal_rect_t){ gap + (double)index * (width + gap), top + gap * 0.5,
+                                   width, row_h - gap };
+}
 
 /* Lists a directory and orders it the way the viewer orders pages, so
    the picker and the page sequence agree. */
@@ -1264,9 +1293,14 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     size_t hidden = rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
-    if (listing.count == 0) {
+    if (listing.count == 0 && rubraview_path_dirname(dir).len == 0) {
         if (hidden > 0) osd_say(app, U8("nothing in that folder can be opened here"));
         return;
+    }
+    if (listing.count == 0 && hidden > 0) {
+        /* D-18 kept the reader out of a folder with nothing to open; with
+           `..` on screen it is no longer a trap, so it is only said. */
+        osd_say(app, U8("nothing here can be opened"));
     }
     app->picker_hidden = hidden;
 
@@ -1303,16 +1337,104 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
         }
     }
 
+    /* `..` first, wherever there is a folder above this one (owner,
+       2026-09-23). `Ctrl+Backspace` did this already, but not by touch. */
+    u8str_t parent = rubraview_path_dirname(dir);
+    if (parent.len > 0 && !(parent.len == dir.len && memcmp(parent.ptr, dir.ptr, dir.len) == 0)) {
+        proven_result_mem_mut_t up_res =
+            proven_arena_alloc(app->arena, (listing.count + 1) * sizeof(rubraview_fs_entry_t));
+        if (proven_is_ok(up_res.err)) {
+            rubraview_fs_entry_t *with_up = (rubraview_fs_entry_t*)(void*)up_res.value.ptr;
+            with_up[0] = (rubraview_fs_entry_t){
+                .name = U8(".."),
+                .path = parent,
+                .is_directory = true,
+            };
+            memcpy(with_up + 1, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
+            listing.entries = with_up;
+            listing.count += 1;
+        }
+    }
+
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double tile = 160.0 * dpi;
 
+    proven_result_mem_mut_t sel_res = proven_arena_alloc(app->arena, listing.count * sizeof(bool));
+    app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
+    if (app->picker_selected) memset(app->picker_selected, 0, listing.count * sizeof(bool));
+
+    rubraview_picker_mode_t mode = app->picker.mode;   /* the mode outlives the folder */
     app->picker_dir = dir;
     app->picker_listing = listing;
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
                                           (double)win_h - (PICKER_CRUMB_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           PICKER_COLUMNS);
+    app->picker.selected = app->picker_selected;
+    rubraview_picker_set_mode(&app->picker, mode);
+    /* The focus starts on the first file: `..` and the folders are for
+       going somewhere, and "Same type" reads the focused file. */
+    for (size_t i = 0; i < listing.count; ++i) {
+        if (!listing.entries[i].is_directory) { app->picker.focus = i; break; }
+    }
+}
+
+/* The extension of the item the focus is on, ".jpg" and such. */
+static u8str_t picker_focus_extension(const app_state_t *app) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    if (app->picker.focus < app->picker_listing.count) {
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[app->picker.focus];
+        if (!entry->is_directory) return rubraview_path_ext(entry->name);
+    }
+    /* The focus is on a folder: the first picked file answers instead. */
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (!app->picker_selected || !app->picker_selected[i]) continue;
+        if (app->picker_listing.entries[i].is_directory) continue;
+        return rubraview_path_ext(app->picker_listing.entries[i].name);
+    }
+    return none;
+}
+
+static void rename_extension_begin(app_state_t *app);
+
+/* One of the buttons along the bottom was pressed. */
+static void picker_button(app_state_t *app, picker_button_t button) {
+    char line[128];
+    switch (button) {
+        case PICKER_BTN_INDIVIDUAL:
+            rubraview_picker_set_mode(&app->picker, app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL
+                                                    ? RUBRAVIEW_PICK_SINGLE : RUBRAVIEW_PICK_INDIVIDUAL);
+            osd_say(app, app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL
+                         ? U8("tap files to pick them one by one") : U8("a tap opens again"));
+            break;
+        case PICKER_BTN_RANGE:
+            rubraview_picker_set_mode(&app->picker, app->picker.mode == RUBRAVIEW_PICK_RANGE
+                                                    ? RUBRAVIEW_PICK_SINGLE : RUBRAVIEW_PICK_RANGE);
+            osd_say(app, app->picker.mode == RUBRAVIEW_PICK_RANGE
+                         ? U8("tap two files: everything between them turns over") : U8("a tap opens again"));
+            break;
+        case PICKER_BTN_SAME_TYPE: {
+            u8str_t ext = picker_focus_extension(app);
+            if (ext.len == 0) { osd_say(app, U8("put the focus on a file first")); break; }
+            if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) {
+                rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
+            }
+            size_t n = rubraview_picker_select_extension(&app->picker, ext, true);
+            int written = snprintf(line, sizeof(line), "%zu %.*s file(s) picked", n, (int)ext.len, ext.ptr);
+            if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+            break;
+        }
+        case PICKER_BTN_EXTENSION:
+            rename_extension_begin(app);
+            break;
+        case PICKER_BTN_CLEAR:
+            rubraview_picker_clear_selection(&app->picker);
+            osd_say(app, U8("nothing picked"));
+            break;
+        default:
+            break;
+    }
 }
 
 static void picker_open(app_state_t *app) {
@@ -2695,7 +2817,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         if (y + cell < crumb_h || y > win_h - action_h) continue;
 
         rubraview_pal_rect_t tile = { x + 6.0 * dpi, y + 6.0 * dpi, cell_w - 12.0 * dpi, cell - 12.0 * dpi };
-        rubraview_pal_render_fill_rect(app->renderer, tile, COLOR_TILE_FILL, 0.0);
+        bool picked = app->picker_selected && index < app->picker_listing.count && app->picker_selected[index];
+        rubraview_pal_render_fill_rect(app->renderer, tile, picked ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile,
                                          index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER,
                                          index == app->picker.focus ? 2.0 : 1.0, 0.0);
@@ -2710,9 +2833,21 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        kind, cell * 0.10, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
     }
 
-    /* Action bar with the selection metrics (§3.15.2 tier three). */
+    /* Action bar: the buttons, then the selection metrics (§3.15.2 tier three). */
     rubraview_pal_rect_t bar = { 0.0, win_h - action_h, win_w, action_h };
     rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
+
+    for (int32_t b = 0; b < PICKER_BTN_COUNT; ++b) {
+        rubraview_pal_rect_t rect = picker_button_rect(win_w, win_h, dpi, b);
+        bool lit = (b == PICKER_BTN_INDIVIDUAL && app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL) ||
+                   (b == PICKER_BTN_RANGE && app->picker.mode == RUBRAVIEW_PICK_RANGE);
+        rubraview_pal_render_fill_rect(app->renderer, rect, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, rect, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, cstr(PICKER_BUTTON_LABEL[b]), rect,
+                                       rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    bar.y += PICKER_BUTTON_ROW * dpi;
+    bar.height -= PICKER_BUTTON_ROW * dpi;
 
     char status[224];
     size_t selected = 0;
@@ -2728,6 +2863,9 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        (u8str_t){ .ptr = status, .len = (size_t)written },
                                        bar, action_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+
+    /* The picker covers the chrome, so its own text box is drawn here. */
+    draw_rename_box(app, win_w, win_h, dpi);
 }
 
 /* Text with a dark outline around it, for subtitles and their preview.
@@ -2832,6 +2970,31 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     draw_outlined_text(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu);
 }
 
+/* The text box: renaming a file, or giving the picked files one
+   extension. Drawn by the chrome and by the picker, which covers it. */
+static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->rename_active) return;
+    {
+        double box_w = 560.0 * dpi, box_h = 64.0 * dpi;
+        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        /* The name, the syllable the IME is still building, and a caret
+           that blinks (owner, 2026-09-23: the box did not look like it
+           was taking text). The caret's place is held by a space while it
+           is dark, so the name does not jump as it blinks. */
+        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing) + 2];
+        size_t at = app->rename_length;
+        memcpy(shown, app->rename_buffer, at);
+        memcpy(shown + at, app->rename_composing, app->rename_composing_length);
+        at += app->rename_composing_length;
+        bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+        shown[at++] = caret_lit ? '|' : ' ';
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = at },
+                                       box, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
     double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -2848,19 +3011,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                        box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
-    if (app->rename_active) {
-        double box_w = 560.0 * chrome_dpi, box_h = 64.0 * chrome_dpi;
-        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
-        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
-        /* The name, then the syllable the IME is still building. */
-        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
-        memcpy(shown, app->rename_buffer, app->rename_length);
-        memcpy(shown + app->rename_length, app->rename_composing, app->rename_composing_length);
-        rubraview_pal_render_draw_text(app->renderer,
-                                       (u8str_t){ .ptr = shown, .len = app->rename_length + app->rename_composing_length },
-                                       box, 18.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    }
+    draw_rename_box(app, win_w, win_h, chrome_dpi);
 
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double box_h = 44.0 * chrome_dpi;
@@ -3223,6 +3374,7 @@ static void triage_undo(app_state_t *app) {
 /* The box closes: the window goes back to keys only (K5). */
 static void rename_end(app_state_t *app) {
     app->rename_active = false;
+    app->rename_is_extension = false;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, false);
 }
@@ -3244,20 +3396,94 @@ static void rename_begin(app_state_t *app) {
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
 
+    /* The whole name, extension and all (owner, 2026-09-23): an
+       extension typed wrongly could not be corrected before, and the
+       owner asked for no question when it changes. */
     u8str_t name = rubraview_path_basename(path);
-    size_t stem = rubraview_rename_stem_length(name);
-    if (stem >= sizeof(app->rename_buffer)) return;
+    if (name.len >= sizeof(app->rename_buffer)) return;
 
-    memcpy(app->rename_buffer, name.ptr, stem);
-    app->rename_length = stem;
-    app->rename_buffer[stem] = '\0';
+    memcpy(app->rename_buffer, name.ptr, name.len);
+    app->rename_length = name.len;
+    app->rename_buffer[name.len] = '\0';
     app->rename_active = true;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);   /* Hangul, capitals, symbols (K5's hole) */
 }
 
+/* The picked files all take one extension (owner, 2026-09-23). The box is
+   the rename box; what is typed replaces every one of their extensions. */
+static void rename_extension_begin(app_state_t *app) {
+    size_t picked = 0;
+    uint64_t bytes = 0;
+    rubraview_picker_selection_metrics(&app->picker, &picked, &bytes);
+    if (picked == 0) { osd_say(app, U8("pick some files first")); return; }
+
+    u8str_t ext = picker_focus_extension(app);
+    app->rename_length = 0;
+    if (ext.len > 0 && ext.len < sizeof(app->rename_buffer)) {
+        memcpy(app->rename_buffer, ext.ptr, ext.len);
+        app->rename_length = ext.len;
+    }
+    app->rename_buffer[app->rename_length] = '\0';
+    app->rename_active = true;
+    app->rename_is_extension = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, U8("type the extension for the picked files"));
+}
+
+/* Renames every picked file to the typed extension, one undo entry each. */
+static void rename_extension_commit(app_state_t *app) {
+    u8str_t typed = { .ptr = app->rename_buffer, .len = app->rename_length };
+    char dotted[64];
+    if (typed.len == 0) { rename_end(app); return; }
+    if (typed.ptr[0] != '.') {
+        if (typed.len + 1 >= sizeof(dotted)) { rename_end(app); return; }
+        dotted[0] = '.';
+        memcpy(dotted + 1, typed.ptr, typed.len);
+        typed = (u8str_t){ .ptr = dotted, .len = typed.len + 1 };
+    }
+
+    size_t done = 0, failed = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (!app->picker_selected || !app->picker_selected[i]) continue;
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
+        if (entry->is_directory) continue;
+
+        char want[64];
+        size_t n = typed.len < sizeof(want) - 1 ? typed.len : sizeof(want) - 1;
+        memcpy(want, typed.ptr, n);
+        want[n] = '\0';
+        u8str_t target = rubraview_path_with_ext(app->arena, entry->path, want);
+        bool unchanged = target.len == entry->path.len &&
+                         memcmp(target.ptr, entry->path.ptr, target.len) == 0;
+        if (target.len == 0 || unchanged ||
+            rubraview_rename_validate(rubraview_path_basename(target)) != RUBRAVIEW_RENAME_OK) {
+            failed++;
+            continue;
+        }
+        if (!rubraview_pal_fs_move(entry->path, target)) { failed++; continue; }
+        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+            .op = RUBRAVIEW_FILE_OP_RENAME,
+            .source_path = entry->path,
+            .target_path = target,
+        });
+        done++;
+    }
+    rubraview_undo_commit(&app->undo);
+
+    char line[128];
+    int written = failed > 0
+        ? snprintf(line, sizeof(line), "%zu renamed to %.*s, %zu could not be", done, (int)typed.len, typed.ptr, failed)
+        : snprintf(line, sizeof(line), "%zu file(s) now end in %.*s", done, (int)typed.len, typed.ptr);
+    rename_end(app);
+    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+    picker_navigate(app, app->picker_dir);   /* the names on screen have changed */
+}
+
 static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
+    if (app->rename_is_extension) { rename_extension_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
     (void)rubraview_rename_append(app->rename_buffer, sizeof(app->rename_buffer), &app->rename_length,
                                   (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
@@ -3266,9 +3492,7 @@ static void rename_commit(app_state_t *app) {
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
 
-    u8str_t old_name = rubraview_path_basename(path);
-    u8str_t stem = { .ptr = app->rename_buffer, .len = app->rename_length };
-    u8str_t new_name = rubraview_rename_compose(app->arena, old_name, stem);
+    u8str_t new_name = { .ptr = app->rename_buffer, .len = app->rename_length };
 
     rubraview_rename_err_t err = rubraview_rename_validate(new_name);
     if (err != RUBRAVIEW_RENAME_OK) {
@@ -6486,13 +6710,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                         int32_t pw = 0, ph = 0;
                         rubraview_pal_window_get_size(app.window, &pw, &ph);
+                        if (event.mouse.y >= (double)ph - PICKER_ACTION_HEIGHT * dpi) {
+                            for (int32_t b = 0; b < PICKER_BTN_COUNT; ++b) {
+                                rubraview_pal_rect_t rect = picker_button_rect((double)pw, (double)ph, dpi, b);
+                                if (event.mouse.x >= rect.x && event.mouse.x < rect.x + rect.width &&
+                                    event.mouse.y >= rect.y && event.mouse.y < rect.y + rect.height) {
+                                    picker_button(&app, (picker_button_t)b);
+                                    break;
+                                }
+                            }
+                            break;
+                        }
                         double cell_w = (double)pw / (double)PICKER_COLUMNS;
                         size_t column = (size_t)(event.mouse.x / cell_w);
                         size_t row = (size_t)((event.mouse.y - crumb_h + app.picker.scroll_offset) / app.picker.tile_extent);
                         size_t index = row * PICKER_COLUMNS + column;
                         if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
                             app.picker.focus = index;
-                            picker_activate(&app, index);
+                            /* In a picking mode the tap picks; otherwise it opens. */
+                            if (!rubraview_picker_tap(&app.picker, index)) picker_activate(&app, index);
                         }
                         break;
                     }
@@ -6633,7 +6869,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            the same still image kept two cores busy doing it. */
         bool media_playing = app.media && !app.media_paused;
         bool others_moving = app.slideshow_running || app.anim_active ||
-                             app.notice_seconds > 0.0 || app.pending_decode_count > 0;
+                             app.notice_seconds > 0.0 || app.pending_decode_count > 0 ||
+                             app.rename_active;   /* the caret blinks (owner, 2026-09-23) */
         if (handled > 0) last_input_seconds = now;
         if (handled > 0 || media_playing || others_moving) last_busy_seconds = now;
         bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;
