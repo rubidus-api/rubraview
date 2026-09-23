@@ -93,10 +93,10 @@ static const char *const PARTS[] = {
 "  note \"For files Windows cannot play. FFmpeg's DLLs are needed,\"\n"
 "  note \"not ffmpeg.exe: put these five beside rubraview.exe,\"\n"
 "  note \"then start rubraview again:\"\n"
-"  note \"  avcodec-62  avformat-62  avutil-60  swscale-9  swresample-6\"\n"
-"  note \"They must be FFmpeg 8.1; 9.x and later are refused.\"\n"
+"  note \"  avcodec-63  avformat-63  avutil-61  swscale-10  swresample-7\"\n"
+"  note \"They must be FFmpeg 9.0; other versions are refused.\"\n"
 "  note \"Get: github.com/BtbN/FFmpeg-Builds/releases\"\n"
-"  note \"  ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip, its bin folder\"\n"
+"  note \"  ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip, its bin folder\"\n"
 "  note \"The name must say shared; the lib folder's .dll.a is for building.\"\n"
 "  note \"The LGPL build is enough. FFmpeg is not shipped with rubraview.\"\n"
 "\n",

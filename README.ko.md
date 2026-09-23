@@ -156,13 +156,13 @@
 형식에만 필요하고, **`ffmpeg.exe` 가 아니라 DLL 다섯 개**입니다.
 
 ```
-avcodec-62.dll  avformat-62.dll  avutil-60.dll  swscale-9.dll  swresample-6.dll
+avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 ```
 
 [BtbN 의 윈도우 빌드](https://github.com/BtbN/FFmpeg-Builds/releases) 에서
-`ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip` 을 받으세요. 반드시 **8.1**
+`ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip` 을 받으세요. 반드시 **9.0**
 이어야 하고 이름에 **shared** 가 있어야 합니다. `shared` 가 없는 판에는 실행
-파일만 있고 DLL 이 없으며, 9.x 는 DLL 이름의 번호가 달라 루브라뷰가 쓰지
+파일만 있고 DLL 이 없으며, 다른 판은 DLL 이름의 번호가 달라 루브라뷰가 쓰지
 않습니다. 압축 속 `bin` 폴더의 다섯 개를 `rubraview-v0.0.16.exe` 옆에 복사하고
 루브라뷰를 다시 실행하면 됩니다. `lib` 폴더의 `.dll.a`, `.lib` 는 FFmpeg 을
 링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
