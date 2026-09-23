@@ -38,6 +38,48 @@ which music never could.
    page has to be a music file.
 6. Turn `gapless` off: the track ends and stops, as it did before.
 
-## Measured on the Windows 11 VM
+## Measured on the Windows 11 VM, 2026-09-24
 
-NOT RUN YET.
+Two tones six seconds each — `01 low.wav` at 440 Hz and `02 high.wav` at
+880 Hz — in a folder of their own, the build run from that folder, and
+the session recorded with `vmrecord.sh`. The recording was read twice:
+`wavstat.py` for level and silence, and a Goertzel of 440 Hz and 880 Hz
+separately, because a zero-crossing pitch follows whichever tone is
+louder and cannot see an overlap at all.
+
+**Gapless** (`crossfade_seconds = 0`): one unbroken run of sound from the
+first note to the last — `wavstat.py` finds no window below −60 dBFS at
+the join. At 50 ms resolution the change takes about 0.1 s, which is the
+fade the fixture itself carries at each end (50 ms out, 50 ms in), and
+the viewer moves to the second page as it happens: its name in the
+status line, its own words on screen.
+
+**Crossfade** (`crossfade_seconds = 3`), the amplitudes of the two tones
+through the change:
+
+```text
+ time     440 Hz     880 Hz      sum
+ 7.50     0.3500     0.0010   0.3500
+ 8.00     0.3413     0.0759   0.3497
+ 8.50     0.3100     0.1618   0.3497
+ 9.00     0.2577     0.2364   0.3497
+ 9.50     0.1881     0.2949   0.3497
+10.00     0.1049     0.3336   0.3497
+10.50     0.0032     0.3494   0.3494
+```
+
+The first falls to nothing and the second rises to full over **exactly
+three seconds**, and the sum stays between 0.3494 and 0.3500 the whole
+way. That flat sum is the point of the equal-power curve: a straight-line
+fade would sag to about 0.7 of it in the middle, which is heard as a dip.
+
+Found by this case, and fixed: the backend says "finished" about a second
+before the sound the device still holds has been heard, and handing over
+there closed the output — cutting both the tail of the first track and
+the fade. The overlap is now allowed to finish (with a wall-clock guard,
+in case the position stops moving), which is what produced the clean
+three seconds above.
+
+Steps 4, 5 and 6 (letting the waiting track go, a film never pre-opened,
+and gapless turned off) are not measured; the first two are decided by
+`music_next_page` and covered by reading, the third by the setting.
