@@ -7,10 +7,10 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.11.exe              the viewer
-dist/rubraview-mfprobe-v0.0.11.exe      a tool that reports which video
+dist/rubraview-v0.0.12.exe              the viewer
+dist/rubraview-mfprobe-v0.0.12.exe      a tool that reports which video
                                        formats your Windows can play
-dist/rubraview-v0.0.11/                 the release bundle — zip this
+dist/rubraview-v0.0.12/                 the release bundle — zip this
 ```
 
 The bundle holds the viewer, this manual, the licences of the three
@@ -19,7 +19,7 @@ libraries it borrows, and a list of the system DLLs it calls.
 ## Getting it running
 
 The program is built with its version in its name —
-`rubraview-v0.0.11.exe` — so that a copy sitting in a downloads folder
+`rubraview-v0.0.12.exe` — so that a copy sitting in a downloads folder
 still says which build it is. Rename it to `rubraview.exe` if you prefer;
 nothing depends on the name. The examples below use the short form.
 
@@ -151,6 +151,9 @@ While it does:
   follows), `Ctrl+\` goes back to normal.
 - A strip above the information bar shows the time; click or drag on it to
   go somewhere else.
+- Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
+  `.ass`, and a DVD's pictures as `.idx` with its `.sub`) or from inside
+  the film itself.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later.
 
