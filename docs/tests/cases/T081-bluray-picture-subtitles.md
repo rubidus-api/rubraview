@@ -47,7 +47,31 @@ frame, every one of the 48000 pixels drawn, colour 1 reading `FFFFFFFF`
 (white), `FFFFF000` (yellow) and `FFACC1FF` (pale blue) — the Y'CbCr the
 generator wrote, converted.
 
-## Measured on the Windows 11 VM
+## Measured on the Windows 11 VM, 2026-09-24
 
-NOT RUN — the VM is lent out; to be run with the packaged build from its
-own folder (the trap T078 found).
+The build run from its own folder (`rbpgs`), holding only the exe, the
+film `clip_h264.mkv` and `clip_h264.sup` from `tools/mkpgs.py`. Read from
+screenshots, the pixel in the middle of the bar:
+
+- 2.60 s: a bar low on the picture, `(255, 255, 255)` — the first
+  subtitle, white, exactly the colour the reader computes from its
+  Y'CbCr;
+- 4.94 s: `(255, 240, 0)`, the second — yellow;
+- 9.98 s: nothing; the last subtitle ended at 9 s.
+- `C`: the bar goes and the film is its own again; `C` again brings it
+  back (and the track list holds the `.sup`).
+- `Z` / `X`: five `X` (+2.5 s) at 4.94 s shows the *first* subtitle,
+  white; ten `Z` from there (−2.5 s) shows the *third*,
+  `(172, 193, 255)` — the pale blue, and the only way to reach it by
+  keyboard, since the arrows seek five seconds at a time.
+- Step 2: `F` took the window from 1280x752 to 1280x800. The bar's
+  bounding box was the same size and the same x, and its y moved by 24 —
+  exactly the letterboxing the taller window adds. It is drawn in the
+  film's frame, not the window's.
+
+Found by this case (2026-09-24): `Z` and `X` refused to move a picture
+subtitle at all — the guard asked whether the *text* track had cues, and
+a DVD's or a Blu-ray's pictures are not text. It said "no subtitles are
+showing" while a subtitle was plainly on screen. Fixed, and the remembered
+sync now comes back for a picture track as well; both are in the same
+commit as this case.
