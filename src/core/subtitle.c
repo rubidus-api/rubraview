@@ -264,6 +264,8 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
 /* SAMI is HTML: `<SYNC Start=1234>` opens a caption and the next SYNC
    closes it. The text between them is usually `<P Class=KRCC>...`, and
    the class is the only place the language is written. */
+static void sort_cues(rubraview_subtitle_cue_t *cues, size_t count);
+
 static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
     size_t i = 0;
     double open_at = -1.0;
@@ -282,19 +284,19 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             u8str_t body = strip_markup(arena, raw, false);
             if (body.len > 0) {
                 /* SAMI marks an empty caption with `&nbsp;`, which means
-                   "nothing is showing now" rather than a caption. */
-                bool blank = body.len <= 6 && (body.len == 0 || body.ptr[0] == '&');
-                if (!blank) {
-                    rubraview_subtitle_cue_t cue = {
-                        .start_seconds = open_at,
-                        /* SAMI has no end time: a caption lasts until the
-                           next SYNC. The end is filled in below. */
-                        .end_seconds = open_at + 0.001,
-                        .text = body,
-                        .language = language,
-                    };
-                    cue_push(arena, cues, cue);
-                }
+                   "nothing is showing now" rather than a caption. It is
+                   kept for now, with no text: it is where the caption
+                   before it ends. The blanks are dropped below. */
+                bool blank = body.len <= 6 && body.ptr[0] == '&';
+                rubraview_subtitle_cue_t cue = {
+                    .start_seconds = open_at,
+                    /* SAMI has no end time: a caption lasts until the
+                       next one of its language. Filled in below. */
+                    .end_seconds = open_at + 0.001,
+                    .text = blank ? (u8str_t){ .ptr = body.ptr, .len = 0 } : body,
+                    .language = language,
+                };
+                cue_push(arena, cues, cue);
             }
         }
 
@@ -339,6 +341,29 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         i = body_start;
     }
 
+    /* The last caption has no SYNC after it to close it (2026-09-23):
+       without this the file's final caption was dropped, and a final
+       `&nbsp;` never said where the one before it stops. */
+    if (open_at >= 0.0 && text.len > body_start) {
+        u8str_t raw = { .ptr = text.ptr + body_start, .len = text.len - body_start };
+        u8str_t body = strip_markup(arena, raw, false);
+        if (body.len > 0) {
+            bool blank = body.len <= 6 && body.ptr[0] == '&';
+            rubraview_subtitle_cue_t cue = {
+                .start_seconds = open_at,
+                .end_seconds = open_at + 0.001,
+                .text = blank ? (u8str_t){ .ptr = body.ptr, .len = 0 } : body,
+                .language = language,
+            };
+            cue_push(arena, cues, cue);
+        }
+    }
+
+    /* In time order first: a file is not obliged to be written in it
+       (owner, 2026-09-23), and what follows asks "which caption comes
+       next in this language", which only means something in order. */
+    sort_cues(cues->data, cues->count);
+
     /* A SAMI caption ends where the next one of *its own language*
        starts (owner, 2026-09-23). One file often carries several
        languages, a class each, interleaved at the same moments; ending
@@ -356,6 +381,14 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         }
         cue->end_seconds = end > cue->start_seconds ? end : cue->start_seconds + 3.0;
     }
+
+    /* The blanks have done their work: they said where a caption stops. */
+    size_t kept = 0;
+    for (size_t k = 0; k < cues->count; ++k) {
+        if (cues->data[k].text.len == 0) continue;
+        cues->data[kept++] = cues->data[k];
+    }
+    cues->count = kept;
 }
 
 /* ---- SubStation Alpha ---- */
