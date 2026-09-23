@@ -12,8 +12,14 @@ This project follows Keep a Changelog.
   picker's bottom bar gains **Individual** (every tap turns one file on or
   off), **Range** (tap two, and everything between them turns over),
   **Same type** (every file with the focused file's extension), **Change
-  ext** (the picked files all take one typed extension) and **Clear**. A
-  mode stays on until it is turned off.
+  ext** (the picked files all take one typed extension), **Playlist**,
+  **Recycle**, **Move to**, **Copy to** and **Clear**. A mode stays on
+  until it is turned off.
+- **Playlist** writes the picked files as `PlaylistNNNN.m3u8` in the folder
+  and opens them as one sequence. **Recycle** asks by wanting a second
+  press. **Move to** and **Copy to** wait for a number key, which names one
+  of the folders on the settings window's Files page. Every one of them can
+  be undone with `Ctrl+Z`, one file at a time.
 - The picker lists `..` first wherever there is a folder above.
 
 ### Changed
@@ -21,6 +27,19 @@ This project follows Keep a Changelog.
 - The rename box (`F2`) holds the whole name, extension included, so an
   extension can be corrected. It is not asked about (owner).
 - The rename box draws a caret, which blinks.
+- The picker draws the messages and the text box itself, which it used to
+  cover: pressing its buttons said nothing at all before.
+
+### Fixed
+
+- The number keys (1-9) send a file to the folders set on the settings
+  window's Files page — they never did. Those folders, and portable mode,
+  were read from `settings.ini` *by name alone*, so they followed whatever
+  folder the viewer happened to be started in rather than the settings file
+  it actually uses. `history.ini` and `layout.ini` had the same fault in
+  portable mode.
+- While the picker is open a number key answers its "Move to" or "Copy
+  to" instead of sending the page behind it to a folder.
 
 ## [0.0.13] - 2026-09-23
 

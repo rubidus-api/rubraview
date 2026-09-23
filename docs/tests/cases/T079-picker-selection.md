@@ -38,3 +38,32 @@ because the focus starts on `..`; the focus now starts on the first file.
 And the extension change did nothing at first: the "has anything
 changed?" test compared lengths, so `.png` to `.jpg` looked like no
 change. Both fixed and re-measured.
+
+## The rest of the buttons, measured 2026-09-23
+
+Same folder, `pic1..4.png`, with `Folder 1` on the settings window's Files
+page set to another folder:
+
+- **Playlist**: with six `.png` picked, `Playlist0001.m3u8` appeared in the
+  folder — `#EXTM3U` and the six names, relative — and the viewer opened
+  exactly those six as one sequence (`pic1.png (1/6)`);
+- **Recycle**: the first press asked, the second binned the two picked
+  files, and the folder lost exactly those two;
+- **Copy to** then `1`: the originals stayed and the copies appeared in
+  the bound folder;
+- **Move to** then `1`: the picked file left the folder and appeared in
+  the bound one.
+
+Two faults found here, both fixed:
+
+- the numbered folders had never worked in any build: `settings.ini` was
+  read by name alone, so it was looked for in whatever folder the viewer
+  was started in. Portable mode was decided the same way. Both now use the
+  executable's own folder;
+- with a folder bound, a number key was taken by §3.18.3 (send the page to
+  that folder) even while the picker was open, so "Copy to" moved the page
+  behind the picker instead. The picker now answers first.
+
+A third thing to know for testing: `keys.ps1` sends keys through the guest
+and they can go nowhere if the viewer is not in front — `right` did
+nothing for several runs. Keys over RDP (`xdotool key`) always arrive.
