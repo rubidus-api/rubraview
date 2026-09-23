@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-30 Music outlives its page, and an arbiter says who gets the speakers
+
+- Status: Accepted (owner 2026-09-24, RV-081's first half)
+- Decision: a track that is still playing is not closed when its page leaves — the same player is handed to a background slot and goes on (§3.14.6). Coming back to its page hands it straight back, at the moment it had reached; nothing is opened twice. When a page with sound of its own is opened the music stands aside, and it comes back when that page ends or goes. The deciding is a state machine in `src/core/music.c` (`rubraview_bgm_event`) and is tested on the host.
+- Consequences: **the listener's own pause outranks the arbiter** — music stopped by hand does not come back to life because a film ended, which is what the state machine remembers and what its test pins down. The hand-over lives inside `media_close`, so no path that closes a player can forget it. `Space` with no player on the page is the background music's. `audio.bgm_pause_on_video` is a live setting; with it off the two play together. A track handed to the background does not get gapless or a crossfade — a transition belongs to the page that is being read.
+
 ## 2026-09-24: D-29 The next track is opened early, and the two overlap on an equal-power curve
 
 - Status: Accepted (owner 2026-09-24: "E도 진행해 주세요", RV-075 being the gapless and crossfade part of it)
