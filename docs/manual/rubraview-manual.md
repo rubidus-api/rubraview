@@ -159,6 +159,11 @@ While it does:
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
   `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
   `.sup`) or from inside the film itself.
+- `Shift+P` puts the music in a small window of its own, on top of
+  whatever you are reading: the cover, the track, a strip to move along
+  and buttons to play, pause and change track. Music keeps playing when
+  you turn to a picture, and steps aside on its own while a film with
+  sound is playing.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later.
 
@@ -272,6 +277,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
+| `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
 | `Delete` | To the recycle bin |

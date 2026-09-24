@@ -29,6 +29,8 @@ const char *rubraview_default_keymap(void) {
     /* §3.22.1 */
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"
+    /* §3.14.6 (owner, 2026-09-24): the music in a window of its own. */
+    "toggle_miniplayer = \"Shift+P\"\n"
     "toggle_pixel_grid = \"G\"\n"
     "quit = \"Escape\"\n"
     /* §3.18: triage. Delete is safe — it goes to the recycle bin — and

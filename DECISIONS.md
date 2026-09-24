@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-24: D-31 The mini player is a window of its own, and drives whichever track is sounding
+
+- Status: Accepted (owner 2026-09-24, RV-081's second half)
+- Decision: `Shift+P` opens a small window (320x80 of client, on top, its own renderer and event pump — the F1 help window's shape) showing the cover, the track, who made it, the elapsed time and a strip, with three buttons: back a track, play or pause, on a track. It speaks to the background music when there is any and to the page's own track otherwise, so the reader never has to ask which one a button will move.
+- Consequences: the cover is decoded a second time for that window, because a texture belongs to the renderer that draws it. Play or pause through the mini player counts as the listener's own pause (D-30), so it outranks the arbiter. The outer buttons move to the neighbouring *music* page in the folder: with the music on the page the viewer turns to it, and with it in the background the reader stays where they are while the music changes. With nothing playing the window says so rather than leaving the last track's place on the strip.
+
 ## 2026-09-24: D-30 Music outlives its page, and an arbiter says who gets the speakers
 
 - Status: Accepted (owner 2026-09-24, RV-081's first half)
