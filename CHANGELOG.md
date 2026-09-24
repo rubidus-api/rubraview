@@ -40,6 +40,40 @@ This project follows Keep a Changelog.
   frame the disc authored it for, the way a DVD's `.idx`/`.sub` pair is
   (D-27). Reading it needs neither FFmpeg nor a decoder.
 
+### Changed
+
+- Files that share a modified time, a creation time or a size are ordered
+  by name, then by the listing, so a folder opens the same way every time;
+  before, their order was whatever the filesystem listed. Sorting is
+  proven's introsort now, never quadratic.
+- Bicubic and Lanczos-3 resizing in export and batch runs 1.4-2.4x faster,
+  with the same output byte for byte.
+- Settings, playlists, subtitles and tags read their numbers with
+  proven's parsers: a value that is not a finite number (`nan`, `inf`, too
+  many digits) falls back to the default instead of being used.
+
+### Fixed
+
+- A comic opened from Explorer runs into its next volume. Past the last
+  page nothing happened when the archive's path came with backslashes, as
+  Explorer and the command line give it — the viewer compared whole paths
+  byte for byte against the folder listing, which joins with `/`. Stepping
+  back past the first page had the same fault.
+- The place to resume a volume is found however its path is spelt: a
+  volume reached by paging on and the same file double-clicked later are
+  one book, not two.
+- A long whole number in an INI file no longer overflows while it is
+  read (`rubraview_ini_get_int`), and a picture whose claimed width times
+  its pixel size does not fit is refused instead of overflowing.
+- The window title names an archive page (`2.png (2/4) - Rubraview`); it
+  showed only ` (2/4)`.
+- A file whose sound cannot be played now says so — which call failed and
+  what it returned — instead of looking exactly like a file with no sound
+  in it.
+- `Z` and `X` move a DVD's or a Blu-ray's picture subtitles too. They
+  moved only text before, and said "no subtitles are showing" while a
+  subtitle was plainly on screen (found measuring T081).
+
 ## [0.0.17] - 2026-09-24
 
 ### Changed
@@ -52,22 +86,6 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
-- A comic opened from Explorer runs into its next volume. Past the last
-  page nothing happened when the archive's path came with backslashes, as
-  Explorer and the command line give it — the viewer compared whole paths
-  byte for byte against the folder listing, which joins with `/`. Stepping
-  back past the first page had the same fault.
-- The place to resume a volume is found however its path is spelt: a
-  volume reached by paging on and the same file double-clicked later are
-  one book, not two.
-- The window title names an archive page (`2.png (2/4) - Rubraview`); it
-  showed only ` (2/4)`.
-- A file whose sound cannot be played now says so — which call failed and
-  what it returned — instead of looking exactly like a file with no sound
-  in it.
-- `Z` and `X` move a DVD's or a Blu-ray's picture subtitles too. They
-  moved only text before, and said "no subtitles are showing" while a
-  subtitle was plainly on screen (found measuring T081).
 - A subtitle file is read whatever order it is written in (owner,
   2026-09-23): the captions are put in time order before anything else is
   worked out, so a SAMI whose languages do not take turns, or a SubRip
