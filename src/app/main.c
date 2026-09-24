@@ -589,7 +589,7 @@ static void animation_prepare(app_state_t *app) {
     }
 
     if (!app->anim_frames) {
-        proven_result_mem_mut_t res = proven_arena_alloc(app->arena, ANIM_MAX_FRAMES * sizeof(rubraview_frame_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
         if (!proven_is_ok(res.err)) return;
         app->anim_frames = (rubraview_frame_t*)(void*)res.value.ptr;
     }
@@ -635,7 +635,7 @@ static void animation_tick(app_state_t *app, double dt) {
 static void rebuild_layout(app_state_t *app) {
     if (page_count(app) == 0) return;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, page_count(app) * sizeof(rubraview_page_info_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_page_info_t *infos = (rubraview_page_info_t*)(void*)res.value.ptr;
 
@@ -952,7 +952,7 @@ static size_t subtitle_candidates(proven_arena_t *arena, u8str_t video_path,
         rubraview_pal_fs_list_dir(arena, rubraview_path_dirname(video_path));
     if (listing.count == 0) { if (out_why) *out_why = "the folder could not be listed"; return 0; }
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, listing.count * sizeof(u8str_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing.count, sizeof(u8str_t));
     if (!proven_is_ok(res.err)) { if (out_why) *out_why = "out of memory"; return 0; }
     u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
     size_t sibling_count = 0;
@@ -1846,7 +1846,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     /* Directories first, then files, each in natural order — folders are
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, listing.count * sizeof(rubraview_sort_item_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_sort_item_t));
     if (proven_is_ok(res.err)) {
         items = (rubraview_sort_item_t*)(void*)res.value.ptr;
         for (size_t i = 0; i < listing.count; ++i) {
@@ -1861,7 +1861,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
         rubraview_sort_items(items, listing.count, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
 
         proven_result_mem_mut_t ordered_res =
-            proven_arena_alloc(app->arena, listing.count * sizeof(rubraview_fs_entry_t));
+            rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(ordered_res.err)) {
             rubraview_fs_entry_t *ordered = (rubraview_fs_entry_t*)(void*)ordered_res.value.ptr;
             size_t out = 0;
@@ -1881,7 +1881,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     u8str_t parent = rubraview_path_dirname(dir);
     if (parent.len > 0 && !(parent.len == dir.len && memcmp(parent.ptr, dir.ptr, dir.len) == 0)) {
         proven_result_mem_mut_t up_res =
-            proven_arena_alloc(app->arena, (listing.count + 1) * sizeof(rubraview_fs_entry_t));
+            rubraview_arena_alloc_array(app->arena, (listing.count + 1), sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(up_res.err)) {
             rubraview_fs_entry_t *with_up = (rubraview_fs_entry_t*)(void*)up_res.value.ptr;
             with_up[0] = (rubraview_fs_entry_t){
@@ -1900,7 +1900,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double tile = 160.0 * dpi;
 
-    proven_result_mem_mut_t sel_res = proven_arena_alloc(app->arena, listing.count * sizeof(bool));
+    proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(bool));
     app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
     if (app->picker_selected) memset(app->picker_selected, 0, listing.count * sizeof(bool));
 
@@ -1945,7 +1945,7 @@ static size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out
         if (app->picker_selected && app->picker_selected[i] && !app->picker_listing.entries[i].is_directory) picked++;
     }
     if (picked == 0) return 0;
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, picked * sizeof(rubraview_fs_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, picked, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return 0;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0;
@@ -1967,7 +1967,7 @@ static void picker_make_playlist(app_state_t *app) {
     if (n == 0) { osd_say(app, U8("pick some files first")); return; }
 
     rubraview_playlist_t list = {0};
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, n * sizeof(rubraview_playlist_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(rubraview_playlist_entry_t));
     if (!proven_is_ok(res.err)) return;
     list.entries = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < n; ++i) {
@@ -3875,7 +3875,7 @@ static void draw_vobsub(app_state_t *app) {
         }
         if (!app->vobsub_texture) return;
         size_t pixels = (size_t)app->vobsub_cue.width * (size_t)app->vobsub_cue.height;
-        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, pixels * 4);
+        proven_result_mem_mut_t mem = rubraview_arena_alloc_array(app->arena, pixels, sizeof(uint32_t));
         if (!proven_is_ok(mem.err)) return;
         uint32_t *bgra = (uint32_t*)mem.value.ptr;
         rubraview_vobsub_pixels(&app->vobsub_cue, bgra);
@@ -3923,7 +3923,7 @@ static void draw_pgs(app_state_t *app) {
         }
         if (!app->pgs_texture) return;
         size_t pixels = (size_t)app->pgs_cue.width * (size_t)app->pgs_cue.height;
-        proven_result_mem_mut_t mem = proven_arena_alloc(app->arena, pixels * 4);
+        proven_result_mem_mut_t mem = rubraview_arena_alloc_array(app->arena, pixels, sizeof(uint32_t));
         if (!proven_is_ok(mem.err)) return;
         uint32_t *bgra = (uint32_t*)mem.value.ptr;
         rubraview_pgs_pixels(&app->pgs_cue, bgra);
@@ -4661,7 +4661,7 @@ static void rename_commit(app_state_t *app) {
 static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *items, size_t count) {
     if (count == 0) return;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, count * sizeof(rubraview_fs_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
 
@@ -6454,7 +6454,7 @@ static void load_keymap(app_state_t *app) {
 
 static void build_slides(app_state_t *app) {
     if (app->layout.count == 0) return;
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, app->layout.count * sizeof(rubraview_slideshow_item_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, app->layout.count, sizeof(rubraview_slideshow_item_t));
     if (!proven_is_ok(res.err)) return;
 
     app->slides = (rubraview_slideshow_item_t*)(void*)res.value.ptr;
@@ -6685,7 +6685,7 @@ static bool open_folder(app_state_t *app, u8str_t dir) {
    table, apply any ComicInfo, lay out, and start the ring. */
 static void finish_open(app_state_t *app, size_t start_page) {
     media_close(app); /* the playing video belongs to the source being replaced */
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, page_count(app) * sizeof(app_page_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(app_page_t));
     if (!proven_is_ok(res.err)) {
         app->source.page_count = 0;
         return;
@@ -6707,7 +6707,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     if (app->source.has_comicinfo) {
         rubraview_comicinfo_t info = rubraview_comicinfo_parse(app->arena, app->source.comicinfo_xml);
         proven_result_mem_mut_t infos_res =
-            proven_arena_alloc(app->arena, page_count(app) * sizeof(rubraview_page_info_t));
+            rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
         if (proven_is_ok(infos_res.err)) {
             rubraview_page_info_t *infos = (rubraview_page_info_t*)(void*)infos_res.value.ptr;
             memset(infos, 0, page_count(app) * sizeof(rubraview_page_info_t));
@@ -7214,7 +7214,7 @@ static void panel_run_batch(app_state_t *app) {
 }
 
 static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, BATCH_MAX_INPUTS * sizeof(rubraview_batch_input_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, BATCH_MAX_INPUTS, sizeof(rubraview_batch_input_t));
     if (!proven_is_ok(res.err)) {
         console_line("rubraview: out of memory building the file list");
         return 1;

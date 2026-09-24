@@ -16,7 +16,7 @@ static bool entries_reserve(proven_arena_t *arena, rubraview_history_t *history,
     size_t new_cap = history->capacity == 0 ? 16 : history->capacity * 2;
     if (new_cap < min_capacity) new_cap = min_capacity;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_history_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_history_entry_t));
     if (!proven_is_ok(res.err)) return false;
 
     rubraview_history_entry_t *data = (rubraview_history_entry_t*)(void*)res.value.ptr;

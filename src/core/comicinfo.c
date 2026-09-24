@@ -83,7 +83,7 @@ typedef struct page_buf {
 static bool page_buf_push(proven_arena_t *arena, page_buf_t *b, rubraview_comicinfo_page_t page) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 8 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_comicinfo_page_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_comicinfo_page_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_comicinfo_page_t *new_data = (rubraview_comicinfo_page_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_comicinfo_page_t));

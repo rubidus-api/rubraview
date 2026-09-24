@@ -103,7 +103,7 @@ static bool ini_entries_reserve(proven_arena_t *arena, rubraview_ini_doc_t *doc,
     size_t new_cap = doc->capacity == 0 ? 8 : doc->capacity * 2;
     if (new_cap < min_capacity) new_cap = min_capacity;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_ini_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_ini_entry_t));
     if (!proven_is_ok(res.err)) return false;
 
     rubraview_ini_entry_t *new_entries = (rubraview_ini_entry_t*)(void*)res.value.ptr;

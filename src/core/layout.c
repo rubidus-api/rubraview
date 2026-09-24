@@ -33,7 +33,7 @@ static bool spread_buf_reserve(proven_arena_t *arena, spread_buf_t *b, size_t mi
     size_t new_cap = b->capacity == 0 ? 8 : b->capacity * 2;
     if (new_cap < min_capacity) new_cap = min_capacity;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_spread_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_spread_t));
     if (!proven_is_ok(res.err)) return false;
 
     rubraview_spread_t *new_data = (rubraview_spread_t*)(void*)res.value.ptr;

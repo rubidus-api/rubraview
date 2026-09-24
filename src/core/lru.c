@@ -7,7 +7,7 @@ rubraview_lru_cache_t rubraview_lru_create(proven_arena_t *arena, size_t max_ent
     };
     if (!arena || max_entries == 0) return cache;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, max_entries * sizeof(rubraview_cache_entry_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, max_entries, sizeof(rubraview_cache_entry_t));
     if (!proven_is_ok(res.err)) return cache;
 
     cache.entries = (rubraview_cache_entry_t*)(void*)res.value.ptr;
