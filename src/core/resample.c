@@ -105,124 +105,88 @@ static void resample_bilinear(const rubraview_pixbuf_t *src, rubraview_pixbuf_t 
     }
 }
 
-static void resample_bicubic(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst, int32_t y0, int32_t y1) {
+/* Bicubic and Lanczos-3 are one loop with a different kernel. The
+   horizontal weights depend only on the column, so they are worked out
+   once per column for a block of RESAMPLE_BLOCK columns and reused down
+   every row of the band — before, each was recomputed for every pixel of
+   every row (Lanczos: 24 sinf a pixel). Every pixel still sees the same
+   weights added in the same order, so the output is byte-identical to the
+   per-pixel version; the block lives on the stack because this runs on
+   worker threads that own no arena (RV-067). */
+#define RESAMPLE_BLOCK 128
+#define RESAMPLE_MAX_TAPS 6
+
+static inline void kernel_weights(float s, int32_t base, int taps, int first, float (*weight)(float), float *w) {
+    float sum = 0.0f;
+    for (int i = 0; i < taps; ++i) {
+        w[i] = weight(s - (float)(base + first + i));
+        sum += w[i];
+    }
+    if (fabsf(sum) > 1e-6f) {
+        for (int i = 0; i < taps; ++i) w[i] /= sum;
+    }
+}
+
+static inline void resample_kernel(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst, int32_t y0, int32_t y1,
+                                   int taps, int first, float (*weight)(float)) {
     int32_t bpp = rubraview_bytes_per_pixel(src->format);
     float scale_x = (float)src->width / (float)dst->width;
     float scale_y = (float)src->height / (float)dst->height;
 
-    for (int32_t dy = y0; dy < y1; ++dy) {
-        float sy = (dy + 0.5f) * scale_y - 0.5f;
-        int32_t y_base = (int32_t)floorf(sy);
+    int32_t x_off[RESAMPLE_BLOCK][RESAMPLE_MAX_TAPS];   /* byte offset of each tap's pixel in a row */
+    float wx[RESAMPLE_BLOCK][RESAMPLE_MAX_TAPS];
 
-        float wy[4];
-        float sum_wy = 0.0f;
-        for (int i = 0; i < 4; ++i) {
-            wy[i] = bicubic_weight(sy - (float)(y_base - 1 + i));
-            sum_wy += wy[i];
-        }
-        if (fabsf(sum_wy) > 1e-6f) {
-            for (int i = 0; i < 4; ++i) wy[i] /= sum_wy;
-        }
-
-        uint8_t *dst_row = dst->pixels + ((ptrdiff_t)dy * dst->stride);
-
-        for (int32_t dx = 0; dx < dst->width; ++dx) {
-            float sx = (dx + 0.5f) * scale_x - 0.5f;
+    for (int32_t bx = 0; bx < dst->width; bx += RESAMPLE_BLOCK) {
+        int32_t block = dst->width - bx < RESAMPLE_BLOCK ? dst->width - bx : RESAMPLE_BLOCK;
+        for (int32_t k = 0; k < block; ++k) {
+            float sx = (float)(bx + k + 0.5f) * scale_x - 0.5f;
             int32_t x_base = (int32_t)floorf(sx);
+            kernel_weights(sx, x_base, taps, first, weight, wx[k]);
+            for (int j = 0; j < taps; ++j) x_off[k][j] = clamp_coord(x_base + first + j, src->width) * bpp;
+        }
 
-            float wx[4];
-            float sum_wx = 0.0f;
-            for (int j = 0; j < 4; ++j) {
-                wx[j] = bicubic_weight(sx - (float)(x_base - 1 + j));
-                sum_wx += wx[j];
+        for (int32_t dy = y0; dy < y1; ++dy) {
+            float sy = (dy + 0.5f) * scale_y - 0.5f;
+            int32_t y_base = (int32_t)floorf(sy);
+            float wy[RESAMPLE_MAX_TAPS];
+            kernel_weights(sy, y_base, taps, first, weight, wy);
+
+            const uint8_t *srows[RESAMPLE_MAX_TAPS];
+            for (int i = 0; i < taps; ++i) {
+                int32_t cy = clamp_coord(y_base + first + i, src->height);
+                srows[i] = src->pixels + ((ptrdiff_t)cy * src->stride);
             }
-            if (fabsf(sum_wx) > 1e-6f) {
-                for (int j = 0; j < 4; ++j) wx[j] /= sum_wx;
-            }
 
-            float accum[8] = {0};
-            for (int i = 0; i < 4; ++i) {
-                int32_t cy = clamp_coord(y_base - 1 + i, src->height);
-                const uint8_t *srow = src->pixels + ((ptrdiff_t)cy * src->stride);
-                float row_weight = wy[i];
-
-                for (int j = 0; j < 4; ++j) {
-                    int32_t cx = clamp_coord(x_base - 1 + j, src->width);
-                    const uint8_t *spx = srow + (cx * bpp);
-                    float w = row_weight * wx[j];
-                    for (int c = 0; c < bpp; ++c) {
-                        accum[c] += spx[c] * w;
+            uint8_t *dst_row = dst->pixels + ((ptrdiff_t)dy * dst->stride);
+            for (int32_t k = 0; k < block; ++k) {
+                float accum[8] = {0};
+                for (int i = 0; i < taps; ++i) {
+                    float row_weight = wy[i];
+                    for (int j = 0; j < taps; ++j) {
+                        const uint8_t *spx = srows[i] + x_off[k][j];
+                        float w = row_weight * wx[k][j];
+                        for (int c = 0; c < bpp; ++c) {
+                            accum[c] += spx[c] * w;
+                        }
                     }
                 }
-            }
 
-            uint8_t *dpx = dst_row + (dx * bpp);
-            for (int c = 0; c < bpp; ++c) {
-                int ival = (int)(accum[c] + 0.5f);
-                dpx[c] = (uint8_t)(ival < 0 ? 0 : (ival > 255 ? 255 : ival));
+                uint8_t *dpx = dst_row + ((bx + k) * bpp);
+                for (int c = 0; c < bpp; ++c) {
+                    int ival = (int)(accum[c] + 0.5f);
+                    dpx[c] = (uint8_t)(ival < 0 ? 0 : (ival > 255 ? 255 : ival));
+                }
             }
         }
     }
 }
 
+static void resample_bicubic(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst, int32_t y0, int32_t y1) {
+    resample_kernel(src, dst, y0, y1, 4, -1, bicubic_weight);
+}
+
 static void resample_lanczos3(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst, int32_t y0, int32_t y1) {
-    int32_t bpp = rubraview_bytes_per_pixel(src->format);
-    float scale_x = (float)src->width / (float)dst->width;
-    float scale_y = (float)src->height / (float)dst->height;
-
-    for (int32_t dy = y0; dy < y1; ++dy) {
-        float sy = (dy + 0.5f) * scale_y - 0.5f;
-        int32_t y_base = (int32_t)floorf(sy);
-
-        float wy[6];
-        float sum_wy = 0.0f;
-        for (int i = 0; i < 6; ++i) {
-            wy[i] = lanczos3_weight(sy - (float)(y_base - 2 + i));
-            sum_wy += wy[i];
-        }
-        if (fabsf(sum_wy) > 1e-6f) {
-            for (int i = 0; i < 6; ++i) wy[i] /= sum_wy;
-        }
-
-        uint8_t *dst_row = dst->pixels + ((ptrdiff_t)dy * dst->stride);
-
-        for (int32_t dx = 0; dx < dst->width; ++dx) {
-            float sx = (dx + 0.5f) * scale_x - 0.5f;
-            int32_t x_base = (int32_t)floorf(sx);
-
-            float wx[6];
-            float sum_wx = 0.0f;
-            for (int j = 0; j < 6; ++j) {
-                wx[j] = lanczos3_weight(sx - (float)(x_base - 2 + j));
-                sum_wx += wx[j];
-            }
-            if (fabsf(sum_wx) > 1e-6f) {
-                for (int j = 0; j < 6; ++j) wx[j] /= sum_wx;
-            }
-
-            float accum[8] = {0};
-            for (int i = 0; i < 6; ++i) {
-                int32_t cy = clamp_coord(y_base - 2 + i, src->height);
-                const uint8_t *srow = src->pixels + ((ptrdiff_t)cy * src->stride);
-                float row_weight = wy[i];
-
-                for (int j = 0; j < 6; ++j) {
-                    int32_t cx = clamp_coord(x_base - 2 + j, src->width);
-                    const uint8_t *spx = srow + (cx * bpp);
-                    float w = row_weight * wx[j];
-                    for (int c = 0; c < bpp; ++c) {
-                        accum[c] += spx[c] * w;
-                    }
-                }
-            }
-
-            uint8_t *dpx = dst_row + (dx * bpp);
-            for (int c = 0; c < bpp; ++c) {
-                int ival = (int)(accum[c] + 0.5f);
-                dpx[c] = (uint8_t)(ival < 0 ? 0 : (ival > 255 ? 255 : ival));
-            }
-        }
-    }
+    resample_kernel(src, dst, y0, y1, 6, -2, lanczos3_weight);
 }
 
 /* One horizontal band of the destination. The scale factors still come
