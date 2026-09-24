@@ -1,4 +1,5 @@
 #include "rubraview/playlist.h"
+#include "rubraview/number.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,14 +12,8 @@ static u8str_t trim(const char *ptr, size_t len) {
 }
 
 static double parse_double_or(u8str_t s, double default_value) {
-    if (s.len == 0 || s.len >= 64) return default_value;
-    char buf[64];
-    memcpy(buf, s.ptr, s.len);
-    buf[s.len] = '\0';
-    char *endptr = NULL;
-    double result = strtod(buf, &endptr);
-    if (endptr == buf || *endptr != '\0') return default_value;
-    return result;
+    double value = 0.0;
+    return rubraview_parse_double(s, &value) ? value : default_value;
 }
 
 typedef struct entry_buf {

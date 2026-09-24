@@ -1,4 +1,5 @@
 #include "rubraview/settings_doc.h"
+#include "rubraview/number.h"
 #include "rubraview/ini.h"
 #include <string.h>
 #include <stdlib.h>
@@ -87,15 +88,7 @@ static int tokenize(parser_t *p, u8str_t line, token_t *out) {
 }
 
 static bool number(u8str_t text, double *out) {
-    if (text.len == 0 || text.len > 31) return false;
-    char buffer[32];
-    memcpy(buffer, text.ptr, text.len);
-    buffer[text.len] = '\0';
-    char *end = NULL;
-    double value = strtod(buffer, &end);
-    if (!end || *end != '\0') return false;
-    *out = value;
-    return true;
+    return rubraview_parse_double(text, out);
 }
 
 /* `lo..hi` */

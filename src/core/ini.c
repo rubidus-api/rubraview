@@ -1,4 +1,5 @@
 #include "rubraview/ini.h"
+#include "rubraview/number.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -195,35 +196,19 @@ long long rubraview_ini_get_int(const rubraview_ini_doc_t *doc, u8str_t section,
     const u8str_t *v = rubraview_ini_get(doc, section, key);
     if (!v || v->len == 0) return default_value;
 
-    size_t i = 0;
-    bool neg = false;
-    if (v->ptr[0] == '-' || v->ptr[0] == '+') { neg = (v->ptr[0] == '-'); i = 1; }
-    if (i >= v->len) return default_value;
-
-    long long result = 0;
-    for (; i < v->len; ++i) {
-        char c = v->ptr[i];
-        if (c < '0' || c > '9') return default_value;
-        result = result * 10 + (c - '0');
-    }
-    return neg ? -result : result;
+    /* proven_scan_i64 under the hood: the old digit loop overflowed a
+       long long on a long enough value. */
+    int64_t value = 0;
+    return rubraview_parse_i64(*v, &value) ? (long long)value : default_value;
 }
 
 double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double default_value) {
     const u8str_t *v = rubraview_ini_get(doc, section, key);
     if (!v || v->len == 0) return default_value;
 
-    /* v->ptr may not be null-terminated (it can be a slice of caller text);
-       copy into a bounded stack buffer before handing off to strtod. */
-    char buf[64];
-    if (v->len >= sizeof(buf)) return default_value;
-    memcpy(buf, v->ptr, v->len);
-    buf[v->len] = '\0';
-
-    char *endptr = NULL;
-    double result = strtod(buf, &endptr);
-    if (endptr == buf || *endptr != '\0') return default_value;
-    return result;
+    /* The value is a slice of the file's text and is read where it lies. */
+    double value = 0.0;
+    return rubraview_parse_double(*v, &value) ? value : default_value;
 }
 
 static void set_kind(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key,

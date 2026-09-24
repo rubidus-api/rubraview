@@ -37,6 +37,7 @@
 #include <math.h>
 #include <time.h>
 
+#include "rubraview/number.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
 #include "rubraview/keymap.h"
@@ -2486,8 +2487,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
         media_say_volume(app);
     } else if (action.len > 12 && memcmp(action.ptr, "open_recent:", 12) == 0) {
         /* File › Recent: the entry's index in the reading history. */
-        size_t index = (size_t)strtoul(action.ptr + 12, NULL, 10);
-        if (index < app->history.count) open_path(app, app->history.entries[index].path);
+        /* Read inside the view: an action is a slice, not a C string. */
+        int64_t index = -1;
+        if (rubraview_parse_i64((u8str_t){ .ptr = action.ptr + 12, .len = action.len - 12 }, &index) &&
+            index >= 0 && (size_t)index < app->history.count) {
+            open_path(app, app->history.entries[index].path);
+        }
     } else if (rubraview_u8_eq_lit(action, "toggle_always_on_top")) {
         bool on = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
         rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
@@ -2527,7 +2532,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     } else if (rubraview_u8_eq_lit(action, "boxes_opacity_100") || rubraview_u8_eq_lit(action, "boxes_opacity_80") ||
                rubraview_u8_eq_lit(action, "boxes_opacity_60") || rubraview_u8_eq_lit(action, "boxes_opacity_40")) {
-        double percent = (double)strtol(action.ptr + 14, NULL, 10);
+        double percent = 100.0;
+        if (!rubraview_parse_double((u8str_t){ .ptr = action.ptr + 14, .len = action.len - 14 }, &percent)) percent = 100.0;
         rubraview_settings_set(&app->settings, U8("ui"), U8("menubox_opacity"), percent);
         rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_opacity"), percent);
         char line[32];
@@ -6547,13 +6553,8 @@ static void history_load(app_state_t *app) {
    reading history, under the same portable-or-AppData rule. */
 static double ini_number(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double fallback) {
     const u8str_t *text = rubraview_ini_get(doc, section, key);
-    if (!text || text->len == 0 || text->len > 31) return fallback;
-    char buffer[32];
-    memcpy(buffer, text->ptr, text->len);
-    buffer[text->len] = '\0';
-    char *end = NULL;
-    double value = strtod(buffer, &end);
-    return (end && end != buffer) ? value : fallback;
+    double value = 0.0;
+    return (text && rubraview_parse_double_prefix(*text, &value, NULL)) ? value : fallback;
 }
 
 /* A box saved on a larger screen, or left near the edge of a window that
