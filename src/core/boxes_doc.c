@@ -21,11 +21,6 @@ static bool box_fail(box_parser_t *p, const char *message) {
     return false;
 }
 
-static bool is_word(u8str_t w, const char *text) {
-    size_t n = strlen(text);
-    return w.len == n && memcmp(w.ptr, text, n) == 0;
-}
-
 static bool action_name_ok(u8str_t w) {
     if (w.len == 0) return false;
     for (size_t i = 0; i < w.len; ++i) {
@@ -72,7 +67,7 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
     if (!next_token(p, &rest, &word, &q1)) return p->doc->error == NULL;
     if (q1) return box_fail(p, "a line starts with a keyword, not with quoted text");
 
-    if (is_word(word, "toolbox")) {
+    if (rubraview_u8_eq_lit(word, "toolbox")) {
         if (p->open_menu >= 0) return box_fail(p, "a toolbox inside a menu — close the menu with `end` first");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`toolbox` needs a profile name");
         if (p->doc->profile_count >= RUBRAVIEW_BOXES_MAX_PROFILES) return box_fail(p, "too many toolbox profiles");
@@ -87,7 +82,7 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         };
         return true;
     }
-    if (is_word(word, "tile")) {
+    if (rubraview_u8_eq_lit(word, "tile")) {
         if (p->profile < 0) return box_fail(p, "a `tile` before any `toolbox`");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`tile` needs an action id");
         if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`tile` needs a \"caption\"");
@@ -96,31 +91,31 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         if (p->doc->tile_count >= RUBRAVIEW_BOXES_MAX_TILES) return box_fail(p, "too many tiles");
         p->doc->tiles[p->doc->tile_count++] = (rubraview_box_tile_t){ .action = second, .caption = third };
         profile->tile_count++;
-    } else if (is_word(word, "menu")) {
+    } else if (rubraview_u8_eq_lit(word, "menu")) {
         p->profile = -1;
         if (!next_token(p, &rest, &second, &q2) || !q2) return box_fail(p, "`menu` needs a \"label\"");
         rubraview_box_node_t node = { .kind = RUBRAVIEW_BOX_NODE_MENU, .label = second };
         if (next_token(p, &rest, &third, &q3)) {
             u8str_t condition = {0};
             bool qc = false;
-            if (q3 || !is_word(third, "when") || !next_token(p, &rest, &condition, &qc) || qc) {
+            if (q3 || !rubraview_u8_eq_lit(third, "when") || !next_token(p, &rest, &condition, &qc) || qc) {
                 return box_fail(p, "after a menu's label only `when <condition>` may follow");
             }
-            if (!is_word(condition, "media")) return box_fail(p, "the only condition is `when media`");
+            if (!rubraview_u8_eq_lit(condition, "media")) return box_fail(p, "the only condition is `when media`");
             node.when = RUBRAVIEW_BOXES_WHEN_MEDIA;
         }
         if (p->doc->error) return false;
         if (!add_box_node(p, node)) return false;
         p->open_menu = (int32_t)p->doc->node_count - 1;
         return true;
-    } else if (is_word(word, "item")) {
+    } else if (rubraview_u8_eq_lit(word, "item")) {
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`item` needs an action id");
         if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`item` needs a \"label\"");
         if (!add_box_node(p, (rubraview_box_node_t){ .kind = RUBRAVIEW_BOX_NODE_ITEM, .label = third, .action = second })) return false;
-    } else if (is_word(word, "recent")) {
+    } else if (rubraview_u8_eq_lit(word, "recent")) {
         if (p->open_menu < 0) return box_fail(p, "`recent` outside any `menu`");
         if (!add_box_node(p, (rubraview_box_node_t){ .kind = RUBRAVIEW_BOX_NODE_RECENT })) return false;
-    } else if (is_word(word, "end")) {
+    } else if (rubraview_u8_eq_lit(word, "end")) {
         if (p->open_menu < 0) return box_fail(p, "an `end` with no open `menu`");
         p->open_menu = p->doc->nodes[p->open_menu].parent;
     } else {

@@ -14,11 +14,6 @@ static const struct { const char *context; const char *heading; } GROUPS[] = {
     { "slideshow",  "Slide show" },
 };
 
-static bool same(u8str_t a, const char *b) {
-    size_t n = strlen(b);
-    return a.len == n && (n == 0 || memcmp(a.ptr, b, n) == 0);
-}
-
 static u8str_t arena_text(proven_arena_t *arena, const char *text, size_t len) {
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
@@ -118,10 +113,10 @@ size_t rubraview_help_build(proven_arena_t *arena,
             if (binding->combo_count == 0) continue;
 
             if (pass < group_count) {
-                if (!same(binding->context, GROUPS[pass].context)) continue;
+                if (!rubraview_u8_eq_lit(binding->context, GROUPS[pass].context)) continue;
             } else {
                 bool known = false;
-                for (size_t g = 0; g < group_count && !known; ++g) known = same(binding->context, GROUPS[g].context);
+                for (size_t g = 0; g < group_count && !known; ++g) known = rubraview_u8_eq_lit(binding->context, GROUPS[g].context);
                 if (known) continue;
             }
 

@@ -52,28 +52,17 @@ u8str_t rubraview_export_extension(rubraview_export_format_t format) {
     }
 }
 
-static bool ext_is(u8str_t ext, const char *lit) {
-    size_t n = strlen(lit);
-    if (ext.len != n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char a = ext.ptr[i];
-        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-        if (a != lit[i]) return false;
-    }
-    return true;
-}
-
 rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename) {
     u8str_t ext = rubraview_path_ext(filename);
     if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
 
-    if (ext_is(ext, "jpg") || ext_is(ext, "jpeg") || ext_is(ext, "jpe")) return RUBRAVIEW_EXPORT_JPEG;
-    if (ext_is(ext, "png")) return RUBRAVIEW_EXPORT_PNG;
-    if (ext_is(ext, "webp")) return RUBRAVIEW_EXPORT_WEBP;
-    if (ext_is(ext, "gif")) return RUBRAVIEW_EXPORT_GIF;
-    if (ext_is(ext, "bmp")) return RUBRAVIEW_EXPORT_BMP;
-    if (ext_is(ext, "tif") || ext_is(ext, "tiff")) return RUBRAVIEW_EXPORT_TIFF;
-    if (ext_is(ext, "ico")) return RUBRAVIEW_EXPORT_ICO;
+    if (rubraview_u8_eq_lit_ci(ext, "jpg") || rubraview_u8_eq_lit_ci(ext, "jpeg") || rubraview_u8_eq_lit_ci(ext, "jpe")) return RUBRAVIEW_EXPORT_JPEG;
+    if (rubraview_u8_eq_lit_ci(ext, "png")) return RUBRAVIEW_EXPORT_PNG;
+    if (rubraview_u8_eq_lit_ci(ext, "webp")) return RUBRAVIEW_EXPORT_WEBP;
+    if (rubraview_u8_eq_lit_ci(ext, "gif")) return RUBRAVIEW_EXPORT_GIF;
+    if (rubraview_u8_eq_lit_ci(ext, "bmp")) return RUBRAVIEW_EXPORT_BMP;
+    if (rubraview_u8_eq_lit_ci(ext, "tif") || rubraview_u8_eq_lit_ci(ext, "tiff")) return RUBRAVIEW_EXPORT_TIFF;
+    if (rubraview_u8_eq_lit_ci(ext, "ico")) return RUBRAVIEW_EXPORT_ICO;
     return RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
 }
 

@@ -4,12 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static bool u8str_eq(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    if (a.len == 0) return true;
-    return memcmp(a.ptr, b.ptr, a.len) == 0;
-}
-
 static u8str_t trim(const char *ptr, size_t len) {
     size_t start = 0, end = len;
     while (start < end && (ptr[start] == ' ' || ptr[start] == '\t')) start++;
@@ -174,7 +168,7 @@ const u8str_t *rubraview_ini_get(const rubraview_ini_doc_t *doc, u8str_t section
     if (!doc || !doc->entries) return NULL;
     const u8str_t *found = NULL;
     for (size_t i = 0; i < doc->count; ++i) {
-        if (u8str_eq(doc->entries[i].section, section) && u8str_eq(doc->entries[i].key, key)) {
+        if (rubraview_u8_eq(doc->entries[i].section, section) && rubraview_u8_eq(doc->entries[i].key, key)) {
             found = &doc->entries[i].value; /* last occurrence wins */
         }
     }
@@ -237,7 +231,7 @@ static void set_kind(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t se
     if (!arena || !doc) return;
 
     for (size_t i = 0; i < doc->count; ++i) {
-        if (u8str_eq(doc->entries[i].section, section) && u8str_eq(doc->entries[i].key, key)) {
+        if (rubraview_u8_eq(doc->entries[i].section, section) && rubraview_u8_eq(doc->entries[i].key, key)) {
             doc->entries[i].value = value;
             doc->entries[i].kind = kind;
             return;
@@ -358,7 +352,7 @@ u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t
 
         bool already_flushed = false;
         for (size_t j = 0; j < s; ++j) {
-            if (doc->entries[j].section.len != 0 && u8str_eq(doc->entries[j].section, section)) {
+            if (doc->entries[j].section.len != 0 && rubraview_u8_eq(doc->entries[j].section, section)) {
                 already_flushed = true;
                 break;
             }
@@ -370,12 +364,12 @@ u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t
         byte_buf_append(arena, &buf, "]\n", 2);
 
         for (size_t i = 0; i < doc->count; ++i) {
-            if (!u8str_eq(doc->entries[i].section, section)) continue;
+            if (!rubraview_u8_eq(doc->entries[i].section, section)) continue;
             /* A key repeated in the document is written once, with its
                last value: TOML refuses a repeat. */
             bool later = false;
             for (size_t k = i + 1; k < doc->count; ++k) {
-                if (u8str_eq(doc->entries[k].section, section) && u8str_eq(doc->entries[k].key, doc->entries[i].key)) {
+                if (rubraview_u8_eq(doc->entries[k].section, section) && rubraview_u8_eq(doc->entries[k].key, doc->entries[i].key)) {
                     later = true;
                     break;
                 }
