@@ -14,6 +14,12 @@ int main(void) {
     assert(rubraview_parse_double(U8(" -0.25\t"), &d) && d == -0.25);
     assert(rubraview_parse_double(U8("1e3"), &d) && d == 1000.0);
     assert(rubraview_parse_double(U8("0.1"), &d) && d == 0.1);   /* correctly rounded */
+    /* strtod took a decimal with nothing before or after the point, and a
+       hand-written settings.ini may say "opacity = .8". */
+    assert(rubraview_parse_double(U8(".8"), &d) && d == 0.8);
+    assert(rubraview_parse_double(U8("5."), &d) && d == 5.0);
+    assert(rubraview_parse_double(U8("+2"), &d) && d == 2.0);
+    assert(!rubraview_parse_double(U8("."), &d));
     assert(!rubraview_parse_double(U8(""), &d));
     assert(!rubraview_parse_double(U8("   "), &d));
     assert(!rubraview_parse_double(U8("1.5x"), &d));
