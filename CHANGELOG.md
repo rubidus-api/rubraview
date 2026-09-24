@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The music in a window of its own (owner, 2026-09-24, D-31, RV-081).
+  `Shift+P` opens a small player on top of whatever is being read — the
+  cover, the track, who made it, a strip to seek on and three buttons —
+  driving the background music when there is any and the page's own track
+  otherwise.
 - Music plays on while pictures are looked at or a comic is read, and
   stands aside for a film with sound of its own (owner, 2026-09-24,
   D-30, RV-081). The listener's own pause outranks that: music stopped by
