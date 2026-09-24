@@ -34,6 +34,7 @@ static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F,
 #define THUMB_BLUR 1
 #define THUMB_KEEP 0.78
 #define THUMB_DECODE_SIDE 256
+#define FOLDER_TRIES 3
 
 /* Owner, 2026-09-25: an archive's first page within a time limit, given up
    when the reading looks too slow to finish in it. */
@@ -287,15 +288,20 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     uint8_t *raw = NULL;
 
     if (job->folder) {
-        /* Its first picture in the order it would open, else its first film. */
+        /* Its first picture in the order it would open, else its first film;
+           when the shell has nothing for one, the next — three at most, so
+           a folder of odd files does not hold the queue up. */
         rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(scratch, path);
         u8str_t none = { .ptr = "", .len = 0 };
-        rubraview_sibling_index_t first = rubraview_fs_index_siblings(scratch, &inside, none, pictures,
-                                                                      RUBRAVIEW_SORT_NAME_NATURAL, true);
-        if (first.count == 0) {
-            first = rubraview_fs_index_siblings(scratch, &inside, none, films, RUBRAVIEW_SORT_NAME_NATURAL, true);
+        u8str_t kinds[2] = { pictures, films };
+        int tries = 0;
+        for (int k = 0; k < 2 && !raw && tries < FOLDER_TRIES; ++k) {
+            rubraview_sibling_index_t found = rubraview_fs_index_siblings(scratch, &inside, none, kinds[k],
+                                                                          RUBRAVIEW_SORT_NAME_NATURAL, true);
+            for (size_t i = 0; i < found.count && !raw && tries < FOLDER_TRIES; ++i, ++tries) {
+                raw = rubraview_pal_shell_thumbnail_bgra(found.paths[i], 192, &w, &h);
+            }
         }
-        if (first.count > 0) raw = rubraview_pal_shell_thumbnail_bgra(first.paths[0], 192, &w, &h);
     } else if (rubraview_glob_match_list(rubraview_path_basename(path), archives)) {
         raw = archive_first_page(scratch, factory, path, pictures, &w, &h);
     } else {
