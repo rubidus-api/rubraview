@@ -1379,6 +1379,16 @@ static void media_prepare(app_state_t *app) {
         app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_VIDEO;
         app->slides[app->spread_index].duration_seconds = opened.info.duration_seconds;
     }
+    /* A file whose sound cannot be played looks exactly like a file with
+       no sound, which is how three measurements were misread on
+       2026-09-24. Say which call failed instead. */
+    if (opened.info.has_audio && !opened.info.audio_output) {
+        char why[128], line[192];
+        int n = rubraview_pal_audio_last_failure(why, sizeof(why))
+            ? snprintf(line, sizeof(line), "no sound: the device would not open (%s)", why)
+            : snprintf(line, sizeof(line), "no sound: the device would not open");
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    }
     /* §3.14.6: something with sound of its own is on screen now. */
     if (opened.info.has_audio) {
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, bgm_pause_for_sound(app)));
