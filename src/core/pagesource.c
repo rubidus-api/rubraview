@@ -269,22 +269,6 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
     return result;
 }
 
-/* Windows treats '/' and '\\' as the same separator and filenames as
-   case-insensitive. Two names that Windows calls the same file must
-   compare equal here, or the viewer opens the wrong one. */
-static bool same_filename(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    for (size_t i = 0; i < a.len; ++i) {
-        char x = a.ptr[i], y = b.ptr[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
-        if (x == '\\') x = '/';
-        if (y == '\\') y = '/';
-        if (x != y) return false;
-    }
-    return true;
-}
-
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path) {
     if (!source || path.len == 0) return -1;
 
@@ -298,7 +282,7 @@ int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_
         u8str_t candidate = source->pages[i].path.len > 0
                               ? rubraview_path_basename(source->pages[i].path)
                               : source->pages[i].name;
-        if (same_filename(candidate, wanted)) return (int32_t)i;
+        if (rubraview_path_same(candidate, wanted)) return (int32_t)i;
     }
     return -1;
 }

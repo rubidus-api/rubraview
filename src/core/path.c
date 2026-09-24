@@ -143,3 +143,16 @@ u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename
         .len = total_len
     };
 }
+
+bool rubraview_path_same(u8str_t a, u8str_t b) {
+    if (a.len != b.len) return false;
+    for (proven_size_t i = 0; i < a.len; ++i) {
+        char x = a.ptr[i], y = b.ptr[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+        if (rubraview_path_is_sep(x)) x = '/';
+        if (rubraview_path_is_sep(y)) y = '/';
+        if (x != y) return false;
+    }
+    return true;
+}
