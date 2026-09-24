@@ -52,6 +52,16 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- A comic opened from Explorer runs into its next volume. Past the last
+  page nothing happened when the archive's path came with backslashes, as
+  Explorer and the command line give it — the viewer compared whole paths
+  byte for byte against the folder listing, which joins with `/`. Stepping
+  back past the first page had the same fault.
+- The place to resume a volume is found however its path is spelt: a
+  volume reached by paging on and the same file double-clicked later are
+  one book, not two.
+- The window title names an archive page (`2.png (2/4) - Rubraview`); it
+  showed only ` (2/4)`.
 - A file whose sound cannot be played now says so — which call failed and
   what it returned — instead of looking exactly like a file with no sound
   in it.

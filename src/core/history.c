@@ -141,7 +141,7 @@ rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text)
 const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_t *history, u8str_t path) {
     if (!history || !history->entries) return NULL;
     for (size_t i = 0; i < history->count; ++i) {
-        if (u8str_eq(history->entries[i].path, path)) return &history->entries[i];
+        if (rubraview_path_same(history->entries[i].path, path)) return &history->entries[i];
     }
     return NULL;
 }
@@ -151,7 +151,7 @@ void rubraview_history_record(proven_arena_t *arena, rubraview_history_t *histor
     if (!arena || !history || path.len == 0) return;
 
     for (size_t i = 0; i < history->count; ++i) {
-        if (!u8str_eq(history->entries[i].path, path)) continue;
+        if (!rubraview_path_same(history->entries[i].path, path)) continue;
         history->entries[i].page = page;
         history->entries[i].total = total;
         history->entries[i].timestamp = timestamp;

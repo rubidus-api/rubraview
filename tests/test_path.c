@@ -96,6 +96,20 @@ int main(void) {
     }
     printf("  [PASS] A sibling path with another extension keeps the folder\n");
 
+    /* Test: two spellings Windows calls the same file compare equal. The
+       shell hands over backslashes, a listing joins with '/', and names
+       differ in case; none of that makes it another file. */
+    {
+        u8str_t shell = { .ptr = "C:\\c\\Vol 02.cbz", .len = 15 };
+        u8str_t joined = { .ptr = "C:\\c/vol 02.CBZ", .len = 15 };
+        u8str_t other = { .ptr = "C:\\c/Vol 03.cbz", .len = 15 };
+        assert(rubraview_path_same(shell, joined));
+        assert(!rubraview_path_same(shell, other));
+        assert(!rubraview_path_same(shell, (u8str_t){ .ptr = "C:\\c\\Vol 02.cb", .len = 14 }));
+        assert(rubraview_path_same((u8str_t){ .ptr = "", .len = 0 }, (u8str_t){ .ptr = "", .len = 0 }));
+    }
+    printf("  [PASS] Paths Windows calls the same file compare equal\n");
+
     free(raw_mem);
     printf("[test_path] All tests passed successfully!\n");
     return 0;

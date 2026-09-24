@@ -98,3 +98,26 @@ Also seen: the window title is empty where an archive page's name would
 go (`(2/2) - Rubraview 0.0.17`), while the status line names the page
 properly. Noted in `BACKLOGS.md` as a small blemish, not a defect of the
 archive path.
+
+## Measured again on the Windows 11 VM, 2026-09-25
+
+Step 6's PASS above held only for a path written with `/`. Opened the way
+Explorer and a command prompt spell it, `C:\...\cbz\Vol 01.cbz`, `End` then
+`PageDown` stayed on `10.png (4/4)`: the next volume was looked up by
+comparing whole paths with a folder listing that joins with `/`. Fixed
+(`rubraview_path_same`), and measured with both spellings:
+
+| Check | Result |
+|---|---|
+| 6, `\` path | PASS. `10.png (4/4)` → `PageDown` → `1.png (1/2)` (Vol 02) → `PageUp` → back in Vol 01. |
+| 6, `/` path | PASS, as before. |
+| 9, across spellings | PASS. Vol 01 reached from Vol 02 by `PageUp` (its path then joined with `/`), left on page 2, reopened by the `\` path: `Resume page 2 / 4 (Enter)`. Before the fix these were two history entries. |
+| title | PASS. `1.png (1/4) - Rubraview 0.0.17` and `10.png (4/4) - ...`, where it was ` (1/4) - ...`. |
+
+Stepping back past page 1 lands on the first page of the previous volume,
+not its last. §3.8.1 says nothing about the backward direction; left as it
+is.
+
+`Right` does not turn a page (the owner's list, 2026-09-09: PageDown/Up,
+Space/Enter, Backspace); a first attempt with it moved nothing, which was
+the test's mistake, not the viewer's.

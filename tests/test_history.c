@@ -55,6 +55,23 @@ int main(void) {
     }
     printf("  [PASS] Only [history] keys become positions; unknown paths return nothing\n");
 
+    /* Test 2b: a volume reached by paging on from the one before is keyed
+       by the folder joined with '/'; the same file double-clicked in
+       Explorer comes with backslashes. It is one book, with one place to
+       resume from, and recording it again updates that place. */
+    {
+        rubraview_history_t history = rubraview_history_parse(&arena, lit(
+            "[history]\n"
+            "C:\\c/Vol 02.cbz = page:1, total:2, time:100\n"));
+        const rubraview_history_entry_t *e = rubraview_history_find(&history, lit("C:\\c\\vol 02.CBZ"));
+        assert(e != NULL && e->page == 1);
+
+        rubraview_history_record(&arena, &history, lit("C:\\c\\Vol 02.cbz"), 0, 2, 200);
+        assert(history.count == 1);
+        assert(history.entries[0].timestamp == 200);
+    }
+    printf("  [PASS] One file spelt two ways is one history entry\n");
+
     /* Test 3: A malformed or partial line restores what it can instead
        of losing the whole file. */
     {

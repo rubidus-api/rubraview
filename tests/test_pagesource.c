@@ -246,6 +246,25 @@ int main(void) {
     }
     printf("  [PASS] Consecutive archive traversal steps volume to volume in natural order\n");
 
+    /* Test 5b: the path the reader opened is spelt the way Explorer spells
+       it — backslashes, and a case of its own — while the listing joins
+       the folder and the name with '/'. It is still the same file, and
+       the next volume must still be found (measured on the VM: a CBZ
+       double-clicked in Explorer never ran into its next volume). */
+    {
+        rubraview_fs_entry_t entries[2] = {
+            { .name = lit("Vol 02.cbz"), .path = lit("C:\\c/Vol 02.cbz") },
+            { .name = lit("Vol 01.cbz"), .path = lit("C:\\c/Vol 01.cbz") },
+        };
+        rubraview_fs_listing_t listing = { .entries = entries, .count = 2 };
+
+        u8str_t next = rubraview_page_source_sibling_archive(&arena, &listing, lit("C:\\c\\Vol 01.cbz"), true);
+        assert(str_eq(next, "C:\\c/Vol 02.cbz"));
+        u8str_t back = rubraview_page_source_sibling_archive(&arena, &listing, lit("C:\\c\\VOL 02.CBZ"), false);
+        assert(str_eq(back, "C:\\c/Vol 01.cbz"));
+    }
+    printf("  [PASS] The next volume is found from a backslashed, differently cased path\n");
+
     /* Test 6: A buffer that is not an archive yields an empty source
        rather than a crash, and out-of-range reads are refused. */
     {
