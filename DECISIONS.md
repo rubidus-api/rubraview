@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-34 The picker's tiles show the item's picture, soft, with an outlined name
+
+- Status: Accepted (owner 2026-09-25: "파일/폴더 선택할 때 썸네일이 박스 안에 그려지면 좋겠네요. 글자는 서로 다른 외곽선과 내부 색으로 표시하여 그림 위에서도 잘 보이게 하고, 썸네일은 선명하게가 아니라 약간 흐릿하게 처리하고, 폴더도 썸네일 보이게요.")
+- Decision: each picker tile shows the picture Windows' shell has for the item (photos and films alike), cut to the tile's shape, made small (96 px wide) and stretched back, box-blurred by one pixel and darkened to 78 %; the name is drawn in a light cream with a black outline. A folder shows its first picture in natural order, or its first film when it holds none — its own files only, not its subfolders. Thumbnails are made two per pass of the loop, for the tiles on screen only, in a scratch arena emptied after each, and given back when the picker closes.
+- Consequences: archives keep the plain tile (their first page would mean reading them whole). A file the shell has no thumbnail for keeps the plain tile. The shell's parser refuses '/' as a separator, which the listings use — `shell_thumbnail_bgra` turns it into a backslash (this also mends the shell cover of a sound file opened from a listing). Host-tested in `src/core/thumb.c` (T089).
+
 ## 2026-09-25: D-33 Text subtitles in a box the reader moves and sizes; the Sub tile toggles and chooses
 
 - Status: Accepted (owner 2026-09-25: "자막 출력 부분을 떠다니는 반투명 창처럼 하면 좋을 것 같네요. 터치하면 창 외곽선이 굵게 보이고, 그 상태로 오른쪽 상단 위에 S(설정) M(이동) R(리사이즈) X(종료) 버튼이 뜨고, 이동이나 리사이즈는 버튼 위에서 드래그하게요. 툴박스에 sub 버튼이 있어서 그거 누르면 자막이 꺼지고 켜지고, 더블클릭이나 프레스 홀드 하면 여러 자막 중 원하는 언어 자막 열 수 있게 하고요.")
