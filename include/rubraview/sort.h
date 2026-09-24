@@ -50,8 +50,9 @@ typedef struct rubraview_sort_item {
     int64_t  mtime;      /* used by RUBRAVIEW_SORT_DATE_MODIFIED */
     int64_t  ctime;      /* used by RUBRAVIEW_SORT_DATE_CREATED */
     uint64_t size_bytes; /* used by RUBRAVIEW_SORT_FILE_SIZE */
-    uint64_t tag;        /* opaque, never compared: carried through sorting so callers can
-                            join the sorted order back to their own parallel data */
+    uint64_t tag;        /* carried through sorting so callers can join the sorted order back
+                            to their own parallel data; compared only as the last tie-break,
+                            so give it the listing order */
 } rubraview_sort_item_t;
 
 /**
