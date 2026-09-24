@@ -27,6 +27,9 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     }
     if (rubraview_u8_eq_lit(action, "next_audio_track")) st.enabled = f->other_audio_track;
     if (rubraview_u8_eq_lit(action, "next_subtitle_track")) st.enabled = f->other_subtitle;
+    if (rubraview_u8_eq_lit(action, "toggle_subtitles") || rubraview_u8_eq_lit(action, "choose_subtitle_track")) {
+        st.enabled = f->has_subtitles;
+    }
     if (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later")) st.enabled = f->subtitle_shown;
 
     static const struct { const char *action; size_t offset; } TOGGLES[] = {
@@ -42,6 +45,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         { "toggle_fit_lock",       offsetof(rubraview_action_facts_t, fit_lock) },
         { "toggle_always_on_top",  offsetof(rubraview_action_facts_t, always_on_top) },
         { "media_mute",            offsetof(rubraview_action_facts_t, muted) },
+        { "toggle_subtitles",      offsetof(rubraview_action_facts_t, subtitle_shown) },
     };
     for (size_t i = 0; i < sizeof(TOGGLES) / sizeof(TOGGLES[0]); ++i) {
         if (rubraview_u8_eq_lit(action, TOGGLES[i].action)) {
@@ -120,6 +124,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
         { "next_subtitle_track", 0xE7F0 },   /* ClosedCaption */
+        { "toggle_subtitles", 0xE7F0 },      /* ClosedCaption: the Sub tile (D-33) */
         { "next_audio_track", 0xE8D6 },      /* Audio */
         { "zoom_in", 0xE8A3 },               /* ZoomIn */
         { "zoom_out", 0xE71F },              /* ZoomOut */
