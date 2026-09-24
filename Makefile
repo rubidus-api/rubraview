@@ -73,6 +73,7 @@ SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/src/proven/memory.c \
               vendor/proven/src/proven/panic.c \
               vendor/proven/src/proven/job.c \
+              vendor/proven/src/proven/algorithm.c \
               vendor/proven/platform/proven_sys_mem.c \
               vendor/proven/platform/proven_sys_thread.c
 
