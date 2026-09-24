@@ -1,4 +1,5 @@
 #include "rubraview/subtitle.h"
+#include "rubraview/number.h"
 #include "rubraview/path.h"
 #include <string.h>
 #include <stdlib.h>
@@ -297,12 +298,12 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             if (!rubraview_u8_starts_with_ci(at, "start")) continue;
             size_t v = k + 5;
             while (v < tag_end && (text.ptr[v] == ' ' || text.ptr[v] == '=' || text.ptr[v] == '"')) v++;
-            char number[24];
-            size_t n = 0;
-            while (v < tag_end && text.ptr[v] >= '0' && text.ptr[v] <= '9' && n + 1 < sizeof(number)) {
-                number[n++] = text.ptr[v++];
+            size_t digits = v;
+            while (v < tag_end && text.ptr[v] >= '0' && text.ptr[v] <= '9') v++;
+            double ms = 0.0;
+            if (v > digits && rubraview_parse_double((u8str_t){ .ptr = text.ptr + digits, .len = v - digits }, &ms)) {
+                start_ms = ms;
             }
-            if (n > 0) { number[n] = '\0'; start_ms = strtod(number, NULL); }
             break;
         }
 

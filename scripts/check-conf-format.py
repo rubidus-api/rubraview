@@ -29,6 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCES = [
     "tools/conf_samples.c",
     "src/core/ini.c",
+    "src/core/number.c",
     "src/core/history.c",
     "src/core/path.c",
     "src/core/utf8.c",
@@ -40,6 +41,9 @@ SOURCES = [
     "vendor/proven/src/proven/arena.c",
     "vendor/proven/src/proven/memory.c",
     "vendor/proven/src/proven/panic.c",
+    "vendor/proven/src/proven/float_parse.c",
+    "vendor/proven/src/proven/float_decimal.c",
+    "vendor/proven/src/proven/scan.c",
     "vendor/proven/platform/proven_sys_mem.c",
 ]
 

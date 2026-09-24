@@ -9,7 +9,7 @@ CC ?= gcc
 CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
 LDFLAGS ?= -lm -lpthread
 
-SRCS_CORE = src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
+SRCS_CORE = src/core/number.c src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
@@ -77,6 +77,19 @@ SRCS_PROVEN = vendor/proven/src/proven/arena.c \
               vendor/proven/platform/proven_sys_mem.c \
               vendor/proven/platform/proven_sys_thread.c
 
+# proven's number parsers. float_decimal.c uses unsigned __int128 for its
+# exact arithmetic, which -pedantic refuses, so the host builds these three
+# as objects without it (like the other vendored code; the sources stay as
+# vendored). The Windows build has no -pedantic and compiles them directly.
+SRCS_PROVEN_NUM = vendor/proven/src/proven/float_parse.c \
+                  vendor/proven/src/proven/float_decimal.c \
+                  vendor/proven/src/proven/scan.c
+PROVEN_NUM_OBJS = $(patsubst vendor/proven/src/proven/%.c,build/proven/%.o,$(SRCS_PROVEN_NUM))
+
+build/proven/%.o: vendor/proven/src/proven/%.c
+	@mkdir -p build/proven
+	$(CC) $(filter-out -pedantic,$(CFLAGS)) -c $< -o $@
+
 # Portable logic layered on the PAL; compiled into both builds.
 SRCS_PAL_COMMON = src/pal/pal_fs_common.c
 
@@ -102,7 +115,7 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
 
 SRCS_APP = src/app/main.c
 
-TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_sort \
+TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_number build/tests/test_sort \
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
@@ -138,7 +151,7 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
 	@mkdir -p build/tests
 	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
 
@@ -182,7 +195,7 @@ win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(J
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
 		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) \
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
-		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) \
+		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(SRCS_PROVEN_NUM) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"

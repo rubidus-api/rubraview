@@ -63,6 +63,16 @@ int main(void) {
     assert(rubraview_ini_get_int(&doc, lit("slideshow"), lit("negative"), 0) == -12);
     printf("  [PASS] Typed getters (bool/int/float) with defaults\n");
 
+    /* A number that is not one falls back to the default instead of
+       overflowing or turning into NaN (proven's parsers, number.h). */
+    rubraview_ini_set(&arena, &doc, lit("slideshow"), lit("huge"), lit("99999999999999999999999"));
+    rubraview_ini_set(&arena, &doc, lit("slideshow"), lit("nan"), lit("nan"));
+    rubraview_ini_set(&arena, &doc, lit("slideshow"), lit("spaced"), lit(" 2.5 "));
+    assert(rubraview_ini_get_int(&doc, lit("slideshow"), lit("huge"), 5) == 5);
+    assert(rubraview_ini_get_float(&doc, lit("slideshow"), lit("nan"), 1.25) == 1.25);
+    assert(rubraview_ini_get_float(&doc, lit("slideshow"), lit("spaced"), 0.0) == 2.5);
+    printf("  [PASS] An overflowing or non-finite number falls back to the default\n");
+
     /* Test 3: ini_set updates an existing key in place (count unchanged) */
     size_t count_before = doc.count;
     rubraview_ini_set(&arena, &doc, lit("curation"), lit("dir_1"), lit("D:\\NewKeep"));

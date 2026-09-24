@@ -311,7 +311,7 @@ def box_actions(main_text):
 
 
 def handled_actions(main_text):
-    found = set(re.findall(r'action_is\(action, "([a-z0-9_]+)"\)', main_text))
+    found = set(re.findall(r'(?:action_is|rubraview_u8_eq_lit)\(action, "([a-z0-9_]+)"\)', main_text))
     steps = re.search(r"STEPS\[\] = \{(.*?)\};", main_text, re.S)
     if steps:
         found |= set(re.findall(r'\{ "([a-z0-9_]+)"', steps.group(1)))

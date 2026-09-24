@@ -1,5 +1,7 @@
 #include "rubraview/batchrun.h"
+#include "rubraview/number.h"
 #include "rubraview/path.h"
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -19,29 +21,14 @@ static bool starts_with(u8str_t s, const char *prefix, u8str_t *out_rest) {
 /* Parses a decimal integer. Refuses anything with a stray character in
    it — "--quality=90abc" is a typo, not the number 90. */
 static bool parse_int(u8str_t s, long *out) {
-    if (s.len == 0 || s.len > 20) return false;
-    char buf[24];
-    memcpy(buf, s.ptr, s.len);
-    buf[s.len] = '\0';
-
-    char *end = NULL;
-    long value = strtol(buf, &end, 10);
-    if (!end || *end != '\0') return false;
-    *out = value;
+    int64_t value = 0;
+    if (!rubraview_parse_i64(s, &value) || value < LONG_MIN || value > LONG_MAX) return false;
+    *out = (long)value;
     return true;
 }
 
 static bool parse_double(u8str_t s, double *out) {
-    if (s.len == 0 || s.len > 32) return false;
-    char buf[36];
-    memcpy(buf, s.ptr, s.len);
-    buf[s.len] = '\0';
-
-    char *end = NULL;
-    double value = strtod(buf, &end);
-    if (!end || *end != '\0') return false;
-    *out = value;
-    return true;
+    return rubraview_parse_double(s, out);
 }
 
 static bool parse_filter(u8str_t s, rubraview_resample_filter_t *out) {
