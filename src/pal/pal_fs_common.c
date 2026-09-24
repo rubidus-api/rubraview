@@ -9,12 +9,6 @@
 #include "rubraview/path.h"
 #include <string.h>
 
-static bool u8str_eq(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    if (a.len == 0) return true;
-    return memcmp(a.ptr, b.ptr, a.len) == 0;
-}
-
 rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
                                                       const rubraview_fs_listing_t *listing,
                                                       u8str_t current_file_path,
@@ -76,7 +70,7 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     for (int pass = 0; pass < 2 && !result.found && wanted.len > 0; ++pass) {
         for (size_t i = 0; i < kept; ++i) {
             u8str_t name = listing->entries[items[i].tag].name;
-            if (pass == 0 ? u8str_eq(name, wanted) : rubraview_path_same(name, wanted)) {
+            if (pass == 0 ? rubraview_u8_eq(name, wanted) : rubraview_path_same(name, wanted)) {
                 result.current = i;
                 result.found = true;
                 break;

@@ -11,15 +11,6 @@ static u8str_t trim(const char *ptr, size_t len) {
     return (u8str_t){ .ptr = ptr + start, .len = end - start };
 }
 
-static bool word_ci_eq(u8str_t word, const char *lit) {
-    size_t n = strlen(lit);
-    if (word.len != n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        if (tolower((unsigned char)word.ptr[i]) != tolower((unsigned char)lit[i])) return false;
-    }
-    return true;
-}
-
 static rubraview_key_combo_t parse_combo(u8str_t token) {
     rubraview_key_combo_t combo = { .modifiers = 0, .key_name = token };
 
@@ -34,9 +25,9 @@ static rubraview_key_combo_t parse_combo(u8str_t token) {
         u8str_t rest = { .ptr = combo.key_name.ptr + plus + 1, .len = combo.key_name.len - plus - 1 };
 
         uint32_t mod = 0;
-        if (word_ci_eq(word, "shift")) mod = RUBRAVIEW_MOD_SHIFT;
-        else if (word_ci_eq(word, "ctrl") || word_ci_eq(word, "control")) mod = RUBRAVIEW_MOD_CTRL;
-        else if (word_ci_eq(word, "alt")) mod = RUBRAVIEW_MOD_ALT;
+        if (rubraview_u8_eq_lit_ci(word, "shift")) mod = RUBRAVIEW_MOD_SHIFT;
+        else if (rubraview_u8_eq_lit_ci(word, "ctrl") || rubraview_u8_eq_lit_ci(word, "control")) mod = RUBRAVIEW_MOD_CTRL;
+        else if (rubraview_u8_eq_lit_ci(word, "alt")) mod = RUBRAVIEW_MOD_ALT;
         else break; /* not a recognized modifier word: stop peeling */
 
         combo.modifiers |= mod;
@@ -132,12 +123,6 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
     return keymap;
 }
 
-static bool u8str_eq(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    if (a.len == 0) return true;
-    return memcmp(a.ptr, b.ptr, a.len) == 0;
-}
-
 static bool combo_matches(rubraview_key_combo_t a, rubraview_key_combo_t b) {
     if (a.modifiers != b.modifiers) return false;
     if (a.key_name.len != b.key_name.len) return false;
@@ -150,7 +135,7 @@ static bool combo_matches(rubraview_key_combo_t a, rubraview_key_combo_t b) {
 static u8str_t find_action_in_context(const rubraview_keymap_t *keymap, u8str_t context, rubraview_key_combo_t combo) {
     for (size_t i = 0; i < keymap->count; ++i) {
         const rubraview_key_binding_t *b = &keymap->bindings[i];
-        if (!u8str_eq(b->context, context)) continue;
+        if (!rubraview_u8_eq(b->context, context)) continue;
         for (size_t c = 0; c < b->combo_count; ++c) {
             if (combo_matches(b->combos[c], combo)) return b->action;
         }
@@ -173,7 +158,7 @@ u8str_t rubraview_keymap_find_action(const rubraview_keymap_t *keymap, u8str_t c
 const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_keymap_t *keymap, u8str_t context, u8str_t action) {
     if (!keymap || !keymap->bindings) return NULL;
     for (size_t i = 0; i < keymap->count; ++i) {
-        if (u8str_eq(keymap->bindings[i].context, context) && u8str_eq(keymap->bindings[i].action, action)) {
+        if (rubraview_u8_eq(keymap->bindings[i].context, context) && rubraview_u8_eq(keymap->bindings[i].action, action)) {
             return &keymap->bindings[i];
         }
     }
@@ -204,7 +189,7 @@ static bool in_base_layer(u8str_t context) {
 }
 
 bool rubraview_keymap_contexts_meet(u8str_t a, u8str_t b) {
-    if (u8str_eq(a, b)) return true;
+    if (rubraview_u8_eq(a, b)) return true;
     return in_base_layer(a) && in_base_layer(b);
 }
 
@@ -234,7 +219,7 @@ bool rubraview_keymap_equal(const rubraview_keymap_t *a, const rubraview_keymap_
     if (!a || !b || a->count != b->count) return false;
     for (size_t i = 0; i < a->count; ++i) {
         const rubraview_key_binding_t *x = &a->bindings[i], *y = &b->bindings[i];
-        if (!u8str_eq(x->context, y->context) || !u8str_eq(x->action, y->action) ||
+        if (!rubraview_u8_eq(x->context, y->context) || !rubraview_u8_eq(x->action, y->action) ||
             x->combo_count != y->combo_count) return false;
         for (size_t c = 0; c < x->combo_count; ++c) {
             if (!combo_matches(x->combos[c], y->combos[c])) return false;

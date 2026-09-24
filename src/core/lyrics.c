@@ -24,18 +24,6 @@ static u8str_t trim(u8str_t s) {
     return s;
 }
 
-static bool starts_with_ci(u8str_t s, const char *prefix) {
-    size_t n = strlen(prefix);
-    if (s.len < n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char a = s.ptr[i], b = prefix[i];
-        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-        if (a != b) return false;
-    }
-    return true;
-}
-
 /* ---- .lrc ---- */
 
 typedef struct lyric_buf {
@@ -133,13 +121,13 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
                 stamps[stamp_count++] = when;
             } else {
                 /* Not a time: one of the metadata tags. */
-                if (starts_with_ci(inside, "ti:")) {
+                if (rubraview_u8_starts_with_ci(inside, "ti:")) {
                     lyrics.title = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
-                } else if (starts_with_ci(inside, "ar:")) {
+                } else if (rubraview_u8_starts_with_ci(inside, "ar:")) {
                     lyrics.artist = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
-                } else if (starts_with_ci(inside, "al:")) {
+                } else if (rubraview_u8_starts_with_ci(inside, "al:")) {
                     lyrics.album = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
-                } else if (starts_with_ci(inside, "offset:")) {
+                } else if (rubraview_u8_starts_with_ci(inside, "offset:")) {
                     char buffer[32];
                     size_t n = inside.len - 7;
                     if (n < sizeof(buffer)) {
@@ -241,7 +229,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
         while (r.pos < r.len) {
             u8str_t line = trim(read_line(&r));
-            if (starts_with_ci(line, "track ")) track_count++;
+            if (rubraview_u8_starts_with_ci(line, "track ")) track_count++;
         }
     }
     if (track_count == 0) return sheet;
@@ -259,12 +247,12 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         u8str_t line = trim(read_line(&r));
         if (line.len == 0) continue;
 
-        if (starts_with_ci(line, "file ")) {
+        if (rubraview_u8_starts_with_ci(line, "file ")) {
             sheet.audio_file = quoted_or_rest((u8str_t){ .ptr = line.ptr + 5, .len = line.len - 5 });
             continue;
         }
 
-        if (starts_with_ci(line, "track ")) {
+        if (rubraview_u8_starts_with_ci(line, "track ")) {
             in_track = true;
             if (current >= track_count) break;
 
@@ -279,7 +267,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
             continue;
         }
 
-        if (starts_with_ci(line, "title ")) {
+        if (rubraview_u8_starts_with_ci(line, "title ")) {
             u8str_t value = quoted_or_rest((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
             /* Before the first TRACK, TITLE names the album. */
             if (in_track && current > 0) tracks[current - 1].title = value;
@@ -287,14 +275,14 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
             continue;
         }
 
-        if (starts_with_ci(line, "performer ")) {
+        if (rubraview_u8_starts_with_ci(line, "performer ")) {
             u8str_t value = quoted_or_rest((u8str_t){ .ptr = line.ptr + 10, .len = line.len - 10 });
             if (in_track && current > 0) tracks[current - 1].performer = value;
             else sheet.album_performer = value;
             continue;
         }
 
-        if (starts_with_ci(line, "index ") && in_track && current > 0) {
+        if (rubraview_u8_starts_with_ci(line, "index ") && in_track && current > 0) {
             u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
 
             long index_number = 0;

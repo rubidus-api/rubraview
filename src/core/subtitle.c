@@ -32,19 +32,6 @@ static u8str_t trim(u8str_t s) {
     return s;
 }
 
-static bool starts_with_ci(u8str_t s, const char *prefix) {
-    size_t n = strlen(prefix);
-    if (s.len < n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char a = s.ptr[i];
-        char b = prefix[i];
-        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-        if (a != b) return false;
-    }
-    return true;
-}
-
 /* ---- cue list ---- */
 
 typedef struct cue_buf {
@@ -148,7 +135,7 @@ static u8str_t strip_markup(proven_arena_t *arena, u8str_t text, bool braces_too
         if (text.ptr[i] == '<') {
             /* `<br>` and `<br/>` are the one tag that means something. */
             u8str_t rest = { .ptr = text.ptr + i, .len = text.len - i };
-            if (starts_with_ci(rest, "<br")) {
+            if (rubraview_u8_starts_with_ci(rest, "<br")) {
                 if (written == 0 || out[written - 1] != '\n') out[written++] = '\n';
             }
             while (i < text.len && text.ptr[i] != '>') i++;
@@ -191,8 +178,8 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
         if (line.len == 0) continue;
 
         /* WebVTT's own header lines are not cues. */
-        if (starts_with_ci(line, "WEBVTT") || starts_with_ci(line, "NOTE") ||
-            starts_with_ci(line, "STYLE") || starts_with_ci(line, "REGION")) {
+        if (rubraview_u8_starts_with_ci(line, "WEBVTT") || rubraview_u8_starts_with_ci(line, "NOTE") ||
+            rubraview_u8_starts_with_ci(line, "STYLE") || rubraview_u8_starts_with_ci(line, "REGION")) {
             continue;
         }
 
@@ -276,7 +263,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         if (text.ptr[i] != '<') { i++; continue; }
 
         u8str_t rest = { .ptr = text.ptr + i, .len = text.len - i };
-        if (!starts_with_ci(rest, "<sync")) { i++; continue; }
+        if (!rubraview_u8_starts_with_ci(rest, "<sync")) { i++; continue; }
 
         /* Close the caption that was open. */
         if (open_at >= 0.0 && i > body_start) {
@@ -307,7 +294,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         double start_ms = -1.0;
         for (size_t k = i; k + 6 < tag_end; ++k) {
             u8str_t at = { .ptr = text.ptr + k, .len = tag_end - k };
-            if (!starts_with_ci(at, "start")) continue;
+            if (!rubraview_u8_starts_with_ci(at, "start")) continue;
             size_t v = k + 5;
             while (v < tag_end && (text.ptr[v] == ' ' || text.ptr[v] == '=' || text.ptr[v] == '"')) v++;
             char number[24];
@@ -325,8 +312,8 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
            one's. */
         for (size_t look = tag_end + 1; look < text.len && look < tag_end + 200; ++look) {
             u8str_t at = { .ptr = text.ptr + look, .len = text.len - look };
-            if (starts_with_ci(at, "<sync")) break;
-            if (!starts_with_ci(at, "class")) continue;
+            if (rubraview_u8_starts_with_ci(at, "<sync")) break;
+            if (!rubraview_u8_starts_with_ci(at, "class")) continue;
 
             size_t v = look + 5;
             while (v < text.len && (text.ptr[v] == ' ' || text.ptr[v] == '=' || text.ptr[v] == '"')) v++;
@@ -401,7 +388,7 @@ static void parse_ass(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
 
     while (!at_end(&s)) {
         u8str_t line = next_line(&s);
-        if (!starts_with_ci(trim(line), "dialogue:")) continue;
+        if (!rubraview_u8_starts_with_ci(trim(line), "dialogue:")) continue;
 
         u8str_t rest = trim(line);
         rest.ptr += 9;   /* past "Dialogue:" */
@@ -439,14 +426,14 @@ rubraview_subtitle_format_t rubraview_subtitle_format_for_name(u8str_t filename)
     u8str_t ext = rubraview_path_ext(filename);
     if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
 
-    if (starts_with_ci(ext, "srt") && ext.len == 3) return RUBRAVIEW_SUBTITLE_SRT;
-    if (starts_with_ci(ext, "smi") && ext.len == 3) return RUBRAVIEW_SUBTITLE_SMI;
-    if (starts_with_ci(ext, "sami") && ext.len == 4) return RUBRAVIEW_SUBTITLE_SMI;
-    if (starts_with_ci(ext, "vtt") && ext.len == 3) return RUBRAVIEW_SUBTITLE_VTT;
-    if (starts_with_ci(ext, "ass") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
-    if (starts_with_ci(ext, "ssa") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
-    if (starts_with_ci(ext, "idx") && ext.len == 3) return RUBRAVIEW_SUBTITLE_VOBSUB;
-    if (starts_with_ci(ext, "sup") && ext.len == 3) return RUBRAVIEW_SUBTITLE_PGS;
+    if (rubraview_u8_starts_with_ci(ext, "srt") && ext.len == 3) return RUBRAVIEW_SUBTITLE_SRT;
+    if (rubraview_u8_starts_with_ci(ext, "smi") && ext.len == 3) return RUBRAVIEW_SUBTITLE_SMI;
+    if (rubraview_u8_starts_with_ci(ext, "sami") && ext.len == 4) return RUBRAVIEW_SUBTITLE_SMI;
+    if (rubraview_u8_starts_with_ci(ext, "vtt") && ext.len == 3) return RUBRAVIEW_SUBTITLE_VTT;
+    if (rubraview_u8_starts_with_ci(ext, "ass") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
+    if (rubraview_u8_starts_with_ci(ext, "ssa") && ext.len == 3) return RUBRAVIEW_SUBTITLE_ASS;
+    if (rubraview_u8_starts_with_ci(ext, "idx") && ext.len == 3) return RUBRAVIEW_SUBTITLE_VOBSUB;
+    if (rubraview_u8_starts_with_ci(ext, "sup") && ext.len == 3) return RUBRAVIEW_SUBTITLE_PGS;
     return RUBRAVIEW_SUBTITLE_UNKNOWN;
 }
 
@@ -457,12 +444,12 @@ static rubraview_subtitle_format_t sniff(u8str_t text) {
 
     for (size_t i = 0; i + 6 < text.len && i < 4096; ++i) {
         u8str_t at = { .ptr = text.ptr + i, .len = text.len - i };
-        if (starts_with_ci(at, "WEBVTT")) return RUBRAVIEW_SUBTITLE_VTT;
-        if (starts_with_ci(at, "<SAMI")) return RUBRAVIEW_SUBTITLE_SMI;
-        if (starts_with_ci(at, "<SYNC")) return RUBRAVIEW_SUBTITLE_SMI;
-        if (starts_with_ci(at, "[Script Info]")) return RUBRAVIEW_SUBTITLE_ASS;
-        if (starts_with_ci(at, "Dialogue:")) return RUBRAVIEW_SUBTITLE_ASS;
-        if (starts_with_ci(at, "-->")) return RUBRAVIEW_SUBTITLE_SRT;
+        if (rubraview_u8_starts_with_ci(at, "WEBVTT")) return RUBRAVIEW_SUBTITLE_VTT;
+        if (rubraview_u8_starts_with_ci(at, "<SAMI")) return RUBRAVIEW_SUBTITLE_SMI;
+        if (rubraview_u8_starts_with_ci(at, "<SYNC")) return RUBRAVIEW_SUBTITLE_SMI;
+        if (rubraview_u8_starts_with_ci(at, "[Script Info]")) return RUBRAVIEW_SUBTITLE_ASS;
+        if (rubraview_u8_starts_with_ci(at, "Dialogue:")) return RUBRAVIEW_SUBTITLE_ASS;
+        if (rubraview_u8_starts_with_ci(at, "-->")) return RUBRAVIEW_SUBTITLE_SRT;
     }
     return RUBRAVIEW_SUBTITLE_UNKNOWN;
 }

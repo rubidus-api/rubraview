@@ -16,11 +16,6 @@ static bool starts_with(u8str_t s, const char *prefix, u8str_t *out_rest) {
     return true;
 }
 
-static bool equals(u8str_t s, const char *lit) {
-    size_t n = strlen(lit);
-    return s.len == n && memcmp(s.ptr, lit, n) == 0;
-}
-
 /* Parses a decimal integer. Refuses anything with a stray character in
    it — "--quality=90abc" is a typo, not the number 90. */
 static bool parse_int(u8str_t s, long *out) {
@@ -50,10 +45,10 @@ static bool parse_double(u8str_t s, double *out) {
 }
 
 static bool parse_filter(u8str_t s, rubraview_resample_filter_t *out) {
-    if (equals(s, "lanczos3") || equals(s, "lanczos")) { *out = RUBRAVIEW_FILTER_LANCZOS3; return true; }
-    if (equals(s, "bicubic")) { *out = RUBRAVIEW_FILTER_BICUBIC; return true; }
-    if (equals(s, "bilinear")) { *out = RUBRAVIEW_FILTER_BILINEAR; return true; }
-    if (equals(s, "nearest")) { *out = RUBRAVIEW_FILTER_NEAREST; return true; }
+    if (rubraview_u8_eq_lit(s, "lanczos3") || rubraview_u8_eq_lit(s, "lanczos")) { *out = RUBRAVIEW_FILTER_LANCZOS3; return true; }
+    if (rubraview_u8_eq_lit(s, "bicubic")) { *out = RUBRAVIEW_FILTER_BICUBIC; return true; }
+    if (rubraview_u8_eq_lit(s, "bilinear")) { *out = RUBRAVIEW_FILTER_BILINEAR; return true; }
+    if (rubraview_u8_eq_lit(s, "nearest")) { *out = RUBRAVIEW_FILTER_NEAREST; return true; }
     return false;
 }
 
@@ -138,23 +133,23 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
 
-        if (equals(arg, "--batch")) { result.batch_mode = true; continue; }
-        if (equals(arg, "--register-shell")) { result.register_shell = true; continue; }
-        if (equals(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
-        if (equals(arg, "--new-instance")) { result.new_instance = true; continue; }
-        if (equals(arg, "--diag")) { result.diagnostics = true; continue; }
-        if (equals(arg, "--version") || equals(arg, "-v")) { result.show_version = true; continue; }
-        if (equals(arg, "--probe-media")) { result.probe_media = true; continue; }
-        if (equals(arg, "--probe-gpu")) { result.probe_gpu = true; continue; }
-        if (equals(arg, "--recursive")) { result.recursive = true; continue; }
-        if (equals(arg, "--pause")) { result.pause_at_end = true; continue; }
-        if (equals(arg, "--grayscale")) {
+        if (rubraview_u8_eq_lit(arg, "--batch")) { result.batch_mode = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--register-shell")) { result.register_shell = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--new-instance")) { result.new_instance = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--diag")) { result.diagnostics = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--version") || rubraview_u8_eq_lit(arg, "-v")) { result.show_version = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--probe-media")) { result.probe_media = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--probe-gpu")) { result.probe_gpu = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--recursive")) { result.recursive = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--pause")) { result.pause_at_end = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--grayscale")) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_COLOR_ADJUST);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
             a->params.color.grayscale = true;
             continue;
         }
-        if (equals(arg, "--privacy-clean")) {
+        if (rubraview_u8_eq_lit(arg, "--privacy-clean")) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_PRIVACY_SCRUB);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
             a->params.privacy.strip_all_exif = true;
@@ -221,7 +216,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (starts_with(arg, "--rotate=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_ORIENT);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
-            if (equals(value, "exif")) {
+            if (rubraview_u8_eq_lit(value, "exif")) {
                 a->params.orient.use_exif_auto_orient = true;
             } else {
                 long deg = 0;
@@ -236,8 +231,8 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (starts_with(arg, "--flip=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_ORIENT);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
-            if (equals(value, "h")) a->params.orient.flip_horizontal = true;
-            else if (equals(value, "v")) a->params.orient.flip_vertical = true;
+            if (rubraview_u8_eq_lit(value, "h")) a->params.orient.flip_horizontal = true;
+            else if (rubraview_u8_eq_lit(value, "v")) a->params.orient.flip_vertical = true;
             else { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
             continue;
         }

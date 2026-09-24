@@ -5,12 +5,6 @@
 
 #define HISTORY_SECTION "history"
 
-static bool u8str_eq(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    if (a.len == 0) return true;
-    return memcmp(a.ptr, b.ptr, a.len) == 0;
-}
-
 static bool entries_reserve(proven_arena_t *arena, rubraview_history_t *history, size_t min_capacity) {
     if (history->capacity >= min_capacity) return true;
     size_t new_cap = history->capacity == 0 ? 16 : history->capacity * 2;
@@ -78,11 +72,6 @@ static int64_t whole_number(u8str_t v) {
     return negative ? -n : n;
 }
 
-static bool starts_with(u8str_t s, const char *prefix) {
-    size_t n = strlen(prefix);
-    return s.len >= n && memcmp(s.ptr, prefix, n) == 0;
-}
-
 static void add_entry(proven_arena_t *arena, rubraview_history_t *history,
                       u8str_t path, int32_t page, int32_t total, int64_t timestamp) {
     if (path.len == 0) return;
@@ -105,20 +94,20 @@ rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text)
     int32_t page = 0, total = 0;
     int64_t timestamp = 0;
     for (size_t i = 0; i <= doc.count; ++i) {
-        bool boundary = i == doc.count || !u8str_eq(doc.entries[i].section, section);
+        bool boundary = i == doc.count || !rubraview_u8_eq(doc.entries[i].section, section);
         if (boundary) {
-            if (starts_with(section, "entry-")) add_entry(arena, &history, path, page, total, timestamp);
+            if (rubraview_u8_starts_with(section, "entry-")) add_entry(arena, &history, path, page, total, timestamp);
             if (i == doc.count) break;
             section = doc.entries[i].section;
             path = (u8str_t){ .ptr = "", .len = 0 };
             page = 0; total = 0; timestamp = 0;
         }
         const rubraview_ini_entry_t *e = &doc.entries[i];
-        if (starts_with(e->section, "entry-")) {
-            if (u8str_eq(e->key, U8("path")))       path = e->value;
-            else if (u8str_eq(e->key, U8("page")))  page = (int32_t)whole_number(e->value);
-            else if (u8str_eq(e->key, U8("total"))) total = (int32_t)whole_number(e->value);
-            else if (u8str_eq(e->key, U8("time")))  timestamp = whole_number(e->value);
+        if (rubraview_u8_starts_with(e->section, "entry-")) {
+            if (rubraview_u8_eq(e->key, U8("path")))       path = e->value;
+            else if (rubraview_u8_eq(e->key, U8("page")))  page = (int32_t)whole_number(e->value);
+            else if (rubraview_u8_eq(e->key, U8("total"))) total = (int32_t)whole_number(e->value);
+            else if (rubraview_u8_eq(e->key, U8("time")))  timestamp = whole_number(e->value);
             continue;
         }
 
