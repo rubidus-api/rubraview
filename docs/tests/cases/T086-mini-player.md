@@ -46,6 +46,7 @@ there is any, otherwise the one the page itself is playing.
   so instead.
 
 Not measured: step 6 (the outer buttons), and pausing the background
-music from the button — that run hit the audio-open flakiness written up
-in `BACKLOGS.md`, where a track sometimes opens with no sound at all, so
-there was nothing to hear either way.
+music from the button. That run was read wrongly at the time — see the
+end of T085: the VM key tool takes five to six seconds a call, so what
+looked like "no sound at all" was a recording that had stopped before the
+thing being measured happened.

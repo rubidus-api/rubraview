@@ -52,6 +52,9 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- A file whose sound cannot be played now says so — which call failed and
+  what it returned — instead of looking exactly like a file with no sound
+  in it.
 - `Z` and `X` move a DVD's or a Blu-ray's picture subtitles too. They
   moved only text before, and said "no subtitles are showing" while a
   subtitle was plainly on screen (found measuring T081).

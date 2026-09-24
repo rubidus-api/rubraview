@@ -34,29 +34,47 @@ the two frequencies are measured separately.
 
 ## Measured on the Windows 11 VM, 2026-09-24
 
-**The chain works, and was traced end to end.** A build with a temporary
-trace beside the program recorded the decisions of one run:
+Steps 1, 2 and 3, measured by recording the session and reading the two
+tones apart — the background track at 587 Hz, the film's own sound at
+440 Hz — with the viewer's own decisions traced beside them so the two
+clocks could be lined up:
 
 ```text
-prepare index=1 media_page=0 media=1 bgm=0
-adopt? media=1 page=0 video=0 ended=0 audio=1     the track becomes background music
-opened audio=1 out=1 video=1                      the film opens, with sound
-bgm_do action=1 bgm=1 holds=1 aside=1             PAUSE: the music stands aside
-bgm_do action=2 bgm=1 holds=1 aside=0             RESUME: the film ended
+app 753207.4   the track opens and plays
+app 753217.9   the reader turns to the picture: it becomes background music
+app 753232.6   the film opens  -> the music is paused
+app 753242.8   the film ends   -> the music is resumed
+
+recording  4.0   587 on                     (the track)
+recording 29.5   587 off, 440 on            (the film opened: 753232.6)
+recording 39.5   440 off, 587 on            (the film ended:  753242.8)
 ```
 
-That is steps 1, 2 and 3, each in its turn.
+The two agree to within the half-second measuring window: the music
+stands aside the moment the film opens and comes back the moment it ends,
+and the film is heard in between.
 
-**What is not settled.** In runs measured by recording rather than
-tracing, the film sometimes opened with **no audio at all** — neither its
-own sound in the recording nor the `has_audio` that would tell the
-arbiter anything — and the music therefore played on through it. The same
-file plays with sound when it is opened with no background music behind
-it. So: when the film has sound the arbiter does the right thing; whether
-a film *gets* its sound while a second player already holds the device is
-the open question, and it is a platform one rather than a decision one.
-Written up in `BACKLOGS.md`.
+### The wrong turning this case took first, and what it cost
 
-Steps 4, 5 and 6 are not measured: 4 and 5 need the listener's own pause
-on a page with no player, which the key path reaches only while music is
-still running, and the tone track outlasts a measurement badly.
+Four earlier recordings showed the music playing straight through the
+film with no film sound at all, which was written up here as "a film
+opened while music plays sometimes gets no sound" and put in `BACKLOGS.md`
+as an open platform question. It was neither.
+
+Every call to the VM key tool takes five to six seconds of its own — it
+registers and starts a scheduled task inside the session. The test script
+had `sleep 4` between steps and assumed the keys landed there, so the
+film actually opened twenty to thirty seconds later than intended, after
+the recording had already stopped. The recordings were truthful about the
+window they covered; the window was simply the wrong one.
+
+The fix in method is the one this project keeps relearning in a new
+dress: **do not date events by the sleeps in the script.** Have the
+program say when it did each thing, and line the measurement up against
+that. A trace of four lines settled in one run what four recordings could
+not.
+
+Steps 4, 5 and 6 are not measured: the listener's own pause from the
+keyboard on a page with no player, the same with a film coming and going,
+and the setting turned off. The first two are covered by the mini player
+instead (T086), which pauses the background music by the same path.
