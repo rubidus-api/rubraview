@@ -1,4 +1,5 @@
 #include "rubraview/audio_dsp.h"
+#include "rubraview/number.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -293,22 +294,17 @@ double rubraview_replaygain_factor(const rubraview_replaygain_t *tags,
 }
 
 bool rubraview_replaygain_parse_db(u8str_t text, double *out_db) {
-    if (!out_db || text.len == 0 || text.len > 64) return false;
+    if (!out_db || text.len == 0) return false;
 
-    char buffer[72];
-    memcpy(buffer, text.ptr, text.len);
-    buffer[text.len] = '\0';
-
-    char *end = NULL;
-    double value = strtod(buffer, &end);
-    if (end == buffer) return false;
+    double value = 0.0;
+    size_t used = 0;
+    if (!rubraview_parse_double_prefix(text, &value, &used)) return false;
 
     /* The tag is conventionally "-7.230000 dB"; anything after the
        number that is not a unit means it is not a gain. */
-    while (*end == ' ' || *end == '\t') end++;
-    if (*end != '\0') {
-        if (!((end[0] == 'd' || end[0] == 'D') && (end[1] == 'b' || end[1] == 'B'))) return false;
-    }
+    while (used < text.len && (text.ptr[used] == ' ' || text.ptr[used] == '\t')) used++;
+    u8str_t unit = { .ptr = text.ptr + used, .len = text.len - used };
+    if (unit.len > 0 && !rubraview_u8_starts_with_ci(unit, "db")) return false;
 
     *out_db = value;
     return true;

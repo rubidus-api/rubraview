@@ -1,4 +1,5 @@
 #include "rubraview/lyrics.h"
+#include "rubraview/number.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -128,15 +129,11 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
                 } else if (rubraview_u8_starts_with_ci(inside, "al:")) {
                     lyrics.album = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
                 } else if (rubraview_u8_starts_with_ci(inside, "offset:")) {
-                    char buffer[32];
-                    size_t n = inside.len - 7;
-                    if (n < sizeof(buffer)) {
-                        memcpy(buffer, inside.ptr + 7, n);
-                        buffer[n] = '\0';
-                        /* The tag is in milliseconds, and positive means
-                           the words come *earlier*. */
-                        lyrics.offset_seconds = -strtod(buffer, NULL) / 1000.0;
-                    }
+                    /* The tag is in milliseconds, and positive means
+                       the words come *earlier*. */
+                    double ms = 0.0;
+                    u8str_t value = { .ptr = inside.ptr + 7, .len = inside.len - 7 };
+                    if (rubraview_parse_double_prefix(value, &ms, NULL)) lyrics.offset_seconds = -ms / 1000.0;
                 }
             }
             i = close + 1;
