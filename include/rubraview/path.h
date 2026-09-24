@@ -51,6 +51,15 @@ u8str_t rubraview_path_stem(u8str_t path);
 bool rubraview_path_has_ext(u8str_t path, const char *ext);
 
 /**
+ * Whether two paths name the same file the way Windows decides it:
+ * '/' and '\\' are one separator and ASCII letters ignore case. The shell
+ * hands over "C:\\c\\Vol 02.cbz", a directory listing joins "C:\\c" and
+ * "Vol 02.cbz" with '/', and both are the same volume. Nothing is
+ * resolved on disk: "a/../b" and "b" still differ.
+ */
+bool rubraview_path_same(u8str_t a, u8str_t b);
+
+/**
  * Join directory and filename into an arena-allocated path.
  * Strictly guarantees the null-terminated allocation invariant:
  * (allocated size = len + 1, and ptr[len] == '\0').

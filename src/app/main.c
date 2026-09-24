@@ -704,7 +704,9 @@ static void update_window_title(app_state_t *app) {
     size_t used = 0;
     int32_t page = current_page_index(app);
     if (page >= 0 && (size_t)page < page_count(app)) {
-        u8str_t name = rubraview_path_basename(app->source.pages[page].path);
+        /* The name the status line shows, not the path: an archive page
+           has no path of its own (found by T037). */
+        u8str_t name = page_display_name(app, (size_t)page);
         int n = snprintf(title, sizeof(title), "%.*s (%d/%zu) ",
                          (int)name.len, name.ptr, (int)page + 1, page_count(app));
         used = n > 0 ? ((size_t)n < sizeof(title) ? (size_t)n : sizeof(title) - 1) : 0;
@@ -6736,6 +6738,9 @@ static void open_path(app_state_t *app, u8str_t path) {
     history_remember(app);
 
     bool opened = false;
+    /* The path is spelt as the caller gave it — backslashes from the
+       shell, '/' from a folder listing — so every lookup by it compares
+       with rubraview_path_same, never byte for byte. */
     u8str_t key = entry.path;
 
     if (entry.is_directory) {

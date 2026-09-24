@@ -6,6 +6,7 @@
  */
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/glob.h"
+#include "rubraview/path.h"
 #include <string.h>
 
 static bool u8str_eq(u8str_t a, u8str_t b) {
@@ -65,11 +66,21 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     result.current = 0;
     result.found = false;
 
-    for (size_t i = 0; i < kept; ++i) {
-        if (u8str_eq(ordered_paths[i], current_file_path)) {
-            result.current = i;
-            result.found = true;
-            break;
+    /* The current file is found by its name, not its whole path: the
+       listing joins the folder and the name with '/', while the path the
+       reader opened may be spelt with backslashes, as Explorer hands it
+       over, and then no whole path would ever match. Every entry is in
+       the one folder, so the name is enough. An exact match wins; only
+       without one is case ignored, as Windows ignores it. */
+    u8str_t wanted = rubraview_path_basename(current_file_path);
+    for (int pass = 0; pass < 2 && !result.found && wanted.len > 0; ++pass) {
+        for (size_t i = 0; i < kept; ++i) {
+            u8str_t name = listing->entries[items[i].tag].name;
+            if (pass == 0 ? u8str_eq(name, wanted) : rubraview_path_same(name, wanted)) {
+                result.current = i;
+                result.found = true;
+                break;
+            }
         }
     }
 
