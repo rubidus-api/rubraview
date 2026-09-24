@@ -1772,11 +1772,6 @@ static void prev_spread(app_state_t *app) {
 static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
                                  bool *out_enabled, bool *out_current);
 
-static bool action_is(u8str_t action, const char *name) {
-    size_t n = strlen(name);
-    return action.len == n && memcmp(action.ptr, name, n) == 0;
-}
-
 static void toggle_slideshow(app_state_t *app) {
     app->slideshow_running = !app->slideshow_running;
     if (app->slideshow_running) {
@@ -2214,7 +2209,7 @@ static void toolbox_refresh(app_state_t *app) {
         for (int32_t i = 0; i < parts[p]->tile_count && count < RUBRAVIEW_TOOLBOX_MAX_TILES; ++i) {
             const rubraview_box_tile_t *tile = &doc->tiles[parts[p]->first_tile + i];
             /* The slide show's own Stop tile stands in for the profile's Slides tile. */
-            if (p == 1 && parts[0] && action_is(tile->action, "toggle_slideshow")) continue;
+            if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "toggle_slideshow")) continue;
             app->toolbox_tiles[count++] = *tile;
         }
     }
@@ -2278,19 +2273,19 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         static char named[48];
         return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
     }
-    if (action_is(tile->action, "media_play_pause")) {
+    if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? U8("Play") : U8("Pause");
     }
-    if (action_is(tile->action, "media_mute")) {
+    if (rubraview_u8_eq_lit(tile->action, "media_mute")) {
         return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? U8("Unmute") : U8("Mute");
     }
-    if (action_is(tile->action, "media_speed_cycle")) {
+    if (rubraview_u8_eq_lit(tile->action, "media_speed_cycle")) {
         static char speed[16];   /* drawn before the next call */
         int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
     }
-    if (action_is(tile->action, "media_ab_cycle")) {
+    if (rubraview_u8_eq_lit(tile->action, "media_ab_cycle")) {
         return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? U8("Set B") : U8("A-B off");
     }
     return tile->caption;
@@ -2317,7 +2312,7 @@ static bool window_nudge(app_state_t *app, u8str_t action) {
         { "window_shorter", 0, 0, 0, -1 },   { "window_taller", 0, 0, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(STEPS) / sizeof(STEPS[0]); ++i) {
-        if (!action_is(action, STEPS[i].name)) continue;
+        if (!rubraview_u8_eq_lit(action, STEPS[i].name)) continue;
         if (rubraview_pal_window_is_fullscreen(app->window)) return true;
         int32_t x = 0, y = 0, w = 0, h = 0;
         if (!rubraview_pal_window_get_frame(app->window, &x, &y, &w, &h)) return true;
@@ -2340,38 +2335,38 @@ static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
 
-    if (action_is(action, "quit")) {
+    if (rubraview_u8_eq_lit(action, "quit")) {
         /* Esc closes what is open before it closes the program. */
         if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
         rubraview_pal_window_request_close(app->window);
-    } else if (action_is(action, "next_page")) {
+    } else if (rubraview_u8_eq_lit(action, "next_page")) {
         next_spread(app);
-    } else if (action_is(action, "prev_page")) {
+    } else if (rubraview_u8_eq_lit(action, "prev_page")) {
         prev_spread(app);
-    } else if (action_is(action, "first_page")) {
+    } else if (rubraview_u8_eq_lit(action, "first_page")) {
         go_to_spread(app, 0);
-    } else if (action_is(action, "last_page")) {
+    } else if (rubraview_u8_eq_lit(action, "last_page")) {
         go_to_spread(app, app->layout.count > 0 ? app->layout.count - 1 : 0);
-    } else if (action_is(action, "fit_window")) {
+    } else if (rubraview_u8_eq_lit(action, "fit_window")) {
         app->fit_mode = RUBRAVIEW_FIT_WINDOW; reset_view(app);
-    } else if (action_is(action, "fit_width")) {
+    } else if (rubraview_u8_eq_lit(action, "fit_width")) {
         app->fit_mode = RUBRAVIEW_FIT_WIDTH; reset_view(app);
-    } else if (action_is(action, "fit_height")) {
+    } else if (rubraview_u8_eq_lit(action, "fit_height")) {
         app->fit_mode = RUBRAVIEW_FIT_HEIGHT; reset_view(app);
-    } else if (action_is(action, "actual_size")) {
+    } else if (rubraview_u8_eq_lit(action, "actual_size")) {
         app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE; reset_view(app);
-    } else if (action_is(action, "smart_fit")) {
+    } else if (rubraview_u8_eq_lit(action, "smart_fit")) {
         app->fit_mode = RUBRAVIEW_FIT_SMART; reset_view(app);
-    } else if (action_is(action, "fit_stretch")) {
+    } else if (rubraview_u8_eq_lit(action, "fit_stretch")) {
         app->fit_mode = RUBRAVIEW_FIT_STRETCH; reset_view(app);
-    } else if (action_is(action, "toggle_fit_lock")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_fit_lock")) {
         app->fit_lock = !app->fit_lock;
-    } else if (action_is(action, "skip_forward")) {
+    } else if (rubraview_u8_eq_lit(action, "skip_forward")) {
         go_to_spread(app, app->spread_index + 10);
-    } else if (action_is(action, "skip_backward")) {
+    } else if (rubraview_u8_eq_lit(action, "skip_backward")) {
         go_to_spread(app, app->spread_index > 10 ? app->spread_index - 10 : 0);
-    } else if (action_is(action, "up_to_folder")) {
+    } else if (rubraview_u8_eq_lit(action, "up_to_folder")) {
         /* §3.7.2: ascend to the parent directory, shown in the picker so
            the reader can choose what to open next. */
         u8str_t here = app->picker_dir;
@@ -2382,109 +2377,109 @@ static void handle_action(app_state_t *app, u8str_t action) {
             app->picker.focus = 0;
             app->picker_open = app->picker_listing.count > 0;
         }
-    } else if (action_is(action, "open_folder")) {
+    } else if (rubraview_u8_eq_lit(action, "open_folder")) {
         picker_open(app);
-    } else if (action_is(action, "toggle_spread_detect")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_spread_detect")) {
         /* §3.3.4: with detection off, a wide scan pairs like any other
            page instead of standing alone. */
         app->spread_detect = !app->spread_detect;
         app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
         app->needs_relayout = true;
-    } else if (action_is(action, "interval_up")) {
+    } else if (rubraview_u8_eq_lit(action, "interval_up")) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.5);
-    } else if (action_is(action, "interval_down")) {
+    } else if (rubraview_u8_eq_lit(action, "interval_down")) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.5);
-    } else if (action_is(action, "interval_up_fine")) {
+    } else if (rubraview_u8_eq_lit(action, "interval_up_fine")) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.1);
-    } else if (action_is(action, "interval_down_fine")) {
+    } else if (rubraview_u8_eq_lit(action, "interval_down_fine")) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.1);
-    } else if (action_is(action, "zoom_in")) {
+    } else if (rubraview_u8_eq_lit(action, "zoom_in")) {
         app->zoom *= ZOOM_STEP;
-    } else if (action_is(action, "zoom_out")) {
+    } else if (rubraview_u8_eq_lit(action, "zoom_out")) {
         app->zoom /= ZOOM_STEP;
         if (app->zoom < 0.01) app->zoom = 0.01;
-    } else if (action_is(action, "rotate_cw")) {
+    } else if (rubraview_u8_eq_lit(action, "rotate_cw")) {
         app->orientation = rubraview_orientation_rotate_cw(app->orientation);
         app->needs_relayout = true;
         reset_view(app);
-    } else if (action_is(action, "rotate_ccw")) {
+    } else if (rubraview_u8_eq_lit(action, "rotate_ccw")) {
         app->orientation = rubraview_orientation_rotate_ccw(app->orientation);
         app->needs_relayout = true;
         reset_view(app);
-    } else if (action_is(action, "flip_horizontal")) {
+    } else if (rubraview_u8_eq_lit(action, "flip_horizontal")) {
         app->orientation = rubraview_orientation_flip_h(app->orientation);
-    } else if (action_is(action, "flip_vertical")) {
+    } else if (rubraview_u8_eq_lit(action, "flip_vertical")) {
         app->orientation = rubraview_orientation_flip_v(app->orientation);
-    } else if (action_is(action, "toggle_pixel_grid")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_pixel_grid")) {
         app->pixel_grid = !app->pixel_grid;
-    } else if (action_is(action, "toggle_nearest")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_nearest")) {
         app->force_nearest = !app->force_nearest;
-    } else if (action_is(action, "toggle_osd")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_osd")) {
         app->osd.always_on = !app->osd.always_on;
-    } else if (action_is(action, "toggle_filmstrip")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_filmstrip")) {
         app->filmstrip.visible = !app->filmstrip.visible;
-    } else if (action_is(action, "toggle_menu")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_menu")) {
         rubraview_box_click_anchor(&app->menubox);
         menu_rebuild(app);
         sync_menubox_tiles(app);
-    } else if (action_is(action, "layout_single")) {
+    } else if (rubraview_u8_eq_lit(action, "layout_single")) {
         app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
         app->needs_relayout = true;
         reset_view(app);
-    } else if (action_is(action, "layout_dual")) {
+    } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
         app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;
         app->needs_relayout = true;
         reset_view(app);
-    } else if (action_is(action, "layout_book")) {
+    } else if (rubraview_u8_eq_lit(action, "layout_book")) {
         app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_BOOK;
         app->needs_relayout = true;
         reset_view(app);
-    } else if (action_is(action, "toggle_toolbox")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox")) {
         /* A toolbox that is its own window is put back, not shown twice. */
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
         else rubraview_box_click_anchor(&app->toolbox);
-    } else if (action_is(action, "open_picker")) {
+    } else if (rubraview_u8_eq_lit(action, "open_picker")) {
         if (app->picker_open) {
             app->picker_open = false;
         } else {
             picker_open(app);
         }
-    } else if (action_is(action, "delete_file")) {
+    } else if (rubraview_u8_eq_lit(action, "delete_file")) {
         triage_delete(app, false);
-    } else if (action_is(action, "purge_file")) {
+    } else if (rubraview_u8_eq_lit(action, "purge_file")) {
         /* §3.18.1: a permanent delete asks first, every time. */
         app->confirm_purge = true;
-    } else if (action_is(action, "undo")) {
+    } else if (rubraview_u8_eq_lit(action, "undo")) {
         triage_undo(app);
-    } else if (action_is(action, "rename_file")) {
+    } else if (rubraview_u8_eq_lit(action, "rename_file")) {
         rename_begin(app);
-    } else if (action_is(action, "open_settings")) {
+    } else if (rubraview_u8_eq_lit(action, "open_settings")) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
-    } else if (action_is(action, "open_edit")) {
+    } else if (rubraview_u8_eq_lit(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
         else panel_open_edit(app);
-    } else if (action_is(action, "quick_export") || action_is(action, "save_as")) {
+    } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
         else panel_open_export(app);
-    } else if (action_is(action, "open_batch")) {
+    } else if (rubraview_u8_eq_lit(action, "open_batch")) {
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
-    } else if (app->media && (action_is(action, "media_play_pause") || action_is(action, "anim_toggle_pause"))) {
+    } else if (app->media && (rubraview_u8_eq_lit(action, "media_play_pause") || rubraview_u8_eq_lit(action, "anim_toggle_pause"))) {
         media_toggle_pause(app);   /* anim_toggle_pause: the name before D-16, in keymap.ini files saved earlier */
-    } else if (app->media && action_is(action, "media_stop")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_stop")) {
         /* Stop: back to the start and paused, the first frame on screen. */
         if (!app->media_paused) media_toggle_pause(app);
         media_seek_to(app, 0.0);
         osd_say(app, U8("stopped"));
-    } else if (action_is(action, "media_volume_up") || action_is(action, "media_volume_down")) {
+    } else if (rubraview_u8_eq_lit(action, "media_volume_up") || rubraview_u8_eq_lit(action, "media_volume_down")) {
         double volume = rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
         rubraview_settings_set(&app->settings, U8("audio"), U8("volume"),
-                               volume + (action_is(action, "media_volume_up") ? 5.0 : -5.0));
+                               volume + (rubraview_u8_eq_lit(action, "media_volume_up") ? 5.0 : -5.0));
         rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), 0.0);   /* turning it up or down unmutes */
         settings_took_effect(app);
         media_say_volume(app);
-    } else if (action_is(action, "media_mute")) {
+    } else if (rubraview_u8_eq_lit(action, "media_mute")) {
         bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
         rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), muted ? 0.0 : 1.0);
         settings_took_effect(app);
@@ -2493,15 +2488,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* File › Recent: the entry's index in the reading history. */
         size_t index = (size_t)strtoul(action.ptr + 12, NULL, 10);
         if (index < app->history.count) open_path(app, app->history.entries[index].path);
-    } else if (action_is(action, "toggle_always_on_top")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_always_on_top")) {
         bool on = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
         rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
         settings_took_effect(app);
         osd_say(app, on ? U8("no longer on top of other windows") : U8("always on top of other windows"));
-    } else if (action_is(action, "toggle_toolbox_pin")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox_pin")) {
         rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
         osd_say(app, app->toolbox.pinned ? U8("toolbox pinned open") : U8("toolbox unpinned"));
-    } else if (action_is(action, "toggle_toolbox_detach")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox_detach")) {
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) {
             int32_t w = 0, h = 0;
             rubraview_pal_window_get_size(app->window, &w, &h);
@@ -2514,24 +2509,24 @@ static void handle_action(app_state_t *app, u8str_t action) {
             toolbox_detach(app, fx + fw - (int32_t)(360.0 * rubraview_pal_window_dpi_scale(app->window)),
                            fy + fh / 2, false);
         }
-    } else if (action_is(action, "open_keys")) {
+    } else if (rubraview_u8_eq_lit(action, "open_keys")) {
         settings_open(app);
         if (app->settings_open) {
             rubraview_settings_view_set_page(&app->settings_view, RUBRAVIEW_TAB_KEYS);
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
             app->settings_dirty = true;
         }
-    } else if (action_is(action, "toggle_help")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
         help_show(app);
-    } else if (action_is(action, "toggle_miniplayer")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_miniplayer")) {
         mini_show(app);
-    } else if (action_is(action, "about")) {
+    } else if (rubraview_u8_eq_lit(action, "about")) {
         char line[160];
         int n = snprintf(line, sizeof(line), "Rubraview %s  -  FFmpeg %s", RUBRAVIEW_VERSION_STRING,
                          rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG) ? "found beside the program" : "not found");
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (action_is(action, "boxes_opacity_100") || action_is(action, "boxes_opacity_80") ||
-               action_is(action, "boxes_opacity_60") || action_is(action, "boxes_opacity_40")) {
+    } else if (rubraview_u8_eq_lit(action, "boxes_opacity_100") || rubraview_u8_eq_lit(action, "boxes_opacity_80") ||
+               rubraview_u8_eq_lit(action, "boxes_opacity_60") || rubraview_u8_eq_lit(action, "boxes_opacity_40")) {
         double percent = (double)strtol(action.ptr + 14, NULL, 10);
         rubraview_settings_set(&app->settings, U8("ui"), U8("menubox_opacity"), percent);
         rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_opacity"), percent);
@@ -2540,15 +2535,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     } else if (window_nudge(app, action)) {
         /* D-16: Ctrl + arrows size the window, Alt + arrows move it. */
-    } else if (app->media && action_is(action, "anim_step_forward")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "anim_step_forward")) {
         media_step(app, true);
-    } else if (app->media && action_is(action, "anim_step_back")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "anim_step_back")) {
         media_step(app, false);
-    } else if (app->media && action_is(action, "media_seek_forward")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward")) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
-    } else if (app->media && action_is(action, "media_seek_back")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back")) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
-    } else if (app->media && action_is(action, "next_audio_track")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "next_audio_track")) {
         /* §3.16.2: the next sound track of the same file, without
            stopping the picture. */
         int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO,
@@ -2571,7 +2566,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "sound %.*s", (int)text.len, text.ptr);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (app->media && action_is(action, "next_subtitle_track")) {
+    } else if (app->media && rubraview_u8_eq_lit(action, "next_subtitle_track")) {
         /* §3.16.2: the subtitle files beside the film, and off. */
         if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
             osd_say(app, U8("this video has no subtitles, in it or beside it"));
@@ -2586,7 +2581,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %.*s", (int)text.len, text.ptr);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (app->media && (action_is(action, "subtitle_earlier") || action_is(action, "subtitle_later"))) {
+    } else if (app->media && (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later"))) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
         /* A DVD's or a Blu-ray's pictures are subtitles too, and they are
@@ -2594,7 +2589,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->subtitle.count == 0 && app->vobsub.count == 0 && app->pgs.count == 0) {
             osd_say(app, U8("no subtitles are showing"));
         } else {
-            rubraview_subtitle_nudge(&app->subtitle, action_is(action, "subtitle_later"));
+            rubraview_subtitle_nudge(&app->subtitle, rubraview_u8_eq_lit(action, "subtitle_later"));
             if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
                 app->subtitle_offset_for = app->source.pages[app->media_page].path;
                 app->subtitle_offset_seconds = app->subtitle.offset_seconds;
@@ -2603,7 +2598,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (!app->media && app->bgm_media && action_is(action, "media_play_pause")) {
+    } else if (!app->media && app->bgm_media && rubraview_u8_eq_lit(action, "media_play_pause")) {
         /* §3.14.6: with a picture on screen and music behind it, the
            play key is the music's — and the listener's own pause
            outranks the arbiter from then on. */
@@ -2614,29 +2609,29 @@ static void handle_action(app_state_t *app, u8str_t action) {
                                   pausing ? RUBRAVIEW_BGM_READER_PAUSED : RUBRAVIEW_BGM_READER_RESUMED,
                                   bgm_pause_for_sound(app));
         osd_say(app, pausing ? U8("the music is paused") : U8("the music plays on"));
-    } else if (action_is(action, "anim_toggle_pause") || action_is(action, "media_play_pause")) {
+    } else if (rubraview_u8_eq_lit(action, "anim_toggle_pause") || rubraview_u8_eq_lit(action, "media_play_pause")) {
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
-    } else if (action_is(action, "anim_step_forward") || action_is(action, "subpage_next")) {
+    } else if (rubraview_u8_eq_lit(action, "anim_step_forward") || rubraview_u8_eq_lit(action, "subpage_next")) {
         rubraview_animation_step(&app->animation, true);
         show_frame(app, app->animation.current);
-    } else if (action_is(action, "anim_step_back") || action_is(action, "subpage_prev")) {
+    } else if (rubraview_u8_eq_lit(action, "anim_step_back") || rubraview_u8_eq_lit(action, "subpage_prev")) {
         rubraview_animation_step(&app->animation, false);
         show_frame(app, app->animation.current);
-    } else if (app->media && (action_is(action, "anim_speed_up") || action_is(action, "anim_speed_down") ||
-                              action_is(action, "media_speed_up") || action_is(action, "media_speed_down") ||
-                              action_is(action, "media_speed_reset") || action_is(action, "media_speed_cycle"))) {
+    } else if (app->media && (rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "anim_speed_down") ||
+                              rubraview_u8_eq_lit(action, "media_speed_up") || rubraview_u8_eq_lit(action, "media_speed_down") ||
+                              rubraview_u8_eq_lit(action, "media_speed_reset") || rubraview_u8_eq_lit(action, "media_speed_cycle"))) {
         /* D-15: 0.25x to 4x a quarter at a time; the tile cycles the usual ones. */
         double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
-        if (action_is(action, "media_speed_reset")) {
+        if (rubraview_u8_eq_lit(action, "media_speed_reset")) {
             speed = 1.0;
-        } else if (action_is(action, "media_speed_cycle")) {
+        } else if (rubraview_u8_eq_lit(action, "media_speed_cycle")) {
             static const double CYCLE[] = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
             size_t next = 0;
             for (size_t i = 0; i < 6; ++i) if (fabs(CYCLE[i] - speed) < 1e-6) next = (i + 1) % 6;
             speed = CYCLE[next];
         } else {
-            bool up = action_is(action, "anim_speed_up") || action_is(action, "media_speed_up");
+            bool up = rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "media_speed_up");
             speed += up ? 0.25 : -0.25;
         }
         if (speed < 0.25) speed = 0.25;
@@ -2649,15 +2644,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         speed_text(text, sizeof(text), speed);
         int n = snprintf(line, sizeof(line), "speed %s", text);
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (action_is(action, "media_ab_edit")) {
+    } else if (rubraview_u8_eq_lit(action, "media_ab_edit")) {
         ab_edit_begin(app);
-    } else if (app->media && (action_is(action, "media_ab_a") || action_is(action, "media_ab_b") ||
-                              action_is(action, "media_ab_clear") || action_is(action, "media_ab_cycle"))) {
+    } else if (app->media && (rubraview_u8_eq_lit(action, "media_ab_a") || rubraview_u8_eq_lit(action, "media_ab_b") ||
+                              rubraview_u8_eq_lit(action, "media_ab_clear") || rubraview_u8_eq_lit(action, "media_ab_cycle"))) {
         /* D-15 A-B repeat. The tile walks A, then B, then off. */
         char line[64];
         int n = 0;
-        bool set_a = action_is(action, "media_ab_a") || (action_is(action, "media_ab_cycle") && app->ab_a < 0.0);
-        bool set_b = action_is(action, "media_ab_b") || (action_is(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
+        bool set_a = rubraview_u8_eq_lit(action, "media_ab_a") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a < 0.0);
+        bool set_b = rubraview_u8_eq_lit(action, "media_ab_b") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
         if (set_a) {
             app->ab_a = app->media_position;
             if (app->ab_b >= 0.0 && app->ab_b <= app->ab_a) app->ab_b = -1.0;
@@ -2672,15 +2667,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
             n = snprintf(line, sizeof(line), "repeat off");
         }
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (action_is(action, "anim_speed_up")) {
+    } else if (rubraview_u8_eq_lit(action, "anim_speed_up")) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, true);
-    } else if (action_is(action, "anim_speed_down")) {
+    } else if (rubraview_u8_eq_lit(action, "anim_speed_down")) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, false);
-    } else if (action_is(action, "next_archive")) {
+    } else if (rubraview_u8_eq_lit(action, "next_archive")) {
         open_sibling_archive(app, true);
-    } else if (action_is(action, "prev_archive")) {
+    } else if (rubraview_u8_eq_lit(action, "prev_archive")) {
         open_sibling_archive(app, false);
-    } else if (action_is(action, "resume_accept")) {
+    } else if (rubraview_u8_eq_lit(action, "resume_accept")) {
         /* §3.17.1: the prompt is answered by opening the remembered page. */
         if (app->resume_offer) {
             app->resume_offer = false;
@@ -2688,12 +2683,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
             go_to_spread(app, target);
             update_precache(app);
         }
-    } else if (action_is(action, "toggle_slideshow")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_slideshow")) {
         toggle_slideshow(app);
-    } else if (action_is(action, "toggle_fullscreen")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_fullscreen")) {
         rubraview_pal_window_set_fullscreen(app->window,
                                             !rubraview_pal_window_is_fullscreen(app->window));
-    } else if (action_is(action, "toggle_layout")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
         int32_t page = current_page_index(app);
         app->layout_opts.mode = (app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_SINGLE)
             ? RUBRAVIEW_PAGE_LAYOUT_DUAL
@@ -2703,7 +2698,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rebuild_layout(app);
         if (page >= 0) app->spread_index = spread_index_for_page(app, page);
         reset_view(app);
-    } else if (action_is(action, "toggle_reading_order")) {
+    } else if (rubraview_u8_eq_lit(action, "toggle_reading_order")) {
         int32_t page = current_page_index(app);
         app->layout_opts.direction = (app->layout_opts.direction == RUBRAVIEW_READING_LTR)
             ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR;
@@ -3428,7 +3423,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
            its tile says "Delete?"; a second tap on it within five seconds
            acts. Any other tap disarms it. */
         const rubraview_menu_item_t *item = rubraview_menu_item_at(&app->menu, tile);
-        if (item && action_is(item->action, "delete_file")) {
+        if (item && rubraview_u8_eq_lit(item->action, "delete_file")) {
             if (!rubraview_confirm_press(&app->menu_confirm, item - app->menu.tree->items,
                                          rubraview_pal_time_now_seconds())) {
                 osd_say(app, U8("tap Delete again to move it to the recycle bin"));
@@ -5124,11 +5119,6 @@ static void settings_read_file(app_state_t *app) {
     app->settings_saved = app->settings;
 }
 
-static bool u8str_equal_lit(u8str_t s, const char *lit) {
-    size_t n = strlen(lit);
-    return s.len == n && memcmp(s.ptr, lit, n) == 0;
-}
-
 
 #define SETTINGS_BACKGROUND  0xFF161616u
 #define SETTINGS_PANE        0xFF1E1E1Eu
@@ -5141,16 +5131,16 @@ static bool u8str_equal_lit(u8str_t s, const char *lit) {
 static size_t settings_info(void *user, u8str_t source, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
     int n = 0;
-    if (u8str_equal_lit(source, "config.path")) {
+    if (rubraview_u8_eq_lit(source, "config.path")) {
         n = snprintf(buffer, capacity, "%.*s%s", (int)app->settings_path.len, app->settings_path.ptr,
                      app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? "  (portable)" : "");
-    } else if (u8str_equal_lit(source, "media.ffmpeg")) {
+    } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
         n = snprintf(buffer, capacity, "%s",
                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
                          ? "its DLLs are beside the program" : "not found (or not 8.x) - Media Foundation only");
-    } else if (u8str_equal_lit(source, "gpu.adapter")) {
+    } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, "run rubraview --probe-gpu <video> for the details");
-    } else if (u8str_equal_lit(source, "cache.used")) {
+    } else if (rubraview_u8_eq_lit(source, "cache.used")) {
         size_t loaded = 0;
         for (size_t i = 0; i < page_count(app); ++i) if (app->pages[i].texture) loaded++;
         n = snprintf(buffer, capacity, "%zu page(s) decoded and kept", loaded);
@@ -5162,7 +5152,7 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
 /* The rows the document's `table` lines name. */
 static size_t settings_table_row(void *user, u8str_t source, size_t index, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
-    if (!u8str_equal_lit(source, "keymap")) return 0;
+    if (!rubraview_u8_eq_lit(source, "keymap")) return 0;
     if (index == 0) {
         int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", "keys  (Enter adds a key, Delete takes the last off)");
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
@@ -5450,14 +5440,14 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_ACTION: {
             const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
             if (!node) break;
-            if (u8str_equal_lit(node->name, "shell.register")) {
+            if (rubraview_u8_eq_lit(node->name, "shell.register")) {
                 settings_say(app, rubraview_pal_shell_register(rubraview_shell_extensions())
                                       ? "file types registered" : "could not register the file types");
-            } else if (u8str_equal_lit(node->name, "shell.unregister")) {
+            } else if (rubraview_u8_eq_lit(node->name, "shell.unregister")) {
                 settings_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
                                       ? "file types removed" : "could not remove the file types");
-            } else if (u8str_equal_lit(node->name, "keys.export") || u8str_equal_lit(node->name, "keys.import")) {
-                keys_export_or_import(app, u8str_equal_lit(node->name, "keys.export"));
+            } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
+                keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
             }
             break;
         }
@@ -5491,7 +5481,7 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
     size_t index = (size_t)app->key_capture - 1;
     app->key_capture = 0;
     if (index >= app->keymap.count) return;
-    if (combo.modifiers == 0 && u8str_equal_lit(combo.key_name, "Escape")) {
+    if (combo.modifiers == 0 && rubraview_u8_eq_lit(combo.key_name, "Escape")) {
         settings_say(app, "no key added");
         return;
     }
@@ -5600,7 +5590,7 @@ static size_t settings_pump(app_state_t *app) {
 static void settings_preview(app_state_t *app, u8str_t name, rubraview_pal_rect_t rect) {
     rubraview_renderer_t *r = app->settings_renderer;
     rubraview_pal_render_fill_rect(r, rect, 0xFF303A44u, 0.0);
-    if (!u8str_equal_lit(name, "subtitle")) return;
+    if (!rubraview_u8_eq_lit(name, "subtitle")) return;
     double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
     double size = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size")) * dpi;
     double off = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;

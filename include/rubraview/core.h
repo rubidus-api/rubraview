@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include "proven.h"
 
 #ifdef __cplusplus
@@ -18,6 +19,54 @@ typedef struct u8str {
 } u8str_t;
 
 #define U8(lit) ((u8str_t){ .ptr = ("" lit), .len = sizeof("" lit) - 1 })
+
+/* ---- views: one set of comparisons for the whole program ----
+   An empty view may carry a NULL pointer, and memcmp must not be handed
+   one even for zero bytes; these check the length first. */
+
+static inline bool rubraview_u8_eq(u8str_t a, u8str_t b) {
+    return a.len == b.len && (a.len == 0 || memcmp(a.ptr, b.ptr, a.len) == 0);
+}
+
+static inline bool rubraview_u8_eq_lit(u8str_t s, const char *lit) {
+    size_t n = strlen(lit);
+    return s.len == n && (n == 0 || memcmp(s.ptr, lit, n) == 0);
+}
+
+static inline char rubraview_ascii_lower(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+/* ASCII letters ignore case; every other byte must match exactly. */
+static inline bool rubraview_u8_eq_lit_ci(u8str_t s, const char *lit) {
+    size_t n = strlen(lit);
+    if (s.len != n) return false;
+    for (size_t i = 0; i < n; ++i) {
+        if (rubraview_ascii_lower(s.ptr[i]) != rubraview_ascii_lower(lit[i])) return false;
+    }
+    return true;
+}
+
+static inline bool rubraview_u8_starts_with(u8str_t s, const char *prefix) {
+    size_t n = strlen(prefix);
+    return s.len >= n && (n == 0 || memcmp(s.ptr, prefix, n) == 0);
+}
+
+static inline bool rubraview_u8_starts_with_ci(u8str_t s, const char *prefix) {
+    size_t n = strlen(prefix);
+    if (s.len < n) return false;
+    for (size_t i = 0; i < n; ++i) {
+        if (rubraview_ascii_lower(s.ptr[i]) != rubraview_ascii_lower(prefix[i])) return false;
+    }
+    return true;
+}
+
+/* The same bytes as proven's view type, for proven's own algorithms
+   (the parser, the scanner). u8str_t stays char-typed because WinAPI
+   and the rest of the viewer speak char; D-32. */
+static inline proven_u8str_view_t rubraview_u8_view(u8str_t s) {
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s.ptr, .size = s.len };
+}
 
 /**
  * `count` elements of `size` bytes from the arena, the product checked

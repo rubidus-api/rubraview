@@ -1,11 +1,6 @@
 #include "rubraview/ui_actions.h"
 #include <string.h>
 
-static bool is(u8str_t action, const char *name) {
-    size_t n = strlen(name);
-    return action.len == n && memcmp(action.ptr, name, n) == 0;
-}
-
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
     "rename_file", "delete_file",
@@ -21,18 +16,18 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     if (!f) return st;
 
     for (size_t i = 0; i < sizeof(NEEDS_PAGE) / sizeof(NEEDS_PAGE[0]); ++i) {
-        if (is(action, NEEDS_PAGE[i])) st.enabled = f->has_page;
+        if (rubraview_u8_eq_lit(action, NEEDS_PAGE[i])) st.enabled = f->has_page;
     }
-    if (is(action, "next_archive") || is(action, "prev_archive")) st.enabled = f->archive_series;
+    if (rubraview_u8_eq_lit(action, "next_archive") || rubraview_u8_eq_lit(action, "prev_archive")) st.enabled = f->archive_series;
     /* Export writes a picture: a film or a sound has none to write. */
-    if (is(action, "quick_export")) st.enabled = f->has_page && !f->media;
+    if (rubraview_u8_eq_lit(action, "quick_export")) st.enabled = f->has_page && !f->media;
     /* Sound has no frames to step. */
-    if (is(action, "anim_step_forward") || is(action, "anim_step_back")) {
+    if (rubraview_u8_eq_lit(action, "anim_step_forward") || rubraview_u8_eq_lit(action, "anim_step_back")) {
         st.enabled = f->media ? f->video : f->frames;
     }
-    if (is(action, "next_audio_track")) st.enabled = f->other_audio_track;
-    if (is(action, "next_subtitle_track")) st.enabled = f->other_subtitle;
-    if (is(action, "subtitle_earlier") || is(action, "subtitle_later")) st.enabled = f->subtitle_shown;
+    if (rubraview_u8_eq_lit(action, "next_audio_track")) st.enabled = f->other_audio_track;
+    if (rubraview_u8_eq_lit(action, "next_subtitle_track")) st.enabled = f->other_subtitle;
+    if (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later")) st.enabled = f->subtitle_shown;
 
     static const struct { const char *action; size_t offset; } TOGGLES[] = {
         { "toggle_slideshow",      offsetof(rubraview_action_facts_t, slideshow) },
@@ -49,13 +44,13 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         { "media_mute",            offsetof(rubraview_action_facts_t, muted) },
     };
     for (size_t i = 0; i < sizeof(TOGGLES) / sizeof(TOGGLES[0]); ++i) {
-        if (is(action, TOGGLES[i].action)) {
+        if (rubraview_u8_eq_lit(action, TOGGLES[i].action)) {
             bool on = *(const bool*)((const char*)f + TOGGLES[i].offset);
             st.mark = on ? RUBRAVIEW_MARK_ON : RUBRAVIEW_MARK_OFF;
         }
     }
 
-    if (is(action, "toggle_reading_order")) st.value = f->rtl ? "R>L" : "L>R";
+    if (rubraview_u8_eq_lit(action, "toggle_reading_order")) st.value = f->rtl ? "R>L" : "L>R";
 
     static const struct { const char *action; rubraview_page_layout_t layout; } LAYOUTS[] = {
         { "layout_single", RUBRAVIEW_PAGE_LAYOUT_SINGLE },
@@ -63,7 +58,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         { "layout_book",   RUBRAVIEW_PAGE_LAYOUT_BOOK },
     };
     for (size_t i = 0; i < sizeof(LAYOUTS) / sizeof(LAYOUTS[0]); ++i) {
-        if (is(action, LAYOUTS[i].action) && f->layout == LAYOUTS[i].layout) st.mark = RUBRAVIEW_MARK_CURRENT;
+        if (rubraview_u8_eq_lit(action, LAYOUTS[i].action) && f->layout == LAYOUTS[i].layout) st.mark = RUBRAVIEW_MARK_CURRENT;
     }
     static const struct { const char *action; rubraview_fit_mode_t fit; } FITS[] = {
         { "fit_window",  RUBRAVIEW_FIT_WINDOW },
@@ -74,7 +69,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         { "fit_stretch", RUBRAVIEW_FIT_STRETCH },
     };
     for (size_t i = 0; i < sizeof(FITS) / sizeof(FITS[0]); ++i) {
-        if (is(action, FITS[i].action) && f->fit == FITS[i].fit) st.mark = RUBRAVIEW_MARK_CURRENT;
+        if (rubraview_u8_eq_lit(action, FITS[i].action) && f->fit == FITS[i].fit) st.mark = RUBRAVIEW_MARK_CURRENT;
     }
     return st;
 }
@@ -140,11 +135,11 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "fit_window", 0xE9A6 },            /* FitPage */
     };
     if (!f) return 0;
-    if (is(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */
-    if (is(action, "media_mute")) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
-    if (is(action, "toggle_fullscreen")) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */
+    if (rubraview_u8_eq_lit(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */
+    if (rubraview_u8_eq_lit(action, "media_mute")) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
+    if (rubraview_u8_eq_lit(action, "toggle_fullscreen")) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */
     for (size_t i = 0; i < sizeof(ICONS) / sizeof(ICONS[0]); ++i) {
-        if (is(action, ICONS[i].action)) return ICONS[i].icon;
+        if (rubraview_u8_eq_lit(action, ICONS[i].action)) return ICONS[i].icon;
     }
     return 0;
 }

@@ -110,6 +110,28 @@ int main(void) {
     }
     printf("  [PASS] Paths Windows calls the same file compare equal\n");
 
+    /* One set of view comparisons for the whole program (core.h), where
+       there were a dozen private copies. An empty view may carry a NULL
+       pointer; none of them may hand that to memcmp. */
+    {
+        u8str_t empty_null = { .ptr = NULL, .len = 0 };
+        assert(rubraview_u8_eq(empty_null, U8("")));
+        assert(rubraview_u8_eq_lit(empty_null, ""));
+        assert(!rubraview_u8_eq_lit(empty_null, "a"));
+        assert(rubraview_u8_eq(U8("next_page"), U8("next_page")));
+        assert(!rubraview_u8_eq(U8("next_page"), U8("next_pagE")));
+        assert(rubraview_u8_eq_lit(U8("jpeg"), "jpeg"));
+        assert(rubraview_u8_eq_lit_ci(U8("JPeG"), "jpeg"));
+        assert(!rubraview_u8_eq_lit_ci(U8("jpg"), "jpeg"));
+        assert(rubraview_u8_starts_with(U8("[history]"), "[his"));
+        assert(rubraview_u8_starts_with(empty_null, ""));
+        assert(!rubraview_u8_starts_with(U8("ab"), "abc"));
+        assert(rubraview_u8_starts_with_ci(U8("Dialogue: 0"), "dialogue:"));
+        proven_u8str_view_t v = rubraview_u8_view(U8("abc"));
+        assert(v.size == 3 && v.ptr[0] == 'a');
+    }
+    printf("  [PASS] One set of view comparisons, safe on an empty view\n");
+
     free(raw_mem);
     printf("[test_path] All tests passed successfully!\n");
     return 0;

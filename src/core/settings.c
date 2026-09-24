@@ -92,11 +92,6 @@ static bool choice_index(const rubraview_setting_def_t *def, u8str_t word, doubl
     return false;
 }
 
-static bool u8str_equal_lit(u8str_t s, const char *lit) {
-    size_t n = strlen(lit);
-    return s.len == n && memcmp(s.ptr, lit, n) == 0;
-}
-
 rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, u8str_t ini_text) {
     rubraview_settings_t settings = rubraview_settings_defaults();
     if (!arena || ini_text.len == 0) return settings;
@@ -109,7 +104,7 @@ rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, u8str_t ini_
         const u8str_t *raw = rubraview_ini_get(&doc, section, def->key);
         /* D-13 moved the General tab's keys under [general]; a file from
            before still has them above the first section. */
-        if (!raw && u8str_equal_lit(section, "general")) {
+        if (!raw && rubraview_u8_eq_lit(section, "general")) {
             section = (u8str_t){ .ptr = "", .len = 0 };
             raw = rubraview_ini_get(&doc, section, def->key);
         }
