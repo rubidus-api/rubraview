@@ -272,6 +272,17 @@ typedef struct app_state {
     double                     bgm_position;
     bool                       bgm_paused;
     rubraview_bgm_t            bgm;
+    rubraview_tags_t           bgm_tags;        /* what the background track says about itself */
+    /* §3.14.6: the mini player — its own small window, on top, showing
+       whichever track is sounding and driving it. */
+    rubraview_window_t        *mini_window;
+    rubraview_renderer_t      *mini_renderer;
+    rubraview_texture_t       *mini_cover;
+    int32_t                    mini_cover_w, mini_cover_h;
+    bool                       mini_open;
+    bool                       mini_dirty;
+    int32_t                    mini_frame[4];
+    int32_t                    mini_hover;      /* which button the pointer is on, -1 for none */
     double                     music_end_seen;     /* wall time the backend first said "finished", or 0 */
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
     bool                       video_transform_ok;
@@ -433,6 +444,9 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void help_show(app_state_t *app);
+static void mini_show(app_state_t *app);
+static bool mini_paused(const app_state_t *app);
+static void mini_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void ab_edit_begin(app_state_t *app);
@@ -1232,6 +1246,7 @@ static bool bgm_adopt(app_state_t *app) {
     app->bgm_info = app->media_info;
     app->bgm_page = app->media_page;
     app->bgm_position = app->media_position;
+    app->bgm_tags = app->music_tags;   /* its words outlive the page too */
     app->bgm_paused = app->media_paused;
     app->media = NULL;
     app->media_page = -1;
@@ -2496,6 +2511,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (action_is(action, "toggle_help")) {
         help_show(app);
+    } else if (action_is(action, "toggle_miniplayer")) {
+        mini_show(app);
     } else if (action_is(action, "about")) {
         char line[160];
         int n = snprintf(line, sizeof(line), "Rubraview %s  -  FFmpeg %s", RUBRAVIEW_VERSION_STRING,
@@ -2932,6 +2949,132 @@ static void ab_edit_text_typed(app_state_t *app, u8str_t text) {
         app->ab_edit_text[f][app->ab_edit_length[f]++] = c;
         app->ab_edit_text[f][app->ab_edit_length[f]] = '\0';
     }
+}
+
+/* ---- §3.14.6: the mini player ---- */
+
+#define MINI_BACKGROUND 0xFF181818u
+#define MINI_WIDTH  320
+#define MINI_HEIGHT 80
+
+/* Which player it speaks to: the background music if there is any,
+   otherwise the track the page itself is playing. */
+static rubraview_media_t *mini_target(const app_state_t *app) {
+    if (app->bgm_media) return app->bgm_media;
+    if (app->media && !app->media_info.has_video) return app->media;
+    return NULL;
+}
+
+static const rubraview_tags_t *mini_tags(const app_state_t *app) {
+    return app->bgm_media ? &app->bgm_tags : &app->music_tags;
+}
+
+static bool mini_paused(const app_state_t *app) {
+    return app->bgm_media ? app->bgm_paused : app->media_paused;
+}
+
+static double mini_position(const app_state_t *app) {
+    return app->bgm_media ? app->bgm_position : app->media_position;
+}
+
+static double mini_duration(const app_state_t *app) {
+    return app->bgm_media ? app->bgm_info.duration_seconds : app->media_info.duration_seconds;
+}
+
+/* The page of the track being heard, or -1 when it has none on screen. */
+static int32_t mini_page(const app_state_t *app) {
+    return app->bgm_media ? app->bgm_page : app->media_page;
+}
+
+static void mini_close(app_state_t *app) {
+    if (!app->mini_open) return;
+    rubraview_pal_window_get_frame(app->mini_window, &app->mini_frame[0], &app->mini_frame[1],
+                                   &app->mini_frame[2], &app->mini_frame[3]);
+    if (app->mini_cover) rubraview_pal_texture_destroy(app->mini_cover);
+    if (app->mini_renderer) rubraview_pal_render_destroy(app->mini_renderer);
+    if (app->mini_window) rubraview_pal_window_destroy(app->mini_window);
+    app->mini_cover = NULL;
+    app->mini_renderer = NULL;
+    app->mini_window = NULL;
+    app->mini_open = false;
+}
+
+/* The cover belongs to the renderer that draws it, so the small window
+   decodes its own copy from the same bytes. */
+static void mini_cover_load(app_state_t *app) {
+    if (app->mini_cover) rubraview_pal_texture_destroy(app->mini_cover);
+    app->mini_cover = NULL;
+    app->mini_cover_w = app->mini_cover_h = 0;
+    const rubraview_tags_t *tags = mini_tags(app);
+    if (!app->mini_renderer || !tags->art || tags->art_size == 0) return;
+    rubraview_image_load_result_t art = rubraview_pal_image_load_texture_from_memory(
+        app->mini_renderer, tags->art, tags->art_size, false);
+    if (art.texture) {
+        app->mini_cover = art.texture;
+        app->mini_cover_w = art.width;
+        app->mini_cover_h = art.height;
+    }
+}
+
+static void mini_show(app_state_t *app) {
+    if (app->mini_open) { mini_close(app); return; }   /* the same key puts it away */
+    if (!mini_target(app)) {
+        osd_say(app, U8("there is no music to show"));
+        return;
+    }
+    rubraview_window_config_t config = {
+        .title = "Rubraview music", .width = MINI_WIDTH, .height = MINI_HEIGHT + 24, .owner = app->window,
+    };
+    app->mini_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->mini_window) {
+        osd_say(app, U8("the mini player could not be opened"));
+        return;
+    }
+    if (app->mini_frame[2] > 0 && app->mini_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->mini_window, app->mini_frame[0], app->mini_frame[1],
+                                       app->mini_frame[2], app->mini_frame[3]);
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->mini_window, &w, &h);
+    app->mini_renderer = rubraview_pal_render_create(app->arena,
+                                                     rubraview_pal_window_native_handle(app->mini_window), w, h);
+    if (!app->mini_renderer) {
+        rubraview_pal_window_destroy(app->mini_window);
+        app->mini_window = NULL;
+        osd_say(app, U8("the mini player could not be drawn"));
+        return;
+    }
+    /* Small and on top: it is meant to sit over whatever is being read. */
+    rubraview_pal_window_set_topmost(app->mini_window, true);
+    app->mini_open = true;
+    app->mini_hover = -1;
+    mini_cover_load(app);
+    app->mini_dirty = true;
+}
+
+/* Where each part of the little window is, in its own pixels. */
+static rubraview_pal_rect_t mini_cover_rect(double dpi, double win_h) {
+    double m = 6.0 * dpi;
+    double side = win_h - 2.0 * m;
+    if (side < 16.0 * dpi) side = 16.0 * dpi;
+    return (rubraview_pal_rect_t){ m, m, side, side };
+}
+
+static rubraview_pal_rect_t mini_button_rect(double dpi, double win_w, double win_h, int32_t which) {
+    (void)win_h;
+    double side = 24.0 * dpi, gap = 4.0 * dpi;
+    double right = win_w - 6.0 * dpi;
+    double x = right - (3 - which) * side - (2 - which) * gap;
+    return (rubraview_pal_rect_t){ x, 6.0 * dpi, side, side };
+}
+
+/* The strip runs from beside the cover to the window's edge, under the
+   words and the buttons. */
+static rubraview_pal_rect_t mini_strip_rect(double dpi, double win_w, double win_h) {
+    double left = mini_cover_rect(dpi, win_h).width + 12.0 * dpi;
+    double width = win_w - left - 46.0 * dpi;    /* room for the clock at the end */
+    if (width < 20.0 * dpi) width = 20.0 * dpi;
+    return (rubraview_pal_rect_t){ left, win_h - 14.0 * dpi, width, 5.0 * dpi };
 }
 
 /* ---- RFC-0002 Q6: the detached toolbox ---- */
@@ -5656,6 +5799,246 @@ static size_t help_pump(app_state_t *app) {
     return handled;
 }
 
+/* ---- the mini player: what it shows and what its buttons do ---- */
+
+/* Play or pause whichever track is sounding. When it is the background
+   music, the listener's own pause is recorded — it outranks the arbiter
+   from then on (D-30). */
+static void mini_toggle_play(app_state_t *app) {
+    if (app->bgm_media) {
+        bool pausing = !app->bgm_paused;
+        rubraview_pal_media_set_paused(app->bgm_media, pausing);
+        app->bgm_paused = pausing;
+        (void)rubraview_bgm_event(&app->bgm,
+                                  pausing ? RUBRAVIEW_BGM_READER_PAUSED : RUBRAVIEW_BGM_READER_RESUMED,
+                                  bgm_pause_for_sound(app));
+    } else if (app->media && !app->media_info.has_video) {
+        handle_action(app, U8("media_play_pause"));
+    }
+    app->mini_dirty = true;
+}
+
+/* The track before or after the one being heard, in the same folder. */
+static int32_t mini_neighbour_page(const app_state_t *app, bool forward) {
+    int32_t from = mini_page(app);
+    if (from < 0) return -1;
+    int32_t step = forward ? 1 : -1;
+    for (int32_t i = from + step; i >= 0 && (size_t)i < page_count(app); i += step) {
+        u8str_t path = app->source.pages[i].path;
+        if (is_media_path(path) && rubraview_tags_is_music_name(rubraview_path_basename(path))) return i;
+    }
+    return -1;
+}
+
+/* Play that track. If the page on screen is the one being heard, the
+   viewer simply turns to it; otherwise it becomes the background music
+   and the reader stays where they are. */
+static void mini_go_to(app_state_t *app, int32_t index) {
+    if (index < 0) return;
+    if (!app->bgm_media) {
+        go_to_spread(app, spread_index_for_page(app, index));
+        update_precache(app);
+        app->mini_dirty = true;
+        return;
+    }
+    u8str_t path = app->source.pages[index].path;
+    rubraview_media_backend_t order[2];
+    size_t count = rubraview_media_backend_order(app->media_preferred,
+                                                 rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
+                                                 order);
+    for (size_t i = 0; i < count; ++i) {
+        rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
+        if (!opened.media) continue;
+        bool was_paused = app->bgm_paused;
+        bgm_close(app);
+        app->bgm_media = opened.media;
+        app->bgm_info = opened.info;
+        app->bgm_page = index;
+        app->bgm_position = 0.0;
+        app->bgm_paused = was_paused;
+        app->bgm_tags = (rubraview_tags_t){0};
+        {
+            u8str_t head = rubraview_pal_fs_read_file(app->arena, path, MUSIC_MAX_HEAD_BYTES);
+            if (head.len > 0) {
+                app->bgm_tags = rubraview_tags_read(app->arena, (rubraview_tags_source_t){
+                    .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
+            }
+        }
+        rubraview_pal_media_set_paused(app->bgm_media, was_paused);
+        bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_OPENED, bgm_pause_for_sound(app)));
+        mini_cover_load(app);
+        app->mini_dirty = true;
+        return;
+    }
+    osd_say(app, U8("that track could not be opened"));
+}
+
+static void mini_seek_to(app_state_t *app, double fraction) {
+    rubraview_media_t *m = mini_target(app);
+    double duration = mini_duration(app);
+    if (!m || duration <= 0.0) return;
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+    double where = fraction * duration;
+    if (app->bgm_media) {
+        rubraview_pal_media_seek(m, where);
+        app->bgm_position = where;
+    } else {
+        media_seek_to(app, where);
+    }
+    app->mini_dirty = true;
+}
+
+/* A click: a button, or the strip. */
+static void mini_press(app_state_t *app, double x, double y) {
+    double dpi = rubraview_pal_window_dpi_scale(app->mini_window);
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->mini_window, &w, &h);
+    for (int32_t i = 0; i < 3; ++i) {
+        rubraview_pal_rect_t b = mini_button_rect(dpi, w, h, i);
+        if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) {
+            if (i == 0) mini_go_to(app, mini_neighbour_page(app, false));
+            else if (i == 1) mini_toggle_play(app);
+            else mini_go_to(app, mini_neighbour_page(app, true));
+            return;
+        }
+    }
+    rubraview_pal_rect_t strip = mini_strip_rect(dpi, w, h);
+    if (y >= strip.y - 8.0 * dpi && y <= strip.y + strip.height + 8.0 * dpi &&
+        x >= strip.x && x <= strip.x + strip.width && strip.width > 0.0) {
+        mini_seek_to(app, (x - strip.x) / strip.width);
+    }
+}
+
+static void draw_mini_window(app_state_t *app) {
+    if (!app->mini_open || !app->mini_dirty) return;
+    app->mini_dirty = false;
+    rubraview_renderer_t *r = app->mini_renderer;
+    double dpi = rubraview_pal_window_dpi_scale(app->mini_window);
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->mini_window, &w, &h);
+    rubraview_pal_render_begin(r, MINI_BACKGROUND);
+
+    /* Nothing is playing: say so, rather than leave the last track's
+       place on the strip looking like something that is still there. */
+    if (!mini_target(app)) {
+        rubraview_pal_rect_t all = { 0.0, 0.0, (double)w, (double)h };
+        rubraview_pal_render_draw_text(r, U8("nothing is playing"), all, 13.0 * dpi,
+                                       0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        if (!rubraview_pal_render_end(r)) mini_close(app);
+        return;
+    }
+
+    /* The cover, or a plain square where one would be. */
+    rubraview_pal_rect_t cover = mini_cover_rect(dpi, h);
+    if (app->mini_cover && app->mini_cover_w > 0 && app->mini_cover_h > 0) {
+        rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+            rubraview_mat3x2_scale(cover.width / (double)app->mini_cover_w,
+                                   cover.height / (double)app->mini_cover_h),
+            rubraview_mat3x2_translate(cover.x, cover.y));
+        rubraview_pal_render_draw_texture(r, app->mini_cover, place, RUBRAVIEW_INTERP_LINEAR);
+    } else {
+        rubraview_pal_render_fill_rect(r, cover, COLOR_TILE_FILL, 3.0);
+    }
+
+    /* The words: the track, then who made it. */
+    const rubraview_tags_t *tags = mini_tags(app);
+    double left = cover.x + cover.width + 6.0 * dpi;
+    double text_w = (double)w - left - 6.0 * dpi - 3.0 * 28.0 * dpi;
+    if (text_w < 40.0 * dpi) text_w = 40.0 * dpi;
+    u8str_t title = tags->title;
+    if (title.len == 0) {
+        int32_t page = mini_page(app);
+        if (page >= 0 && (size_t)page < page_count(app)) {
+            title = rubraview_path_basename(app->source.pages[page].path);
+        }
+    }
+    rubraview_pal_rect_t line1 = { left, 6.0 * dpi, text_w, 18.0 * dpi };
+    rubraview_pal_render_draw_text(r, title, line1, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    if (tags->artist.len > 0) {
+        rubraview_pal_rect_t line2 = { left, 25.0 * dpi, text_w, 16.0 * dpi };
+        rubraview_pal_render_draw_text(r, tags->artist, line2, 11.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    /* The three buttons: back a track, play or pause, on a track. */
+    static const char *const GLYPH[3] = { "|<", "||", ">|" };
+    for (int32_t i = 0; i < 3; ++i) {
+        rubraview_pal_rect_t b = mini_button_rect(dpi, w, h, i);
+        rubraview_pal_render_fill_rect(r, b, app->mini_hover == i ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
+        const char *glyph = i == 1 ? (mini_paused(app) ? " >" : "||") : GLYPH[i];
+        rubraview_pal_render_draw_text(r, cstr(glyph), b, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    /* Where the track has got to, and how far it goes. */
+    rubraview_pal_rect_t strip = mini_strip_rect(dpi, w, h);
+    rubraview_pal_render_fill_rect(r, strip, 0x40FFFFFFu, 2.0);
+    double duration = mini_duration(app);
+    if (duration > 0.0) {
+        double fraction = mini_position(app) / duration;
+        if (fraction < 0.0) fraction = 0.0;
+        if (fraction > 1.0) fraction = 1.0;
+        rubraview_pal_rect_t done = { strip.x, strip.y, strip.width * fraction, strip.height };
+        rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, 2.0);
+    }
+    char clock[64];
+    u8str_t at = rubraview_format_timecode(clock, sizeof(clock), mini_position(app), false);
+    rubraview_pal_rect_t time_rect = { strip.x + strip.width + 4.0 * dpi, h - 20.0 * dpi,
+                                       (double)w - (strip.x + strip.width) - 8.0 * dpi, 16.0 * dpi };
+    rubraview_pal_render_draw_text(r, at, time_rect, 11.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+
+    if (!rubraview_pal_render_end(r)) mini_close(app);
+}
+
+static size_t mini_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->mini_open && rubraview_pal_window_poll_event(app->mini_window, &event)) {
+        handled++;
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                mini_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->mini_renderer, event.resize.width, event.resize.height);
+                app->mini_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+            case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
+                app->mini_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                double dpi = rubraview_pal_window_dpi_scale(app->mini_window);
+                int32_t w = 0, h = 0;
+                rubraview_pal_window_get_size(app->mini_window, &w, &h);
+                int32_t was = app->mini_hover;
+                app->mini_hover = -1;
+                for (int32_t i = 0; i < 3; ++i) {
+                    rubraview_pal_rect_t b = mini_button_rect(dpi, w, h, i);
+                    if (event.mouse.x >= b.x && event.mouse.x < b.x + b.width &&
+                        event.mouse.y >= b.y && event.mouse.y < b.y + b.height) {
+                        app->mini_hover = i;
+                        break;
+                    }
+                }
+                if (app->mini_hover != was) app->mini_dirty = true;
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                mini_press(app, event.mouse.x, event.mouse.y);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_key_combo_t combo = event.key.combo;
+                if (key_is(combo, "Escape")) { mini_close(app); return handled; }
+                if (key_is(combo, "Space")) mini_toggle_play(app);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return handled;
+}
+
 static void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -8036,6 +8419,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            window pumped the thread's messages into it. */
         handled += settings_pump(&app);
         handled += help_pump(&app);
+        handled += mini_pump(&app);
 
         if (app.needs_relayout) {
             int32_t page = current_page_index(&app);
@@ -8088,6 +8472,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
         draw_settings_window(&app);
         draw_help_window(&app);
+        /* The strip moves while the track does, so the little window is
+           redrawn each pass it is playing. */
+        if (app.mini_open && !mini_paused(&app)) app.mini_dirty = true;
+        draw_mini_window(&app);
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 
