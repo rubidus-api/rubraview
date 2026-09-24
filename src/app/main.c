@@ -38,6 +38,7 @@
 #include <time.h>
 
 #include "rubraview/number.h"
+#include "rubraview/subbox.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
 #include "rubraview/keymap.h"
@@ -301,6 +302,13 @@ typedef struct app_state {
     u8str_t                        subtitle_offset_for;
     double                         subtitle_offset_seconds;
     char                           subtitle_label[96];   /* what the OSD calls the track in use */
+    /* D-33: the subtitle box, the Sub tile's taps, and the list of tracks
+       a double tap or a held press opens. */
+    rubraview_subbox_t             subbox;
+    rubraview_tap_t                sub_tap;
+    int32_t                        subtitle_last;        /* the track the Sub tile turns back on, -1 for none */
+    bool                           sub_list_open;
+    double                         sub_list_anchor_x, sub_list_anchor_y;
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
 
@@ -748,6 +756,10 @@ static void media_close(app_state_t *app) {
        page is leaving — it becomes the background music. This is here
        rather than in the caller so that no path can forget it. */
     if (bgm_adopt(app)) return;
+    app->subbox.selected = false;
+    rubraview_subbox_end_drag(&app->subbox);
+    app->sub_list_open = false;
+    app->sub_tap = (rubraview_tap_t){0};
     vobsub_clear(app);
     pgs_clear(app);
     music_clear(app);
@@ -1004,6 +1016,7 @@ static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t v
    choice, so it is in the cycle. */
 static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     app->tracks = rubraview_tracks_create();
+    app->subtitle_last = -1;
     if (app->media) rubraview_pal_media_tracks(app->media, &app->tracks);
 
     rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
@@ -2246,6 +2259,7 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
                              rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO, app->tracks.current_audio) != app->tracks.current_audio,
         .other_subtitle = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, app->tracks.current_subtitle) >= 0,
         .subtitle_shown = app->tracks.current_subtitle >= 0,
+        .has_subtitles = rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) > 0,
         .slideshow = app->slideshow_running,
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
@@ -2330,6 +2344,110 @@ static bool window_nudge(app_state_t *app, u8str_t action) {
         return true;
     }
     return false;
+}
+
+/* ---- D-33: the Sub tile and its list of tracks ---- */
+
+/* The OSD line for the subtitles now in use. */
+static void subtitle_say(app_state_t *app) {
+    char label[160];
+    u8str_t text = app->tracks.current_subtitle >= 0
+                       ? rubraview_track_label(label, sizeof(label), &app->tracks, app->tracks.current_subtitle)
+                       : U8("off");
+    char line[192];
+    int n = snprintf(line, sizeof(line), "subtitles %.*s", (int)text.len, text.ptr);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+}
+
+/* The subtitle tracks in list order; returns how many. */
+static size_t subtitle_track_indices(const app_state_t *app, int32_t *out, size_t capacity) {
+    size_t n = 0;
+    for (size_t i = 0; i < app->tracks.count && n < capacity; ++i) {
+        if (app->tracks.tracks[i].kind == RUBRAVIEW_TRACK_SUBTITLE) out[n++] = (int32_t)i;
+    }
+    return n;
+}
+
+/* A tap on the Sub tile: off, or back on to the track last shown (the
+   first one when none was). */
+static void subtitles_toggle(app_state_t *app) {
+    if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
+        osd_say(app, U8("this video has no subtitles, in it or beside it"));
+        return;
+    }
+    if (app->tracks.current_subtitle >= 0) {
+        app->subtitle_last = app->tracks.current_subtitle;
+        subtitle_select(app, -1);
+        app->subbox.selected = false;
+    } else {
+        int32_t want = app->subtitle_last;
+        if (want < 0 || (size_t)want >= app->tracks.count ||
+            app->tracks.tracks[want].kind != RUBRAVIEW_TRACK_SUBTITLE) {
+            want = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE, -1);
+        }
+        subtitle_select(app, want);
+    }
+    subtitle_say(app);
+}
+
+#define SUB_LIST_MAX 16
+#define SUB_LIST_ROW 40.0
+#define SUB_LIST_WIDTH 340.0
+
+static rubraview_rect_t sub_list_rect(const app_state_t *app, size_t *out_rows) {
+    int32_t tracks[SUB_LIST_MAX];
+    size_t rows = 1 + subtitle_track_indices(app, tracks, SUB_LIST_MAX);   /* Off, then each track */
+    if (out_rows) *out_rows = rows;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    return rubraview_choice_list_rect((double)win_w, (double)win_h, rows, SUB_LIST_ROW * dpi,
+                                      SUB_LIST_WIDTH * dpi, app->sub_list_anchor_x, app->sub_list_anchor_y);
+}
+
+/* A double tap or a held press: the list, above where it was asked for. */
+static void sub_list_open_at(app_state_t *app, double x, double y) {
+    if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
+        osd_say(app, U8("this video has no subtitles, in it or beside it"));
+        return;
+    }
+    app->sub_list_anchor_x = x;
+    app->sub_list_anchor_y = y;
+    app->sub_list_open = true;
+}
+
+/* Row 0 is Off; row k the k-th subtitle track. */
+static void sub_list_choose(app_state_t *app, int32_t row) {
+    int32_t tracks[SUB_LIST_MAX];
+    size_t n = subtitle_track_indices(app, tracks, SUB_LIST_MAX);
+    app->sub_list_open = false;
+    if (row == 0) {
+        if (app->tracks.current_subtitle >= 0) app->subtitle_last = app->tracks.current_subtitle;
+        subtitle_select(app, -1);
+        app->subbox.selected = false;
+    } else if (row > 0 && (size_t)(row - 1) < n) {
+        subtitle_select(app, tracks[row - 1]);
+    }
+    subtitle_say(app);
+}
+
+/* Where the Sub tile is on screen, for the list to open above it. */
+static bool sub_tile_anchor(app_state_t *app, double *x, double *y);
+
+/* The Sub tile was pressed or let go (from the toolbox in the window or
+   detached — both come here). */
+static void sub_tile_result(app_state_t *app, rubraview_tap_result_t r) {
+    if (r == RUBRAVIEW_TAP_SINGLE) {
+        subtitles_toggle(app);
+    } else if (r == RUBRAVIEW_TAP_CHOOSE) {
+        double x = 0.0, y = 0.0;
+        if (!sub_tile_anchor(app, &x, &y)) {
+            int32_t w = 0, h = 0;
+            rubraview_pal_window_get_size(app->window, &w, &h);
+            x = w * 0.5; y = h * 0.75;
+        }
+        sub_list_open_at(app, x, y);
+    }
 }
 
 static void handle_action(app_state_t *app, u8str_t action) {
@@ -2572,6 +2690,14 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "sound %.*s", (int)text.len, text.ptr);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
+    } else if (app->media && rubraview_u8_eq_lit(action, "toggle_subtitles")) {
+        /* D-33: from the menu or a key; the Sub tile's taps come through
+           sub_tile_result, which also tells a double tap from a single. */
+        subtitles_toggle(app);
+    } else if (app->media && rubraview_u8_eq_lit(action, "choose_subtitle_track")) {
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->window, &w, &h);
+        sub_list_open_at(app, w * 0.5, h * 0.75);
     } else if (app->media && rubraview_u8_eq_lit(action, "next_subtitle_track")) {
         /* §3.16.2: the subtitle files beside the film, and off. */
         if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
@@ -3280,12 +3406,20 @@ static void toolbox_window_pump(app_state_t *app) {
                     if (!rubraview_rect_contains(toolbox_window_tile(app, &m, i), event.mouse.x, event.mouse.y)) continue;
                     bool enabled = true;
                     (void)toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
-                    if (enabled) handle_action(app, app->toolbox_tiles[i].action);
+                    if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) {
+                        /* D-33: decided on release, a double tap or a hold */
+                        sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
+                    } else if (enabled) {
+                        handle_action(app, app->toolbox_tiles[i].action);
+                    }
                     app->toolbox_window_drawn = 0.0;
                     break;
                 }
                 break;
             }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                sub_tile_result(app, rubraview_tap_release(&app->sub_tap, rubraview_pal_time_now_seconds()));
+                break;
             default:
                 break;
         }
@@ -3294,6 +3428,11 @@ static void toolbox_window_pump(app_state_t *app) {
 
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (ab_edit_handle_key(app, combo)) return;
+    /* D-33: Escape closes the list of subtitle tracks, and only that. */
+    if (app->sub_list_open && rubraview_u8_eq_lit(combo.key_name, "Escape") && combo.modifiers == 0) {
+        app->sub_list_open = false;
+        return;
+    }
     if (triage_handle_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
     /* §3.7.1: the slide show's own bindings win while it is running,
@@ -3455,7 +3594,13 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         if (tile < app->toolbox_tile_count) {
             bool enabled = true;
             (void)toolbox_caption(app, &app->toolbox_tiles[tile], &enabled);
-            if (enabled) handle_action(app, app->toolbox_tiles[tile].action);
+            if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_subtitles")) {
+                /* D-33: a tap toggles, a double tap or a hold chooses —
+                   so this tile is decided on release, not on the press. */
+                sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
+            } else if (enabled) {
+                handle_action(app, app->toolbox_tiles[tile].action);
+            }
         }
         return true;
     }
@@ -3942,36 +4087,213 @@ static void draw_pgs(app_state_t *app) {
                                       RUBRAVIEW_INTERP_LINEAR);
 }
 
-static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
-    draw_vobsub(app);
-    draw_pgs(app);
-    if (!app->media || app->subtitle.count == 0) return;
-    const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
-    if (!cue || cue->text.len == 0) return;
+#define SUBBOX_BUTTON 30.0
+#define SUBBOX_GAP 4.0
 
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    /* §3.22.2.5: the reader sets the size in points; the window's own
-       height still has a say, so a subtitle is not a speck on a large
-       screen nor a banner on a small one. */
+/* The subtitle size in pixels: §3.22.2.5's points, with the window's own
+   height still having a say, so a subtitle is not a speck on a large
+   screen nor a banner on a small one. */
+static double subtitle_window_scale(double win_h) {
+    double scale = win_h / 720.0;
+    return scale < 0.6 ? 0.6 : (scale > 2.5 ? 2.5 : scale);
+}
+
+static double subtitle_font_px(app_state_t *app, double win_h) {
     double wanted = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size"));
     if (wanted <= 0.0) wanted = 24.0;
-    double font = wanted * dpi * ((double)win_h / 720.0);
-    if (font < wanted * dpi * 0.6) font = wanted * dpi * 0.6;
-    if (font > wanted * dpi * 2.5) font = wanted * dpi * 2.5;
+    return wanted * rubraview_pal_window_dpi_scale(app->window) * subtitle_window_scale(win_h);
+}
 
+/* Two lines and a margin: the box's height for a given font (D-33). */
+#define SUBBOX_LINES_FACTOR (1.35 * 2.0 + 0.5)
+
+/* Where the subtitle box is (D-33). Unplaced, it is where subtitles
+   always were: the bottom, above the filmstrip, 90% wide. */
+static rubraview_rect_t subbox_geometry(app_state_t *app, double win_w, double win_h, double *out_font) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double font = subtitle_font_px(app, win_h);
+    double height = font * SUBBOX_LINES_FACTOR;
+    double below = (app->filmstrip.visible ? FILMSTRIP_THUMB * dpi : 0.0) + 36.0 * dpi;
+    rubraview_rect_t def = { win_w * 0.05, win_h - below - height, win_w * 0.9, height };
+    if (out_font) *out_font = font;
+    return rubraview_subbox_rect(&app->subbox, win_w, win_h, height, def);
+}
+
+/* The text subtitle on screen now, or NULL. */
+static const rubraview_subtitle_cue_t *subtitle_cue_now(app_state_t *app) {
+    if (!app->media || app->subtitle.count == 0) return NULL;
+    const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
+    return (cue && cue->text.len > 0) ? cue : NULL;
+}
+
+/* A subtitle box can be touched while it shows text, or once selected. */
+static bool subbox_live(app_state_t *app) {
+    return app->media && app->tracks.current_subtitle >= 0 &&
+           (app->subbox.selected || subtitle_cue_now(app) != NULL);
+}
+
+static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
+    /* A DVD's or a Blu-ray's pictures stay where the disc put them. */
+    draw_vobsub(app);
+    draw_pgs(app);
+    const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
+    if (!app->media || app->tracks.current_subtitle < 0) return;
+    if (!cue && !app->subbox.selected) return;   /* an empty box draws nothing */
+
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double font = 0.0;
+    rubraview_rect_t box = subbox_geometry(app, (double)win_w, (double)win_h, &font);
+    rubraview_pal_rect_t body = { box.x, box.y, box.width, box.height };
+
+    /* The translucent pane: `video.subtitle_background` percent of black. */
+    double percent = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_background"));
+    if (percent < 0.0) percent = 0.0;
+    if (percent > 100.0) percent = 100.0;
+    uint32_t alpha = (uint32_t)(percent * 2.55 + 0.5);
+    if (alpha > 0) rubraview_pal_render_fill_rect(app->renderer, body, alpha << 24, 6.0 * dpi);
+
+    if (app->subbox.selected) {
+        /* Selected: a thick edge, and S M R X above the top-right corner. */
+        rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_TILE_CURRENT, 3.0 * dpi, 6.0 * dpi);
+        rubraview_rect_t buttons[RUBRAVIEW_SUBBOX_BUTTONS];
+        rubraview_subbox_buttons(box, SUBBOX_BUTTON * dpi, SUBBOX_GAP * dpi, buttons);
+        static const char *const LETTERS[RUBRAVIEW_SUBBOX_BUTTONS] = { "S", "M", "R", "X" };
+        for (int i = 0; i < RUBRAVIEW_SUBBOX_BUTTONS; ++i) {
+            rubraview_pal_rect_t b = { buttons[i].x, buttons[i].y, buttons[i].width, buttons[i].height };
+            bool dragging = (i == 1 && app->subbox.dragging == RUBRAVIEW_SUBBOX_MOVE) ||
+                            (i == 2 && app->subbox.dragging == RUBRAVIEW_SUBBOX_RESIZE);
+            rubraview_pal_render_fill_rect(app->renderer, b, dragging ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 4.0 * dpi);
+            rubraview_pal_render_stroke_rect(app->renderer, b, i == 3 ? COLOR_CLOSE_HOVER : COLOR_TILE_CURRENT,
+                                             1.5 * dpi, 4.0 * dpi);
+            rubraview_pal_render_draw_text(app->renderer, cstr(LETTERS[i]), b, b.height * 0.5,
+                                           COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+    if (!cue) return;
+
+    /* The text sits on the box's bottom; more than two lines grow it up. */
     size_t lines = 1;
     for (size_t i = 0; i < cue->text.len; ++i) {
         if (cue->text.ptr[i] == '\n') ++lines;
     }
-    double height = font * 1.35 * (double)lines;
-    double below = (app->filmstrip.visible ? FILMSTRIP_THUMB * dpi : 0.0) + 36.0 * dpi;
-    rubraview_pal_rect_t rect = { (double)win_w * 0.05, (double)win_h - below - height,
-                                  (double)win_w * 0.9, height };
+    double pad = font * 0.25;
+    double needed = font * 1.35 * (double)lines;
+    double room = box.height - 2.0 * pad;
+    if (needed < room) needed = room;
+    rubraview_pal_rect_t rect = { box.x + pad, box.y + box.height - pad - needed, box.width - 2.0 * pad, needed };
 
     /* R135 asks for a two-pixel outline, and §3.22.2.5 lets the reader
        change it (0 turns it off). */
     double outline = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
     draw_outlined_text(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu);
+}
+
+/* The list a double tap or a held press on the Sub tile opens (D-33). */
+static void draw_sub_list(app_state_t *app) {
+    if (!app->sub_list_open) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    size_t rows = 0;
+    rubraview_rect_t list = sub_list_rect(app, &rows);
+    double row_h = SUB_LIST_ROW * dpi;
+    rubraview_pal_rect_t frame = { list.x, list.y, list.width, list.height };
+    rubraview_pal_render_fill_rect(app->renderer, frame, 0xFA1A1A1Au, 4.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, frame, COLOR_TILE_CURRENT, 1.5 * dpi, 4.0 * dpi);
+    rubraview_pal_rect_t title = { list.x, list.y, list.width, row_h };
+    rubraview_pal_render_draw_text(app->renderer, U8("Subtitles"), title, row_h * 0.4, 0xB0F0F0F0u,
+                                   RUBRAVIEW_TEXT_CENTER);
+
+    int32_t tracks[SUB_LIST_MAX];
+    size_t n = subtitle_track_indices(app, tracks, SUB_LIST_MAX);
+    int32_t hover = rubraview_choice_list_row_at(list, row_h, rows, app->pointer_x, app->pointer_y);
+    for (size_t r = 0; r < rows; ++r) {
+        rubraview_pal_rect_t cell = { list.x + 4.0 * dpi, list.y + row_h * (double)(r + 1) + 2.0 * dpi,
+                                      list.width - 8.0 * dpi, row_h - 4.0 * dpi };
+        bool current = r == 0 ? app->tracks.current_subtitle < 0
+                              : (r - 1 < n && tracks[r - 1] == app->tracks.current_subtitle);
+        if ((int32_t)r == hover) rubraview_pal_render_fill_rect(app->renderer, cell, 0x40FFFFFFu, 3.0 * dpi);
+        if (current) rubraview_pal_render_stroke_rect(app->renderer, cell, COLOR_TILE_CURRENT, 2.0 * dpi, 3.0 * dpi);
+        char label[160];
+        u8str_t text = r == 0 ? U8("Off")
+                              : (r - 1 < n ? rubraview_track_label(label, sizeof(label), &app->tracks, tracks[r - 1]) : U8(""));
+        rubraview_pal_render_draw_text(app->renderer, text, cell, row_h * 0.4, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
+static bool sub_tile_anchor(app_state_t *app, double *x, double *y) {
+    if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) return false;
+    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
+        if (!rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) continue;
+        rubraview_rect_t r = rubraview_box_tile_rect(&app->toolbox, &metrics, i);
+        if (r.width <= 0.0) return false;
+        *x = r.x + r.width * 0.5;
+        *y = r.y - 4.0 * rubraview_pal_window_dpi_scale(app->window);
+        return true;
+    }
+    return false;
+}
+
+/* D-33: a press on the subtitle box, its buttons, or away from a selected
+   box. True when the press was the box's. */
+static bool subbox_press(app_state_t *app, double x, double y, bool buttons_only) {
+    if (!app->media || app->tracks.current_subtitle < 0) return false;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_rect_t box = subbox_geometry(app, (double)win_w, (double)win_h, NULL);
+    rubraview_subbox_part_t part = rubraview_subbox_hit(&app->subbox, box, SUBBOX_BUTTON * dpi, SUBBOX_GAP * dpi,
+                                                        subbox_live(app), x, y);
+    /* The buttons of a selected box float over whatever is there (the
+       toolbox's anchor sits right by the default place), so they are asked
+       before the rest of the chrome; the body and the tap away after it. */
+    if (buttons_only && (part == RUBRAVIEW_SUBBOX_NONE || part == RUBRAVIEW_SUBBOX_BODY)) return false;
+    switch (part) {
+        case RUBRAVIEW_SUBBOX_NONE:
+            if (!app->subbox.selected) return false;
+            app->subbox.selected = false;   /* the tap that lets go does nothing else */
+            return true;
+        case RUBRAVIEW_SUBBOX_BODY:
+            app->subbox.selected = true;
+            return true;
+        case RUBRAVIEW_SUBBOX_SETTINGS:
+            settings_open(app);
+            if (app->settings_open) {
+                rubraview_settings_view_set_page(&app->settings_view, RUBRAVIEW_TAB_VIDEO);
+                app->settings_dirty = true;
+            }
+            return true;
+        case RUBRAVIEW_SUBBOX_MOVE:
+        case RUBRAVIEW_SUBBOX_RESIZE:
+            (void)rubraview_subbox_begin_drag(&app->subbox, part, box, x, y);
+            return true;
+        case RUBRAVIEW_SUBBOX_CLOSE:
+            app->subtitle_last = app->tracks.current_subtitle;
+            subtitle_select(app, -1);
+            app->subbox.selected = false;
+            subtitle_say(app);
+            return true;
+    }
+    return false;
+}
+
+/* D-33: M or R held and dragged. R writes the subtitle size itself, so
+   the settings page and the box never disagree. */
+static void subbox_drag_motion(app_state_t *app, double x, double y) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_rect_t box = subbox_geometry(app, (double)win_w, (double)win_h, NULL);
+    double scale = dpi * subtitle_window_scale((double)win_h);
+    double min_h = 10.0 * scale * SUBBOX_LINES_FACTOR, max_h = 72.0 * scale * SUBBOX_LINES_FACTOR;
+    double height = box.height;
+    rubraview_subbox_drag(&app->subbox, box, x, y, (double)win_w, (double)win_h,
+                          160.0 * dpi, min_h, max_h, &height);
+    if (app->subbox.dragging == RUBRAVIEW_SUBBOX_RESIZE) {
+        double points = floor(height / SUBBOX_LINES_FACTOR / scale + 0.5);
+        if (points < 10.0) points = 10.0;
+        if (points > 72.0) points = 72.0;
+        rubraview_settings_set(&app->settings, U8("video"), U8("subtitle_size"), points);
+    }
 }
 
 /* The text box: renaming a file, or giving the picked files one
@@ -5143,7 +5465,7 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
     } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
         n = snprintf(buffer, capacity, "%s",
                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
-                         ? "its DLLs are beside the program" : "not found (or not 8.x) - Media Foundation only");
+                         ? "its DLLs are beside the program" : "not found (or not 9.x) - Media Foundation only");
     } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, "run rubraview --probe-gpu <video> for the details");
     } else if (rubraview_u8_eq_lit(source, "cache.used")) {
@@ -6379,6 +6701,7 @@ static void render_frame(app_state_t *app) {
     } else {
         draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
+        draw_sub_list(app);   /* D-33: on top of every box */
         draw_panel(app);
         draw_curve_widget(app);
     }
@@ -6596,6 +6919,19 @@ static void layout_load(app_state_t *app) {
     /* Where the boxes were left, not a setting: layout.ini, read like the positions. */
     if (ini_number(&doc, U8("boxes"), U8("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
 
+    /* D-33: the subtitle box, as fractions of the window. */
+    if (ini_number(&doc, U8("subtitle_box"), U8("placed"), 0.0) > 0.5) {
+        double left = ini_number(&doc, U8("subtitle_box"), U8("left"), -1.0);
+        double bottom = ini_number(&doc, U8("subtitle_box"), U8("bottom"), -1.0);
+        double width = ini_number(&doc, U8("subtitle_box"), U8("width"), -1.0);
+        if (left >= 0.0 && left < 1.0 && bottom > 0.0 && bottom <= 1.0 && width > 0.0 && width <= 1.0) {
+            app->subbox.placed = true;
+            app->subbox.left = left;
+            app->subbox.bottom = bottom;
+            app->subbox.width = width;
+        }
+    }
+
     /* The settings window's frame; the PAL pulls it onto a screen when it is placed. */
     static const char *const FRAME_KEYS[4] = { "x", "y", "width", "height" };
     int32_t frame[4];
@@ -6616,6 +6952,12 @@ static void layout_save(app_state_t *app) {
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_x"), app->menubox.anchor_x);
     rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_y"), app->menubox.anchor_y);
     rubraview_ini_set_int(app->arena, &doc, U8("boxes"), U8("toolbox_pinned"), app->toolbox.pinned ? 1 : 0);
+    if (app->subbox.placed) {
+        rubraview_ini_set_int(app->arena, &doc, U8("subtitle_box"), U8("placed"), 1);
+        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("left"), app->subbox.left);
+        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("bottom"), app->subbox.bottom);
+        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("width"), app->subbox.width);
+    }
     if (app->settings_frame[2] > 0 && app->settings_frame[3] > 0) {
         rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("x"), app->settings_frame[0]);
         rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("y"), app->settings_frame[1]);
@@ -8224,6 +8566,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                    if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
+                        subbox_drag_motion(&app, event.mouse.x, event.mouse.y);   /* D-33 */
+                        app.pointer_x = event.mouse.x;
+                        app.pointer_y = event.mouse.y;
+                        break;
+                    }
                     if (app.curve_dragging >= 0) {
                         curve_widget_drag(&app, event.mouse.x, event.mouse.y);
                         app.pointer_x = event.mouse.x;
@@ -8312,6 +8660,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    /* D-33: the list of subtitle tracks takes the next tap —
+                       a row chooses it, anywhere else closes the list. */
+                    if (app.sub_list_open) {
+                        size_t rows = 0;
+                        rubraview_rect_t list = sub_list_rect(&app, &rows);
+                        int32_t row = rubraview_choice_list_row_at(list, SUB_LIST_ROW * rubraview_pal_window_dpi_scale(app.window),
+                                                                   rows, event.mouse.x, event.mouse.y);
+                        if (row >= 0) sub_list_choose(&app, row);
+                        else if (!rubraview_rect_contains(list, event.mouse.x, event.mouse.y)) app.sub_list_open = false;
+                        break;
+                    }
+
                     /* §3.13: with the workbench open, a drag on the picture
                        is the crop rectangle. It is asked before the panel,
                        whose "a click outside closes it" rule would otherwise
@@ -8328,6 +8688,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
+                        subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
                     /* RFC-0002 §4.2: the seek bar, before the canvas turns a page. */
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && timeline_hit(&app, event.mouse.x, event.mouse.y, NULL)) {
                         app.timeline_dragging = true;
@@ -8338,6 +8700,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                        press there is a click *or* the start of a drag. */
                     if (box_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (handle_chrome_click(&app, event.mouse.x, event.mouse.y)) break;
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && subbox_press(&app, event.mouse.x, event.mouse.y, false)) break;
 
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     rubraview_pointer_intent_t intent;
@@ -8360,6 +8723,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
+                    if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
+                        rubraview_subbox_end_drag(&app.subbox);
+                        break;
+                    }
                     app.curve_dragging = -1;
                     if (app.crop_dragging) {
                         app.crop_dragging = false;
@@ -8438,6 +8806,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         if (dt < 0.0) dt = 0.0;
         app.last_frame_seconds = now;
         tick_timers(&app, dt);
+        sub_tile_result(&app, rubraview_tap_tick(&app.sub_tap, now));   /* D-33: a tap decided, or a hold */
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;
@@ -8452,7 +8821,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         bool media_playing = app.media && !app.media_paused;
         bool others_moving = app.slideshow_running || app.anim_active ||
                              app.notice_seconds > 0.0 || app.pending_decode_count > 0 ||
-                             app.rename_active;   /* the caret blinks (owner, 2026-09-23) */
+                             app.rename_active ||   /* the caret blinks (owner, 2026-09-23) */
+                             rubraview_tap_waiting(&app.sub_tap) ||   /* D-33: a tap or a hold being decided */
+                             app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE;
         if (handled > 0) last_input_seconds = now;
         if (handled > 0 || media_playing || others_moving) last_busy_seconds = now;
         bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;

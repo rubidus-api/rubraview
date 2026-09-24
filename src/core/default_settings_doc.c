@@ -85,6 +85,7 @@ static const char *const PARTS[] = {
 "  section \"Subtitles\"\n"
 "  int    video.subtitle_size      \"Subtitle size\"           10..72 step 1 unit \"pt\" = 24 wired\n"
 "  int    video.subtitle_outline   \"Subtitle outline\"        0..8 step 1 unit \"px\" = 2 wired\n"
+"  int    video.subtitle_background \"Subtitle box shade\"     0..100 step 5 unit \"%\" = 35 wired\n"
 "  preview subtitle 3\n"
 "  section \"Playing\"\n"
 "  float  video.ab_step_seconds    \"A-B step\"                0.1..1.0 step 0.1 unit \"s\" = 0.5\n"

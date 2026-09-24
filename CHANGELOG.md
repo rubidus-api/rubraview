@@ -8,6 +8,14 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Subtitles in a box of their own (owner, 2026-09-25, D-33). A tap on the
+  subtitle selects its translucent box; S, M, R and X appear at its corner:
+  drag M to move it, drag R to resize it (which sets the subtitle size), S
+  opens the subtitle settings, X turns subtitles off. The box stays where
+  it was left. The toolbox's Sub button turns subtitles off and on; a
+  double tap or a held press opens the list of subtitle tracks to choose
+  from. Settings › Video gains the box's shade.
+
 - The music in a window of its own (owner, 2026-09-24, D-31, RV-081).
   `Shift+P` opens a small player on top of whatever is being read — the
   cover, the track, who made it, a strip to seek on and three buttons —
@@ -54,6 +62,8 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- Settings › Video said FFmpeg must be 8.x when it was not found; it is 9.x
+  since 0.0.17.
 - A comic opened from Explorer runs into its next volume. Past the last
   page nothing happened when the archive's path came with backslashes, as
   Explorer and the command line give it — the viewer compared whole paths

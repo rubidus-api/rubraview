@@ -37,6 +37,7 @@ typedef struct rubraview_action_facts {
     bool other_audio_track;   /* `A` would change the sound track */
     bool other_subtitle;      /* `C` would change the subtitles */
     bool subtitle_shown;      /* subtitles are being drawn */
+    bool has_subtitles;       /* the film has a subtitle track to turn on (D-33) */
     /* toggles */
     bool slideshow, filmstrip, osd, toolbox_pinned, toolbox_detached, fullscreen;
     bool nearest, pixel_grid, spread_detect, fit_lock, always_on_top, muted;
