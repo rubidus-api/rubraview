@@ -8,6 +8,10 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Thumbnails in the file picker (owner, 2026-09-25, D-34). Each tile shows
+  its picture, softly blurred and a little dark so the name — light with a
+  dark outline — reads over it; a folder shows its first picture, or its
+  first film. Tiles fill in as they come into view.
 - Subtitles in a box of their own (owner, 2026-09-25, D-33). A tap on the
   subtitle selects its translucent box; S, M, R and X appear at its corner:
   drag M to move it, drag R to resize it (which sets the subtitle size), S
