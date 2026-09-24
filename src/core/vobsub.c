@@ -292,7 +292,7 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
     }
     if (wanted == 0) return track;
 
-    proven_result_mem_mut_t mem = proven_arena_alloc(arena, wanted * sizeof(rubraview_vobsub_entry_t));
+    proven_result_mem_mut_t mem = rubraview_arena_alloc_array(arena, wanted, sizeof(rubraview_vobsub_entry_t));
     if (!proven_is_ok(mem.err)) return track;
     rubraview_vobsub_entry_t *entries = (rubraview_vobsub_entry_t*)mem.value.ptr;
 

@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include "rubraview/core.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +133,20 @@ int main(void) {
     assert(rubraview_bytes_per_pixel(RUBRAVIEW_PIXFMT_GRAY8) == 1);
     assert(rubraview_bytes_per_pixel(RUBRAVIEW_PIXFMT_RGBA16F) == 8);
     printf("  [PASS] rubraview_bytes_per_pixel check\n");
+
+    /* Sizes are multiplied with a check (proven's PROVEN_CKD_MUL), never
+       trusted: a width a file claims can be as large as INT32_MAX, and
+       width * 8 bytes in int32_t is undefined behaviour, not just wrong. */
+    {
+        rubraview_pixbuf_t huge = rubraview_pixbuf_create(&arena, INT32_MAX, 1, RUBRAVIEW_PIXFMT_RGBA16F);
+        assert(!rubraview_pixbuf_is_valid(&huge));
+
+        proven_result_mem_mut_t over = rubraview_arena_alloc_array(&arena, SIZE_MAX / 2, 4);
+        assert(over.err == PROVEN_ERR_OVERFLOW);
+        proven_result_mem_mut_t fine = rubraview_arena_alloc_array(&arena, 16, sizeof(uint32_t));
+        assert(proven_is_ok(fine.err) && fine.value.size >= 64);
+    }
+    printf("  [PASS] Sizes are multiplied with a check, and an overflow is refused\n");
 
     free(raw_mem);
     printf("[test_pixbuf] All tests passed successfully!\n");

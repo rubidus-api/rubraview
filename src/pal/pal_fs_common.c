@@ -24,7 +24,7 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     rubraview_sibling_index_t result = {0};
     if (!arena || !listing || listing->count == 0) return result;
 
-    proven_result_mem_mut_t items_res = proven_arena_alloc(arena, listing->count * sizeof(rubraview_sort_item_t));
+    proven_result_mem_mut_t items_res = rubraview_arena_alloc_array(arena, listing->count, sizeof(rubraview_sort_item_t));
     if (!proven_is_ok(items_res.err)) return result;
     rubraview_sort_item_t *items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
 
@@ -53,7 +53,7 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     rubraview_shuffle_state_t shuffle = { .seed = 0x9E3779B97F4A7C15ULL };
     rubraview_sort_items(items, kept, mode, ascending, &shuffle);
 
-    proven_result_mem_mut_t out_res = proven_arena_alloc(arena, kept * sizeof(u8str_t));
+    proven_result_mem_mut_t out_res = rubraview_arena_alloc_array(arena, kept, sizeof(u8str_t));
     if (!proven_is_ok(out_res.err)) return result;
     u8str_t *ordered_paths = (u8str_t*)(void*)out_res.value.ptr;
 

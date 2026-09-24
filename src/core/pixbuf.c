@@ -20,17 +20,20 @@ rubraview_pixbuf_t rubraview_pixbuf_create(proven_arena_t *arena, int32_t width,
         return (rubraview_pixbuf_t){0};
     }
 
+    /* A width comes from a file header, so the row size is checked
+       before anything is multiplied by it (PROVEN_CKD_MUL). */
     int32_t bpp = rubraview_bytes_per_pixel(format);
-    int32_t stride = width * bpp;
-    proven_size_t total_bytes = (proven_size_t)stride * (proven_size_t)height;
-
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, total_bytes);
+    int32_t stride = 0;
+    if (bpp <= 0 || PROVEN_CKD_MUL(&stride, width, bpp)) {
+        return (rubraview_pixbuf_t){0};
+    }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, (proven_size_t)stride, (proven_size_t)height);
     if (!proven_is_ok(res.err)) {
         return (rubraview_pixbuf_t){0};
     }
 
     uint8_t *ptr = (uint8_t*)res.value.ptr;
-    memset(ptr, 0, total_bytes);
+    memset(ptr, 0, (size_t)stride * (size_t)height);
 
     return (rubraview_pixbuf_t){
         .pixels = ptr,

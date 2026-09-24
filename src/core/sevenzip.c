@@ -170,7 +170,7 @@ rubraview_sz_result_t rubraview_sz_open(proven_arena_t *arena,
 
     rubraview_sz_entry_t *entries = NULL;
     if (files > 0) {
-        proven_result_mem_mut_t res_e = proven_arena_alloc(arena, files * sizeof(*entries));
+        proven_result_mem_mut_t res_e = rubraview_arena_alloc_array(arena, files, sizeof(*entries));
         entries = proven_is_ok(res_e.err) ? (rubraview_sz_entry_t*)(void*)res_e.value.ptr : NULL;
         if (!entries) {
             SzArEx_Free(&st->db, &st->alloc_main);

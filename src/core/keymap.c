@@ -55,7 +55,7 @@ typedef struct combo_buf {
 static bool combo_buf_push(proven_arena_t *arena, combo_buf_t *b, rubraview_key_combo_t combo) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 4 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_key_combo_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_key_combo_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_key_combo_t *new_data = (rubraview_key_combo_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_key_combo_t));
@@ -91,7 +91,7 @@ typedef struct binding_buf {
 static bool binding_buf_push(proven_arena_t *arena, binding_buf_t *b, rubraview_key_binding_t binding) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 8 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_key_binding_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_key_binding_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_key_binding_t *new_data = (rubraview_key_binding_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_key_binding_t));
@@ -211,13 +211,13 @@ bool rubraview_keymap_contexts_meet(u8str_t a, u8str_t b) {
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source) {
     rubraview_keymap_t copy = {0};
     if (!arena || !source || source->count == 0) return copy;
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, source->count * sizeof(rubraview_key_binding_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, source->count, sizeof(rubraview_key_binding_t));
     if (!proven_is_ok(res.err)) return copy;
     copy.bindings = (rubraview_key_binding_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < source->count; ++i) {
         rubraview_key_binding_t b = source->bindings[i];
         if (b.combo_count > 0) {
-            proven_result_mem_mut_t c = proven_arena_alloc(arena, b.combo_count * sizeof(rubraview_key_combo_t));
+            proven_result_mem_mut_t c = rubraview_arena_alloc_array(arena, b.combo_count, sizeof(rubraview_key_combo_t));
             if (!proven_is_ok(c.err)) return (rubraview_keymap_t){0};
             memcpy(c.value.ptr, b.combos, b.combo_count * sizeof(rubraview_key_combo_t));
             b.combos = (rubraview_key_combo_t*)(void*)c.value.ptr;
@@ -262,7 +262,7 @@ rubraview_bind_result_t rubraview_keymap_bind(proven_arena_t *arena, rubraview_k
         }
     }
     /* A new array each time: the old one may be shared with a copy (Revert). */
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, (target->combo_count + 1) * sizeof(rubraview_key_combo_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, (target->combo_count + 1), sizeof(rubraview_key_combo_t));
     if (!proven_is_ok(res.err)) return RUBRAVIEW_BIND_FAILED;
     rubraview_key_combo_t *combos = (rubraview_key_combo_t*)(void*)res.value.ptr;
     if (target->combo_count > 0) memcpy(combos, target->combos, target->combo_count * sizeof(rubraview_key_combo_t));

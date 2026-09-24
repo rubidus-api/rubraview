@@ -55,7 +55,7 @@ u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
     if (utf8_in.len == 0) return (u8str_t){ .ptr = "", .len = 0 };
 
     /* Pass 1: decode to codepoints. Upper bound: one codepoint per byte. */
-    proven_result_mem_mut_t decoded_res = proven_arena_alloc(arena, utf8_in.len * sizeof(uint32_t));
+    proven_result_mem_mut_t decoded_res = rubraview_arena_alloc_array(arena, utf8_in.len, sizeof(uint32_t));
     if (!proven_is_ok(decoded_res.err)) return (u8str_t){ .ptr = "", .len = 0 };
     uint32_t *decoded = (uint32_t*)(void*)decoded_res.value.ptr;
     size_t decoded_count = 0;
@@ -73,7 +73,7 @@ u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
     }
 
     /* Pass 2: compose. Output is never longer than the input in codepoints. */
-    proven_result_mem_mut_t composed_res = proven_arena_alloc(arena, decoded_count * sizeof(uint32_t));
+    proven_result_mem_mut_t composed_res = rubraview_arena_alloc_array(arena, decoded_count, sizeof(uint32_t));
     if (!proven_is_ok(composed_res.err)) return (u8str_t){ .ptr = "", .len = 0 };
     uint32_t *composed = (uint32_t*)(void*)composed_res.value.ptr;
     size_t composed_count = 0;

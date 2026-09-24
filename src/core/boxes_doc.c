@@ -210,9 +210,9 @@ rubraview_menu_tree_t rubraview_boxes_menu(proven_arena_t *arena, const rubravie
     if (!recent) recent_count = 0;
 
     size_t capacity = doc->node_count + recent_count + 1;
-    proven_result_mem_mut_t items_mem = proven_arena_alloc(arena, capacity * sizeof(rubraview_menu_item_t));
-    proven_result_mem_mut_t queue_mem = proven_arena_alloc(arena, capacity * sizeof(shown_t));
-    proven_result_mem_mut_t kids_mem = proven_arena_alloc(arena, capacity * sizeof(shown_t));
+    proven_result_mem_mut_t items_mem = rubraview_arena_alloc_array(arena, capacity, sizeof(rubraview_menu_item_t));
+    proven_result_mem_mut_t queue_mem = rubraview_arena_alloc_array(arena, capacity, sizeof(shown_t));
+    proven_result_mem_mut_t kids_mem = rubraview_arena_alloc_array(arena, capacity, sizeof(shown_t));
     if (!proven_is_ok(items_mem.err) || !proven_is_ok(queue_mem.err) || !proven_is_ok(kids_mem.err)) return empty;
     rubraview_menu_item_t *items = (rubraview_menu_item_t*)(void*)items_mem.value.ptr;
     shown_t *queue = (shown_t*)(void*)queue_mem.value.ptr;
