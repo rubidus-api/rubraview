@@ -98,8 +98,9 @@
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
 /* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
-#define MEDIA_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp;" \
-                     "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
+#define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
+#define AUDIO_FILTER "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
+#define MEDIA_FILTER VIDEO_FILTER ";" AUDIO_FILTER
 /* How far the picture's clock may run on from the last thing the sound
    thread reported, before it waits for the next report. */
 #define MEDIA_AUDIO_EXTRAPOLATION 0.2
@@ -1843,7 +1844,9 @@ static void picker_thumbs_step(app_state_t *app) {
     app->picker_thumbs_arrived = false;
     if (!app->picker_open || !app->picker_thumbs) return;
     if (!app->thumbs) {
-        app->thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(MEDIA_FILTER), U8(ARCHIVE_FILTER),
+        /* A folder's picture: its first image, else its first film —
+           not a sound file, which seldom has one (rbmedia, 2026-09-25). */
+        app->thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(VIDEO_FILTER), U8(ARCHIVE_FILTER),
                                                  thumbs_wake, app->window);
         if (!app->thumbs) return;
         rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
@@ -3950,19 +3953,6 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
     rubraview_pal_render_fill_rect(app->renderer, backdrop, 0xF0101010u, 0.0);
 
-    /* Breadcrumb: every segment is its own tappable tile. */
-    rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
-    double crumb_x = 8.0 * dpi;
-    for (size_t i = 0; i < crumbs.count; ++i) {
-        double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
-        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
-        rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
-                                       crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        crumb_x += w + 6.0 * dpi;
-    }
-
     /* Virtualised grid: only the rows on screen are drawn. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
     double cell = app->picker.tile_extent;
@@ -4016,6 +4006,23 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                            entry->is_directory ? U8("[ folder ]") : U8("[ file ]"),
                                            kind, cell * 0.10, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
         }
+    }
+
+    /* Breadcrumb: every segment is its own tappable tile. Drawn after the
+       grid, on a bar of its own, so a row scrolled half under it does not
+       show through (seen on the VM, 2026-09-25). */
+    rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, crumb_h };
+    rubraview_pal_render_fill_rect(app->renderer, crumb_bar, 0xFF101010u, 0.0);
+    rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+    double crumb_x = 8.0 * dpi;
+    for (size_t i = 0; i < crumbs.count; ++i) {
+        double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
+        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+        rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
+                                       crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        crumb_x += w + 6.0 * dpi;
     }
 
     /* Action bar: the buttons, then the selection metrics (§3.15.2 tier three). */
@@ -4198,8 +4205,12 @@ static rubraview_rect_t subbox_geometry(app_state_t *app, double win_w, double w
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double font = subtitle_font_px(app, win_h);
     double height = font * SUBBOX_LINES_FACTOR;
-    double below = (app->filmstrip.visible ? FILMSTRIP_THUMB * dpi : 0.0) + 36.0 * dpi;
-    rubraview_rect_t def = { win_w * 0.05, win_h - below - height, win_w * 0.9, height };
+    /* Unplaced, the box sits just above the seek bar, so the bar never
+       covers its last line (it did, VM 2026-09-25). */
+    rubraview_pal_rect_t bar, track;
+    timeline_geometry(app, win_w, win_h, &bar, &track);
+    double bottom = bar.y - 4.0 * dpi;
+    rubraview_rect_t def = { win_w * 0.05, bottom - height, win_w * 0.9, height };
     if (out_font) *out_font = font;
     return rubraview_subbox_rect(&app->subbox, win_w, win_h, height, def);
 }
