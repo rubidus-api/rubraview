@@ -166,6 +166,15 @@ While it does:
   sound is playing.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later.
+- Text subtitles sit in a shaded box. Tap it and its edge thickens and four
+  small buttons appear at its top-right corner: drag **M** to move the box,
+  drag **R** to resize it (the height is the subtitle size), **S** opens the
+  subtitle settings and **X** turns subtitles off. Tap anywhere else to let
+  it go. The box stays where you left it. A DVD's or a Blu-ray's picture
+  subtitles stay where the disc puts them.
+- The toolbox's **CC** button turns subtitles off and on. Tap it twice
+  quickly, or hold it for half a second, and a list of the film's subtitles
+  opens — tap the one you want (or **Off**).
 
 ## The floating boxes
 
@@ -203,6 +212,11 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 `Alt` + arrows move it.
 
 ## Settings
+
+In the file picker each tile shows its picture — softened and a little
+dark, so the name drawn over it stays readable — and a folder shows the
+first picture in it (or its first film). The tiles fill in as they come
+into view; an archive keeps a plain tile.
 
 In the file picker, the bottom row picks several files without holding a
 key: **Individual** makes every tap turn one file on or off, **Range**
