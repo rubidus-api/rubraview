@@ -33,7 +33,7 @@ static WCHAR *utf8_to_wide(proven_arena_t *arena, u8str_t utf8) {
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, utf8.ptr, (int)utf8.len, NULL, 0);
     if (wide_len < 0) return NULL;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, ((size_t)wide_len + 1) * sizeof(WCHAR));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, ((size_t)wide_len + 1), sizeof(WCHAR));
     if (!proven_is_ok(res.err)) return NULL;
 
     WCHAR *wide = (WCHAR*)(void*)res.value.ptr;
@@ -64,7 +64,7 @@ typedef struct entry_buf {
 static bool entry_buf_push(proven_arena_t *arena, entry_buf_t *b, rubraview_fs_entry_t entry) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 32 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_fs_entry_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_fs_entry_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_fs_entry_t *new_data = (rubraview_fs_entry_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_fs_entry_t));
@@ -154,7 +154,7 @@ u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, u
     int wide_len = MultiByteToWideChar(cp, 0, bytes.ptr, (int)bytes.len, NULL, 0);
     if (wide_len <= 0) return empty;
 
-    proven_result_mem_mut_t wide_res = proven_arena_alloc(arena, (size_t)wide_len * sizeof(WCHAR));
+    proven_result_mem_mut_t wide_res = rubraview_arena_alloc_array(arena, (size_t)wide_len, sizeof(WCHAR));
     if (!proven_is_ok(wide_res.err)) return empty;
     WCHAR *wide = (WCHAR*)(void*)wide_res.value.ptr;
 

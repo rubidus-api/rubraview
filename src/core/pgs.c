@@ -109,7 +109,7 @@ rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, const uint8_t *
         if (pass == 0) {
             wanted = count;
             if (wanted == 0) return track;
-            proven_result_mem_mut_t mem = proven_arena_alloc(arena, wanted * sizeof(rubraview_pgs_entry_t));
+            proven_result_mem_mut_t mem = rubraview_arena_alloc_array(arena, wanted, sizeof(rubraview_pgs_entry_t));
             if (!proven_is_ok(mem.err)) return track;
             track.entries = (rubraview_pgs_entry_t*)mem.value.ptr;
             memset(track.entries, 0, wanted * sizeof(rubraview_pgs_entry_t));

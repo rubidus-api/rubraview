@@ -72,7 +72,7 @@ rubraview_zip_result_t rubraview_zip_open(proven_arena_t *arena, const uint8_t *
 
     rubraview_zip_entry_t *entries = NULL;
     if (total_entries > 0) {
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)total_entries * sizeof(rubraview_zip_entry_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, (size_t)total_entries, sizeof(rubraview_zip_entry_t));
         if (!proven_is_ok(res.err)) {
             result.err = RUBRAVIEW_ZIP_ERR_OUT_OF_MEMORY;
             return result;

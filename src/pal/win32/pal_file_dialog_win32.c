@@ -90,7 +90,7 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *ar
             DWORD count = 0;
             IShellItemArray_GetCount(pItems, &count);
             if (count > 0) {
-                proven_result_mem_mut_t mres = proven_arena_alloc(arena, count * sizeof(u8str_t));
+                proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, count, sizeof(u8str_t));
                 if (proven_is_ok(mres.err)) {
                     u8str_t *path_arr = (u8str_t*)mres.value.ptr;
                     for (DWORD i = 0; i < count; ++i) {

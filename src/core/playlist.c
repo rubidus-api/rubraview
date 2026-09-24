@@ -29,7 +29,7 @@ typedef struct entry_buf {
 static bool entry_buf_push(proven_arena_t *arena, entry_buf_t *b, rubraview_playlist_entry_t entry) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 16 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_playlist_entry_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_playlist_entry_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_playlist_entry_t *new_data = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_playlist_entry_t));

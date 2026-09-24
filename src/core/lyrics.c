@@ -46,7 +46,7 @@ typedef struct lyric_buf {
 static bool lyric_push(proven_arena_t *arena, lyric_buf_t *b, rubraview_lyric_line_t line) {
     if (b->count >= b->capacity) {
         size_t cap = b->capacity == 0 ? 64 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, cap * sizeof(*b->data));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, cap, sizeof(*b->data));
         if (!proven_is_ok(res.err)) return false;
         rubraview_lyric_line_t *data = (rubraview_lyric_line_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(*b->data));
@@ -246,7 +246,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
     }
     if (track_count == 0) return sheet;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, track_count * sizeof(rubraview_cue_track_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track_count, sizeof(rubraview_cue_track_t));
     if (!proven_is_ok(res.err)) return sheet;
     rubraview_cue_track_t *tracks = (rubraview_cue_track_t*)(void*)res.value.ptr;
     memset(tracks, 0, track_count * sizeof(*tracks));

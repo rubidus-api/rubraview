@@ -230,7 +230,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
     }
     if (type == RUBRAVIEW_SETTING_CHOICE) {
         if (choice_count < 2) return fail(p, "a choice needs at least two choices");
-        proven_result_mem_mut_t res = proven_arena_alloc(p->arena, (size_t)(choice_count + 1) * sizeof(char*));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(p->arena, (size_t)(choice_count + 1), sizeof(char*));
         if (!proven_is_ok(res.err)) return fail(p, "out of memory");
         const char **list = (const char**)(void*)res.value.ptr;
         for (int k = 0; k < choice_count; ++k) list[k] = choices[k];
@@ -315,8 +315,8 @@ rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, u8s
         p.doc.error = "no memory to parse into";
         return p.doc;
     }
-    proven_result_mem_mut_t defs = proven_arena_alloc(arena, RUBRAVIEW_SETTINGS_MAX * sizeof(rubraview_setting_def_t));
-    proven_result_mem_mut_t nodes = proven_arena_alloc(arena, RUBRAVIEW_SETTINGS_DOC_MAX_NODES * sizeof(rubraview_settings_node_t));
+    proven_result_mem_mut_t defs = rubraview_arena_alloc_array(arena, RUBRAVIEW_SETTINGS_MAX, sizeof(rubraview_setting_def_t));
+    proven_result_mem_mut_t nodes = rubraview_arena_alloc_array(arena, RUBRAVIEW_SETTINGS_DOC_MAX_NODES, sizeof(rubraview_settings_node_t));
     if (!proven_is_ok(defs.err) || !proven_is_ok(nodes.err)) {
         p.doc.error = "no memory to parse into";
         return p.doc;

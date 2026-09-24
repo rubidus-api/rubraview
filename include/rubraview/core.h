@@ -19,6 +19,24 @@ typedef struct u8str {
 
 #define U8(lit) ((u8str_t){ .ptr = ("" lit), .len = sizeof("" lit) - 1 })
 
+/**
+ * `count` elements of `size` bytes from the arena, the product checked
+ * with proven's PROVEN_CKD_MUL (manual chapter 1, section 4). A product
+ * that does not fit is refused with PROVEN_ERR_OVERFLOW instead of
+ * wrapping into a small block that the caller then writes past. Every
+ * array the viewer takes from an arena goes through here.
+ */
+[[nodiscard]]
+static inline proven_result_mem_mut_t rubraview_arena_alloc_array(proven_arena_t *arena,
+                                                                  proven_size_t count,
+                                                                  proven_size_t size) {
+    proven_size_t bytes = 0;
+    if (PROVEN_CKD_MUL(&bytes, count, size)) {
+        return (proven_result_mem_mut_t){ .err = PROVEN_ERR_OVERFLOW };
+    }
+    return proven_arena_alloc(arena, bytes);
+}
+
 typedef enum rubraview_pixel_format {
     RUBRAVIEW_PIXFMT_RGBA8 = 0,   /* Standard 32-bit RGBA (8 bits per channel) */
     RUBRAVIEW_PIXFMT_BGRA8,       /* Direct2D/WIC native layout */

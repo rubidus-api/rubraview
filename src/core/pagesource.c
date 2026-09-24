@@ -28,7 +28,7 @@ typedef struct ref_buf {
 static bool ref_buf_push(proven_arena_t *arena, ref_buf_t *b, rubraview_page_ref_t ref) {
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 32 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(rubraview_page_ref_t));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_page_ref_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_page_ref_t *data = (rubraview_page_ref_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(rubraview_page_ref_t));
@@ -82,7 +82,7 @@ static rubraview_page_source_t page_source_from_zip(proven_arena_t *arena,
     /* Names first: a legacy archive's entries have to be readable before
        they can be filtered or sorted (§3.8.3). */
     proven_result_mem_mut_t names_res =
-        proven_arena_alloc(arena, opened.value.entry_count * sizeof(u8str_t));
+        rubraview_arena_alloc_array(arena, opened.value.entry_count, sizeof(u8str_t));
     if (!proven_is_ok(names_res.err)) return source;
     u8str_t *names = (u8str_t*)(void*)names_res.value.ptr;
 
@@ -102,7 +102,7 @@ static rubraview_page_source_t page_source_from_zip(proven_arena_t *arena,
     ref_buf_t buf = {0};
     rubraview_sort_item_t *items = NULL;
     proven_result_mem_mut_t items_res =
-        proven_arena_alloc(arena, opened.value.entry_count * sizeof(rubraview_sort_item_t));
+        rubraview_arena_alloc_array(arena, opened.value.entry_count, sizeof(rubraview_sort_item_t));
     if (!proven_is_ok(items_res.err)) return source;
     items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
 
@@ -162,7 +162,7 @@ static rubraview_page_source_t page_source_from_7z(proven_arena_t *arena,
     source.archive7z = opened.value;
 
     proven_result_mem_mut_t items_res =
-        proven_arena_alloc(arena, (opened.value.entry_count + 1) * sizeof(rubraview_sort_item_t));
+        rubraview_arena_alloc_array(arena, (opened.value.entry_count + 1), sizeof(rubraview_sort_item_t));
     if (!proven_is_ok(items_res.err)) return source;
     rubraview_sort_item_t *items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
 

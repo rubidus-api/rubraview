@@ -57,7 +57,7 @@ static bool cue_push(proven_arena_t *arena, cue_buf_t *b, rubraview_subtitle_cue
 
     if (b->count >= b->capacity) {
         size_t new_cap = b->capacity == 0 ? 64 : b->capacity * 2;
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap * sizeof(*b->data));
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(*b->data));
         if (!proven_is_ok(res.err)) return false;
         rubraview_subtitle_cue_t *data = (rubraview_subtitle_cue_t*)(void*)res.value.ptr;
         if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(*b->data));
