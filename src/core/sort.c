@@ -1,4 +1,5 @@
 #include "rubraview/sort.h"
+#include "proven/algorithm.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -157,51 +158,65 @@ void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mo
 
 /* RV-031: multi-criteria sort over rubraview_sort_item_t. */
 
-static int compare_items(const rubraview_sort_item_t *a, const rubraview_sort_item_t *b, rubraview_sort_mode_t mode, bool ascending) {
-    int cmp = 0;
+/* The key of one mode, ascending. */
+static int compare_key(const rubraview_sort_item_t *a, const rubraview_sort_item_t *b, rubraview_sort_mode_t mode) {
     switch (mode) {
         case RUBRAVIEW_SORT_NAME_LEXICAL:
-            cmp = rubraview_str_lexcmp(a->name, b->name);
-            break;
+            return rubraview_str_lexcmp(a->name, b->name);
         case RUBRAVIEW_SORT_DATE_MODIFIED:
-            cmp = (a->mtime < b->mtime) ? -1 : (a->mtime > b->mtime ? 1 : 0);
-            break;
+            return (a->mtime < b->mtime) ? -1 : (a->mtime > b->mtime ? 1 : 0);
         case RUBRAVIEW_SORT_DATE_CREATED:
-            cmp = (a->ctime < b->ctime) ? -1 : (a->ctime > b->ctime ? 1 : 0);
-            break;
+            return (a->ctime < b->ctime) ? -1 : (a->ctime > b->ctime ? 1 : 0);
         case RUBRAVIEW_SORT_FILE_SIZE:
-            cmp = (a->size_bytes < b->size_bytes) ? -1 : (a->size_bytes > b->size_bytes ? 1 : 0);
-            break;
+            return (a->size_bytes < b->size_bytes) ? -1 : (a->size_bytes > b->size_bytes ? 1 : 0);
         case RUBRAVIEW_SORT_NAME_NATURAL:
         default:
-            cmp = rubraview_str_natcmp(a->name, b->name);
-            break;
+            return rubraview_str_natcmp(a->name, b->name);
     }
-    return ascending ? cmp : -cmp;
 }
 
-static void quicksort_items(rubraview_sort_item_t *items, int low, int high, rubraview_sort_mode_t mode, bool ascending) {
-    if (low >= high) return;
+/* Every order is total: a tie on the key goes to the natural name, then
+   the name's bytes, and only then the listing order (`tag`). Without that
+   a folder of photos sharing one modified time opened in whatever order
+   the filesystem listed it, and proven's introsort, like any fast sort,
+   is not stable. Descending reverses the whole comparison except the
+   last resort, so equal files still keep their listing order. */
+static int compare_items(const rubraview_sort_item_t *a, const rubraview_sort_item_t *b,
+                         rubraview_sort_mode_t mode, bool ascending) {
+    int cmp = compare_key(a, b, mode);
+    if (cmp == 0 && mode != RUBRAVIEW_SORT_NAME_NATURAL) cmp = rubraview_str_natcmp(a->name, b->name);
+    if (cmp == 0 && mode != RUBRAVIEW_SORT_NAME_LEXICAL) cmp = rubraview_str_lexcmp(a->name, b->name);
+    if (cmp != 0) return ascending ? cmp : -cmp;
+    return (a->tag < b->tag) ? -1 : (a->tag > b->tag ? 1 : 0);
+}
 
-    rubraview_sort_item_t pivot = items[(low + high) / 2];
-    int i = low;
-    int j = high;
-
-    while (i <= j) {
-        while (compare_items(&items[i], &pivot, mode, ascending) < 0) i++;
-        while (compare_items(&items[j], &pivot, mode, ascending) > 0) j--;
-
-        if (i <= j) {
-            rubraview_sort_item_t tmp = items[i];
-            items[i] = items[j];
-            items[j] = tmp;
-            i++;
-            j--;
-        }
+/* proven's comparator takes no context, so each mode and direction has
+   its own; the sort runs on the main thread only. */
+#define RV_SORT_CMP(fn, mode, asc) \
+    static int fn(const void *a, const void *b) { \
+        return compare_items((const rubraview_sort_item_t *)a, (const rubraview_sort_item_t *)b, mode, asc); \
     }
+RV_SORT_CMP(cmp_natural_up, RUBRAVIEW_SORT_NAME_NATURAL, true)
+RV_SORT_CMP(cmp_natural_down, RUBRAVIEW_SORT_NAME_NATURAL, false)
+RV_SORT_CMP(cmp_lexical_up, RUBRAVIEW_SORT_NAME_LEXICAL, true)
+RV_SORT_CMP(cmp_lexical_down, RUBRAVIEW_SORT_NAME_LEXICAL, false)
+RV_SORT_CMP(cmp_mtime_up, RUBRAVIEW_SORT_DATE_MODIFIED, true)
+RV_SORT_CMP(cmp_mtime_down, RUBRAVIEW_SORT_DATE_MODIFIED, false)
+RV_SORT_CMP(cmp_ctime_up, RUBRAVIEW_SORT_DATE_CREATED, true)
+RV_SORT_CMP(cmp_ctime_down, RUBRAVIEW_SORT_DATE_CREATED, false)
+RV_SORT_CMP(cmp_size_up, RUBRAVIEW_SORT_FILE_SIZE, true)
+RV_SORT_CMP(cmp_size_down, RUBRAVIEW_SORT_FILE_SIZE, false)
+#undef RV_SORT_CMP
 
-    if (low < j) quicksort_items(items, low, j, mode, ascending);
-    if (i < high) quicksort_items(items, i, high, mode, ascending);
+static proven_compare_fn_t comparator_for(rubraview_sort_mode_t mode, bool ascending) {
+    switch (mode) {
+        case RUBRAVIEW_SORT_NAME_LEXICAL: return ascending ? cmp_lexical_up : cmp_lexical_down;
+        case RUBRAVIEW_SORT_DATE_MODIFIED: return ascending ? cmp_mtime_up : cmp_mtime_down;
+        case RUBRAVIEW_SORT_DATE_CREATED: return ascending ? cmp_ctime_up : cmp_ctime_down;
+        case RUBRAVIEW_SORT_FILE_SIZE: return ascending ? cmp_size_up : cmp_size_down;
+        case RUBRAVIEW_SORT_NAME_NATURAL:
+        default: return ascending ? cmp_natural_up : cmp_natural_down;
+    }
 }
 
 /* splitmix64 (public domain): a small, fast, well-distributed generator,
@@ -229,5 +244,16 @@ void rubraview_sort_items(rubraview_sort_item_t *items, size_t count, rubraview_
         return;
     }
 
-    quicksort_items(items, 0, (int)(count - 1), mode, ascending);
+    /* proven's introsort: O(n log n) whatever the input, where the old
+       quicksort went quadratic and recursed n deep on the wrong shape.
+       The array only borrows the caller's items; sorting allocates
+       nothing, so it needs no allocator. */
+    proven_array_t view = {
+        .data = (proven_byte_t *)items,
+        .len = count,
+        .cap = count,
+        .elem_size = sizeof(*items),
+        .align = alignof(rubraview_sort_item_t),
+    };
+    proven_array_sort(&view, comparator_for(mode, ascending));
 }

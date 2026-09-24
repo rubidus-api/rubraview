@@ -165,12 +165,59 @@ static void test_multi_criteria_sort(void) {
     printf("  [PASS] Different seeds diverge; shuffle output is a true permutation\n");
 }
 
+/* Every order is total. Photos copied from a camera share one modified
+   time and a folder's files often share one size; the order among them
+   must not depend on the order the filesystem listed them in, or the
+   same folder opens on a different page each time. Ties go to the
+   natural name, then the bytes of the name, then the listing order. */
+static void test_ties_and_scale(void) {
+    rubraview_sort_item_t a[4] = {
+        { .name = U8("c.jpg"),  .mtime = 50, .tag = 0 },
+        { .name = U8("a10.jpg"), .mtime = 50, .tag = 1 },
+        { .name = U8("a2.jpg"), .mtime = 50, .tag = 2 },
+        { .name = U8("b.jpg"),  .mtime = 10, .tag = 3 },
+    };
+    rubraview_sort_item_t b[4] = { a[3], a[2], a[1], a[0] };  /* listed the other way round */
+    rubraview_sort_items(a, 4, RUBRAVIEW_SORT_DATE_MODIFIED, true, NULL);
+    rubraview_sort_items(b, 4, RUBRAVIEW_SORT_DATE_MODIFIED, true, NULL);
+    const char *want[4] = { "b.jpg", "a2.jpg", "a10.jpg", "c.jpg" };
+    for (int i = 0; i < 4; ++i) {
+        assert(a[i].name.len == strlen(want[i]) && memcmp(a[i].name.ptr, want[i], a[i].name.len) == 0);
+        assert(b[i].name.len == a[i].name.len && memcmp(b[i].name.ptr, a[i].name.ptr, a[i].name.len) == 0);
+    }
+
+    /* Same size everywhere: the name decides, both directions. */
+    rubraview_sort_item_t s[3] = {
+        { .name = U8("x2"), .size_bytes = 7 }, { .name = U8("x10"), .size_bytes = 7 }, { .name = U8("x1"), .size_bytes = 7 },
+    };
+    rubraview_sort_items(s, 3, RUBRAVIEW_SORT_FILE_SIZE, true, NULL);
+    assert(s[0].name.len == 2 && s[0].name.ptr[1] == '1' && s[2].name.len == 3);
+
+    /* Large inputs in the shapes that hurt a plain quicksort (sorted,
+       reversed, all equal, organ pipe) finish and come out ordered. */
+    enum { N = 200000 };
+    static rubraview_sort_item_t big[N];
+    for (int shape = 0; shape < 4; ++shape) {
+        for (int i = 0; i < N; ++i) {
+            int64_t k = shape == 0 ? i : shape == 1 ? N - i : shape == 2 ? 5 : (i < N / 2 ? i : N - i);
+            big[i] = (rubraview_sort_item_t){ .name = U8("same"), .size_bytes = (uint64_t)k, .tag = (uint64_t)i };
+        }
+        rubraview_sort_items(big, N, RUBRAVIEW_SORT_FILE_SIZE, true, NULL);
+        for (int i = 1; i < N; ++i) {
+            assert(big[i - 1].size_bytes < big[i].size_bytes ||
+                   (big[i - 1].size_bytes == big[i].size_bytes && big[i - 1].tag < big[i].tag));
+        }
+    }
+    printf("  [PASS] Every order is total: ties go to the name, then the listing; large inputs of any shape\n");
+}
+
 int main(void) {
     printf("[test_sort] Starting sorting algorithm unit tests...\n");
     test_natural_comparison();
     test_lexical_comparison();
     test_path_array_sorting();
     test_multi_criteria_sort();
+    test_ties_and_scale();
     printf("[test_sort] All tests passed successfully!\n");
     return 0;
 }
