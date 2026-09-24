@@ -270,3 +270,23 @@ rubraview_zip_data_result_t rubraview_zip_read_entry(proven_arena_t *arena,
     result.data = (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)entry->uncompressed_size };
     return result;
 }
+
+bool rubraview_zip_locate_directory(const uint8_t *tail, size_t tail_size, uint64_t file_size,
+                                    uint64_t *out_cd_offset, uint64_t *out_cd_size) {
+    if (!tail || tail_size > file_size || !out_cd_offset || !out_cd_size) return false;
+    size_t eocd = 0;
+    if (!find_eocd(tail, tail_size, &eocd)) return false;
+    uint64_t eocd_in_file = file_size - tail_size + eocd;
+    uint64_t cd_size = rd_u32(tail + eocd + 12);
+    uint64_t cd_offset = rd_u32(tail + eocd + 16);
+    if (cd_offset + cd_size > eocd_in_file) return false;
+    *out_cd_offset = cd_offset;
+    *out_cd_size = cd_size;
+    return true;
+}
+
+bool rubraview_zip_local_span(const uint8_t header[30], uint32_t compressed_size, uint64_t *out_span) {
+    if (!header || !out_span || rd_u32(header) != ZIP_SIG_LOCAL_HEADER) return false;
+    *out_span = 30u + (uint64_t)rd_u16(header + 26) + (uint64_t)rd_u16(header + 28) + compressed_size;
+    return true;
+}

@@ -96,6 +96,22 @@ typedef struct rubraview_zip_data_result {
                                                                    size_t entry_index,
                                                                    uint32_t max_uncompressed_bytes);
 
+/*
+ * Reading a ZIP a piece at a time (D-34's archive thumbnails): the parts a
+ * reader needs are the End-of-Central-Directory record and the Central
+ * Directory at the end, then one entry's local header and data.
+ */
+
+/* Where the Central Directory is, from the last `tail_size` bytes of a file
+   of `file_size` bytes (the EOCD is always in the last 22 + 65535). */
+bool rubraview_zip_locate_directory(const uint8_t *tail, size_t tail_size, uint64_t file_size,
+                                    uint64_t *out_cd_offset, uint64_t *out_cd_size);
+
+/* How many bytes one entry takes from its local header on, given the
+   header's first 30 bytes: the header, its name and extra field, and the
+   compressed data. False when those 30 bytes are not a local header. */
+bool rubraview_zip_local_span(const uint8_t header[30], uint32_t compressed_size, uint64_t *out_span);
+
 #ifdef __cplusplus
 }
 #endif

@@ -328,6 +328,44 @@ int main(void) {
     }
     printf("  [PASS] A corrupted deflate stream is rejected, never half-inflated\n");
 
+    /* Reading a ZIP a piece at a time (D-34): the directory found from the
+       file's tail alone, then one entry copied into an otherwise zeroed
+       buffer of the file's size reads back whole; an entry that was never
+       read fails cleanly instead of returning zeros as data. */
+    {
+        uint8_t zip_buf[4096];
+        test_zip_entry_t src[] = {
+            { .name = "a.txt", .content = "first entry" },
+            { .name = "b.txt", .content = "second one" },
+            { .name = "c.txt", .content = "third" },
+        };
+        size_t zip_len = build_zip(zip_buf, sizeof(zip_buf), src, 3);
+        size_t tail = 60;   /* less than the file: the EOCD and part of the directory */
+        uint64_t cd_off = 0, cd_size = 0;
+        assert(!rubraview_zip_locate_directory(zip_buf + zip_len - 10, 10, zip_len, &cd_off, &cd_size));
+        assert(rubraview_zip_locate_directory(zip_buf + zip_len - tail, tail, zip_len, &cd_off, &cd_size));
+        assert(cd_off > 0 && cd_off + cd_size < zip_len);
+
+        static uint8_t sparse[4096];
+        memset(sparse, 0, sizeof(sparse));
+        memcpy(sparse + cd_off, zip_buf + cd_off, zip_len - cd_off);   /* directory and EOCD */
+        rubraview_zip_result_t r = rubraview_zip_open(&arena, sparse, zip_len);
+        assert(r.err == RUBRAVIEW_ZIP_OK && r.value.entry_count == 3);
+
+        const rubraview_zip_entry_t *b = &r.value.entries[1];
+        uint64_t span = 0;
+        assert(!rubraview_zip_local_span(sparse + b->local_header_offset, b->compressed_size, &span));   /* not read yet */
+        assert(rubraview_zip_local_span(zip_buf + b->local_header_offset, b->compressed_size, &span));
+        assert(span == 30 + 5 + 10);
+        memcpy(sparse + b->local_header_offset, zip_buf + b->local_header_offset, (size_t)span);
+
+        rubraview_zip_data_result_t got = rubraview_zip_read_entry(&arena, &r.value, 1, UINT32_MAX);
+        assert(got.err == RUBRAVIEW_ZIP_OK && str_eq(got.data, "second one"));
+        rubraview_zip_data_result_t missing = rubraview_zip_read_entry(&arena, &r.value, 0, UINT32_MAX);
+        assert(missing.err != RUBRAVIEW_ZIP_OK);
+    }
+    printf("  [PASS] A ZIP read in pieces: the directory from its tail, one entry, the rest refused\n");
+
     free(raw_mem);
     printf("[test_archive] All tests passed successfully!\n");
     return 0;

@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-35 Thumbnails are made on a thread of their own; archives too, within a time limit
+
+- Status: Accepted (owner 2026-09-25: "썸네일은 다 읽고 파일 목록 보여주는게 아니라 동적으로, 일단 파일 목록 보여주고 입력 처리하면서 백그라운드로 동적으로 될 떄마다 추가하는 형식으로 항목에 표시하게 해줘요" and "압축파일도 썸네일 보여주게 해 주세요. 다만 제한시간 걸고 읽는 속도나 시간이 오래 걸릴 것 같으면 포기하는 식으로.")
+- Decision: D-34's thumbnails move off the main thread. The list shows at once; the main thread only asks for the tiles on screen and turns finished pictures into textures, a result waking the loop. One worker thread (`src/pal/win32/pal_thumbs_win32.c`, below normal priority) owns its COM apartment, WIC factory and scratch arena and does the shell calls, folder listings and archive reading. Requests are taken newest first (`src/core/thumbq.c`), so after a scroll the tiles now on screen come first; a new listing is a new generation and late results are dropped. Archives: a ZIP (CBZ) is read in pieces — the directory at its end, then the first page's entry — into a buffer of the file's size, a megabyte at a time, and given up as soon as the rest could not be read within 1.5 s at the speed seen so far (`rubraview_read_budget_ok`); an entry over 24 MB, a file over 2 GB, or a 7z/CB7 over 24 MB (solid: its first page may need all of it) is not tried. The page is decoded small by WIC from memory.
+- Consequences: supersedes D-34's "archives keep the plain tile" and "two per pass on the main thread". No memory-mapping: a mapped file on a network drive that goes away would fault inside the viewer; explicit reads fail instead.
+
 ## 2026-09-25: D-34 The picker's tiles show the item's picture, soft, with an outlined name
 
 - Status: Accepted (owner 2026-09-25: "파일/폴더 선택할 때 썸네일이 박스 안에 그려지면 좋겠네요. 글자는 서로 다른 외곽선과 내부 색으로 표시하여 그림 위에서도 잘 보이게 하고, 썸네일은 선명하게가 아니라 약간 흐릿하게 처리하고, 폴더도 썸네일 보이게요.")

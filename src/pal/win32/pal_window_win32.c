@@ -722,6 +722,10 @@ void rubraview_pal_window_set_title(rubraview_window_t *window, const char *titl
     SetWindowTextW(window->hwnd, wide);
 }
 
+void rubraview_pal_window_wake(rubraview_window_t *window) {
+    if (window && window->hwnd) PostMessageW(window->hwnd, WM_NULL, 0, 0);
+}
+
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms) {
     if (!window || window->queue_count > 0 || window->should_close) return;
     /* MWMO_INPUTAVAILABLE also wakes for input that an earlier Peek

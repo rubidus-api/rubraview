@@ -173,6 +173,10 @@ bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_windo
  */
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms);
 
+/* Wakes a waiting rubraview_pal_window_wait_event from any thread — how a
+   background worker says it has something for the loop (D-34). */
+void rubraview_pal_window_wake(rubraview_window_t *window);
+
 /** Set the window's caption (UTF-8). Frameless windows still show it in
     the taskbar and Alt+Tab. */
 void rubraview_pal_window_set_title(rubraview_window_t *window, const char *title_utf8);
