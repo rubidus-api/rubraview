@@ -55,3 +55,5 @@ and a Korean `.srt` lasting the whole film.
 | 9 | PASS. Photographed 0.8 s into the press: the list open, #2 kor edged. |
 | 10 | PASS. `layout.ini` held `left = 0.0, bottom = 0.553191, width = 0.5875`; reopened, the box was there at 42 pt. |
 | 11 | NOT RUN this time: the picture-subtitle path is unchanged (T078, T081). |
+| touch | NOT RUN: the VM has no touch input; tap, double tap and hold were measured with a mouse. For a finger, the window now declines Windows' press-and-hold (which otherwise holds the press back and turns it into a right click) and flicks, so a held finger reaches the Sub tile as a held press. To check on a touch screen: hold the CC button — the list must open while the finger is still down. |
+| detached toolbox, fullscreen | NOT RUN. |

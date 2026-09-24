@@ -457,6 +457,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             return 0;
         }
 
+        /* D-33: a finger held still must arrive as a held left press, so
+           the Sub tile can tell a hold from a tap. Windows' own press-and-
+           hold otherwise keeps the press back and turns it into a right
+           click when the finger lifts. Flicks would steal quick strokes. */
+        case 0x02CC: /* WM_TABLET_QUERYSYSTEMGESTURESTATUS */
+            return 0x00000001 /* TABLET_DISABLE_PRESSANDHOLD */ | 0x00010000 /* TABLET_DISABLE_FLICKS */;
+
         case WM_GESTURE: {
             GESTUREINFO gi = { .cbSize = sizeof(GESTUREINFO) };
             if (!GetGestureInfo((HGESTUREINFO)lparam, &gi)) break;
