@@ -70,6 +70,12 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- The subtitle box's default place is just above the seek bar, which used
+  to cover its last line.
+- The picker's path bar stays on top when the tiles are scrolled; rows no
+  longer show through it.
+- A folder's thumbnail skips sound files and tries the next picture or
+  film when the shell has nothing for the first.
 - Settings › Video said FFmpeg must be 8.x when it was not found; it is 9.x
   since 0.0.17.
 - A comic opened from Explorer runs into its next volume. Past the last
