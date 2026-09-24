@@ -48,6 +48,14 @@ void rubraview_pal_audio_set_playing(rubraview_audio_out_t *out, bool playing);
 void rubraview_pal_audio_set_gain(rubraview_audio_out_t *out, double gain);
 
 /**
+ * Why the last attempt to open the device failed — the call that failed
+ * and what it returned — or false when none has. A device that will not
+ * open is otherwise indistinguishable from a file with no sound in it,
+ * which is exactly how three measurements were misread on 2026-09-24.
+ */
+bool rubraview_pal_audio_last_failure(char *buffer, size_t capacity);
+
+/**
  * A seek: the device buffer and the ring are emptied, and the heard
  * position restarts at `base_seconds`. Blocks until the output thread has
  * done it. Call it from the producer while it is not writing — that is

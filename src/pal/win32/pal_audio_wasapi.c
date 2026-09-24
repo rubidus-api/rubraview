@@ -6,6 +6,7 @@
 #include <audioclient.h>
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/pal/pal_time.h"
@@ -147,12 +148,40 @@ static void close_device(device_t *d) {
 }
 
 /* The default output device, opened in our format. */
+/* Why the last attempt to open the device failed, for the viewer to say
+   out loud: a silent failure looks exactly like a file with no sound
+   (2026-09-24 — three VM measurements were read wrongly because of it). */
+static _Atomic uint32_t last_open_hr;
+static const char *volatile last_open_step;   /* a literal: safe to hand about */
+
+static bool step_ok(HRESULT hr, const char *step) {
+    if (SUCCEEDED(hr)) return true;
+    atomic_store_explicit(&last_open_hr, (uint32_t)hr, memory_order_relaxed);
+    last_open_step = step;
+    return false;
+}
+
+bool rubraview_pal_audio_last_failure(char *buffer, size_t capacity) {
+    uint32_t hr = atomic_load_explicit(&last_open_hr, memory_order_relaxed);
+    const char *step = last_open_step;
+    if (!buffer || capacity == 0 || hr == 0 || !step) return false;
+    snprintf(buffer, capacity, "%s 0x%08lX", step, (unsigned long)hr);
+    return true;
+}
+
 static bool open_device(rubraview_audio_out_t *out, device_t *d) {
     *d = (device_t){0};
-    bool ok = SUCCEEDED(CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
-                                         &RV_IID_IMMDeviceEnumerator, (void**)&d->enumerator)) && d->enumerator &&
-              SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &d->device)) && d->device &&
-              SUCCEEDED(IMMDevice_Activate(d->device, &RV_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&d->client)) && d->client;
+    HRESULT hr = CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+                                  &RV_IID_IMMDeviceEnumerator, (void**)&d->enumerator);
+    bool ok = step_ok(hr, "CoCreateInstance(MMDeviceEnumerator)") && d->enumerator;
+    if (ok) {
+        hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &d->device);
+        ok = step_ok(hr, "GetDefaultAudioEndpoint") && d->device;
+    }
+    if (ok) {
+        hr = IMMDevice_Activate(d->device, &RV_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&d->client);
+        ok = step_ok(hr, "IMMDevice_Activate") && d->client;
+    }
     if (ok) {
         WAVEFORMATEXTENSIBLE format = {0};
         format.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
@@ -168,11 +197,18 @@ static bool open_device(rubraview_audio_out_t *out, device_t *d) {
 
         DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
                       AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-        ok = SUCCEEDED(IAudioClient_Initialize(d->client, AUDCLNT_SHAREMODE_SHARED, flags, DEVICE_BUFFER_100NS, 0,
-                                               (WAVEFORMATEX*)&format, NULL)) &&
-             SUCCEEDED(IAudioClient_SetEventHandle(d->client, out->wake)) &&
-             SUCCEEDED(IAudioClient_GetBufferSize(d->client, &d->buffer_frames)) && d->buffer_frames > 0 &&
-             SUCCEEDED(IAudioClient_GetService(d->client, &RV_IID_IAudioRenderClient, (void**)&d->render)) && d->render;
+        hr = IAudioClient_Initialize(d->client, AUDCLNT_SHAREMODE_SHARED, flags, DEVICE_BUFFER_100NS, 0,
+                                     (WAVEFORMATEX*)&format, NULL);
+        ok = step_ok(hr, "IAudioClient_Initialize");
+        if (ok) ok = step_ok(IAudioClient_SetEventHandle(d->client, out->wake), "SetEventHandle");
+        if (ok) {
+            hr = IAudioClient_GetBufferSize(d->client, &d->buffer_frames);
+            ok = step_ok(hr, "GetBufferSize") && d->buffer_frames > 0;
+        }
+        if (ok) {
+            hr = IAudioClient_GetService(d->client, &RV_IID_IAudioRenderClient, (void**)&d->render);
+            ok = step_ok(hr, "GetService(IAudioRenderClient)") && d->render;
+        }
         /* Volume is a nicety: an output that cannot give it still plays. */
         if (ok && FAILED(IAudioClient_GetService(d->client, &RV_IID_ISimpleAudioVolume, (void**)&d->volume))) d->volume = NULL;
         /* The clock too: without it the heard position leaves out what the
