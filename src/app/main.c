@@ -40,6 +40,7 @@
 #include "rubraview/number.h"
 #include "rubraview/subbox.h"
 #include "rubraview/thumb.h"
+#include "rubraview/pal/pal_thumbs.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
 #include "rubraview/keymap.h"
@@ -428,11 +429,14 @@ typedef struct app_state {
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
     rubraview_picker_t     picker;
     bool                  *picker_selected;   /* one per listed item, remade on every folder */
-    /* D-34: one picture per listed item, made a few at a time for the
-       tiles on screen. 0 = not tried yet, 1 = ready, 2 = none to show. */
+    /* D-34: one picture per listed item, made on a thread of its own for
+       the tiles on screen and added as each arrives. 0 = not asked for,
+       1 = ready, 2 = none to show, 3 = asked for. */
     struct picker_thumb { uint8_t state; rubraview_texture_t *texture; } *picker_thumbs;
     size_t                 picker_thumb_count;
-    bool                   picker_thumbs_pending;   /* tiles on screen still waiting */
+    rubraview_thumbs_t    *thumbs;              /* the thread, started with the first picker */
+    uint32_t               picker_generation;   /* one per listing: late results are known by it */
+    bool                   picker_thumbs_arrived;   /* a picture came in this pass: draw */
     /* Move and Copy wait for the digit that names a curation folder;
        Recycle waits to be pressed a second time (§3.18.1's rule). */
     int32_t                picker_pending;     /* a picker_button_t, waiting for its digit */
@@ -797,8 +801,6 @@ static void media_close(app_state_t *app) {
     app->subtitle_count = 0;
 }
 
-/* Defined here so the link does not depend on which MinGW carries it. */
-static const GUID RV_IID_IShellItemImageFactory = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
 
 /* RV-084: what a file that is only sound shows — the album art Windows'
    own shell finds in it (ID3, MP4 and FLAC tags alike), or a plain dark
@@ -852,63 +854,10 @@ static void music_load(app_state_t *app, u8str_t path) {
     music_make_backdrop(app, &app->music_tags);
 }
 
-/* The picture Windows' own shell has for a file — a photo's or a film's
-   thumbnail, a record's cover — as top-row-first BGRA the caller frees,
-   or NULL. THUMBNAILONLY: the picture itself, never the generic icon.
-   Main thread only: the shell wants the apartment this thread runs. */
-static uint8_t *shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t *out_w, int32_t *out_h) {
-    uint8_t *result = NULL;
-    char narrow[MAX_PATH * 4];
-    WCHAR wide[MAX_PATH * 2];
-    if (path.len == 0 || path.len >= sizeof(narrow)) return NULL;
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
-    /* The shell's parser, unlike CreateFile, does not take '/' for a
-       separator — and a listing joins the folder and the name with '/'. */
-    for (size_t i = 0; i < path.len; ++i) {
-        if (narrow[i] == '/') narrow[i] = '\\';
-    }
-    IShellItemImageFactory *factory = NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) > 0 &&
-        SUCCEEDED(SHCreateItemFromParsingName(wide, NULL, &RV_IID_IShellItemImageFactory, (void**)&factory)) &&
-        factory) {
-        SIZE size = { side, side };
-        HBITMAP bitmap = NULL;
-        if (SUCCEEDED(factory->lpVtbl->GetImage(factory, size, SIIGBF_BIGGERSIZEOK | SIIGBF_THUMBNAILONLY, &bitmap)) &&
-            bitmap) {
-            BITMAP info;
-            if (GetObjectW(bitmap, sizeof(info), &info) && info.bmWidth > 0 && info.bmHeight > 0 &&
-                info.bmWidth <= 4096 && info.bmHeight <= 4096) {
-                int32_t w = info.bmWidth, h = info.bmHeight;
-                uint8_t *pixels = (uint8_t*)malloc((size_t)w * (size_t)h * 4u);
-                BITMAPINFO bi = {0};
-                bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                bi.bmiHeader.biWidth = w;
-                bi.bmiHeader.biHeight = -h;   /* top row first */
-                bi.bmiHeader.biPlanes = 1;
-                bi.bmiHeader.biBitCount = 32;
-                bi.bmiHeader.biCompression = BI_RGB;
-                HDC dc = GetDC(NULL);
-                if (pixels && dc && GetDIBits(dc, bitmap, 0, (UINT)h, pixels, &bi, DIB_RGB_COLORS) == h) {
-                    result = pixels;
-                    pixels = NULL;
-                    *out_w = w;
-                    *out_h = h;
-                }
-                if (dc) ReleaseDC(NULL, dc);
-                free(pixels);
-            }
-            DeleteObject(bitmap);
-        }
-        factory->lpVtbl->Release(factory);
-    }
-    return result;
-}
-
 static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
     rubraview_texture_t *texture = NULL;
     int32_t w = 0, h = 0;
-    uint8_t *pixels = shell_thumbnail_bgra(path, 512, &w, &h);
+    uint8_t *pixels = rubraview_pal_shell_thumbnail_bgra(path, 512, &w, &h);
     if (pixels) {
         texture = rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (texture && !rubraview_pal_texture_upload_bgra(texture, pixels, w * 4)) {
@@ -1873,57 +1822,6 @@ static void picker_thumbs_free(app_state_t *app) {
     free(app->picker_thumbs);
     app->picker_thumbs = NULL;
     app->picker_thumb_count = 0;
-    app->picker_thumbs_pending = false;
-}
-
-/* A thumbnail is cut, shrunk and softened in a scratch arena of its own,
-   emptied after each one: the app arena only ever grows. */
-#define THUMB_SCRATCH_BYTES (4u << 20)
-#define THUMB_MAX_WIDTH 96
-#define THUMB_BLUR 1
-#define THUMB_KEEP 0.78
-#define THUMBS_PER_PASS 2
-
-static rubraview_texture_t *picker_make_thumb(app_state_t *app, const rubraview_fs_entry_t *entry, double aspect) {
-    static void *scratch_memory = NULL;
-    if (!scratch_memory) scratch_memory = malloc(THUMB_SCRATCH_BYTES);
-    if (!scratch_memory) return NULL;
-    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_memory,
-                                                                     .size = THUMB_SCRATCH_BYTES });
-    u8str_t source = entry->path;
-    if (entry->is_directory) {
-        /* A folder shows its first picture, in the order it would open —
-           or its first film when it holds no picture. Not its subfolders. */
-        if (rubraview_u8_eq_lit(entry->name, "..")) return NULL;
-        rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(&scratch, entry->path);
-        u8str_t none = { .ptr = "", .len = 0 };
-        rubraview_sibling_index_t first = rubraview_fs_index_siblings(
-            &scratch, &inside, none, U8(IMAGE_FILTER), RUBRAVIEW_SORT_NAME_NATURAL, true);
-        if (first.count == 0) {
-            first = rubraview_fs_index_siblings(&scratch, &inside, none, U8(MEDIA_FILTER), RUBRAVIEW_SORT_NAME_NATURAL, true);
-        }
-        if (first.count == 0) return NULL;
-        source = first.paths[0];
-    } else if (!rubraview_glob_match_list(entry->name, U8(IMAGE_FILTER ";" MEDIA_FILTER))) {
-        return NULL;   /* an archive: its pages would mean reading it whole */
-    }
-
-    int32_t w = 0, h = 0;
-    uint8_t *pixels = shell_thumbnail_bgra(source, 192, &w, &h);
-    if (!pixels) return NULL;
-    rubraview_pixbuf_t shell = { .pixels = pixels, .width = w, .height = h, .stride = w * 4,
-                                 .format = RUBRAVIEW_PIXFMT_BGRA8 };
-    rubraview_pixbuf_t thumb = rubraview_thumb_make(&scratch, &shell, aspect, THUMB_MAX_WIDTH, THUMB_BLUR, THUMB_KEEP);
-    rubraview_texture_t *texture = NULL;
-    if (rubraview_pixbuf_is_valid(&thumb)) {
-        texture = rubraview_pal_texture_create_bgra(app->renderer, thumb.width, thumb.height);
-        if (texture && !rubraview_pal_texture_upload_bgra(texture, thumb.pixels, thumb.stride)) {
-            rubraview_pal_texture_destroy(texture);
-            texture = NULL;
-        }
-    }
-    free(pixels);
-    return texture;
 }
 
 /* The tile's inner rectangle, as draw_picker draws it. */
@@ -1935,25 +1833,62 @@ static void picker_tile_size(app_state_t *app, double *out_w, double *out_h) {
     *out_h = app->picker.tile_extent - 12.0 * dpi;
 }
 
-/* A few thumbnails for the tiles on screen, per pass of the loop, so a
-   big folder opens at once and fills in. */
+static void thumbs_wake(void *context) {
+    rubraview_pal_window_wake((rubraview_window_t*)context);
+}
+
+/* Each pass: take in what the thread has made, and ask for the tiles now
+   on screen that have not been asked for. Nothing here waits. */
 static void picker_thumbs_step(app_state_t *app) {
-    app->picker_thumbs_pending = false;
+    app->picker_thumbs_arrived = false;
     if (!app->picker_open || !app->picker_thumbs) return;
+    if (!app->thumbs) {
+        app->thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(MEDIA_FILTER), U8(ARCHIVE_FILTER),
+                                                 thumbs_wake, app->window);
+        if (!app->thumbs) return;
+        rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
+    }
+
+    rubraview_thumb_result_t done;
+    while (rubraview_pal_thumbs_take(app->thumbs, &done)) {
+        if (done.generation == app->picker_generation && done.index < app->picker_thumb_count) {
+            struct picker_thumb *t = &app->picker_thumbs[done.index];
+            rubraview_texture_t *texture = NULL;
+            if (done.bgra) {
+                texture = rubraview_pal_texture_create_bgra(app->renderer, done.width, done.height);
+                if (texture && !rubraview_pal_texture_upload_bgra(texture, done.bgra, done.width * 4)) {
+                    rubraview_pal_texture_destroy(texture);
+                    texture = NULL;
+                }
+            }
+            if (t->texture) rubraview_pal_texture_destroy(t->texture);
+            t->texture = texture;
+            t->state = texture ? 1 : 2;
+            app->picker_thumbs_arrived = true;
+        }
+        free(done.bgra);
+    }
+
     double tw = 0.0, th = 0.0;
     picker_tile_size(app, &tw, &th);
     if (tw <= 1.0 || th <= 1.0) return;
+    /* The newest request is made first, so the last tile on screen is asked
+       for first and the first one last: they fill in from the top. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
-    int made = 0;
-    for (size_t i = 0; i < visible.count; ++i) {
-        size_t index = visible.first + i;
-        if (index >= app->picker_thumb_count || index >= app->picker_listing.count) break;
+    for (size_t k = visible.count; k-- > 0;) {
+        size_t index = visible.first + k;
+        if (index >= app->picker_thumb_count || index >= app->picker_listing.count) continue;
         struct picker_thumb *t = &app->picker_thumbs[index];
-        if (t->state != 0) continue;
-        if (made >= THUMBS_PER_PASS) { app->picker_thumbs_pending = true; return; }
-        t->texture = picker_make_thumb(app, &app->picker_listing.entries[index], tw / th);
-        t->state = t->texture ? 1 : 2;
-        ++made;
+        if (t->state != 0 && t->state != 3) continue;
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+        if (entry->is_directory && rubraview_u8_eq_lit(entry->name, "..")) { t->state = 2; continue; }
+        /* Asked again while waiting, it moves to the front of the queue. */
+        if (rubraview_pal_thumbs_request(app->thumbs, app->picker_generation, index, entry->is_directory,
+                                         tw / th, entry->path)) {
+            t->state = 3;
+        } else if (t->state == 0) {
+            t->state = 2;   /* a path the queue cannot hold */
+        }
     }
 }
 
@@ -2035,6 +1970,8 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
 
     rubraview_picker_mode_t mode = app->picker.mode;   /* the mode outlives the folder */
     picker_thumbs_free(app);
+    app->picker_generation++;
+    if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
     app->picker_thumbs = (struct picker_thumb *)calloc(listing.count ? listing.count : 1, sizeof(*app->picker_thumbs));
     app->picker_thumb_count = app->picker_thumbs ? listing.count : 0;
     app->picker_dir = dir;
@@ -8956,8 +8893,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         tick_timers(&app, dt);
         sub_tile_result(&app, rubraview_tap_tick(&app.sub_tap, now));   /* D-33: a tap decided, or a hold */
         /* D-34: thumbnails for the picker's tiles, a few a pass; given back when it closes. */
-        if (app.picker_open) picker_thumbs_step(&app);
-        else if (app.picker_thumbs) picker_thumbs_free(&app);
+        if (app.picker_open) {
+            picker_thumbs_step(&app);
+        } else if (app.picker_thumbs) {
+            picker_thumbs_free(&app);
+            app.picker_generation++;   /* what is still being made is for nobody */
+            if (app.thumbs) rubraview_pal_thumbs_generation(app.thumbs, app.picker_generation);
+        }
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;
@@ -8975,7 +8917,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                              app.rename_active ||   /* the caret blinks (owner, 2026-09-23) */
                              rubraview_tap_waiting(&app.sub_tap) ||   /* D-33: a tap or a hold being decided */
                              app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE ||
-                             app.picker_thumbs_pending;   /* D-34: tiles still filling in */
+                             app.picker_thumbs_arrived;   /* D-34: a picture came in; the thread wakes the loop */
         if (handled > 0) last_input_seconds = now;
         if (handled > 0 || media_playing || others_moving) last_busy_seconds = now;
         bool settled = now - last_busy_seconds > IDLE_REDRAW_GRACE;
@@ -9047,6 +8989,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         rubraview_pal_fs_write_file(app.history_path, text);
     }
 
+    picker_thumbs_free(&app);
+    rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
+    app.thumbs = NULL;
     if (app.jobs) {
         proven_job_system_close(app.jobs);
         proven_job_system_destroy(app.jobs);
