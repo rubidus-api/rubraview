@@ -30,6 +30,8 @@ typedef struct rubraview_image_load_result {
     rubraview_texture_t *texture;  /* NULL when ok == false */
     int32_t width, height;         /* after any EXIF orientation transform */
     int32_t exif_orientation;      /* the tag value found (1-8); 1 when absent */
+    int32_t full_width, full_height; /* the picture's own size; width/height are smaller when reduced */
+    bool    reduced;               /* held smaller than the picture: too big for the device (the fall-back) */
     bool    ok;
 } rubraview_image_load_result_t;
 
@@ -119,6 +121,18 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    u8str_t path,
                                                    const uint8_t *data, size_t size,
                                                    bool apply_exif_orientation);
+
+/**
+ * The same, but no larger than `max_width` x `max_height` (the aspect
+ * kept, never enlarged): the decoder is read through a scaler, so a
+ * picture too large to hold whole — the adjust panel's preview of a very
+ * large page — never is.
+ */
+rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
+                                                          u8str_t path,
+                                                          const uint8_t *data, size_t size,
+                                                          bool apply_exif_orientation,
+                                                          int32_t max_width, int32_t max_height);
 
 /**
  * §3.10: encode a pixel buffer and write it to `path`. The format and

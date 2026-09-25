@@ -22,6 +22,11 @@ extern "C" {
  * where M_viewport fits the combined spread into the window (RV-022) and
  * then applies the interactive zoom and pan.
  *
+ * Two pages of unequal resolution are first brought to the taller one's
+ * height (M_side = S(H / h_side) . T . M_viewport), so a low-resolution
+ * scan is not drawn small beside a high-resolution one. At actual size
+ * each page keeps its own pixels instead, centred vertically.
+ *
  * This is portable geometry with no renderer dependency, which is why it
  * lives in core rather than behind the PAL.
  */
@@ -35,6 +40,7 @@ typedef struct rubraview_draw_command {
     double  src_left, src_top;       /* sub-rectangle of that page, in its own pixels */
     double  src_right, src_bottom;   /* the whole page unless the spread was split (§3.3.7) */
     rubraview_mat3x2_t transform;    /* maps the sub-rectangle's own pixel space to client pixels */
+    double  scale;                   /* this page's on-screen scale (page pixel -> client pixel) */
 } rubraview_draw_command_t;
 
 typedef struct rubraview_composition {
