@@ -127,6 +127,7 @@ waits for a key before it closes.
 |---|---|
 | `--resize=50%` `--resize=1920x1080` `--resize=w800` `--resize=h600` | How to resize |
 | `--filter=lanczos3\|bicubic\|bilinear\|nearest` | How to resample |
+| (Settings › Display) | Bicubic and Lanczos resizes of large pictures run on the graphics card when there is one, with the same result |
 | `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico` | What to write |
 | `--quality=1..100` | For JPEG and WebP |
 | `--rotate=90\|180\|270\|exif`, `--flip=h\|v` | Turn them |

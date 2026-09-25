@@ -42,6 +42,8 @@
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
 #include "rubraview/pal/pal_thumbs.h"
+#include "rubraview/pal/pal_gpu_resample.h"
+#include "rubraview/resample_mt.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
 #include "rubraview/keymap.h"
@@ -5839,6 +5841,13 @@ static void settings_took_effect(app_state_t *app) {
     /* D-15: the session volume follows the setting. */
     rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, U8("audio"), U8("volume")) / 100.0,
                                    rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5);
+    /* D-38: export's resizes on the graphics card, restarted only when the choice changed. */
+    static int applied = -1;
+    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("display"), U8("gpu_resize")));
+    if (mode != applied) {
+        applied = mode;
+        (void)rubraview_pal_gpu_resample_start((rubraview_gpu_resize_mode_t)mode);
+    }
 }
 
 /* §3.22.2: a keymap written out to share or keep, or read back in. What
@@ -7575,6 +7584,8 @@ typedef struct batch_ctx {
     const rubraview_cli_result_t *cli;
     u8str_t output_dir;
     size_t written;
+    proven_job_sys_t *jobs;   /* RV-067's pool for resizes on the CPU; NULL on one core */
+    size_t workers;
 } batch_ctx_t;
 
 /* Whether this job changes any pixel. A job that only strips metadata
@@ -7735,8 +7746,10 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         int32_t target_h = 0;
         int32_t target_w = resize_target(resize, pixels.width, pixels.height, &target_h);
         if (target_w != pixels.width || target_h != pixels.height) {
-            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample(arena, &pixels, target_w, target_h,
-                                                                  resize->filter);
+            /* The card when D-38 installed it and the picture is worth it;
+               otherwise every core (RV-067), the same bytes as one. */
+            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample_mt(arena, bc->jobs, bc->workers, &pixels,
+                                                                     target_w, target_h, resize->filter, 0);
             if (rubraview_pixbuf_is_valid(&scaled)) pixels = scaled;
         }
     }
@@ -7928,6 +7941,22 @@ static void panel_run_batch(app_state_t *app) {
     }
 }
 
+/* D-38 in a batch run, which starts before the viewer reads its settings:
+   settings.ini found by the same rule (beside the program, else AppData). */
+static rubraview_gpu_resize_mode_t batch_gpu_resize_mode(proven_arena_t *arena) {
+    u8str_t exe = rubraview_pal_process_executable(arena);
+    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
+    u8str_t portable_ini = rubraview_path_join(arena, beside, U8("settings.ini"));
+    rubraview_config_mode_t mode = rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini));
+    char appdata_utf8[1024];
+    u8str_t appdata = U8(".");
+    DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
+    if (written > 0 && written < sizeof(appdata_utf8)) appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
+    u8str_t path = rubraview_config_path(arena, mode, beside, appdata, U8("settings.ini"));
+    rubraview_settings_t settings = rubraview_settings_load(arena, rubraview_pal_fs_read_file(arena, path, 256u * 1024u));
+    return (rubraview_gpu_resize_mode_t)lround(rubraview_settings_get(&settings, U8("display"), U8("gpu_resize")));
+}
+
 static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, BATCH_MAX_INPUTS, sizeof(rubraview_batch_input_t));
     if (!proven_is_ok(res.err)) {
@@ -7952,9 +7981,20 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     proven_arena_t work = proven_arena_create(
         (proven_mem_mut_t){ .ptr = (proven_byte_t*)work_memory, .size = BATCH_WORK_ARENA_BYTES });
 
+    (void)rubraview_pal_gpu_resample_start(batch_gpu_resize_mode(arena));   /* D-38 */
     batch_ctx_t ctx = { .cli = cli, .output_dir = cli->output_dir, .written = 0 };
+    /* A batch run has no window and no Direct2D: the resize bands may go to
+       worker threads (the viewer itself keeps none, §3.1). */
+    DWORD cores = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    ctx.workers = cores > 16 ? 16 : cores;
+    if (ctx.workers > 1 &&
+        !proven_is_ok(proven_job_system_init(proven_arena_as_allocator(arena), ctx.workers, 256, &ctx.jobs))) {
+        ctx.jobs = NULL;
+    }
     rubraview_batch_report_t report = rubraview_batch_run(&work, &cli->job, inputs, count,
                                                           U8(""), batch_process, &ctx, NULL, 0);
+    rubraview_pal_gpu_resample_stop();
+    if (ctx.jobs) { proven_job_system_close(ctx.jobs); proven_job_system_destroy(ctx.jobs); }
     free(work_memory);
 
     char line[160];
@@ -8142,6 +8182,66 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
    RV-062's shape — whether a decoded frame then comes back as a texture
    or as system memory. Written before building the zero-copy path so
    that "can this be tried here at all" is measured, not assumed. */
+/* D-38: the card's resize against the CPU's on the same picture: how many
+   bytes differ, by how much, and how long each took. With `always` the
+   software rasteriser stands in when there is no card, so this measures
+   correctness anywhere and speed only on a machine with a card. */
+static void probe_gpu_resize(void) {
+    char line[256];
+    bool on = rubraview_pal_gpu_resample_start(RUBRAVIEW_GPU_RESIZE_ON);
+    snprintf(line, sizeof(line), "gpu resize with gpu_resize = on: %s%s", rubraview_pal_gpu_resample_describe(),
+             on ? "" : " (not used)");
+    console_line(line);
+    bool started = rubraview_pal_gpu_resample_start(RUBRAVIEW_GPU_RESIZE_ALWAYS);
+    snprintf(line, sizeof(line), "gpu resize with gpu_resize = always: %s", rubraview_pal_gpu_resample_describe());
+    console_line(line);
+    if (!started) return;
+    size_t cap = (size_t)96 << 20;
+    void *memory = malloc(cap);
+    if (!memory) return;
+    static const struct { int32_t sw, sh, dw, dh; } SIZES[] = { {1600, 1200, 2400, 1800}, {1600, 1200, 1000, 750}, {1600, 1200, 320, 240} };
+    static const rubraview_resample_filter_t FILTERS[2] = { RUBRAVIEW_FILTER_BICUBIC, RUBRAVIEW_FILTER_LANCZOS3 };
+    for (size_t k = 0; k < sizeof(SIZES) / sizeof(SIZES[0]); ++k) {
+        for (int f = 0; f < 2; ++f) {
+            proven_arena_t a = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = cap });
+            rubraview_pixbuf_t src = rubraview_pixbuf_create(&a, SIZES[k].sw, SIZES[k].sh, RUBRAVIEW_PIXFMT_RGBA8);
+            rubraview_pixbuf_t cpu = rubraview_pixbuf_create(&a, SIZES[k].dw, SIZES[k].dh, RUBRAVIEW_PIXFMT_RGBA8);
+            rubraview_pixbuf_t gpu = rubraview_pixbuf_create(&a, SIZES[k].dw, SIZES[k].dh, RUBRAVIEW_PIXFMT_RGBA8);
+            if (!rubraview_pixbuf_is_valid(&src) || !rubraview_pixbuf_is_valid(&cpu) || !rubraview_pixbuf_is_valid(&gpu)) break;
+            unsigned seed = 11;
+            for (int32_t y = 0; y < src.height; ++y)
+                for (int32_t x = 0; x < src.width; ++x) {
+                    uint8_t *p = src.pixels + (ptrdiff_t)y * src.stride + x * 4;
+                    seed = seed * 1103515245u + 12345u;
+                    int noise = (int)((seed >> 16) & 15) - 8;
+                    bool edge = ((x / 97) + (y / 61)) % 2 == 0;
+                    int v[3] = { x * 255 / src.width, y * 255 / src.height, 128 + (int)(100.0 * sin(x * 0.02 + y * 0.01)) };
+                    for (int c = 0; c < 3; ++c) { int t = v[c] + noise + (edge ? 40 : 0); p[c] = (uint8_t)(t < 0 ? 0 : t > 255 ? 255 : t); }
+                    p[3] = 255;
+                }
+            double t0 = rubraview_pal_time_now_seconds();
+            rubraview_resample_band(&src, &cpu, FILTERS[f], 0, cpu.height);
+            double t1 = rubraview_pal_time_now_seconds();
+            bool ok = rubraview_resample_try_accel(&src, &gpu, FILTERS[f]);
+            double t2 = rubraview_pal_time_now_seconds();
+            size_t n = (size_t)cpu.stride * (size_t)cpu.height, changed = 0;
+            int worst = 0;
+            for (size_t i = 0; ok && i < n; ++i) {
+                int d = abs((int)cpu.pixels[i] - (int)gpu.pixels[i]);
+                if (d) changed++;
+                if (d > worst) worst = d;
+            }
+            snprintf(line, sizeof(line), "gpu resize %s %dx%d -> %dx%d: %s; cpu %.3f s, card %.3f s; max diff %d, %.4f%% of bytes differ",
+                     f ? "lanczos3" : "bicubic", SIZES[k].sw, SIZES[k].sh, SIZES[k].dw, SIZES[k].dh,
+                     ok ? "done on the card" : "the card refused (CPU would do it)", t1 - t0, t2 - t1, worst,
+                     n ? 100.0 * (double)changed / (double)n : 0.0);
+            console_line(line);
+        }
+    }
+    free(memory);
+    rubraview_pal_gpu_resample_stop();
+}
+
 static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
     (void)arena;
     char line[512];
@@ -8750,6 +8850,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             }
 
             if (cli.probe_gpu) {
+                probe_gpu_resize();   /* D-38 first: it needs no file */
                 int code = probe_gpu_file(&arena, cli.input);
                 free(memory);
                 CoUninitialize();
@@ -9288,6 +9389,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     picker_thumbs_free(&app);
     rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
+    rubraview_pal_gpu_resample_stop();       /* D-38 */
     app.thumbs = NULL;
     if (app.jobs) {
         proven_job_system_close(app.jobs);

@@ -110,6 +110,12 @@ static const char *const PARTS[] = {
 "  toggle display.color_management \"Use embedded ICC profiles\" = true\n"
 "  choice display.accent           \"Accent colour\"           crimson | cobalt | emerald | amber | teal | purple = crimson\n"
 "  info   \"Graphics\"                {gpu.adapter}\n"
+"  section \"Resizing (export and batch)\"\n"
+"  choice display.gpu_resize       \"Resize on the graphics card\" off | on | always = on wired\n"
+"  note   \"on: bicubic and Lanczos resizes of a megapixel or more go to the\"\n"
+"  note   \"card when it can run compute shaders; the CPU otherwise.\"\n"
+"  note   \"always: every such resize, in software when there is no card\"\n"
+"  note   \"(for testing). The result matches the CPU's to within one level.\"\n"
 "\n",
 "page cache \"Cache\"\n"
 "  section \"Memory\"\n"
