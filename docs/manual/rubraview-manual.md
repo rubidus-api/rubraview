@@ -51,8 +51,9 @@ actual size, `4`, each keeps its own pixels).
 
 A picture too large for the graphics card — tens of thousands of pixels a
 side, or over 128 megapixels — opens reduced; the status line says
-"shown reduced" and still gives its real size. Zooming in on it past
-the reduced size shows it magnified rather than sharper. Every key is in **Keys** at the
+"shown reduced" and still gives its real size. Zoom in, and the part on
+screen is read again from the file at full detail: it sharpens a moment
+after, tile by tile, and so does whatever you move to. Every key is in **Keys** at the
 end of this manual.
 
 Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
