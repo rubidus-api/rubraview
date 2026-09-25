@@ -4,11 +4,13 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
+#include <ole2.h>
 #include <windowsx.h>
 #include <imm.h>
 #include <dwmapi.h>
 #include <string.h>
 #include "rubraview/pal/pal_window.h"
+#include "rubraview/path.h"
 
 #define RUBRAVIEW_WINDOW_CLASS L"Rubraview_MainWindow_Class"
 #define EVENT_QUEUE_CAPACITY 128
@@ -57,6 +59,8 @@ struct rubraview_window {
        The event carries pointers into this, so it has to outlive the
        message that filled it. */
     char drop_storage[16][1024];
+    struct rv_drop_target *drop_target;   /* §3.19.2: the OLE drop target, when registered */
+    unsigned drop_serial;                 /* one temporary folder per drop of virtual files */
 
     rubraview_window_event_t queue[EVENT_QUEUE_CAPACITY];
     size_t queue_head;
@@ -686,8 +690,243 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     return w;
 }
 
+
+/* ---- §3.19.2 OLE drop target ----
+ *
+ * WM_DROPFILES only hears files that exist on disk. A browser's picture, a
+ * mail attachment, a file dragged out of some archive managers exists only
+ * as a stream the source hands over on request (FileGroupDescriptorW +
+ * FileContents). The drop target takes both: CF_HDROP gives paths as
+ * before; virtual files are written to a folder of this process under
+ * %TEMP% and opened from there, and that folder is removed when the
+ * window goes. Nothing is ever moved: the effect offered back is copy (or
+ * link), so the source keeps its file.
+ */
+
+#define DROP_MAX_BYTES (1024ull * 1024ull * 1024ull)   /* a virtual file over 1 GB is not written */
+
+typedef struct rv_drop_target {
+    IDropTarget iface;
+    LONG refs;
+    struct rubraview_window *window;
+    DWORD effect;   /* what DragEnter found this data could be */
+} rv_drop_target_t;
+
+static UINT cf_file_descriptor(void) {
+    static UINT cf = 0;
+    if (!cf) cf = RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW);
+    return cf;
+}
+
+static UINT cf_file_contents(void) {
+    static UINT cf = 0;
+    if (!cf) cf = RegisterClipboardFormatW(CFSTR_FILECONTENTS);
+    return cf;
+}
+
+static bool data_has(IDataObject *data, UINT format, DWORD tymed) {
+    FORMATETC fe = { (CLIPFORMAT)format, NULL, DVASPECT_CONTENT, -1, tymed };
+    return data && data->lpVtbl->QueryGetData(data, &fe) == S_OK;
+}
+
+static DWORD drop_effect_for(IDataObject *data, DWORD allowed) {
+    bool usable = data_has(data, CF_HDROP, TYMED_HGLOBAL) ||
+                  (data_has(data, cf_file_descriptor(), TYMED_HGLOBAL));
+    if (!usable) return DROPEFFECT_NONE;
+    if (allowed & DROPEFFECT_COPY) return DROPEFFECT_COPY;
+    if (allowed & DROPEFFECT_LINK) return DROPEFFECT_LINK;
+    return DROPEFFECT_NONE;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_query_interface(IDropTarget *self, REFIID riid, void **out) {
+    if (!out) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropTarget)) {
+        *out = self;
+        self->lpVtbl->AddRef(self);
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE dt_add_ref(IDropTarget *self) {
+    return (ULONG)InterlockedIncrement(&((rv_drop_target_t*)self)->refs);
+}
+
+static ULONG STDMETHODCALLTYPE dt_release(IDropTarget *self) {
+    LONG left = InterlockedDecrement(&((rv_drop_target_t*)self)->refs);
+    if (left == 0) free(self);
+    return (ULONG)left;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_drag_enter(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys; (void)pt;
+    rv_drop_target_t *t = (rv_drop_target_t*)self;
+    t->effect = drop_effect_for(data, effect ? *effect : 0);
+    if (effect) *effect = t->effect;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_drag_over(IDropTarget *self, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys; (void)pt;
+    rv_drop_target_t *t = (rv_drop_target_t*)self;
+    if (effect) *effect = (t->effect & *effect) ? t->effect : DROPEFFECT_NONE;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_drag_leave(IDropTarget *self) {
+    ((rv_drop_target_t*)self)->effect = DROPEFFECT_NONE;
+    return S_OK;
+}
+
+/* Adds one UTF-8 path to the event, into the window's storage. */
+static void drop_event_add_wide(struct rubraview_window *w, rubraview_window_event_t *event, const WCHAR *wide) {
+    if (event->drop.count >= 16) return;
+    int written = WideCharToMultiByte(CP_UTF8, 0, wide, -1, w->drop_storage[event->drop.count],
+                                      (int)sizeof(w->drop_storage[0]), NULL, NULL);
+    if (written <= 1) return;
+    event->drop.paths[event->drop.count] = w->drop_storage[event->drop.count];
+    event->drop.path_lengths[event->drop.count] = (size_t)(written - 1);
+    event->drop.count++;
+}
+
+static void drop_take_hdrop(struct rubraview_window *w, IDataObject *data, rubraview_window_event_t *event) {
+    FORMATETC fe = { CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM medium = {0};
+    if (data->lpVtbl->GetData(data, &fe, &medium) != S_OK) return;
+    HDROP drop = (HDROP)medium.hGlobal;
+    UINT dropped = DragQueryFileW(drop, 0xFFFFFFFFu, NULL, 0);
+    for (UINT i = 0; i < dropped && event->drop.count < 16; ++i) {
+        WCHAR wide[MAX_PATH * 2];
+        if (DragQueryFileW(drop, i, wide, (UINT)(sizeof(wide) / sizeof(wide[0]))) == 0) continue;
+        drop_event_add_wide(w, event, wide);
+    }
+    ReleaseStgMedium(&medium);
+}
+
+/* %TEMP%\rubraview-drop-<pid>, this process's own. */
+static bool drop_root(WCHAR *out, size_t cap) {
+    WCHAR temp[MAX_PATH];
+    DWORD n = GetTempPathW(MAX_PATH, temp);
+    if (n == 0 || n >= MAX_PATH) return false;
+    int written = _snwprintf(out, cap, L"%lsrubraview-drop-%lu", temp, (unsigned long)GetCurrentProcessId());
+    return written > 0 && (size_t)written < cap;
+}
+
+/* Writes one virtual file's contents to `path`; false leaves nothing behind. */
+static bool drop_write_contents(IDataObject *data, LONG index, const WCHAR *path) {
+    FORMATETC fe = { (CLIPFORMAT)cf_file_contents(), NULL, DVASPECT_CONTENT, index, TYMED_ISTREAM | TYMED_HGLOBAL };
+    STGMEDIUM medium = {0};
+    if (data->lpVtbl->GetData(data, &fe, &medium) != S_OK) return false;
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    bool ok = file != INVALID_HANDLE_VALUE;
+    unsigned long long total = 0;
+    if (ok && medium.tymed == TYMED_ISTREAM && medium.pstm) {
+        static BYTE chunk[64 * 1024];
+        for (;;) {
+            ULONG got = 0;
+            HRESULT hr = medium.pstm->lpVtbl->Read(medium.pstm, chunk, sizeof(chunk), &got);
+            if (got > 0) {
+                DWORD put = 0;
+                total += got;
+                if (total > DROP_MAX_BYTES || !WriteFile(file, chunk, got, &put, NULL) || put != got) { ok = false; break; }
+            }
+            if (hr != S_OK || got == 0) { ok = SUCCEEDED(hr) && ok; break; }
+        }
+    } else if (ok && medium.tymed == TYMED_HGLOBAL && medium.hGlobal) {
+        SIZE_T size = GlobalSize(medium.hGlobal);
+        void *bytes = GlobalLock(medium.hGlobal);
+        DWORD put = 0;
+        ok = bytes && size <= DROP_MAX_BYTES && WriteFile(file, bytes, (DWORD)size, &put, NULL) && put == size;
+        if (bytes) GlobalUnlock(medium.hGlobal);
+    } else {
+        ok = false;
+    }
+    if (file != INVALID_HANDLE_VALUE) {
+        CloseHandle(file);
+        if (!ok) DeleteFileW(path);
+    }
+    ReleaseStgMedium(&medium);
+    return ok;
+}
+
+static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rubraview_window_event_t *event) {
+    FORMATETC fe = { (CLIPFORMAT)cf_file_descriptor(), NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM medium = {0};
+    if (data->lpVtbl->GetData(data, &fe, &medium) != S_OK) return;
+    FILEGROUPDESCRIPTORW *group = (FILEGROUPDESCRIPTORW*)GlobalLock(medium.hGlobal);
+    WCHAR root[MAX_PATH], folder[MAX_PATH];
+    if (group && drop_root(root, MAX_PATH)) {
+        /* A folder per drop, so two pictures both called image.jpg stay two. */
+        w->drop_serial++;
+        int n = _snwprintf(folder, MAX_PATH, L"%ls\\%u", root, w->drop_serial);
+        if (n > 0 && n < MAX_PATH) {
+            CreateDirectoryW(root, NULL);
+            CreateDirectoryW(folder, NULL);
+            for (UINT i = 0; i < group->cItems && event->drop.count < 16; ++i) {
+                const FILEDESCRIPTORW *fd = &group->fgd[i];
+                if ((fd->dwFlags & FD_ATTRIBUTES) && (fd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                char raw[MAX_PATH * 4], safe[240];
+                int len = WideCharToMultiByte(CP_UTF8, 0, fd->cFileName, -1, raw, (int)sizeof(raw), NULL, NULL);
+                if (len <= 1) continue;
+                u8str_t name = rubraview_path_safe_name(safe, sizeof(safe), (u8str_t){ .ptr = raw, .len = (size_t)(len - 1) });
+                WCHAR wide_name[MAX_PATH], path[MAX_PATH * 2];
+                if (MultiByteToWideChar(CP_UTF8, 0, name.ptr, -1, wide_name, MAX_PATH) <= 0) continue;
+                int m = _snwprintf(path, MAX_PATH * 2, L"%ls\\%ls", folder, wide_name);
+                if (m <= 0 || m >= MAX_PATH * 2) continue;
+                if (drop_write_contents(data, (LONG)i, path)) drop_event_add_wide(w, event, path);
+            }
+        }
+    }
+    if (group) GlobalUnlock(medium.hGlobal);
+    ReleaseStgMedium(&medium);
+}
+
+static HRESULT STDMETHODCALLTYPE dt_drop(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
+    (void)keys; (void)pt;
+    rv_drop_target_t *t = (rv_drop_target_t*)self;
+    DWORD chosen = drop_effect_for(data, effect ? *effect : 0);
+    if (effect) *effect = chosen;
+    if (chosen == DROPEFFECT_NONE || !t->window) return S_OK;
+
+    rubraview_window_event_t event = { .kind = RUBRAVIEW_WINDOW_EVENT_DROP };
+    /* Real files first: a source that offers both (Explorer does) means them. */
+    if (data_has(data, CF_HDROP, TYMED_HGLOBAL)) drop_take_hdrop(t->window, data, &event);
+    if (event.drop.count == 0 && data_has(data, cf_file_descriptor(), TYMED_HGLOBAL)) {
+        drop_take_virtual(t->window, data, &event);
+    }
+    if (event.drop.count > 0) queue_push(t->window, event);
+    else if (effect) *effect = DROPEFFECT_NONE;
+    return S_OK;
+}
+
+static IDropTargetVtbl g_drop_target_vtbl = {
+    dt_query_interface, dt_add_ref, dt_release, dt_drag_enter, dt_drag_over, dt_drag_leave, dt_drop,
+};
+
+/* Removes this process's folder of dropped virtual files. */
+static void drop_remove_temp(void) {
+    WCHAR root[MAX_PATH + 2];
+    if (!drop_root(root, MAX_PATH)) return;
+    size_t n = wcslen(root);
+    root[n + 1] = L'\0';   /* SHFileOperation wants a double terminator */
+    if (GetFileAttributesW(root) == INVALID_FILE_ATTRIBUTES) return;
+    SHFILEOPSTRUCTW op = {0};
+    op.wFunc = FO_DELETE;
+    op.pFrom = root;
+    op.fFlags = FOF_NO_UI;
+    SHFileOperationW(&op);
+}
+
 void rubraview_pal_window_destroy(rubraview_window_t *window) {
     if (!window || !window->hwnd) return;
+    if (window->drop_target) {
+        RevokeDragDrop(window->hwnd);            /* OLE gives back its reference */
+        window->drop_target->window = NULL;
+        window->drop_target->iface.lpVtbl->Release(&window->drop_target->iface);
+        window->drop_target = NULL;
+        drop_remove_temp();
+    }
     DestroyWindow(window->hwnd);
     window->hwnd = NULL;
     /* The struct itself belongs to the caller's arena. */
@@ -916,7 +1155,33 @@ void rubraview_pal_window_text_input(rubraview_window_t *window, bool on) {
 
 void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept) {
     if (!window || !window->hwnd) return;
-    DragAcceptFiles(window->hwnd, accept ? TRUE : FALSE);
+    if (!accept) {
+        if (window->drop_target) {
+            RevokeDragDrop(window->hwnd);
+            window->drop_target->window = NULL;
+            window->drop_target->iface.lpVtbl->Release(&window->drop_target->iface);
+            window->drop_target = NULL;
+        }
+        DragAcceptFiles(window->hwnd, FALSE);
+        return;
+    }
+    if (window->drop_target) return;
+    /* §3.19.2: OLE's drop target hears browsers and archive managers as
+       well as Explorer. It needs OLE on this thread (the main thread's
+       apartment is already single-threaded, so this only adds OLE). When
+       it cannot be had, WM_DROPFILES still takes files from Explorer. */
+    rv_drop_target_t *t = (rv_drop_target_t*)calloc(1, sizeof(*t));
+    if (t && SUCCEEDED(OleInitialize(NULL))) {
+        t->iface.lpVtbl = &g_drop_target_vtbl;
+        t->refs = 1;
+        t->window = window;
+        if (SUCCEEDED(RegisterDragDrop(window->hwnd, &t->iface))) {
+            window->drop_target = t;
+            return;
+        }
+    }
+    free(t);
+    DragAcceptFiles(window->hwnd, TRUE);
 }
 
 /* ---- §3.19.3 file associations ---- */
