@@ -205,6 +205,13 @@ bool rubraview_edit_curve_remove(rubraview_edit_session_t *session, int32_t inde
     return true;
 }
 
+void rubraview_edit_cycle_channel(rubraview_edit_session_t *session, int step) {
+    if (!session) return;
+    int n = (int)RUBRAVIEW_EDIT_CHANNEL_LUMA + 1;
+    int c = ((int)session->active_channel + step % n + n) % n;
+    session->active_channel = (rubraview_edit_channel_t)c;
+}
+
 /* ---- crop ---- */
 
 double rubraview_crop_ratio_value(rubraview_crop_ratio_t ratio, int32_t image_width, int32_t image_height) {
