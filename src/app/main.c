@@ -2767,6 +2767,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "sound %.*s", (int)text.len, text.ptr);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
+    } else if (rubraview_u8_eq_lit(action, "debug_lose_device")) {
+        /* A test's trigger (RV-062): the next frame acts as if the graphics
+           device had been lost. Bound by no default key. */
+        rubraview_pal_render_force_lost(app->renderer);
     } else if (app->media && rubraview_u8_eq_lit(action, "toggle_subtitles")) {
         /* D-33: from the menu or a key; the Sub tile's taps come through
            sub_tile_result, which also tells a double tap from a single. */
@@ -5261,6 +5265,7 @@ static void panel_relayout(app_state_t *app) {
 
 static void edit_preview_close(app_state_t *app);
 static void edit_preview_open(app_state_t *app);
+static void media_reopen_on_new_device(app_state_t *app);
 
 static void panel_close(app_state_t *app) {
     edit_preview_close(app);
@@ -7033,7 +7038,33 @@ static void render_frame(app_state_t *app) {
 
     if (!rubraview_pal_render_end(app->renderer)) {
         unload_all_pages(app);
+        media_reopen_on_new_device(app);
     }
+}
+
+/* RV-062: after a lost graphics device, a film decoded on the card is
+   opened again, where it was, paused or not, on the same tracks: its
+   decoder lived on the lost card and would hand over no more frames.
+   Software-decoded films and sound are not bound to the device and are
+   left alone (reopening music would be a gap you can hear). */
+static void media_reopen_on_new_device(app_state_t *app) {
+    if (!app->media || !app->media_info.has_video || !app->media_info.hardware_decode) return;
+    double position = app->media_position;
+    bool paused = app->media_paused;
+    int32_t subtitle = app->tracks.current_subtitle;
+    int32_t audio = app->tracks.current_audio;
+    media_close(app);
+    media_prepare(app);
+    if (!app->media) return;
+    if (audio >= 0 && audio != app->tracks.current_audio && (size_t)audio < app->tracks.count &&
+        app->tracks.tracks[audio].kind == RUBRAVIEW_TRACK_AUDIO &&
+        rubraview_pal_media_select_audio_track(app->media, app->tracks.tracks[audio].stream_index)) {
+        app->tracks.current_audio = audio;
+    }
+    if (subtitle != app->tracks.current_subtitle) subtitle_select(app, subtitle);
+    media_seek_to(app, position);
+    app->media_position = position;
+    if (paused != app->media_paused) media_toggle_pause(app);
 }
 
 /* ---- per-frame timers ---- */
