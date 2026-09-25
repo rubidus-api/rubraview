@@ -33,6 +33,7 @@ the tools' five-second calls land while it plays.
 | # | Result |
 |---|---|
 | 2 | PASS (synthetic loss): position 05.500 → 05.542 → … → 06.125 after the trigger, no restart and no pause; `한국어 자막` (the second track) still shown; two photographs 1.5 s apart show different frames. |
+| 2, again | PASS: after the change that also remakes the other textures, the trigger with the film at its end brought up "the graphics device was reset: the film was opened again" — the reopen path ran — and the film stayed paused at 10.0 s. With the adjust panel open and Exposure raised, the brightened preview and its histogram were drawn again after the trigger; the viewer kept answering. |
 | 3 | NOT RUN: a real device loss cannot be caused on the VM; the synthetic one does not remove the decoder's device, so the fresh-device half is not exercised here. |
 
 A false start: a keymap.ini holding only the trigger line removed every

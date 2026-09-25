@@ -7037,7 +7037,32 @@ static void render_frame(app_state_t *app) {
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
+        /* Every texture made on the lost device is dead, not only the
+           pages': drawing one would fail the next frame too. Each of these
+           is made again on demand. */
         unload_all_pages(app);
+        if (app->picker_thumbs) {
+            picker_thumbs_free(app);
+            app->picker_generation++;   /* the picker asks for its tiles again */
+            if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
+            if (app->picker_open) {
+                app->picker_thumbs = (struct picker_thumb *)calloc(app->picker_listing.count ? app->picker_listing.count : 1,
+                                                                   sizeof(*app->picker_thumbs));
+                app->picker_thumb_count = app->picker_thumbs ? app->picker_listing.count : 0;
+            }
+        }
+        if (app->edit_preview) {
+            rubraview_pal_texture_destroy(app->edit_preview);
+            app->edit_preview = NULL;
+            app->edit_shown_valid = false;   /* the next pass uploads it again */
+        }
+        if (app->vobsub_texture) { rubraview_pal_texture_destroy(app->vobsub_texture); app->vobsub_texture = NULL; app->vobsub_texture_cue = -1; }
+        if (app->pgs_texture) { rubraview_pal_texture_destroy(app->pgs_texture); app->pgs_texture = NULL; app->pgs_texture_cue = -1; }
+        if (app->music_backdrop) {
+            rubraview_pal_texture_destroy(app->music_backdrop);
+            app->music_backdrop = NULL;
+            if (app->music_tags_read) music_make_backdrop(app, &app->music_tags);
+        }
         media_reopen_on_new_device(app);
     }
 }
@@ -7065,6 +7090,7 @@ static void media_reopen_on_new_device(app_state_t *app) {
     media_seek_to(app, position);
     app->media_position = position;
     if (paused != app->media_paused) media_toggle_pause(app);
+    osd_say(app, U8("the graphics device was reset: the film was opened again"));
 }
 
 /* ---- per-frame timers ---- */
