@@ -93,6 +93,19 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- Save a copy wrote a picture of about four megapixels or more unedited
+  (T093): its memory ran out after reading the page and the untouched
+  page was written in its place. The save now takes memory sized to the
+  picture, and says on screen whether it saved; it writes nothing rather
+  than a wrong copy.
+
+- The curve box had no way to pick the Red, Green, Blue or Luma curve.
+  Its corner label is now a button: click for the next, right-click for
+  the one before.
+
+- A notice raised by something slow, such as a save, was used up before
+  it was drawn.
+
 - A film decoded on the graphics card keeps playing after the card is
   reset or the PC wakes from sleep: it is opened again where it was, on the
   same tracks (RV-062), and says so. Before, its picture froze until it was

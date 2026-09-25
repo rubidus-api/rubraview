@@ -228,6 +228,28 @@ int main(void) {
     }
     printf("  [PASS] The preview is bounded by the view, never magnified, and follows the crop\n");
 
+    /* The curve's channel label is a button: forward on a click, back on
+       a right click, round the five and back to RGB on a reset. Each
+       channel keeps its own curve. */
+    {
+        rubraview_edit_session_t s = rubraview_edit_begin(100, 100);
+        assert(s.active_channel == RUBRAVIEW_EDIT_CHANNEL_RGB);
+        rubraview_edit_cycle_channel(&s, 1);
+        assert(s.active_channel == RUBRAVIEW_EDIT_CHANNEL_RED);
+        int32_t i = rubraview_edit_curve_grab(&s, 128.0f, 200.0f, 4.0f);
+        assert(i == 1 && s.curves[RUBRAVIEW_EDIT_CHANNEL_RED].point_count == 3);
+        assert(s.curves[RUBRAVIEW_EDIT_CHANNEL_RGB].point_count == 2);
+        for (int k = 0; k < 5; ++k) rubraview_edit_cycle_channel(&s, 1);
+        assert(s.active_channel == RUBRAVIEW_EDIT_CHANNEL_RED);   /* five steps: round once */
+        rubraview_edit_cycle_channel(&s, -1);
+        rubraview_edit_cycle_channel(&s, -1);
+        assert(s.active_channel == RUBRAVIEW_EDIT_CHANNEL_LUMA);
+        rubraview_edit_reset(&s);
+        assert(s.active_channel == RUBRAVIEW_EDIT_CHANNEL_RGB);
+        assert(s.curves[RUBRAVIEW_EDIT_CHANNEL_RED].point_count == 2);
+    }
+    printf("  [PASS] The channel label cycles the five curves, each kept apart\n");
+
     free(raw);
     printf("[test_edit] All tests passed successfully!\n");
     return 0;

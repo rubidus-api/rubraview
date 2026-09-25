@@ -71,8 +71,12 @@ through its pages, and opens an `.ico` at its largest layer.
 ## Adjusting a picture
 
 `E` opens the adjust panel. Drag a slider, and the picture follows.
+The curve box shows the picture's histogram behind the curve; its
+corner button (**RGB >**) picks which curve you edit — click for the
+next of RGB, Red, Green, Blue and Luma, right-click for the one before.
 Nothing is written until you press **Save a copy**, which writes
-`<name>_edit.<ext>` beside the original and leaves the original alone.
+`<name>_edit.<ext>` beside the original and leaves the original alone;
+a line at the top says whether it was saved.
 
 `Ctrl+E` opens Export: pick a format and a quality, tick **Privacy
 clean** to strip GPS and camera details, and press Export.

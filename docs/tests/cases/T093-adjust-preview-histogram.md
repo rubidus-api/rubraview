@@ -32,4 +32,7 @@ the saved copy, although the manual said it followed the sliders.
 |---|---|
 | 1 | PASS: `scene.jpg` (a Windows wallpaper, 3840x2400): a dark peak with a long tail behind the curve. |
 | 2 | PASS: on the test pattern `photo.jpg`, Exposure dragged right brightened blue and red at once; on `scene.jpg`, dragged left, the picture darkened and the histogram crowded to the left. |
-| 3, 4, 5, 6 | NOT RUN. |
+| 3 | FAIL, then PASS: there was no way to pick a channel (`active_channel` was never set after the session began). The label is now a button (`rubraview_edit_cycle_channel`, host-tested in test_edit); a click showed "Red >" and a red histogram. |
+| 4 | PASS: the Red curve lifted turned the page magenta as it was dragged; Reset brought back "RGB >", the grey histogram and the page as at step 1. |
+| 5 | FAIL, then PASS: on the 3840x2400 page the copy came out unedited — the red values of `scenep_edit.png` (a PNG, so lossless) equalled the source's at every level. The commit's first copy did not fit in the 64 MB app arena left after decoding, and the save wrote the decoded page instead. With memory sized to the picture: red mapped one-to-one (128→208, 30→52), green and blue unchanged, 3840x2400, the same means as the preview's; an Exposure save came out brighter. The notice "saved a copy beside the page" shows (it had been spent while the save held the frame). Crop not tried. |
+| 6 | PASS: Save a copy closes the panel; the page is drawn as it was. |

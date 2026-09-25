@@ -5392,15 +5392,45 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
         return;
     }
 
-    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(app->arena, source, NULL, 0, true);
-    if (!rubraview_pixbuf_is_valid(&pixels)) return;
+    /* The pixels get memory of their own, sized to the picture: the app
+       arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
+       commit's first copy used to fail there — which wrote the page
+       unedited, as if the edit had been saved (T093). */
+    int32_t w = app->pages[page].width, h = app->pages[page].height;
+    if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
+    if (w <= 0 || h <= 0) { osd_say(app, U8("not saved: the page is not read yet")); return; }
+    size_t src_bytes = (size_t)w * (size_t)h * 4u;
+    size_t out_bytes = src_bytes;
+    if (apply_edit && app->edit.resize_width > 0 && app->edit.resize_height > 0) {
+        size_t r = (size_t)app->edit.resize_width * (size_t)app->edit.resize_height * 4u;
+        if (r > out_bytes) out_bytes = r;
+    }
+    /* decode and its conversion, then the commit's clone, blur and sharpen
+       (each a copy plus a row buffer's worth), then the resize */
+    size_t need = src_bytes * 8u + out_bytes * 2u + (16u << 20);
+    void *work_mem = malloc(need);
+    if (!work_mem) { osd_say(app, U8("not saved: not enough memory for this picture")); return; }
+    proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = need });
 
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, NULL, 0, true);
+    if (!rubraview_pixbuf_is_valid(&pixels)) {
+        free(work_mem);
+        osd_say(app, U8("not saved: the picture could not be read"));
+        return;
+    }
     if (apply_edit) {
-        rubraview_pixbuf_t edited = rubraview_edit_commit(app->arena, &app->edit, &pixels);
-        if (rubraview_pixbuf_is_valid(&edited)) pixels = edited;
+        rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &app->edit, &pixels);
+        if (!rubraview_pixbuf_is_valid(&edited)) {
+            free(work_mem);
+            osd_say(app, U8("not saved: the edit could not be applied"));
+            return;
+        }
+        pixels = edited;
     }
     if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
-    rubraview_pal_image_save(out_path, &pixels, &options);
+    bool saved = rubraview_pal_image_save(out_path, &pixels, &options);
+    free(work_mem);
+    osd_say(app, saved ? U8("saved a copy beside the page") : U8("not saved: the file could not be written"));
 }
 
 /* Turns a panel row back into the thing it stands for. Keeping this in
@@ -6923,6 +6953,11 @@ static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
     return (rubraview_pal_rect_t){ x, y, side, side };
 }
 
+/* The channel button in the curve box's top-left corner. */
+static rubraview_pal_rect_t curve_channel_rect(rubraview_pal_rect_t box, double dpi) {
+    return (rubraview_pal_rect_t){ box.x + 3.0 * dpi, box.y + 3.0 * dpi, 58.0 * dpi, 20.0 * dpi };
+}
+
 static void draw_curve_widget(app_state_t *app) {
     rubraview_pal_rect_t box = curve_widget_rect(app);
     if (box.width <= 0.0) return;
@@ -6961,8 +6996,13 @@ static void draw_curve_widget(app_state_t *app) {
             (rubraview_pal_rect_t){ px - grip * 0.5, py - grip * 0.5, grip, grip }, 0xFFFFD000u, 0.0);
     }
 
-    static const char *const CHANNEL_NAMES[5] = { "RGB", "Red", "Green", "Blue", "Luma" };
-    rubraview_pal_rect_t label = { box.x + 6.0 * dpi, box.y + 4.0 * dpi, box.width - 12.0 * dpi, 18.0 * dpi };
+    /* The label is the channel button: a click steps forward, a right
+       click back (T093). */
+    static const char *const CHANNEL_NAMES[5] = { "RGB >", "Red >", "Green >", "Blue >", "Luma >" };
+    rubraview_pal_rect_t tab = curve_channel_rect(box, dpi);
+    rubraview_pal_render_fill_rect(app->renderer, tab, 0xC0202020u, 3.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, tab, 0x80FFFFFFu, 1.0, 3.0 * dpi);
+    rubraview_pal_rect_t label = { tab.x + 5.0 * dpi, tab.y + 2.0 * dpi, tab.width - 8.0 * dpi, tab.height - 4.0 * dpi };
     rubraview_pal_render_draw_text(app->renderer, cstr(CHANNEL_NAMES[app->edit.active_channel]),
                                    label, 12.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 }
@@ -6981,6 +7021,13 @@ static bool curve_widget_press(app_state_t *app, double px, double py, bool remo
     rubraview_pal_rect_t box = curve_widget_rect(app);
     if (box.width <= 0.0) return false;
     if (px < box.x || px > box.x + box.width || py < box.y || py > box.y + box.height) return false;
+
+    rubraview_pal_rect_t tab = curve_channel_rect(box, rubraview_pal_window_dpi_scale(app->window));
+    if (px >= tab.x && px <= tab.x + tab.width && py >= tab.y && py <= tab.y + tab.height) {
+        rubraview_edit_cycle_channel(&app->edit, remove ? -1 : 1);
+        app->curve_dragging = -1;
+        return true;
+    }
 
     float x = (float)((px - box.x) / box.width * 255.0);
     float y = (float)((1.0 - (py - box.y) / box.height) * 255.0);
@@ -7114,7 +7161,9 @@ static void tick_timers(app_state_t *app, double dt) {
     animation_tick(app, dt);
 
     if (app->notice_seconds > 0.0) {
-        app->notice_seconds -= dt;
+        /* A frame that waited on a long act (a save, a decode) must not
+           spend the notice that act just raised before it is drawn. */
+        app->notice_seconds -= dt > 0.25 ? 0.25 : dt;
         if (app->notice_seconds < 0.0) app->notice_seconds = 0.0;
     }
 

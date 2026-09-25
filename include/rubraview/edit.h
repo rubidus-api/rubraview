@@ -156,6 +156,10 @@ void rubraview_edit_curve_move(rubraview_edit_session_t *session, int32_t index,
 /** Remove an interior point. The endpoints are refused. */
 bool rubraview_edit_curve_remove(rubraview_edit_session_t *session, int32_t index);
 
+/** Step the channel the curve widget edits, `step` +1 forward or -1 back,
+ *  round RGB, Red, Green, Blue, Luma. Each channel keeps its own curve. */
+void rubraview_edit_cycle_channel(rubraview_edit_session_t *session, int step);
+
 /** Straight line from (0,0) to (255,255) — the identity curve. */
 void rubraview_edit_curve_reset(rubraview_edit_session_t *session, rubraview_edit_channel_t channel);
 
