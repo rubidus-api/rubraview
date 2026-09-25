@@ -11,7 +11,7 @@ LDFLAGS ?= -lm -lpthread
 
 SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq.c src/core/textedit.c src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
-            src/core/viewport.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
+            src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
             src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # miniz is third-party and does not build clean under this project's
@@ -107,6 +107,7 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_render_d2d.c \
                  src/pal/win32/pal_image_wic.c \
                  src/pal/win32/pal_thumbs_win32.c \
+                 src/pal/win32/pal_tiles_win32.c \
                  src/pal/win32/pal_gpu_resample_win32.c \
                  src/pal/win32/pal_file_dialog_win32.c \
                  src/pal/win32/pal_media_mf.c \
@@ -119,7 +120,7 @@ SRCS_APP = src/app/main.c
 
 TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_number build/tests/test_subbox build/tests/test_thumb build/tests/test_thumbq build/tests/test_textedit build/tests/test_sort \
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
-            build/tests/test_viewport build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
+            build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
             build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_browse build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 

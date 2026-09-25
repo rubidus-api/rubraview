@@ -11,6 +11,7 @@
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/viewport.h"
+#include "rubraview/pal/pal_image_wic_internal.h"
 
 /* A page's texture holds at most this many pixels (512 MB at four bytes
    each); a bigger picture is shown reduced, see finish_decode_frame. */
@@ -697,6 +698,85 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
                                                           bool apply_exif_orientation,
                                                           int32_t max_width, int32_t max_height) {
     return read_pixels_within(arena, path, data, size, apply_exif_orientation, max_width, max_height);
+}
+
+bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+                                bool apply_exif_orientation,
+                                int32_t x, int32_t y, int32_t w, int32_t h,
+                                int32_t out_w, int32_t out_h, uint8_t *dst, uint32_t stride) {
+    if (!factory || !data || size == 0 || size > UINT32_MAX || !dst || x < 0 || y < 0 ||
+        w <= 0 || h <= 0 || out_w <= 0 || out_h <= 0 ||
+        (uint64_t)stride < (uint64_t)out_w * 4u || (uint64_t)stride * (uint64_t)out_h > (uint64_t)UINT_MAX) {
+        return false;
+    }
+    bool ok = false;
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = NULL;
+    IWICBitmapFrameDecode *frame = NULL;
+    IWICBitmapFlipRotator *rotator = NULL;
+    IWICColorTransform *color_transform = NULL;
+    IWICBitmapClipper *clipper = NULL;
+    IWICBitmapScaler *scaler = NULL;
+    IWICFormatConverter *converter = NULL;
+
+    if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream ||
+        FAILED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size)) ||
+        FAILED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
+                                                          WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder ||
+        FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) {
+        goto done;
+    }
+
+    IWICBitmapSource *source = (IWICBitmapSource*)frame;
+    int32_t orientation = apply_exif_orientation ? read_orientation(frame) : 1;
+    if (orientation != 1) {
+        /* Not cached whole, as the page's decode does: a tile of a turned
+           picture is slower to read, but a huge one is never held. */
+        if (FAILED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) || !rotator ||
+            FAILED(IWICBitmapFlipRotator_Initialize(rotator, source, exif_to_transform(orientation)))) {
+            goto done;
+        }
+        source = (IWICBitmapSource*)rotator;
+    }
+    source = apply_color_management(factory, frame, source, &color_transform);
+
+    UINT sw = 0, sh = 0;
+    if (FAILED(IWICBitmapSource_GetSize(source, &sw, &sh)) ||
+        (uint64_t)x + (uint64_t)w > sw || (uint64_t)y + (uint64_t)h > sh) {
+        goto done;
+    }
+    WICRect rect = { .X = x, .Y = y, .Width = w, .Height = h };
+    if (FAILED(IWICImagingFactory_CreateBitmapClipper(factory, &clipper)) || !clipper ||
+        FAILED(IWICBitmapClipper_Initialize(clipper, source, &rect))) {
+        goto done;
+    }
+    source = (IWICBitmapSource*)clipper;
+    if (out_w != w || out_h != h) {
+        if (FAILED(IWICImagingFactory_CreateBitmapScaler(factory, &scaler)) || !scaler ||
+            FAILED(IWICBitmapScaler_Initialize(scaler, source, (UINT)out_w, (UINT)out_h,
+                                               WICBitmapInterpolationModeFant))) {
+            goto done;
+        }
+        source = (IWICBitmapSource*)scaler;
+    }
+    if (FAILED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) || !converter ||
+        FAILED(IWICFormatConverter_Initialize(converter, source, &GUID_WICPixelFormat32bppPBGRA,
+                                              WICBitmapDitherTypeNone, NULL, 0.0,
+                                              WICBitmapPaletteTypeMedianCut))) {
+        goto done;
+    }
+    ok = SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, stride, stride * (UINT)out_h, dst));
+
+done:
+    if (converter) IWICFormatConverter_Release(converter);
+    if (scaler) IWICBitmapScaler_Release(scaler);
+    if (clipper) IWICBitmapClipper_Release(clipper);
+    if (color_transform) IWICColorTransform_Release(color_transform);
+    if (rotator) IWICBitmapFlipRotator_Release(rotator);
+    if (frame) IWICBitmapFrameDecode_Release(frame);
+    if (decoder) IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
+    return ok;
 }
 
 static const GUID *container_for_format(rubraview_export_format_t format) {
