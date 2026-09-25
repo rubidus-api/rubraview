@@ -65,6 +65,16 @@ void rubraview_mat3x2_apply(rubraview_mat3x2_t m, double x, double y, double *ou
  */
 rubraview_mat3x2_t rubraview_viewport_matrix(double cx, double cy, double scale, double dx, double dy);
 
+/**
+ * The size a picture of `width` x `height` may be held at: no side over
+ * `max_side` (the graphics device's largest bitmap) and no more than
+ * `max_pixels` in all, the aspect kept, never enlarged and never below
+ * one pixel a side. Returns true when that is smaller than the picture —
+ * the page is then shown reduced (the very large picture's fall-back).
+ */
+bool rubraview_fit_within_limits(int32_t width, int32_t height, int32_t max_side, uint64_t max_pixels,
+                                 int32_t *out_width, int32_t *out_height);
+
 #ifdef __cplusplus
 }
 #endif

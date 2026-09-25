@@ -67,25 +67,61 @@ int main(void) {
     }
     printf("  [PASS] Dual spread places pages side by side separated by the gutter\n");
 
-    /* Test 3: Pages of unequal height are each centred vertically within
-       the spread. */
+    /* Test 3: A low-resolution page beside a high-resolution one is not
+       drawn small: both are brought to the taller page's height before
+       the pair is fitted, so a 400x600 scan beside an 800x1200 one shows
+       at the same size on screen. Each command says its own scale. */
     {
-        rubraview_page_size_t tall = { .width = 800, .height = 1200 };
-        rubraview_page_size_t short_page = { .width = 800, .height = 600 };
+        rubraview_page_size_t high = { .width = 800, .height = 1200 };
+        rubraview_page_size_t low = { .width = 400, .height = 600 };
         rubraview_spread_t spread = { .left_index = 0, .right_index = 1, .left_half = RUBRAVIEW_SPREAD_WHOLE };
 
-        rubraview_composition_t c = rubraview_compose_spread(&spread, &tall, &short_page, 1600, 1200,
-                                                             RUBRAVIEW_FIT_WINDOW, 0.0, 1.0, 0.0, 0.0);
+        rubraview_composition_t c = rubraview_compose_spread(&spread, &low, &high, 1616, 1200,
+                                                             RUBRAVIEW_FIT_WINDOW, 16.0, 1.0, 0.0, 0.0);
         assert(c.count == 2);
-        assert(approx(c.content_height, 1200)); /* the taller page sets the height */
+        assert(approx(c.content_height, 1200) && approx(c.content_width, 800 + 16 + 800));
+        assert(approx(c.scale, 1.0));
 
         double lx, ly, lw, lh, rx, ry, rw, rh;
         mapped_bounds(&c.commands[0], &lx, &ly, &lw, &lh);
         mapped_bounds(&c.commands[1], &rx, &ry, &rw, &rh);
-        assert(approx(ly, 0.0));    /* tall page fills the height */
-        assert(approx(ry, 300.0));  /* short page centred: (1200 - 600) / 2 */
+        assert(approx(lh, 1200.0) && approx(rh, 1200.0));   /* the same height on screen */
+        assert(approx(lw, 800.0) && approx(rw, 800.0));
+        assert(approx(ly, 0.0) && approx(ry, 0.0));
+        assert(approx(rx, 816.0));                          /* the gutter is kept */
+        assert(approx(c.commands[0].scale, 2.0));           /* the low page is magnified */
+        assert(approx(c.commands[1].scale, 1.0));
+
+        /* Mirrored, and under zoom, the rule holds. */
+        rubraview_composition_t m = rubraview_compose_spread(&spread, &high, &low, 1616, 1200,
+                                                             RUBRAVIEW_FIT_WINDOW, 16.0, 1.5, 0.0, 0.0);
+        mapped_bounds(&m.commands[0], &lx, &ly, &lw, &lh);
+        mapped_bounds(&m.commands[1], &rx, &ry, &rw, &rh);
+        assert(approx(lh, rh) && approx(lh, 1800.0));
+        assert(approx(m.commands[1].scale, 3.0));
     }
-    printf("  [PASS] Unequal page heights are each centred within the spread\n");
+    printf("  [PASS] A low-resolution page beside a high one is brought to the same height\n");
+
+    /* Test 3b: Actual size means each page's own pixels, so there the
+       smaller page stays smaller and is centred vertically. */
+    {
+        rubraview_page_size_t tall = { .width = 800, .height = 1200 };
+        rubraview_page_size_t short_page = { .width = 400, .height = 600 };
+        rubraview_spread_t spread = { .left_index = 0, .right_index = 1, .left_half = RUBRAVIEW_SPREAD_WHOLE };
+
+        rubraview_composition_t c = rubraview_compose_spread(&spread, &tall, &short_page, 1600, 1200,
+                                                             RUBRAVIEW_FIT_ACTUAL_SIZE, 0.0, 1.0, 0.0, 0.0);
+        assert(c.count == 2);
+        assert(approx(c.content_height, 1200));
+
+        double lx, ly, lw, lh, rx, ry, rw, rh;
+        mapped_bounds(&c.commands[0], &lx, &ly, &lw, &lh);
+        mapped_bounds(&c.commands[1], &rx, &ry, &rw, &rh);
+        assert(approx(lh, 1200.0) && approx(rh, 600.0));
+        assert(approx(ry - ly, 300.0));   /* centred: (1200 - 600) / 2 */
+        assert(approx(c.commands[1].scale, 1.0));
+    }
+    printf("  [PASS] At actual size each page keeps its own pixels, centred\n");
 
     /* Test 4: A split spread half draws only that half of the source. */
     {

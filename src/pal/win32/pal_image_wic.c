@@ -1,6 +1,8 @@
 #ifdef _WIN32
 #define COBJMACROS
 #include <stdarg.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <windows.h>
 #include <wincodec.h>
@@ -8,6 +10,11 @@
 #include <string.h>
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
+#include "rubraview/viewport.h"
+
+/* A page's texture holds at most this many pixels (512 MB at four bytes
+   each); a bigger picture is shown reduced, see finish_decode_frame. */
+#define PAGE_MAX_PIXELS ((uint64_t)128 << 20)
 
 /*
  * The imaging factory is created once and reused. The viewer is
@@ -258,24 +265,68 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
            photograph (see pal_render_d2d_internal.h). */
         UINT decoded_w = 0, decoded_h = 0;
         HRESULT size_hr = IWICFormatConverter_GetSize(converter, &decoded_w, &decoded_h);
+        if (SUCCEEDED(size_hr) && decoded_w > 0 && decoded_h > 0 &&
+            decoded_w <= INT32_MAX && decoded_h <= INT32_MAX) {
+            result.full_width = (int32_t)decoded_w;
+            result.full_height = (int32_t)decoded_h;
 
-        ID2D1Bitmap *bitmap = NULL;
-        hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource*)converter, NULL, &bitmap);
-        if (SUCCEEDED(hr) && bitmap && SUCCEEDED(size_hr) && decoded_w > 0 && decoded_h > 0) {
-            rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, bitmap,
-                                                                      (int32_t)decoded_w, (int32_t)decoded_h);
-            if (texture) {
-                rubraview_pal_texture_size(texture, &result.width, &result.height);
-                result.texture = texture;
-                result.ok = true;
-            } else {
-                ID2D1Bitmap_Release(bitmap);
+            /* The very large picture's fall-back. A bitmap over the
+               device's largest side, or past the pixel budget, cannot be
+               made at all — the page used to fail. It is decoded through
+               WIC's scaler to what fits instead, and when even that is
+               refused (the card's memory), at half again, a few times. */
+            int32_t tw = 0, th = 0;
+            UINT32 max_side = ID2D1RenderTarget_GetMaximumBitmapSize(rt);
+            rubraview_fit_within_limits(result.full_width, result.full_height,
+                                        max_side > 0 && max_side <= INT32_MAX ? (int32_t)max_side : 16384,
+                                        PAGE_MAX_PIXELS, &tw, &th);
+            for (int attempt = 0; attempt < 5 && tw > 0 && th > 0; ++attempt) {
+                bool reduce = tw != result.full_width || th != result.full_height;
+                IWICBitmapScaler *scaler = NULL;
+                IWICFormatConverter *scaled = NULL;
+                IWICBitmapSource *feed = (IWICBitmapSource*)converter;
+                if (reduce) {
+                    /* The scaler goes on the source and the conversion
+                       after it: a scaler's output format is its own
+                       choice, and PBGRA is what the bitmap must be. */
+                    if (FAILED(IWICImagingFactory_CreateBitmapScaler(factory, &scaler)) || !scaler) break;
+                    if (FAILED(IWICBitmapScaler_Initialize(scaler, source, (UINT)tw, (UINT)th,
+                                                           WICBitmapInterpolationModeFant)) ||
+                        FAILED(IWICImagingFactory_CreateFormatConverter(factory, &scaled)) || !scaled ||
+                        FAILED(IWICFormatConverter_Initialize(scaled, (IWICBitmapSource*)scaler,
+                                                              &GUID_WICPixelFormat32bppPBGRA,
+                                                              WICBitmapDitherTypeNone, NULL, 0.0,
+                                                              WICBitmapPaletteTypeMedianCut))) {
+                        if (scaled) IWICFormatConverter_Release(scaled);
+                        IWICBitmapScaler_Release(scaler);
+                        break;
+                    }
+                    feed = (IWICBitmapSource*)scaled;
+                }
+                ID2D1Bitmap *bitmap = NULL;
+                hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, feed, NULL, &bitmap);
+                if (scaled) IWICFormatConverter_Release(scaled);
+                if (scaler) IWICBitmapScaler_Release(scaler);
+                if (SUCCEEDED(hr) && bitmap) {
+                    rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, bitmap, tw, th);
+                    if (texture) {
+                        rubraview_pal_texture_size(texture, &result.width, &result.height);
+                        result.texture = texture;
+                        result.reduced = reduce;
+                        result.ok = true;
+                    } else {
+                        ID2D1Bitmap_Release(bitmap);
+                    }
+                    break;
+                }
+                /* A device that is gone will not take a smaller one either. */
+                if (hr == D2DERR_RECREATE_TARGET || tw <= 1024 || th <= 1) break;
+                tw /= 2;
+                th = th / 2 > 0 ? th / 2 : 1;
             }
-        } else if (bitmap) {
-            /* A bitmap whose size is unknown is worse than none: it
-               would be laid out against a number nobody measured. */
-            ID2D1Bitmap_Release(bitmap);
         }
+        /* A bitmap whose size is unknown is not made at all: it would be
+           laid out against a number nobody measured. */
     }
 
     IWICFormatConverter_Release(converter);
@@ -544,10 +595,9 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
 /* The viewing path never brings pixels to the CPU (§4.1.1). The editing
    workbench has to: its commit layer runs the core engine on a real
    buffer, not on a GPU texture. */
-rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
-                                                   u8str_t path,
-                                                   const uint8_t *data, size_t size,
-                                                   bool apply_exif_orientation) {
+static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, u8str_t path,
+                                             const uint8_t *data, size_t size,
+                                             bool apply_exif_orientation, int32_t max_w, int32_t max_h) {
     rubraview_pixbuf_t empty = {0};
     IWICImagingFactory *factory = wic_factory();
     if (!factory || !arena) return empty;
@@ -578,18 +628,51 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                  WICBitmapDitherTypeNone, NULL, 0.0,
                                                  WICBitmapPaletteTypeMedianCut))) {
         UINT w = 0, h = 0;
-        if (SUCCEEDED(IWICFormatConverter_GetSize(converter, &w, &h)) && w > 0 && h > 0) {
+        IWICBitmapSource *feed = (IWICBitmapSource*)converter;
+        IWICBitmapScaler *scaler = NULL;
+        IWICFormatConverter *scaled = NULL;
+        if (SUCCEEDED(IWICFormatConverter_GetSize(converter, &w, &h)) && w > 0 && h > 0 &&
+            w <= INT32_MAX && h <= INT32_MAX && max_w > 0 && max_h > 0 &&
+            (w > (UINT)max_w || h > (UINT)max_h)) {
+            /* Asked for no more than a box: WIC's scaler reads the source
+               a band at a time, so the full size is never held. */
+            double k = (double)max_w / (double)w;
+            if ((double)max_h / (double)h < k) k = (double)max_h / (double)h;
+            UINT sw = (UINT)((double)w * k), sh = (UINT)((double)h * k);
+            if (sw < 1) sw = 1;
+            if (sh < 1) sh = 1;
+            /* Scaler on the source, RGBA after it: a scaler picks its
+               own output format (BGRA here), which would swap red and
+               blue if it came last. */
+            if (SUCCEEDED(IWICImagingFactory_CreateBitmapScaler(factory, &scaler)) && scaler &&
+                SUCCEEDED(IWICBitmapScaler_Initialize(scaler, source, sw, sh, WICBitmapInterpolationModeFant)) &&
+                SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &scaled)) && scaled &&
+                SUCCEEDED(IWICFormatConverter_Initialize(scaled, (IWICBitmapSource*)scaler,
+                                                         &GUID_WICPixelFormat32bppRGBA,
+                                                         WICBitmapDitherTypeNone, NULL, 0.0,
+                                                         WICBitmapPaletteTypeMedianCut))) {
+                feed = (IWICBitmapSource*)scaled;
+                w = sw;
+                h = sh;
+            } else {
+                w = h = 0;
+            }
+        }
+        /* CopyPixels takes the buffer's size as a UINT. */
+        if (w > 0 && h > 0 && w <= INT32_MAX && h <= INT32_MAX &&
+            (uint64_t)w * 4u * (uint64_t)h <= (uint64_t)UINT_MAX) {
             rubraview_pixbuf_t pb = rubraview_pixbuf_create(arena, (int32_t)w, (int32_t)h,
                                                             RUBRAVIEW_PIXFMT_RGBA8);
             if (rubraview_pixbuf_is_valid(&pb)) {
                 UINT stride = (UINT)pb.stride;
                 UINT buffer_size = stride * h;
-                if (SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, stride,
-                                                             buffer_size, pb.pixels))) {
+                if (SUCCEEDED(IWICBitmapSource_CopyPixels(feed, NULL, stride, buffer_size, pb.pixels))) {
                     out = pb;
                 }
             }
         }
+        if (scaled) IWICFormatConverter_Release(scaled);
+        if (scaler) IWICBitmapScaler_Release(scaler);
     }
 
     if (converter) IWICFormatConverter_Release(converter);
@@ -599,6 +682,21 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
     IWICBitmapDecoder_Release(decoder);
     if (stream) IWICStream_Release(stream);
     return out;
+}
+
+rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
+                                                   u8str_t path,
+                                                   const uint8_t *data, size_t size,
+                                                   bool apply_exif_orientation) {
+    return read_pixels_within(arena, path, data, size, apply_exif_orientation, 0, 0);
+}
+
+rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
+                                                          u8str_t path,
+                                                          const uint8_t *data, size_t size,
+                                                          bool apply_exif_orientation,
+                                                          int32_t max_width, int32_t max_height) {
+    return read_pixels_within(arena, path, data, size, apply_exif_orientation, max_width, max_height);
 }
 
 static const GUID *container_for_format(rubraview_export_format_t format) {

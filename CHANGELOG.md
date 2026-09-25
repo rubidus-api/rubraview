@@ -8,6 +8,17 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Two pages side by side are shown at one height (D-39): a
+  low-resolution scan beside a high-resolution one is no longer drawn
+  small. At actual size each page keeps its own pixels.
+
+- Very large pictures open (D-39). A picture bigger than the graphics
+  card can hold, or over 128 megapixels, is shown reduced — read through
+  the decoder's scaler, and smaller again if the card still refuses —
+  instead of failing to open. The status line gives its real size and
+  says "shown reduced"; actual size, the crop and Save a copy use the
+  real picture, and the adjust panel's preview works on it.
+
 - Resizing on the graphics card (D-38). Bicubic and Lanczos resizes of a
   megapixel or more in export and batch runs go to the card when it can
   run compute shaders — the same result as the CPU, byte for byte — and

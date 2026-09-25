@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-39 Two pages share one height; a picture too large for the card is shown reduced
+
+- Status: Accepted (owner 2026-09-25: "초고해상도 처리를 위한 폴백 등도 있어야 한다고 봐요 그리고 2개씩 보기에서 왼쪽에 저해상도 오른쪽에 고해상도 이렇게 있을때에도 저해상도가 작게 보이는게 아니라 지능적으로 크기 리사이즈해서 보여줘요")
+- Decision:
+  - Two-page view brings both pages to the taller one's height before the pair is fitted (`rubraview_compose_spread`), so a low-resolution scan beside a high-resolution one is the same size on screen. Actual size is the exception: there each page keeps its own pixels, centred, as before. Each draw command carries its own scale (the pixel grid uses it).
+  - A page's texture is at most the device's largest bitmap side (`GetMaximumBitmapSize`) and 128 megapixels (512 MB); a bigger picture is decoded through WIC's Fant scaler to what fits (`rubraview_fit_within_limits`). When the device refuses even that, the size is halved and tried again, down to 1024 pixels. The page keeps the picture's own size for layout, zoom, crop and the status line ("shown reduced"), and its texture is stretched to it.
+  - The adjust panel's preview of such a page reads the picture through the scaler at the window's size (`rubraview_pal_image_read_pixels_within`), and so does any page whose full-size copy cannot be allocated. Save a copy still works at full size or says it could not (T093).
+- Consequences: a picture over 128 MP that the card could have held whole is now held reduced, so zooming in past the reduced size is softer than it was there; pictures the card refused now open at all. Region (tiled) decoding for deep zoom would be the next step. The budget is the implementer's pick. The VM's software renderer accepted a 20000x12000 bitmap, so the halving step after a refusal was not seen to run.
+
 ## 2026-09-25: D-38 Bicubic and Lanczos resizes go to the graphics card, with the CPU's own arithmetic
 
 - Status: Accepted (owner 2026-09-25: "gpu 가속으로 확대 축소 더 빨리 하는거 고민하고 처리해 주세요. 테스트는 못하겠지만요")

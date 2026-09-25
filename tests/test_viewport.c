@@ -128,6 +128,27 @@ int main(void) {
     }
     printf("  [PASS] viewport_matrix centers zoom on the pivot and pans it to the target\n");
 
+    /* The texture a page may have: within the device's largest side and a
+       pixel budget, the aspect kept, never enlarged, never zero. */
+    {
+        int32_t w = 0, h = 0;
+        assert(!rubraview_fit_within_limits(4000, 3000, 16384, 128u << 20, &w, &h));
+        assert(w == 4000 && h == 3000);                       /* fits: unchanged */
+
+        assert(rubraview_fit_within_limits(30000, 10000, 16384, 1ull << 40, &w, &h));
+        assert(w == 16384 && h == 5461);                      /* the longer side to the device's limit */
+
+        assert(rubraview_fit_within_limits(16000, 16000, 16384, 64u << 20, &w, &h));
+        assert((uint64_t)w * (uint64_t)h <= (64u << 20) && w == h && w >= 8000);   /* the budget */
+
+        assert(rubraview_fit_within_limits(200000, 3, 16384, 128u << 20, &w, &h));
+        assert(w == 16384 && h == 1);                         /* a sliver keeps one row */
+
+        assert(!rubraview_fit_within_limits(0, 100, 16384, 128u << 20, &w, &h));
+        assert(w == 0 && h == 100);                           /* nothing to fit: passed through */
+    }
+    printf("  [PASS] fit_within_limits keeps the aspect within the side and pixel limits\n");
+
     printf("[test_viewport] All tests passed successfully!\n");
     return 0;
 }
