@@ -76,6 +76,7 @@ static const expected_t EXPECTED[] = {
     { "display", "tile_base_px", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_DISPLAY, 1.0, 0.0, 2.0, 1.0, "48|64|96", false },
     { "display", "color_management", RUBRAVIEW_SETTING_BOOL, RUBRAVIEW_TAB_DISPLAY, 1.0, 0.0, 1.0, 1.0, "", false },
     { "display", "accent", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_DISPLAY, 0.0, 0.0, 5.0, 1.0, "crimson|cobalt|emerald|amber|teal|purple", false },
+    { "display", "gpu_resize", RUBRAVIEW_SETTING_CHOICE, RUBRAVIEW_TAB_DISPLAY, 1.0, 0.0, 2.0, 1.0, "off|on|always", true },
     { "cache", "memory_cap_mb", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_CACHE, 512.0, 256.0, 4096.0, 64.0, "", false },
     { "cache", "lookahead", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_CACHE, 2.0, 1.0, 16.0, 1.0, "", false },
     { "cache", "lookbehind", RUBRAVIEW_SETTING_INT, RUBRAVIEW_TAB_CACHE, 1.0, 0.0, 8.0, 1.0, "", false },

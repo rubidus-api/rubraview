@@ -107,6 +107,7 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_render_d2d.c \
                  src/pal/win32/pal_image_wic.c \
                  src/pal/win32/pal_thumbs_win32.c \
+                 src/pal/win32/pal_gpu_resample_win32.c \
                  src/pal/win32/pal_file_dialog_win32.c \
                  src/pal/win32/pal_media_mf.c \
                  src/pal/win32/pal_audio_wasapi.c \

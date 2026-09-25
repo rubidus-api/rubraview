@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-38 Bicubic and Lanczos resizes go to the graphics card, with the CPU's own arithmetic
+
+- Status: Accepted (owner 2026-09-25: "gpu 가속으로 확대 축소 더 빨리 하는거 고민하고 처리해 주세요. 테스트는 못하겠지만요")
+- Decision: on-screen zoom already runs on the card (Direct2D); the CPU work was export's and batch's resizes. Those now go to a D3D11 compute path when `[display] gpu_resize` allows it: two shaders (horizontal into a float intermediate, then vertical) fed the CPU's own weight tables, `precise` and IEEE-strict so they add in the CPU's order; the output bands keep the intermediate under 32 MB. The shaders are compiled at run time by Windows' `d3dcompiler_47.dll` (the build host has no HLSL compiler). `on` (default): real cards only, for resizes of a megapixel or more; `always`: also Windows' software adapters (for testing); `off`: never. Any failure — no compiler, no card, a source over 256 MB, a device lost mid-way — falls back to the CPU. A batch run also resizes on every core (RV-067's pool, byte-identical).
+- Consequences: measured on the VM through the Basic Render Driver: identical bytes to the CPU on six resizes and on a whole batch; the speed on a real card is not measured (no card here) — the expected gain is on enlargements, and upload and readback limit it on small pictures, hence the megapixel threshold. Gray and 16-bit pictures stay on the CPU.
+
 ## 2026-09-25: D-37 Bicubic and Lanczos resample in two passes; output may move by one level
 
 - Status: Accepted (owner 2026-09-25: "남은 백로그도 다 처리 바랍니다", which included the separable resampler left open by D-32 because it changes output)

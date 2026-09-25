@@ -8,6 +8,12 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Resizing on the graphics card (D-38). Bicubic and Lanczos resizes of a
+  megapixel or more in export and batch runs go to the card when it can
+  run compute shaders — the same result as the CPU, byte for byte — and
+  batch runs use every CPU core otherwise. Settings › Display ›
+  "Resize on the graphics card": off, on (the default) or always.
+
 - The adjust panel (`E`) shows its result as you drag (RV-064, RV-065):
   the picture follows every slider and curve, and a histogram of the
   adjusted picture sits behind the curve. Until now only the saved copy
