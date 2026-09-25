@@ -155,10 +155,33 @@ static u8str_t cstr(const char *s) {
 
 typedef struct app_page {
     rubraview_texture_t *texture;
-    int32_t width, height;
+    int32_t width, height;             /* the texture's */
+    int32_t full_width, full_height;   /* the picture's, when the texture is reduced */
+    bool reduced;                      /* too large for the device: held smaller (the fall-back) */
     bool loaded;
     bool failed;
 } app_page_t;
+
+/* The size a page is laid out, zoomed and cropped at: the picture's own,
+   even when its texture had to be reduced — so actual size, the crop and
+   the status line all speak of the real picture. */
+static void page_picture_size(const app_page_t *page, int32_t *out_w, int32_t *out_h);
+static int32_t picture_w(const app_page_t *page) { int32_t w = 0, h = 0; page_picture_size(page, &w, &h); return w; }
+static int32_t picture_h(const app_page_t *page) { int32_t w = 0, h = 0; page_picture_size(page, &w, &h); return h; }
+
+static void page_picture_size(const app_page_t *page, int32_t *out_w, int32_t *out_h) {
+    bool full = page->reduced && page->full_width > 0 && page->full_height > 0;
+    *out_w = full ? page->full_width : page->width;
+    *out_h = full ? page->full_height : page->height;
+}
+
+/* Texture pixels to picture pixels: identity unless the page is reduced. */
+static rubraview_mat3x2_t page_texture_prescale(const app_page_t *page) {
+    int32_t w = 0, h = 0;
+    page_picture_size(page, &w, &h);
+    if (page->width <= 0 || page->height <= 0) return rubraview_mat3x2_scale(1.0, 1.0);
+    return rubraview_mat3x2_scale((double)w / (double)page->width, (double)h / (double)page->height);
+}
 
 typedef struct app_state {
     proven_arena_t *arena;
@@ -570,6 +593,9 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
     page->texture = loaded.texture;
     page->width = loaded.width;
     page->height = loaded.height;
+    page->full_width = loaded.full_width;
+    page->full_height = loaded.full_height;
+    page->reduced = loaded.reduced;
     page->loaded = true;
     return page;
 }
@@ -602,6 +628,9 @@ static void show_frame(app_state_t *app, size_t frame_index) {
     page->texture = loaded.texture;
     page->width = loaded.width;
     page->height = loaded.height;
+    page->full_width = loaded.full_width;
+    page->full_height = loaded.full_height;
+    page->reduced = loaded.reduced;
     page->loaded = true;
     app->needs_relayout = true;
 }
@@ -678,15 +707,15 @@ static void rebuild_layout(app_state_t *app) {
     double fallback_w = 800.0, fallback_h = 1200.0;
     for (size_t i = 0; i < page_count(app); ++i) {
         if (app->pages[i].loaded) {
-            fallback_w = (double)app->pages[i].width;
-            fallback_h = (double)app->pages[i].height;
+            fallback_w = (double)picture_w(&app->pages[i]);
+            fallback_h = (double)picture_h(&app->pages[i]);
             break;
         }
     }
 
     for (size_t i = 0; i < page_count(app); ++i) {
-        double w = app->pages[i].loaded ? (double)app->pages[i].width : fallback_w;
-        double h = app->pages[i].loaded ? (double)app->pages[i].height : fallback_h;
+        double w = app->pages[i].loaded ? (double)picture_w(&app->pages[i]) : fallback_w;
+        double h = app->pages[i].loaded ? (double)picture_h(&app->pages[i]) : fallback_h;
         /* Pagination sees the page as the reader does, so a rotated
            portrait page is treated as the landscape it now presents. */
         rubraview_orientation_apply_size(app->orientation, w, h, &infos[i].width, &infos[i].height);
@@ -4681,8 +4710,13 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
             char line[192];
             u8str_t name = page_display_name(app, (size_t)page);
             u8str_t text = rubraview_osd_format(line, sizeof(line), name,
-                                                app->pages[page].width, app->pages[page].height,
+                                                picture_w(&app->pages[page]), picture_h(&app->pages[page]),
                                                 app->zoom * 100.0, (size_t)page, page_count(app));
+            static const char REDUCED[] = "  |  shown reduced";
+            if (app->pages[page].reduced && text.ptr == line && text.len + sizeof(REDUCED) <= sizeof(line)) {
+                memcpy(line + text.len, REDUCED, sizeof(REDUCED));
+                text.len += sizeof(REDUCED) - 1;
+            }
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
@@ -4801,11 +4835,11 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
 
         rubraview_page_size_t left_size = {0}, right_size = {0};
         if (left && left->loaded) {
-            rubraview_orientation_apply_size(app->orientation, (double)left->width, (double)left->height,
+            rubraview_orientation_apply_size(app->orientation, (double)picture_w((left)), (double)picture_h((left)),
                                              &left_size.width, &left_size.height);
         }
         if (right && right->loaded) {
-            rubraview_orientation_apply_size(app->orientation, (double)right->width, (double)right->height,
+            rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
                                              &right_size.width, &right_size.height);
         }
 
@@ -4834,7 +4868,8 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
             if (whole_page) {
                 /* Source pixels -> oriented space -> screen. */
                 rubraview_mat3x2_t oriented = rubraview_mat3x2_multiply(
-                    rubraview_orientation_matrix(app->orientation, (double)page->width, (double)page->height),
+                    rubraview_mat3x2_multiply(page_texture_prescale(page),
+                        rubraview_orientation_matrix(app->orientation, (double)picture_w(page), (double)picture_h(page))),
                     cmd->transform);
                 if (cmd->page_index == app->media_page) {
                     /* A DVD's picture subtitles are drawn in the film's
@@ -4846,7 +4881,7 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                 }
                 rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
 
-                if (app->pixel_grid && comp.scale >= PIXEL_GRID_MIN_SCALE) {
+                if (app->pixel_grid && cmd->scale >= PIXEL_GRID_MIN_SCALE) {
                     rubraview_pal_render_draw_pixel_grid(app->renderer, oriented,
                                                          page->width, page->height, 0x40FFFFFFu);
                 }
@@ -4856,11 +4891,16 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                    the user's own rotation is not applied to this case —
                    splitting and manual rotation together is left to the
                    editing workbench in M6. */
+                /* The command speaks in picture pixels; a reduced texture
+                   has fewer, so the rectangle shrinks and the transform
+                   grows by the same ratio. */
+                rubraview_mat3x2_t pre = page_texture_prescale(page);
                 rubraview_src_rect_t src = {
-                    .left = cmd->src_left, .top = cmd->src_top,
-                    .right = cmd->src_right, .bottom = cmd->src_bottom,
+                    .left = cmd->src_left / pre.a, .top = cmd->src_top / pre.d,
+                    .right = cmd->src_right / pre.a, .bottom = cmd->src_bottom / pre.d,
                 };
-                rubraview_pal_render_draw_texture_region(app->renderer, page->texture, src, cmd->transform, interp);
+                rubraview_pal_render_draw_texture_region(app->renderer, page->texture, src,
+                                                         rubraview_mat3x2_multiply(pre, cmd->transform), interp);
             }
         }
     }
@@ -5284,7 +5324,7 @@ static void panel_open_edit(app_state_t *app) {
     if (page < 0) return;
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    app->edit = rubraview_edit_begin(app->pages[page].width, app->pages[page].height);
+    app->edit = rubraview_edit_begin(picture_w(&app->pages[page]), picture_h(&app->pages[page]));
     app->panel = rubraview_panel_create(U8("Adjust"), dpi);
     app->panel_is_export = false;
     app->panel_is_batch = false;
@@ -5396,7 +5436,7 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
        arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
        commit's first copy used to fail there — which wrote the page
        unedited, as if the edit had been saved (T093). */
-    int32_t w = app->pages[page].width, h = app->pages[page].height;
+    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
     if (w <= 0 || h <= 0) { osd_say(app, U8("not saved: the page is not read yet")); return; }
     size_t src_bytes = (size_t)w * (size_t)h * 4u;
@@ -6688,11 +6728,11 @@ static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, d
     app_page_t *right = ensure_page_loaded(app, spread->right_index);
     rubraview_page_size_t left_size = {0}, right_size = {0};
     if (left && left->loaded) {
-        rubraview_orientation_apply_size(app->orientation, (double)left->width, (double)left->height,
+        rubraview_orientation_apply_size(app->orientation, (double)picture_w((left)), (double)picture_h((left)),
                                          &left_size.width, &left_size.height);
     }
     if (right && right->loaded) {
-        rubraview_orientation_apply_size(app->orientation, (double)right->width, (double)right->height,
+        rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
                                          &right_size.width, &right_size.height);
     }
     rubraview_composition_t comp = rubraview_compose_spread(
@@ -6757,28 +6797,46 @@ static void edit_preview_open(app_state_t *app) {
     edit_preview_close(app);
     int32_t page = current_page_index(app);
     if (page < 0 || (size_t)page >= page_count(app) || !app->pages[page].loaded) return;
-    int32_t w = app->pages[page].width, h = app->pages[page].height;
+    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
     if (w <= 0 || h <= 0) return;
 
-    size_t big = (size_t)w * (size_t)h * 4u * 2u + (16u << 20);
-    void *scratch_mem = malloc(big);
-    if (!scratch_mem) return;
-    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_mem, .size = big });
-    rubraview_pixbuf_t full = {0};
-    u8str_t path = app->source.pages[page].path;
-    if (path.len > 0) {
-        full = rubraview_pal_image_read_pixels(&scratch, path, NULL, 0, true);
-    } else {
-        rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
-        if (bytes.ok && bytes.data.len > 0) {
-            full = rubraview_pal_image_read_pixels(&scratch, (u8str_t){ .ptr = "", .len = 0 },
-                                                   (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
-        }
-    }
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     int32_t pw = 0, ph = 0;
     rubraview_edit_preview_size(&app->edit, win_w, win_h, &pw, &ph);
+    if (pw <= 0 || ph <= 0) return;
+
+    /* The whole picture when it fits in memory; otherwise — a page shown
+       reduced, or a malloc refused — only the window's worth, read
+       through the decoder's scaler, so a very large page still gets its
+       preview. */
+    bool within = app->pages[page].reduced;
+    size_t big = 0;
+    void *scratch_mem = NULL;
+    if (!within) {
+        big = (size_t)w * (size_t)h * 4u * 2u + (16u << 20);
+        scratch_mem = malloc(big);
+        within = scratch_mem == NULL;
+    }
+    if (within) {
+        big = (size_t)pw * (size_t)ph * 4u * 3u + (16u << 20);
+        scratch_mem = malloc(big);
+        if (!scratch_mem) return;
+    }
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_mem, .size = big });
+    rubraview_pixbuf_t full = {0};
+    u8str_t path = app->source.pages[page].path;
+    int32_t max_w = within ? pw : 0, max_h = within ? ph : 0;
+    if (path.len > 0) {
+        full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, max_w, max_h);
+    } else {
+        rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+        if (bytes.ok && bytes.data.len > 0) {
+            full = rubraview_pal_image_read_pixels_within(&scratch, (u8str_t){ .ptr = "", .len = 0 },
+                                                          (const uint8_t*)bytes.data.ptr, bytes.data.len, true,
+                                                          max_w, max_h);
+        }
+    }
     if (rubraview_pixbuf_is_valid(&full) && pw > 0 && ph > 0) {
         size_t small = (size_t)pw * (size_t)ph * 4u;
         app->edit_small_bytes = small + (1u << 20);

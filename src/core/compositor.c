@@ -59,9 +59,22 @@ rubraview_composition_t rubraview_compose_spread(const rubraview_spread_t *sprea
         side_extent(right_size, RUBRAVIEW_SPREAD_WHOLE, &rw, &rh, &r_src_left, &r_src_right);
     }
 
+    /* A pair is shown at one height: the lower-resolution page is scaled
+       up to the taller one's, in page units, so a 1000-pixel scan beside
+       a 3000-pixel one is not a third of its size. At actual size the
+       reader asked for each page's own pixels, so there nothing is. */
+    double l_unit = 1.0, r_unit = 1.0;
+    if (has_left && has_right && fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) {
+        double target = (lh > rh) ? lh : rh;
+        l_unit = target / lh;
+        r_unit = target / rh;
+    }
+    double lw_u = lw * l_unit, lh_u = lh * l_unit;
+    double rw_u = rw * r_unit, rh_u = rh * r_unit;
+
     double effective_gutter = (has_left && has_right) ? gutter : 0.0;
-    double content_w = lw + effective_gutter + rw;
-    double content_h = (lh > rh) ? lh : rh;
+    double content_w = lw_u + effective_gutter + rw_u;
+    double content_h = (lh_u > rh_u) ? lh_u : rh_u;
     if (content_w <= 0.0 || content_h <= 0.0) return out;
 
     /* Fit the combined spread as one unit, then apply zoom and pan. */
@@ -87,10 +100,14 @@ rubraview_composition_t rubraview_compose_spread(const rubraview_spread_t *sprea
             .page_index = spread->left_index,
             .src_left = l_src_left, .src_top = 0.0,
             .src_right = l_src_right, .src_bottom = lh,
+            .scale = scale * l_unit,
         };
         /* Centre this page vertically within the spread's height. */
-        double centre = (content_h - lh) / 2.0;
-        cmd.transform = rubraview_mat3x2_multiply(rubraview_mat3x2_translate(0.0, centre), viewport);
+        double centre = (content_h - lh_u) / 2.0;
+        cmd.transform = rubraview_mat3x2_multiply(
+            rubraview_mat3x2_multiply(rubraview_mat3x2_scale(l_unit, l_unit),
+                                      rubraview_mat3x2_translate(0.0, centre)),
+            viewport);
         out.commands[out.count++] = cmd;
     }
 
@@ -99,10 +116,13 @@ rubraview_composition_t rubraview_compose_spread(const rubraview_spread_t *sprea
             .page_index = spread->right_index,
             .src_left = r_src_left, .src_top = 0.0,
             .src_right = r_src_right, .src_bottom = rh,
+            .scale = scale * r_unit,
         };
-        double centre = (content_h - rh) / 2.0;
+        double centre = (content_h - rh_u) / 2.0;
         cmd.transform = rubraview_mat3x2_multiply(
-            rubraview_mat3x2_translate(lw + effective_gutter, centre), viewport);
+            rubraview_mat3x2_multiply(rubraview_mat3x2_scale(r_unit, r_unit),
+                                      rubraview_mat3x2_translate(lw_u + effective_gutter, centre)),
+            viewport);
         out.commands[out.count++] = cmd;
     }
 

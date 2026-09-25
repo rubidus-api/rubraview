@@ -45,7 +45,14 @@ again and leaves nothing behind in the registry.
 ## Reading
 
 `PageDown` / `PageUp`, `Space` / `Backspace` turn the pages; `B` shows two
-pages side by side, `M` reads right to left. Every key is in **Keys** at the
+pages side by side, `M` reads right to left. Two pages are shown at the
+same height, so a small scan beside a large one is not drawn small (at
+actual size, `4`, each keeps its own pixels).
+
+A picture too large for the graphics card — tens of thousands of pixels a
+side, or over 128 megapixels — opens reduced; the status line says
+"shown reduced" and still gives its real size. Zooming in on it past
+the reduced size shows it magnified rather than sharper. Every key is in **Keys** at the
 end of this manual.
 
 Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens

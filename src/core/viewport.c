@@ -1,4 +1,5 @@
 #include "rubraview/viewport.h"
+#include <math.h>
 
 static double dmin(double a, double b) { return a < b ? a : b; }
 
@@ -80,4 +81,30 @@ rubraview_mat3x2_t rubraview_viewport_matrix(double cx, double cy, double scale,
     rubraview_mat3x2_t s = rubraview_mat3x2_scale(scale, scale);
     rubraview_mat3x2_t t2 = rubraview_mat3x2_translate(dx, dy);
     return rubraview_mat3x2_multiply(rubraview_mat3x2_multiply(t1, s), t2);
+}
+
+bool rubraview_fit_within_limits(int32_t width, int32_t height, int32_t max_side, uint64_t max_pixels,
+                                 int32_t *out_width, int32_t *out_height) {
+    *out_width = width;
+    *out_height = height;
+    if (width <= 0 || height <= 0) return false;
+    double k = 1.0;
+    if (max_side > 0) {
+        int32_t longest = width > height ? width : height;
+        if (longest > max_side) k = (double)max_side / (double)longest;
+    }
+    if (max_pixels > 0) {
+        double pixels = (double)width * (double)height * k * k;
+        if (pixels > (double)max_pixels) k *= sqrt((double)max_pixels / pixels);
+    }
+    if (k >= 1.0) return false;
+    int32_t w = (int32_t)floor((double)width * k);
+    int32_t h = (int32_t)floor((double)height * k);
+    /* floor may leave the product a hair over the budget */
+    while (max_pixels > 0 && (uint64_t)w * (uint64_t)h > max_pixels && w > 1 && h > 1) {
+        if (w >= h) w--; else h--;
+    }
+    *out_width = w < 1 ? 1 : w;
+    *out_height = h < 1 ? 1 : h;
+    return true;
 }
