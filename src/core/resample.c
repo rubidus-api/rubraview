@@ -330,7 +330,62 @@ rubraview_pixbuf_t rubraview_pixbuf_resample(proven_arena_t *arena,
         return (rubraview_pixbuf_t){0};
     }
 
+    if (rubraview_resample_try_accel(src, &dst, filter)) return dst;   /* D-38: the card, when it is worth it */
     rubraview_resample_band(src, &dst, filter, 0, dst_height);
 
     return dst;
+}
+
+/* ---- D-38 ---- */
+
+int32_t rubraview_resample_taps(rubraview_resample_filter_t filter) {
+    return filter == RUBRAVIEW_FILTER_BICUBIC ? 4 : filter == RUBRAVIEW_FILTER_LANCZOS3 ? 6 : 0;
+}
+
+bool rubraview_resample_axis_weights(rubraview_resample_filter_t filter, int32_t src_len, int32_t dst_len,
+                                     int32_t *out_index, float *out_weight) {
+    int32_t taps = rubraview_resample_taps(filter);
+    if (taps == 0 || src_len <= 0 || dst_len <= 0 || !out_index || !out_weight) return false;
+    int first = taps == 4 ? -1 : -2;
+    float (*weight)(float) = taps == 4 ? bicubic_weight : lanczos3_weight;
+    /* Exactly the expressions resample_kernel uses, so the weights are the same floats. */
+    float scale = (float)src_len / (float)dst_len;
+    for (int32_t k = 0; k < dst_len; ++k) {
+        float s = (float)(k + 0.5f) * scale - 0.5f;
+        int32_t base = (int32_t)floorf(s);
+        kernel_weights(s, base, taps, first, weight, out_weight + (size_t)k * (size_t)taps);
+        for (int j = 0; j < taps; ++j) out_index[(size_t)k * (size_t)taps + (size_t)j] = clamp_coord(base + first + j, src_len);
+    }
+    return true;
+}
+
+static rubraview_resample_accel_fn g_accel;
+static void *g_accel_context;
+static uint64_t g_accel_min_pixels;
+
+void rubraview_resample_set_accel(rubraview_resample_accel_fn fn, void *context, uint64_t min_pixels) {
+    g_accel = fn;
+    g_accel_context = context;
+    g_accel_min_pixels = min_pixels;
+}
+
+bool rubraview_resample_accel_wanted(rubraview_resample_filter_t filter, rubraview_pixel_format_t format,
+                                     int32_t src_w, int32_t src_h, int32_t dst_w, int32_t dst_h,
+                                     uint64_t min_pixels) {
+    if (rubraview_resample_taps(filter) == 0) return false;
+    if (rubraview_bytes_per_pixel(format) != 4) return false;
+    if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return false;
+    uint64_t a = (uint64_t)src_w * (uint64_t)src_h, b = (uint64_t)dst_w * (uint64_t)dst_h;
+    return (a > b ? a : b) >= min_pixels;
+}
+
+bool rubraview_resample_try_accel(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst,
+                                  rubraview_resample_filter_t filter) {
+    rubraview_resample_accel_fn fn = g_accel;
+    if (!fn || !src || !dst) return false;
+    if (!rubraview_resample_accel_wanted(filter, src->format, src->width, src->height, dst->width, dst->height,
+                                         g_accel_min_pixels)) {
+        return false;
+    }
+    return fn(g_accel_context, src, dst, filter);
 }

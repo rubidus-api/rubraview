@@ -58,6 +58,8 @@ rubraview_pixbuf_t rubraview_pixbuf_resample_mt(proven_arena_t *arena,
 
     rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, dst_width, dst_height, src->format);
     if (!rubraview_pixbuf_is_valid(&dst)) return (rubraview_pixbuf_t){0};
+    /* D-38: the card takes the whole picture at once, before any banding. */
+    if (rubraview_resample_try_accel(src, &dst, filter)) return dst;
 
     /* The band descriptors live on this stack frame, which outlives the
        jobs because the function does not return until every one of them
