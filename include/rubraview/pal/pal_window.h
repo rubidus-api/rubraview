@@ -177,6 +177,12 @@ void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeou
    background worker says it has something for the loop (D-34). */
 void rubraview_pal_window_wake(rubraview_window_t *window);
 
+/* The clipboard's text (CF_UNICODETEXT), as UTF-8 into `buf`, NUL-
+   terminated; returns its length, 0 when there is none. And putting text
+   there. For the rename box's Ctrl+C / Ctrl+X / Ctrl+V. */
+size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, size_t cap);
+bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text);
+
 /** Set the window's caption (UTF-8). Frameless windows still show it in
     the taskbar and Alt+Tab. */
 void rubraview_pal_window_set_title(rubraview_window_t *window, const char *title_utf8);

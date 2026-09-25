@@ -204,6 +204,12 @@ bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t cod
  * is how big one cell is at `font_size` in the fixed-width face — the
  * width of one character and the height of one line.
  */
+/* How wide `text` is in the proportional face draw_text uses, on one line
+   (trailing spaces counted) — what a text field needs to put its caret and
+   its selection under the right characters. False when it cannot tell. */
+bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+                                       double *out_width);
+
 bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
                                     double *out_width, double *out_height);
 
