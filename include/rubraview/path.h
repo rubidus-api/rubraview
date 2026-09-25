@@ -60,6 +60,18 @@ bool rubraview_path_has_ext(u8str_t path, const char *ext);
 bool rubraview_path_same(u8str_t a, u8str_t b);
 
 /**
+ * A file name another program handed over (a browser's dragged picture, a
+ * mail attachment — §3.19.2), made safe to create in a folder of ours:
+ * only its last part is kept (no "..\\" or "C:\\" walks out), the
+ * characters Windows refuses (< > : " / \\ | ? * and control bytes) become
+ * '_', trailing dots and spaces go, a reserved device name (CON, NUL,
+ * COM1...) gets a '_' in front, and it is cut to fit `cap` - 1 bytes on a
+ * UTF-8 boundary, keeping its extension when it can. An empty result is
+ * "dropped". Written into `buf`, NUL-terminated; the returned view is it.
+ */
+u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name);
+
+/**
  * Join directory and filename into an arena-allocated path.
  * Strictly guarantees the null-terminated allocation invariant:
  * (allocated size = len + 1, and ptr[len] == '\0').

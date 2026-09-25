@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-36 Dropped virtual files are copied to a temporary folder and opened from there
+
+- Status: Accepted (implementer, carrying out RFC-0001 §3.19.2 / RV-073, which already called for an OLE `IDropTarget` taking drops from browsers and archive managers)
+- Decision: the main window registers an OLE drop target (falling back to `DragAcceptFiles` when OLE cannot be had). CF_HDROP gives paths as before. A drop that offers only virtual files (FileGroupDescriptorW + FileContents) has each file written to `%TEMP%\rubraview-drop-<pid>\<n>\<name>`, the name cleaned by `rubraview_path_safe_name`, at most 16 files and 1 GB each, and the drop opens those copies. The folder is this process's and is removed when the window is destroyed. The effect offered back is copy (or link), never move.
+- Consequences: a dropped picture is a copy — renaming or deleting it from the viewer acts on the temporary copy, not on anything in the source program. Links and plain text are refused (no download).
+
 ## 2026-09-25: D-35 Thumbnails are made on a thread of their own; archives too, within a time limit
 
 - Status: Accepted (owner 2026-09-25: "썸네일은 다 읽고 파일 목록 보여주는게 아니라 동적으로, 일단 파일 목록 보여주고 입력 처리하면서 백그라운드로 동적으로 될 떄마다 추가하는 형식으로 항목에 표시하게 해줘요" and "압축파일도 썸네일 보여주게 해 주세요. 다만 제한시간 걸고 읽는 속도나 시간이 오래 걸릴 것 같으면 포기하는 식으로.")

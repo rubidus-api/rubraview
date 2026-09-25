@@ -156,3 +156,73 @@ bool rubraview_path_same(u8str_t a, u8str_t b) {
     }
     return true;
 }
+
+static bool reserved_device_name(const char *name, size_t len) {
+    /* The part before the first dot is what Windows compares. */
+    size_t stem = 0;
+    while (stem < len && name[stem] != '.') stem++;
+    static const char *const NAMES[] = { "CON", "PRN", "AUX", "NUL" };
+    char up[5] = {0};
+    if (stem == 3 || stem == 4) {
+        for (size_t i = 0; i < stem; ++i) {
+            char c = name[i];
+            up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+        }
+        if (stem == 3) {
+            for (size_t i = 0; i < 4; ++i) if (memcmp(up, NAMES[i], 3) == 0) return true;
+        } else if ((memcmp(up, "COM", 3) == 0 || memcmp(up, "LPT", 3) == 0) && up[3] >= '1' && up[3] <= '9') {
+            return true;
+        }
+    }
+    return false;
+}
+
+u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    if (!buf || cap < 16) return none;
+    u8str_t base = rubraview_path_basename(name);
+
+    /* Characters Windows refuses, and control bytes. */
+    char clean[512];
+    size_t n = 0;
+    for (size_t i = 0; i < base.len && n < sizeof(clean); ++i) {
+        unsigned char c = (unsigned char)base.ptr[i];
+        bool bad = c < 32 || c == 127 || c == '<' || c == '>' || c == ':' || c == '"' ||
+                   c == '/' || c == '\\' || c == '|' || c == '?' || c == '*';
+        clean[n++] = bad ? '_' : (char)c;
+    }
+    while (n > 0 && (clean[n - 1] == '.' || clean[n - 1] == ' ')) n--;
+    size_t lead = 0;
+    while (lead < n && clean[lead] == ' ') lead++;
+
+    size_t at = 0;
+    if (n - lead == 0) {
+        memcpy(buf, "dropped", 7);
+        at = 7;
+    } else {
+        if (reserved_device_name(clean + lead, n - lead)) buf[at++] = '_';
+        size_t room = cap - 1 - at;
+        size_t len = n - lead;
+        const char *src = clean + lead;
+        if (len <= room) {
+            memcpy(buf + at, src, len);
+            at += len;
+        } else {
+            /* Too long: keep the extension (up to 16 bytes) and cut the stem,
+               never inside a UTF-8 sequence. */
+            size_t ext = 0;
+            for (size_t i = len; i > 0 && len - i < 16; --i) {
+                if (src[i - 1] == '.') { ext = len - (i - 1); break; }
+            }
+            if (ext >= room) ext = 0;
+            size_t stem = room - ext;
+            while (stem > 0 && ((unsigned char)src[stem] & 0xC0) == 0x80) stem--;
+            memcpy(buf + at, src, stem);
+            at += stem;
+            memcpy(buf + at, src + len - ext, ext);
+            at += ext;
+        }
+    }
+    buf[at] = '\0';
+    return (u8str_t){ .ptr = buf, .len = at };
+}
