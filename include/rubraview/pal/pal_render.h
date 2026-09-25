@@ -207,6 +207,11 @@ bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t cod
 /* How wide `text` is in the proportional face draw_text uses, on one line
    (trailing spaces counted) — what a text field needs to put its caret and
    its selection under the right characters. False when it cannot tell. */
+/* The next frame's present is treated as a lost device: the renderer is
+   rebuilt and the caller told to reload, exactly as after a driver reset.
+   A test's trigger — a real loss cannot be caused on demand. */
+void rubraview_pal_render_force_lost(rubraview_renderer_t *renderer);
+
 bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t text, double font_size,
                                        double *out_width);
 
