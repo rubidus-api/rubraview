@@ -82,3 +82,15 @@ Windows calls behind them do what they say.
   A set whose first picture is `b_exif6.jpg` took about 6.5 s to show —
   that picture takes as long when the viewer is started on it, so it is
   the picture, not the drop (BACKLOGS).
+
+## Measured on the Windows 11 VM, 2026-09-25 (the rename box as a text field, T092)
+
+On a copy of `photo.png`, F2 then keys through keys.ps1, each screenshot
+taken by a separate call (a shot inside the key call came back stale once):
+
+| Check | Result |
+|---|---|
+| `Home`, `Shift+Right` x3 | PASS: "pho" shaded, the caret after it, the box drawn over the toolbox's anchor (it was under it before this change). |
+| `Ctrl+X`, `End`, `Ctrl+V` | PASS: `to.pngpho`. `Ctrl+C` instead: `photo.pngpho`. |
+| An outside program's clipboard (`Set-Clipboard "가을 사진"`), `Ctrl+A`, `Ctrl+V` | PASS: the box read `가을 사진`, the caret after 진. |
+| `Esc` | PASS: the file kept its name. |

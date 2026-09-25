@@ -961,6 +961,46 @@ void rubraview_pal_window_set_title(rubraview_window_t *window, const char *titl
     SetWindowTextW(window->hwnd, wide);
 }
 
+size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, size_t cap) {
+    if (!buf || cap == 0) return 0;
+    buf[0] = '\0';
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return 0;
+    if (!OpenClipboard(window ? window->hwnd : NULL)) return 0;
+    size_t n = 0;
+    HANDLE data = GetClipboardData(CF_UNICODETEXT);
+    const WCHAR *wide = data ? (const WCHAR*)GlobalLock(data) : NULL;
+    if (wide) {
+        int written = WideCharToMultiByte(CP_UTF8, 0, wide, -1, buf, (int)cap, NULL, NULL);
+        if (written > 1) n = (size_t)(written - 1);
+        else if (written == 0 && cap > 1) {
+            /* Longer than the buffer: none of it, rather than a cut character. */
+            buf[0] = '\0';
+        }
+        GlobalUnlock(data);
+    }
+    CloseClipboard();
+    return n;
+}
+
+bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text) {
+    if (text.len == 0 || text.len > 65536) return false;
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, NULL, 0);
+    if (wide_len <= 0) return false;
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, ((size_t)wide_len + 1) * sizeof(WCHAR));
+    if (!memory) return false;
+    WCHAR *wide = (WCHAR*)GlobalLock(memory);
+    if (!wide) { GlobalFree(memory); return false; }
+    MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, wide_len);
+    wide[wide_len] = L'\0';
+    GlobalUnlock(memory);
+    if (!OpenClipboard(window ? window->hwnd : NULL)) { GlobalFree(memory); return false; }
+    EmptyClipboard();
+    bool ok = SetClipboardData(CF_UNICODETEXT, memory) != NULL;
+    CloseClipboard();
+    if (!ok) GlobalFree(memory);   /* on success the clipboard owns it */
+    return ok;
+}
+
 void rubraview_pal_window_wake(rubraview_window_t *window) {
     if (window && window->hwnd) PostMessageW(window->hwnd, WM_NULL, 0, 0);
 }

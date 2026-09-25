@@ -40,6 +40,7 @@
 #include "rubraview/number.h"
 #include "rubraview/subbox.h"
 #include "rubraview/thumb.h"
+#include "rubraview/textedit.h"
 #include "rubraview/pal/pal_thumbs.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
@@ -375,7 +376,7 @@ typedef struct app_state {
     bool                   rename_active;
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     char                   rename_buffer[256];
-    size_t                 rename_length;
+    rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
     char                   rename_composing[64];   /* the IME's unfinished syllable, drawn after the text */
     size_t                 rename_composing_length;
     bool                   confirm_purge;   /* §3.18.1's Y/N dialog is showing */
@@ -2978,6 +2979,55 @@ static bool key_is(rubraview_key_combo_t combo, const char *name) {
     return combo.key_name.len == n && memcmp(combo.key_name.ptr, name, n) == 0;
 }
 
+/* Typed, composed or pasted text into the rename box: control bytes and
+   anything that is not UTF-8 are left out (rubraview_rename_append's rule),
+   then it goes in at the caret in place of the selection. */
+static void rename_insert(app_state_t *app, u8str_t text) {
+    if (text.len == 0) return;
+    char clean[sizeof(app->rename_buffer)];
+    size_t length = 0;
+    (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
+    (void)rubraview_textedit_insert(&app->rename_edit, (u8str_t){ .ptr = clean, .len = length });
+}
+
+/* The editing keys of the rename box. The characters themselves come as
+   text; these are the keys that move, select, delete and use the clipboard. */
+static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
+    rubraview_textedit_t *te = &app->rename_edit;
+    bool shift = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
+    bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+    if (key_is(combo, "Backspace")) {
+        /* A whole character, not one byte: half a Hangul syllable would
+           leave the name unwritable. (Inside a syllable the IME takes
+           Backspace itself and it never comes here.) */
+        rubraview_textedit_backspace(te);
+    } else if (key_is(combo, "Delete")) {
+        rubraview_textedit_delete(te);
+    } else if (key_is(combo, "Left")) {
+        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_LEFT, shift);
+    } else if (key_is(combo, "Right")) {
+        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_RIGHT, shift);
+    } else if (key_is(combo, "Home")) {
+        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_HOME, shift);
+    } else if (key_is(combo, "End")) {
+        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_END, shift);
+    } else if (ctrl && key_is(combo, "A")) {
+        rubraview_textedit_select_all(te);
+    } else if (ctrl && (key_is(combo, "C") || key_is(combo, "X"))) {
+        u8str_t chosen = rubraview_textedit_selection(te);
+        if (chosen.len > 0 && rubraview_pal_clipboard_set_text(app->window, chosen) && key_is(combo, "X")) {
+            rubraview_textedit_backspace(te);   /* removes the selection */
+        }
+    } else if (ctrl && key_is(combo, "V")) {
+        char pasted[sizeof(app->rename_buffer)];
+        size_t n = rubraview_pal_clipboard_get_text(app->window, pasted, sizeof(pasted));
+        rename_insert(app, (u8str_t){ .ptr = pasted, .len = n });
+    } else {
+        return false;
+    }
+    return true;
+}
+
 /* Everything §3.18 puts in front of the reader answers the next key
    press before anything else does: a confirmation that is ignored is
    worse than no confirmation at all. */
@@ -3008,13 +3058,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (app->rename_active) {
         if (key_is(combo, "Enter")) { rename_commit(app); return true; }
         if (key_is(combo, "Escape")) { rename_end(app); return true; }
-        if (key_is(combo, "Backspace")) {
-            /* A whole character, not one byte: half a Hangul syllable
-               would leave the name unwritable. (Inside a syllable the
-               IME takes Backspace itself and it never comes here.) */
-            rubraview_rename_backspace(app->rename_buffer, &app->rename_length);
-            return true;
-        }
+        if (rename_edit_key(app, combo)) return true;
         /* The characters themselves arrive as text (rename_text), in
            either case and from the IME; the keys that make them are
            swallowed here, as is everything else while renaming. */
@@ -4413,19 +4457,46 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
-        /* The name, the syllable the IME is still building, and a caret
-           that blinks (owner, 2026-09-23: the box did not look like it
-           was taking text). The caret's place is held by a space while it
-           is dark, so the name does not jump as it blinks. */
-        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing) + 2];
-        size_t at = app->rename_length;
-        memcpy(shown, app->rename_buffer, at);
-        memcpy(shown + at, app->rename_composing, app->rename_composing_length);
-        at += app->rename_composing_length;
-        bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
-        shown[at++] = caret_lit ? '|' : ' ';
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = at },
-                                       box, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        /* The name with the syllable the IME is still building at the
+           caret, the selection shaded under its characters, and a caret
+           that blinks (owner, 2026-09-23: the box did not look like it was
+           taking text). Widths come from the face the text is drawn in, so
+           caret and shading sit under the right characters, Hangul too. */
+        const rubraview_textedit_t *te = &app->rename_edit;
+        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
+        size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
+        memcpy(shown, app->rename_buffer, caret);
+        memcpy(shown + caret, app->rename_composing, comp);
+        memcpy(shown + caret + comp, app->rename_buffer + caret, len - caret);
+        size_t total = len + comp;
+        double size = 18.0 * dpi, pad = 14.0 * dpi;
+        double full = 0.0, to_caret = 0.0;
+        (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = total }, size, &full);
+        (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = caret + comp }, size, &to_caret);
+        /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
+        double inner = box.width - 2.0 * pad;
+        double x0 = full <= inner ? box.x + (box.width - full) * 0.5 : box.x + pad;
+        if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
+        if (rubraview_textedit_has_selection(te)) {
+            size_t a = 0, b = 0;
+            rubraview_textedit_selection_range(te, &a, &b);
+            /* the composing text sits at the caret, which is one end of the selection */
+            size_t da = a >= caret ? a + comp : a, db = b >= caret ? b + comp : b;
+            double xa = 0.0, xb = 0.0;
+            (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = da }, size, &xa);
+            (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = db }, size, &xb);
+            rubraview_pal_rect_t shade = { x0 + xa, box.y + box.height * 0.2, xb - xa, box.height * 0.6 };
+            rubraview_pal_render_fill_rect(app->renderer, shade, 0xA05B9BD5u, 2.0);
+        }
+        rubraview_pal_rect_t line = { x0, box.y, full + 4.0 * dpi, box.height };
+        if (total > 0) {
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = total },
+                                           line, size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        }
+        if (fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5) {
+            rubraview_pal_rect_t bar = { x0 + to_caret, box.y + box.height * 0.22, 2.0 * dpi, box.height * 0.56 };
+            rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_TEXT, 0.0);
+        }
     }
 }
 
@@ -4458,12 +4529,12 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
-static void draw_chrome(app_state_t *app, double win_w, double win_h) {
-    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+/* §3.18's confirmation, the text boxes and the notices sit above
+   everything else: they are answers to something the reader just did. They
+   used to be drawn first, under the floating boxes, and the toolbox's
+   anchor covered the start of a name being typed (VM, 2026-09-25). */
+static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
-
-    /* §3.18's confirmation and its notices sit above everything else:
-       they are answers to something the reader just did. */
     if (app->confirm_purge) {
         double box_w = 520.0 * chrome_dpi, box_h = 90.0 * chrome_dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
@@ -4473,11 +4544,13 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                        U8("Delete this file from the disk for good?  (Y / N)"),
                                        box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-
     draw_rename_box(app, win_w, win_h, chrome_dpi);
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
-
     draw_notice(app, win_w, win_h, chrome_dpi);
+}
+
+static void draw_chrome(app_state_t *app, double win_w, double win_h) {
+    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
 
     /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
        low-resolution thumbnail decoding arrives with the asynchronous
@@ -4916,7 +4989,9 @@ static void triage_undo(app_state_t *app) {
 /* §3.18.2's inline rename. The box is drawn here, not a child EDIT
    control; its text comes from the window's text input (TEXT events,
    with the IME attached only while the box is open, K5), so Hangul,
-   capitals and symbols go in as typed. No selection or clipboard yet. */
+   capitals and symbols go in as typed. The caret moves and selects with
+   the arrows, Home and End (Shift to select), Ctrl+A selects all, and
+   Ctrl+C / Ctrl+X / Ctrl+V use the clipboard. */
 /* The box closes: the window goes back to keys only (K5). */
 static void rename_end(app_state_t *app) {
     app->rename_active = false;
@@ -4936,7 +5011,7 @@ static void rename_text(app_state_t *app, const rubraview_window_event_t *event)
     if (!app->rename_active) return;
     u8str_t text = { .ptr = event->text.utf8, .len = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
-        (void)rubraview_rename_append(app->rename_buffer, sizeof(app->rename_buffer), &app->rename_length, text);
+        rename_insert(app, text);
     } else {
         size_t n = text.len < sizeof(app->rename_composing) ? text.len : sizeof(app->rename_composing) - 1;
         memcpy(app->rename_composing, text.ptr, n);
@@ -4954,9 +5029,8 @@ static void rename_begin(app_state_t *app) {
     u8str_t name = rubraview_path_basename(path);
     if (name.len >= sizeof(app->rename_buffer)) return;
 
-    memcpy(app->rename_buffer, name.ptr, name.len);
-    app->rename_length = name.len;
-    app->rename_buffer[name.len] = '\0';
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, name);
     app->rename_active = true;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);   /* Hangul, capitals, symbols (K5's hole) */
@@ -4971,12 +5045,8 @@ static void rename_extension_begin(app_state_t *app) {
     if (picked == 0) { osd_say(app, U8("pick some files first")); return; }
 
     u8str_t ext = picker_focus_extension(app);
-    app->rename_length = 0;
-    if (ext.len > 0 && ext.len < sizeof(app->rename_buffer)) {
-        memcpy(app->rename_buffer, ext.ptr, ext.len);
-        app->rename_length = ext.len;
-    }
-    app->rename_buffer[app->rename_length] = '\0';
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, ext.len < sizeof(app->rename_buffer) ? ext : U8(""));
     app->rename_active = true;
     app->rename_is_extension = true;
     app->rename_composing_length = 0;
@@ -4986,7 +5056,7 @@ static void rename_extension_begin(app_state_t *app) {
 
 /* Renames every picked file to the typed extension, one undo entry each. */
 static void rename_extension_commit(app_state_t *app) {
-    u8str_t typed = { .ptr = app->rename_buffer, .len = app->rename_length };
+    u8str_t typed = rubraview_textedit_text(&app->rename_edit);
     char dotted[64];
     if (typed.len == 0) { rename_end(app); return; }
     if (typed.ptr[0] != '.') {
@@ -5037,14 +5107,13 @@ static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
-    (void)rubraview_rename_append(app->rename_buffer, sizeof(app->rename_buffer), &app->rename_length,
-                                  (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
     rename_end(app);
 
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
 
-    u8str_t new_name = { .ptr = app->rename_buffer, .len = app->rename_length };
+    u8str_t new_name = rubraview_textedit_text(&app->rename_edit);
 
     rubraview_rename_err_t err = rubraview_rename_validate(new_name);
     if (err != RUBRAVIEW_RENAME_OK) {
@@ -6798,6 +6867,7 @@ static void render_frame(app_state_t *app) {
         draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_sub_list(app);   /* D-33: on top of every box */
+        draw_chrome_answers(app, (double)win_w, (double)win_h);
         draw_panel(app);
         draw_curve_widget(app);
     }

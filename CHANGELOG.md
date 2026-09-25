@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The rename box edits like a text field: the arrows, Home and End move
+  the caret (Shift selects), Ctrl+A selects everything, typing replaces
+  the selection, and Ctrl+C, Ctrl+X and Ctrl+V use the clipboard — Hangul
+  included. The same box types the picker's "Change ext".
+
 - Drop pictures from other programs (RV-073, D-36). The window takes drops
   the way Explorer offers them and also the way browsers and mail programs
   do — a picture with no file behind it is copied to a temporary folder of
@@ -75,6 +80,9 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- The rename box, the A-B box, the delete question and the notices are
+  drawn above the floating boxes; the toolbox's anchor covered the start of
+  a name being typed.
 - The subtitle box's default place is just above the seek bar, which used
   to cover its last line.
 - The picker's path bar stays on top when the tiles are scrolled; rows no
