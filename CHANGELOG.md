@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Zooming into a very large picture is sharp (D-40). The part on
+  screen is decoded again from the file in tiles, on a thread of its own,
+  and drawn over the reduced picture as each tile is ready; moving
+  around fetches the new part the same way.
+
 - Two pages side by side are shown at one height (D-39): a
   low-resolution scan beside a high-resolution one is no longer drawn
   small. At actual size each page keeps its own pixels.

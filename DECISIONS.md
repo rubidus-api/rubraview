@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-40 Zooming into a reduced page decodes the part on screen again, in tiles
+
+- Status: Accepted (owner 2026-09-25: "타일 디코딩으로 확대 선명하게 해 주세요", after D-39 named tiled decoding as the next step)
+- Decision:
+  - When a page shown reduced (D-39) is magnified on screen — its texture drawn more than 5 % larger than its own pixels — the part in view (plus half a tile around, for a pan) is decoded again from the file in 512-pixel tiles at the coarsest level still as sharp as the screen (level L = one output pixel per 2^L picture pixels), and drawn over the reduced texture (`src/core/tiles.c`, `rubraview_tiles_*`).
+  - The tiles are made on a thread of its own (`pal_tiles_win32.c`, the thumbnail thread's pattern, D-35): its own COM and WIC factory; the page's file read once; one band per tile row — the rows above are decoded to reach it either way — clipped, scaled and converted the way the page itself is (EXIF turn, colour profile, then clipper → Fant scaler → premultiplied BGRA; `rubraview_wic_region_pbgra`). Only the newest request counts; a failed tile is reported so it is not asked for again.
+  - The main thread keeps up to 96 tile textures (about 96 MB), the least recently drawn going first, and asks only when the list of missing tiles changes. Tiles go when the page changes, when pages are unloaded (a lost device included) and at exit; none are drawn during a page fade.
+- Consequences: an archive page is not tiled yet (it has no file for the thread to read). A turned (EXIF 5-8) picture's tiles go through an uncached rotator and are slower. Only level 0 could be seen on the VM: with the 128 MP budget a reduced texture is magnified only above 0.6x, where level 0 is chosen; coarser levels begin with pictures several times larger and rest on the host tests.
+
 ## 2026-09-25: D-39 Two pages share one height; a picture too large for the card is shown reduced
 
 - Status: Accepted (owner 2026-09-25: "초고해상도 처리를 위한 폴백 등도 있어야 한다고 봐요 그리고 2개씩 보기에서 왼쪽에 저해상도 오른쪽에 고해상도 이렇게 있을때에도 저해상도가 작게 보이는게 아니라 지능적으로 크기 리사이즈해서 보여줘요")
