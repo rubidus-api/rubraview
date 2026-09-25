@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-25: D-37 Bicubic and Lanczos resample in two passes; output may move by one level
+
+- Status: Accepted (owner 2026-09-25: "남은 백로그도 다 처리 바랍니다", which included the separable resampler left open by D-32 because it changes output)
+- Decision: bicubic and Lanczos-3 filter source rows horizontally once (per 128-column block, a stack cache of float rows) and sum them vertically; when the image shrinks vertically by taps - 1 or more (3 for bicubic, 5 for Lanczos), the previous 2-D sum is used instead, being cheaper there. The intermediate stays float.
+- Consequences: output may differ from 0.0.17's by one level in a few bytes (measured: at most 1, in at most 0.003 % of bytes); bilinear and nearest are unchanged. Enlarging is 3-13x faster, moderate shrinking 1.2-1.9x, large shrinking unchanged (`docs/benchmark/results/2026-09-25-resample-two-pass.md`). The previous implementation is kept as `tools/resample_reference.c` for `tools/resample_compare.c`.
+
 ## 2026-09-25: D-36 Dropped virtual files are copied to a temporary folder and opened from there
 
 - Status: Accepted (implementer, carrying out RFC-0001 §3.19.2 / RV-073, which already called for an OLE `IDropTarget` taking drops from browsers and archive managers)
