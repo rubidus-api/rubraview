@@ -73,12 +73,14 @@ This project follows Keep a Changelog.
 
 ### Changed
 
+- Bicubic and Lanczos-3 resizing in export and batch is faster: enlarging
+  3-13 times, moderate shrinking up to twice, large shrinking as before
+  (D-32, D-37). A pixel may differ from 0.0.17's by one level of 255, in a
+  handful of bytes.
 - Files that share a modified time, a creation time or a size are ordered
   by name, then by the listing, so a folder opens the same way every time;
   before, their order was whatever the filesystem listed. Sorting is
   proven's introsort now, never quadratic.
-- Bicubic and Lanczos-3 resizing in export and batch runs 1.4-2.4x faster,
-  with the same output byte for byte.
 - Settings, playlists, subtitles and tags read their numbers with
   proven's parsers: a value that is not a finite number (`nan`, `inf`, too
   many digits) falls back to the default instead of being used.
