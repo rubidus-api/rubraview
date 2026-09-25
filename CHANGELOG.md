@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- The adjust panel (`E`) shows its result as you drag (RV-064, RV-065):
+  the picture follows every slider and curve, and a histogram of the
+  adjusted picture sits behind the curve. Until now only the saved copy
+  changed.
+
 - The rename box edits like a text field: the arrows, Home and End move
   the caret (Shift selects), Ctrl+A selects everything, typing replaces
   the selection, and Ctrl+C, Ctrl+X and Ctrl+V use the clipboard — Hangul
