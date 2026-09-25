@@ -377,6 +377,19 @@ typedef struct app_state {
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     char                   rename_buffer[256];
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
+    /* RV-065: the adjust panel's live preview — a reduced copy of the page
+       run through the same commit code as Save a copy — and its histogram. */
+    void                  *edit_small_mem, *edit_work_mem;
+    size_t                 edit_small_bytes, edit_work_bytes;
+    rubraview_pixbuf_t     edit_small;
+    int32_t                edit_page;          /* the page the copy is of, -1 for none */
+    rubraview_texture_t   *edit_preview;
+    int32_t                edit_preview_w, edit_preview_h;
+    rubraview_edit_params_t edit_shown_params;
+    rubraview_edit_curve_t edit_shown_curves[5];
+    bool                   edit_shown_valid;
+    uint32_t               edit_hist[4][256];  /* R, G, B, luminance of the preview */
+    bool                   edit_hist_ok;
     char                   rename_composing[64];   /* the IME's unfinished syllable, drawn after the text */
     size_t                 rename_composing_length;
     bool                   confirm_purge;   /* §3.18.1's Y/N dialog is showing */
@@ -5246,7 +5259,11 @@ static void panel_relayout(app_state_t *app) {
     if (w > 0 && h > 0) rubraview_panel_layout(&app->panel, (double)w, (double)h);
 }
 
+static void edit_preview_close(app_state_t *app);
+static void edit_preview_open(app_state_t *app);
+
 static void panel_close(app_state_t *app) {
+    edit_preview_close(app);
     app->panel.open = false;
     app->panel.row_count = 0;
     app->panel_is_export = false;
@@ -5286,6 +5303,7 @@ static void panel_open_edit(app_state_t *app) {
 
     app->panel.open = true;
     panel_relayout(app);
+    edit_preview_open(app);
 }
 
 static void panel_open_export(app_state_t *app) {
@@ -6674,6 +6692,144 @@ static bool edit_panel_open(const app_state_t *app) {
     return app->panel.open && !app->panel_is_export && !app->panel_is_batch;
 }
 
+/* ---- RV-065: the adjust panel's live preview and histogram ---- */
+
+static void edit_preview_close(app_state_t *app) {
+    if (app->edit_preview) rubraview_pal_texture_destroy(app->edit_preview);
+    app->edit_preview = NULL;
+    free(app->edit_small_mem);
+    free(app->edit_work_mem);
+    app->edit_small_mem = app->edit_work_mem = NULL;
+    app->edit_small = (rubraview_pixbuf_t){0};
+    app->edit_page = -1;
+    app->edit_shown_valid = false;
+    app->edit_hist_ok = false;
+}
+
+/* The page read once at full size, in memory of its own that is given back
+   straight away (the app arena is a fixed 64 MB and a 12 MP photo is 48),
+   shrunk to what the window shows, and kept while the panel is open. */
+static void edit_preview_open(app_state_t *app) {
+    edit_preview_close(app);
+    int32_t page = current_page_index(app);
+    if (page < 0 || (size_t)page >= page_count(app) || !app->pages[page].loaded) return;
+    int32_t w = app->pages[page].width, h = app->pages[page].height;
+    if (w <= 0 || h <= 0) return;
+
+    size_t big = (size_t)w * (size_t)h * 4u * 2u + (16u << 20);
+    void *scratch_mem = malloc(big);
+    if (!scratch_mem) return;
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_mem, .size = big });
+    rubraview_pixbuf_t full = {0};
+    u8str_t path = app->source.pages[page].path;
+    if (path.len > 0) {
+        full = rubraview_pal_image_read_pixels(&scratch, path, NULL, 0, true);
+    } else {
+        rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+        if (bytes.ok && bytes.data.len > 0) {
+            full = rubraview_pal_image_read_pixels(&scratch, (u8str_t){ .ptr = "", .len = 0 },
+                                                   (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
+        }
+    }
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    int32_t pw = 0, ph = 0;
+    rubraview_edit_preview_size(&app->edit, win_w, win_h, &pw, &ph);
+    if (rubraview_pixbuf_is_valid(&full) && pw > 0 && ph > 0) {
+        size_t small = (size_t)pw * (size_t)ph * 4u;
+        app->edit_small_bytes = small + (1u << 20);
+        app->edit_work_bytes = small * 10u + (8u << 20);   /* commit's stages and the BGRA copy */
+        app->edit_small_mem = malloc(app->edit_small_bytes);
+        app->edit_work_mem = malloc(app->edit_work_bytes);
+        if (app->edit_small_mem && app->edit_work_mem) {
+            proven_arena_t keep = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->edit_small_mem,
+                                                                          .size = app->edit_small_bytes });
+            rubraview_pixbuf_t rgba = full.format == RUBRAVIEW_PIXFMT_RGBA8
+                ? full : rubraview_pixbuf_convert(&scratch, &full, RUBRAVIEW_PIXFMT_RGBA8);
+            app->edit_small = rubraview_pixbuf_resample(&keep, &rgba, pw, ph, RUBRAVIEW_FILTER_BILINEAR);
+            if (rubraview_pixbuf_is_valid(&app->edit_small)) app->edit_page = page;
+        }
+    }
+    free(scratch_mem);
+    if (app->edit_page < 0) edit_preview_close(app);
+}
+
+/* Runs the session over the reduced copy when a slider or a curve changed
+   since the last run: a new picture for the page and a new histogram. The
+   crop is left out — it is shown by its own overlay, on the whole picture. */
+static void edit_preview_update(app_state_t *app) {
+    if (!edit_panel_open(app) || !app->edit_work_mem || !app->edit_small_mem || app->edit_page < 0) return;
+    if (current_page_index(app) != app->edit_page) { edit_preview_close(app); return; }
+    if (app->edit_shown_valid &&
+        memcmp(&app->edit_shown_params, &app->edit.params, sizeof(app->edit.params)) == 0 &&
+        memcmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0) {
+        return;
+    }
+    app->edit_shown_params = app->edit.params;
+    memcpy(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves));
+    app->edit_shown_valid = true;
+
+    proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->edit_work_mem,
+                                                                  .size = app->edit_work_bytes });
+    rubraview_edit_session_t session = app->edit;
+    session.crop_active = false;
+    session.resize_width = session.resize_height = 0;
+    rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &session, &app->edit_small);
+    if (!rubraview_pixbuf_is_valid(&edited)) return;
+    rubraview_histogram_compute(&edited, app->edit_hist[0], app->edit_hist[1], app->edit_hist[2], app->edit_hist[3]);
+    app->edit_hist_ok = true;
+    rubraview_pixbuf_t bgra = edited.format == RUBRAVIEW_PIXFMT_BGRA8
+        ? edited : rubraview_pixbuf_convert(&work, &edited, RUBRAVIEW_PIXFMT_BGRA8);
+    if (!rubraview_pixbuf_is_valid(&bgra)) return;
+    if (!app->edit_preview || app->edit_preview_w != bgra.width || app->edit_preview_h != bgra.height) {
+        if (app->edit_preview) rubraview_pal_texture_destroy(app->edit_preview);
+        app->edit_preview = rubraview_pal_texture_create_bgra(app->renderer, bgra.width, bgra.height);
+        app->edit_preview_w = bgra.width;
+        app->edit_preview_h = bgra.height;
+    }
+    if (app->edit_preview) (void)rubraview_pal_texture_upload_bgra(app->edit_preview, bgra.pixels, bgra.stride);
+}
+
+/* The adjusted picture over the page, where the page is on screen. */
+static void draw_edit_preview(app_state_t *app) {
+    if (!edit_panel_open(app) || !app->edit_preview || !app->edit_small_mem ||
+        app->edit_page != current_page_index(app)) return;
+    rubraview_pal_rect_t rect;
+    double scale = 1.0;
+    if (!page_screen_rect(app, &rect, &scale) || app->edit_preview_w <= 0 || app->edit_preview_h <= 0) return;
+    rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+        rubraview_mat3x2_scale(rect.width / (double)app->edit_preview_w, rect.height / (double)app->edit_preview_h),
+        rubraview_mat3x2_translate(rect.x, rect.y));
+    rubraview_pal_render_draw_texture(app->renderer, app->edit_preview, place, RUBRAVIEW_INTERP_LINEAR);
+}
+
+/* The histogram behind the curve: the active channel's, luminance for RGB
+   and Luma. Scaled to the tallest bin that is not the first or the last,
+   so a clipped white or black does not flatten everything else. */
+static void draw_edit_histogram(app_state_t *app, rubraview_pal_rect_t box) {
+    if (!app->edit_hist_ok) return;
+    int ch = 3;
+    uint32_t color = 0x90A0A0A0u;
+    switch (app->edit.active_channel) {
+        case RUBRAVIEW_EDIT_CHANNEL_RED:   ch = 0; color = 0x70FF5050u; break;
+        case RUBRAVIEW_EDIT_CHANNEL_GREEN: ch = 1; color = 0x7050FF50u; break;
+        case RUBRAVIEW_EDIT_CHANNEL_BLUE:  ch = 2; color = 0x805080FFu; break;
+        default: break;
+    }
+    const uint32_t *hist = app->edit_hist[ch];
+    uint32_t top = 1;
+    for (int i = 1; i < 255; ++i) if (hist[i] > top) top = hist[i];
+    double bin = box.width / 256.0;
+    for (int i = 0; i < 256; ++i) {
+        double f = (double)hist[i] / (double)top;
+        if (f > 1.0) f = 1.0;
+        double hgt = box.height * f;
+        if (hgt < 0.5) continue;
+        rubraview_pal_render_fill_rect(app->renderer,
+            (rubraview_pal_rect_t){ box.x + bin * i, box.y + box.height - hgt, bin + 0.5, hgt }, color, 0.0);
+    }
+}
+
 static void draw_crop_overlay(app_state_t *app) {
     if (!edit_panel_open(app) || !app->edit.crop_active) return;
     rubraview_pal_rect_t rect;
@@ -6760,6 +6916,7 @@ static void draw_curve_widget(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
     rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+    draw_edit_histogram(app, box);   /* RV-065: what the adjusted picture holds, behind its curve */
 
     /* quarters, so a point's height can be judged without a ruler */
     for (int i = 1; i < 4; ++i) {
@@ -6864,6 +7021,8 @@ static void render_frame(app_state_t *app) {
     if (app->picker_open) {
         draw_picker(app, (double)win_w, (double)win_h);
     } else {
+        edit_preview_update(app);
+        draw_edit_preview(app);
         draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_sub_list(app);   /* D-33: on top of every box */
