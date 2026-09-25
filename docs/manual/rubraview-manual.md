@@ -84,7 +84,8 @@ it was.
 ## Sorting your files
 
 `Delete` sends the file to the recycle bin (`Shift+Delete` deletes for good,
-after asking), `F2` renames it keeping the extension, `Ctrl+Z` undoes a move,
+after asking), `F2` renames it (the box edits like any text field: arrows
+and `Shift` select, `Ctrl+A`, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`), `Ctrl+Z` undoes a move,
 a copy or a rename, and `1`–`9` send it to a folder you chose.
 
 To use the number keys for sorting, put this in `settings.ini`:
