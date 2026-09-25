@@ -132,6 +132,29 @@ int main(void) {
     }
     printf("  [PASS] One set of view comparisons, safe on an empty view\n");
 
+    /* A name another program hands over is made safe to create (§3.19.2). */
+    {
+        char b[64];
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("cat.jpg")), "cat.jpg"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("..\\..\\Windows\\evil.dll")), "evil.dll"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("C:/x/y.png")), "y.png"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("a<b>c:d\"e|f?g*h.png")), "a_b_c_d_e_f_g_h.png"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("tab\there.txt")), "tab_here.txt"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("dots... ")), "dots"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("CON.txt")), "_CON.txt"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("com3")), "_com3"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("console.txt")), "console.txt"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("")), "dropped"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8(" . ")), "dropped"));
+        assert(str_eq(rubraview_path_safe_name(b, sizeof(b), U8("사진.jpg")), "사진.jpg"));
+        /* Too long: cut on a character boundary, the extension kept. */
+        char small[16];
+        u8str_t cut = rubraview_path_safe_name(small, sizeof(small), U8("가나다라마바사아.jpeg"));
+        assert(cut.len <= 15 && cut.len >= 5 && memcmp(cut.ptr + cut.len - 5, ".jpeg", 5) == 0);
+        for (size_t i = 0; i + 5 < cut.len; i += 3) assert(((unsigned char)cut.ptr[i] & 0xF0) == 0xE0);   /* whole syllables */
+    }
+    printf("  [PASS] A name another program hands over is made safe to create\n");
+
     free(raw_mem);
     printf("[test_path] All tests passed successfully!\n");
     return 0;

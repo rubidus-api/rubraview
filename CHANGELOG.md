@@ -8,6 +8,11 @@ This project follows Keep a Changelog.
 
 ### Added
 
+- Drop pictures from other programs (RV-073, D-36). The window takes drops
+  the way Explorer offers them and also the way browsers and mail programs
+  do — a picture with no file behind it is copied to a temporary folder of
+  the viewer's, opened, and removed when the viewer closes.
+
 - Thumbnails in the file picker (owner, 2026-09-25, D-34, D-35). Each tile
   shows its picture, softly blurred and a little dark so the name — light
   with a dark outline — reads over it; a folder shows its first picture, or

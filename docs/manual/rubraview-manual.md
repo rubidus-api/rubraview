@@ -55,6 +55,11 @@ place when you open it again — press `Enter` to take it.
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
 `.cb7` and `.7z` all open, and nothing is ever unpacked to your disk.
 
+Drop files on the window to open them — several at once become one
+sequence. Pictures dragged out of a browser or a mail program work too:
+they are copied to a temporary folder of the viewer's, which is removed
+when it closes.
+
 ## Animated images
 
 While a GIF, WebP or APNG is on screen, `Space` pauses it, `.` and `,`
