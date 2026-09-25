@@ -89,6 +89,7 @@ struct rubraview_renderer {
     ID2D1DeviceContext *target;    /* the render target, and the effect graph's owner */
     ID3D11Device *d3d;
     ID3D11Device *decode_d3d;      /* RV-062: the decoder's own device, same card; made on first use */
+    bool force_lost;               /* the next present is treated as a lost device (a test's trigger) */
     IDXGISwapChain1 *swap_chain;
     ID2D1Bitmap1 *back_buffer;
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
@@ -339,6 +340,10 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
     return r;
 }
 
+void rubraview_pal_render_force_lost(rubraview_renderer_t *renderer) {
+    if (renderer) renderer->force_lost = true;
+}
+
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     if (!renderer) return;
     release_back_buffer(renderer);
@@ -401,6 +406,10 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
         hr = IDXGISwapChain1_Present(renderer->swap_chain, 1, 0);
     }
 
+    if (renderer->force_lost) {
+        renderer->force_lost = false;
+        hr = DXGI_ERROR_DEVICE_REMOVED;
+    }
     if (hr == (HRESULT)D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED ||
         hr == DXGI_ERROR_DEVICE_RESET) {
         /* The device is gone — a driver update, a GPU reset, a laptop
@@ -412,6 +421,13 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
         if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
         if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
         if (renderer->d3d) { ID3D11Device_Release(renderer->d3d); renderer->d3d = NULL; }
+        /* A reset or a TDR takes every device on the card, the decoder's
+           too (RV-062): a removed one is let go so the film, reopened by
+           the caller, gets a fresh one. A living one is kept. */
+        if (renderer->decode_d3d && ID3D11Device_GetDeviceRemovedReason(renderer->decode_d3d) != S_OK) {
+            ID3D11Device_Release(renderer->decode_d3d);
+            renderer->decode_d3d = NULL;
+        }
         renderer->free_textures = NULL;
         (void)create_device(renderer);
         return false; /* recreated or not, the caller must reload textures */

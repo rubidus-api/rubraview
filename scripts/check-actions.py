@@ -237,6 +237,7 @@ KEY_WORDS = {"Plus": "+", "Minus": "-", "BracketRight": "]", "BracketLeft": "[",
 INTERNAL = {
     "resume_accept": "answered from the resume prompt, which has its own keys",
     "anim_toggle_pause": "the name media_play_pause had before D-16, kept for keymap.ini files saved earlier",
+    "debug_lose_device": "a test's trigger for RV-062's lost-device path, bound only in a test machine's keymap.ini",
 }
 
 

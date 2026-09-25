@@ -85,6 +85,9 @@ This project follows Keep a Changelog.
 
 ### Fixed
 
+- A film decoded on the graphics card keeps playing after the card is
+  reset or the PC wakes from sleep: it is opened again where it was, on the
+  same tracks (RV-062). Before, its picture froze until it was reopened.
 - The rename box, the A-B box, the delete question and the notices are
   drawn above the floating boxes; the toolbox's anchor covered the start of
   a name being typed.
