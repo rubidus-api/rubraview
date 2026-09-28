@@ -2601,7 +2601,7 @@ static void toolbox_refresh(app_state_t *app) {
     app->toolbox.tile_count = count;
     /* The strip's seek bar, for a film or music; for a still picture with
        others around it, where it is among them (owner, 2026-09-28). */
-    app->toolbox.timeline = app->media != NULL || page_count(app) > 1;
+    app->toolbox.timeline = app->media != NULL || page_count(app) > 1 || app->pagebar_dragging;
     /* The menu follows what is on screen too, but only while it is at its
        root: a reader halfway down a submenu is not pulled back. */
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
@@ -4236,7 +4236,10 @@ static void pagebar_drag(app_state_t *app, double x, bool released) {
     double now = rubraview_pal_time_now_seconds();
     if (!released && now - app->pagebar_last < 0.1) return;
     app->pagebar_last = now;
-    if (pagebar_shown(app)) pagebar_click(app, app->pagebar_x, app->pagebar_width, x);
+    /* Pages all the way: a film or a song passed over does not stop the
+       drag. Where it ends decides the bar: a film or a song there makes it
+       that page's own seek bar again (owner, 2026-09-28). */
+    if (page_count(app) > 1) pagebar_click(app, app->pagebar_x, app->pagebar_width, x);
     if (released) app->pagebar_dragging = false;
 }
 
@@ -4250,7 +4253,8 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         rubraview_pal_render_fill_rect(r, track, 0x60FFFFFFu, track.height * 0.5);
         double duration = app->media_info.duration_seconds;
         double f = duration > 0.0 ? app->media_position / duration : 0.0;
-        if (pagebar_shown(app)) f = rubraview_pagebar_fraction((size_t)current_page_index(app), page_count(app));
+        bool pages = pagebar_shown(app) || app->pagebar_dragging;   /* held, it stays a page bar */
+        if (pages) f = rubraview_pagebar_fraction((size_t)current_page_index(app), page_count(app));
         if (f < 0.0) f = 0.0;
         if (f > 1.0) f = 1.0;
         rubraview_pal_rect_t done = { track.x, track.y, track.width * f, track.height };
@@ -4260,7 +4264,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
     char place[48];
-    int n = pagebar_shown(app) && hovered < 0
+    int n = (pagebar_shown(app) || app->pagebar_dragging) && hovered < 0
         ? snprintf(place, sizeof(place), "%d / %zu", current_page_index(app) + 1, page_count(app)) : 0;
     if (n > 0) {
         /* The place at the right end of the line, the name in what is left. */

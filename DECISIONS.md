@@ -182,6 +182,7 @@ Do not store credentials, private infrastructure details, personal data, private
   - Settings › Files › Sort by offers, in this order: `text` (the name as plain text), `explorer` (Explorer's order, digits grouped: 2 before 10; the default), `modified`, `size`, `created`. These are the orders that were there as `lexical`, `natural`, `date`, `size`; a settings.ini holding an old word is read as its new one and written back with it (`CHOICE_RENAMES` in settings.c).
   - The picker (`O`) lists in the same order, folders first, instead of always by name.
   - The toolbox's page bar (D-44) can be held and dragged: the page under the pointer is shown, at most ten a second, and the one under it on release; in the detached toolbox window too.
+  - Held, it stays a page bar over every page, a film or a song included; where the drag or the click ends decides the bar: on a film or a song it is that page's own seek bar again (owner, same day: "드래그가 끝난 자리나 버튼이 떼어진 자리가 동영상이거나 음악이면 각자 자기 타입의 동작으로"). Measured on the VM: a drag ended on `e_clip.mp4` (5 of 6) — the film played and the bar showed its time.
 - Consequences: a choice word renamed later needs its own line in `CHOICE_RENAMES`. Measured on the Windows 11 VM the same day: a stored `natural` showed as `explorer` and was written back as `explorer`; the picker by size listed `rbtest` in the order of the file sizes; a drag along the bar turned 1 → 3 → 4 → 6 and stopped at 6 of 6.
 
 ## 2026-09-28: D-45 Sort by is read; the settings window's text can be marked and copied
