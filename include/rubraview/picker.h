@@ -4,6 +4,7 @@
 #include "rubraview/core.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/ui_virtual.h"
+#include "rubraview/pagesource.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,33 @@ bool rubraview_picker_is_places(u8str_t dir);
  * PC page itself and for an empty path.
  */
 u8str_t rubraview_picker_parent(u8str_t dir);
+
+/**
+ * Inside the archive being read (owner, 2026-09-28: moving around a comic
+ * quickly). The picker names a place in it as the archive's own path and
+ * the folder inside, "D:/Comics/Big.cbz/Vol 1"; the archive's path alone
+ * is its top. True when `dir` is such a place; `inner` is the part after
+ * the archive, without separators at its ends. Either separator, and
+ * letters in either case, as Windows compares paths.
+ */
+bool rubraview_picker_inside_archive(u8str_t dir, u8str_t archive_path, u8str_t *out_inner);
+
+#define RUBRAVIEW_PICKER_NOT_A_PAGE ((size_t)-1)
+
+typedef struct rubraview_archive_level {
+    rubraview_fs_listing_t listing;   /* its folders, then its pages, in the book's order */
+    size_t *page_of;                  /* one per entry: the page's index, or NOT_A_PAGE for a folder */
+} rubraview_archive_level_t;
+
+/**
+ * One level of an open archive: the folders and pages directly in
+ * `inner`, from the source's pages (which are in the book's order, a
+ * folder's pages together). Paths are the archive's path joined with the
+ * inside, NUL-terminated in `arena`.
+ */
+rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, u8str_t archive_path,
+                                                         const rubraview_page_ref_t *pages, size_t page_count,
+                                                         u8str_t inner);
 
 /**
  * A path typed into the picker's path box (owner, 2026-09-28), cleaned:
