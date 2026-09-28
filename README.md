@@ -1,8 +1,6 @@
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.17** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.17/rubraview-v0.0.17.zip)
+
 # Rubraview
-
-**Rubraview v0.0.17** (latest release) download — [rubraview-v0.0.17.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.17/rubraview-v0.0.17.zip) · [all releases](https://github.com/rubidus-api/rubraview/releases)
-
-**English** · [한국어](README.ko.md)
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
