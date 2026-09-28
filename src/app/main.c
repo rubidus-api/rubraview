@@ -254,6 +254,10 @@ typedef struct app_state {
     char                   ab_edit_text[2][32];
     size_t                 ab_edit_length[2];
     bool                   timeline_dragging; /* RFC-0002 §4.2: the pointer holds the seek bar */
+    /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
+       main window or the detached toolbox's, with the bar where it was pressed. */
+    bool                   pagebar_dragging, pagebar_detached;
+    double                 pagebar_x, pagebar_width, pagebar_last;
     /* RFC-0002 Q6: the toolbox as a window of its own once dragged out. */
     rubraview_window_t    *toolbox_window;
     rubraview_renderer_t  *toolbox_renderer;
@@ -534,10 +538,12 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void picker_path_begin(app_state_t *app);
+static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending);
 static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo);
 static bool settings_row_is_text(const app_state_t *app, int32_t row);
 static bool pagebar_shown(const app_state_t *app);
-static void pagebar_click(app_state_t *app, double bar_x, double bar_width, double x);
+static void pagebar_press(app_state_t *app, double bar_x, double bar_width, double x, bool detached);
+static void pagebar_drag(app_state_t *app, double x, bool released);
 static bool key_is(rubraview_key_combo_t combo, const char *name);
 static void help_show(app_state_t *app);
 static void mini_show(app_state_t *app);
@@ -2207,7 +2213,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     }
     app->picker_hidden = hidden;
 
-    /* Directories first, then files, each in natural order — folders are
+    /* Directories first, then files, each in the Sort by order — folders are
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_sort_item_t));
@@ -2216,13 +2222,17 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
         for (size_t i = 0; i < listing.count; ++i) {
             items[i] = (rubraview_sort_item_t){
                 .name = listing.entries[i].name,
-                .mtime = listing.entries[i].is_directory ? 0 : 1, /* sort key: folders first */
+                .mtime = listing.entries[i].mtime,
                 .ctime = listing.entries[i].ctime,
                 .size_bytes = listing.entries[i].size_bytes,
                 .tag = (uint64_t)i,
             };
         }
-        rubraview_sort_items(items, listing.count, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
+        /* Settings > Files > Sort by, as the pages are turned (owner,
+           2026-09-28); the two passes below put the folders first. */
+        bool ascending = true;
+        rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
+        rubraview_sort_items(items, listing.count, mode, ascending, NULL);
 
         proven_result_mem_mut_t ordered_res =
             rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_fs_entry_t));
@@ -3793,6 +3803,7 @@ static void toolbox_window_pump(app_state_t *app) {
                 app->toolbox_window_pointer_x = event.mouse.x;
                 app->toolbox_window_pointer_y = event.mouse.y;
                 app->toolbox_window_drawn = 0.0;
+                if (app->pagebar_dragging && app->pagebar_detached) pagebar_drag(app, event.mouse.x, false);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                 dispatch_key(app, event.key.combo);   /* the viewer's keys work from here too */
@@ -3827,7 +3838,7 @@ static void toolbox_window_pump(app_state_t *app) {
                     event.mouse.x >= l.timeline.x && event.mouse.x < l.timeline.x + l.timeline.width &&
                     event.mouse.y >= m.anchor_size + l.timeline.y - l.timeline.height &&
                     event.mouse.y < m.anchor_size + l.timeline.y + l.timeline.height * 2.0) {
-                    pagebar_click(app, l.timeline.x, l.timeline.width, event.mouse.x);
+                    pagebar_press(app, l.timeline.x, l.timeline.width, event.mouse.x, true);
                     app->toolbox_window_drawn = 0.0;
                     break;
                 }
@@ -3847,6 +3858,11 @@ static void toolbox_window_pump(app_state_t *app) {
                 break;
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (app->pagebar_dragging && app->pagebar_detached) {
+                    pagebar_drag(app, event.mouse.x, true);
+                    app->toolbox_window_drawn = 0.0;
+                    break;
+                }
                 sub_tile_result(app, rubraview_tap_release(&app->sub_tap, rubraview_pal_time_now_seconds()));
                 break;
             default:
@@ -3990,7 +4006,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         rubraview_rect_t bar = rubraview_box_timeline_rect(&app->toolbox, &metrics);
         if (bar.width > 0.0 && x >= bar.x && x < bar.x + bar.width &&
             y >= bar.y - bar.height && y < bar.y + bar.height * 2.0) {
-            pagebar_click(app, bar.x, bar.width, x);
+            pagebar_press(app, bar.x, bar.width, x, false);
             note_activity(app);
             return true;
         }
@@ -4201,6 +4217,27 @@ static void pagebar_click(app_state_t *app, double bar_x, double bar_width, doub
     if ((int32_t)page == current_page_index(app)) return;
     go_to_spread(app, spread_index_for_page(app, (int32_t)page));
     update_precache(app);
+}
+
+/* The press also takes hold of the bar: moving the pointer turns the
+   pages under it, as the film's seek bar does. */
+static void pagebar_press(app_state_t *app, double bar_x, double bar_width, double x, bool detached) {
+    pagebar_click(app, bar_x, bar_width, x);
+    app->pagebar_dragging = true;
+    app->pagebar_detached = detached;
+    app->pagebar_x = bar_x;
+    app->pagebar_width = bar_width;
+    app->pagebar_last = rubraview_pal_time_now_seconds();
+}
+
+/* A page every tenth of a second at most while dragging — each is a
+   decode — and the one under the pointer when it is let go. */
+static void pagebar_drag(app_state_t *app, double x, bool released) {
+    double now = rubraview_pal_time_now_seconds();
+    if (!released && now - app->pagebar_last < 0.1) return;
+    app->pagebar_last = now;
+    if (pagebar_shown(app)) pagebar_click(app, app->pagebar_x, app->pagebar_width, x);
+    if (released) app->pagebar_dragging = false;
 }
 
 /* The strip's seek bar and the line under it: the file's name or, under
@@ -9717,6 +9754,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             panel_apply_row(&app, dragged);
                         }
                     }
+                    if (app.pagebar_dragging && !app.pagebar_detached) pagebar_drag(&app, event.mouse.x, false);
                     if (app.timeline_dragging && rubraview_pal_time_now_seconds() - app.timeline_last_seek > 0.1) {
                         timeline_seek_to_pointer(&app, event.mouse.x);   /* a seek every tenth of a second at most */
                     }
@@ -9896,6 +9934,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (app.timeline_dragging) {
                         app.timeline_dragging = false;
                         timeline_seek_to_pointer(&app, event.mouse.x);
+                        break;
+                    }
+                    if (app.pagebar_dragging && !app.pagebar_detached) {
+                        pagebar_drag(&app, event.mouse.x, true);
                         break;
                     }
                     rubraview_panel_release(&app.panel);

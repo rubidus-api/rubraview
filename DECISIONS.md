@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-46 Sort by's orders named for what they do; the picker follows them; the page bar drags
+
+- Status: Accepted (owner 2026-09-28: "정렬에 그냥 문자열 순, 윈도 탐색기식 파일이름 순(숫자는 묶어서), modification time, 파일크기 순서 추가해 줘", then "위에 제안한 것도 이어서 해줘" on dragging the page bar)
+- Decision:
+  - Settings › Files › Sort by offers, in this order: `text` (the name as plain text), `explorer` (Explorer's order, digits grouped: 2 before 10; the default), `modified`, `size`, `created`. These are the orders that were there as `lexical`, `natural`, `date`, `size`; a settings.ini holding an old word is read as its new one and written back with it (`CHOICE_RENAMES` in settings.c).
+  - The picker (`O`) lists in the same order, folders first, instead of always by name.
+  - The toolbox's page bar (D-44) can be held and dragged: the page under the pointer is shown, at most ten a second, and the one under it on release; in the detached toolbox window too.
+- Consequences: a choice word renamed later needs its own line in `CHOICE_RENAMES`. Measured on the Windows 11 VM the same day: a stored `natural` showed as `explorer` and was written back as `explorer`; the picker by size listed `rbtest` in the order of the file sizes; a drag along the bar turned 1 → 3 → 4 → 6 and stopped at 6 of 6.
+
 ## 2026-09-28: D-45 Sort by is read; the settings window's text can be marked and copied
 
 - Status: Accepted (owner 2026-09-28: "정렬방식은 설정에서 바꿀수 있고. 그리고 설정의 텍스트는 블럭설정 또는 복사 가능하게 해줘")

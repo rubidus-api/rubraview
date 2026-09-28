@@ -76,7 +76,29 @@ rubraview_settings_t rubraview_settings_defaults(void) {
 /* Matches a stored word against a choice list; an unrecognised word
    keeps the default rather than becoming index 0, which would silently
    change the setting to something the file did not say. */
+/* Words a choice was once stored under, read as the word it has now
+   (owner, 2026-09-28: Sort by's orders named for what they do). */
+static const struct { const char *section, *key, *old_word, *new_word; } CHOICE_RENAMES[] = {
+    { "files", "sort_mode", "natural", "explorer" },
+    { "files", "sort_mode", "lexical", "text" },
+    { "files", "sort_mode", "date",    "modified" },
+};
+
+static bool choice_index_exact(const rubraview_setting_def_t *def, u8str_t word, double *out);
+
 static bool choice_index(const rubraview_setting_def_t *def, u8str_t word, double *out) {
+    if (choice_index_exact(def, word, out)) return true;
+    for (size_t r = 0; r < sizeof(CHOICE_RENAMES) / sizeof(CHOICE_RENAMES[0]); ++r) {
+        if (!rubraview_u8_eq_lit(def->section, CHOICE_RENAMES[r].section) ||
+            !rubraview_u8_eq_lit(def->key, CHOICE_RENAMES[r].key) ||
+            !rubraview_u8_eq_lit_ci(word, CHOICE_RENAMES[r].old_word)) continue;
+        u8str_t now = { .ptr = CHOICE_RENAMES[r].new_word, .len = strlen(CHOICE_RENAMES[r].new_word) };
+        return choice_index_exact(def, now, out);
+    }
+    return false;
+}
+
+static bool choice_index_exact(const rubraview_setting_def_t *def, u8str_t word, double *out) {
     for (int32_t i = 0; i < def->choice_count && def->choices[i]; ++i) {
         size_t n = strlen(def->choices[i]);
         if (word.len != n) continue;
