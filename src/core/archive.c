@@ -26,6 +26,58 @@ static uint32_t rd_u32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+static uint64_t rd_u64(const uint8_t *p) {
+    return (uint64_t)rd_u32(p) | ((uint64_t)rd_u32(p + 4) << 32);
+}
+
+#define ZIP_SIG_EOCD64 0x06064b50u
+#define ZIP_SIG_EOCD64_LOCATOR 0x07064b50u
+#define ZIP_EOCD64_MIN_SIZE 56u
+#define ZIP_EOCD64_LOCATOR_SIZE 20u
+
+/* ZIP64: when the classic end record is saturated, the real count, size
+   and offset of the central directory are in the ZIP64 end record, which
+   the locator just before the classic one points at. `base` is where
+   `data` starts in the file (the thumbnail thread holds only the tail).
+   Everything is checked against what is in hand before it is read. */
+static bool read_eocd64(const uint8_t *data, size_t size, uint64_t base, size_t eocd_off,
+                        uint64_t *entries, uint64_t *cd_size, uint64_t *cd_offset) {
+    if (eocd_off < ZIP_EOCD64_LOCATOR_SIZE) return false;
+    const uint8_t *loc = data + eocd_off - ZIP_EOCD64_LOCATOR_SIZE;
+    if (rd_u32(loc) != ZIP_SIG_EOCD64_LOCATOR) return false;
+    uint64_t rec = rd_u64(loc + 8);
+    if (rec < base || rec - base > size || (rec - base) + ZIP_EOCD64_MIN_SIZE > size) return false;
+    const uint8_t *r = data + (rec - base);
+    if (rd_u32(r) != ZIP_SIG_EOCD64) return false;
+    *entries = rd_u64(r + 32);
+    *cd_size = rd_u64(r + 40);
+    *cd_offset = rd_u64(r + 48);
+    return true;
+}
+
+/* An entry's 0x0001 extra field holds, in this order, those of its sizes
+   and its offset that the header saturated to 0xFFFFFFFF. */
+static bool apply_zip64_extra(const uint8_t *extra, size_t len, uint64_t *uncompressed,
+                              uint64_t *compressed, uint64_t *offset) {
+    bool need_u = *uncompressed == 0xFFFFFFFFu, need_c = *compressed == 0xFFFFFFFFu, need_o = *offset == 0xFFFFFFFFu;
+    if (!need_u && !need_c && !need_o) return true;
+    size_t i = 0;
+    while (i + 4 <= len) {
+        uint16_t id = rd_u16(extra + i), n = rd_u16(extra + i + 2);
+        if (i + 4 + n > len) return false;
+        if (id == 0x0001) {
+            const uint8_t *v = extra + i + 4;
+            size_t at = 0;
+            if (need_u) { if (at + 8 > n) return false; *uncompressed = rd_u64(v + at); at += 8; }
+            if (need_c) { if (at + 8 > n) return false; *compressed = rd_u64(v + at); at += 8; }
+            if (need_o) { if (at + 8 > n) return false; *offset = rd_u64(v + at); at += 8; }
+            return true;
+        }
+        i += 4u + n;
+    }
+    return false;   /* saturated, and nothing says what it really is */
+}
+
 /* Scan backward for the End-of-Central-Directory signature. The EOCD is
    fixed-size plus a variable comment (0-65535 bytes), so it can only be
    found within the last (22 + 65535) bytes of the file. */
@@ -61,12 +113,23 @@ rubraview_zip_result_t rubraview_zip_open(proven_arena_t *arena, const uint8_t *
     }
 
     const uint8_t *eocd = data + eocd_off;
-    uint16_t total_entries = rd_u16(eocd + 10);
-    uint32_t cd_size = rd_u32(eocd + 12);
-    uint32_t cd_offset = rd_u32(eocd + 16);
+    uint64_t total_entries = rd_u16(eocd + 10);
+    uint64_t cd_size = rd_u32(eocd + 12);
+    uint64_t cd_offset = rd_u32(eocd + 16);
+    if (total_entries == 0xFFFFu || cd_size == 0xFFFFFFFFu || cd_offset == 0xFFFFFFFFu) {
+        if (!read_eocd64(data, size, 0, eocd_off, &total_entries, &cd_size, &cd_offset)) {
+            result.err = RUBRAVIEW_ZIP_ERR_CORRUPT;
+            return result;
+        }
+    }
 
-    if ((uint64_t)cd_offset + (uint64_t)cd_size > (uint64_t)eocd_off) {
+    if (cd_offset > (uint64_t)eocd_off || cd_size > (uint64_t)eocd_off - cd_offset) {
         result.err = RUBRAVIEW_ZIP_ERR_TRUNCATED;
+        return result;
+    }
+    /* every entry takes at least a header's worth of the directory */
+    if (total_entries > cd_size / ZIP_CENTRAL_HEADER_MIN_SIZE) {
+        result.err = RUBRAVIEW_ZIP_ERR_CORRUPT;
         return result;
     }
 
@@ -96,16 +159,21 @@ rubraview_zip_result_t rubraview_zip_open(proven_arena_t *arena, const uint8_t *
 
         uint16_t gp_flags = rd_u16(p + 8);
         uint16_t method = rd_u16(p + 10);
-        uint32_t uncompressed_size = rd_u32(p + 24);
-        uint32_t compressed_size = rd_u32(p + 20);
+        uint64_t uncompressed_size = rd_u32(p + 24);
+        uint64_t compressed_size = rd_u32(p + 20);
         uint16_t filename_len = rd_u16(p + 28);
         uint16_t extra_len = rd_u16(p + 30);
         uint16_t comment_len = rd_u16(p + 32);
-        uint32_t local_header_offset = rd_u32(p + 42);
+        uint64_t local_header_offset = rd_u32(p + 42);
 
         const uint8_t *record_end = p + ZIP_CENTRAL_HEADER_MIN_SIZE + filename_len + extra_len + comment_len;
         if (record_end > cd_end) {
             result.err = RUBRAVIEW_ZIP_ERR_TRUNCATED;
+            return result;
+        }
+        if (!apply_zip64_extra(p + ZIP_CENTRAL_HEADER_MIN_SIZE + filename_len, extra_len,
+                               &uncompressed_size, &compressed_size, &local_header_offset)) {
+            result.err = RUBRAVIEW_ZIP_ERR_CORRUPT;
             return result;
         }
 
@@ -126,7 +194,7 @@ rubraview_zip_result_t rubraview_zip_open(proven_arena_t *arena, const uint8_t *
     result.value.data = data;
     result.value.size = size;
     result.value.entries = entries;
-    result.value.entry_count = total_entries;
+    result.value.entry_count = (size_t)total_entries;
     return result;
 }
 
@@ -148,7 +216,7 @@ rubraview_zip_data_result_t rubraview_zip_read_stored(const rubraview_zip_archiv
         return result;
     }
 
-    if ((uint64_t)entry->local_header_offset + ZIP_LOCAL_HEADER_MIN_SIZE > (uint64_t)zip->size) {
+    if ((uint64_t)zip->size < ZIP_LOCAL_HEADER_MIN_SIZE || entry->local_header_offset > (uint64_t)zip->size - ZIP_LOCAL_HEADER_MIN_SIZE) {
         result.err = RUBRAVIEW_ZIP_ERR_TRUNCATED;
         return result;
     }
@@ -163,9 +231,7 @@ rubraview_zip_data_result_t rubraview_zip_read_stored(const rubraview_zip_archiv
     uint16_t local_extra_len = rd_u16(local + 28);
 
     uint64_t data_offset = (uint64_t)entry->local_header_offset + ZIP_LOCAL_HEADER_MIN_SIZE + local_filename_len + local_extra_len;
-    uint64_t data_end = data_offset + entry->uncompressed_size;
-
-    if (data_end > (uint64_t)zip->size) {
+    if (data_offset > (uint64_t)zip->size || entry->uncompressed_size > (uint64_t)zip->size - data_offset) {
         result.err = RUBRAVIEW_ZIP_ERR_TRUNCATED;
         return result;
     }
@@ -182,8 +248,8 @@ rubraview_zip_data_result_t rubraview_zip_read_stored(const rubraview_zip_archiv
 static rubraview_zip_err_t entry_payload(const rubraview_zip_archive_t *zip,
                                          const rubraview_zip_entry_t *entry,
                                          const uint8_t **out_data,
-                                         uint32_t *out_size) {
-    if ((uint64_t)entry->local_header_offset + ZIP_LOCAL_HEADER_MIN_SIZE > (uint64_t)zip->size) {
+                                         uint64_t *out_size) {
+    if ((uint64_t)zip->size < ZIP_LOCAL_HEADER_MIN_SIZE || entry->local_header_offset > (uint64_t)zip->size - ZIP_LOCAL_HEADER_MIN_SIZE) {
         return RUBRAVIEW_ZIP_ERR_TRUNCATED;
     }
 
@@ -195,7 +261,7 @@ static rubraview_zip_err_t entry_payload(const rubraview_zip_archive_t *zip,
 
     uint64_t data_offset = (uint64_t)entry->local_header_offset + ZIP_LOCAL_HEADER_MIN_SIZE
                          + local_filename_len + local_extra_len;
-    if (data_offset + entry->compressed_size > (uint64_t)zip->size) {
+    if (data_offset > (uint64_t)zip->size || entry->compressed_size > (uint64_t)zip->size - data_offset) {
         return RUBRAVIEW_ZIP_ERR_TRUNCATED;
     }
 
@@ -236,7 +302,7 @@ rubraview_zip_data_result_t rubraview_zip_read_entry(proven_arena_t *arena,
     }
 
     const uint8_t *compressed = NULL;
-    uint32_t compressed_size = 0;
+    uint64_t compressed_size = 0;
     rubraview_zip_err_t located = entry_payload(zip, entry, &compressed, &compressed_size);
     if (located != RUBRAVIEW_ZIP_OK) {
         result.err = located;
@@ -277,15 +343,18 @@ bool rubraview_zip_locate_directory(const uint8_t *tail, size_t tail_size, uint6
     size_t eocd = 0;
     if (!find_eocd(tail, tail_size, &eocd)) return false;
     uint64_t eocd_in_file = file_size - tail_size + eocd;
+    uint64_t entries = rd_u16(tail + eocd + 10);
     uint64_t cd_size = rd_u32(tail + eocd + 12);
     uint64_t cd_offset = rd_u32(tail + eocd + 16);
-    if (cd_offset + cd_size > eocd_in_file) return false;
+    if ((entries == 0xFFFFu || cd_size == 0xFFFFFFFFu || cd_offset == 0xFFFFFFFFu) &&
+        !read_eocd64(tail, tail_size, file_size - tail_size, eocd, &entries, &cd_size, &cd_offset)) return false;
+    if (cd_offset > eocd_in_file || cd_size > eocd_in_file - cd_offset) return false;
     *out_cd_offset = cd_offset;
     *out_cd_size = cd_size;
     return true;
 }
 
-bool rubraview_zip_local_span(const uint8_t header[30], uint32_t compressed_size, uint64_t *out_span) {
+bool rubraview_zip_local_span(const uint8_t header[30], uint64_t compressed_size, uint64_t *out_span) {
     if (!header || !out_span || rd_u32(header) != ZIP_SIG_LOCAL_HEADER) return false;
     *out_span = 30u + (uint64_t)rd_u16(header + 26) + (uint64_t)rd_u16(header + 28) + compressed_size;
     return true;

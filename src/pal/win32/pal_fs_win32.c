@@ -336,6 +336,39 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     return ok;
 }
 
+bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {
+    if (!out) return false;
+    *out = (rubraview_fs_mapping_t){0};
+    WCHAR wide[MAX_PATH * 2];
+    char narrow[MAX_PATH * 4];
+    if (path.len == 0 || path.len >= sizeof(narrow)) return false;
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
+    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, NULL);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    HANDLE section = NULL;
+    if (GetFileSizeEx(file, &size) && size.QuadPart > 0) {
+        section = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
+    }
+    CloseHandle(file);   /* the section keeps what it needs */
+    if (!section) return false;
+    const void *view = MapViewOfFile(section, FILE_MAP_READ, 0, 0, 0);
+    CloseHandle(section);   /* the view keeps the section */
+    if (!view) return false;
+    out->data = (const uint8_t*)view;
+    out->size = (uint64_t)size.QuadPart;
+    out->os = (void*)view;
+    return true;
+}
+
+void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping) {
+    if (mapping && mapping->os) UnmapViewOfFile(mapping->os);
+    if (mapping) *mapping = (rubraview_fs_mapping_t){0};
+}
+
 #endif /* _WIN32 */
 
 /* ---- file management (§3.18), RV-070 / RV-071 ---- */

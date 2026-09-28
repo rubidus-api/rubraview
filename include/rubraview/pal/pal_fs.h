@@ -59,6 +59,22 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
  */
 u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path);
 
+/**
+ * A file mapped read-only (owner, 2026-09-28: comics of several GB). The
+ * archive readers take bytes and a size, so a mapping serves them with no
+ * copy and no limit but the address space; pages are read from disk as
+ * they are touched. The file is opened with full sharing and its handle
+ * closed at once.
+ */
+typedef struct rubraview_fs_mapping {
+    const uint8_t *data;
+    uint64_t       size;
+    void          *os;     /* the platform's handle, NULL when unmapped */
+} rubraview_fs_mapping_t;
+
+bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out);
+void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping);
+
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
 

@@ -4,6 +4,9 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,3 +235,31 @@ bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path) { (void)origi
 bool rubraview_pal_fs_move(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_make_dirs(u8str_t path) { (void)path; return false; }
+
+bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {
+    if (!out) return false;
+    *out = (rubraview_fs_mapping_t){0};
+    char z[4096];
+    if (path.len == 0 || path.len >= sizeof(z)) return false;
+    memcpy(z, path.ptr, path.len);
+    z[path.len] = '\0';
+    int fd = open(z, O_RDONLY);
+    if (fd < 0) return false;
+    struct stat st;
+    void *p = MAP_FAILED;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0) {
+        p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    }
+    close(fd);
+    if (p == MAP_FAILED) return false;
+    out->data = (const uint8_t*)p;
+    out->size = (uint64_t)st.st_size;
+    out->os = p;
+    return true;
+}
+
+void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping) {
+    if (!mapping || !mapping->os) { if (mapping) *mapping = (rubraview_fs_mapping_t){0}; return; }
+    munmap(mapping->os, (size_t)mapping->size);
+    *mapping = (rubraview_fs_mapping_t){0};
+}
