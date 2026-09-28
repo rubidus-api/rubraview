@@ -685,6 +685,21 @@ static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, u8str_t path
     return out;
 }
 
+bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_height) {
+    if (!out_width || !out_height) return false;
+    IWICBitmapDecoder *decoder = decoder_for_path(path);
+    if (!decoder) return false;
+    IWICBitmapFrameDecode *frame = NULL;
+    UINT w = 0, h = 0;
+    bool ok = SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame &&
+              SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) &&
+              w > 0 && h > 0 && w <= INT32_MAX && h <= INT32_MAX;
+    if (frame) IWICBitmapFrameDecode_Release(frame);
+    IWICBitmapDecoder_Release(decoder);
+    if (ok) { *out_width = (int32_t)w; *out_height = (int32_t)h; }
+    return ok;
+}
+
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    u8str_t path,
                                                    const uint8_t *data, size_t size,

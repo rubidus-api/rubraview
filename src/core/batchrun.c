@@ -375,3 +375,16 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
 
     return report;
 }
+
+size_t rubraview_batch_work_bytes(int32_t width, int32_t height, int32_t out_w, int32_t out_h,
+                                  bool turn, bool resize, bool sharpen) {
+    if (width <= 0 || height <= 0) return 0;
+    uint64_t source = (uint64_t)width * (uint64_t)height * 4u;
+    uint64_t target = resize && out_w > 0 && out_h > 0 ? (uint64_t)out_w * (uint64_t)out_h * 4u : source;
+    uint64_t total = source;                    /* read_pixels: one RGBA picture */
+    if (turn) total += source;                  /* rubraview_pixbuf_orient's copy */
+    if (resize) total += target;                /* the resampler's destination (its intermediate is on the stack) */
+    if (sharpen) total += 3u * target;          /* blur's two and unsharp's result */
+    total += 16u * 1024u * 1024u;               /* names, arena alignment */
+    return total > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)total;
+}

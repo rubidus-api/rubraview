@@ -8264,28 +8264,6 @@ typedef struct batch_ctx {
     size_t workers;
 } batch_ctx_t;
 
-/* Whether this job changes any pixel. A job that only strips metadata
-   from a JPEG can take §3.10's zero-touch path and keep every
-   coefficient; one that resizes cannot. */
-static bool job_touches_pixels(const rubraview_batch_job_t *job) {
-    for (size_t i = 0; i < job->action_count; ++i) {
-        switch (job->actions[i].kind) {
-            case RUBRAVIEW_BATCH_RESIZE:
-                return true;
-            case RUBRAVIEW_BATCH_COLOR_ADJUST:
-                return true;
-            case RUBRAVIEW_BATCH_ORIENT: {
-                const rubraview_batch_orient_params_t *o = &job->actions[i].params.orient;
-                if (o->rotate_degrees != 0 || o->flip_horizontal || o->flip_vertical ||
-                    o->use_exif_auto_orient) return true;
-                break;
-            }
-            default: break;
-        }
-    }
-    return false;
-}
-
 static rubraview_orientation_t orientation_from_action(const rubraview_batch_orient_params_t *o) {
     rubraview_orientation_t out = rubraview_orientation_identity();
     for (int32_t turns = o->rotate_degrees / 90; turns > 0; --turns) {
@@ -8338,6 +8316,66 @@ static int32_t resize_target(const rubraview_batch_resize_params_t *r,
     return (int32_t)(w + 0.5) > 0 ? (int32_t)(w + 0.5) : 1;
 }
 
+/* One line on the run's console naming the file and what went wrong: a
+   count of failures says nothing about which or why. */
+static void batch_say(u8str_t path, const char *why) {
+    char line[600];
+    int n = snprintf(line, sizeof(line), "rubraview: %.*s: %s", (int)(path.len < 500 ? path.len : 500), path.ptr, why);
+    if (n > 0) console_line(line);
+}
+
+/* Decode, turn, resize, adjust, save. A step that cannot be done fails the
+   file: writing it without the step would say it was done. */
+static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview_batch_input_t *input,
+                         u8str_t out_path, const rubraview_batch_orient_params_t *orient,
+                         const rubraview_batch_resize_params_t *resize, const rubraview_batch_color_params_t *color,
+                         rubraview_export_options_t options, rubraview_export_format_t source_format) {
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, NULL, 0,
+                                                                orient && orient->use_exif_auto_orient);
+    if (!rubraview_pixbuf_is_valid(&pixels)) { batch_say(input->path, "could not be read"); return false; }
+
+    if (orient && !orient->use_exif_auto_orient) {
+        rubraview_orientation_t o = orientation_from_action(orient);
+        rubraview_pixbuf_t turned = rubraview_pixbuf_orient(arena, &pixels, o);
+        if (!rubraview_pixbuf_is_valid(&turned)) { batch_say(input->path, "could not be turned"); return false; }
+        pixels = turned;
+    }
+
+    if (resize) {
+        int32_t target_h = 0;
+        int32_t target_w = resize_target(resize, pixels.width, pixels.height, &target_h);
+        if (target_w != pixels.width || target_h != pixels.height) {
+            /* The card when D-38 installed it and the picture is worth it;
+               otherwise every core (RV-067), the same bytes as one. */
+            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample_mt(arena, bc->jobs, bc->workers, &pixels,
+                                                                     target_w, target_h, resize->filter, 0);
+            if (!rubraview_pixbuf_is_valid(&scaled)) { batch_say(input->path, "could not be resized"); return false; }
+            pixels = scaled;
+        }
+    }
+
+    if (color) {
+        if (color->has_color_adjust) rubraview_color_adjust(&pixels, &color->adjust);
+        if (color->grayscale) {
+            rubraview_color_adjust_params_t gray = { .exposure_ev = 0.0f, .contrast = 0.0f,
+                                                     .saturation = 0.0f, .gamma = 1.0f };
+            rubraview_color_adjust(&pixels, &gray);
+        }
+        if (color->has_unsharp) {
+            rubraview_pixbuf_t sharp = rubraview_filter_unsharp_mask(arena, &pixels, color->sigma,
+                                                                     color->amount, color->threshold);
+            if (!rubraview_pixbuf_is_valid(&sharp)) { batch_say(input->path, "could not be sharpened"); return false; }
+            pixels = sharp;
+        }
+    }
+
+    if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
+    if (!rubraview_pal_image_save(out_path, &pixels, &options)) { batch_say(input->path, "could not be written"); return false; }
+
+    bc->written++;
+    return true;
+}
+
 static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *job,
                           const rubraview_batch_input_t *input, u8str_t output_name, void *ctx) {
     batch_ctx_t *bc = (batch_ctx_t*)ctx;
@@ -8378,7 +8416,6 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
 
     rubraview_export_options_t options = bc->cli->export_options;
     rubraview_export_format_t source_format = rubraview_export_format_for_name(input->path);
-    bool pixels_change = job_touches_pixels(job);
 
     /* §3.9/§3.10: a JPEG that is only being turned, or only being
        cleaned, never goes near a decoder. This is the whole reason
@@ -8408,48 +8445,29 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         }
     }
 
-    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, NULL, 0,
-                                                                orient && orient->use_exif_auto_orient);
-    if (!rubraview_pixbuf_is_valid(&pixels)) return false;
-
-    if (orient && !orient->use_exif_auto_orient) {
-        rubraview_orientation_t o = orientation_from_action(orient);
-        rubraview_pixbuf_t turned = rubraview_pixbuf_orient(arena, &pixels, o);
-        if (rubraview_pixbuf_is_valid(&turned)) pixels = turned;
-    }
-
-    if (resize) {
-        int32_t target_h = 0;
-        int32_t target_w = resize_target(resize, pixels.width, pixels.height, &target_h);
-        if (target_w != pixels.width || target_h != pixels.height) {
-            /* The card when D-38 installed it and the picture is worth it;
-               otherwise every core (RV-067), the same bytes as one. */
-            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample_mt(arena, bc->jobs, bc->workers, &pixels,
-                                                                     target_w, target_h, resize->filter, 0);
-            if (rubraview_pixbuf_is_valid(&scaled)) pixels = scaled;
+    /* A picture whose steps need more than the run's arena gets room of its
+       own, sized before it is decoded. Before this, a step with no room
+       failed quietly and the file was written without it (left open by D-39). */
+    void *own = NULL;
+    proven_arena_t own_arena;
+    int32_t sw = 0, sh = 0;
+    if (rubraview_pal_image_size(input->path, &sw, &sh)) {
+        int32_t th = 0, tw = resize ? resize_target(resize, sw, sh, &th) : 0;
+        int32_t th2 = 0, tw2 = resize ? resize_target(resize, sh, sw, &th2) : 0;   /* turned first, perhaps */
+        if ((int64_t)tw2 * th2 > (int64_t)tw * th) { tw = tw2; th = th2; }
+        size_t need = rubraview_batch_work_bytes(sw, sh, tw, th, orient != NULL, resize != NULL,
+                                                 color && color->has_unsharp);
+        size_t room = arena->backing.size > arena->offset ? (size_t)(arena->backing.size - arena->offset) : 0;
+        if (need > room) {
+            own = need == SIZE_MAX ? NULL : malloc(need);
+            if (!own) { batch_say(input->path, "not enough memory for a picture this large"); return false; }
+            own_arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)own, .size = need });
+            arena = &own_arena;
         }
     }
-
-    if (color) {
-        if (color->has_color_adjust) rubraview_color_adjust(&pixels, &color->adjust);
-        if (color->grayscale) {
-            rubraview_color_adjust_params_t gray = { .exposure_ev = 0.0f, .contrast = 0.0f,
-                                                     .saturation = 0.0f, .gamma = 1.0f };
-            rubraview_color_adjust(&pixels, &gray);
-        }
-        if (color->has_unsharp) {
-            rubraview_pixbuf_t sharp = rubraview_filter_unsharp_mask(arena, &pixels, color->sigma,
-                                                                     color->amount, color->threshold);
-            if (rubraview_pixbuf_is_valid(&sharp)) pixels = sharp;
-        }
-    }
-
-    (void)pixels_change;
-    if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
-    if (!rubraview_pal_image_save(out_path, &pixels, &options)) return false;
-
-    bc->written++;
-    return true;
+    bool ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, options, source_format);
+    free(own);
+    return ok;
 }
 
 /* Collects the files a run will work on: one file, or a directory, or a
