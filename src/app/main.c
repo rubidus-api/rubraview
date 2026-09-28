@@ -214,7 +214,8 @@ typedef struct app_state {
     /* Pages come from a folder or a CBZ through the same source (§3.8.1). */
     rubraview_page_source_t source;
     u8str_t                 source_dir;   /* the directory the source lives in */
-    u8str_t                 archive_bytes;/* the CBZ held in memory, empty for a folder */
+    u8str_t                 archive_bytes;/* the archive's bytes (its mapping), empty for a folder */
+    rubraview_fs_mapping_t  archive_map;  /* the archive, mapped read-only (owner, 2026-09-28: comics of several GB) */
     app_page_t *pages;
 
     /* M4 */
@@ -547,6 +548,7 @@ static void tiles_reset(app_state_t *app);
    the drawing they belong with; the key handler above needs to name
    them. */
 static bool open_folder(app_state_t *app, u8str_t dir);
+static void source_close(app_state_t *app);
 static void triage_delete(app_state_t *app, bool permanent);
 static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
@@ -5699,8 +5701,7 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     if (!entries || count == 0) return;
 
     history_remember(app);
-    rubraview_page_source_close(&app->source);
-    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    source_close(app);
 
     rubraview_fs_listing_t listing = { .entries = entries, .count = count };
     bool ascending = true;
@@ -8144,13 +8145,26 @@ static void history_remember(app_state_t *app) {
 
 /* ---- opening ---- */
 
+/* The source is let go of: a CB7's decoded block (heap), and the archive's
+   mapping. Every way out of a source comes through here. */
+static void source_close(app_state_t *app) {
+    rubraview_page_source_close(&app->source);
+    rubraview_pal_fs_unmap(&app->archive_map);
+    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+}
+
 static bool open_archive(app_state_t *app, u8str_t archive_path) {
     /* Leaving one archive for another gives back what the old one held;
        a CB7's decoded solid block is heap memory, not arena memory. */
-    rubraview_page_source_close(&app->source);
+    source_close(app);
 
-    u8str_t bytes = rubraview_pal_fs_read_file(app->arena, archive_path, MAX_ARCHIVE_BYTES);
-    if (bytes.len == 0) return false;
+    /* Mapped, not read into the 64 MB working arena: an archive over
+       about 60 MB did not open at all, each one kept its bytes for the
+       rest of the session, and nothing over 2 GB was read (owner,
+       2026-09-28: comics of several GB). */
+    if (!rubraview_pal_fs_map(archive_path, &app->archive_map)) return false;
+    if (app->archive_map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&app->archive_map); return false; }
+    u8str_t bytes = { .ptr = (const char*)app->archive_map.data, .len = (size_t)app->archive_map.size };
 
     app->archive_bytes = bytes;
     app->source = rubraview_page_source_from_archive(app->arena,
@@ -8163,7 +8177,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
 }
 
 static bool open_folder(app_state_t *app, u8str_t dir) {
-    rubraview_page_source_close(&app->source);
+    source_close(app);
 
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
     if (listing.count == 0) return false;
@@ -10233,7 +10247,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     media_close(&app);
     unload_all_pages(&app);
-    rubraview_page_source_close(&app.source);
+    source_close(&app);
     rubraview_pal_render_destroy(app.renderer);
     rubraview_pal_window_destroy(app.window);
     free(memory);

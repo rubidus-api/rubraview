@@ -39,10 +39,10 @@ typedef enum rubraview_zip_err {
 
 typedef struct rubraview_zip_entry {
     u8str_t  name;               /* raw bytes from the Central Directory; encoding per RV-026 (utf8_flag + rubraview_archive_filename_detect) */
-    uint32_t uncompressed_size;
-    uint32_t compressed_size;
+    uint64_t uncompressed_size;  /* 64-bit: ZIP64 (owner, 2026-09-28: comics of several GB) */
+    uint64_t compressed_size;
     uint16_t compression_method; /* 0 = STORED, 8 = deflate (indexed, not yet readable) */
-    uint32_t local_header_offset;
+    uint64_t local_header_offset;
     bool     utf8_flag;          /* ZIP General Purpose Bit 11 */
 } rubraview_zip_entry_t;
 
@@ -110,7 +110,7 @@ bool rubraview_zip_locate_directory(const uint8_t *tail, size_t tail_size, uint6
 /* How many bytes one entry takes from its local header on, given the
    header's first 30 bytes: the header, its name and extra field, and the
    compressed data. False when those 30 bytes are not a local header. */
-bool rubraview_zip_local_span(const uint8_t header[30], uint32_t compressed_size, uint64_t *out_span);
+bool rubraview_zip_local_span(const uint8_t header[30], uint64_t compressed_size, uint64_t *out_span);
 
 #ifdef __cplusplus
 }
