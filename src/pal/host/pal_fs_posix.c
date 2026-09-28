@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
@@ -73,6 +74,38 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t 
         entry_buf_push(arena, &buf, entry);
     }
     closedir(dir);
+
+    listing.entries = buf.data;
+    listing.count = buf.count;
+    return listing;
+}
+
+static void push_place(proven_arena_t *arena, entry_buf_t *buf, const char *name, u8str_t path) {
+    struct stat st;
+    if (path.len == 0 || stat(path.ptr, &st) != 0 || !S_ISDIR(st.st_mode)) return;
+    rubraview_fs_entry_t entry = {0};
+    entry.name = arena_dup(arena, name, strlen(name));
+    entry.path = path;
+    fill_from_stat(&entry, &st);
+    entry_buf_push(arena, buf, entry);
+}
+
+rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
+    rubraview_fs_listing_t listing = {0};
+    if (!arena) return listing;
+
+    entry_buf_t buf = {0};
+    const char *home = getenv("HOME");
+    if (home && home[0]) {
+        u8str_t home_path = arena_dup(arena, home, strlen(home));
+        push_place(arena, &buf, "Home", home_path);
+        static const char *const FOLDERS[] = { "Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music" };
+        for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
+            u8str_t name = { .ptr = FOLDERS[i], .len = strlen(FOLDERS[i]) };
+            push_place(arena, &buf, FOLDERS[i], rubraview_path_join(arena, home_path, name));
+        }
+    }
+    push_place(arena, &buf, "/", arena_dup(arena, "/", 1));
 
     listing.entries = buf.data;
     listing.count = buf.count;

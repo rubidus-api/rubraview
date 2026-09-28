@@ -1,6 +1,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <wchar.h>
+#include <knownfolders.h>
 #include <stdio.h>
 #include <string.h>
 #include "rubraview/pal/pal_fs.h"
@@ -111,6 +114,76 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t 
     } while (FindNextFileW(find, &find_data));
 
     FindClose(find);
+
+    listing.entries = buf.data;
+    listing.count = buf.count;
+    return listing;
+}
+
+static void push_place(proven_arena_t *arena, entry_buf_t *buf, u8str_t name, u8str_t path) {
+    if (name.len == 0 || path.len == 0) return;
+    rubraview_fs_entry_t entry = {0};
+    entry.name = name;
+    entry.path = path;
+    entry.is_directory = true;
+    entry_buf_push(arena, buf, entry);
+}
+
+rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
+    rubraview_fs_listing_t listing = {0};
+    if (!arena) return listing;
+    entry_buf_t buf = {0};
+
+    /* The usual folders first, where they are on this PC (they may have
+       been moved, so they are asked for rather than spelt). */
+    static const struct { const KNOWNFOLDERID *id; const char *name; } FOLDERS[] = {
+        { &FOLDERID_Profile,   "Home" },
+        { &FOLDERID_Desktop,   "Desktop" },
+        { &FOLDERID_Documents, "Documents" },
+        { &FOLDERID_Downloads, "Downloads" },
+        { &FOLDERID_Pictures,  "Pictures" },
+        { &FOLDERID_Videos,    "Videos" },
+        { &FOLDERID_Music,     "Music" },
+    };
+    for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
+        PWSTR wide = NULL;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERS[i].id, KF_FLAG_DONT_VERIFY, NULL, &wide)) && wide) {
+            DWORD attrs = GetFileAttributesW(wide);
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                push_place(arena, &buf, arena_dup(arena, FOLDERS[i].name, strlen(FOLDERS[i].name)),
+                           wide_to_u8str(arena, wide));
+            }
+        }
+        CoTaskMemFree(wide);
+    }
+
+    /* Then every drive. Only a fixed disk is asked for its label: asking
+       an empty reader or a lost network drive waits on the device. */
+    WCHAR roots[512];
+    DWORD got = GetLogicalDriveStringsW((DWORD)(sizeof(roots) / sizeof(roots[0])), roots);
+    if (got > 0 && got < sizeof(roots) / sizeof(roots[0])) {
+        for (const WCHAR *root = roots; *root; root += wcslen(root) + 1) {
+            if (wcslen(root) < 2 || root[1] != L':') continue;
+            UINT type = GetDriveTypeW(root);
+            if (type == DRIVE_NO_ROOT_DIR || type == DRIVE_UNKNOWN) continue;
+
+            WCHAR label[MAX_PATH + 1] = L"";
+            if (type == DRIVE_FIXED) {
+                if (!GetVolumeInformationW(root, label, MAX_PATH + 1, NULL, NULL, NULL, NULL, 0)) label[0] = L'\0';
+            } else {
+                const WCHAR *kind = type == DRIVE_REMOVABLE ? L"Removable" :
+                                    type == DRIVE_CDROM     ? L"CD/DVD" :
+                                    type == DRIVE_REMOTE    ? L"Network" : L"";
+                wcsncpy(label, kind, MAX_PATH);
+                label[MAX_PATH] = L'\0';
+            }
+            WCHAR name[MAX_PATH + 8];
+            if (label[0]) swprintf(name, sizeof(name) / sizeof(name[0]), L"%lc: %ls", root[0], label);
+            else          swprintf(name, sizeof(name) / sizeof(name[0]), L"%lc:", root[0]);
+            char path[4] = { (char)root[0], ':', '/', '\0' };
+            push_place(arena, &buf, wide_to_u8str(arena, name), arena_dup(arena, path, 3));
+        }
+    }
 
     listing.entries = buf.data;
     listing.count = buf.count;

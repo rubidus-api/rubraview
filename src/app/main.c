@@ -2079,6 +2079,9 @@ static void picker_thumbs_step(app_state_t *app) {
         if (t->state != 0 && t->state != 3) continue;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
         if (entry->is_directory && rubraview_u8_eq_lit(entry->name, "..")) { t->state = 2; continue; }
+        /* A drive's first picture is not looked for: an empty reader or a
+           lost network drive would hold the one thumbnail thread. */
+        if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
         /* Asked again while waiting, it moves to the front of the queue. */
         if (rubraview_pal_thumbs_request(app->thumbs, app->picker_generation, index, entry->is_directory,
                                          tw / th, entry->path)) {
@@ -2090,10 +2093,15 @@ static void picker_thumbs_step(app_state_t *app) {
 }
 
 static void picker_navigate(app_state_t *app, u8str_t dir) {
-    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
+    /* The PC page lists drives and the usual folders, in the PAL's order
+       (owner, 2026-09-28: the whole machine, not only the folder the
+       viewer was started in). */
+    bool places = rubraview_picker_is_places(dir);
+    rubraview_fs_listing_t listing = places ? rubraview_pal_fs_list_places(app->arena)
+                                            : rubraview_pal_fs_list_dir(app->arena, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     size_t hidden = rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
-    if (listing.count == 0 && rubraview_path_dirname(dir).len == 0) {
+    if (listing.count == 0 && rubraview_picker_parent(dir).len == 0) {
         if (hidden > 0) osd_say(app, U8("nothing in that folder can be opened here"));
         return;
     }
@@ -2108,7 +2116,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_sort_item_t));
-    if (proven_is_ok(res.err)) {
+    if (!places && proven_is_ok(res.err)) {
         items = (rubraview_sort_item_t*)(void*)res.value.ptr;
         for (size_t i = 0; i < listing.count; ++i) {
             items[i] = (rubraview_sort_item_t){
@@ -2138,9 +2146,10 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     }
 
     /* `..` first, wherever there is a folder above this one (owner,
-       2026-09-23). `Ctrl+Backspace` did this already, but not by touch. */
-    u8str_t parent = rubraview_path_dirname(dir);
-    if (parent.len > 0 && !(parent.len == dir.len && memcmp(parent.ptr, dir.ptr, dir.len) == 0)) {
+       2026-09-23). `Ctrl+Backspace` did this already, but not by touch.
+       Above a drive is the PC page, so every folder has one. */
+    u8str_t parent = rubraview_picker_parent(dir);
+    if (parent.len > 0) {
         proven_result_mem_mut_t up_res =
             rubraview_arena_alloc_array(app->arena, (listing.count + 1), sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(up_res.err)) {
@@ -2385,11 +2394,9 @@ static void picker_button(app_state_t *app, picker_button_t button) {
 static void picker_open(app_state_t *app) {
     u8str_t dir = app->picker_dir;
     if (dir.len == 0) {
-        if (app->source_dir.len > 0) {
-            dir = app->source_dir;
-        } else {
-            dir = U8(".");
-        }
+        /* Nothing open: the PC page, not the folder the viewer happened
+           to be started in (owner, 2026-09-28). */
+        dir = app->source_dir.len > 0 ? app->source_dir : U8(RUBRAVIEW_PICKER_PLACES);
     }
     picker_navigate(app, dir);
     app->picker_open = app->picker_listing.count > 0;
@@ -2747,7 +2754,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
            the reader can choose what to open next. */
         u8str_t here = app->picker_dir;
         if (here.len == 0) here = app->source_dir;
-        u8str_t parent = rubraview_path_dirname(here);
+        u8str_t parent = rubraview_picker_parent(here);
         if (parent.len > 0) {
             picker_navigate(app, parent);
             app->picker.focus = 0;
@@ -3161,7 +3168,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         return true;
     }
     if (combo.key_name.len == 9 && memcmp(combo.key_name.ptr, "Backspace", 9) == 0) {
-        u8str_t parent = rubraview_path_dirname(app->picker_dir);
+        u8str_t parent = rubraview_picker_parent(app->picker_dir);
         if (parent.len > 0) {
             picker_navigate(app, parent);
             app->picker.focus = 0;
@@ -9038,6 +9045,11 @@ static void box_release(app_state_t *app, double x, double y) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)instance; (void)previous; (void)command_line; (void)show;
+
+    /* The picker's PC page lists every drive: an empty card reader or DVD
+       opened from it must read as an empty folder, not stop the viewer
+       behind Windows' "There is no disk in the drive" box. */
+    SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;
