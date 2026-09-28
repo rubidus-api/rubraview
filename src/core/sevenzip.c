@@ -13,6 +13,8 @@
 #include "7z.h"
 #include "7zCrc.h"
 #include "7zAlloc.h"
+#include "LzmaDec.h"
+#include "Lzma2Dec.h"
 
 /* ------------------------------------------------------------------ */
 /* A seekable stream over a buffer that is already in memory.
@@ -75,7 +77,30 @@ typedef struct sz_state {
     Byte  *block;
     size_t block_size;
     bool   opened;
+
+    /* A block too large to hold (owner, 2026-09-28: a CB7 is often one
+       solid block of the whole book, several GB) is streamed instead: one
+       decoder kept where the reader is, so turning forwards goes on from
+       there and only going back starts again. */
+    struct {
+        UInt32      folder;     /* 0xFFFFFFFF: none */
+        UInt32      method;
+        CLzmaDec    lzma;
+        CLzma2Dec   lzma2;
+        bool        has_lzma, has_lzma2;
+        UInt64      out_pos;    /* bytes of the block decoded so far */
+        UInt64      out_size;   /* the block's whole size */
+        const Byte *pack;
+        UInt64      pack_left;
+        Byte       *chunk;
+    } s;
 } sz_state_t;
+
+#define SZ_METHOD_COPY  0u
+#define SZ_METHOD_LZMA2 0x21u
+#define SZ_METHOD_LZMA  0x30101u
+#define SZ_STREAM_CHUNK (1u << 20)
+#define SZ_STREAM_MAX_DICT ((UInt64)1 << 30)   /* the decoder's window: the only large thing streaming holds */
 
 static void *sz_malloc(ISzAllocPtr p, size_t size) { (void)p; return size ? malloc(size) : NULL; }
 static void  sz_free(ISzAllocPtr p, void *addr) { (void)p; free(addr); }
@@ -152,6 +177,7 @@ rubraview_sz_result_t rubraview_sz_open(proven_arena_t *arena,
     SzArEx_Init(&st->db);
     st->opened = true;
     st->block_index = 0xFFFFFFFFu;
+    st->s.folder = 0xFFFFFFFFu;
 
     SRes res = SzArEx_Open(&st->db, &st->look.vt, &st->alloc_main, &st->alloc_temp);
     if (res != SZ_OK) {
@@ -212,6 +238,102 @@ rubraview_sz_result_t rubraview_sz_open(proven_arena_t *arena,
     return result;
 }
 
+static void stream_end(sz_state_t *st) {
+    if (st->s.has_lzma) LzmaDec_Free(&st->s.lzma, &st->alloc_main);
+    if (st->s.has_lzma2) Lzma2Dec_Free(&st->s.lzma2, &st->alloc_main);
+    st->s.has_lzma = st->s.has_lzma2 = false;
+    st->s.folder = 0xFFFFFFFFu;
+}
+
+/* Starts `folder` from its first byte. Only a block of one coder reading
+   one packed stream is streamed — LZMA, LZMA2 or stored, which is what a
+   comic's CB7 holds; anything else is refused as too large, as before. */
+static rubraview_sz_err_t stream_begin(sz_state_t *st, UInt32 folder) {
+    stream_end(st);
+    const CSzAr *ar = &st->db.db;
+    const Byte *data = ar->CodersData + ar->FoCodersOffsets[folder];
+    CSzData sd = { .Data = data, .Size = ar->FoCodersOffsets[(size_t)folder + 1] - ar->FoCodersOffsets[folder] };
+    CSzFolder f;
+    if (SzGetNextFolderItem(&f, &sd) != SZ_OK) return RUBRAVIEW_SZ_ERR_CORRUPT;
+    if (f.NumCoders != 1 || f.NumPackStreams != 1) return RUBRAVIEW_SZ_ERR_TOO_LARGE;
+    const CSzCoderInfo *c = &f.Coders[0];
+    UInt32 pack_index = ar->FoStartPackStreamIndex[folder];
+    UInt64 start = st->db.dataPos + ar->PackPositions[pack_index];
+    UInt64 size = ar->PackPositions[(size_t)pack_index + 1] - ar->PackPositions[pack_index];
+    if (start > st->stream.size || size > st->stream.size - start) return RUBRAVIEW_SZ_ERR_CORRUPT;
+    const Byte *props = data + c->PropsOffset;
+
+    if (c->MethodID == SZ_METHOD_LZMA) {
+        if (c->PropsSize != LZMA_PROPS_SIZE) return RUBRAVIEW_SZ_ERR_CORRUPT;
+        UInt64 dict = (UInt64)props[1] | ((UInt64)props[2] << 8) | ((UInt64)props[3] << 16) | ((UInt64)props[4] << 24);
+        if (dict > SZ_STREAM_MAX_DICT) return RUBRAVIEW_SZ_ERR_TOO_LARGE;
+        LzmaDec_Construct(&st->s.lzma);
+        if (LzmaDec_Allocate(&st->s.lzma, props, c->PropsSize, &st->alloc_main) != SZ_OK) return RUBRAVIEW_SZ_ERR_OUT_OF_MEMORY;
+        st->s.has_lzma = true;
+        LzmaDec_Init(&st->s.lzma);
+    } else if (c->MethodID == SZ_METHOD_LZMA2) {
+        if (c->PropsSize != 1 || props[0] > 40) return RUBRAVIEW_SZ_ERR_CORRUPT;
+        UInt64 dict = props[0] == 40 ? 0xFFFFFFFFu : ((UInt64)(2 | (props[0] & 1)) << (props[0] / 2 + 11));
+        if (dict > SZ_STREAM_MAX_DICT) return RUBRAVIEW_SZ_ERR_TOO_LARGE;
+        Lzma2Dec_Construct(&st->s.lzma2);
+        if (Lzma2Dec_Allocate(&st->s.lzma2, props[0], &st->alloc_main) != SZ_OK) return RUBRAVIEW_SZ_ERR_OUT_OF_MEMORY;
+        st->s.has_lzma2 = true;
+        Lzma2Dec_Init(&st->s.lzma2);
+    } else if (c->MethodID != SZ_METHOD_COPY) {
+        return RUBRAVIEW_SZ_ERR_TOO_LARGE;
+    }
+    if (!st->s.chunk) {
+        st->s.chunk = (Byte*)malloc(SZ_STREAM_CHUNK);
+        if (!st->s.chunk) { stream_end(st); return RUBRAVIEW_SZ_ERR_OUT_OF_MEMORY; }
+    }
+    st->s.folder = folder;
+    st->s.method = c->MethodID;
+    st->s.out_pos = 0;
+    st->s.out_size = SzAr_GetFolderUnpackSize(ar, folder);
+    st->s.pack = st->stream.data + start;
+    st->s.pack_left = size;
+    return RUBRAVIEW_SZ_OK;
+}
+
+/* Bytes [offset, offset + n) of `folder` into `dst`. The decoder never
+   runs past the end of what was asked, so the next page goes on from
+   exactly there. */
+static rubraview_sz_err_t stream_read(sz_state_t *st, UInt32 folder, UInt64 offset, size_t n, Byte *dst) {
+    if (st->s.folder != folder || offset < st->s.out_pos) {
+        rubraview_sz_err_t begun = stream_begin(st, folder);
+        if (begun != RUBRAVIEW_SZ_OK) return begun;
+    }
+    if (offset > st->s.out_size || n > st->s.out_size - offset) return RUBRAVIEW_SZ_ERR_CORRUPT;
+    UInt64 end = offset + n;
+    while (st->s.out_pos < end) {
+        UInt64 left = end - st->s.out_pos;
+        SizeT out_len = left < SZ_STREAM_CHUNK ? (SizeT)left : SZ_STREAM_CHUNK;
+        SizeT in_len = st->s.pack_left > (UInt64)(SizeT)-1 ? (SizeT)-1 : (SizeT)st->s.pack_left;
+        ELzmaStatus status = LZMA_STATUS_NOT_SPECIFIED;
+        SRes res = SZ_OK;
+        if (st->s.method == SZ_METHOD_LZMA) {
+            res = LzmaDec_DecodeToBuf(&st->s.lzma, st->s.chunk, &out_len, st->s.pack, &in_len, LZMA_FINISH_ANY, &status);
+        } else if (st->s.method == SZ_METHOD_LZMA2) {
+            res = Lzma2Dec_DecodeToBuf(&st->s.lzma2, st->s.chunk, &out_len, st->s.pack, &in_len, LZMA_FINISH_ANY, &status);
+        } else {
+            if (out_len > in_len) out_len = in_len;
+            memcpy(st->s.chunk, st->s.pack, out_len);
+            in_len = out_len;
+        }
+        if (res != SZ_OK) { stream_end(st); return RUBRAVIEW_SZ_ERR_CORRUPT_STREAM; }
+        if (out_len == 0) { stream_end(st); return RUBRAVIEW_SZ_ERR_CORRUPT_STREAM; }   /* no progress: the stream is short */
+        st->s.pack += in_len;
+        st->s.pack_left -= in_len;
+        UInt64 from = st->s.out_pos, to = st->s.out_pos + out_len;
+        if (to > offset) {
+            UInt64 a = from > offset ? from : offset;
+            memcpy(dst + (a - offset), st->s.chunk + (a - from), (size_t)(to - a));
+        }
+        st->s.out_pos = to;
+    }
+    return RUBRAVIEW_SZ_OK;
+}
+
 rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
                                                    rubraview_sz_archive_t *archive,
                                                    size_t entry_index,
@@ -241,7 +363,17 @@ rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
     if (folder != st->block_index) {
         UInt64 folder_bytes = SzAr_GetFolderUnpackSize(&st->db.db, folder);
         if (folder_bytes > archive->max_folder_bytes) {
-            out.err = RUBRAVIEW_SZ_ERR_TOO_LARGE;
+            /* Too large to hold: streamed, keeping only this page. */
+            UInt64 first = st->db.UnpackPositions[st->db.FolderToFile[folder]];
+            UInt64 at = st->db.UnpackPositions[file_index];
+            if (at < first) { out.err = RUBRAVIEW_SZ_ERR_CORRUPT; return out; }
+            proven_result_mem_mut_t res_s = proven_arena_alloc(arena, (size_t)entry->size + 1);
+            if (!proven_is_ok(res_s.err)) { out.err = RUBRAVIEW_SZ_ERR_OUT_OF_MEMORY; return out; }
+            rubraview_sz_err_t got = stream_read(st, folder, at - first, (size_t)entry->size, (Byte*)res_s.value.ptr);
+            if (got != RUBRAVIEW_SZ_OK) { out.err = got; return out; }
+            res_s.value.ptr[entry->size] = '\0';
+            out.err = RUBRAVIEW_SZ_OK;
+            out.data = (u8str_t){ .ptr = (const char*)res_s.value.ptr, .len = (size_t)entry->size };
             return out;
         }
     }
@@ -276,6 +408,8 @@ void rubraview_sz_close(rubraview_sz_archive_t *archive) {
     if (!archive || !archive->state) return;
     sz_state_t *st = (sz_state_t*)archive->state;
     if (st->block) { ISzAlloc_Free(&st->alloc_main, st->block); st->block = NULL; }
+    stream_end(st);
+    free(st->s.chunk);
     if (st->opened) SzArEx_Free(&st->db, &st->alloc_main);
     free(st);
     archive->state = NULL;

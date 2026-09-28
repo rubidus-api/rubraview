@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-47 Comics of several gigabytes: mapped, ZIP64, streamed solid blocks, a picker inside the book
+
+- Status: Accepted (owner 2026-09-28: "cbz cb7 같은 압축파일 내 파일들을 만화처럼 볼 때 빠르게 파일탐색하고 할 수 있게 해줘요. 파일과 경로가 복잡한 수기가짜리 만화책을 봐도 잘 동작하게요", then "위의 추천한 작업들도 같이 해 줘요" on the plan `docs/plans/archive/2026-09-28-large-archives.md` and its recommended answers)
+- Decision:
+  - An archive is mapped read-only (`rubraview_pal_fs_map`), not read into the 64 MB working arena: before, a CBZ over about 60 MB did not open, each one opened kept its bytes, and nothing over 2 GB was read (`ftell`). The mapping is let go with the source (`source_close`); the file stays free to rename and delete.
+  - ZIP64 is read: the end record and its locator, the `0x0001` extra field, 64-bit sizes and offsets — in the thumbnail thread's tail-only lookup too.
+  - A solid 7z block over the page-cache budget (512 MB) is streamed instead of refused: one LZMA/LZMA2/stored decoder kept where the reader is, so turning forwards goes on from there and going back starts again; its window is capped at 1 GB. A far jump in such a block takes as long as decoding up to it (accepted by the owner).
+  - Pages inside an archive are ordered folder by folder, each part natural, a level's loose pages before its subfolders (so a cover at the top stays first; Explorer would list the folders first).
+  - With a book open, `O` opens the picker inside it at the page's own folder, on the page; its path reads `…/Big.cbz/제 1 권`, `..` climbs through the book's folders and out to the real folder. A tapped page is gone to; the bottom bar's file actions refuse inside a book; no thumbnails there yet.
+- Consequences: measured on the Windows 11 VM: a 5.05 GB stored ZIP64 CBZ (1 821 pages in Hangul-named nested folders) opened at once, three page turns within 5 ms, the last page in 91 ms, the process's own memory 194 MB; the picker went to `제 10 권 › Ch 01 › p005.jpg` and the viewer showed page 1206 of 1821, as counted. A 1.25 GB single-block LZMA2 CB7 (450 pages) opened at once and turned forwards at once; the last page took about 8-12 s, during which the window does not answer. The build before this opened neither. Left for later (BACKLOGS): the far jump off the main thread, thumbnails inside a book, entering an archive that is not open, the working arena that other readers (VobSub, PGS) still fill and that is never reset.
+
 ## 2026-09-28: D-46 Sort by's orders named for what they do; the picker follows them; the page bar drags
 
 - Status: Accepted (owner 2026-09-28: "정렬에 그냥 문자열 순, 윈도 탐색기식 파일이름 순(숫자는 묶어서), modification time, 파일크기 순서 추가해 줘", then "위에 제안한 것도 이어서 해줘" on dragging the page bar)
