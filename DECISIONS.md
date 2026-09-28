@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-48 Pages are scaled with Direct2D's high-quality cubic; Scaling filter is read
+
+- Status: Accepted (owner 2026-09-29: "확대축소 품질개선")
+- Decision: every page was drawn with Direct2D's plain cubic whatever Settings › Viewer › Scaling filter said (it was shown, never read). Plain cubic takes a small neighbourhood and no more, so a page shrunk to fit keeps a fraction of its detail and aliases. The setting is now read: `bicubic` (the default) and `lanczos3` draw with `D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC`, which filters before it shrinks and is the same cubic when it enlarges; `bilinear` and `nearest` do what they say; the pixel-art toggle still wins.
+- Consequences: measured on the Windows 11 VM with a 4000x5600 test page (a fan of 2-px lines, 6-px screentone, circles, text) at fit (0.134x), against an exact Lanczos-3 reduction of the same page: plain cubic 10.1 dB (the lines broke into dots, the screentone into a false pattern), high-quality cubic 23.8 dB, by eye indistinguishable from the reference. `lanczos3` has no path of its own: at this measurement it would not be visibly better; if a difference is found later, a settled-view resample (D-38's Lanczos) is the way.
+
 ## 2026-09-29: D-47 Comics of several gigabytes: mapped, ZIP64, streamed solid blocks, a picker inside the book
 
 - Status: Accepted (owner 2026-09-28: "cbz cb7 같은 압축파일 내 파일들을 만화처럼 볼 때 빠르게 파일탐색하고 할 수 있게 해줘요. 파일과 경로가 복잡한 수기가짜리 만화책을 봐도 잘 동작하게요", then "위의 추천한 작업들도 같이 해 줘요" on the plan `docs/plans/archive/2026-09-28-large-archives.md` and its recommended answers)
