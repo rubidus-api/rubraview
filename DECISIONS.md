@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-43 The reader's own favourites on the places bar
+
+- Status: Accepted (owner 2026-09-28: "추천대로 진행", on a star in the path bar and a file of its own)
+- Decision: a star after the path (☆, ★ when starred) and `Ctrl+D` put the folder on screen into the favourites or take it out. Favourites come first on the places bar, in the order they were added, set a little apart from the fixed places, and are kept in `favorites.ini` beside `history.ini` (portable or AppData, §3.17.2): one `[favorite-N]` section with a quoted `path` each, D-13's INI and TOML subset (`check-conf-format` samples it). At most 32; the file is written at each change.
+- Consequences: the label is the folder's own name, so two favourites with the same name look alike (the lit one is where you are). Renaming or reordering favourites is not in this. Measured on the Windows 11 VM the same day: starred by `Ctrl+D`, kept across a restart, opened by a tap, removed by a tap on ★.
+
 ## 2026-09-28: D-42 The picker's places bar and typed path
 
 - Status: Accepted (owner 2026-09-28: "메뉴에서 파일을 열고자 했을 때, 루브라뷰 있는 곳 상위 폴더는 열 수가 없었습니다 ... 운영체제별로 자주 쓰는 위치 ... 즐겨찾기 같은 곳에 넣을 수는 없나요", then "경로를 직접 입력하는 기능도 당연히 필요해요")
