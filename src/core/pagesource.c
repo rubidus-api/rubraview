@@ -129,8 +129,10 @@ static rubraview_page_source_t page_source_from_zip(proven_arena_t *arena,
         };
     }
 
-    /* §3.8.1: pages are numbered, so natural order is the right order. */
-    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
+    /* §3.8.1: pages are numbered, so natural order is the right order —
+       folder by folder, the way the book's own folders read (owner,
+       2026-09-28: comics with complicated paths). */
+    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_PATH_NATURAL, true, NULL);
 
     for (size_t i = 0; i < kept; ++i) {
         rubraview_page_ref_t ref = {
@@ -191,7 +193,7 @@ static rubraview_page_source_t page_source_from_7z(proven_arena_t *arena,
         };
     }
 
-    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_NAME_NATURAL, true, NULL);
+    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_PATH_NATURAL, true, NULL);   /* a CB7 reads the same, folder by folder */
 
     for (size_t i = 0; i < kept; ++i) {
         rubraview_page_ref_t ref = {
