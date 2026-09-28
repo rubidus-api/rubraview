@@ -153,6 +153,16 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
                                              rubraview_batch_item_result_t *out_results,
                                              size_t results_capacity);
 
+/**
+ * How much work memory one batch file needs, from its size before it is
+ * decoded: the picture read as RGBA, a turned copy, the resized picture,
+ * and sharpening's three at the size it runs on, with room for names.
+ * `out_w` x `out_h` is the resize target (unused without `resize`). 0 for
+ * a size that is not a picture; SIZE_MAX when it cannot be counted.
+ */
+size_t rubraview_batch_work_bytes(int32_t width, int32_t height, int32_t out_w, int32_t out_h,
+                                  bool turn, bool resize, bool sharpen);
+
 #ifdef __cplusplus
 }
 #endif

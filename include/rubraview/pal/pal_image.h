@@ -117,6 +117,13 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
  * a pixel buffer in `arena` — a folder file by path, or an archive page
  * from its bytes.
  */
+/**
+ * A picture's size as stored, without decoding its pixels — enough for a
+ * batch run to give a large picture room of its own first. False when it
+ * cannot be read.
+ */
+bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_height);
+
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    u8str_t path,
                                                    const uint8_t *data, size_t size,
