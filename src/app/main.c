@@ -186,6 +186,20 @@ static rubraview_mat3x2_t page_texture_prescale(const app_page_t *page) {
     return rubraview_mat3x2_scale((double)w / (double)page->width, (double)h / (double)page->height);
 }
 
+typedef struct save_job {
+    char source[1024], out[1024];
+    rubraview_edit_session_t edit;
+    bool apply_edit;
+    rubraview_export_options_t options;
+    rubraview_export_format_t source_format;
+    int route;
+    int32_t width, height;
+    rubraview_window_t *wake;
+    HANDLE thread;
+    volatile LONG done;
+    int result;
+} save_job_t;
+
 typedef struct app_state {
     proven_arena_t *arena;
     rubraview_window_t *window;
@@ -406,6 +420,7 @@ typedef struct app_state {
     rubraview_undo_stack_t undo;
     rubraview_curation_t   curation;
     bool                   rename_active;
+    struct save_job       *save_job;   /* Save a copy in progress on its own thread, or NULL */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
     char                   rename_buffer[1024];
@@ -5843,6 +5858,96 @@ static void panel_open_batch(app_state_t *app) {
     panel_relayout(app);
 }
 
+/* Save a copy's work, off the main thread: everything it needs copied in,
+   its own memory, its own WIC factory. `result` indexes save_job_poll's lines. */
+enum { SAVE_OK = 0, SAVE_UNREADABLE, SAVE_EDIT_FAILED, SAVE_UNWRITABLE, SAVE_NO_MEMORY };
+
+static u8str_t save_read_whole(u8str_t path, void **out_mem) {
+    *out_mem = NULL;
+    rubraview_fs_entry_t entry;
+    uint8_t probe_mem[4096];
+    proven_arena_t probe = proven_arena_create((proven_mem_mut_t){ .ptr = probe_mem, .size = sizeof(probe_mem) });
+    if (!rubraview_pal_fs_stat(&probe, path, &entry) || entry.size_bytes == 0 || entry.size_bytes > MAX_ARCHIVE_BYTES) {
+        return (u8str_t){ .ptr = "", .len = 0 };
+    }
+    size_t size = (size_t)entry.size_bytes + 4096;
+    *out_mem = malloc(size);
+    if (!*out_mem) return (u8str_t){ .ptr = "", .len = 0 };
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)*out_mem, .size = size });
+    return rubraview_pal_fs_read_file(&arena, path, MAX_ARCHIVE_BYTES);
+}
+
+static int save_job_work(save_job_t *job) {
+    u8str_t source = { .ptr = job->source, .len = strlen(job->source) };
+    u8str_t out_path = { .ptr = job->out, .len = strlen(job->out) };
+
+    if (job->route == RUBRAVIEW_EXPORT_STRIP_ONLY || job->route == RUBRAVIEW_EXPORT_COPY) {
+        void *mem = NULL;
+        u8str_t bytes = save_read_whole(source, &mem);
+        int result = SAVE_UNREADABLE;
+        if (bytes.len > 0 && job->route == RUBRAVIEW_EXPORT_COPY) {
+            result = rubraview_pal_fs_write_file(out_path, bytes) ? SAVE_OK : SAVE_UNWRITABLE;
+        } else if (bytes.len > 0) {
+            /* the strip's output is at most the input: room for it beside */
+            size_t room = bytes.len * 2u + (1u << 20);
+            void *work_mem = malloc(room);
+            result = SAVE_NO_MEMORY;
+            if (work_mem) {
+                proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
+                rubraview_jpegtran_result_t stripped = rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.len);
+                result = stripped.err != RUBRAVIEW_JPEGTRAN_OK ? SAVE_UNREADABLE
+                       : rubraview_pal_fs_write_file(out_path, stripped.data) ? SAVE_OK : SAVE_UNWRITABLE;
+                free(work_mem);
+            }
+        }
+        free(mem);
+        return result;
+    }
+
+    /* The pixels get memory of their own, sized to the picture: the app
+       arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
+       commit's first copy used to fail there — which wrote the page
+       unedited, as if the edit had been saved (T093). */
+    size_t src_bytes = (size_t)job->width * (size_t)job->height * 4u;
+    size_t out_bytes = src_bytes;
+    if (job->apply_edit && job->edit.resize_width > 0 && job->edit.resize_height > 0) {
+        size_t r = (size_t)job->edit.resize_width * (size_t)job->edit.resize_height * 4u;
+        if (r > out_bytes) out_bytes = r;
+    }
+    /* decode and its conversion, then the commit's clone, blur and sharpen
+       (each a copy plus a row buffer's worth), then the resize */
+    size_t need = src_bytes * 8u + out_bytes * 2u + (16u << 20);
+    void *work_mem = malloc(need);
+    if (!work_mem) return SAVE_NO_MEMORY;
+    proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = need });
+
+    int result = SAVE_OK;
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, NULL, 0, true);
+    if (!rubraview_pixbuf_is_valid(&pixels)) result = SAVE_UNREADABLE;
+    if (result == SAVE_OK && job->apply_edit) {
+        rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &job->edit, &pixels);
+        if (rubraview_pixbuf_is_valid(&edited)) pixels = edited; else result = SAVE_EDIT_FAILED;
+    }
+    if (result == SAVE_OK) {
+        rubraview_export_options_t options = job->options;
+        if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = job->source_format;
+        if (!rubraview_pal_image_save(out_path, &pixels, &options)) result = SAVE_UNWRITABLE;
+    }
+    free(work_mem);
+    return result;
+}
+
+static DWORD WINAPI save_job_run(LPVOID param) {
+    save_job_t *job = (save_job_t*)param;
+    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    job->result = com ? save_job_work(job) : SAVE_UNREADABLE;
+    rubraview_pal_image_thread_end();
+    if (com) CoUninitialize();
+    InterlockedExchange(&job->done, 1);
+    rubraview_pal_window_wake(job->wake);   /* the main loop hears it at once */
+    return 0;
+}
+
 /* The workbench's Save a copy, and the export dialog's Export, are the
    same act: run the session, then write. §3.10 decides whether the write
    even needs an encoder. */
@@ -5867,59 +5972,50 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
 
     rubraview_export_route_t route = rubraview_export_plan(&options, source_format, pixels_change);
 
-    if (route == RUBRAVIEW_EXPORT_STRIP_ONLY) {
-        u8str_t bytes = rubraview_pal_fs_read_file(app->arena, source, MAX_ARCHIVE_BYTES);
-        if (bytes.len == 0) return;
-        rubraview_jpegtran_result_t stripped = rubraview_jpegtran_strip_metadata(
-            app->arena, (const uint8_t*)bytes.ptr, bytes.len);
-        if (stripped.err == RUBRAVIEW_JPEGTRAN_OK) rubraview_pal_fs_write_file(out_path, stripped.data);
-        return;
-    }
-    if (route == RUBRAVIEW_EXPORT_COPY) {
-        u8str_t bytes = rubraview_pal_fs_read_file(app->arena, source, MAX_ARCHIVE_BYTES);
-        if (bytes.len > 0) rubraview_pal_fs_write_file(out_path, bytes);
-        return;
-    }
-
-    /* The pixels get memory of their own, sized to the picture: the app
-       arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
-       commit's first copy used to fail there — which wrote the page
-       unedited, as if the edit had been saved (T093). */
     int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
-    if (w <= 0 || h <= 0) { osd_say(app, U8("not saved: the page is not read yet")); return; }
-    size_t src_bytes = (size_t)w * (size_t)h * 4u;
-    size_t out_bytes = src_bytes;
-    if (apply_edit && app->edit.resize_width > 0 && app->edit.resize_height > 0) {
-        size_t r = (size_t)app->edit.resize_width * (size_t)app->edit.resize_height * 4u;
-        if (r > out_bytes) out_bytes = r;
-    }
-    /* decode and its conversion, then the commit's clone, blur and sharpen
-       (each a copy plus a row buffer's worth), then the resize */
-    size_t need = src_bytes * 8u + out_bytes * 2u + (16u << 20);
-    void *work_mem = malloc(need);
-    if (!work_mem) { osd_say(app, U8("not saved: not enough memory for this picture")); return; }
-    proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = need });
-
-    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, NULL, 0, true);
-    if (!rubraview_pixbuf_is_valid(&pixels)) {
-        free(work_mem);
-        osd_say(app, U8("not saved: the picture could not be read"));
+    if (route != RUBRAVIEW_EXPORT_STRIP_ONLY && route != RUBRAVIEW_EXPORT_COPY && (w <= 0 || h <= 0)) {
+        osd_say(app, U8("not saved: the page is not read yet"));
         return;
     }
-    if (apply_edit) {
-        rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &app->edit, &pixels);
-        if (!rubraview_pixbuf_is_valid(&edited)) {
-            free(work_mem);
-            osd_say(app, U8("not saved: the edit could not be applied"));
-            return;
-        }
-        pixels = edited;
-    }
-    if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
-    bool saved = rubraview_pal_image_save(out_path, &pixels, &options);
-    free(work_mem);
-    osd_say(app, saved ? U8("saved a copy beside the page") : U8("not saved: the file could not be written"));
+    if (app->save_job) { osd_say(app, U8("still saving the last copy")); return; }
+    if (source.len >= sizeof(app->save_job->source) || out_path.len >= sizeof(app->save_job->out)) return;
+
+    /* The copy is made on a thread of its own (owner, 2026-09-28): a
+       large picture took the window with it for as long as it took. */
+    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
+    if (!job) { osd_say(app, U8("not saved: not enough memory")); return; }
+    memcpy(job->source, source.ptr, source.len);
+    memcpy(job->out, out_path.ptr, out_path.len);
+    job->edit = app->edit;
+    job->apply_edit = apply_edit;
+    job->options = options;
+    job->source_format = source_format;
+    job->route = route;
+    job->width = w;
+    job->height = h;
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
+    if (!job->thread) { free(job); osd_say(app, U8("not saved: could not start")); return; }
+    app->save_job = job;
+    osd_say(app, U8("saving a copy..."));
+}
+
+/* Each pass: a finished copy says how it went and lets go of its thread. */
+static void save_job_poll(app_state_t *app, bool wait) {
+    save_job_t *job = app->save_job;
+    if (!job) return;
+    if (!wait && !InterlockedCompareExchange(&job->done, 0, 0)) return;
+    WaitForSingleObject(job->thread, INFINITE);   /* a quit waits: a copy is never left half written */
+    CloseHandle(job->thread);
+    static const char *const SAID[] = {
+        "saved a copy beside the page", "not saved: the picture could not be read",
+        "not saved: the edit could not be applied", "not saved: the file could not be written",
+        "not saved: not enough memory for this picture",
+    };
+    if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
+    free(job);
+    app->save_job = NULL;
 }
 
 /* Turns a panel row back into the thing it stands for. Keeping this in
@@ -10031,6 +10127,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             if (app.thumbs) rubraview_pal_thumbs_generation(app.thumbs, app.picker_generation);
         }
         tiles_take_all(&app);   /* D-40 */
+        save_job_poll(&app, false);
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;
@@ -10124,6 +10221,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     picker_thumbs_free(&app);
     rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
+    save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
     rubraview_pal_tiles_stop(app.tiles);
     rubraview_pal_gpu_resample_stop();       /* D-38 */
     app.thumbs = NULL;
