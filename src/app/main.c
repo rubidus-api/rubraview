@@ -463,6 +463,12 @@ typedef struct app_state {
        hides the window rather than destroying it, so it is made once. */
     int32_t                    settings_frame[4];     /* x, y, width, height in screen pixels */
     bool                       settings_mouse_down;
+    /* The window's text as last drawn, row by row from the page's first
+       column, and the block marked on it (owner, 2026-09-28: copyable). */
+    char                       settings_grid_text[96][400];
+    uint16_t                   settings_grid_len[96];
+    rubraview_grid_selection_t settings_sel;
+    bool                       settings_selecting;
     char                       settings_message[240]; /* the last action's result, under the page */
 
     /* In-app Metro file picker (§3.15.2), RV-043 */
@@ -528,6 +534,8 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void picker_path_begin(app_state_t *app);
+static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo);
+static bool settings_row_is_text(const app_state_t *app, int32_t row);
 static bool pagebar_shown(const app_state_t *app);
 static void pagebar_click(app_state_t *app, double bar_x, double bar_width, double x);
 static bool key_is(rubraview_key_combo_t combo, const char *name);
@@ -5623,6 +5631,14 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
 
 /* A given set of files becomes the page sequence — a drop, or what the
    picker picked. `said` goes to the OSD when it opens. */
+/* Settings > Files > Sort by and Ascending: the order a folder's pages
+   are turned in (owner, 2026-09-28). An archive keeps its natural order. */
+static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending) {
+    *out_ascending = rubraview_settings_get(&app->settings, U8("files"), U8("sort_ascending")) > 0.5;
+    return rubraview_sort_mode_for_setting(
+        (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("sort_mode"))));
+}
+
 static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said) {
     if (!entries || count == 0) return;
 
@@ -5631,9 +5647,10 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
 
     rubraview_fs_listing_t listing = { .entries = entries, .count = count };
+    bool ascending = true;
+    rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
     app->source = rubraview_page_source_from_listing(app->arena, &listing,
-                                                     U8(IMAGE_FILTER ";" MEDIA_FILTER),
-                                                     RUBRAVIEW_SORT_NAME_NATURAL, true);
+                                                     U8(IMAGE_FILTER ";" MEDIA_FILTER), mode, ascending);
     if (app->source.page_count == 0) {
         osd_say(app, U8("none of those files is a picture or a film"));
         return;
@@ -6309,6 +6326,17 @@ static void settings_took_effect(app_state_t *app) {
         applied = mode;
         (void)rubraview_pal_gpu_resample_start((rubraview_gpu_resize_mode_t)mode);
     }
+    /* Sort by or Ascending changed: the folder on screen is opened again
+       in the new order, at the same picture. Not on the first call, which
+       is the settings being read at start. */
+    static int sorted = -1;
+    bool ascending = true;
+    int order = (int)folder_sort_mode(app, &ascending) * 2 + (ascending ? 1 : 0);
+    if (sorted >= 0 && order != sorted && app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER && page_count(app) > 1) {
+        u8str_t here = current_file_path(app);
+        if (here.len > 0 && !app->media) open_path(app, here);
+    }
+    sorted = order;
 }
 
 /* §3.22.2: a keymap written out to share or keep, or read back in. What
@@ -6533,34 +6561,65 @@ static size_t settings_pump(app_state_t *app) {
                     app->settings_dirty = true;
                     break;
                 }
+                if (settings_copy_key(app, event.key.combo)) break;
                 rubraview_settings_key_t key;
                 if (settings_key_of(event.key.combo, &key)) {
                     settings_event(app, rubraview_settings_view_key(view, &app->settings, key));
                 }
                 break;
             }
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (app->key_capture > 0) {
                     app->key_capture = 0;   /* a click elsewhere is a change of mind */
                     settings_say(app, "no key added");
                 }
+                /* A drag marks text: on a line that is only text, or with
+                   Shift anywhere on the page — a plain click on a setting
+                   still changes it. */
+                int32_t col = (int32_t)(event.mouse.x / app->settings_cell_w);
+                int32_t row = (int32_t)(event.mouse.y / app->settings_cell_h);
+                if (app->settings_sel.active) { app->settings_sel.active = false; app->settings_dirty = true; }
+                if (col >= view->content_col && row < view->rows - 1 &&
+                    ((event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) || settings_row_is_text(app, row))) {
+                    int32_t c = col - view->content_col;
+                    app->settings_sel = (rubraview_grid_selection_t){ true, row, c, row, c };
+                    app->settings_selecting = true;
+                    app->settings_dirty = true;
+                    break;
+                }
                 app->settings_mouse_down = true;
-                settings_event(app, rubraview_settings_view_press(view, &app->settings,
-                                   (int32_t)(event.mouse.x / app->settings_cell_w),
-                                   (int32_t)(event.mouse.y / app->settings_cell_h)));
+                settings_event(app, rubraview_settings_view_press(view, &app->settings, col, row));
                 break;
+            }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                if (app->settings_selecting) {
+                    int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w) - view->content_col;
+                    int32_t rr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                    app->settings_sel.end_col = c < 0 ? 0 : c;
+                    app->settings_sel.end_row = rr < 0 ? 0 : rr > view->rows - 2 ? view->rows - 2 : rr;
+                    app->settings_dirty = true;
+                    break;
+                }
                 if (app->settings_mouse_down) {
                     settings_event(app, rubraview_settings_view_drag(view, &app->settings,
                                        (int32_t)(event.mouse.x / app->settings_cell_w)));
                 }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (app->settings_selecting) {
+                    app->settings_selecting = false;
+                    /* A click that did not move marks nothing. */
+                    if (app->settings_sel.anchor_row == app->settings_sel.end_row &&
+                        app->settings_sel.anchor_col == app->settings_sel.end_col) app->settings_sel.active = false;
+                    app->settings_dirty = true;
+                    break;
+                }
                 app->settings_mouse_down = false;
                 rubraview_settings_view_release(view);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                app->settings_sel.active = false;   /* the text under it has moved */
                 settings_event(app, rubraview_settings_view_scroll(view, event.mouse.wheel_delta > 0 ? -3 : 3));
                 break;
             default:
@@ -6569,6 +6628,53 @@ static size_t settings_pump(app_state_t *app) {
         if (!app->settings_open) break;
     }
     return handled;
+}
+
+/* The title, the message line, a heading, a note, live information, or
+   nothing: a row the pointer can mark from without changing anything. */
+static bool settings_row_is_text(const app_state_t *app, int32_t row) {
+    const rubraview_settings_view_t *v = &app->settings_view;
+    if (row <= 1 || row == v->rows - 2) return true;
+    int32_t content = row - 2 + v->scroll;
+    for (size_t i = 0; i < v->line_count; ++i) {
+        const rubraview_settings_line_t *ln = &v->lines[i];
+        if (content < ln->row || content >= ln->row + ln->height) continue;
+        return ln->kind == RUBRAVIEW_LINE_SECTION || ln->kind == RUBRAVIEW_LINE_NOTE || ln->kind == RUBRAVIEW_LINE_INFO;
+    }
+    return true;
+}
+
+/* Ctrl+A marks the page; Ctrl+C copies what is marked, or the focused
+   line when nothing is. */
+static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!(combo.modifiers & RUBRAVIEW_MOD_CTRL)) return false;
+    const rubraview_settings_view_t *v = &app->settings_view;
+    if (key_is(combo, "A")) {
+        app->settings_sel = (rubraview_grid_selection_t){ true, 0, 0, v->rows - 2, INT32_MAX / 2 };
+        app->settings_dirty = true;
+        return true;
+    }
+    if (!key_is(combo, "C")) return false;
+    char text[16384];
+    size_t n = 0;
+    if (app->settings_sel.active) {
+        u8str_t rows[96];
+        int32_t count = (int32_t)(sizeof(rows) / sizeof(rows[0]));
+        for (int32_t i = 0; i < count; ++i) rows[i] = (u8str_t){ .ptr = app->settings_grid_text[i], .len = app->settings_grid_len[i] };
+        n = rubraview_grid_selection_copy(&app->settings_sel, rows, count, text, sizeof(text));
+    } else if (v->focus_line >= 0) {
+        int32_t row = rubraview_settings_view_screen_row(v, (size_t)v->focus_line);
+        if (v->lines[v->focus_line].kind == RUBRAVIEW_LINE_TABLE) row += v->focus_row;
+        if (row >= 0 && row < 96) {   /* already a window row, the title's two included */
+            u8str_t line = { .ptr = app->settings_grid_text[row], .len = app->settings_grid_len[row] };
+            rubraview_grid_selection_t whole = { true, 0, 0, 0, INT32_MAX / 2 };
+            n = rubraview_grid_selection_copy(&whole, &line, 1, text, sizeof(text));
+        }
+    }
+    const char *said = n > 0 && rubraview_pal_clipboard_set_text(app->settings_window, (u8str_t){ .ptr = text, .len = n })
+                           ? "copied" : "nothing to copy";
+    settings_say(app, said);
+    return true;
 }
 
 /* A `preview subtitle` line: the sample drawn the way the video will
@@ -7027,6 +7133,15 @@ static size_t mini_pump(app_state_t *app) {
     return handled;
 }
 
+static void settings_grid_keep(app_state_t *app, int32_t row, u8str_t text) {
+    if (row < 0 || row >= (int32_t)(sizeof(app->settings_grid_len) / sizeof(app->settings_grid_len[0]))) return;
+    size_t n = text.len < sizeof(app->settings_grid_text[0]) ? text.len : sizeof(app->settings_grid_text[0]) - 1;
+    /* Cut on a character, never inside one. */
+    while (n > 0 && n < text.len && ((unsigned char)text.ptr[n] & 0xC0u) == 0x80u) --n;
+    memcpy(app->settings_grid_text[row], text.ptr, n);
+    app->settings_grid_len[row] = (uint16_t)n;
+}
+
 static void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -7051,8 +7166,10 @@ static void draw_settings_window(app_state_t *app) {
         settings_text(app, rubraview_settings_page_text(v, p, line, sizeof(line)), 0.0, y, SETTINGS_TEXT);
     }
 
-    /* The page. */
+    /* The page. Each row's text is kept as drawn, for a marked block to copy. */
+    memset(app->settings_grid_len, 0, sizeof(app->settings_grid_len));
     double x0 = cw * v->content_col;
+    settings_grid_keep(app, 0, rubraview_settings_page_title((size_t)v->page));
     settings_text(app, rubraview_settings_page_title((size_t)v->page), x0, 0.0, SETTINGS_ACCENT);
     for (size_t i = 0; i < v->line_count; ++i) {
         const rubraview_settings_line_t *ln = &v->lines[i];
@@ -7079,13 +7196,25 @@ static void draw_settings_window(app_state_t *app) {
             if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired &&
                 (int32_t)i != v->focus_line) color = SETTINGS_DIM;
             if (ln->kind == RUBRAVIEW_LINE_TABLE && k == 0) color = SETTINGS_ACCENT;
+            settings_grid_keep(app, 2 + content_row, text);
             settings_text(app, text, x0, y, color);
         }
     }
 
     /* Under the page: the last action's result, then the buttons. */
     if (app->settings_message[0]) {
+        settings_grid_keep(app, v->rows - 2, cstr(app->settings_message));
         rubraview_pal_render_draw_text_mono(r, cstr(app->settings_message), x0, ch * (v->rows - 2), fs, SETTINGS_DIM);
+    }
+    /* The marked block, shaded over the text it covers. */
+    for (int32_t row = 0; row < v->rows - 1; ++row) {
+        int32_t c0 = 0, c1 = 0;
+        if (!rubraview_grid_selection_row(&app->settings_sel, row, &c0, &c1)) continue;
+        int32_t last_col = v->cols - v->content_col - 1;
+        if (c1 > last_col) c1 = last_col;
+        if (c1 < c0) continue;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 + cw * c0, ch * row, cw * (c1 - c0 + 1), ch },
+                                       0x704A90D9u, 0.0);
     }
     for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
         int32_t col = 0, width = 0;
@@ -7903,8 +8032,10 @@ static bool open_folder(app_state_t *app, u8str_t dir) {
     if (listing.count == 0) return false;
 
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    bool ascending = true;
+    rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
     app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER ";" MEDIA_FILTER),
-                                                     RUBRAVIEW_SORT_NAME_NATURAL, true);
+                                                     mode, ascending);
     app->source_dir = dir;
     return app->source.page_count > 0;
 }

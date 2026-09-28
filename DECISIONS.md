@@ -175,6 +175,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-45 Sort by is read; the settings window's text can be marked and copied
+
+- Status: Accepted (owner 2026-09-28: "정렬방식은 설정에서 바꿀수 있고. 그리고 설정의 텍스트는 블럭설정 또는 복사 가능하게 해줘")
+- Decision:
+  - Settings › Files › Sort by and Ascending order a folder's pages and a picked set (they were shown but not read; now `wired`). A fifth choice, `created`, goes last so the file's old values keep their meaning. Changing either opens the folder on screen again in the new order, at the same picture. An archive keeps its natural order.
+  - The settings window's text is marked as a terminal marks it: a drag from a line that is only text (a heading, a note, live information, the title or message line), or Shift and a drag anywhere on the page — a plain click on a setting still changes it. `Ctrl+A` marks the page; `Ctrl+C` copies what is marked, or the focused line when nothing is (`rubraview_grid_selection_*`: a wide character whole, trailing spaces dropped, CRLF between rows).
+- Consequences: what is copied is the text as drawn, sliders and brackets included. The page list on the left is not marked. Measured on the Windows 11 VM the same day: a drag across the General page copied exactly its rows (read back with `Get-Clipboard`); Sort by size put `a_photo.jpg` at 5 of 6 as the sizes say, descending at 2 of 6, natural again at 1 of 6.
+
 ## 2026-09-28: D-44 The toolbox's seek bar is a page bar for still pictures
 
 - Status: Accepted (owner 2026-09-28: "정지화상 볼때 툴바에 동영상재생막대랑 같은 모양으로 이번 폴더나 압축파일 내에서 몇번째 이미지 보는지 진행막대", then "진행막대를 누르면 그 위치의 이미지를 현재 목록 또는 폴더에서 볼 수 있어야 해")

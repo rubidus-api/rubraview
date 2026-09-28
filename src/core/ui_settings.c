@@ -734,3 +734,62 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
     pad_to(&w, width);
     return finish(&w);
 }
+
+/* ---- a marked block of the grid (owner, 2026-09-28) ---- */
+
+static bool selection_bounds(const rubraview_grid_selection_t *sel, int32_t *r0, int32_t *c0, int32_t *r1, int32_t *c1) {
+    if (!sel || !sel->active) return false;
+    bool forward = sel->anchor_row < sel->end_row ||
+                   (sel->anchor_row == sel->end_row && sel->anchor_col <= sel->end_col);
+    *r0 = forward ? sel->anchor_row : sel->end_row;
+    *c0 = forward ? sel->anchor_col : sel->end_col;
+    *r1 = forward ? sel->end_row : sel->anchor_row;
+    *c1 = forward ? sel->end_col : sel->anchor_col;
+    return true;
+}
+
+bool rubraview_grid_selection_row(const rubraview_grid_selection_t *selection, int32_t row,
+                                  int32_t *out_first, int32_t *out_last) {
+    int32_t r0, c0, r1, c1;
+    if (!selection_bounds(selection, &r0, &c0, &r1, &c1) || row < r0 || row > r1) return false;
+    *out_first = row == r0 ? c0 : 0;
+    *out_last = row == r1 ? c1 : INT32_MAX;
+    return true;
+}
+
+size_t rubraview_grid_selection_copy(const rubraview_grid_selection_t *selection,
+                                     const u8str_t *rows, int32_t row_count, char *out, size_t capacity) {
+    if (!out || capacity == 0) return 0;
+    out[0] = '\0';
+    int32_t r0, c0, r1, c1;
+    if (!rows || !selection_bounds(selection, &r0, &c0, &r1, &c1)) return 0;
+    size_t len = 0;
+    for (int32_t row = r0 < 0 ? 0 : r0; row <= r1 && row < row_count; ++row) {
+        int32_t first = 0, last = 0;
+        (void)rubraview_grid_selection_row(selection, row, &first, &last);
+        if (row > r0 && row > 0) {
+            if (len + 2 >= capacity) break;
+            out[len++] = '\r';
+            out[len++] = '\n';
+        }
+        size_t row_start = len;
+        int32_t cell = 0;
+        u8str_t text = rows[row];
+        for (size_t i = 0; i < text.len;) {
+            uint32_t cp = 0;
+            size_t n = next_code_point(text.ptr + i, text.len - i, &cp);
+            int w = cell_width(cp);
+            if (cell > last) break;
+            if (cell + w - 1 >= first) {
+                if (len + n >= capacity) { out[len] = '\0'; return len; }
+                memcpy(out + len, text.ptr + i, n);
+                len += n;
+            }
+            cell += w;
+            i += n;
+        }
+        while (len > row_start && out[len - 1] == ' ') --len;   /* the row's padding is not text */
+    }
+    out[len] = '\0';
+    return len;
+}

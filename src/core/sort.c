@@ -257,3 +257,13 @@ void rubraview_sort_items(rubraview_sort_item_t *items, size_t count, rubraview_
     };
     proven_array_sort(&view, comparator_for(mode, ascending));
 }
+
+rubraview_sort_mode_t rubraview_sort_mode_for_setting(int32_t choice) {
+    switch (choice) {
+        case 1: return RUBRAVIEW_SORT_NAME_LEXICAL;
+        case 2: return RUBRAVIEW_SORT_DATE_MODIFIED;
+        case 3: return RUBRAVIEW_SORT_FILE_SIZE;
+        case 4: return RUBRAVIEW_SORT_DATE_CREATED;
+        default: return RUBRAVIEW_SORT_NAME_NATURAL;
+    }
+}

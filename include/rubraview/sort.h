@@ -18,6 +18,13 @@ typedef enum rubraview_sort_mode {
 } rubraview_sort_mode_t;
 
 /**
+ * Settings > Files > Sort by, as the index of its choice (natural,
+ * lexical, date, size, created): the mode it names. Anything else is
+ * natural, the default.
+ */
+rubraview_sort_mode_t rubraview_sort_mode_for_setting(int32_t choice);
+
+/**
  * Strict lexicographical comparison between two UTF-8 slices.
  * Case-insensitive primary, byte-exact tie-breaker.
  */
