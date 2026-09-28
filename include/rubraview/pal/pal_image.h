@@ -98,6 +98,9 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
  */
 bool rubraview_pal_image_startup(void);
 
+/** A thread other than the main one that read or wrote pictures lets go of its WIC factory before it ends. */
+void rubraview_pal_image_thread_end(void);
+
 /**
  * Walk the decode path for one file and report what happened at each
  * step, into `buffer`.

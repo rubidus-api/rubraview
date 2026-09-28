@@ -23,7 +23,10 @@
  * (RV-044) must either create its own factory or serialise access —
  * WIC objects are not free-threaded by default.
  */
-static IWICImagingFactory *g_wic_factory = NULL;
+/* One factory a thread: Save a copy decodes and writes on a thread of its
+   own (owner, 2026-09-28), and a factory made in the main thread's
+   apartment is not handed to another. */
+static _Thread_local IWICImagingFactory *g_wic_factory = NULL;
 
 static IWICImagingFactory *wic_factory(void);
 
@@ -43,6 +46,11 @@ static IWICImagingFactory *wic_factory(void) {
         g_wic_factory = NULL;
     }
     return g_wic_factory;
+}
+
+void rubraview_pal_image_thread_end(void) {
+    if (g_wic_factory) IWICImagingFactory_Release(g_wic_factory);
+    g_wic_factory = NULL;
 }
 
 /* Maps the EXIF 0x0112 orientation value (RV-029 reads the same tag from
