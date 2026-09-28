@@ -190,6 +190,18 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     return listing;
 }
 
+u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path) {
+    if (!arena || path.len == 0) return path;
+    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
+    WCHAR *wide = utf8_to_wide(arena, path_z);
+    if (!wide || GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES) return path_z;
+    WCHAR full[MAX_PATH * 2];
+    DWORD got = GetFullPathNameW(wide, (DWORD)(sizeof(full) / sizeof(full[0])), full, NULL);
+    if (got == 0 || got >= sizeof(full) / sizeof(full[0])) return path_z;
+    u8str_t out = wide_to_u8str(arena, full);
+    return out.len > 0 ? out : path_z;
+}
+
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry) {
     if (!arena || !out_entry || path.len == 0) return false;
 

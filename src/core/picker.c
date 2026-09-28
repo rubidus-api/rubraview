@@ -2,6 +2,7 @@
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
 #include <ctype.h>
+#include <string.h>
 
 bool rubraview_picker_is_places(u8str_t dir) {
     return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_PLACES);
@@ -29,6 +30,41 @@ u8str_t rubraview_picker_parent(u8str_t dir) {
     }
     u8str_t parent = rubraview_path_dirname((u8str_t){ .ptr = dir.ptr, .len = len });
     return parent.len > 0 ? parent : places;
+}
+
+static bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_t current) {
+    const u8str_t none = { .ptr = "", .len = 0 };
+    if (!arena || !typed.ptr) return none;
+    const char *p = typed.ptr;
+    size_t n = typed.len;
+    while (n > 0 && is_space(p[0])) { ++p; --n; }
+    while (n > 0 && is_space(p[n - 1])) --n;
+    if (n >= 2 && p[0] == '"' && p[n - 1] == '"') { ++p; n -= 2; }
+    while (n > 0 && is_space(p[0])) { ++p; --n; }
+    while (n > 0 && is_space(p[n - 1])) --n;
+    if (n == 0) return none;
+
+    bool drive = n >= 2 && p[1] == ':' && ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'));
+    /* A trailing separator goes, but "/" and "C:/" are roots and keep theirs. */
+    size_t keep = drive ? 3 : 1;
+    while (n > keep && rubraview_path_is_sep(p[n - 1])) --n;
+
+    u8str_t cleaned = { .ptr = p, .len = n };
+    if (drive && n == 2) cleaned = rubraview_path_join(arena, cleaned, (u8str_t){ .ptr = "/", .len = 1 });
+    else if (!drive && !rubraview_path_is_sep(p[0]) && current.len > 0 && !rubraview_picker_is_places(current)) {
+        cleaned = rubraview_path_join(arena, current, cleaned);
+    }
+    if (cleaned.ptr == p) {
+        /* A slice of what was typed: copied, so the OS gets its NUL. */
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
+        if (!proven_is_ok(res.err)) return none;
+        memcpy(res.value.ptr, p, n);
+        res.value.ptr[n] = '\0';
+        cleaned = (u8str_t){ .ptr = (const char*)res.value.ptr, .len = n };
+    }
+    return cleaned;
 }
 
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path) {

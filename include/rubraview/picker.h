@@ -53,6 +53,15 @@ bool rubraview_picker_is_places(u8str_t dir);
 u8str_t rubraview_picker_parent(u8str_t dir);
 
 /**
+ * A path typed into the picker's path box (owner, 2026-09-28), cleaned:
+ * spaces and the quotes Explorer's "Copy as path" adds are dropped, a
+ * trailing separator goes (not a root's), a bare drive "C:" becomes
+ * "C:/", and a relative name is joined to `current` unless that is the
+ * PC page. Empty when nothing is left. NUL-terminated, in `arena`.
+ */
+u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_t current);
+
+/**
  * Split a path into tappable segments, after a first "PC" chip that
  * opens the PC page. Slices point into `path`.
  */
