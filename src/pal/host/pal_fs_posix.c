@@ -1,5 +1,6 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -110,6 +111,17 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     listing.entries = buf.data;
     listing.count = buf.count;
     return listing;
+}
+
+u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path) {
+    if (!arena || path.len == 0) return path;
+    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
+    if (path_z.len == 0) return path;
+    char *full = realpath(path_z.ptr, NULL);
+    if (!full) return path_z;
+    u8str_t out = arena_dup(arena, full, strlen(full));
+    free(full);
+    return out.len > 0 ? out : path_z;
 }
 
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry) {

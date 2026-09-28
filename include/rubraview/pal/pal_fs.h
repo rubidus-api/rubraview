@@ -52,6 +52,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t 
  */
 rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
 
+/**
+ * The full path of a folder or file that exists ("." becomes the folder
+ * the viewer runs in), so the picker can climb above it. What cannot be
+ * resolved is given back as it was. NUL-terminated, in `arena`.
+ */
+u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path);
+
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
 

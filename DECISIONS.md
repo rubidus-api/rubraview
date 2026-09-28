@@ -175,6 +175,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-42 The picker's places bar and typed path
+
+- Status: Accepted (owner 2026-09-28: "메뉴에서 파일을 열고자 했을 때, 루브라뷰 있는 곳 상위 폴더는 열 수가 없었습니다 ... 운영체제별로 자주 쓰는 위치 ... 즐겨찾기 같은 곳에 넣을 수는 없나요", then "경로를 직접 입력하는 기능도 당연히 필요해요")
+- Decision:
+  - Every folder the picker lists is made absolute first (`rubraview_pal_fs_absolute`): it held `.` when the viewer had been started with nothing, and `.` has no parent by name, so the folders above the viewer's own could not be reached.
+  - Under the path, a places bar always shows the PC page's entries (Home, Desktop, Documents, Downloads, Pictures, Videos, Music and the drives); the one on screen is lit. Only the ones that fit the window's width are shown; the rest are on the PC page.
+  - `Ctrl+L`, or a tap on the path bar past its chips, turns the bar into a text box holding the folder on screen, all of it selected. Enter shows a folder or opens a file; quotes and spaces around the path go, a bare `C:` is its root, and a name without a root is taken from the folder on screen (`rubraview_picker_typed_path`). A path that is not there is said, and the box stays open to be put right.
+  - An open text box takes every key before anything else: a resume offer still on screen took the box's Enter (found on the VM).
+- Consequences: the grid starts 40 px lower. Favourites the reader adds themselves are not in this (they need a file of their own; asked of the owner). `~` and `%USERPROFILE%` are not expanded. Measured on the Windows 11 VM the same day: the bar, a lit Home, `..` typed from an archive's folder, a typed folder name, a wrong name reported with the box kept open, Backspace in the box.
+
 ## 2026-09-28: D-41 The picker reaches the whole machine through a PC page
 
 - Status: Accepted (owner 2026-09-28: "탐색할 때 현재 실행 폴더만 보게 하지 말고 시스템 전체 다 볼 수 있게 탐색하도록 해 주세요"; read by the implementer as the in-app picker, which with nothing open started in `.`, the folder the viewer was run from, and stopped at a drive's root)

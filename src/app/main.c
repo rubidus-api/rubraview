@@ -402,7 +402,8 @@ typedef struct app_state {
     rubraview_curation_t   curation;
     bool                   rename_active;
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
-    char                   rename_buffer[256];
+    bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
+    char                   rename_buffer[1024];
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
@@ -466,6 +467,7 @@ typedef struct app_state {
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
     u8str_t                picker_dir;
+    rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
     rubraview_fs_listing_t picker_listing;
     size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
@@ -522,6 +524,8 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
+static void picker_path_begin(app_state_t *app);
+static bool key_is(rubraview_key_combo_t combo, const char *name);
 static void help_show(app_state_t *app);
 static void mini_show(app_state_t *app);
 static bool mini_paused(const app_state_t *app);
@@ -1845,6 +1849,13 @@ static void toggle_slideshow(app_state_t *app) {
 
 #define PICKER_COLUMNS 4
 #define PICKER_CRUMB_HEIGHT 44.0
+#define PICKER_PLACES_HEIGHT 40.0   /* the places bar under the path (owner, 2026-09-28) */
+#define PICKER_HEADER_HEIGHT (PICKER_CRUMB_HEIGHT + PICKER_PLACES_HEIGHT)
+
+/* A chip in the path or the places bar, as wide as its label. */
+static double picker_chip_width(u8str_t label, double dpi) {
+    return (double)(label.len + 3) * 9.0 * dpi;
+}
 #define PICKER_ACTION_HEIGHT 96.0   /* two rows: the buttons, then what is picked */
 #define PICKER_BUTTON_ROW 48.0
 
@@ -2126,6 +2137,9 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        (owner, 2026-09-28: the whole machine, not only the folder the
        viewer was started in). */
     bool places = rubraview_picker_is_places(dir);
+    /* "." has no parent by name, which kept the reader below the folder the
+       viewer was run from (owner, 2026-09-28): every folder is made whole. */
+    if (!places) dir = rubraview_pal_fs_absolute(app->arena, dir);
     rubraview_fs_listing_t listing = places ? rubraview_pal_fs_list_places(app->arena)
                                             : rubraview_pal_fs_list_dir(app->arena, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
@@ -2212,7 +2226,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     app->picker_dir = dir;
     app->picker_listing = listing;
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
-                                          (double)win_h - (PICKER_CRUMB_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
+                                          (double)win_h - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           PICKER_COLUMNS);
     app->picker.selected = app->picker_selected;
     rubraview_picker_set_mode(&app->picker, mode);
@@ -2427,6 +2441,7 @@ static void picker_open(app_state_t *app) {
            to be started in (owner, 2026-09-28). */
         dir = app->source_dir.len > 0 ? app->source_dir : U8(RUBRAVIEW_PICKER_PLACES);
     }
+    if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
     picker_navigate(app, dir);
     app->picker_open = app->picker_listing.count > 0;
 }
@@ -3141,6 +3156,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
 static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->picker_open) return false;
 
+    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "L")) {
+        picker_path_begin(app);
+        return true;
+    }
+
     if (combo.key_name.len == 1) {
         char c = combo.key_name.ptr[0];
         if (app->picker_has_pending && c >= '1' && c <= '9') {
@@ -3265,6 +3285,19 @@ static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
    press before anything else does: a confirmation that is ignored is
    worse than no confirmation at all. */
 static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    /* An open text box takes every key first: a resume offer still on
+       screen took its Enter, and the typed path went nowhere (VM,
+       2026-09-28). */
+    if (app->rename_active) {
+        if (key_is(combo, "Enter")) { rename_commit(app); return true; }
+        if (key_is(combo, "Escape")) { rename_end(app); return true; }
+        if (rename_edit_key(app, combo)) return true;
+        /* The characters themselves arrive as text (rename_text), in
+           either case and from the IME; the keys that make them are
+           swallowed here, as is everything else while renaming. */
+        return true;
+    }
+
     /* §3.17.1's resume prompt answers Enter before paging does. Enter
        turns a page now (owner, 2026-09-09), and a prompt that the very
        key meant to answer it walks straight past is not a prompt. */
@@ -3285,16 +3318,6 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
                agree to by accident and easy to refuse. */
             app->confirm_purge = false;
         }
-        return true;
-    }
-
-    if (app->rename_active) {
-        if (key_is(combo, "Enter")) { rename_commit(app); return true; }
-        if (key_is(combo, "Escape")) { rename_end(app); return true; }
-        if (rename_edit_key(app, combo)) return true;
-        /* The characters themselves arrive as text (rename_text), in
-           either case and from the IME; the keys that make them are
-           swallowed here, as is everything else while renaming. */
         return true;
     }
 
@@ -4225,6 +4248,7 @@ static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rub
 static void draw_picker(app_state_t *app, double win_w, double win_h) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+    double header_h = PICKER_HEADER_HEIGHT * dpi;
     double action_h = PICKER_ACTION_HEIGHT * dpi;
 
     rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
@@ -4243,8 +4267,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         size_t row = index / PICKER_COLUMNS;
         size_t column = index % PICKER_COLUMNS;
         double x = (double)column * cell_w;
-        double y = crumb_h + (double)row * cell - app->picker.scroll_offset;
-        if (y + cell < crumb_h || y > win_h - action_h) continue;
+        double y = header_h + (double)row * cell - app->picker.scroll_offset;
+        if (y + cell < header_h || y > win_h - action_h) continue;
 
         rubraview_pal_rect_t tile = { x + 6.0 * dpi, y + 6.0 * dpi, cell_w - 12.0 * dpi, cell - 12.0 * dpi };
         bool picked = app->picker_selected && index < app->picker_listing.count && app->picker_selected[index];
@@ -4288,18 +4312,40 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     /* Breadcrumb: every segment is its own tappable tile. Drawn after the
        grid, on a bar of its own, so a row scrolled half under it does not
        show through (seen on the VM, 2026-09-25). */
-    rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, crumb_h };
+    rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, header_h };
     rubraview_pal_render_fill_rect(app->renderer, crumb_bar, 0xFF101010u, 0.0);
     rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
     double crumb_x = 8.0 * dpi;
     for (size_t i = 0; i < crumbs.count; ++i) {
-        double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
+        double w = picker_chip_width(crumbs.items[i].label, dpi);
         rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
         rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
         rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
                                        crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         crumb_x += w + 6.0 * dpi;
+    }
+    /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
+    if (!app->rename_is_path && crumb_x + 200.0 * dpi < win_w) {
+        rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, 0.0, win_w - crumb_x - 16.0 * dpi, crumb_h };
+        rubraview_pal_render_draw_text(app->renderer, U8("tap here or Ctrl+L to type a path"), hint,
+                                       crumb_h * 0.30, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    /* The places bar: the usual folders and the drives, one tap away from
+       anywhere (owner, 2026-09-28: "즐겨찾기 같은 곳에"). The one on screen is lit. */
+    double place_x = 8.0 * dpi;
+    for (size_t i = 0; i < app->picker_places.count; ++i) {
+        const rubraview_fs_entry_t *place = &app->picker_places.entries[i];
+        double w = picker_chip_width(place->name, dpi);
+        if (place_x + w > win_w) break;
+        rubraview_pal_rect_t chip = { place_x, crumb_h + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
+        bool here = rubraview_path_same(place->path, app->picker_dir);
+        rubraview_pal_render_fill_rect(app->renderer, chip, here ? COLOR_TILE_CURRENT : COLOR_BAR_FILL, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, place->name, chip,
+                                       crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        place_x += w + 6.0 * dpi;
     }
 
     /* Action bar: the buttons, then the selection metrics (§3.15.2 tier three). */
@@ -4325,7 +4371,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     char hidden[48] = "";
     if (app->picker_hidden > 0) snprintf(hidden, sizeof(hidden), "   |   %zu other files hidden", app->picker_hidden);
     int written = snprintf(status, sizeof(status),
-                           "%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Esc closes",
+                           "%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Ctrl+L types a path, Esc closes",
                            app->picker_listing.count, hidden, selected, (unsigned long long)bytes);
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
@@ -4688,6 +4734,12 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
     {
         double box_w = 560.0 * dpi, box_h = 64.0 * dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
+        /* The typed path sits where the path is, as an address bar does. */
+        if (app->rename_is_path) {
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, PICKER_CRUMB_HEIGHT * dpi },
+                                           0xFF101010u, 0.0);   /* the chips under it do not show through */
+            box = (rubraview_pal_rect_t){ 4.0 * dpi, 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
+        }
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
         /* The name with the syllable the IME is still building at the
@@ -4708,7 +4760,7 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
         (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = caret + comp }, size, &to_caret);
         /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
         double inner = box.width - 2.0 * pad;
-        double x0 = full <= inner ? box.x + (box.width - full) * 0.5 : box.x + pad;
+        double x0 = full <= inner && !app->rename_is_path ? box.x + (box.width - full) * 0.5 : box.x + pad;
         if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
         if (rubraview_textedit_has_selection(te)) {
             size_t a = 0, b = 0;
@@ -5249,6 +5301,7 @@ static void triage_undo(app_state_t *app) {
 static void rename_end(app_state_t *app) {
     app->rename_active = false;
     app->rename_is_extension = false;
+    app->rename_is_path = false;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, false);
 }
@@ -5269,6 +5322,43 @@ static void rename_text(app_state_t *app, const rubraview_window_event_t *event)
         size_t n = text.len < sizeof(app->rename_composing) ? text.len : sizeof(app->rename_composing) - 1;
         memcpy(app->rename_composing, text.ptr, n);
         app->rename_composing_length = n;
+    }
+}
+
+/* The picker's path box (owner, 2026-09-28: "경로를 직접 입력하는 기능도
+   당연히 필요해요"): the rename box over the path bar, holding the folder
+   on screen, all of it selected so typing replaces it. */
+static void picker_path_begin(app_state_t *app) {
+    if (!app->picker_open || app->rename_active) return;
+    u8str_t here = rubraview_picker_is_places(app->picker_dir) ? U8("") : app->picker_dir;
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, here.len < sizeof(app->rename_buffer) ? here : U8(""));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_path = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+/* Enter in the path box: a folder is shown, a file is opened, and a path
+   that is not there is said, with the box left open to put it right. */
+static void picker_path_commit(app_state_t *app) {
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    u8str_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_edit), app->picker_dir);
+    if (path.len == 0) { rename_end(app); return; }
+    rubraview_fs_entry_t found;
+    if (!rubraview_pal_fs_stat(app->arena, path, &found)) {
+        osd_say(app, U8("no such folder or file"));
+        return;
+    }
+    rename_end(app);
+    if (found.is_directory) {
+        picker_navigate(app, path);
+        app->picker.focus = 0;
+    } else {
+        app->picker_open = false;
+        open_path(app, path);
     }
 }
 
@@ -5359,6 +5449,7 @@ static void rename_extension_commit(app_state_t *app) {
 static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
+    if (app->rename_is_path) { picker_path_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
     rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
     rename_end(app);
@@ -9407,15 +9498,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (app.picker_open) {
                         double dpi = rubraview_pal_window_dpi_scale(app.window);
                         double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+                        double header_h = PICKER_HEADER_HEIGHT * dpi;
 
                         if (event.mouse.y < crumb_h) {
-                            /* A breadcrumb chip navigates to its prefix. */
+                            /* A breadcrumb chip navigates to its prefix; the
+                               bar past the last chip takes a typed path. */
                             rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app.picker_dir);
                             double x = 8.0 * dpi;
+                            bool on_chip = false;
                             for (size_t i = 0; i < crumbs.count; ++i) {
-                                double w = (double)(crumbs.items[i].label.len + 3) * 9.0 * dpi;
+                                double w = picker_chip_width(crumbs.items[i].label, dpi);
                                 if (event.mouse.x >= x && event.mouse.x < x + w) {
+                                    if (app.rename_active) rename_end(&app);
                                     picker_navigate(&app, crumbs.items[i].prefix);
+                                    app.picker.focus = 0;
+                                    on_chip = true;
+                                    break;
+                                }
+                                x += w + 6.0 * dpi;
+                            }
+                            if (!on_chip && event.mouse.x >= x && !app.rename_active) picker_path_begin(&app);
+                            break;
+                        }
+                        if (event.mouse.y < header_h) {
+                            double x = 8.0 * dpi;
+                            for (size_t i = 0; i < app.picker_places.count; ++i) {
+                                double w = picker_chip_width(app.picker_places.entries[i].name, dpi);
+                                if (event.mouse.x >= x && event.mouse.x < x + w) {
+                                    if (app.rename_active) rename_end(&app);
+                                    picker_navigate(&app, app.picker_places.entries[i].path);
                                     app.picker.focus = 0;
                                     break;
                                 }
@@ -9439,7 +9550,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                         double cell_w = (double)pw / (double)PICKER_COLUMNS;
                         size_t column = (size_t)(event.mouse.x / cell_w);
-                        size_t row = (size_t)((event.mouse.y - crumb_h + app.picker.scroll_offset) / app.picker.tile_extent);
+                        size_t row = (size_t)((event.mouse.y - header_h + app.picker.scroll_offset) / app.picker.tile_extent);
                         size_t index = row * PICKER_COLUMNS + column;
                         if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
                             app.picker.focus = index;
