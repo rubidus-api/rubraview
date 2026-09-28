@@ -69,6 +69,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
+#include "rubraview/favorites.h"
 #include "rubraview/playlist.h"
 #include "rubraview/help.h"
 #include "rubraview/default_keymap.h"
@@ -468,6 +469,8 @@ typedef struct app_state {
     bool                   picker_open;
     u8str_t                picker_dir;
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
+    rubraview_favorites_t  favorites;       /* D-43: the reader's own, first on the places bar */
+    u8str_t                favorites_path;
     rubraview_fs_listing_t picker_listing;
     size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
@@ -1856,6 +1859,45 @@ static void toggle_slideshow(app_state_t *app) {
 static double picker_chip_width(u8str_t label, double dpi) {
     return (double)(label.len + 3) * 9.0 * dpi;
 }
+
+/* The places bar's items in order: the reader's favourites (D-43), then
+   the PC page's places. False past the end. */
+typedef struct picker_bar_item { u8str_t label, path; bool favorite; } picker_bar_item_t;
+
+static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out) {
+    if (index < app->favorites.count) {
+        *out = (picker_bar_item_t){ rubraview_favorites_label(app->favorites.paths[index]),
+                                    app->favorites.paths[index], true };
+        return true;
+    }
+    index -= app->favorites.count;
+    if (index >= app->picker_places.count) return false;
+    *out = (picker_bar_item_t){ app->picker_places.entries[index].name, app->picker_places.entries[index].path, false };
+    return true;
+}
+
+/* The star after the path: lit when the folder on screen is a favourite.
+   None on the PC page, which is not a folder. */
+static u8str_t picker_star_label(const app_state_t *app) {
+    if (rubraview_picker_is_places(app->picker_dir)) return U8("");
+    return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? U8("\xE2\x98\x85") : U8("\xE2\x98\x86");
+}
+
+static void osd_say(app_state_t *app, u8str_t text);
+
+/* The star pressed, or Ctrl+D: the folder on screen in or out, and the
+   file written at once, so a crash later does not lose it. */
+static void picker_toggle_favorite(app_state_t *app) {
+    if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0) return;
+    bool was = rubraview_favorites_contains(&app->favorites, app->picker_dir);
+    bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app->picker_dir);
+    if (!was && !now) { osd_say(app, U8("favourites are full")); return; }
+    osd_say(app, now ? U8("added to favourites") : U8("removed from favourites"));
+    if (app->favorites_path.len > 0 &&
+        !rubraview_pal_fs_write_file(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites))) {
+        osd_say(app, U8("could not write favorites.ini"));
+    }
+}
 #define PICKER_ACTION_HEIGHT 96.0   /* two rows: the buttons, then what is picked */
 #define PICKER_BUTTON_ROW 48.0
 
@@ -3160,6 +3202,10 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         picker_path_begin(app);
         return true;
     }
+    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "D")) {
+        picker_toggle_favorite(app);   /* D-43, as a browser bookmarks a page */
+        return true;
+    }
 
     if (combo.key_name.len == 1) {
         char c = combo.key_name.ptr[0];
@@ -4325,6 +4371,16 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         crumb_x += w + 6.0 * dpi;
     }
+    u8str_t star = picker_star_label(app);
+    if (star.len > 0) {
+        double w = picker_chip_width(star, dpi);
+        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+        bool lit = rubraview_favorites_contains(&app->favorites, app->picker_dir);
+        rubraview_pal_render_fill_rect(app->renderer, chip, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, star, chip, crumb_h * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        crumb_x += w + 6.0 * dpi;
+    }
     /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
     if (!app->rename_is_path && crumb_x + 200.0 * dpi < win_w) {
         rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, 0.0, win_w - crumb_x - 16.0 * dpi, crumb_h };
@@ -4335,15 +4391,18 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     /* The places bar: the usual folders and the drives, one tap away from
        anywhere (owner, 2026-09-28: "즐겨찾기 같은 곳에"). The one on screen is lit. */
     double place_x = 8.0 * dpi;
-    for (size_t i = 0; i < app->picker_places.count; ++i) {
-        const rubraview_fs_entry_t *place = &app->picker_places.entries[i];
-        double w = picker_chip_width(place->name, dpi);
+    picker_bar_item_t item;
+    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
+        double w = picker_chip_width(item.label, dpi);
+        /* A little gap between the reader's favourites and the fixed places. */
+        if (!item.favorite && i == app->favorites.count && i > 0) place_x += 10.0 * dpi;
         if (place_x + w > win_w) break;
         rubraview_pal_rect_t chip = { place_x, crumb_h + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
-        bool here = rubraview_path_same(place->path, app->picker_dir);
-        rubraview_pal_render_fill_rect(app->renderer, chip, here ? COLOR_TILE_CURRENT : COLOR_BAR_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, place->name, chip,
+        bool here = rubraview_path_same(item.path, app->picker_dir);
+        rubraview_pal_render_fill_rect(app->renderer, chip,
+                                       here ? COLOR_TILE_CURRENT : item.favorite ? COLOR_TILE_FILL : COLOR_BAR_FILL, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, chip, item.favorite ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, item.label, chip,
                                        crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         place_x += w + 6.0 * dpi;
     }
@@ -4371,7 +4430,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     char hidden[48] = "";
     if (app->picker_hidden > 0) snprintf(hidden, sizeof(hidden), "   |   %zu other files hidden", app->picker_hidden);
     int written = snprintf(status, sizeof(status),
-                           "%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Ctrl+L types a path, Esc closes",
+                           "%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Ctrl+L types a path, Ctrl+D stars, Esc closes",
                            app->picker_listing.count, hidden, selected, (unsigned long long)bytes);
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
@@ -7651,6 +7710,12 @@ static void history_load(app_state_t *app) {
                                              app->config_beside, appdata, U8("layout.ini"));
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
+
+    /* D-43: the picker's favourites, beside the history. */
+    app->favorites_path = rubraview_config_path(app->arena, app->config_mode,
+                                                app->config_beside, appdata, U8("favorites.ini"));
+    app->favorites = rubraview_favorites_parse(app->arena,
+                                               rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u));
 }
 
 /* §3.6: "Positions persisted across sessions". The two floating boxes
@@ -9517,16 +9582,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                                 }
                                 x += w + 6.0 * dpi;
                             }
+                            u8str_t star = on_chip ? U8("") : picker_star_label(&app);
+                            if (star.len > 0 && event.mouse.x >= x && event.mouse.x < x + picker_chip_width(star, dpi)) {
+                                picker_toggle_favorite(&app);
+                                break;
+                            }
+                            if (star.len > 0) x += picker_chip_width(star, dpi) + 6.0 * dpi;
                             if (!on_chip && event.mouse.x >= x && !app.rename_active) picker_path_begin(&app);
                             break;
                         }
                         if (event.mouse.y < header_h) {
                             double x = 8.0 * dpi;
-                            for (size_t i = 0; i < app.picker_places.count; ++i) {
-                                double w = picker_chip_width(app.picker_places.entries[i].name, dpi);
+                            picker_bar_item_t item;
+                            for (size_t i = 0; picker_bar_item(&app, i, &item); ++i) {
+                                double w = picker_chip_width(item.label, dpi);
+                                if (!item.favorite && i == app.favorites.count && i > 0) x += 10.0 * dpi;   /* as drawn */
                                 if (event.mouse.x >= x && event.mouse.x < x + w) {
                                     if (app.rename_active) rename_end(&app);
-                                    picker_navigate(&app, app.picker_places.entries[i].path);
+                                    picker_navigate(&app, item.path);
                                     app.picker.focus = 0;
                                     break;
                                 }
