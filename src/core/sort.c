@@ -158,6 +158,24 @@ void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mo
 
 /* RV-031: multi-criteria sort over rubraview_sort_item_t. */
 
+static bool is_path_sep(char c) { return c == '/' || c == '\\'; }
+
+int rubraview_path_natcmp(u8str_t a, u8str_t b) {
+    size_t ia = 0, ib = 0;
+    for (;;) {
+        size_t ea = ia, eb = ib;
+        while (ea < a.len && !is_path_sep(a.ptr[ea])) ea++;
+        while (eb < b.len && !is_path_sep(b.ptr[eb])) eb++;
+        bool a_file = ea >= a.len, b_file = eb >= b.len;   /* the last part is the page itself */
+        if (a_file != b_file) return a_file ? -1 : 1;      /* a level's pages before its folders */
+        int cmp = rubraview_str_natcmp((u8str_t){ .ptr = a.ptr + ia, .len = ea - ia },
+                                       (u8str_t){ .ptr = b.ptr + ib, .len = eb - ib });
+        if (cmp != 0 || a_file) return cmp;
+        ia = ea + 1;
+        ib = eb + 1;
+    }
+}
+
 /* The key of one mode, ascending. */
 static int compare_key(const rubraview_sort_item_t *a, const rubraview_sort_item_t *b, rubraview_sort_mode_t mode) {
     switch (mode) {
@@ -169,6 +187,8 @@ static int compare_key(const rubraview_sort_item_t *a, const rubraview_sort_item
             return (a->ctime < b->ctime) ? -1 : (a->ctime > b->ctime ? 1 : 0);
         case RUBRAVIEW_SORT_FILE_SIZE:
             return (a->size_bytes < b->size_bytes) ? -1 : (a->size_bytes > b->size_bytes ? 1 : 0);
+        case RUBRAVIEW_SORT_PATH_NATURAL:
+            return rubraview_path_natcmp(a->name, b->name);
         case RUBRAVIEW_SORT_NAME_NATURAL:
         default:
             return rubraview_str_natcmp(a->name, b->name);
@@ -206,6 +226,8 @@ RV_SORT_CMP(cmp_ctime_up, RUBRAVIEW_SORT_DATE_CREATED, true)
 RV_SORT_CMP(cmp_ctime_down, RUBRAVIEW_SORT_DATE_CREATED, false)
 RV_SORT_CMP(cmp_size_up, RUBRAVIEW_SORT_FILE_SIZE, true)
 RV_SORT_CMP(cmp_size_down, RUBRAVIEW_SORT_FILE_SIZE, false)
+RV_SORT_CMP(cmp_path_up, RUBRAVIEW_SORT_PATH_NATURAL, true)
+RV_SORT_CMP(cmp_path_down, RUBRAVIEW_SORT_PATH_NATURAL, false)
 #undef RV_SORT_CMP
 
 static proven_compare_fn_t comparator_for(rubraview_sort_mode_t mode, bool ascending) {
@@ -214,6 +236,7 @@ static proven_compare_fn_t comparator_for(rubraview_sort_mode_t mode, bool ascen
         case RUBRAVIEW_SORT_DATE_MODIFIED: return ascending ? cmp_mtime_up : cmp_mtime_down;
         case RUBRAVIEW_SORT_DATE_CREATED: return ascending ? cmp_ctime_up : cmp_ctime_down;
         case RUBRAVIEW_SORT_FILE_SIZE: return ascending ? cmp_size_up : cmp_size_down;
+        case RUBRAVIEW_SORT_PATH_NATURAL: return ascending ? cmp_path_up : cmp_path_down;
         case RUBRAVIEW_SORT_NAME_NATURAL:
         default: return ascending ? cmp_natural_up : cmp_natural_down;
     }

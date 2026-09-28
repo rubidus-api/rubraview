@@ -15,6 +15,7 @@ typedef enum rubraview_sort_mode {
     RUBRAVIEW_SORT_DATE_CREATED,     /* Timestamp created */
     RUBRAVIEW_SORT_FILE_SIZE,        /* Byte size */
     RUBRAVIEW_SORT_RANDOM,           /* Fisher-Yates shuffle */
+    RUBRAVIEW_SORT_PATH_NATURAL,     /* inside an archive: folder by folder, natural, loose pages first */
 } rubraview_sort_mode_t;
 
 /**
@@ -37,6 +38,9 @@ int rubraview_str_lexcmp(u8str_t a, u8str_t b);
  * Handles arbitrary digit length without 64-bit integer overflow.
  */
 int rubraview_str_natcmp(u8str_t a, u8str_t b);
+
+/** Paths compared folder by folder, each part natural, a level's files before its folders; '/' and '\\' alike. */
+int rubraview_path_natcmp(u8str_t a, u8str_t b);
 
 /**
  * Sort an array of u8str_t paths/names in-place according to the chosen mode.
