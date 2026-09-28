@@ -18,9 +18,9 @@ typedef enum rubraview_sort_mode {
 } rubraview_sort_mode_t;
 
 /**
- * Settings > Files > Sort by, as the index of its choice (natural,
- * lexical, date, size, created): the mode it names. Anything else is
- * natural, the default.
+ * Settings > Files > Sort by, as the index of its choice (text,
+ * explorer, modified, size, created): the mode it names. Anything else
+ * is Explorer's natural order, the default.
  */
 rubraview_sort_mode_t rubraview_sort_mode_for_setting(int32_t choice);
 

@@ -44,7 +44,7 @@ static const char *const PARTS[] = {
 "\n",
 "page files \"Files\"\n"
 "  section \"Folders and archives\"\n"
-"  choice files.sort_mode          \"Sort by\"                 natural | lexical | date | size | created = natural wired\n"
+"  choice files.sort_mode          \"Sort by\"                 text | explorer | modified | size | created = explorer wired\n"
 "  toggle files.sort_ascending     \"Ascending\"               = true wired\n"
 "  choice files.archive_codepage   \"Archive filenames\"       auto | utf8 | cp949 | shift_jis | gbk | big5 | cp1252 = auto\n"
 "  toggle files.comicinfo          \"Read ComicInfo.xml\"      = true\n"
