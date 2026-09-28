@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-44 The toolbox's seek bar is a page bar for still pictures
+
+- Status: Accepted (owner 2026-09-28: "정지화상 볼때 툴바에 동영상재생막대랑 같은 모양으로 이번 폴더나 압축파일 내에서 몇번째 이미지 보는지 진행막대", then "진행막대를 누르면 그 위치의 이미지를 현재 목록 또는 폴더에서 볼 수 있어야 해")
+- Decision: with a still picture on screen and more than one page in the folder, archive or playlist, the toolbox strip's seek bar shows the page's place — (page) / (count) filled, so the last page fills it — and the line under it ends with `page / count`. A click on the bar goes to the page whose share of the bar it landed in (`rubraview_pagebar_fraction`, `rubraview_pagebar_page`), in the same order the pages are turned. The detached toolbox window does the same.
+- Consequences: a film keeps its seek bar. Dragging along the page bar is not in this (a click jumps). Measured on the Windows 11 VM the same day: six pictures, 1 / 6 filled a sixth, a click at the right end gave 6 / 6 and at the middle 4 / 6, as the window title said.
+
 ## 2026-09-28: D-43 The reader's own favourites on the places bar
 
 - Status: Accepted (owner 2026-09-28: "추천대로 진행", on a star in the path bar and a file of its own)
