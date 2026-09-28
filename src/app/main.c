@@ -528,6 +528,8 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void picker_path_begin(app_state_t *app);
+static bool pagebar_shown(const app_state_t *app);
+static void pagebar_click(app_state_t *app, double bar_x, double bar_width, double x);
 static bool key_is(rubraview_key_combo_t combo, const char *name);
 static void help_show(app_state_t *app);
 static void mini_show(app_state_t *app);
@@ -2579,7 +2581,9 @@ static void toolbox_refresh(app_state_t *app) {
     }
     app->toolbox_tile_count = count;
     app->toolbox.tile_count = count;
-    app->toolbox.timeline = app->media != NULL;   /* the strip's seek bar, for a film or music */
+    /* The strip's seek bar, for a film or music; for a still picture with
+       others around it, where it is among them (owner, 2026-09-28). */
+    app->toolbox.timeline = app->media != NULL || page_count(app) > 1;
     /* The menu follows what is on screen too, but only while it is at its
        root: a reader halfway down a submenu is not pulled back. */
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
@@ -3811,6 +3815,14 @@ static void toolbox_window_pump(app_state_t *app) {
                     app->toolbox_window_drawn = 0.0;
                     break;
                 }
+                if (pagebar_shown(app) && l.timeline.width > 0.0 &&
+                    event.mouse.x >= l.timeline.x && event.mouse.x < l.timeline.x + l.timeline.width &&
+                    event.mouse.y >= m.anchor_size + l.timeline.y - l.timeline.height &&
+                    event.mouse.y < m.anchor_size + l.timeline.y + l.timeline.height * 2.0) {
+                    pagebar_click(app, l.timeline.x, l.timeline.width, event.mouse.x);
+                    app->toolbox_window_drawn = 0.0;
+                    break;
+                }
                 for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
                     if (!rubraview_rect_contains(toolbox_window_tile(app, &m, i), event.mouse.x, event.mouse.y)) continue;
                     bool enabled = true;
@@ -3961,6 +3973,16 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
             double seconds = rubraview_seekbar_time(bar.x, bar.width, x, app->media_info.duration_seconds);
             media_seek_to(app, seconds);
             app->media_position = seconds;
+            note_activity(app);
+            return true;
+        }
+    }
+    /* The same bar over a still picture: a click goes to that page. */
+    if (toolbox_here && pagebar_shown(app)) {
+        rubraview_rect_t bar = rubraview_box_timeline_rect(&app->toolbox, &metrics);
+        if (bar.width > 0.0 && x >= bar.x && x < bar.x + bar.width &&
+            y >= bar.y - bar.height && y < bar.y + bar.height * 2.0) {
+            pagebar_click(app, bar.x, bar.width, x);
             note_activity(app);
             return true;
         }
@@ -4160,6 +4182,19 @@ static void draw_timeline(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* The strip's bar for a still picture: its place in the folder or archive. */
+static bool pagebar_shown(const app_state_t *app) {
+    return !app->media && page_count(app) > 1;
+}
+
+/* A click on that bar: the page whose share of the bar it landed in. */
+static void pagebar_click(app_state_t *app, double bar_x, double bar_width, double x) {
+    size_t page = rubraview_pagebar_page(bar_x, bar_width, x, page_count(app));
+    if ((int32_t)page == current_page_index(app)) return;
+    go_to_spread(app, spread_index_for_page(app, (int32_t)page));
+    update_precache(app);
+}
+
 /* The strip's seek bar and the line under it: the file's name or, under
    the pointer, what the button does. Offsets put the layout on screen. */
 static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
@@ -4170,6 +4205,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         rubraview_pal_render_fill_rect(r, track, 0x60FFFFFFu, track.height * 0.5);
         double duration = app->media_info.duration_seconds;
         double f = duration > 0.0 ? app->media_position / duration : 0.0;
+        if (pagebar_shown(app)) f = rubraview_pagebar_fraction((size_t)current_page_index(app), page_count(app));
         if (f < 0.0) f = 0.0;
         if (f > 1.0) f = 1.0;
         rubraview_pal_rect_t done = { track.x, track.y, track.width * f, track.height };
@@ -4178,6 +4214,17 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
+    char place[48];
+    int n = pagebar_shown(app) && hovered < 0
+        ? snprintf(place, sizeof(place), "%d / %zu", current_page_index(app) + 1, page_count(app)) : 0;
+    if (n > 0) {
+        /* The place at the right end of the line, the name in what is left. */
+        double w = (double)n * l->title.height * 0.45;
+        rubraview_pal_rect_t right = { name.x + name.width - w, name.y, w, name.height };
+        rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = place, .len = (size_t)n }, right,
+                                       l->title.height * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+        name.width -= w + l->title.height * 0.5;
+    }
     rubraview_pal_render_draw_text(r, label, name, l->title.height * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 }
 

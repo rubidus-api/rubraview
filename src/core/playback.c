@@ -332,3 +332,17 @@ u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
     if ((size_t)written >= buffer_size) written = (int)buffer_size - 1;
     return (u8str_t){ .ptr = buffer, .len = (size_t)written };
 }
+
+double rubraview_pagebar_fraction(size_t index, size_t count) {
+    if (count == 0) return 0.0;
+    if (index >= count) return 1.0;
+    return (double)(index + 1) / (double)count;
+}
+
+size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, size_t count) {
+    if (count == 0 || !(bar_width > 0.0)) return 0;
+    double f = (click_x - bar_x) / bar_width;
+    if (!(f > 0.0)) return 0;
+    size_t page = (size_t)(f * (double)count);
+    return page < count ? page : count - 1;
+}

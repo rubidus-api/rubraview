@@ -74,6 +74,14 @@ double rubraview_seekbar_time(double bar_x, double bar_width, double click_x, do
 double rubraview_seekbar_fraction(double position_seconds, double duration_seconds);
 
 /**
+ * The same bar for a still picture (owner, 2026-09-28): how much of it
+ * page `index` (zero-based) of `count` fills — (index + 1) / count, so the
+ * last page fills it — and the page a click at `click_x` asks for.
+ */
+double rubraview_pagebar_fraction(size_t index, size_t count);
+size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, size_t count);
+
+/**
  * `hh:mm:ss.mmm`, or `mm:ss.mmm` for anything under an hour — what the
  * HUD shows. Writes into `buffer` and returns the slice.
  */
