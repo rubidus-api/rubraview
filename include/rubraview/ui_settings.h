@@ -197,6 +197,29 @@ typedef struct rubraview_cell_run {
 } rubraview_cell_run_t;
 size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity);
 
+/**
+ * A block of the window's text marked with the pointer (owner, 2026-09-28:
+ * "설정의 텍스트는 블럭설정 또는 복사 가능하게"): a stream of cells from the
+ * anchor to the pointer, either way round, as a terminal marks text.
+ */
+typedef struct rubraview_grid_selection {
+    bool    active;
+    int32_t anchor_row, anchor_col;   /* where the drag began, in cells */
+    int32_t end_row, end_col;         /* where the pointer is */
+} rubraview_grid_selection_t;
+
+/** The cells of `row` that are marked, both ends included (INT32_MAX: to the row's end). False when none. */
+bool rubraview_grid_selection_row(const rubraview_grid_selection_t *selection, int32_t row,
+                                  int32_t *out_first, int32_t *out_last);
+
+/**
+ * The marked text of `rows` (each as drawn, starting at cell 0): a wide
+ * character touched by the block is taken whole, each row's trailing
+ * spaces go, rows are joined by CRLF. NUL-terminated; returns its length.
+ */
+size_t rubraview_grid_selection_copy(const rubraview_grid_selection_t *selection,
+                                     const u8str_t *rows, int32_t row_count, char *out, size_t capacity);
+
 /** A button's label, as drawn: "[ Revert ]". */
 u8str_t rubraview_settings_button_text(rubraview_settings_button_t button);
 
