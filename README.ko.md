@@ -1,8 +1,6 @@
+**한국어** | [English](README.md) — **Rubraview v0.0.17** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.17/rubraview-v0.0.17.zip)
+
 # Rubraview
-
-**Rubraview v0.0.17**(최신 판) 내려받기 — [rubraview-v0.0.17.zip (Windows 11 x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.17/rubraview-v0.0.17.zip) · [모든 판](https://github.com/rubidus-api/rubraview/releases)
-
-[English](README.md) · **한국어**
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
