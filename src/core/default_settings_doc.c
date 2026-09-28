@@ -39,7 +39,7 @@ static const char *const PARTS[] = {
 "  toggle viewer.portrait_collapse \"Collapse in a portrait window\" = true\n"
 "  section \"Zoom\"\n"
 "  int    viewer.zoom_step_percent \"Zoom step\"               5..50 step 1 unit \"%\" = 10\n"
-"  choice viewer.interpolation     \"Scaling filter\"          nearest | bilinear | bicubic | lanczos3 = bicubic\n"
+"  choice viewer.interpolation     \"Scaling filter\"          nearest | bilinear | bicubic | lanczos3 = bicubic wired\n"
 "  toggle viewer.pixel_grid        \"Pixel grid past 400%\"    = false\n"
 "\n",
 "page files \"Files\"\n"

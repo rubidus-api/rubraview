@@ -4453,6 +4453,23 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb);
 
+/* How a page is scaled on screen: Settings › Viewer › Scaling filter,
+   read at last (owner, 2026-09-29: "확대축소 품질개선" — it was shown but
+   every page was drawn with plain cubic). Plain cubic samples a small
+   neighbourhood and nothing more, so a page shrunk to fit — a 4000-pixel
+   scan at a quarter of its size — kept only every fourth pixel's worth of
+   detail and aliased; Direct2D's high-quality cubic filters first when it
+   shrinks and is the same cubic when it enlarges. Pixel art (the toggle)
+   still gets nearest. */
+static rubraview_interpolation_t page_interpolation(const app_state_t *app) {
+    if (app->force_nearest) return RUBRAVIEW_INTERP_NEAREST;
+    switch ((int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("interpolation")))) {
+        case 0:  return RUBRAVIEW_INTERP_NEAREST;
+        case 1:  return RUBRAVIEW_INTERP_LINEAR;
+        default: return RUBRAVIEW_INTERP_HIGH_QUALITY_CUBIC;
+    }
+}
+
 static void draw_picker(app_state_t *app, double win_w, double win_h) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
@@ -5308,11 +5325,7 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
             (double)win_w, (double)win_h,
             app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
 
-        /* RV-064 made the cubic modes real; before the device context
-           they fell back to linear. Pixel art still gets nearest, which
-           is the one §3.5 actually depends on. */
-        rubraview_interpolation_t interp = app->force_nearest
-            ? RUBRAVIEW_INTERP_NEAREST : RUBRAVIEW_INTERP_CUBIC;
+        rubraview_interpolation_t interp = page_interpolation(app);
 
         for (size_t i = 0; i < comp.count; ++i) {
             const rubraview_draw_command_t *cmd = &comp.commands[i];
