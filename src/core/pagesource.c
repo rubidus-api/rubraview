@@ -269,6 +269,25 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
     return result;
 }
 
+uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source, size_t index) {
+    if (!source || index >= source->page_count) return 0;
+    size_t entry = source->pages[index].entry_index;
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) {
+        return entry < source->archive7z.entry_count ? source->archive7z.entries[entry].size : 0;
+    }
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE) {
+        return entry < source->archive.entry_count ? source->archive.entries[entry].uncompressed_size : 0;
+    }
+    return 0;
+}
+
+size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, size_t index) {
+    uint64_t size = rubraview_page_source_entry_size(source, index);
+    if (size == 0 || size > SIZE_MAX - 256) return 0;
+    /* Both readers make one allocation of size + 1; the rest is alignment. */
+    return (size_t)size + 256;
+}
+
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path) {
     if (!source || path.len == 0) return -1;
 

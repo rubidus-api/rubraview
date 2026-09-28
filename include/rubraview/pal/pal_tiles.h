@@ -37,6 +37,11 @@ void rubraview_pal_tiles_stop(rubraview_tiles_t *tiles);
    what is unread go. The picture size is the upright one the page has. */
 void rubraview_pal_tiles_source(rubraview_tiles_t *tiles, uint32_t generation, u8str_t path,
                                 bool apply_exif_orientation, int32_t picture_w, int32_t picture_h);
+/* The same for a page with no file of its own — an archive page (RV-085).
+   `bytes` is a malloc'd copy of the page the thread takes over and frees;
+   it is freed here if no thread is running. */
+void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *tiles, uint32_t generation, uint8_t *bytes, size_t size,
+                                      bool apply_exif_orientation, int32_t picture_w, int32_t picture_h);
 /* The tiles wanted now, replacing what was wanted before (at most 128). */
 void rubraview_pal_tiles_want(rubraview_tiles_t *tiles, uint32_t generation,
                               const rubraview_tile_key_t *keys, size_t count);
