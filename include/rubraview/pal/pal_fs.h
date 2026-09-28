@@ -43,6 +43,15 @@ typedef struct rubraview_fs_listing {
  */
 rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t dir_path);
 
+/**
+ * The PC page's entries (owner, 2026-09-28): the usual folders (home,
+ * Desktop, Documents, Downloads, Pictures, Videos, Music) that exist,
+ * then every drive (Windows) or the root "/" (POSIX), all as folders and
+ * in that order. Nothing here reads a drive's contents, so an empty card
+ * reader or a lost network drive does not hold the call up.
+ */
+rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
+
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
 

@@ -35,7 +35,27 @@ typedef struct rubraview_breadcrumbs {
     size_t count;
 } rubraview_breadcrumbs_t;
 
-/** Split a path into tappable segments. Slices point into `path`. */
+/**
+ * The PC page (owner, 2026-09-28: "시스템 전체 다 볼 수 있게"): every
+ * drive and the usual folders, listed by rubraview_pal_fs_list_places.
+ * The picker keeps it as its folder under this name, which no real path
+ * can spell.
+ */
+#define RUBRAVIEW_PICKER_PLACES "::pc"
+
+bool rubraview_picker_is_places(u8str_t dir);
+
+/**
+ * The folder `..` opens: the parent, or the PC page from a root ("C:",
+ * "C:/", "/", "//server/share") or a bare relative name. Empty for the
+ * PC page itself and for an empty path.
+ */
+u8str_t rubraview_picker_parent(u8str_t dir);
+
+/**
+ * Split a path into tappable segments, after a first "PC" chip that
+ * opens the PC page. Slices point into `path`.
+ */
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path);
 
 /*

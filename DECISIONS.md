@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-28: D-41 The picker reaches the whole machine through a PC page
+
+- Status: Accepted (owner 2026-09-28: "탐색할 때 현재 실행 폴더만 보게 하지 말고 시스템 전체 다 볼 수 있게 탐색하도록 해 주세요"; read by the implementer as the in-app picker, which with nothing open started in `.`, the folder the viewer was run from, and stopped at a drive's root)
+- Decision:
+  - A "PC" page (`RUBRAVIEW_PICKER_PLACES`, `rubraview_pal_fs_list_places`) lists the usual folders that exist (Home, Desktop, Documents, Downloads, Pictures, Videos, Music — asked of Windows, since they can be moved), then every drive, as `C: <label>`, `E: Removable`, `F: CD/DVD`, `Z: Network`. On the host build it is the home folders and `/`.
+  - `..` at a root (`C:`, `C:/`, `/`, `//server/share`) opens the PC page (`rubraview_picker_parent`); the breadcrumb always starts with a `PC` chip; with nothing open the picker starts on the PC page.
+  - Nothing on the PC page reads a drive: only a fixed disk is asked for its label, and its tiles get no thumbnail, so an empty reader or a lost network drive cannot hold the picker or the thumbnail thread. The viewer sets `SEM_FAILCRITICALERRORS`, so opening an empty drive shows an empty folder rather than Windows' "no disk" box.
+- Consequences: SPEC §15's "quick drive chips" are this page rather than chips in the header. A network share that is not mapped to a letter is not listed (typing a path is backlog).
+
 ## 2026-09-25: D-40 Zooming into a reduced page decodes the part on screen again, in tiles
 
 - Status: Accepted (owner 2026-09-25: "타일 디코딩으로 확대 선명하게 해 주세요", after D-39 named tiled decoding as the next step)

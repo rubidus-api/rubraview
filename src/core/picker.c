@@ -3,9 +3,42 @@
 #include "rubraview/path.h"
 #include <ctype.h>
 
+bool rubraview_picker_is_places(u8str_t dir) {
+    return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_PLACES);
+}
+
+u8str_t rubraview_picker_parent(u8str_t dir) {
+    const u8str_t none = { .ptr = "", .len = 0 };
+    const u8str_t places = { .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
+    if (!dir.ptr || dir.len == 0 || rubraview_picker_is_places(dir)) return none;
+
+    size_t len = dir.len;
+    while (len > 0 && rubraview_path_is_sep(dir.ptr[len - 1])) --len;
+    if (len == 0) return places;                                   /* "/" */
+    if (len == 2 && dir.ptr[1] == ':') return places;              /* "C:", "C:/" */
+    if (dir.len >= 2 && rubraview_path_is_sep(dir.ptr[0]) && rubraview_path_is_sep(dir.ptr[1])) {
+        /* "//server/share" is a root too: count the names after the "//". */
+        size_t names = 0;
+        bool in_name = false;
+        for (size_t i = 2; i < len; ++i) {
+            bool sep = rubraview_path_is_sep(dir.ptr[i]);
+            if (!sep && !in_name) ++names;
+            in_name = !sep;
+        }
+        if (names <= 2) return places;
+    }
+    u8str_t parent = rubraview_path_dirname((u8str_t){ .ptr = dir.ptr, .len = len });
+    return parent.len > 0 ? parent : places;
+}
+
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.len == 0) return crumbs;
+
+    crumbs.items[0].label = (u8str_t){ .ptr = "PC", .len = 2 };
+    crumbs.items[0].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
+    crumbs.count = 1;
+    if (rubraview_picker_is_places(path)) return crumbs;
 
     size_t start = 0;
     for (size_t i = 0; i <= path.len; ++i) {
