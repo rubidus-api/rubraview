@@ -31,6 +31,8 @@ struct rubraview_tiles {
     bool exif;
     int32_t picture_w, picture_h;
     bool source_changed;
+    uint8_t *given;          /* an archive page's bytes, not yet taken by the thread (RV-085) */
+    size_t given_size;
 
     /* the newest request */
     rubraview_tile_key_t want[TILES_WANT_MAX];
@@ -123,11 +125,20 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         bool exif = t->exif;
         int32_t pw = t->picture_w, ph = t->picture_h;
         t->source_changed = false;
+        uint8_t *given = NULL;
+        size_t given_size = 0;
+        if (reload) {
+            given = t->given;
+            given_size = t->given_size;
+            t->given = NULL;
+            t->given_size = 0;
+        }
         ReleaseSRWLockExclusive(&t->lock);
 
         if (reload) {
             free(bytes);
-            bytes = read_whole(path, path_len, &byte_count);
+            byte_count = given_size;
+            bytes = given ? given : read_whole(path, path_len, &byte_count);
             bytes_generation = generation;
         }
 
@@ -223,18 +234,21 @@ void rubraview_pal_tiles_stop(rubraview_tiles_t *t) {
     if (WaitForSingleObject(t->thread, 3000) == WAIT_OBJECT_0) {
         CloseHandle(t->thread);
         for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
+        free(t->given);
         free(t);
     }
     /* Otherwise the thread still holds `t`; it is left, not freed under it. */
 }
 
-void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path,
-                                bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
-    if (!t) return;
+static void set_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path, uint8_t *bytes, size_t size,
+                       bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
     AcquireSRWLockExclusive(&t->lock);
     t->generation = generation;
     t->path_len = path.len < sizeof(t->path) ? path.len : 0;
     if (t->path_len) memcpy(t->path, path.ptr, t->path_len);
+    free(t->given);   /* a page never taken: the thread was still on another */
+    t->given = bytes;
+    t->given_size = bytes ? size : 0;
     t->exif = apply_exif_orientation;
     t->picture_w = picture_w;
     t->picture_h = picture_h;
@@ -244,6 +258,19 @@ void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, u8str
     for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
     t->result_count = 0;
     ReleaseSRWLockExclusive(&t->lock);
+}
+
+void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path,
+                                bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
+    if (!t) return;
+    set_source(t, generation, path, NULL, 0, apply_exif_orientation, picture_w, picture_h);
+}
+
+void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *t, uint32_t generation, uint8_t *bytes, size_t size,
+                                      bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
+    if (!t) { free(bytes); return; }
+    set_source(t, generation, (u8str_t){ .ptr = "", .len = 0 }, bytes, size,
+               apply_exif_orientation, picture_w, picture_h);
 }
 
 void rubraview_pal_tiles_want(rubraview_tiles_t *t, uint32_t generation,

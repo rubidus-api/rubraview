@@ -1971,6 +1971,32 @@ static void tiles_take_all(app_state_t *app) {
     }
 }
 
+/* RV-085: an archive page has no file for the thread to read, so it is
+   read here once — the page source (a CB7's solid block, the SDK's index)
+   belongs to this thread — into an arena of just its size, not the app's,
+   and handed over as a copy. Without it every tile fails once and is not
+   asked for again, as for a file that cannot be read. */
+static void tiles_give_archive_page(app_state_t *app, int32_t index, int32_t pw, int32_t ph) {
+    uint8_t *copy = NULL;
+    size_t copy_size = 0;
+    uint64_t size = rubraview_page_source_entry_size(&app->source, (size_t)index);
+    size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)index);
+    void *mem = size > 0 && size <= MAX_PAGE_BYTES && budget > 0 ? malloc(budget) : NULL;
+    if (mem) {
+        proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+        rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)index, MAX_PAGE_BYTES);
+        if (bytes.ok && bytes.data.len > 0) {
+            copy = (uint8_t*)malloc(bytes.data.len);
+            if (copy) {
+                memcpy(copy, bytes.data.ptr, bytes.data.len);
+                copy_size = bytes.data.len;
+            }
+        }
+        free(mem);
+    }
+    rubraview_pal_tiles_source_bytes(app->tiles, app->tile_generation, copy, copy_size, true, pw, ph);
+}
+
 /* After a reduced page is drawn: the tiles on screen, sharper, over it,
    and a request for those not yet made. `place` maps picture pixels to
    the screen (the reader's rotation included); `scale` is its size. */
@@ -1981,7 +2007,6 @@ static void draw_page_tiles(app_state_t *app, int32_t index, const app_page_t *p
     page_picture_size(page, &pw, &ph);
     if (!page->reduced || !rubraview_tiles_wanted(scale, pw, page->width)) return;
     u8str_t path = app->source.pages[index].path;
-    if (path.len == 0) return;   /* an archive page: no file for the thread to read (not yet) */
     if (!app->tiles) {
         app->tiles = rubraview_pal_tiles_start(thumbs_wake, app->window);
         if (!app->tiles) return;
@@ -1990,7 +2015,11 @@ static void draw_page_tiles(app_state_t *app, int32_t index, const app_page_t *p
         tiles_reset(app);
         app->tile_page = index;
         app->tile_page_texture = page->texture;
-        rubraview_pal_tiles_source(app->tiles, app->tile_generation, path, true, pw, ph);
+        if (path.len > 0) {
+            rubraview_pal_tiles_source(app->tiles, app->tile_generation, path, true, pw, ph);
+        } else {
+            tiles_give_archive_page(app, index, pw, ph);
+        }
     }
 
     rubraview_mat3x2_t inverse;

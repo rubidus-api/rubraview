@@ -127,6 +127,19 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
  * treated alike and letters compared without case — which is what
  * Windows itself considers the same file.
  */
+/**
+ * An archive page's size once read, from the archive's index — nothing is
+ * decompressed. 0 for a folder page or an index out of range.
+ */
+uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source, size_t index);
+
+/**
+ * How large an arena rubraview_page_source_read needs for this page (RV-085:
+ * the tile thread's copy is read into one of just that size, not into the
+ * app's arena). 0 when rubraview_page_source_entry_size is.
+ */
+size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, size_t index);
+
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path);
 
 /**
