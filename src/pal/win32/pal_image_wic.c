@@ -9,6 +9,7 @@
 #include <d2d1.h>
 #include <string.h>
 #include "rubraview/pal/pal_image.h"
+#include "rubraview/tiles.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/viewport.h"
 #include "rubraview/pal/pal_image_wic_internal.h"
@@ -741,6 +742,7 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
     IWICBitmapClipper *clipper = NULL;
     IWICBitmapScaler *scaler = NULL;
     IWICFormatConverter *converter = NULL;
+    uint8_t *piece = NULL;   /* a turned picture's tile, as stored, before it is turned */
 
     if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream ||
         FAILED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size)) ||
@@ -752,31 +754,39 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
 
     IWICBitmapSource *source = (IWICBitmapSource*)frame;
     int32_t orientation = apply_exif_orientation ? read_orientation(frame) : 1;
-    if (orientation != 1) {
-        /* Not cached whole, as the page's decode does: a tile of a turned
-           picture is slower to read, but a huge one is never held. */
-        if (FAILED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) || !rotator ||
-            FAILED(IWICBitmapFlipRotator_Initialize(rotator, source, exif_to_transform(orientation)))) {
-            goto done;
-        }
-        source = (IWICBitmapSource*)rotator;
-    }
+    if (orientation < 1 || orientation > 8) orientation = 1;
     source = apply_color_management(factory, frame, source, &color_transform);
 
-    UINT sw = 0, sh = 0;
-    if (FAILED(IWICBitmapSource_GetSize(source, &sw, &sh)) ||
-        (uint64_t)x + (uint64_t)w > sw || (uint64_t)y + (uint64_t)h > sh) {
-        goto done;
+    /* A turned picture (owner, 2026-09-28: a minute to sharpen a 160 MP
+       EXIF-6 JPEG through a rotator over the whole picture): the tile's
+       rectangle is read from the picture as stored, at the turned size,
+       and only that small piece is turned — by WIC's own flip-rotator, so
+       it turns exactly as the page does. */
+    UINT stored_w = 0, stored_h = 0;
+    if (FAILED(IWICBitmapSource_GetSize(source, &stored_w, &stored_h)) ||
+        stored_w > INT32_MAX || stored_h > INT32_MAX) goto done;
+    int32_t upright_w = 0, upright_h = 0;
+    rubraview_exif_upright_size(orientation, (int32_t)stored_w, (int32_t)stored_h, &upright_w, &upright_h);
+    if ((int64_t)x + w > upright_w || (int64_t)y + h > upright_h) goto done;
+    bool turned = orientation >= 5;
+    int32_t read_w = turned ? out_h : out_w, read_h = turned ? out_w : out_h;
+    int32_t rx = x, ry = y, rw = w, rh = h;
+    rubraview_exif_rect_to_stored(orientation, (int32_t)stored_w, (int32_t)stored_h, x, y, w, h, &rx, &ry, &rw, &rh);
+    uint32_t piece_stride = (uint32_t)read_w * 4u;
+    if (orientation != 1) {
+        piece = (uint8_t*)malloc((size_t)piece_stride * (size_t)read_h);
+        if (!piece) goto done;
     }
+    x = rx; y = ry; w = rw; h = rh;
     WICRect rect = { .X = x, .Y = y, .Width = w, .Height = h };
     if (FAILED(IWICImagingFactory_CreateBitmapClipper(factory, &clipper)) || !clipper ||
         FAILED(IWICBitmapClipper_Initialize(clipper, source, &rect))) {
         goto done;
     }
     source = (IWICBitmapSource*)clipper;
-    if (out_w != w || out_h != h) {
+    if (read_w != w || read_h != h) {
         if (FAILED(IWICImagingFactory_CreateBitmapScaler(factory, &scaler)) || !scaler ||
-            FAILED(IWICBitmapScaler_Initialize(scaler, source, (UINT)out_w, (UINT)out_h,
+            FAILED(IWICBitmapScaler_Initialize(scaler, source, (UINT)read_w, (UINT)read_h,
                                                WICBitmapInterpolationModeFant))) {
             goto done;
         }
@@ -788,9 +798,22 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
                                               WICBitmapPaletteTypeMedianCut))) {
         goto done;
     }
-    ok = SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, stride, stride * (UINT)out_h, dst));
+    if (!piece) {
+        ok = SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, stride, stride * (UINT)out_h, dst));
+    } else if (SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, piece_stride, piece_stride * (UINT)read_h, piece))) {
+        IWICBitmap *small = NULL;
+        if (SUCCEEDED(IWICImagingFactory_CreateBitmapFromMemory(factory, (UINT)read_w, (UINT)read_h,
+                                                                &GUID_WICPixelFormat32bppPBGRA, piece_stride,
+                                                                piece_stride * (UINT)read_h, piece, &small)) && small &&
+            SUCCEEDED(IWICImagingFactory_CreateBitmapFlipRotator(factory, &rotator)) && rotator &&
+            SUCCEEDED(IWICBitmapFlipRotator_Initialize(rotator, (IWICBitmapSource*)small, exif_to_transform(orientation)))) {
+            ok = SUCCEEDED(IWICBitmapFlipRotator_CopyPixels(rotator, NULL, stride, stride * (UINT)out_h, dst));
+        }
+        if (small) IWICBitmap_Release(small);
+    }
 
 done:
+    free(piece);
     if (converter) IWICFormatConverter_Release(converter);
     if (scaler) IWICBitmapScaler_Release(scaler);
     if (clipper) IWICBitmapClipper_Release(clipper);

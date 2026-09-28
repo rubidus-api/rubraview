@@ -91,3 +91,39 @@ bool rubraview_mat3x2_invert(rubraview_mat3x2_t m, rubraview_mat3x2_t *out) {
     };
     return true;
 }
+
+void rubraview_exif_upright_size(int orientation, int32_t stored_w, int32_t stored_h,
+                                 int32_t *out_w, int32_t *out_h) {
+    bool turned = orientation >= 5 && orientation <= 8;
+    *out_w = turned ? stored_h : stored_w;
+    *out_h = turned ? stored_w : stored_h;
+}
+
+void rubraview_exif_point_to_stored(int orientation, int32_t W, int32_t H,
+                                    int32_t ux, int32_t uy, int32_t *out_x, int32_t *out_y) {
+    int32_t x = ux, y = uy;
+    switch (orientation) {
+        case 2: x = W - 1 - ux; y = uy;         break;   /* mirrored */
+        case 3: x = W - 1 - ux; y = H - 1 - uy; break;   /* upside down */
+        case 4: x = ux;         y = H - 1 - uy; break;   /* flipped */
+        case 5: x = uy;         y = ux;         break;   /* transposed */
+        case 6: x = uy;         y = H - 1 - ux; break;   /* stored a quarter turn left */
+        case 7: x = W - 1 - uy; y = H - 1 - ux; break;   /* transversed */
+        case 8: x = W - 1 - uy; y = ux;         break;   /* stored a quarter turn right */
+        default: break;
+    }
+    *out_x = x;
+    *out_y = y;
+}
+
+void rubraview_exif_rect_to_stored(int orientation, int32_t W, int32_t H,
+                                   int32_t x, int32_t y, int32_t w, int32_t h,
+                                   int32_t *out_x, int32_t *out_y, int32_t *out_w, int32_t *out_h) {
+    int32_t ax, ay, bx, by;
+    rubraview_exif_point_to_stored(orientation, W, H, x, y, &ax, &ay);
+    rubraview_exif_point_to_stored(orientation, W, H, x + w - 1, y + h - 1, &bx, &by);
+    *out_x = ax < bx ? ax : bx;
+    *out_y = ay < by ? ay : by;
+    *out_w = (ax > bx ? ax - bx : bx - ax) + 1;
+    *out_h = (ay > by ? ay - by : by - ay) + 1;
+}

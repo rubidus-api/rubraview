@@ -50,6 +50,20 @@ size_t rubraview_tiles_visible(double x0, double y0, double x1, double y1, int32
 /** The inverse of an affine matrix; false when it has none. */
 bool rubraview_mat3x2_invert(rubraview_mat3x2_t m, rubraview_mat3x2_t *out);
 
+/*
+ * EXIF orientation (0x0112, 1..8) between the upright picture and the
+ * picture as stored, W x H. A turned picture's tile is read from the
+ * stored one and turned small, not through a rotator over the whole
+ * picture. Values outside 1..8 are 1.
+ */
+void rubraview_exif_upright_size(int orientation, int32_t stored_w, int32_t stored_h,
+                                 int32_t *out_w, int32_t *out_h);
+void rubraview_exif_point_to_stored(int orientation, int32_t stored_w, int32_t stored_h,
+                                    int32_t ux, int32_t uy, int32_t *out_x, int32_t *out_y);
+void rubraview_exif_rect_to_stored(int orientation, int32_t stored_w, int32_t stored_h,
+                                   int32_t x, int32_t y, int32_t w, int32_t h,
+                                   int32_t *out_x, int32_t *out_y, int32_t *out_w, int32_t *out_h);
+
 #ifdef __cplusplus
 }
 #endif
