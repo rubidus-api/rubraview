@@ -495,6 +495,9 @@ typedef struct app_state {
     bool                   picker_open;
     u8str_t                picker_dir;
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
+    bool                   picker_in_book;  /* the picker is inside the archive being read */
+    size_t                *picker_page_of;  /* then: each tile's page, NOT_A_PAGE for a folder */
+    size_t                 picker_page_skip;/* tiles before the book's own (`..`) */
     rubraview_favorites_t  favorites;       /* D-43: the reader's own, first on the places bar */
     u8str_t                favorites_path;
     rubraview_fs_listing_t picker_listing;
@@ -1912,7 +1915,7 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
 /* The star after the path: lit when the folder on screen is a favourite.
    None on the PC page, which is not a folder. */
 static u8str_t picker_star_label(const app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir)) return U8("");
+    if (rubraview_picker_is_places(app->picker_dir) || app->picker_in_book) return U8("");
     return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? U8("\xE2\x98\x85") : U8("\xE2\x98\x86");
 }
 
@@ -1921,7 +1924,7 @@ static void osd_say(app_state_t *app, u8str_t text);
 /* The star pressed, or Ctrl+D: the folder on screen in or out, and the
    file written at once, so a crash later does not lose it. */
 static void picker_toggle_favorite(app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0) return;
+    if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0 || app->picker_in_book) return;
     bool was = rubraview_favorites_contains(&app->favorites, app->picker_dir);
     bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app->picker_dir);
     if (!was && !now) { osd_say(app, U8("favourites are full")); return; }
@@ -2197,6 +2200,7 @@ static void picker_thumbs_step(app_state_t *app) {
         /* A drive's first picture is not looked for: an empty reader or a
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
+        if (app->picker_in_book) { t->state = 2; continue; }   /* a page in the book has no file to ask about */
         /* Asked again while waiting, it moves to the front of the queue. */
         if (rubraview_pal_thumbs_request(app->thumbs, app->picker_generation, index, entry->is_directory,
                                          tw / th, entry->path)) {
@@ -2212,13 +2216,24 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        (owner, 2026-09-28: the whole machine, not only the folder the
        viewer was started in). */
     bool places = rubraview_picker_is_places(dir);
+    /* Inside the book being read (owner, 2026-09-28): its own folders and
+       pages, a level at a time, in the order they are read. */
+    u8str_t inner = { .ptr = "", .len = 0 };
+    bool in_book = !places && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
+                   rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
+    rubraview_archive_level_t level = {0};
+    if (in_book) {
+        level = rubraview_picker_archive_level(app->arena, app->source.archive_path,
+                                               app->source.pages, app->source.page_count, inner);
+    }
     /* "." has no parent by name, which kept the reader below the folder the
        viewer was run from (owner, 2026-09-28): every folder is made whole. */
-    if (!places) dir = rubraview_pal_fs_absolute(app->arena, dir);
-    rubraview_fs_listing_t listing = places ? rubraview_pal_fs_list_places(app->arena)
+    if (!places && !in_book) dir = rubraview_pal_fs_absolute(app->arena, dir);
+    rubraview_fs_listing_t listing = in_book ? level.listing
+                                   : places ? rubraview_pal_fs_list_places(app->arena)
                                             : rubraview_pal_fs_list_dir(app->arena, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
-    size_t hidden = rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
+    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
     if (listing.count == 0 && rubraview_picker_parent(dir).len == 0) {
         if (hidden > 0) osd_say(app, U8("nothing in that folder can be opened here"));
         return;
@@ -2234,7 +2249,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_sort_item_t));
-    if (!places && proven_is_ok(res.err)) {
+    if (!places && !in_book && proven_is_ok(res.err)) {
         items = (rubraview_sort_item_t*)(void*)res.value.ptr;
         for (size_t i = 0; i < listing.count; ++i) {
             items[i] = (rubraview_sort_item_t){
@@ -2271,6 +2286,9 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        2026-09-23). `Ctrl+Backspace` did this already, but not by touch.
        Above a drive is the PC page, so every folder has one. */
     u8str_t parent = rubraview_picker_parent(dir);
+    app->picker_in_book = in_book;
+    app->picker_page_of = level.page_of;
+    app->picker_page_skip = 0;
     if (parent.len > 0) {
         proven_result_mem_mut_t up_res =
             rubraview_arena_alloc_array(app->arena, (listing.count + 1), sizeof(rubraview_fs_entry_t));
@@ -2284,6 +2302,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
             memcpy(with_up + 1, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
             listing.entries = with_up;
             listing.count += 1;
+            app->picker_page_skip = 1;
         }
     }
 
@@ -2462,6 +2481,12 @@ static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
 /* One of the buttons along the bottom was pressed. */
 static void picker_button(app_state_t *app, picker_button_t button) {
     char line[128];
+    /* A page inside a book is not a file: nothing here can pick, move,
+       copy or recycle it. */
+    if (app->picker_in_book && button != PICKER_BTN_CLEAR) {
+        osd_say(app, U8("inside a book: tap a page to go to it"));
+        return;
+    }
     switch (button) {
         case PICKER_BTN_INDIVIDUAL:
             rubraview_picker_set_mode(&app->picker, app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL
@@ -2520,9 +2545,25 @@ static void picker_open(app_state_t *app) {
            to be started in (owner, 2026-09-28). */
         dir = app->source_dir.len > 0 ? app->source_dir : U8(RUBRAVIEW_PICKER_PLACES);
     }
+    /* Reading a book: the picker opens inside it, at the page's own folder,
+       on the page (owner, 2026-09-28). */
+    int32_t reading = current_page_index(app);
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.len > 0 && reading >= 0 &&
+        (app->picker_dir.len == 0 || !rubraview_picker_inside_archive(app->picker_dir, app->source.archive_path, NULL))) {
+        u8str_t folder = rubraview_path_dirname(app->source.pages[reading].name);
+        dir = folder.len > 0 ? rubraview_path_join(app->arena, app->source.archive_path, folder) : app->source.archive_path;
+    }
     if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
     picker_navigate(app, dir);
     app->picker_open = app->picker_listing.count > 0;
+    if (app->picker_in_book && app->picker_page_of && reading >= 0) {
+        for (size_t i = app->picker_page_skip; i < app->picker_listing.count; ++i) {
+            if (app->picker_page_of[i - app->picker_page_skip] != (size_t)reading) continue;
+            app->picker.focus = i;
+            rubraview_picker_reveal_focus(&app->picker);
+            break;
+        }
+    }
 }
 
 /* Activating a tile enters a folder or opens a file. */
@@ -2537,6 +2578,14 @@ static void picker_activate(app_state_t *app, size_t index) {
     }
 
     app->picker_open = false;
+    if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
+        size_t page = app->picker_page_of[index - app->picker_page_skip];
+        if (page != RUBRAVIEW_PICKER_NOT_A_PAGE && page < page_count(app)) {
+            go_to_spread(app, spread_index_for_page(app, (int32_t)page));
+            update_precache(app);
+            return;
+        }
+    }
     open_path(app, entry->path);
 }
 
@@ -9976,7 +10025,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
                             app.picker.focus = index;
                             /* In a picking mode the tap picks; otherwise it opens. */
-                            if (!rubraview_picker_tap(&app.picker, index)) picker_activate(&app, index);
+                            /* In a book a tap always goes to the page, whatever mode was left on outside it. */
+                            if (app.picker_in_book || !rubraview_picker_tap(&app.picker, index)) picker_activate(&app, index);
                         }
                         break;
                     }

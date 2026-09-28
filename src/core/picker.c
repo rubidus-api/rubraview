@@ -32,6 +32,94 @@ u8str_t rubraview_picker_parent(u8str_t dir) {
     return parent.len > 0 ? parent : places;
 }
 
+static char fold(char c) {
+    if (c == '\\') return '/';
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+bool rubraview_picker_inside_archive(u8str_t dir, u8str_t archive_path, u8str_t *out_inner) {
+    size_t n = archive_path.len;
+    while (n > 0 && rubraview_path_is_sep(archive_path.ptr[n - 1])) --n;
+    if (n == 0 || !dir.ptr || dir.len < n) return false;
+    for (size_t i = 0; i < n; ++i) {
+        if (fold(dir.ptr[i]) != fold(archive_path.ptr[i])) return false;
+    }
+    if (dir.len > n && !rubraview_path_is_sep(dir.ptr[n])) return false;   /* "Big.cbz2" is another file */
+    size_t start = n, end = dir.len;
+    while (start < end && rubraview_path_is_sep(dir.ptr[start])) ++start;
+    while (end > start && rubraview_path_is_sep(dir.ptr[end - 1])) --end;
+    if (out_inner) *out_inner = (u8str_t){ .ptr = dir.ptr + start, .len = end - start };
+    return true;
+}
+
+/* The part of `name` after the folder `inner`, when the page is inside it.
+   Separators alike; the book's own names are compared as they are. */
+static bool after_folder(u8str_t name, u8str_t inner, u8str_t *rest) {
+    if (inner.len == 0) { *rest = name; return true; }
+    if (name.len <= inner.len + 1) return false;
+    for (size_t i = 0; i < inner.len; ++i) {
+        char a = name.ptr[i], b = inner.ptr[i];
+        if (a == b || (rubraview_path_is_sep(a) && rubraview_path_is_sep(b))) continue;
+        return false;
+    }
+    if (!rubraview_path_is_sep(name.ptr[inner.len])) return false;
+    *rest = (u8str_t){ .ptr = name.ptr + inner.len + 1, .len = name.len - inner.len - 1 };
+    return true;
+}
+
+static u8str_t join3(proven_arena_t *arena, u8str_t a, u8str_t b, u8str_t c) {
+    u8str_t ab = b.len > 0 ? rubraview_path_join(arena, a, b) : a;
+    return rubraview_path_join(arena, ab, c);
+}
+
+rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, u8str_t archive_path,
+                                                         const rubraview_page_ref_t *pages, size_t page_count,
+                                                         u8str_t inner) {
+    rubraview_archive_level_t level = {0};
+    if (!arena || !pages || page_count == 0) return level;
+    proven_result_mem_mut_t er = rubraview_arena_alloc_array(arena, page_count, sizeof(rubraview_fs_entry_t));
+    proven_result_mem_mut_t pr = rubraview_arena_alloc_array(arena, page_count, sizeof(size_t));
+    proven_result_mem_mut_t fr = rubraview_arena_alloc_array(arena, page_count, sizeof(u8str_t));
+    if (!proven_is_ok(er.err) || !proven_is_ok(pr.err) || !proven_is_ok(fr.err)) return level;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)er.value.ptr;
+    size_t *page_of = (size_t*)(void*)pr.value.ptr;
+    u8str_t *folders = (u8str_t*)(void*)fr.value.ptr;
+
+    /* Folders first, in the order the book reaches them; a folder's pages
+       are together, so only the last one found needs comparing. */
+    size_t folder_count = 0;
+    for (size_t i = 0; i < page_count; ++i) {
+        u8str_t rest;
+        if (!after_folder(pages[i].name, inner, &rest)) continue;
+        size_t cut = 0;
+        while (cut < rest.len && !rubraview_path_is_sep(rest.ptr[cut])) ++cut;
+        if (cut == rest.len || cut == 0) continue;   /* a page here, or an empty part */
+        u8str_t folder = { .ptr = rest.ptr, .len = cut };
+        if (folder_count > 0 && folders[folder_count - 1].len == cut &&
+            memcmp(folders[folder_count - 1].ptr, folder.ptr, cut) == 0) continue;
+        folders[folder_count++] = folder;
+    }
+    size_t count = 0;
+    for (size_t f = 0; f < folder_count; ++f) {
+        entries[count] = (rubraview_fs_entry_t){
+            .name = folders[f], .path = join3(arena, archive_path, inner, folders[f]), .is_directory = true,
+        };
+        page_of[count++] = RUBRAVIEW_PICKER_NOT_A_PAGE;
+    }
+    for (size_t i = 0; i < page_count; ++i) {
+        u8str_t rest;
+        if (!after_folder(pages[i].name, inner, &rest) || rest.len == 0) continue;
+        bool nested = false;
+        for (size_t k = 0; k < rest.len && !nested; ++k) nested = rubraview_path_is_sep(rest.ptr[k]);
+        if (nested) continue;
+        entries[count] = (rubraview_fs_entry_t){ .name = rest, .path = join3(arena, archive_path, inner, rest) };
+        page_of[count++] = i;
+    }
+    level.listing = (rubraview_fs_listing_t){ .entries = entries, .count = count };
+    level.page_of = page_of;
+    return level;
+}
+
 static bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 
 u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_t current) {
