@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-50 What filled the working arena has memory of its own; a low arena goes on in a new block
+
+- Status: Accepted (owner 2026-09-29: "다음작업들 추천 순서대로 진행해 주세요" — the first recommended: the 64 MB working arena that is never reset)
+- Decision:
+  - VobSub `.sub` and PGS `.sup` files are mapped (like archives, D-47) and let go with the film; the cap goes from 192 MB to 1 GB. Read into the working arena, anything over about 60 MB could never load.
+  - The picker builds each listing in one of two arenas of its own (32 MB each), taking turns: the idle one is emptied and filled, and becomes the shown one only when the change succeeds. What outlives a listing is copied out: undo entries, a favourite, a path being opened.
+  - As a last guard, a working arena with under 16 MB left goes on in a new 64 MB block; the full one is kept (what is in it is in use). The renderer's texture structs are the heap's, recycled as before.
+- Consequences: measured on the Windows 11 VM: an 84 MB `.sup` beside a 10 s film — paused at 5.08 s, the build before shows no subtitle, this one the second subtitle's yellow `(255, 240, 0)` (T081's colour). A 3 000-file folder entered and left 60 times: the build before lost its `..` tile (the working arena was full and the allocation failed without a word); this one's listings stayed whole. Pages (D-49) and archives (D-47) already had memory of their own.
+
 ## 2026-09-29: D-49 A far page in a streamed 7z block is read on a thread of its own; archive pages no longer fill the working arena
 
 - Status: Accepted (owner 2026-09-29: "추천대로 진행 바랍니다" on the plan `docs/plans/archive/2026-09-29-far-jump-off-main.md`: the previous page stays on screen with how far the reading has got)

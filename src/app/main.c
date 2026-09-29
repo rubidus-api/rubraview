@@ -305,7 +305,8 @@ typedef struct app_state {
        whole; one picture at a time is decoded into `vobsub_pixels` and
        uploaded, and the texture is kept while that subtitle is up. */
     rubraview_vobsub_track_t   vobsub;
-    u8str_t                    vobsub_sub;          /* the `.sub` file's bytes */
+    u8str_t                    vobsub_sub;          /* the `.sub` file's bytes (its mapping) */
+    rubraview_fs_mapping_t     vobsub_map;
     uint8_t                   *vobsub_pixels;
     rubraview_texture_t       *vobsub_texture;
     int32_t                    vobsub_texture_cue;  /* which one the texture holds, -1 for none */
@@ -314,7 +315,8 @@ typedef struct app_state {
     /* A Blu-ray's picture subtitles (owner, 2026-09-24). The same shape
        as the DVD's above, over a `.sup` file instead of an index pair. */
     rubraview_pgs_track_t      pgs;
-    u8str_t                    pgs_bytes;           /* the `.sup` file itself */
+    u8str_t                    pgs_bytes;           /* the `.sup` file itself (its mapping) */
+    rubraview_fs_mapping_t     pgs_map;
     uint8_t                   *pgs_pixels;
     rubraview_texture_t       *pgs_texture;
     int32_t                    pgs_texture_cue;
@@ -514,6 +516,14 @@ typedef struct app_state {
     bool                   picker_open;
     u8str_t                picker_dir;
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
+    /* The picker's own memory (2026-09-29): every folder shown took a
+       listing from the working arena for good. Two arenas take turns: a
+       listing is built in the idle one, which becomes the shown one only
+       when the change succeeds, so a folder that cannot be shown leaves
+       the one on screen whole. */
+    proven_arena_t         picker_arenas[2];
+    void                  *picker_arena_mem[2];
+    int                    picker_side;
     bool                   picker_in_book;  /* the picker is inside the archive being read */
     size_t                *picker_page_of;  /* then: each tile's page, NOT_A_PAGE for a folder */
     size_t                 picker_page_skip;/* tiles before the book's own (`..`) */
@@ -577,6 +587,7 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void picker_path_begin(app_state_t *app);
+static u8str_t app_keep(app_state_t *app, u8str_t text);
 static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending);
 static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo);
 static bool settings_row_is_text(const app_state_t *app, int32_t row);
@@ -1179,8 +1190,18 @@ static app_page_t *media_page_ready(app_state_t *app) {
 /* A DVD's index is text, its pictures are not: a feature film's worth of
    subpictures runs to a few tens of megabytes. */
 #define VOBSUB_MAX_IDX_BYTES (4u * 1024u * 1024u)
-#define VOBSUB_MAX_SUB_BYTES (192u * 1024u * 1024u)
-#define PGS_MAX_SUP_BYTES    (192u * 1024u * 1024u)
+/* Mapped, not read into the 64 MB working arena, where anything over about
+   60 MB could never load (found 2026-09-29): the cap is a sanity bound now. */
+#define VOBSUB_MAX_SUB_BYTES (1024ull * 1024u * 1024u)
+#define PGS_MAX_SUP_BYTES    (1024ull * 1024u * 1024u)
+
+/* A subtitle picture file, mapped; empty when it cannot be, or is too large. */
+static u8str_t map_subtitle_file(u8str_t path, rubraview_fs_mapping_t *map, uint64_t cap) {
+    rubraview_pal_fs_unmap(map);
+    if (!rubraview_pal_fs_map(path, map)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (map->size > cap) { rubraview_pal_fs_unmap(map); return (u8str_t){ .ptr = "", .len = 0 }; }
+    return (u8str_t){ .ptr = (const char*)map->data, .len = (size_t)map->size };
+}
 #define SUBTITLE_MAX_CANDIDATES 8
 
 /* §3.16.1 / R135: the subtitle files that share the film's name. The
@@ -1320,6 +1341,7 @@ static void vobsub_clear(app_state_t *app) {
     app->vobsub_texture_w = app->vobsub_texture_h = 0;
     app->vobsub = (rubraview_vobsub_track_t){0};
     app->vobsub_sub = (u8str_t){ .ptr = "", .len = 0 };
+    rubraview_pal_fs_unmap(&app->vobsub_map);
 }
 
 /* `movie.idx` names the index; its pictures are in `movie.sub` beside it. */
@@ -1332,7 +1354,7 @@ static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
        started in the film's folder. */
     u8str_t sub_path = rubraview_path_with_ext(app->arena, idx_path, ".sub");
     if (sub_path.len == 0) return;
-    app->vobsub_sub = rubraview_pal_fs_read_file(app->arena, sub_path, VOBSUB_MAX_SUB_BYTES);
+    app->vobsub_sub = map_subtitle_file(sub_path, &app->vobsub_map, VOBSUB_MAX_SUB_BYTES);
     if (app->vobsub_sub.len == 0) {
         osd_say(app, U8("the .sub file beside the index is missing"));
         return;
@@ -1353,11 +1375,12 @@ static void pgs_clear(app_state_t *app) {
     app->pgs_texture_w = app->pgs_texture_h = 0;
     app->pgs = (rubraview_pgs_track_t){0};
     app->pgs_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    rubraview_pal_fs_unmap(&app->pgs_map);
 }
 
 static void pgs_load(app_state_t *app, u8str_t sup_path) {
     pgs_clear(app);
-    app->pgs_bytes = rubraview_pal_fs_read_file(app->arena, sup_path, PGS_MAX_SUP_BYTES);
+    app->pgs_bytes = map_subtitle_file(sup_path, &app->pgs_map, PGS_MAX_SUP_BYTES);
     if (app->pgs_bytes.len == 0) {
         osd_say(app, U8("the subtitle file could not be read"));
         return;
@@ -2069,7 +2092,7 @@ static void osd_say(app_state_t *app, u8str_t text);
 static void picker_toggle_favorite(app_state_t *app) {
     if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0 || app->picker_in_book) return;
     bool was = rubraview_favorites_contains(&app->favorites, app->picker_dir);
-    bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app->picker_dir);
+    bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app_keep(app, app->picker_dir));
     if (!was && !now) { osd_say(app, U8("favourites are full")); return; }
     osd_say(app, now ? U8("added to favourites") : U8("removed from favourites"));
     if (app->favorites_path.len > 0 &&
@@ -2358,7 +2381,50 @@ static void picker_thumbs_step(app_state_t *app) {
     }
 }
 
+#define PICKER_ARENA_BYTES (32u * 1024u * 1024u)
+#define APP_ARENA_LOW (16u * 1024u * 1024u)
+
+/* The working arena is never given back, and when it filled, everything
+   that took from it failed without a word (2026-09-29). What fills it
+   fastest now has memory of its own (pages, the picker, subtitle
+   pictures); as a last guard, a working arena running low goes on in a
+   new block. The full one is kept: what is in it is still in use. */
+static void arena_refill(app_state_t *app) {
+    proven_arena_t *a = app->arena;
+    if (!a || a->backing.size - a->offset >= APP_ARENA_LOW) return;
+    void *mem = malloc(APP_ARENA_BYTES);
+    proven_arena_t *next = (proven_arena_t*)malloc(sizeof(*next));
+    if (!mem || !next) { free(mem); free(next); return; }
+    *next = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = APP_ARENA_BYTES });
+    app->arena = next;
+}
+
+/* The idle picker arena, emptied: the next listing is built in it. */
+static proven_arena_t *picker_next_arena(app_state_t *app) {
+    int side = app->picker_side ^ 1;
+    if (!app->picker_arena_mem[side]) {
+        app->picker_arena_mem[side] = malloc(PICKER_ARENA_BYTES);
+        if (!app->picker_arena_mem[side]) return app->arena;   /* no room: the old way */
+        app->picker_arenas[side] = proven_arena_create((proven_mem_mut_t){
+            .ptr = (proven_byte_t*)app->picker_arena_mem[side], .size = PICKER_ARENA_BYTES });
+    }
+    proven_arena_reset(&app->picker_arenas[side]);
+    return &app->picker_arenas[side];
+}
+
+/* A string kept past the listing it came from (an undo entry, a
+   favourite, a path being opened), copied into the working arena. */
+static u8str_t app_keep(app_state_t *app, u8str_t text) {
+    if (text.len == 0) return text;
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, text.len + 1);
+    if (!proven_is_ok(res.err)) return text;
+    memcpy(res.value.ptr, text.ptr, text.len);
+    res.value.ptr[text.len] = '\0';
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = text.len };
+}
+
 static void picker_navigate(app_state_t *app, u8str_t dir) {
+    proven_arena_t *pa = picker_next_arena(app);
     /* The PC page lists drives and the usual folders, in the PAL's order
        (owner, 2026-09-28: the whole machine, not only the folder the
        viewer was started in). */
@@ -2370,15 +2436,15 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
                    rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
     rubraview_archive_level_t level = {0};
     if (in_book) {
-        level = rubraview_picker_archive_level(app->arena, app->source.archive_path,
+        level = rubraview_picker_archive_level(pa, app->source.archive_path,
                                                app->source.pages, app->source.page_count, inner);
     }
     /* "." has no parent by name, which kept the reader below the folder the
        viewer was run from (owner, 2026-09-28): every folder is made whole. */
-    if (!places && !in_book) dir = rubraview_pal_fs_absolute(app->arena, dir);
+    if (!places && !in_book) dir = rubraview_pal_fs_absolute(pa, dir);
     rubraview_fs_listing_t listing = in_book ? level.listing
-                                   : places ? rubraview_pal_fs_list_places(app->arena)
-                                            : rubraview_pal_fs_list_dir(app->arena, dir);
+                                   : places ? rubraview_pal_fs_list_places(pa)
+                                            : rubraview_pal_fs_list_dir(pa, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
     if (listing.count == 0 && rubraview_picker_parent(dir).len == 0) {
@@ -2395,7 +2461,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     /* Directories first, then files, each in the Sort by order — folders are
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_sort_item_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, listing.count, sizeof(rubraview_sort_item_t));
     if (!places && !in_book && proven_is_ok(res.err)) {
         items = (rubraview_sort_item_t*)(void*)res.value.ptr;
         for (size_t i = 0; i < listing.count; ++i) {
@@ -2414,7 +2480,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
         rubraview_sort_items(items, listing.count, mode, ascending, NULL);
 
         proven_result_mem_mut_t ordered_res =
-            rubraview_arena_alloc_array(app->arena, listing.count, sizeof(rubraview_fs_entry_t));
+            rubraview_arena_alloc_array(pa, listing.count, sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(ordered_res.err)) {
             rubraview_fs_entry_t *ordered = (rubraview_fs_entry_t*)(void*)ordered_res.value.ptr;
             size_t out = 0;
@@ -2438,7 +2504,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     app->picker_page_skip = 0;
     if (parent.len > 0) {
         proven_result_mem_mut_t up_res =
-            rubraview_arena_alloc_array(app->arena, (listing.count + 1), sizeof(rubraview_fs_entry_t));
+            rubraview_arena_alloc_array(pa, (listing.count + 1), sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(up_res.err)) {
             rubraview_fs_entry_t *with_up = (rubraview_fs_entry_t*)(void*)up_res.value.ptr;
             with_up[0] = (rubraview_fs_entry_t){
@@ -2458,7 +2524,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double tile = 160.0 * dpi;
 
-    proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(app->arena, listing.count, sizeof(bool));
+    proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(pa, listing.count, sizeof(bool));
     app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
     if (app->picker_selected) memset(app->picker_selected, 0, listing.count * sizeof(bool));
 
@@ -2469,6 +2535,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     app->picker_thumbs = (struct picker_thumb *)calloc(listing.count ? listing.count : 1, sizeof(*app->picker_thumbs));
     app->picker_thumb_count = app->picker_thumbs ? listing.count : 0;
     app->picker_dir = dir;
+    if (pa != app->arena) app->picker_side ^= 1;   /* the new listing is the one shown */
     app->picker_listing = listing;
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
                                           (double)win_h - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
@@ -2582,8 +2649,8 @@ static void picker_recycle(app_state_t *app) {
         if (!rubraview_pal_fs_recycle(entries[i].path)) continue;
         rubraview_undo_push(&app->undo, (rubraview_file_action_t){
             .op = RUBRAVIEW_FILE_OP_RECYCLE,
-            .source_path = entries[i].path,
-            .target_path = entries[i].path,
+            .source_path = app_keep(app, entries[i].path),
+            .target_path = app_keep(app, entries[i].path),
         });
         done++;
     }
@@ -2612,7 +2679,7 @@ static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
         if (!ok) continue;
         rubraview_undo_push(&app->undo, (rubraview_file_action_t){
             .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
-            .source_path = entries[i].path,
+            .source_path = app_keep(app, entries[i].path),
             .target_path = target,
         });
         done++;
@@ -5811,7 +5878,7 @@ static void rename_extension_commit(app_state_t *app) {
         if (!rubraview_pal_fs_move(entry->path, target)) { failed++; continue; }
         rubraview_undo_push(&app->undo, (rubraview_file_action_t){
             .op = RUBRAVIEW_FILE_OP_RENAME,
-            .source_path = entry->path,
+            .source_path = app_keep(app, entry->path),
             .target_path = target,
         });
         done++;
@@ -8470,6 +8537,9 @@ static void finish_open(app_state_t *app, size_t start_page) {
 }
 
 static void open_path(app_state_t *app, u8str_t path) {
+    /* The path may be a picker listing's, which goes two folders later;
+       the source keeps it (its folder, its archive's path). */
+    path = app_keep(app, path);
     rubraview_fs_entry_t entry;
     if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;
 
@@ -10373,6 +10443,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
         page_job_poll(&app);
+        arena_refill(&app);
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;
