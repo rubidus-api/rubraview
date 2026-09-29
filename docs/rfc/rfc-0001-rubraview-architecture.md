@@ -398,6 +398,7 @@ the keymap does not do is listed after it.
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `P` | The playlist, or this folder's files, floating over the picture |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |

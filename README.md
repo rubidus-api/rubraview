@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.20** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.20/rubraview-v0.0.20.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.21** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.21/rubraview-v0.0.21.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -50,6 +50,7 @@ ships with, so it cannot drift from them.
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `P` | The playlist, or this folder's files, floating over the picture |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |

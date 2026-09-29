@@ -68,6 +68,7 @@ static const char *const PARTS[] = {
 "  int    audio.volume             \"Volume\"                  0..100 step 5 unit \"%\" = 100 wired\n"
 "  toggle audio.mute               \"Mute\"                    = false wired\n"
 "  section \"Playback\"\n"
+"  choice audio.at_end             \"When a file ends\"        stop | next | one | all | shuffle = next wired\n"
 "  toggle audio.gapless            \"Gapless playback\"        = true wired\n"
 "  float  audio.crossfade_seconds  \"Crossfade\"               0.0..5.0 step 0.1 unit \"s\" = 0.0 wired\n"
 "  choice audio.replaygain         \"Volume levelling\"        off | track | album = off\n"

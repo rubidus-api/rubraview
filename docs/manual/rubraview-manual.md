@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.20.exe              the viewer, as built
-dist/rubraview-v0.0.20/                 the release bundle
-dist/rubraview-v0.0.20.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.21.exe              the viewer, as built
+dist/rubraview-v0.0.21/                 the release bundle
+dist/rubraview-v0.0.21.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -175,8 +175,16 @@ While it does:
   fields, `Enter` keeps them, `Esc` leaves them as they were.
   `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
-- A strip above the information bar shows the time; click or drag on it to
-  go somewhere else.
+- The toolbox's seek bar shows the time; click or drag on it to go
+  somewhere else.
+- What happens when a film or a song ends is set by the toolbox's end
+  button, `Ctrl+R`, Playback › At the end, or Settings › Audio › When a
+  file ends: **Once** stops there; **Next** plays the next film or song in
+  the folder or playlist and stops after the last; **1 loop** plays the same
+  one again; **Loop** goes round all of them; **Shuffle** plays them in a
+  random order, each once before any comes again, and never the same one
+  twice in a row. Pictures between them are passed over. `Next` is where it
+  starts.
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
   `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
   `.sup`) or from inside the film itself.
@@ -351,6 +359,7 @@ listed under a later heading only means that while that is on screen.
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `P` | The playlist, or this folder's files, floating over the picture |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
