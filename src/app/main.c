@@ -71,6 +71,7 @@
 #include "rubraview/picker.h"
 #include "rubraview/favorites.h"
 #include "rubraview/fileinfo.h"
+#include "rubraview/notices.h"
 #include <time.h>
 #include "rubraview/playlist.h"
 #include "rubraview/help.h"
@@ -509,13 +510,13 @@ typedef struct app_state {
     bool                       help_dirty;
     int32_t                    help_scroll;      /* the first line on screen */
     double                     help_font, help_cell_w, help_cell_h;
-    rubraview_help_line_t      help_lines[512];
+    rubraview_help_line_t      help_lines[2048];   /* the keys, then the licence notices */
     size_t                     help_count;
     int32_t                    help_key_cols;    /* the widest key list, so nothing overlaps */
     /* Its text as rows on the grid it is drawn on, for marking and copying
        (owner, 2026-09-29), as the settings and information windows do. */
     char                     (*help_row_text)[256];
-    u8str_t                    help_rows[512];
+    u8str_t                    help_rows[2048];
     rubraview_grid_selection_t help_sel;
     bool                       help_selecting;
     char                       help_message[48];
@@ -7603,6 +7604,20 @@ static void help_measure(app_state_t *app) {
 static void help_rebuild(app_state_t *app) {
     app->help_count = rubraview_help_build(app->arena, &app->keymap, rubraview_boxes_document(),
                                            app->help_lines, sizeof(app->help_lines) / sizeof(app->help_lines[0]));
+    /* Then the notices of what is linked in: the executable is offered on
+       its own too, and they go where it goes (owner, 2026-09-29). */
+    const char *const *notices = NULL;
+    size_t notice_count = rubraview_notice_lines(&notices);
+    size_t room = sizeof(app->help_lines) / sizeof(app->help_lines[0]);
+    if (app->help_count + 3 < room) {
+        app->help_lines[app->help_count++] = (rubraview_help_line_t){ .kind = RUBRAVIEW_HELP_BLANK };
+        app->help_lines[app->help_count++] = (rubraview_help_line_t){ .kind = RUBRAVIEW_HELP_HEADING,
+                                                                      .text = U8("Licences of what is inside") };
+    }
+    for (size_t i = 0; i < notice_count && app->help_count < room; ++i) {
+        app->help_lines[app->help_count++] = (rubraview_help_line_t){
+            .kind = RUBRAVIEW_HELP_NOTE, .text = (u8str_t){ .ptr = notices[i], .len = strlen(notices[i]) } };
+    }
     /* The second column starts after the longest key list there is, so a
        binding with three keys does not run into what it does. */
     size_t widest = 0;
@@ -7613,7 +7628,7 @@ static void help_rebuild(app_state_t *app) {
     if (app->help_key_cols < 20) app->help_key_cols = 20;
     if (app->help_key_cols > 48) app->help_key_cols = 48;
     /* The rows as drawn: two cells in, the keys, the text from its column. */
-    if (!app->help_row_text) app->help_row_text = (char (*)[256])calloc(512, 256);
+    if (!app->help_row_text) app->help_row_text = (char (*)[256])calloc(2048, 256);
     for (size_t i = 0; i < app->help_count && app->help_row_text; ++i) {
         const rubraview_help_line_t *l = &app->help_lines[i];
         char *row = app->help_row_text[i];
@@ -7738,8 +7753,8 @@ static void draw_help_window(app_state_t *app) {
 
     /* The bottom line says how to move and how to leave. */
     char foot[128];
-    int written = snprintf(foot, sizeof(foot), " %s%s%zu keys   |   drag to mark, Ctrl+C copies   |   F1 or Esc closes",
-                           app->help_message, app->help_message[0] ? "   |   " : "", app->help_count);
+    int written = snprintf(foot, sizeof(foot), " %s%skeys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   F1 or Esc closes",
+                           app->help_message, app->help_message[0] ? "   |   " : "");
     if (written > 0) {
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
                                        0xFF1E1E1Eu, 0.0);
