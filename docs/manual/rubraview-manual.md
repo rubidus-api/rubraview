@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.21.exe              the viewer, as built
-dist/rubraview-v0.0.21/                 the release bundle
-dist/rubraview-v0.0.21.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.22.exe              the viewer, as built
+dist/rubraview-v0.0.22/                 the release bundle
+dist/rubraview-v0.0.22.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 

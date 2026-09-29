@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-58 A settled screen is drawn when it changes, not every second
+
+- Status: Accepted (owner 2026-09-29: "백로그 있나요. 안한 것 있으면 진행 바람." — found while measuring on the VM)
+- Decision: after the 3 s grace that follows any input or activity, the main loop no longer draws a frame each second. It sums up what is on screen (`scene_signature`: window size, the spread and its pages' loaded state and texture, zoom and pan, the boxes', title bar's, OSD's, notice's, playlist window's and picker's state, the media page, its pause and its time to the second, the far-page reader) each pass and draws when that changes, and every 10 s regardless, as a safety net for anything the summary misses.
+- Consequences: measured on the Windows 11 VM (WARP, no graphics card), a 4032x3024 photo at rest: 10.3 s of CPU in 30 s before, 1.38 s after; 0.0.17 had 4.1 s and 0.0.19 18.9 s. A page turn and a hover drew at once, as before. Something visible that changes without input and is not in the summary shows up to 10 s late; the list is the place to add it. Music playing under a picture still redraws four times a second (the paced path), which is left as it is.
+
 ## 2026-09-29: D-57 What happens when a film or a song ends
 
 - Status: Accepted (owner 2026-09-29: "동영상/음악 재생이 끝나면 어떻게 할 것인가 옵션 추가. 정지 / 다음 파일 재생 선택지. 그리고 루프 종류도 다양하게. 현재 파일 재생 후 정지 / 현재 파일만 루프 / 현재 폴더 또는 재생 목록 전체 루프 / 셔플(하지만 한번씩은 거치게 ...) 루프는 툴바에 버튼이 있어야 겠네요.")
