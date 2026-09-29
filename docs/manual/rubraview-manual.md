@@ -7,21 +7,23 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.18.exe              the viewer
-dist/rubraview-mfprobe-v0.0.18.exe      a tool that reports which video
-                                       formats your Windows can play
-dist/rubraview-v0.0.18/                 the release bundle — zip this
+dist/rubraview-v0.0.19.exe              the viewer, as built
+dist/rubraview-v0.0.19/                 the release bundle
+dist/rubraview-v0.0.19.zip              that bundle, zipped — the download
+dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
-The bundle holds the viewer, this manual, the licences of the three
-libraries it borrows, and a list of the system DLLs it calls.
+The bundle holds `rubraview.exe`, this manual, the changelog and the
+licences of the libraries it borrows. The same licences are also inside
+the program, at the end of the F1 help window, so the executable can be
+downloaded on its own.
 
 ## Getting it running
 
-The program is built with its version in its name —
-`rubraview-v0.0.18.exe` — so that a copy sitting in a downloads folder
-still says which build it is. Rename it to `rubraview.exe` if you prefer;
-nothing depends on the name. The examples below use the short form.
+Inside the bundle the program is plain `rubraview.exe`: the zip and its
+folder carry the version, so a shortcut to the program survives an update.
+`rubraview.exe --version` prints the version, and it is in the window
+title too, so a screenshot identifies the build.
 
 `rubraview.exe --version` prints the version, and it is in the window
 title too, so a screenshot identifies the build.

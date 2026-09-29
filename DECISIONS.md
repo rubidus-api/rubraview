@@ -175,6 +175,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-55 The download is rubraview.exe, in a zip and on its own
+
+- Status: Accepted (owner 2026-09-29: "파일 배포판 패키징 할때, 압축파일 내 exe 파일에선 버젼 정보를 지우고, mfprove 파일은 이제 필요없지 않나요. 불필요한 파일은 제거하고, 그리고 zip 판 외에도 exe만 올려서 바로 받을 수 있게 하는 것도 좋을 듯 해요")
+- Decision:
+  - The exe in the release zip is `rubraview.exe`; the version stays in the zip's and the folder's name (`rubraview-v<version>`) and in the program's title.
+  - The zip holds the program, the manual, CHANGELOG, LICENSE, THIRD_PARTY_NOTICES and `licences/` (now with proven_c_lib's, which was missing). `rubraview-mfprobe.exe`, `gpu-check.cmd`, `VERSION` and the import list leave the zip; `make mfprobe` and `tools/gpu-check.cmd` stay for developers, and the import list is written beside the zip.
+  - The release also carries `rubraview.exe` alone. Because a lone exe comes without its licence files, every notice is compiled into the program (`scripts/gen-notices.py` → `src/core/notices_text.c`, checked by `project-check.sh`) and shown at the end of the F1 help.
+  - `README` links `releases/latest/download/rubraview.exe`.
+- Consequences: the zip and the lone exe are the same bytes. Measured on the Windows 11 VM: the lone exe opened a picture titled `a_photo.jpg (1/6) - Rubraview 0.0.19`, and F1 then End showed the libjpeg-turbo notice last. The exe grew by the notice text.
+
 ## 2026-09-29: D-54 The seek bar is the toolbox's only; nothing the toolbox says is said again
 
 - Status: Accepted (owner 2026-09-29: "현재 동영상 재생할 때, 툴바와 화면 아래에 동시에 재생막대가 뜹니다. 툴바에만 뜨게 해 주시고 나머지도 마찬가지로요.")

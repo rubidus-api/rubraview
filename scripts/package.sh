@@ -27,38 +27,37 @@ fi
 rm -rf "$out"
 mkdir -p "$out" "$out/licences"
 
-cp "dist/$exe" "$out/"
-
-# The codec probe ships alongside when it has been built: it is how a
-# reader finds out what their own Windows can play, and it is useless
-# sitting on the build machine.
-probe="rubraview-mfprobe-v$version.exe"
-[ -f "dist/$probe" ] && cp "dist/$probe" "$out/" || true
-
-# RV-062 step 3 on the reader's own PC: drag a video onto it, get a text
-# file with what this machine does with decoding on the graphics card.
-cp tools/gpu-check.cmd "$out/"
+# Inside the bundle the program is plain `rubraview.exe`: the folder and
+# the zip carry the version (owner, 2026-09-29), so a reader's shortcut
+# and "open with" survive an update. Only what a reader needs goes in: the
+# codec probe and gpu-check.cmd are developer tools, left in tools/.
+cp "dist/$exe" "$out/rubraview.exe"
+# The same executable on its own, for the release's direct download.
+cp "dist/$exe" "dist/rubraview.exe"
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
 cp CHANGELOG.md "$out/"
 [ -f LICENSE ] && cp LICENSE "$out/" || true
 
+cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"
 cp vendor/miniz/LICENSE "$out/licences/miniz-LICENSE.txt"
 cp vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"
 cp vendor/libjpeg-turbo/LICENSE.md "$out/licences/libjpeg-turbo-LICENSE.md"
 cp vendor/libjpeg-turbo/README.ijg "$out/licences/libjpeg-turbo-README.ijg"
 
-printf '%s\n' "$version" > "$out/VERSION"
 
 # The check the "no DLL beside it" criterion really needs: list what the
 # executable imports, so a new dependency cannot slip in unnoticed.
 if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
   x86_64-w64-mingw32-objdump -p "dist/$exe" \
-    | sed -n 's/^\tDLL Name: //p' | sort > "$out/imports.txt"
-  printf '%s\n' "package: imports recorded in $out/imports.txt"
+    | sed -n 's/^\tDLL Name: //p' | sort > "dist/rubraview-v$version.imports.txt"
+  printf '%s\n' "package: imports recorded in dist/rubraview-v$version.imports.txt (beside the bundle, not in it)"
 fi
 
 printf '%s\n' "package: $out ready (version $version)"
-printf '%s\n' "package: zip that folder and it is the release"
+# The zip, made here so what is published is exactly this folder.
+( cd dist && rm -f "rubraview-v$version.zip" && \
+  python3 -c "import os,sys,zipfile; d=sys.argv[1]; z=zipfile.ZipFile(d+'.zip','w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(r,f)) for r,_,fs in os.walk(d) for f in sorted(fs)]; z.close()" "rubraview-v$version" )
+printf '%s\n' "package: dist/rubraview-v$version.zip and dist/rubraview.exe are the release"
 ls -1 "$out"
