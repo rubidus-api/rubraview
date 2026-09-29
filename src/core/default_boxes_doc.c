@@ -97,6 +97,7 @@ static const char *const PARTS[] = {
 "  end\n"
 "  item next_archive         \"Next archive\"\n"
 "  item prev_archive         \"Prev archive\"\n"
+"  item toggle_info          \"Information\"\n"
 "  item rename_file          \"Rename\"\n"
 "  item delete_file          \"Delete\"\n"
 "  item quick_export         \"Export\"\n"

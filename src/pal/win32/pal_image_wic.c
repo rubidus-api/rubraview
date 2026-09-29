@@ -694,6 +694,76 @@ static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, u8str_t path
     return out;
 }
 
+static const char *container_name(const GUID *g) {
+    static const struct { const GUID *guid; const char *name; } NAMES[] = {
+        { &GUID_ContainerFormatJpeg, "JPEG" }, { &GUID_ContainerFormatPng, "PNG" },
+        { &GUID_ContainerFormatGif, "GIF" }, { &GUID_ContainerFormatBmp, "BMP" },
+        { &GUID_ContainerFormatTiff, "TIFF" }, { &GUID_ContainerFormatIco, "ICO" },
+        { &GUID_ContainerFormatWmp, "JPEG XR" }, { &GUID_ContainerFormatDds, "DDS" },
+    };
+    for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); ++i) {
+        if (IsEqualGUID(g, NAMES[i].guid)) return NAMES[i].name;
+    }
+    /* WebP, HEIF and AVIF come from codecs that ship apart from Windows'
+       own; their GUIDs are not in every SDK's headers. */
+    static const GUID webp = { 0xe094b0e2, 0x67f2, 0x45b3, { 0xb0, 0xea, 0x11, 0x53, 0x37, 0xca, 0x7c, 0xf3 } };
+    static const GUID heif = { 0xe1e62521, 0x6787, 0x405b, { 0xa3, 0x39, 0x50, 0x07, 0x15, 0xb5, 0x76, 0x3f } };
+    static const GUID avif = { 0x1ee4c3f2, 0x5b9e, 0x4d7a, { 0x8e, 0x9e, 0x47, 0xd8, 0x9a, 0x9f, 0x4f, 0x3a } };
+    if (IsEqualGUID(g, &webp)) return "WebP";
+    if (IsEqualGUID(g, &heif)) return "HEIF";
+    if (IsEqualGUID(g, &avif)) return "AVIF";
+    return "an image";
+}
+
+bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    IWICImagingFactory *factory = wic_factory();
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = factory ? decoder_for_source(path, data, size, &stream) : NULL;
+    if (!decoder) { if (stream) IWICStream_Release(stream); return false; }
+
+    GUID container = {0};
+    if (SUCCEEDED(IWICBitmapDecoder_GetContainerFormat(decoder, &container))) {
+        snprintf(out->format, sizeof(out->format), "%s", container_name(&container));
+    }
+    UINT frames = 0;
+    (void)IWICBitmapDecoder_GetFrameCount(decoder, &frames);
+    out->frames = frames;
+
+    IWICBitmapFrameDecode *frame = NULL;
+    bool ok = SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame;
+    if (ok) {
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h))) { out->width = (int32_t)w; out->height = (int32_t)h; }
+        (void)IWICBitmapFrameDecode_GetResolution(frame, &out->dpi_x, &out->dpi_y);
+        UINT profiles = 0;
+        if (SUCCEEDED(IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &profiles))) out->color_profile = profiles > 0;
+        WICPixelFormatGUID format;
+        IWICComponentInfo *component = NULL;
+        IWICPixelFormatInfo *info = NULL;
+        if (SUCCEEDED(IWICBitmapFrameDecode_GetPixelFormat(frame, &format)) &&
+            SUCCEEDED(IWICImagingFactory_CreateComponentInfo(factory, &format, &component)) && component &&
+            SUCCEEDED(IWICComponentInfo_QueryInterface(component, &IID_IWICPixelFormatInfo, (void**)&info)) && info) {
+            UINT bpp = 0, channels = 0;
+            (void)IWICPixelFormatInfo_GetBitsPerPixel(info, &bpp);
+            (void)IWICPixelFormatInfo_GetChannelCount(info, &channels);
+            out->bits_per_pixel = bpp;
+            out->channels = channels;
+            const char *kind = channels == 1 ? "grey" : channels == 2 ? "grey with transparency"
+                             : channels == 4 ? "colour with transparency" : "colour";
+            if (bpp > 0 && bpp <= 8 && channels != 1) snprintf(out->pixels, sizeof(out->pixels), "%u-bit indexed colour", bpp);
+            else if (bpp > 0) snprintf(out->pixels, sizeof(out->pixels), "%u-bit %s", bpp, kind);
+        }
+        if (info) IWICPixelFormatInfo_Release(info);
+        if (component) IWICComponentInfo_Release(component);
+        IWICBitmapFrameDecode_Release(frame);
+    }
+    IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
+    return ok;
+}
+
 bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_height) {
     if (!out_width || !out_height) return false;
     IWICBitmapDecoder *decoder = decoder_for_path(path);

@@ -175,6 +175,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-51 The file's information in a window of its own, its text marked and copied
+
+- Status: Accepted (owner 2026-09-29: "지금 재생중인 파일의 용량/픽셀단위크기/코덱/EXIF/기타 자세한 정보를 보여주는 기능도 만들어 주세요. 있으면 잘 다듬어 주시고요. 나와있는 정보는 드래그해서 텍스트로 원하는 부분만 복사해 갈 수있어야 해요." — there was none; the `I` status line was all)
+- Decision:
+  - `Ctrl+I`, or File › Information, opens a window beside the viewer: the file (name, folder, position, size in bytes and units, modified, created) or the archive page (its entry, stored or deflated, and the archive: kind, size, pages); a picture (format, pixels and megapixels, pixel format, dpi, frames, colour profile, "reduced to … on screen") and its EXIF (camera, lens, taken, exposure, aperture, ISO, focal length and its 35 mm figure, exposure bias, flash, orientation in words, location in degrees-minutes-seconds, altitude, software, artist, copyright); a film or a song (length, picture size and frame rate, picture codec, decoded on the card or in software, sample rate and channels, bitrate — the file's when it says, else size over length —, the backend, every track with its codec, channels, language and title, and a song's tags).
+  - It follows the page on screen, a page arriving late included.
+  - Its text is a grid of rows, the values in a column of their own: a drag marks a stream of it, `Ctrl+C` copies what is marked (everything when nothing is), `Ctrl+A` marks all — the settings window's selection (D-45).
+  - EXIF is read by the viewer itself (`rubraview_exif_read`: JPEG APP1, TIFF, PNG `eXIf`, WebP `EXIF`, "Exif\0\0" near the start for HEIF), every offset checked, a sub-IFD followed one level and never back; the picture's format by WIC without decoding it.
+- Consequences: measured on the Windows 11 VM: a photo with EXIF written by Pillow showed every tag as written; a drag across its location copied exactly `37°33'59.4"N 126°58'40.8"E`; a film, a CBZ page of the 5 GB archive and a WAV each showed their sections; turning a page updated the window. Media Foundation's own bitrate is not read (its attribute GUIDs are not in MinGW's headers), so for it the bitrate is the size over the length, and says so.
+
 ## 2026-09-29: D-50 What filled the working arena has memory of its own; a low arena goes on in a new block
 
 - Status: Accepted (owner 2026-09-29: "다음작업들 추천 순서대로 진행해 주세요" — the first recommended: the 64 MB working arena that is never reset)

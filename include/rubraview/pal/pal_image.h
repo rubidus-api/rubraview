@@ -121,6 +121,24 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
  * from its bytes.
  */
 /**
+ * What a picture is, for the information window (owner, 2026-09-29):
+ * its format, pixel format, resolution, frames and whether it carries a
+ * colour profile. Nothing is decoded. A folder page by `path`, an archive
+ * page by its bytes.
+ */
+typedef struct rubraview_image_desc {
+    char     format[32];          /* "JPEG", "PNG", "WebP", "HEIF" … */
+    char     pixels[48];          /* "24-bit colour", "8-bit grey", "32-bit colour with transparency" */
+    int32_t  width, height;       /* as stored */
+    uint32_t bits_per_pixel, channels;
+    double   dpi_x, dpi_y;
+    uint32_t frames;
+    bool     color_profile;
+} rubraview_image_desc_t;
+
+bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out);
+
+/**
  * A picture's size as stored, without decoding its pixels — enough for a
  * batch run to give a large picture room of its own first. False when it
  * cannot be read.

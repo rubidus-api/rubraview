@@ -70,6 +70,8 @@
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/favorites.h"
+#include "rubraview/fileinfo.h"
+#include <time.h>
 #include "rubraview/playlist.h"
 #include "rubraview/help.h"
 #include "rubraview/default_keymap.h"
@@ -486,6 +488,23 @@ typedef struct app_state {
     rubraview_window_t        *help_window;
     rubraview_renderer_t      *help_renderer;
     bool                       help_open;
+    /* The file's information (owner, 2026-09-29): a window of its own,
+       its text marked with the pointer and copied. */
+    bool                       info_open, info_dirty;
+    rubraview_window_t        *info_window;
+    rubraview_renderer_t      *info_renderer;
+    double                     info_font, info_cell_w, info_cell_h;
+    int32_t                    info_frame[4];
+    int32_t                    info_scroll;
+    void                      *info_mem;
+    proven_arena_t             info_arena;       /* the rows, made again when the file changes */
+    u8str_t                   *info_rows;
+    bool                      *info_heading;
+    size_t                     info_count;
+    int64_t                    info_key;         /* which page and film the rows are of */
+    rubraview_grid_selection_t info_sel;
+    bool                       info_selecting;
+    char                       info_message[64];
     bool                       help_dirty;
     int32_t                    help_scroll;      /* the first line on screen */
     double                     help_font, help_cell_w, help_cell_h;
@@ -596,6 +615,7 @@ static void pagebar_press(app_state_t *app, double bar_x, double bar_width, doub
 static void pagebar_drag(app_state_t *app, double x, bool released);
 static bool key_is(rubraview_key_combo_t combo, const char *name);
 static void help_show(app_state_t *app);
+static void info_show(app_state_t *app);
 static void mini_show(app_state_t *app);
 static bool mini_paused(const app_state_t *app);
 static void mini_close(app_state_t *app);
@@ -3293,6 +3313,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
         help_show(app);
+    } else if (rubraview_u8_eq_lit(action, "toggle_info")) {
+        info_show(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_miniplayer")) {
         mini_show(app);
     } else if (rubraview_u8_eq_lit(action, "about")) {
@@ -7128,6 +7150,383 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
 #define HELP_KEYS       0xFFE8C46Fu
 #define HELP_TEXT       0xFFE8E8E8u
 
+
+/* ---- the file's information (owner, 2026-09-29) ---- */
+
+#define INFO_ARENA_BYTES (4u * 1024u * 1024u)
+#define INFO_MAX_ROWS 512
+#define INFO_LABEL_COLS 16
+
+static void info_local_time(char *buf, size_t cap, int64_t unix_seconds) {
+    buf[0] = '\0';
+    if (unix_seconds <= 0) return;
+    time_t t = (time_t)unix_seconds;
+    struct tm local;
+    if (localtime_s(&local, &t) != 0) return;
+    strftime(buf, cap, "%Y-%m-%d %H:%M:%S", &local);
+}
+
+static const char *track_kind_name(rubraview_track_kind_t kind) {
+    return kind == RUBRAVIEW_TRACK_VIDEO ? "Video" : kind == RUBRAVIEW_TRACK_AUDIO ? "Sound" : "Subtitle";
+}
+
+/* What there is to say about the page on screen, gathered into rows. */
+static void info_gather(app_state_t *app) {
+    if (!app->info_mem) {
+        app->info_mem = malloc(INFO_ARENA_BYTES);
+        if (!app->info_mem) return;
+        app->info_arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->info_mem, .size = INFO_ARENA_BYTES });
+    }
+    proven_arena_reset(&app->info_arena);
+    proven_arena_t *a = &app->info_arena;
+    rubraview_info_t info = {0};
+    char b[256];
+    app->info_sel.active = false;
+
+    int32_t index = current_page_index(app);
+    if (index < 0 || (size_t)index >= page_count(app)) {
+        rubraview_info_heading(a, &info, "Nothing is open");
+    } else {
+        const rubraview_page_ref_t *ref = &app->source.pages[index];
+        bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
+        u8str_t path = ref->path;
+
+        /* The file */
+        rubraview_info_heading(a, &info, in_archive ? "Page" : "File");
+        rubraview_info_add(a, &info, "Name", in_archive ? ref->name : rubraview_path_basename(path));
+        if (!in_archive) rubraview_info_add(a, &info, "Folder", rubraview_path_dirname(path));
+        rubraview_info_addf(a, &info, "Position", "%d of %zu", index + 1, page_count(app));
+        uint64_t file_bytes = 0;
+        rubraview_fs_entry_t entry;
+        if (!in_archive && rubraview_pal_fs_stat(a, path, &entry)) {
+            file_bytes = entry.size_bytes;
+            rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), entry.size_bytes) });
+            info_local_time(b, sizeof(b), entry.mtime);
+            rubraview_info_add(a, &info, "Modified", (u8str_t){ b, strlen(b) });
+            info_local_time(b, sizeof(b), entry.ctime);
+            rubraview_info_add(a, &info, "Created", (u8str_t){ b, strlen(b) });
+        }
+        if (in_archive) {
+            file_bytes = rubraview_page_source_entry_size(&app->source, (size_t)index);
+            rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), file_bytes) });
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE && ref->entry_index < app->source.archive.entry_count) {
+                const rubraview_zip_entry_t *z = &app->source.archive.entries[ref->entry_index];
+                const char *how = z->compression_method == 0 ? "stored" : z->compression_method == 8 ? "deflate" : "other";
+                char packed[96];
+                rubraview_info_bytes(packed, sizeof(packed), z->compressed_size);
+                rubraview_info_addf(a, &info, "In the archive", "%s, %s", how, packed);
+            }
+            rubraview_info_heading(a, &info, "Archive");
+            rubraview_info_add(a, &info, "Name", rubraview_path_basename(app->source.archive_path));
+            rubraview_info_add(a, &info, "Folder", rubraview_path_dirname(app->source.archive_path));
+            rubraview_info_add(a, &info, "Kind", app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z ? U8("7z (CB7)") : U8("ZIP (CBZ)"));
+            rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), app->archive_map.size) });
+            rubraview_info_addf(a, &info, "Pages", "%zu", page_count(app));
+        }
+
+        bool film = app->media && app->media_page == index;
+        if (film) {
+            /* A film or a song */
+            const rubraview_media_info_t *m = &app->media_info;
+            rubraview_info_heading(a, &info, m->has_video ? "Film" : "Sound");
+            rubraview_info_add(a, &info, "Length", (u8str_t){ b, rubraview_info_duration(b, sizeof(b), m->duration_seconds) });
+            if (m->has_video) {
+                char code[32];
+                rubraview_info_fourcc(code, sizeof(code), m->video_fourcc);
+                rubraview_info_addf(a, &info, "Picture", "%d x %d, %.3g frames a second", m->width, m->height, m->frame_rate);
+                rubraview_info_add(a, &info, "Picture codec", (u8str_t){ code, strlen(code) });
+                rubraview_info_add(a, &info, "Decoded", m->hardware_decode ? U8("on the graphics card") : U8("in software"));
+            }
+            if (m->has_audio && m->audio_sample_rate) {
+                rubraview_info_addf(a, &info, "Sound", "%u Hz, %u channel%s", (unsigned)m->audio_sample_rate,
+                                    (unsigned)m->audio_channels, m->audio_channels == 1 ? "" : "s");
+            }
+            uint32_t kbps = m->bitrate_kbps;
+            if (!kbps && file_bytes && m->duration_seconds > 0.0) kbps = (uint32_t)((double)file_bytes * 8.0 / m->duration_seconds / 1000.0);
+            if (kbps) rubraview_info_addf(a, &info, "Bitrate", "%u kbit/s%s", (unsigned)kbps, m->bitrate_kbps ? "" : " (size over length)");
+            rubraview_info_add(a, &info, "Opened by", m->backend == RUBRAVIEW_BACKEND_FFMPEG ? U8("FFmpeg") : U8("Media Foundation"));
+            if (app->tracks.count > 0) {
+                rubraview_info_heading(a, &info, "Tracks");
+                for (size_t t = 0; t < app->tracks.count && t < 32; ++t) {
+                    const rubraview_track_t *tr = &app->tracks.tracks[t];
+                    char label[24];
+                    snprintf(label, sizeof(label), "%s %zu", track_kind_name(tr->kind), t + 1);
+                    int n = snprintf(b, sizeof(b), "%.*s", (int)tr->codec.len, tr->codec.ptr);
+                    if (tr->channels > 0 && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", %d ch", tr->channels);
+                    if (tr->language.len && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", %.*s", (int)tr->language.len, tr->language.ptr);
+                    if (tr->title.len && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", \"%.*s\"", (int)tr->title.len, tr->title.ptr);
+                    if (n > 0) rubraview_info_add(a, &info, label, (u8str_t){ b, (size_t)n < sizeof(b) ? (size_t)n : sizeof(b) - 1 });
+                }
+            }
+            if (app->music_tags_read) {
+                const rubraview_tags_t *g = &app->music_tags;
+                rubraview_info_heading(a, &info, "Tags");
+                rubraview_info_add(a, &info, "Title", g->title);
+                rubraview_info_add(a, &info, "Artist", g->artist);
+                rubraview_info_add(a, &info, "Album", g->album);
+                rubraview_info_add(a, &info, "Year", g->year);
+                rubraview_info_add(a, &info, "Track", g->track_number);
+                rubraview_info_add(a, &info, "Genre", g->genre);
+                rubraview_info_add(a, &info, "Codec", g->codec);
+                if (g->bits_per_sample) rubraview_info_addf(a, &info, "Bits", "%u", (unsigned)g->bits_per_sample);
+                if (g->art_size) rubraview_info_add(a, &info, "Cover", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), g->art_size) });
+            }
+        } else if (!is_media_path(path)) {
+            /* A picture: what it is, then what its EXIF says. */
+            rubraview_fs_mapping_t map = {0};
+            void *mem = NULL;
+            const uint8_t *bytes = NULL;
+            size_t size = 0;
+            if (!in_archive) {
+                if (rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX) { bytes = map.data; size = (size_t)map.size; }
+            } else if (page_read_cost(app, (size_t)index) <= PAGE_JOB_MIN_COST) {
+                rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, (size_t)index, &mem);
+                if (pb.ok) { bytes = (const uint8_t*)pb.data.ptr; size = pb.data.len; }
+            }
+            rubraview_image_desc_t d;
+            bool described = bytes && rubraview_pal_image_describe(in_archive ? U8("") : path, bytes, size, &d);
+            if (!described && !in_archive) described = rubraview_pal_image_describe(path, NULL, 0, &d);
+            rubraview_info_heading(a, &info, "Picture");
+            if (described) {
+                rubraview_info_add(a, &info, "Format", (u8str_t){ d.format, strlen(d.format) });
+                rubraview_info_addf(a, &info, "Pixels", "%d x %d (%.1f megapixels)", d.width, d.height,
+                                    (double)d.width * (double)d.height / 1e6);
+                rubraview_info_add(a, &info, "Pixel format", (u8str_t){ d.pixels, strlen(d.pixels) });
+                if (d.dpi_x > 0.0) rubraview_info_addf(a, &info, "Resolution", "%.0f x %.0f dpi", d.dpi_x, d.dpi_y);
+                if (d.frames > 1) rubraview_info_addf(a, &info, "Frames", "%u", (unsigned)d.frames);
+                rubraview_info_add(a, &info, "Colour profile", d.color_profile ? U8("embedded") : U8("none"));
+            } else if (in_archive && !bytes) {
+                rubraview_info_add(a, &info, "Details", U8("not read: far inside a solid 7z block"));
+            }
+            const app_page_t *page = &app->pages[index];
+            if (page->loaded && page->reduced) {
+                rubraview_info_addf(a, &info, "On screen", "reduced to %d x %d (the graphics card's limit)", page->width, page->height);
+            }
+            if (bytes) {
+                rubraview_exif_info_t exif;
+                if (rubraview_exif_read(bytes, size, &exif)) rubraview_info_add_exif(a, &info, &exif);
+            }
+            free(mem);
+            rubraview_pal_fs_unmap(&map);
+        }
+    }
+
+    proven_result_mem_mut_t rr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(u8str_t));
+    proven_result_mem_mut_t hr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(bool));
+    if (!proven_is_ok(rr.err) || !proven_is_ok(hr.err)) { app->info_count = 0; return; }
+    app->info_rows = (u8str_t*)(void*)rr.value.ptr;
+    app->info_heading = (bool*)(void*)hr.value.ptr;
+    app->info_count = rubraview_info_rows(a, &info, INFO_LABEL_COLS, app->info_rows, INFO_MAX_ROWS);
+    for (size_t i = 0, r = 0; i < info.count && r < app->info_count; ++i, ++r) app->info_heading[r] = info.lines[i].heading;
+    if (app->info_scroll > (int32_t)app->info_count) app->info_scroll = 0;
+    app->info_dirty = true;
+}
+
+/* Which page and which film the rows are of: gathered again when it changes. */
+static int64_t info_key_now(const app_state_t *app) {
+    int64_t page = current_page_index(app);
+    int64_t loaded = page >= 0 && (size_t)page < page_count(app) && app->pages[page].loaded ? 1 : 0;
+    return (page + 1) * 4 + (app->media ? 2 : 0) + loaded + (int64_t)app->source.page_count * 1000003;
+}
+
+static void info_close(app_state_t *app) {
+    if (!app->info_open) return;
+    rubraview_pal_window_get_frame(app->info_window, &app->info_frame[0], &app->info_frame[1],
+                                   &app->info_frame[2], &app->info_frame[3]);
+    if (app->info_renderer) rubraview_pal_render_destroy(app->info_renderer);
+    if (app->info_window) rubraview_pal_window_destroy(app->info_window);
+    app->info_renderer = NULL;
+    app->info_window = NULL;
+    app->info_open = false;
+}
+
+static void info_show(app_state_t *app) {
+    if (app->info_open) { info_close(app); return; }   /* Ctrl+I again puts it away */
+    rubraview_window_config_t config = {
+        .title = "Rubraview - information", .width = 760, .height = 640, .owner = app->window,
+    };
+    app->info_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->info_window) { osd_say(app, U8("the information window could not be opened")); return; }
+    if (app->info_frame[2] > 0 && app->info_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->info_window, app->info_frame[0], app->info_frame[1],
+                                       app->info_frame[2], app->info_frame[3]);
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->info_window, &w, &h);
+    app->info_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->info_window), w, h);
+    if (!app->info_renderer) {
+        rubraview_pal_window_destroy(app->info_window);
+        app->info_window = NULL;
+        osd_say(app, U8("the information window could not be drawn"));
+        return;
+    }
+    double dpi = rubraview_pal_window_dpi_scale(app->info_window);
+    app->info_font = 15.0 * dpi;
+    if (!rubraview_pal_render_mono_cell(app->info_renderer, app->info_font, &app->info_cell_w, &app->info_cell_h) ||
+        app->info_cell_w <= 0.0 || app->info_cell_h <= 0.0) {
+        app->info_cell_w = 8.3 * dpi;
+        app->info_cell_h = 17.6 * dpi;
+    }
+    app->info_open = true;
+    app->info_scroll = 0;
+    app->info_message[0] = '\0';
+    app->info_key = info_key_now(app);
+    info_gather(app);
+}
+
+static int32_t info_visible_rows(const app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->info_window, &w, &h);
+    int32_t rows = (int32_t)((double)h / app->info_cell_h) - 2;
+    return rows > 1 ? rows : 1;
+}
+
+static void info_scroll_by(app_state_t *app, int32_t lines) {
+    int32_t last = (int32_t)app->info_count - info_visible_rows(app);
+    if (last < 0) last = 0;
+    app->info_scroll += lines;
+    if (app->info_scroll > last) app->info_scroll = last;
+    if (app->info_scroll < 0) app->info_scroll = 0;
+    app->info_dirty = true;
+}
+
+#define INFO_BACKGROUND 0xFF16181Cu
+#define INFO_HEADING    0xFF7FB2E5u
+#define INFO_TEXT       0xFFE8E8E8u
+#define INFO_DIM        0xFF8A9099u
+
+/* Text on the grid, each narrow run and each wide character at its own cell. */
+static void info_text(app_state_t *app, u8str_t text, double x, double y, uint32_t color) {
+    rubraview_cell_run_t runs[256];
+    size_t n = rubraview_cell_runs(text, runs, sizeof(runs) / sizeof(runs[0]));
+    for (size_t i = 0; i < n; ++i) {
+        u8str_t piece = { .ptr = text.ptr + runs[i].offset, .len = runs[i].length };
+        if (piece.len == 1 && piece.ptr[0] == ' ') continue;
+        rubraview_pal_render_draw_text_mono(app->info_renderer, piece, x + app->info_cell_w * runs[i].col,
+                                            y, app->info_font, color);
+    }
+}
+
+static void draw_info_window(app_state_t *app) {
+    if (!app->info_open) return;
+    int64_t key = info_key_now(app);
+    if (key != app->info_key) { app->info_key = key; info_gather(app); }
+    if (!app->info_dirty) return;
+    app->info_dirty = false;
+    rubraview_renderer_t *r = app->info_renderer;
+    const double cw = app->info_cell_w, ch = app->info_cell_h;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->info_window, &w, &h);
+    rubraview_pal_render_begin(r, INFO_BACKGROUND);
+    double x0 = cw;
+    int32_t rows = info_visible_rows(app);
+    for (int32_t row = 0; row < rows; ++row) {
+        size_t index = (size_t)(app->info_scroll + row);
+        if (index >= app->info_count) break;
+        double y = ch * (0.5 + (double)row);
+        int32_t c0 = 0, c1 = 0;
+        if (rubraview_grid_selection_row(&app->info_sel, (int32_t)index, &c0, &c1)) {
+            int32_t last = (int32_t)((double)w / cw);
+            if (c1 > last) c1 = last;
+            if (c1 >= c0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 + cw * c0, y, cw * (c1 - c0 + 1), ch }, 0x704A90D9u, 0.0);
+        }
+        info_text(app, app->info_rows[index], x0, y, app->info_heading[index] ? INFO_HEADING : INFO_TEXT);
+    }
+    char foot[160];
+    int n = snprintf(foot, sizeof(foot), " %s%sdrag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc",
+                     app->info_message, app->info_message[0] ? "   |   " : "");
+    if (n > 0) rubraview_pal_render_draw_text_mono(r, (u8str_t){ foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
+                                                   0.0, (double)h - ch * 1.2, app->info_font, INFO_DIM);
+    if (!rubraview_pal_render_end(r)) app->info_dirty = true;
+}
+
+/* Ctrl+C: what is marked, or everything; the rows as they are drawn. */
+static void info_copy(app_state_t *app) {
+    char *text = (char*)malloc(65536);
+    if (!text) return;
+    rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->info_count, INT32_MAX / 2 };
+    const rubraview_grid_selection_t *sel = app->info_sel.active ? &app->info_sel : &all;
+    size_t n = rubraview_grid_selection_copy(sel, app->info_rows, (int32_t)app->info_count, text, 65536);
+    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->info_window, (u8str_t){ .ptr = text, .len = n });
+    snprintf(app->info_message, sizeof(app->info_message), "%s", ok ? (app->info_sel.active ? "copied" : "copied everything") : "nothing to copy");
+    free(text);
+    app->info_dirty = true;
+}
+
+static size_t info_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->info_open && rubraview_pal_window_poll_event(app->info_window, &event)) {
+        handled++;
+        int32_t col = 0, row = 0;
+        if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN || event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE ||
+            event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP) {
+            col = (int32_t)((event.mouse.x - app->info_cell_w) / app->info_cell_w);
+            row = app->info_scroll + (int32_t)(event.mouse.y / app->info_cell_h - 0.5);
+            if (col < 0) col = 0;
+            if (row < 0) row = 0;
+            if (row >= (int32_t)app->info_count) row = app->info_count > 0 ? (int32_t)app->info_count - 1 : 0;
+        }
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                info_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->info_renderer, event.resize.width, event.resize.height);
+                app->info_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+                app->info_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                info_scroll_by(app, event.mouse.wheel_delta > 0 ? -3 : 3);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                app->info_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
+                app->info_selecting = true;
+                app->info_message[0] = '\0';
+                app->info_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                if (!app->info_selecting) break;
+                app->info_sel.end_row = row;
+                app->info_sel.end_col = col;
+                app->info_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (!app->info_selecting) break;
+                app->info_selecting = false;
+                if (app->info_sel.anchor_row == app->info_sel.end_row && app->info_sel.anchor_col == app->info_sel.end_col) {
+                    app->info_sel.active = false;   /* a click marks nothing */
+                }
+                app->info_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_key_combo_t k = event.key.combo;
+                bool ctrl = (k.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+                if (ctrl && key_is(k, "C")) { info_copy(app); break; }
+                if (ctrl && key_is(k, "A")) {
+                    app->info_sel = (rubraview_grid_selection_t){ true, 0, 0, (int32_t)app->info_count, INT32_MAX / 2 };
+                    app->info_dirty = true;
+                    break;
+                }
+                if (key_is(k, "Escape") || (ctrl && key_is(k, "I"))) { info_close(app); return handled; }
+                if (key_is(k, "Down")) info_scroll_by(app, 1);
+                else if (key_is(k, "Up")) info_scroll_by(app, -1);
+                else if (key_is(k, "PageDown")) info_scroll_by(app, info_visible_rows(app) - 1);
+                else if (key_is(k, "PageUp")) info_scroll_by(app, -(info_visible_rows(app) - 1));
+                else if (key_is(k, "Home")) info_scroll_by(app, -1000000);
+                else if (key_is(k, "End")) info_scroll_by(app, 1000000);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return handled;
+}
+
 static void help_measure(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->help_window);
     app->help_font = 15.0 * dpi;
@@ -10418,6 +10817,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            window pumped the thread's messages into it. */
         handled += settings_pump(&app);
         handled += help_pump(&app);
+        handled += info_pump(&app);
         handled += mini_pump(&app);
 
         if (app.needs_relayout) {
@@ -10488,6 +10888,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
         draw_settings_window(&app);
         draw_help_window(&app);
+        draw_info_window(&app);
         /* The strip moves while the track does, so the little window is
            redrawn each pass it is playing. */
         if (app.mini_open && !mini_paused(&app)) app.mini_dirty = true;

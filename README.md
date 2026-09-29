@@ -48,6 +48,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
+| `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
