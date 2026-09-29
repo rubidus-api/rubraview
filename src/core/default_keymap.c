@@ -34,6 +34,8 @@ const char *rubraview_default_keymap(void) {
     "toggle_info = \"I, Ctrl+I\"\n"
     /* Owner, 2026-09-29: the playlist (or this folder's files), floating over the picture. */
     "toggle_playlist = \"P\"\n"
+    /* Owner, 2026-09-29: at the end of a film or a song — stop, next, this one again, all round, shuffle. */
+    "media_repeat_cycle = \"Ctrl+R\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own. */
     "toggle_miniplayer = \"Shift+P\"\n"
     "toggle_pixel_grid = \"G\"\n"

@@ -69,6 +69,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_listwin.h"
+#include "rubraview/repeat.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/favorites.h"
@@ -288,6 +289,14 @@ typedef struct app_state {
     rubraview_listwin_t    listwin;
     int32_t                listwin_shown_page;   /* the page it last scrolled to, to follow a new one */
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
+    /* What plays after a film or a song ends (owner, 2026-09-29): the page
+       decided for `follow_for` in `follow_mode`, and the shuffle's flags. */
+    int32_t                follow_page, follow_for;
+    int32_t                follow_mode;
+    size_t                 follow_count;
+    rubraview_shuffle_t    shuffle;
+    uint8_t               *shuffle_flags;
+    size_t                 shuffle_flags_count;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
@@ -1067,6 +1076,7 @@ static void music_transition_tick(app_state_t *app);
 static void music_promote_next(app_state_t *app);
 static void go_to_spread(app_state_t *app, size_t index);
 static void update_precache(app_state_t *app);
+static void media_after_end(app_state_t *app);
 static void ab_edit_close(app_state_t *app);
 
 static void media_close(app_state_t *app) {
@@ -1837,8 +1847,65 @@ static void media_tick(app_state_t *app) {
                 app->media_position = app->media_info.duration_seconds;   /* the clock overshoots by a pass */
             }
             update_window_title(app);
+            media_after_end(app);
         }
     }
+}
+
+/* ---- What plays after a film or a song ends (owner, 2026-09-29) ---- */
+
+static bool page_plays(void *ctx, size_t index) {
+    const app_state_t *app = (const app_state_t *)ctx;
+    return index < page_count(app) && is_media_path(app->source.pages[index].path);
+}
+
+static rubraview_repeat_mode_t repeat_mode(const app_state_t *app) {
+    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("at_end")));
+    return mode >= 0 && mode < RUBRAVIEW_REPEAT_MODE_COUNT ? (rubraview_repeat_mode_t)mode : RUBRAVIEW_REPEAT_NEXT;
+}
+
+/* The page to play when this one ends, decided once for it (a shuffle's
+   pick must not change between preparing the next track and reaching it). */
+static int32_t media_follow_page(app_state_t *app) {
+    if (!app->media || app->media_page < 0) return -1;
+    rubraview_repeat_mode_t mode = repeat_mode(app);
+    size_t count = page_count(app);
+    if (app->follow_for == app->media_page && app->follow_mode == (int32_t)mode && app->follow_count == count) {
+        return app->follow_page;
+    }
+    if (mode == RUBRAVIEW_REPEAT_SHUFFLE) {
+        if (app->shuffle_flags_count != count || !app->shuffle_flags) {   /* a new list: a new shuffle */
+            free(app->shuffle_flags);
+            app->shuffle_flags = (uint8_t *)malloc(count ? count : 1);
+            app->shuffle_flags_count = app->shuffle_flags ? count : 0;
+            double t = rubraview_pal_time_now_seconds();
+            uint64_t seed = 0;
+            memcpy(&seed, &t, sizeof(seed) < sizeof(t) ? sizeof(seed) : sizeof(t));
+            rubraview_shuffle_reset(&app->shuffle, app->shuffle_flags, app->shuffle_flags_count, seed ^ 0xA5A5A5A5u);
+        }
+        rubraview_shuffle_mark(&app->shuffle, (size_t)app->media_page);
+    }
+    app->follow_page = rubraview_repeat_follow(mode, app->media_page, count, page_plays, app, &app->shuffle);
+    app->follow_for = app->media_page;
+    app->follow_mode = (int32_t)mode;
+    app->follow_count = count;
+    return app->follow_page;
+}
+
+/* The film or the song has ended and is holding its last moment: go on as
+   the mode says. A slide show decides for itself; A-B repeat never ends. */
+static void media_toggle_pause(app_state_t *app);
+static void media_after_end(app_state_t *app) {
+    if (app->slideshow_running || repeat_mode(app) == RUBRAVIEW_REPEAT_STOP) return;
+    int32_t next = media_follow_page(app);
+    if (next < 0) return;
+    if (next == app->media_page) {
+        media_toggle_pause(app);   /* ended: it plays again from the start */
+        return;
+    }
+    app->follow_for = -1;
+    go_to_spread(app, spread_index_for_page(app, next));
+    update_precache(app);
 }
 
 /* ---- RV-075: one track running into the next ---- */
@@ -1846,13 +1913,15 @@ static void media_tick(app_state_t *app) {
 /* The page after this one, when it is a music file. A folder holds
    pictures and films too, and neither is something to slide into: the
    next track is the next *page*, and only when it is a track. */
-static int32_t music_next_page(const app_state_t *app) {
-    if (app->media_page < 0) return -1;
-    size_t next = (size_t)app->media_page + 1;
-    if (next >= page_count(app)) return -1;
+static int32_t media_follow_page(app_state_t *app);
+static int32_t music_next_page(app_state_t *app) {
+    /* What plays next is the end-of-file mode's choice (owner, 2026-09-29);
+       it is prepared under this one only when it is a track, not the same one. */
+    int32_t next = media_follow_page(app);
+    if (next < 0 || next == app->media_page) return -1;
     u8str_t path = app->source.pages[next].path;
     if (!is_media_path(path) || !rubraview_tags_is_music_name(rubraview_path_basename(path))) return -1;
-    return (int32_t)next;
+    return next;
 }
 
 static void music_next_close(app_state_t *app) {
@@ -2995,6 +3064,7 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .subtitle_shown = app->tracks.current_subtitle >= 0,
         .has_subtitles = rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) > 0,
         .slideshow = app->slideshow_running,
+        .repeat_mode = (int32_t)repeat_mode(app),
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
         .toolbox_pinned = app->toolbox.pinned,
@@ -3034,6 +3104,7 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
     }
+    if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) return cstr(rubraview_repeat_caption(repeat_mode(app)));
     if (rubraview_u8_eq_lit(tile->action, "media_ab_cycle")) {
         return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? U8("Set B") : U8("A-B off");
     }
@@ -3405,6 +3476,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
         help_show(app);
+    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
+        /* What happens at the end of a film or a song (owner, 2026-09-29). */
+        rubraview_repeat_mode_t mode = rubraview_repeat_cycle(repeat_mode(app));
+        rubraview_settings_set(&app->settings, U8("audio"), U8("at_end"), (double)mode);
+        app->follow_for = -1;   /* decided again, in the new mode */
+        osd_say(app, cstr(rubraview_repeat_sentence(mode)));
     } else if (rubraview_u8_eq_lit(action, "toggle_playlist")) {
         listwin_toggle(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_info")) {
@@ -10910,6 +10987,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
+    app.follow_for = -1;
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
     layout_load(&app);   /* §3.6: back where the reader left them */

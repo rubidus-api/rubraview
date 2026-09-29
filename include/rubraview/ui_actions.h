@@ -43,6 +43,7 @@ typedef struct rubraview_action_facts {
     bool nearest, pixel_grid, spread_detect, fit_lock, always_on_top, muted;
     bool rtl;                 /* pages read right to left */
     bool playing;             /* a film, music or animation is running (not paused) */
+    int32_t repeat_mode;      /* rubraview_repeat_mode_t: what the end of a film or a song does */
     /* choices */
     rubraview_page_layout_t layout;
     rubraview_fit_mode_t fit;

@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.20** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.20/rubraview-v0.0.20.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.21** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.21/rubraview-v0.0.21.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -49,6 +49,7 @@
 | `F1` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |
 | `P` | 재생목록(없으면 이 폴더의 파일) — 화면 위에 떠 있는 창 |
+| `Ctrl+R` | 동영상·음악이 끝나면: 정지 / 다음 파일 / 이 파일 반복 / 전체 반복 / 셔플 |
 | `Shift+P` | 미니 플레이어 |
 | `G` | 400% 넘으면 픽셀 격자 |
 | `Esc` | 끝내기 |
