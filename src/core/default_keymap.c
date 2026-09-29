@@ -29,6 +29,8 @@ const char *rubraview_default_keymap(void) {
     /* §3.22.1 */
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"
+    /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
+    "toggle_info = \"Ctrl+I\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own. */
     "toggle_miniplayer = \"Shift+P\"\n"
     "toggle_pixel_grid = \"G\"\n"

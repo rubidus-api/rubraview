@@ -400,10 +400,13 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     }
 
     /* The sound: float samples, at whatever rate and layout the file has. */
+    UINT32 audio_rate = 0, audio_channels = 0;
     if (has_audio) {
         IMFSourceReader_SetStreamSelection(reader, audio_stream, TRUE);
         UINT32 rate = 0, channels = 0;
         bool decodable = mf_negotiate_audio(reader, audio_stream, &rate, &channels);
+        audio_rate = rate;
+        audio_channels = channels;
         size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
         if (decodable) {
             m->pcm_storage = (float*)malloc(capacity * sizeof(float));
@@ -451,6 +454,9 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
         .has_audio = has_audio,
         .audio_output = m->audio != NULL,
         .video_fourcc = fourcc,
+        .audio_sample_rate = audio_rate,
+        .audio_channels = audio_channels,
+        .bitrate_kbps = 0,   /* the window works it out from the size and the duration */
     };
     *out_reader = reader;
     return true;

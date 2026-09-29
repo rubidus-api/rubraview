@@ -26,6 +26,37 @@ extern "C" {
  */
 int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size);
 
+/**
+ * What a picture's EXIF says, for the file's information window (owner,
+ * 2026-09-29). Strings are copied in, NUL-terminated, trimmed; a number
+ * the file does not give is 0 or its `has_` flag false.
+ */
+typedef struct rubraview_exif_info {
+    bool     found;
+    char     make[64], model[64], lens[96], software[64], artist[64], copyright[96];
+    char     date_taken[24], date_modified[24];   /* "2024-05-01 13:22:07" */
+    int32_t  orientation;                         /* 1-8, 0 when not given */
+    bool     has_exposure; uint32_t exposure_num, exposure_den;   /* seconds, as a fraction */
+    bool     has_fnumber;  double fnumber;
+    uint32_t iso;
+    bool     has_focal;    double focal_mm;
+    uint32_t focal_35mm;
+    bool     has_bias;     double exposure_bias;  /* EV */
+    bool     has_flash;    uint16_t flash;        /* the EXIF bits: bit 0 fired */
+    uint32_t pixel_x, pixel_y;
+    bool     has_gps;      double latitude, longitude;   /* degrees, south and west negative */
+    bool     has_altitude; double altitude_m;
+} rubraview_exif_info_t;
+
+/**
+ * Read the EXIF block of a JPEG (APP1), a TIFF (the file is the block), a
+ * PNG (`eXIf`), a WebP (`EXIF`), or anything else carrying "Exif\0\0"
+ * near its start (HEIF). Every offset is checked against `size`; a
+ * sub-IFD is followed one level and never back into itself. False, with
+ * `found` false, when there is none.
+ */
+bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t *out);
+
 typedef struct rubraview_jpeg_strip_result {
     u8str_t data;           /* arena-allocated JPEG bytes with the targeted segments removed */
     bool    stripped_exif;  /* an APP1 segment with the "Exif\0\0" signature was removed */

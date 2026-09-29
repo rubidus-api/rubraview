@@ -37,6 +37,9 @@ typedef struct rubraview_media_info {
     bool     audio_output;               /* the sound reaches a device (false on a machine without one) */
     uint32_t video_fourcc;               /* the native codec, for messages (RUBRAVIEW_FOURCC order) */
     bool     hardware_decode;            /* RV-062: the pictures are decoded on the graphics card */
+    /* For the information window (owner, 2026-09-29); 0 when unknown. */
+    uint32_t audio_sample_rate, audio_channels;
+    uint32_t bitrate_kbps;               /* the whole file's, or picture and sound added */
 } rubraview_media_info_t;
 
 /*

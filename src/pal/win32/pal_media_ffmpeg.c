@@ -383,6 +383,9 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         .has_audio = m->audio_stream >= 0 || g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0,
         .audio_output = m->audio != NULL,
         .video_fourcc = m->video_stream >= 0 ? (uint32_t)d->format->streams[m->video_stream]->codecpar->codec_tag : 0,
+        .audio_sample_rate = m->audio_rate,
+        .audio_channels = m->audio_channels,
+        .bitrate_kbps = d->format->bit_rate > 0 ? (uint32_t)(d->format->bit_rate / 1000) : 0,
     };
     return true;
 }
