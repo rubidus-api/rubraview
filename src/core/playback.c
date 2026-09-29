@@ -346,3 +346,25 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
     size_t page = (size_t)(f * (double)count);
     return page < count ? page : count - 1;
 }
+
+u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+                               int volume, bool muted, double speed, double ab_a, double ab_b) {
+    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    char at[32], total[32], sp[16] = "";
+    u8str_t a = rubraview_format_timecode(at, sizeof(at), position, false);
+    u8str_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
+    if (speed > 0.0 && fabs(speed - 1.0) > 1e-6) {
+        int n = snprintf(sp, sizeof(sp), "%.2f", speed);
+        while (n > 0 && sp[n - 1] == '0') sp[--n] = '\0';
+        if (n > 0 && sp[n - 1] == '.') sp[--n] = '\0';
+    }
+    char vol[24];
+    if (muted) snprintf(vol, sizeof(vol), "muted");
+    else snprintf(vol, sizeof(vol), "vol %d%%", volume);
+    int n = snprintf(buffer, buffer_size, "%.*s / %.*s   %s%s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr, vol,
+                     sp[0] ? "   " : "", sp, sp[0] ? "x" : "",
+                     ab_a >= 0.0 ? (ab_b > ab_a ? "   A-B" : "   A-") : "");
+    if (n < 0) { buffer[0] = '\0'; return (u8str_t){ .ptr = buffer, .len = 0 }; }
+    size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
+    return (u8str_t){ .ptr = buffer, .len = len };
+}

@@ -42,10 +42,17 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
 
     /* file_name is a slice and need not be NUL-terminated, so its length
        is passed explicitly via the precision specifier. */
-    int written = snprintf(buffer, buffer_size, "%.*s  |  %d x %d  |  %.0f%%  |  %zu / %zu",
+    /* No name and no count: the toolbox's line says those (owner,
+       2026-09-29), and the status line keeps what only it says. */
+    int written;
+    if (file_name.len == 0 && total == 0) {
+        written = snprintf(buffer, buffer_size, "%d x %d  |  %.0f%%", width, height, zoom_percent);
+    } else {
+        written = snprintf(buffer, buffer_size, "%.*s  |  %d x %d  |  %.0f%%  |  %zu / %zu",
                            (int)file_name.len, file_name.ptr ? file_name.ptr : "",
                            width, height, zoom_percent,
                            total > 0 ? index + 1 : 0, total);
+    }
     if (written < 0) {
         buffer[0] = '\0';
         return (u8str_t){ .ptr = buffer, .len = 0 };
