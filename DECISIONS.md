@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-53 Help text copied, covers for large archives, a folder's summary
+
+- Status: Accepted (owner 2026-09-29: "세개 다 추가." — the three offered after D-52)
+- Decision:
+  - The F1 help window's text is marked with a drag and copied (`Ctrl+C`, `Ctrl+A`), as the settings and information windows are; its rows are laid out on the cells they are drawn on.
+  - An archive's cover in the picker is read through a mapping (its index where it lies, the first page's bytes only), streaming a solid 7z block past 24 MB; a first page with more than 64 MB decoded before it is left without a cover. This replaces D-35's timed reads into a buffer committed at the archive's whole size, which a multi-GB book never finished within 1.5 s or could not even commit.
+  - The information window ends with "This folder": pictures, films, songs, archives (each with its size), subfolders, other files, and all files — listed once per folder in memory of its own. For a book: its folders inside and its pages' unpacked size.
+- Consequences: measured on the Windows 11 VM: a drag across a help row copied `Ctrl+I                          Information`; `big.cb7` (1.25 GB, one block) and `big.cbz` (5 GB) got covers where they had none; `rbtest`'s summary counted 5 pictures, 1 film and 1 folder, as PowerShell does.
+
 ## 2026-09-29: D-52 Inside a book: thumbnails, entering one unread, and a drive that goes away
 
 - Status: Accepted (owner 2026-09-29: "다음작업들 추천 순서대로 진행해 주세요" — the backlog left by D-47, in the order recommended)
