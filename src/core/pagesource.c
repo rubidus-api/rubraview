@@ -290,6 +290,21 @@ size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, 
     return (size_t)size + 256;
 }
 
+uint64_t rubraview_page_source_read_cost(const rubraview_page_source_t *source, size_t index) {
+    if (!source || index >= source->page_count || source->kind != RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) return 0;
+    return rubraview_sz_read_cost(&source->archive7z, source->pages[index].entry_index);
+}
+
+void rubraview_page_source_cancel(rubraview_page_source_t *source, bool cancel) {
+    if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_cancel(&source->archive7z, cancel);
+}
+
+void rubraview_page_source_progress(const rubraview_page_source_t *source, uint64_t *out_done, uint64_t *out_total) {
+    if (out_done) *out_done = 0;
+    if (out_total) *out_total = 0;
+    if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_progress(&source->archive7z, out_done, out_total);
+}
+
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path) {
     if (!source || path.len == 0) return -1;
 

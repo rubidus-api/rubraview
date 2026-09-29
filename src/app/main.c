@@ -186,6 +186,23 @@ static rubraview_mat3x2_t page_texture_prescale(const app_page_t *page) {
     return rubraview_mat3x2_scale((double)w / (double)page->width, (double)h / (double)page->height);
 }
 
+/* A page far inside a streamed 7z block, read on a thread of its own
+   (owner, 2026-09-29, plan far-jump-off-main). The thread holds the
+   source's lock while it reads; the main thread cancels it before it
+   reads anything itself, and never waits long. */
+typedef struct page_job {
+    rubraview_page_source_t *source;
+    SRWLOCK *lock;
+    size_t index;
+    void *mem;                  /* the page's own memory, handed over */
+    rubraview_page_bytes_t bytes;
+    HANDLE thread;
+    rubraview_window_t *wake;
+    volatile LONG done;
+} page_job_t;
+
+#define PAGE_JOB_MIN_COST (32u * 1024u * 1024u)   /* bytes to decode first before a page goes to the thread */
+
 typedef struct save_job {
     char source[1024], out[1024];
     rubraview_edit_session_t edit;
@@ -422,6 +439,8 @@ typedef struct app_state {
     rubraview_curation_t   curation;
     bool                   rename_active;
     struct save_job       *save_job;   /* Save a copy in progress on its own thread, or NULL */
+    struct page_job       *page_job;   /* a far page being read on its own thread, or NULL */
+    SRWLOCK                source_lock;/* held around every read of the page source */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
     char                   rename_buffer[1024];
@@ -628,7 +647,109 @@ static bool is_media_path(u8str_t path) {
     return path.len > 0 && rubraview_glob_match_list(rubraview_path_basename(path), U8(MEDIA_FILTER));
 }
 
+/* ---- a page's bytes, and far pages off the main thread ---- */
+
+/* The job in flight is called off and waited for — a 1 MB chunk at most —
+   so the main thread can read. */
+static void page_job_stop(app_state_t *app) {
+    page_job_t *job = app->page_job;
+    if (!job) return;
+    rubraview_page_source_cancel(&app->source, true);
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    rubraview_page_source_cancel(&app->source, false);
+    free(job->mem);
+    free(job);
+    app->page_job = NULL;
+}
+
+/* What it costs to reach a page, when nothing is reading it: bytes to
+   decode first. While the thread reads, the stream's place is moving. */
+static uint64_t page_read_cost(app_state_t *app, size_t index) {
+    if (app->page_job) return UINT64_MAX;
+    return rubraview_page_source_read_cost(&app->source, index);
+}
+
+/* A page's bytes in memory of their own, freed by the caller once they
+   are a texture. They went into the 64 MB working arena, which is never
+   given back: after a few dozen CB7 pages, or a compressed CBZ's worth,
+   pages failed to open (found 2026-09-29). A folder page is read by path
+   and allocates nothing. */
+static rubraview_page_bytes_t page_read_owned(rubraview_page_source_t *source, SRWLOCK *lock, size_t index, void **out_mem) {
+    *out_mem = NULL;
+    rubraview_page_bytes_t none = { .data = { .ptr = "", .len = 0 }, .from_disk = false, .ok = false };
+    AcquireSRWLockExclusive(lock);
+    rubraview_page_bytes_t bytes = none;
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_FOLDER) {
+        uint8_t nothing[64];
+        proven_arena_t unused = proven_arena_create((proven_mem_mut_t){ .ptr = nothing, .size = sizeof(nothing) });
+        bytes = rubraview_page_source_read(&unused, source, index, MAX_PAGE_BYTES);
+    } else {
+        size_t budget = rubraview_page_source_read_budget(source, index);
+        void *mem = budget > 0 && budget <= (size_t)MAX_PAGE_BYTES + 4096u ? malloc(budget) : NULL;
+        if (mem) {
+            proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+            bytes = rubraview_page_source_read(&scratch, source, index, MAX_PAGE_BYTES);
+            if (bytes.ok) *out_mem = mem; else free(mem);
+        }
+    }
+    ReleaseSRWLockExclusive(lock);
+    return bytes;
+}
+
+static DWORD WINAPI page_job_run(LPVOID param) {
+    page_job_t *job = (page_job_t*)param;
+    job->bytes = page_read_owned(job->source, job->lock, job->index, &job->mem);
+    InterlockedExchange(&job->done, 1);
+    rubraview_pal_window_wake(job->wake);
+    return 0;
+}
+
+static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes);
+static void update_window_title(app_state_t *app);
+
+/* Each pass: a far page that has arrived becomes its texture. */
+static void page_job_poll(app_state_t *app) {
+    page_job_t *job = app->page_job;
+    if (!job || !InterlockedCompareExchange(&job->done, 0, 0)) return;
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    app->page_job = NULL;
+    if (job->index < page_count(app)) {
+        app_page_t *page = &app->pages[job->index];
+        if (!page->loaded) {
+            if (job->bytes.ok) page_take_bytes(app, page, job->index, job->bytes);
+            else page->failed = true;
+            app->needs_relayout = true;
+            update_window_title(app);
+        }
+    }
+    free(job->mem);
+    free(job);
+}
+
+static void page_job_start(app_state_t *app, size_t index) {
+    page_job_stop(app);
+    page_job_t *job = (page_job_t*)calloc(1, sizeof(*job));
+    if (!job) return;
+    job->source = &app->source;
+    job->lock = &app->source_lock;
+    job->index = index;
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, page_job_run, job, 0, NULL);
+    if (!job->thread) { free(job); return; }
+    app->page_job = job;
+}
+
+static app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool on_screen);
+
 static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
+    return ensure_page_loaded_how(app, index, true);
+}
+
+/* `on_screen`: the page is wanted now. A far page then goes to the thread;
+   the look-ahead never starts a far read, nor waits for one. */
+static app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool on_screen) {
     if (index < 0 || (size_t)index >= page_count(app)) return NULL;
     app_page_t *page = &app->pages[index];
     if (page->loaded || page->failed) return page;
@@ -636,12 +757,28 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
        it is the page on screen: the pre-cache must not open videos. */
     if (is_media_path(app->source.pages[index].path)) return page;
 
-    rubraview_page_bytes_t bytes = rubraview_page_source_read(app->arena, &app->source,
-                                                              (size_t)index, MAX_PAGE_BYTES);
+    if (app->page_job) {
+        if (app->page_job->index == (size_t)index) return page;   /* on its way */
+        if (!on_screen) return page;                              /* the look-ahead waits its turn */
+        page_job_stop(app);                                       /* the reader has moved on */
+    }
+    if (page_read_cost(app, (size_t)index) > PAGE_JOB_MIN_COST) {
+        if (on_screen) page_job_start(app, (size_t)index);
+        return page;
+    }
+
+    void *mem = NULL;
+    rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)index, &mem);
     if (!bytes.ok) {
         page->failed = true;
         return page;
     }
+    page_take_bytes(app, page, (size_t)index, bytes);
+    free(mem);
+    return page;
+}
+
+static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes) {
 
     /* A folder page is opened by path; an archive page is decoded from
        the bytes the source produced, which never touched the disk. */
@@ -651,7 +788,7 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
                                                        (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
     if (!loaded.ok) {
         page->failed = true;
-        return page;
+        return;
     }
 
     page->texture = loaded.texture;
@@ -661,7 +798,6 @@ static app_page_t *ensure_page_loaded(app_state_t *app, int32_t index) {
     page->full_height = loaded.full_height;
     page->reduced = loaded.reduced;
     page->loaded = true;
-    return page;
 }
 
 /* ---- animated images and sub-pages (§3.20) ---- */
@@ -677,8 +813,10 @@ static void show_frame(app_state_t *app, size_t frame_index) {
 
     u8str_t path = app->source.pages[app->anim_page].path;
     rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    void *mem = NULL;
     if (path.len == 0) {
-        bytes = rubraview_page_source_read(app->arena, &app->source, (size_t)app->anim_page, MAX_PAGE_BYTES);
+        if (page_read_cost(app, (size_t)app->anim_page) > PAGE_JOB_MIN_COST) return;
+        bytes = page_read_owned(&app->source, &app->source_lock, (size_t)app->anim_page, &mem);
         if (!bytes.ok) return;
     }
 
@@ -686,6 +824,7 @@ static void show_frame(app_state_t *app, size_t frame_index) {
     rubraview_image_load_result_t loaded = rubraview_pal_image_load_frame(
         app->renderer, path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
         frame_index, true, &delay);
+    free(mem);
     if (!loaded.ok) return;
 
     if (page->texture) rubraview_pal_texture_destroy(page->texture);
@@ -712,19 +851,23 @@ static void animation_prepare(app_state_t *app) {
 
     u8str_t path = app->source.pages[page_index].path;
     rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    void *mem = NULL;
     if (path.len == 0) {
-        bytes = rubraview_page_source_read(app->arena, &app->source, (size_t)page_index, MAX_PAGE_BYTES);
+        /* A far page in a streamed block is not read twice to look for frames. */
+        if (page_read_cost(app, (size_t)page_index) > PAGE_JOB_MIN_COST) return;
+        bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page_index, &mem);
         if (!bytes.ok) return;
     }
 
     if (!app->anim_frames) {
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
-        if (!proven_is_ok(res.err)) return;
+        if (!proven_is_ok(res.err)) { free(mem); return; }
         app->anim_frames = (rubraview_frame_t*)(void*)res.value.ptr;
     }
 
     size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
                                                   app->anim_frames, ANIM_MAX_FRAMES);
+    free(mem);
     if (count <= 1) return;               /* an ordinary image */
     if (count > ANIM_MAX_FRAMES) count = ANIM_MAX_FRAMES;
 
@@ -2070,10 +2213,14 @@ static void tiles_give_archive_page(app_state_t *app, int32_t index, int32_t pw,
     size_t copy_size = 0;
     uint64_t size = rubraview_page_source_entry_size(&app->source, (size_t)index);
     size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)index);
-    void *mem = size > 0 && size <= MAX_PAGE_BYTES && budget > 0 ? malloc(budget) : NULL;
+    /* Not a page that must be decoded again from far back (a streamed 7z block). */
+    bool close_by = page_read_cost(app, (size_t)index) <= PAGE_JOB_MIN_COST;
+    void *mem = close_by && size > 0 && size <= MAX_PAGE_BYTES && budget > 0 ? malloc(budget) : NULL;
     if (mem) {
         proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+        AcquireSRWLockExclusive(&app->source_lock);
         rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)index, MAX_PAGE_BYTES);
+        ReleaseSRWLockExclusive(&app->source_lock);
         if (bytes.ok && bytes.data.len > 0) {
             copy = (uint8_t*)malloc(bytes.data.len);
             if (copy) {
@@ -7550,7 +7697,12 @@ static void edit_preview_open(app_state_t *app) {
     if (path.len > 0) {
         full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, max_w, max_h);
     } else {
-        rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+        rubraview_page_bytes_t bytes = { .ok = false };
+        if (page_read_cost(app, (size_t)page) <= PAGE_JOB_MIN_COST) {
+            AcquireSRWLockExclusive(&app->source_lock);
+            bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+            ReleaseSRWLockExclusive(&app->source_lock);
+        }
         if (bytes.ok && bytes.data.len > 0) {
             full = rubraview_pal_image_read_pixels_within(&scratch, (u8str_t){ .ptr = "", .len = 0 },
                                                           (const uint8_t*)bytes.data.ptr, bytes.data.len, true,
@@ -7847,7 +7999,21 @@ static void render_frame(app_state_t *app) {
         bool fading = progress < 1.0 && app->prev_spread_valid &&
                       app->prev_spread_index != app->spread_index;
 
-        if (fading) {
+        /* A far page on its way: the page before it stays on screen, with
+           how far the reading has got (owner, 2026-09-29). */
+        bool waiting = app->page_job && app->prev_spread_valid && app->prev_spread_index < app->layout.count &&
+                       (app->page_job->index == (size_t)app->layout.spreads[app->spread_index].left_index ||
+                        app->page_job->index == (size_t)app->layout.spreads[app->spread_index].right_index);
+        if (waiting) {
+            draw_spread(app, app->prev_spread_index, 1.0, win_w, win_h);
+            draw_spread(app, app->spread_index, 1.0, win_w, win_h);   /* asks for its pages; nothing to draw yet */
+            uint64_t done = 0, total = 0;
+            rubraview_page_source_progress(&app->source, &done, &total);
+            char line[96];
+            int n = snprintf(line, sizeof(line), "reading page %zu... %d %%", app->page_job->index + 1,
+                             total > 0 ? (int)(done * 100u / total) : 0);
+            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        } else if (fading) {
             draw_spread(app, app->prev_spread_index, 1.0 - progress, win_w, win_h);
             draw_spread(app, app->spread_index, progress, win_w, win_h);
         } else {
@@ -8028,7 +8194,7 @@ static bool drain_one_pending_decode(app_state_t *app) {
     app->pending_decode_count--;
     memmove(app->pending_decode, app->pending_decode + 1,
             app->pending_decode_count * sizeof(app->pending_decode[0]));
-    ensure_page_loaded(app, (int32_t)index);
+    ensure_page_loaded_how(app, (int32_t)index, false);
     return true;
 }
 
@@ -8210,6 +8376,7 @@ static void history_remember(app_state_t *app) {
 /* The source is let go of: a CB7's decoded block (heap), and the archive's
    mapping. Every way out of a source comes through here. */
 static void source_close(app_state_t *app) {
+    page_job_stop(app);   /* the thread reads this source */
     rubraview_page_source_close(&app->source);
     rubraview_pal_fs_unmap(&app->archive_map);
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
@@ -10205,6 +10372,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
+        page_job_poll(&app);
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;

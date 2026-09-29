@@ -2,6 +2,7 @@
 #include "rubraview/utf8.h"
 
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 /* The vendored LZMA SDK supplies the 7z container parser and the LZMA,
@@ -94,6 +95,11 @@ typedef struct sz_state {
         UInt64      pack_left;
         Byte       *chunk;
     } s;
+
+    /* A read off the main thread (owner, 2026-09-29): called off from the
+       main thread, watched from it, between 1 MB chunks. */
+    atomic_bool     cancel;
+    _Atomic uint64_t progress_done, progress_total;
 } sz_state_t;
 
 #define SZ_METHOD_COPY  0u
@@ -305,7 +311,12 @@ static rubraview_sz_err_t stream_read(sz_state_t *st, UInt32 folder, UInt64 offs
     }
     if (offset > st->s.out_size || n > st->s.out_size - offset) return RUBRAVIEW_SZ_ERR_CORRUPT;
     UInt64 end = offset + n;
+    UInt64 started = st->s.out_pos;
+    atomic_store(&st->progress_total, end - started);
+    atomic_store(&st->progress_done, 0);
     while (st->s.out_pos < end) {
+        /* Between whole chunks only: the decoder is always at a clean place. */
+        if (atomic_load(&st->cancel)) return RUBRAVIEW_SZ_ERR_CANCELLED;
         UInt64 left = end - st->s.out_pos;
         SizeT out_len = left < SZ_STREAM_CHUNK ? (SizeT)left : SZ_STREAM_CHUNK;
         SizeT in_len = st->s.pack_left > (UInt64)(SizeT)-1 ? (SizeT)-1 : (SizeT)st->s.pack_left;
@@ -330,6 +341,7 @@ static rubraview_sz_err_t stream_read(sz_state_t *st, UInt32 folder, UInt64 offs
             memcpy(dst + (a - offset), st->s.chunk + (a - from), (size_t)(to - a));
         }
         st->s.out_pos = to;
+        atomic_store(&st->progress_done, to - started);
     }
     return RUBRAVIEW_SZ_OK;
 }
@@ -347,6 +359,7 @@ rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
     UInt32 file_index = entry->file_index;
 
     if (entry->size > max_entry_bytes) { out.err = RUBRAVIEW_SZ_ERR_TOO_LARGE; return out; }
+    if (atomic_load(&st->cancel)) { out.err = RUBRAVIEW_SZ_ERR_CANCELLED; return out; }
 
     /* An empty file belongs to no folder; the SDK marks that with an
        out-of-range folder index rather than with a flag. */
@@ -379,6 +392,11 @@ rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
     }
 
     size_t offset = 0, processed = 0;
+    if (folder != st->block_index) {
+        /* decoded whole: its progress is all or nothing */
+        atomic_store(&st->progress_total, SzAr_GetFolderUnpackSize(&st->db.db, folder));
+        atomic_store(&st->progress_done, 0);
+    }
     SRes res = SzArEx_Extract(&st->db, &st->look.vt, file_index,
                               &st->block_index, &st->block, &st->block_size,
                               &offset, &processed,
@@ -387,6 +405,7 @@ rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
         out.err = map_sres(res);
         return out;
     }
+    atomic_store(&st->progress_done, atomic_load(&st->progress_total));
     if (processed != entry->size) {
         /* The index and the stream disagree about how long this file is. */
         out.err = RUBRAVIEW_SZ_ERR_CORRUPT_STREAM;
@@ -402,6 +421,35 @@ rubraview_sz_data_result_t rubraview_sz_read_entry(proven_arena_t *arena,
     out.err = RUBRAVIEW_SZ_OK;
     out.data = (u8str_t){ .ptr = copy, .len = processed };
     return out;
+}
+
+uint64_t rubraview_sz_read_cost(const rubraview_sz_archive_t *archive, size_t entry_index) {
+    if (!archive || !archive->state || entry_index >= archive->entry_count) return 0;
+    const sz_state_t *st = (const sz_state_t*)archive->state;
+    UInt32 file = archive->entries[entry_index].file_index;
+    UInt32 folder = st->db.FileToFolder ? st->db.FileToFolder[file] : 0xFFFFFFFFu;
+    if (folder >= st->db.db.NumFolders || folder == st->block_index) return 0;
+    UInt64 folder_bytes = SzAr_GetFolderUnpackSize(&st->db.db, folder);
+    if (folder_bytes <= archive->max_folder_bytes) return folder_bytes;   /* decoded whole */
+    UInt64 at = st->db.UnpackPositions[file] - st->db.UnpackPositions[st->db.FolderToFile[folder]];
+    if (st->s.folder == folder && at >= st->s.out_pos) return at - st->s.out_pos;
+    return at;   /* from the start of the block */
+}
+
+void rubraview_sz_cancel(rubraview_sz_archive_t *archive, bool cancel) {
+    if (!archive || !archive->state) return;
+    atomic_store(&((sz_state_t*)archive->state)->cancel, cancel);
+}
+
+void rubraview_sz_progress(const rubraview_sz_archive_t *archive, uint64_t *out_done, uint64_t *out_total) {
+    uint64_t done = 0, total = 0;
+    if (archive && archive->state) {
+        sz_state_t *st = (sz_state_t*)archive->state;
+        done = atomic_load(&st->progress_done);
+        total = atomic_load(&st->progress_total);
+    }
+    if (out_done) *out_done = done;
+    if (out_total) *out_total = total;
 }
 
 void rubraview_sz_close(rubraview_sz_archive_t *archive) {

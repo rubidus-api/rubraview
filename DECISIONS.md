@@ -175,6 +175,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-49 A far page in a streamed 7z block is read on a thread of its own; archive pages no longer fill the working arena
+
+- Status: Accepted (owner 2026-09-29: "추천대로 진행 바랍니다" on the plan `docs/plans/archive/2026-09-29-far-jump-off-main.md`: the previous page stays on screen with how far the reading has got)
+- Decision:
+  - A page that needs more than 32 MB decoded first (`rubraview_page_source_read_cost`) is read by a reader thread; the page before it stays on screen with "reading page N… P %". The source is read under one lock; a new jump, or closing the book, calls the read off between 1 MB chunks (`rubraview_sz_cancel`) and waits for it, and the stream stays where it got to. The look-ahead, the GIF check, the tiles copy and the edit preview never start a far read.
+  - Every archive page is read into memory of its own, freed once it is a texture (`page_read_owned`). It went into the 64 MB working arena, which is never given back: in a CB7 of 2.7 MB pages, every page from the 16th on came up blank (a compressed CBZ fails the same way, later).
+- Consequences: measured on the Windows 11 VM with `rblarge\big.cb7` (1.25 GB, one block): the build before this was blank from page 16 on; now pages 1-36 all drawn. `End`: the page before stayed on screen with "reading page 450… 99 %", then page 450. `End` then `Home` at once: page 1 in 69 ms, the window answering, 154 MB of the viewer's own memory. A far page in such a book gets no GIF frame check (it would be read twice).
+
 ## 2026-09-29: D-48 Pages are scaled with Direct2D's high-quality cubic; Scaling filter is read
 
 - Status: Accepted (owner 2026-09-29: "확대축소 품질개선")
