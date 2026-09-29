@@ -397,6 +397,7 @@ the keymap does not do is listed after it.
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
+| `P` | The playlist, or this folder's files, floating over the picture |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
@@ -470,6 +471,8 @@ the keymap does not do is listed after it.
 | `Ctrl+[` | Slower (0.25x a step) |
 | `Right` | 5 seconds on |
 | `Left` | 5 seconds back |
+| `Shift+Right` | 30 seconds on |
+| `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
 | `Shift+M` | Mute / sound |

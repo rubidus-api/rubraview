@@ -44,6 +44,7 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_MOVED,        /* the reader finished moving the window (RFC-0002 Q6: docking) */
     RUBRAVIEW_WINDOW_EVENT_TEXT,         /* text typed or finished by the IME, while text input is on */
     RUBRAVIEW_WINDOW_EVENT_COMPOSITION,  /* the IME's unfinished text changed (may become empty) */
+    RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE,  /* the pointer left the client area */
 } rubraview_window_event_kind_t;
 
 typedef enum rubraview_mouse_button {

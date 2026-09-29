@@ -67,10 +67,10 @@ typedef struct rubraview_box_node {
     uint32_t line;
 } rubraview_box_node_t;
 
-#define RUBRAVIEW_BOXES_MAX_TILES 128
+#define RUBRAVIEW_BOXES_MAX_TILES 320
 #define RUBRAVIEW_BOXES_MAX_PROFILES 16
 #define RUBRAVIEW_BOXES_MAX_NODES 160
-#define RUBRAVIEW_TOOLBOX_MAX_TILES 24    /* in one profile: three rows of the strip */
+#define RUBRAVIEW_TOOLBOX_MAX_TILES 40    /* in one profile: five rows of the strip as designed (owner, 2026-09-29: most of what the viewer does) */
 
 typedef struct rubraview_boxes_doc {
     rubraview_box_tile_t        tiles[RUBRAVIEW_BOXES_MAX_TILES];

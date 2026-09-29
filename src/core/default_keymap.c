@@ -32,6 +32,8 @@ const char *rubraview_default_keymap(void) {
     "toggle_help = \"F1\"\n"
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
     "toggle_info = \"I, Ctrl+I\"\n"
+    /* Owner, 2026-09-29: the playlist (or this folder's files), floating over the picture. */
+    "toggle_playlist = \"P\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own. */
     "toggle_miniplayer = \"Shift+P\"\n"
     "toggle_pixel_grid = \"G\"\n"
@@ -122,6 +124,10 @@ const char *rubraview_default_keymap(void) {
        (owner, 2026-09-09), so nothing else is lost. */
     "media_seek_forward = \"Right\"\n"
     "media_seek_back = \"Left\"\n"
+    /* 30 s, as the edge buttons' second step (owner, 2026-09-29). Shift +
+       an arrow skips ten files elsewhere; Ctrl+PageDown/PageUp still do. */
+    "media_seek_forward_long = \"Shift+Right\"\n"
+    "media_seek_back_long = \"Shift+Left\"\n"
     "media_volume_up = \"Up\"\n"
     "media_volume_down = \"Down\"\n"
     "media_mute = \"Shift+M\"\n"

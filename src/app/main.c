@@ -67,6 +67,8 @@
 #include "rubraview/music.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
+#include "rubraview/ui_edgenav.h"
+#include "rubraview/ui_listwin.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/favorites.h"
@@ -114,6 +116,7 @@
    thread reported, before it waits for the next report. */
 #define MEDIA_AUDIO_EXTRAPOLATION 0.2
 #define MEDIA_SEEK_STEP 5.0
+#define MEDIA_SEEK_LONG 30.0   /* the edge buttons' second step, Shift + an arrow (owner, 2026-09-29) */
 #define MEDIA_NOTICE_SECONDS 5.0
 /* How far the picture may fall behind the clock before the clock is
    moved to the picture instead: on a machine that cannot decode in
@@ -278,6 +281,13 @@ typedef struct app_state {
     double                 box_grab_dx, box_grab_dy;   /* where inside the anchor it was grabbed */
     double                 box_press_x, box_press_y;
     bool                   box_drag_moved;
+    rubraview_box_t       *box_sizing;        /* a box whose grip is being dragged (owner, 2026-09-29) */
+    rubraview_titlebar_button_t titlebar_held;  /* the caption or Resize pressed, until the pointer moves or lets go */
+    double                 titlebar_held_x, titlebar_held_y;
+    /* The playlist window (owner, 2026-09-29): what is open, floating over the picture. */
+    rubraview_listwin_t    listwin;
+    int32_t                listwin_shown_page;   /* the page it last scrolled to, to follow a new one */
+    bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
@@ -420,6 +430,7 @@ typedef struct app_state {
     rubraview_cursor_hide_t cursor;
     double last_frame_seconds;
     double pointer_x, pointer_y;
+    bool   pointer_inside;   /* false after the pointer left the window (the edge buttons go with it) */
 
     /* §3.13 / §3.10 / §3.11: the workbench and the two dialogs. All
        three are the same panel model with different rows. */
@@ -3173,6 +3184,35 @@ static void sub_tile_result(app_state_t *app, rubraview_tap_result_t r) {
     }
 }
 
+/* ---- The playlist window (owner, 2026-09-29) ---- */
+
+static void listwin_toggle(app_state_t *app) {
+    app->listwin.open = !app->listwin.open;
+    if (!app->listwin.open) return;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_listwin_place(&app->listwin, (double)w, (double)h);
+    app->listwin_shown_page = -1;   /* the next frame scrolls to the file on screen */
+}
+
+/* A press on the window: true when it took it. */
+static bool listwin_press(app_state_t *app, double x, double y) {
+    size_t index = 0;
+    switch (rubraview_listwin_hit(&app->listwin, x, y, page_count(app), &index)) {
+        case RUBRAVIEW_LISTWIN_CLOSE: app->listwin.open = false; return true;
+        case RUBRAVIEW_LISTWIN_TITLE: rubraview_listwin_drag_begin(&app->listwin, x, y); return true;
+        case RUBRAVIEW_LISTWIN_ROW:
+            if ((int32_t)index != current_page_index(app)) {
+                go_to_spread(app, spread_index_for_page(app, (int32_t)index));
+                update_precache(app);
+            }
+            note_activity(app);
+            return true;
+        case RUBRAVIEW_LISTWIN_BODY: return true;
+        default: return false;
+    }
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -3181,6 +3221,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* Esc closes what is open before it closes the program. */
         if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
+        if (app->listwin.open) { app->listwin.open = false; return; }
         rubraview_pal_window_request_close(app->window);
     } else if (rubraview_u8_eq_lit(action, "next_page")) {
         next_spread(app);
@@ -3364,6 +3405,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
         help_show(app);
+    } else if (rubraview_u8_eq_lit(action, "toggle_playlist")) {
+        listwin_toggle(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_info")) {
         info_show(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_miniplayer")) {
@@ -3392,6 +3435,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
     } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back")) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward_long")) {
+        media_seek_to(app, app->media_position + MEDIA_SEEK_LONG);
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
+        media_seek_to(app, app->media_position - MEDIA_SEEK_LONG);
     } else if (app->media && rubraview_u8_eq_lit(action, "next_audio_track")) {
         /* §3.16.2: the next sound track of the same file, without
            stopping the picture. */
@@ -4003,6 +4050,43 @@ static rubraview_pal_rect_t mini_strip_rect(double dpi, double win_w, double win
 
 /* ---- RFC-0002 Q6: the detached toolbox ---- */
 
+/* The grip beside the pin (owner, 2026-09-29): the three-dot corner of a
+   window's sizing grip, and while it is dragged, what the size is now. */
+static void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                          uint32_t fill, uint32_t border) {
+    rubraview_rect_t gr = rubraview_box_grip_rect(box, metrics);
+    if (gr.width <= 0.0) return;
+    rubraview_pal_rect_t grip = { gr.x, gr.y, gr.width, gr.height };
+    bool hot = box->grip_active || rubraview_rect_contains(gr, app->pointer_x, app->pointer_y);
+    rubraview_pal_render_fill_rect(app->renderer, grip, hot ? COLOR_TILE_FILL : fill, 2.0);
+    rubraview_pal_render_stroke_rect(app->renderer, grip, border, 1.0, 2.0);
+    double d = gr.width * 0.1, step = gr.width * 0.18;
+    double right = gr.x + gr.width * 0.72, bottom = gr.y + gr.height * 0.72;
+    for (int32_t row = 0; row < 3; ++row) {
+        for (int32_t col = 0; col <= row; ++col) {   /* a triangle of dots in the bottom-right corner */
+            rubraview_pal_rect_t dot = { right - col * step - d * 0.5, bottom - (2 - row) * step - d * 0.5, d, d };
+            rubraview_pal_render_fill_rect(app->renderer, dot, COLOR_TEXT, 0.0);
+        }
+    }
+    if (!box->grip_active) return;
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
+    char line[64];
+    int n = snprintf(line, sizeof(line), "%d a row, %d%%",
+                     box->kind == RUBRAVIEW_BOX_TOOLBOX ? sized.strip_columns : sized.columns,
+                     (int)lround((box->scale > 0.0 ? box->scale : 1.0) * 100.0));
+    if (n <= 0) return;
+    double w = gr.width * 3.2;
+    /* On the side away from the box, so it covers none of it. */
+    rubraview_rect_t body = rubraview_box_bounds(box, metrics);
+    bool body_above = body.y + body.height * 0.5 < gr.y;
+    rubraview_pal_rect_t tip = { gr.x + gr.width * 0.5 - w * 0.5, body_above ? gr.y + gr.height * 1.1 : gr.y - gr.height * 0.6,
+                                 w, gr.height * 0.5 };
+    if (tip.x < 0.0) tip.x = 0.0;
+    rubraview_pal_render_fill_rect(app->renderer, tip, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_draw_text(app->renderer, (u8str_t){ line, (size_t)n }, tip, gr.height * 0.28, COLOR_TEXT,
+                                   RUBRAVIEW_TEXT_CENTER);
+}
+
 /* Its size: the anchor bar on top, the profile's grid under it. */
 static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
                             double ox, double oy, int32_t hovered);
@@ -4011,7 +4095,8 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
 
 /* Detached, the strip sits under the window's own anchor bar. */
 static rubraview_toolbox_layout_t toolbox_window_layout(const app_state_t *app, const rubraview_tile_metrics_t *m) {
-    return rubraview_toolbox_layout(m, app->toolbox_tile_count, app->media != NULL);
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, m);   /* the size its grip set */
+    return rubraview_toolbox_layout(&sized, app->toolbox_tile_count, app->media != NULL);
 }
 
 static void toolbox_window_size(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t *out_w, int32_t *out_h) {
@@ -4022,7 +4107,8 @@ static void toolbox_window_size(const app_state_t *app, const rubraview_tile_met
 
 static rubraview_rect_t toolbox_window_tile(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t i) {
     rubraview_toolbox_layout_t l = toolbox_window_layout(app, m);
-    rubraview_rect_t b = rubraview_toolbox_button_rect(&l, m, i);
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, m);
+    rubraview_rect_t b = rubraview_toolbox_button_rect(&l, &sized, i);
     b.y += m->anchor_size;
     return b;
 }
@@ -4304,6 +4390,41 @@ static void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent) {
     }
 }
 
+/* The edge buttons show while the pointer is near a side's middle, on a
+   page, with nothing else of the viewer's in the way (owner, 2026-09-29). */
+static bool edge_nav_allowed(const app_state_t *app) {
+    return app->pointer_inside && !app->cursor.hidden && page_count(app) > 0 && !app->picker_open &&
+           !app->settings_open && !app->panel.open && !app->titlebar.shown;
+}
+
+static bool over_a_box(app_state_t *app, double x, double y) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_box_t *boxes[] = { &app->menubox, &app->toolbox };
+    for (size_t i = 0; i < 2; ++i) {
+        if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
+        if (rubraview_rect_contains(rubraview_box_bounds(boxes[i], &m), x, y)) return true;
+    }
+    return false;
+}
+
+static rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y) {
+    if (!edge_nav_allowed(app) || over_a_box(app, x, y)) return RUBRAVIEW_EDGE_NONE;
+    if (app->listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app->listwin), x, y)) return RUBRAVIEW_EDGE_NONE;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
+    return rubraview_edgenav_revealed(&nav, x, y, (double)w, (double)h);
+}
+
+static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
+    rubraview_edge_hit_t none = { RUBRAVIEW_EDGE_NONE, -1 };
+    if (edge_nav_side(app, x, y) == RUBRAVIEW_EDGE_NONE) return none;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
+    return rubraview_edgenav_hit(&nav, x, y, (double)w, (double)h);
+}
+
 /* Returns true when the chrome consumed the click. */
 static bool handle_chrome_click(app_state_t *app, double x, double y) {
     int32_t win_w = 0, win_h = 0;
@@ -4327,15 +4448,21 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
             rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
             osd_say(app, U8("the floating boxes are back in their corners"));
             return true;
-        case RUBRAVIEW_TITLEBAR_RESIZE:     rubraview_pal_window_begin_resize(app->window); return true;
+        case RUBRAVIEW_TITLEBAR_RESIZE:
         case RUBRAVIEW_TITLEBAR_CAPTION:
-            /* A double press maximises or restores, as a system title bar does
-               (owner, 2026-09-29); a single one drags the window. */
-            if (rubraview_titlebar_caption_press(&app->titlebar, rubraview_pal_time_now_seconds(), x, y, 0.5,
+            /* A double press on the caption maximises or restores, as a system
+               title bar does (owner, 2026-09-29). Moving or sizing waits for
+               the pointer to move with the button held: the system's loop
+               started on the press itself would swallow the second click. */
+            if (button == RUBRAVIEW_TITLEBAR_CAPTION &&
+                rubraview_titlebar_caption_press(&app->titlebar, rubraview_pal_time_now_seconds(), x, y, 0.5,
                                                  4.0 * rubraview_pal_window_dpi_scale(app->window))) {
                 rubraview_pal_window_toggle_maximize(app->window);
+                app->titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
             } else {
-                rubraview_pal_window_begin_drag(app->window);
+                app->titlebar_held = button;
+                app->titlebar_held_x = x;
+                app->titlebar_held_y = y;
             }
             return true;
         default: break;
@@ -4421,6 +4548,13 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
                 handle_action(app, app->toolbox_tiles[tile].action);
             }
         }
+        return true;
+    }
+
+    /* The edge buttons (owner, 2026-09-29), under everything above. */
+    rubraview_edge_hit_t edge = edge_nav_hit(app, x, y);
+    if (edge.side != RUBRAVIEW_EDGE_NONE) {
+        handle_action(app, cstr(rubraview_edgenav_action(edge.side, edge.slot, app->media != NULL)));
         return true;
     }
 
@@ -4649,12 +4783,14 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         rubraview_pal_render_draw_text(app->renderer, pinned ? U8("*") : U8("o"), pin, pr.height * 0.8,
                                        pinned ? COLOR_TILE_CURRENT : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    draw_box_grip(app, box, metrics, box_fill, box_border);
 
     bool strip = box == &app->toolbox;
     rubraview_action_facts_t facts = action_facts(app);
     int32_t hovered = rubraview_box_tile_at(box, metrics, app->pointer_x, app->pointer_y);
     if (strip) {
-        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
+        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&sized, box->tile_count, box->timeline);
         draw_strip_head(app, app->renderer, &l, bounds.x, bounds.y, hovered);
     }
 
@@ -4679,7 +4815,7 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
             rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_TILE_CURRENT, 2.0, 0.0);
         }
         if (caption.len > 0) {
-            rubraview_pal_render_draw_text(app->renderer, caption, tile, metrics->tile_size * 0.22,
+            rubraview_pal_render_draw_text(app->renderer, caption, tile, t.height * 0.22,
                                            enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
@@ -5310,6 +5446,105 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     draw_notice(app, win_w, win_h, chrome_dpi);
 }
 
+/* The edge buttons (owner, 2026-09-29): the revealed side's three, an
+   icon or a short sign each, and the hovered one's caption beside it. */
+static void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
+    rubraview_edge_side_t side = edge_nav_side(app, app->pointer_x, app->pointer_y);
+    if (side == RUBRAVIEW_EDGE_NONE) return;
+    bool media = app->media != NULL;
+    /* [media][side][slot]: an icon of Segoe MDL2 Assets, or 0 and the sign. */
+    static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {
+        { { 0xE76B, 0, 0xE892 }, { 0xE76C, 0, 0xE893 } },
+        { { 0, 0, 0xE892 },      { 0, 0, 0xE893 } },
+    };
+    static const char *const SIGN[2][2][RUBRAVIEW_EDGE_SLOTS] = {
+        { { "<", "-10", "|<" }, { ">", "+10", ">|" } },
+        { { "-5s", "-30s", "|<" }, { "+5s", "+30s", ">|" } },
+    };
+    rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_edge_hit_t hit = rubraview_edgenav_hit(&nav, app->pointer_x, app->pointer_y, win_w, win_h);
+    double opacity = box_opacity(app, &app->toolbox);
+    for (int32_t slot = 0; slot < RUBRAVIEW_EDGE_SLOTS; ++slot) {
+        rubraview_rect_t r = rubraview_edgenav_rect(&nav, side, slot, win_w, win_h);
+        rubraview_pal_rect_t br = { r.x, r.y, r.width, r.height };
+        bool hovered = hit.side == side && hit.slot == slot;
+        rubraview_pal_render_fill_rect(app->renderer, br, rubraview_box_fade(hovered ? COLOR_TILE_FILL : COLOR_BOX_FILL, opacity), 4.0);
+        rubraview_pal_render_stroke_rect(app->renderer, br, COLOR_BOX_BORDER, 1.0, 4.0);
+        uint32_t icon = ICON[media][side][slot];
+        if (!icon || !rubraview_pal_render_draw_icon(app->renderer, icon, br, r.height * 0.45, COLOR_TEXT)) {
+            rubraview_pal_render_draw_text(app->renderer, cstr(SIGN[media][side][slot]), br, r.height * 0.32,
+                                           COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+        if (hovered) {
+            double cw = r.height * 4.0;
+            rubraview_pal_rect_t cap = { side == RUBRAVIEW_EDGE_LEFT ? r.x + r.width + nav.gap : r.x - nav.gap - cw,
+                                         r.y + r.height * 0.2, cw, r.height * 0.6 };
+            rubraview_pal_render_fill_rect(app->renderer, cap, rubraview_box_fade(COLOR_BOX_FILL, opacity), 3.0);
+            rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_edgenav_caption(side, slot, media)), cap,
+                                           r.height * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+}
+
+/* The playlist window: a title saying what the list is and where the file
+   on screen is in it, then a row a file, that one marked. See-through as
+   the toolbox is. */
+static void draw_listwin(app_state_t *app, double win_w, double win_h) {
+    rubraview_listwin_t *lw = &app->listwin;
+    if (!lw->open) return;
+    size_t count = page_count(app);
+    rubraview_listwin_place(lw, win_w, win_h);
+    int32_t current = current_page_index(app);
+    if (current != app->listwin_shown_page && current >= 0) {   /* follow the file on screen */
+        rubraview_listwin_reveal(lw, (size_t)current, count);
+        app->listwin_shown_page = current;
+    }
+    double opacity = box_opacity(app, &app->toolbox);
+    rubraview_pal_rect_t body = { lw->x, lw->y, lw->width, lw->height };
+    /* See-through (owner: "반투명 플로팅"): the picture shows under the list. */
+    rubraview_pal_render_fill_rect(app->renderer, body, rubraview_box_fade(COLOR_BOX_FILL, opacity * 0.75), 4.0);
+    rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 4.0);
+
+    const char *what = app->list_is_set ? "Playlist" : app->source.archive_path.len > 0 ? "In this archive" : "In this folder";
+    char title[96];
+    int n = current >= 0 ? snprintf(title, sizeof(title), "%s   %d / %zu", what, current + 1, count)
+                         : snprintf(title, sizeof(title), "%s   %zu", what, count);
+    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height - lw->row_height * 0.4, lw->title_height };
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ title, (size_t)n }, head, lw->title_height * 0.45,
+                                              COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
+    rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
+    if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
+        rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
+    }
+    rubraview_pal_render_draw_text(app->renderer, U8("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    size_t hovered = SIZE_MAX, index = 0;
+    if (rubraview_listwin_hit(lw, app->pointer_x, app->pointer_y, count, &index) == RUBRAVIEW_LISTWIN_ROW) hovered = index;
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
+        rubraview_rect_t rr = rubraview_listwin_row_rect(lw, i, count);
+        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 4.0, rr.height };
+        if ((int32_t)i == current) rubraview_pal_render_fill_rect(app->renderer, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
+        else if (i == hovered) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_FILL, 2.0);
+        char line[512];
+        u8str_t name = page_display_name(app, i);
+        int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.len < 480 ? name.len : 480), name.ptr);
+        rubraview_pal_rect_t text = { row.x + lw->row_height * 0.3, row.y, row.width - lw->row_height * 0.6, row.height };
+        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) },
+                                                  text, lw->row_height * 0.5, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+    /* A thin bar says where in a long list the rows are. */
+    if (count > rows && rows > 0) {
+        double track = lw->height - lw->title_height;
+        double h = track * (double)rows / (double)count;
+        if (h < lw->row_height * 0.5) h = lw->row_height * 0.5;
+        double y = lw->y + lw->title_height + (track - h) * (double)lw->first / (double)(count - rows);
+        rubraview_pal_rect_t bar = { lw->x + lw->width - 4.0, y, 3.0, h };
+        rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
+    }
+}
+
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
 
@@ -5339,6 +5574,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         }
     }
 
+    draw_edge_nav(app, win_w, win_h);
+
     /* Floating boxes (§3.6). */
     toolbox_refresh(app);
     if (app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
@@ -5350,12 +5587,17 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         /* Beside the anchor, on its row: the grid is below or above it now. */
         rubraview_rect_t anchor = rubraview_box_anchor_rect(&app->menubox, &metrics);
         rubraview_rect_t pin = rubraview_box_pin_rect(&app->menubox, &metrics);
-        double after = pin.x > anchor.x ? pin.x + pin.width : anchor.x + anchor.width;   /* past the pin */
+        rubraview_rect_t grip = rubraview_box_grip_rect(&app->menubox, &metrics);
+        double after = anchor.x + anchor.width;   /* past the pin and the grip, when they are on the right */
+        if (pin.x > anchor.x && pin.x + pin.width > after) after = pin.x + pin.width;
+        if (grip.width > 0.0 && grip.x > anchor.x && grip.x + grip.width > after) after = grip.x + grip.width;
         rubraview_pal_rect_t label = { after + metrics.gutter, anchor.y,
                                        metrics.tile_size * 6.0, anchor.height };
         rubraview_pal_render_draw_text(app->renderer, text, label, metrics.tile_size * 0.2,
                                        COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
+
+    draw_listwin(app, win_w, win_h);
 
     /* Hover titlebar (§3.21.2, §3.21.3). */
     if (app->titlebar.shown) {
@@ -6006,6 +6248,7 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     rubraview_fs_listing_t listing = { .entries = entries, .count = count };
     bool ascending = true;
     rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
+    app->list_is_set = true;   /* a playlist or picked files: the playlist window says so */
     app->source = rubraview_page_source_from_listing(app->arena, &listing,
                                                      U8(IMAGE_FILTER ";" MEDIA_FILTER), mode, ascending);
     if (app->source.page_count == 0) {
@@ -8603,7 +8846,23 @@ static void curve_widget_drag(app_state_t *app, double px, double py) {
     rubraview_edit_curve_move(&app->edit, app->curve_dragging, x, y);
 }
 
+/* The boxes' size from settings.ini (owner, 2026-09-29), each frame so the
+   settings window's change shows at once; not under a grip being dragged. */
+static void boxes_apply_size(app_state_t *app) {
+    if (!app->menubox.grip_active) {
+        rubraview_box_set_size(&app->menubox,
+                               (int32_t)lround(rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_columns"))),
+                               rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_size")) / 100.0);
+    }
+    if (!app->toolbox.grip_active) {
+        rubraview_box_set_size(&app->toolbox,
+                               (int32_t)lround(rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_columns"))),
+                               rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_size")) / 100.0);
+    }
+}
+
 static void render_frame(app_state_t *app) {
+    boxes_apply_size(app);
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     if (win_w <= 0 || win_h <= 0) return;
@@ -9018,6 +9277,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     u8str_t bytes = { .ptr = (const char*)app->archive_map.data, .len = (size_t)app->archive_map.size };
 
     app->archive_bytes = bytes;
+    app->list_is_set = false;
     app->source = rubraview_page_source_from_archive(app->arena,
                                                      (const uint8_t*)bytes.ptr, bytes.len,
                                                      archive_path, U8(IMAGE_FILTER),
@@ -9036,6 +9296,7 @@ static bool open_folder(app_state_t *app, u8str_t dir) {
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
     bool ascending = true;
     rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
+    app->list_is_set = false;
     app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER ";" MEDIA_FILTER),
                                                      mode, ascending);
     app->source_dir = dir;
@@ -10381,6 +10642,11 @@ static bool box_press(app_state_t *app, double x, double y) {
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
+        /* The grip beside the pin sizes the box (owner, 2026-09-29). */
+        if (rubraview_box_grip_begin(boxes[i], &metrics, x, y)) {
+            app->box_sizing = boxes[i];
+            return true;
+        }
         /* Only the left half is a handle (owner, 2026-09-22): the right
            one only hovers. */
         if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) != RUBRAVIEW_ANCHOR_CLICK) continue;
@@ -10396,6 +10662,11 @@ static bool box_press(app_state_t *app, double x, double y) {
 }
 
 static void box_drag_motion(app_state_t *app, double x, double y) {
+    if (app->box_sizing) {
+        rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        (void)rubraview_box_grip_drag(app->box_sizing, &metrics, x, y);
+        return;
+    }
     if (!app->box_drag) return;
     if (!app->box_drag_moved) {
         double dx = x - app->box_press_x, dy = y - app->box_press_y;
@@ -10420,6 +10691,16 @@ static void box_drag_motion(app_state_t *app, double x, double y) {
 }
 
 static void box_release(app_state_t *app, double x, double y) {
+    if (app->box_sizing) {
+        /* Kept in settings.ini, as the boxes' opacity is. */
+        rubraview_box_t *box = app->box_sizing;
+        app->box_sizing = NULL;
+        rubraview_box_grip_end(box);
+        bool menu = box == &app->menubox;
+        rubraview_settings_set(&app->settings, U8("ui"), menu ? U8("menubox_columns") : U8("toolbox_columns"), (double)box->columns);
+        rubraview_settings_set(&app->settings, U8("ui"), menu ? U8("menubox_size") : U8("toolbox_size"), box->scale * 100.0);
+        return;
+    }
     if (!app->box_drag) return;
     rubraview_box_t *box = app->box_drag;
     app->box_drag = NULL;
@@ -10627,6 +10908,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
+    app.listwin = rubraview_listwin_create(dpi);
+    app.listwin_shown_page = -1;
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
     layout_load(&app);   /* §3.6: back where the reader left them */
@@ -10711,6 +10994,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     rename_text(&app, &event);
                     break;
 
+                case RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE:
+                    app.pointer_inside = false;   /* the edge buttons go with the pointer */
+                    break;
+
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         subbox_drag_motion(&app, event.mouse.x, event.mouse.y);   /* D-33 */
@@ -10741,6 +11028,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) pagebar_drag(&app, event.mouse.x, false);
+                    if (app.titlebar_held != RUBRAVIEW_TITLEBAR_NONE) {
+                        double dx = event.mouse.x - app.titlebar_held_x, dy = event.mouse.y - app.titlebar_held_y;
+                        double slop = 4.0 * rubraview_pal_window_dpi_scale(app.window);
+                        if (dx * dx + dy * dy >= slop * slop) {
+                            rubraview_titlebar_button_t held = app.titlebar_held;
+                            app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
+                            if (held == RUBRAVIEW_TITLEBAR_RESIZE) rubraview_pal_window_begin_resize(app.window);
+                            else rubraview_pal_window_begin_drag(app.window);
+                            break;
+                        }
+                    }
+                    if (app.listwin.dragging) {
+                        int32_t lw_w = 0, lw_h = 0;
+                        rubraview_pal_window_get_size(app.window, &lw_w, &lw_h);
+                        rubraview_listwin_drag_to(&app.listwin, event.mouse.x, event.mouse.y, (double)lw_w, (double)lw_h);
+                    }
+                    app.pointer_inside = true;
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
                     rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
@@ -10863,6 +11167,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (app.listwin.open && listwin_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
                         subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
                     /* The anchors answer before the rest of the chrome: a
@@ -10893,6 +11198,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
+                    app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
+                    if (app.listwin.dragging) { app.listwin.dragging = false; break; }
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         rubraview_subbox_end_drag(&app.subbox);
                         break;
@@ -10925,6 +11232,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     if (box_wheel_opacity(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta, event.mouse.modifiers)) break;
+                    if (app.listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y)) {
+                        rubraview_listwin_scroll(&app.listwin, event.mouse.wheel_delta > 0 ? -3 : 3, page_count(&app));
+                        break;
+                    }
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, event.mouse.modifiers));
                     break;

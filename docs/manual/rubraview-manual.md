@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.19.exe              the viewer, as built
-dist/rubraview-v0.0.19/                 the release bundle
-dist/rubraview-v0.0.19.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.20.exe              the viewer, as built
+dist/rubraview-v0.0.20/                 the release bundle
+dist/rubraview-v0.0.20.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -230,6 +230,39 @@ the file to the recycle bin. The reading-order tile says which way pages
 run (`Order: L>R` or `Order: R>L`). Open folder lists folders and the files
 the viewer can open, and says how many others it left out.
 
+Most of what the viewer does has a toolbox button: turning pages one, ten
+or all the way, zoom and fit, turning and flipping, the slide show, the
+filmstrip, the playlist, the information, editing and exporting, opening,
+always on top, the settings and full screen; for a film, 5 s and 30 s back
+and on as well. While a box is open, a second square beside its pin, with
+three dots, sizes it: drag it sideways for more or fewer buttons (or menu
+tiles) a row, and away from the box or back for bigger or smaller ones; the
+size is kept, and Settings › Display has the same four numbers.
+
+At the middle of each side of the window, pointing near the edge shows
+three buttons. For pictures the left ones go to the previous file, ten back
+and the first, the right ones to the next, ten on and the last; for a film
+or a song they go 5 s and 30 s back or on, and to the previous or next file
+(`Shift` + `Left`/`Right` also go 30 s).
+
+`P`, the playlist button or File › Playlist shows what is open as a list
+floating over the picture: the playlist, or the folder's or the archive's
+files when there is none. The file on screen is marked and kept in view; a
+click goes to a file, the wheel scrolls, the title drags it, `X` or `Esc`
+closes it.
+
+`I` (or `Ctrl+I`, or File › Information) opens the file's information: its
+size, dates, pixels and format, and for a photo what the camera wrote —
+camera and lens, when it was taken (with the time zone), exposure, aperture,
+ISO, focal length, program, metering, white balance, colour space, and where
+it was: the place in degrees and minutes, the same in decimal degrees for a
+map's search box, the altitude, the direction the camera faced and the GPS
+time. A picture without any says so. `I` again or `Esc` closes it.
+
+The title bar (point at the top edge) has, after the pin, a `Size` button:
+press it and drag to size the window from its bottom-right corner. A double
+click on the title bar maximises the window or gives it back its size.
+
 `Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
 that stays on top, and `Dock` puts it back. The menu's first tile, the `Pin`
 button on the title bar (point at the top edge) and `Ctrl+Shift+T` keep the
@@ -317,6 +350,7 @@ listed under a later heading only means that while that is on screen.
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
+| `P` | The playlist, or this folder's files, floating over the picture |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
@@ -390,6 +424,8 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+[` | Slower (0.25x a step) |
 | `Right` | 5 seconds on |
 | `Left` | 5 seconds back |
+| `Shift+Right` | 30 seconds on |
+| `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
 | `Shift+M` | Mute / sound |

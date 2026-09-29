@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.19** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.19/rubraview-v0.0.19.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.20** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.20/rubraview-v0.0.20.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -48,6 +48,7 @@
 | `F10`, `Ctrl+,` | 설정 |
 | `F1` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |
+| `P` | 재생목록(없으면 이 폴더의 파일) — 화면 위에 떠 있는 창 |
 | `Shift+P` | 미니 플레이어 |
 | `G` | 400% 넘으면 픽셀 격자 |
 | `Esc` | 끝내기 |
@@ -121,6 +122,8 @@
 | `Ctrl+[` | 느리게(0.25배씩) |
 | `Right` | 5초 뒤로 |
 | `Left` | 5초 앞으로 |
+| `Shift+Right` | 30초 뒤로 |
+| `Shift+Left` | 30초 앞으로 |
 | `Up` | 소리 5% 크게 |
 | `Down` | 소리 5% 작게 |
 | `Shift+M` | 음소거/해제 |

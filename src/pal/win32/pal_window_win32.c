@@ -35,6 +35,7 @@ struct rubraview_window {
     bool tool;              /* RFC-0002 Q6: a detached toolbox */
     bool cursor_visible;
     bool fullscreen;
+    bool tracking_leave;    /* TrackMouseEvent asked for WM_MOUSELEAVE */
     int32_t width, height;
     double dpi_scale;
 
@@ -433,6 +434,19 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                (§3.6.1), and a drag let go outside must still end. */
             if (e.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN) SetCapture(hwnd);
             else if (e.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP && GetCapture() == hwnd) ReleaseCapture();
+            /* Ask to hear when the pointer leaves: what shows only while it
+               is near (the edge buttons) must go with it. */
+            if (msg == WM_MOUSEMOVE && !w->tracking_leave) {
+                TRACKMOUSEEVENT tme = { .cbSize = sizeof(tme), .dwFlags = TME_LEAVE, .hwndTrack = hwnd };
+                w->tracking_leave = TrackMouseEvent(&tme) != FALSE;
+            }
+            return 0;
+        }
+
+        case WM_MOUSELEAVE: {
+            w->tracking_leave = false;
+            rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE };
+            queue_push(w, e);
             return 0;
         }
 
