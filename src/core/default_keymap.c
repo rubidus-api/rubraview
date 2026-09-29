@@ -20,7 +20,8 @@ const char *rubraview_default_keymap(void) {
     "open_picker = \"O, Ctrl+O\"\n"
     "open_folder = \"Ctrl+Shift+O\"\n"
     "toggle_filmstrip = \"F4\"\n"
-    "toggle_osd = \"I\"\n"
+    /* Owner, 2026-09-29: I is the file's information; the status line moves to Shift+I. */
+    "toggle_osd = \"Shift+I\"\n"
     /* §3.13 / §3.10 / §3.11 */
     "open_edit = \"E\"\n"
     "quick_export = \"Ctrl+E\"\n"
@@ -30,7 +31,7 @@ const char *rubraview_default_keymap(void) {
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
-    "toggle_info = \"Ctrl+I\"\n"
+    "toggle_info = \"I, Ctrl+I\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own. */
     "toggle_miniplayer = \"Shift+P\"\n"
     "toggle_pixel_grid = \"G\"\n"

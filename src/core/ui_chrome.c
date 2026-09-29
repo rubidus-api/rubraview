@@ -120,6 +120,7 @@ static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
     /* First in the order is leftmost on screen. */
     RUBRAVIEW_TITLEBAR_SNAP_BOXES,
     RUBRAVIEW_TITLEBAR_PIN,
+    RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
@@ -164,6 +165,20 @@ rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *b
 
     /* §3.21.2: empty titlebar space drags the window. */
     return RUBRAVIEW_TITLEBAR_CAPTION;
+}
+
+bool rubraview_titlebar_caption_press(rubraview_titlebar_t *bar, double now_seconds, double x, double y,
+                                      double interval, double slop) {
+    if (!bar) return false;
+    bool twice = bar->pressed_before && now_seconds - bar->press_time >= 0.0 &&
+                 now_seconds - bar->press_time <= interval &&
+                 x - bar->press_x <= slop && bar->press_x - x <= slop &&
+                 y - bar->press_y <= slop && bar->press_y - y <= slop;
+    bar->pressed_before = !twice;
+    bar->press_time = now_seconds;
+    bar->press_x = x;
+    bar->press_y = y;
+    return twice;
 }
 
 /* ---- Slide-show presentation timing ---- */

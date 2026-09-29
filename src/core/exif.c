@@ -1,4 +1,5 @@
 #include "rubraview/exif.h"
+#include <stdio.h>
 #include <string.h>
 
 #define JPEG_MARKER_SOI 0xD8
@@ -294,6 +295,7 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
     bool have_lat = false, have_lon = false;
     double lat = 0, lon = 0;
     int alt_below = 0;
+    char gps_day[16] = "", gps_clock[16] = "";
     for (uint16_t i = 0; i < n; ++i) {
         size_t e = (size_t)at + 2 + (size_t)i * 12;
         uint16_t tag;
@@ -308,6 +310,7 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 0x0112: x->orientation = (int32_t)entry_uint(t, e); break;
                 case 0x0131: entry_text(t, e, x->software, sizeof(x->software)); break;
                 case 0x0132: entry_date(t, e, x->date_modified, sizeof(x->date_modified)); break;
+                case 0x010E: entry_text(t, e, x->description, sizeof(x->description)); break;
                 case 0x013B: entry_text(t, e, x->artist, sizeof(x->artist)); break;
                 case 0x8298: entry_text(t, e, x->copyright, sizeof(x->copyright)); break;
                 case 0x8769: if (exif_ifd) *exif_ifd = entry_uint(t, e); break;
@@ -329,6 +332,17 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 0xA003: x->pixel_y = entry_uint(t, e); break;
                 case 0xA405: x->focal_35mm = entry_uint(t, e); break;
                 case 0xA434: entry_text(t, e, x->lens, sizeof(x->lens)); break;
+                case 0xA433: entry_text(t, e, x->lens_make, sizeof(x->lens_make)); break;
+                case 0xA431: entry_text(t, e, x->serial, sizeof(x->serial)); break;
+                case 0x9004: entry_date(t, e, x->date_digitized, sizeof(x->date_digitized)); break;
+                case 0x9011: entry_text(t, e, x->offset_time, sizeof(x->offset_time)); break;
+                case 0x8822: x->exposure_program = (uint16_t)entry_uint(t, e); break;
+                case 0x9207: x->metering = (uint16_t)entry_uint(t, e); break;
+                case 0xA403: x->white_balance = (uint16_t)(entry_uint(t, e) + 1); break;   /* 0 auto is stored as 1: 0 means not given */
+                case 0xA402: x->exposure_mode = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA406: x->scene_type = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA001: x->color_space = (uint16_t)entry_uint(t, e); break;
+                case 0xA404: if (entry_rational(t, e, 0, &v, NULL, NULL) && v > 0) { x->has_digital_zoom = true; x->digital_zoom = v; } break;
                 default: break;
             }
         } else {
@@ -341,6 +355,19 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 6:
                     if (entry_rational(t, e, 0, &v, NULL, NULL)) { x->has_altitude = true; x->altitude_m = v; }
                     break;
+                case 7: {   /* hours, minutes, seconds, UTC */
+                    double h = 0, m = 0, sec = 0;
+                    if (entry_rational(t, e, 0, &h, NULL, NULL) && entry_rational(t, e, 1, &m, NULL, NULL) &&
+                        entry_rational(t, e, 2, &sec, NULL, NULL) && h >= 0 && h < 24 && m >= 0 && m < 60 && sec >= 0 && sec < 61) {
+                        snprintf(gps_clock, sizeof(gps_clock), "%02d:%02d:%02d", (int)h, (int)m, (int)sec);
+                    }
+                    break;
+                }
+                case 12: entry_text(t, e, ref, sizeof(ref)); x->speed_ref = ref[0]; break;
+                case 13: if (entry_rational(t, e, 0, &v, NULL, NULL)) { x->has_speed = true; x->speed = v; } break;
+                case 16: entry_text(t, e, ref, sizeof(ref)); x->direction_ref = ref[0]; break;
+                case 17: if (entry_rational(t, e, 0, &v, NULL, NULL) && v >= 0 && v <= 360) { x->has_direction = true; x->direction = v; } break;
+                case 29: entry_date(t, e, gps_day, sizeof(gps_day)); break;
                 default: break;
             }
         }
@@ -352,6 +379,8 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
             x->longitude = lon_ref == 'W' ? -lon : lon;
         }
         if (x->has_altitude && alt_below == 1) x->altitude_m = -x->altitude_m;
+        if (gps_day[0] && gps_clock[0]) snprintf(x->gps_time, sizeof(x->gps_time), "%.10s %.8s UTC", gps_day, gps_clock);
+        else if (gps_clock[0]) snprintf(x->gps_time, sizeof(x->gps_time), "%.8s UTC", gps_clock);
     }
 }
 

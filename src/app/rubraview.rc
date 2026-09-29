@@ -1,0 +1,31 @@
+/* The program's icon (owner, 2026-09-29; drawn by scripts/make-icon.py) and
+   the version Explorer shows under Properties > Details. The version comes
+   from rubraview/version.h, as everything else does. */
+#include "rubraview/version.h"
+
+1 ICON "resources/distribution/rubraview.ico"
+
+1 VERSIONINFO
+FILEVERSION     RUBRAVIEW_VERSION_MAJOR, RUBRAVIEW_VERSION_MINOR, RUBRAVIEW_VERSION_PATCH, 0
+PRODUCTVERSION  RUBRAVIEW_VERSION_MAJOR, RUBRAVIEW_VERSION_MINOR, RUBRAVIEW_VERSION_PATCH, 0
+FILEOS          0x40004
+FILETYPE        0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "rubidus-api"
+            VALUE "FileDescription",  "Rubraview"
+            VALUE "FileVersion",      RUBRAVIEW_VERSION_STRING
+            VALUE "InternalName",     "rubraview"
+            VALUE "OriginalFilename", "rubraview.exe"
+            VALUE "ProductName",      "Rubraview"
+            VALUE "ProductVersion",   RUBRAVIEW_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -218,7 +218,7 @@ button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
 for a picture, with its place in the folder or archive (`4 / 6`), and the
 bar is a page bar. The seek bar is only in the toolbox; the status line
-(`I`) keeps the picture's size and the zoom.
+(`Shift+I`) keeps the picture's size and the zoom.
 
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use
@@ -309,14 +309,14 @@ listed under a later heading only means that while that is on screen.
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
 | `F4` | Filmstrip |
-| `I` | Information bar |
+| `Shift+I` | Information bar |
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
-| `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
+| `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |

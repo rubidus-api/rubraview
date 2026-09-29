@@ -63,6 +63,9 @@ typedef enum rubraview_titlebar_button {
     /* Always on top (owner, 2026-09-15): next to the rescue button, where a
        reader reaches for what the window does. */
     RUBRAVIEW_TITLEBAR_PIN,
+    /* Between the pin and minimise (owner, 2026-09-29): pressed and
+       dragged, it sizes the window from its bottom-right corner. */
+    RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
@@ -76,6 +79,9 @@ typedef struct rubraview_titlebar {
     double hide_delay;      /* grace period after the pointer leaves, 0.5 s */
     bool   shown;
     double idle_seconds;
+    /* The last press on the caption, for a double press (owner, 2026-09-29). */
+    bool   pressed_before;
+    double press_time, press_x, press_y;
 } rubraview_titlebar_t;
 
 rubraview_titlebar_t rubraview_titlebar_create(double dpi_scale);
@@ -93,6 +99,15 @@ bool rubraview_titlebar_tick(rubraview_titlebar_t *bar, double delta_seconds);
 /** Which control is at this point, or NONE when the bar is hidden or the point is below it. */
 rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *bar,
                                                    double x, double y, double window_width);
+
+/**
+ * A press on the caption at `now_seconds`: true when it is the second of a
+ * double press (within `interval` seconds and `slop` pixels of the first),
+ * which toggles maximise and restore as a system title bar does. A double
+ * press is consumed, so a third press starts again.
+ */
+bool rubraview_titlebar_caption_press(rubraview_titlebar_t *bar, double now_seconds, double x, double y,
+                                      double interval, double slop);
 
 /** The rectangle of one control, for painting (§3.21.3). */
 rubraview_rect_t rubraview_titlebar_button_rect(const rubraview_titlebar_t *bar,

@@ -46,6 +46,14 @@ typedef struct rubraview_exif_info {
     uint32_t pixel_x, pixel_y;
     bool     has_gps;      double latitude, longitude;   /* degrees, south and west negative */
     bool     has_altitude; double altitude_m;
+    /* More of what a camera writes (owner, 2026-09-29: "exif 정보나 ... GPS정보 등 다양한 정보들이 다 보여야"). */
+    char     description[96], lens_make[64], serial[48];
+    char     date_digitized[24], offset_time[8];         /* "+09:00" */
+    uint16_t exposure_program, metering, white_balance, exposure_mode, scene_type, color_space;
+    bool     has_digital_zoom; double digital_zoom;
+    char     gps_time[32];                                /* "2024-05-01 04:22:07 UTC" */
+    bool     has_direction; double direction; char direction_ref;   /* degrees; 'T' true or 'M' magnetic north */
+    bool     has_speed;     double speed; char speed_ref;           /* 'K' km/h, 'M' mph, 'N' knots */
 } rubraview_exif_info_t;
 
 /**

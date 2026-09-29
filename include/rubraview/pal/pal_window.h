@@ -226,6 +226,9 @@ void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool vi
 
 /** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */
 void rubraview_pal_window_begin_drag(rubraview_window_t *window);
+/* The title bar's Resize button (owner, 2026-09-29): the OS sizes the
+   window from its bottom-right corner while the button is held. */
+void rubraview_pal_window_begin_resize(rubraview_window_t *window);
 
 /** §3.21.3: the minimize and maximize/restore controls. */
 void rubraview_pal_window_minimize(rubraview_window_t *window);
