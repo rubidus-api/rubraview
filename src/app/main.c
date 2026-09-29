@@ -9097,6 +9097,52 @@ static void tick_timers(app_state_t *app, double dt) {
     }
 }
 
+/* ---- redrawing only what changed ---- */
+
+static void sig_mix(uint64_t *h, const void *data, size_t len) {
+    const unsigned char *p = (const unsigned char *)data;
+    for (size_t i = 0; i < len; ++i) { *h ^= p[i]; *h *= 0x100000001B3ull; }   /* FNV-1a */
+}
+#define SIG(h, v) do { typeof(v) sig_value_ = (v); sig_mix((h), &sig_value_, sizeof(sig_value_)); } while (0)
+
+static void sig_page(uint64_t *h, const app_state_t *app, int32_t index) {
+    SIG(h, index);
+    if (index < 0 || (size_t)index >= page_count(app) || !app->pages) return;
+    const app_page_t *page = &app->pages[index];
+    SIG(h, page->loaded); SIG(h, page->failed); SIG(h, page->reduced);
+    SIG(h, page->width); SIG(h, page->height); SIG(h, (uintptr_t)page->texture);
+}
+
+/* What the settled screen shows, summed up: once the loop has settled, a
+   frame is drawn when this changes, not once a second regardless. On a
+   machine without a graphics card each frame of a large picture costs a
+   third of a core (measured 2026-09-29, 10 s of CPU in 30 s on the VM). */
+static uint64_t scene_signature(const app_state_t *app) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    int32_t w = 0, hh = 0;
+    rubraview_pal_window_get_size(app->window, &w, &hh);
+    SIG(&h, w); SIG(&h, hh);
+    SIG(&h, app->spread_index); SIG(&h, page_count(app));
+    if (app->spread_index < app->layout.count) {
+        sig_page(&h, app, app->layout.spreads[app->spread_index].left_index);
+        sig_page(&h, app, app->layout.spreads[app->spread_index].right_index);
+    }
+    SIG(&h, app->zoom); SIG(&h, app->pan_x); SIG(&h, app->pan_y); SIG(&h, (int)app->fit_mode);
+    SIG(&h, app->titlebar.shown); SIG(&h, (int)app->toolbox.state); SIG(&h, (int)app->menubox.state);
+    SIG(&h, app->toolbox.tile_count); SIG(&h, app->menubox.tile_count);
+    SIG(&h, (int)(rubraview_osd_opacity(&app->osd) * 20.0)); SIG(&h, app->osd.always_on);
+    SIG(&h, app->notice_seconds > 0.0);
+    SIG(&h, (uintptr_t)app->media); SIG(&h, app->media_paused); SIG(&h, app->media_ended);
+    SIG(&h, (int64_t)app->media_position);   /* the time the toolbox shows, to the second */
+    SIG(&h, app->listwin.open); SIG(&h, app->listwin.first);
+    SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
+    SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
+    SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge);
+    SIG(&h, rubraview_pal_window_is_fullscreen(app->window));
+    return h;
+}
+#undef SIG
+
 /* ---- startup ---- */
 
 static void load_keymap(app_state_t *app) {
@@ -11030,6 +11076,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.last_frame_seconds = rubraview_pal_time_now_seconds();
     double last_busy_seconds = app.last_frame_seconds;
     double last_idle_frame_seconds = app.last_frame_seconds;
+    uint64_t last_scene_signature = 0;   /* the settled screen last drawn (see scene_signature) */
     double last_render_seconds = app.last_frame_seconds;
     double last_input_seconds = app.last_frame_seconds;
 
@@ -11406,10 +11453,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            after an input every pass still draws, as the chrome's fades
            expect. */
         bool paced = media_playing && !others_moving && now - last_input_seconds > IDLE_REDRAW_GRACE;
+        /* Settled: a frame when what it would show has changed, checked
+           each pass, and one every ten seconds whatever the summary says. */
         bool draw = paced ? rubraview_media_redraw_due(app.media_new_picture, now - last_render_seconds)
-                          : (!settled || now - last_idle_frame_seconds >= 1.0);
+                          : (!settled || now - last_idle_frame_seconds >= 10.0 ||
+                             scene_signature(&app) != last_scene_signature);
         if (draw) {
             render_frame(&app);
+            last_scene_signature = scene_signature(&app);
             last_render_seconds = now;
             app.media_new_picture = false;
             if (settled) last_idle_frame_seconds = now;
