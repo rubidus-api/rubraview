@@ -34,6 +34,35 @@ rubraview_box_t rubraview_box_create(rubraview_box_kind_t kind, double anchor_x,
     };
 }
 
+rubraview_tile_metrics_t rubraview_box_metrics(const rubraview_box_t *box, const rubraview_tile_metrics_t *base) {
+    rubraview_tile_metrics_t m = *base;
+    if (!box || base->sized) return m;
+    double k = box->scale > 0.0 ? box->scale : 1.0;
+    m.tile_size *= k;
+    m.button_size *= k;
+    if (box->columns > 0) {
+        if (box->kind == RUBRAVIEW_BOX_TOOLBOX) m.strip_columns = box->columns;
+        else m.columns = box->columns;
+    }
+    m.sized = true;
+    return m;
+}
+
+static int32_t max_columns(const rubraview_box_t *box) {
+    return box->kind == RUBRAVIEW_BOX_TOOLBOX ? 24 : 8;
+}
+
+void rubraview_box_set_size(rubraview_box_t *box, int32_t columns, double scale) {
+    if (!box) return;
+    int32_t lo = box->kind == RUBRAVIEW_BOX_TOOLBOX ? 2 : 1;
+    if (columns != 0 && columns < lo) columns = lo;
+    if (columns > max_columns(box)) columns = max_columns(box);
+    if (!(scale >= RUBRAVIEW_BOX_SCALE_MIN)) scale = scale > 0.0 ? RUBRAVIEW_BOX_SCALE_MIN : 1.0;
+    if (scale > RUBRAVIEW_BOX_SCALE_MAX) scale = RUBRAVIEW_BOX_SCALE_MAX;
+    box->columns = columns;
+    box->scale = scale;
+}
+
 static bool is_open(const rubraview_box_t *box) {
     return box->state == RUBRAVIEW_BOX_EXPANDED ||
            box->state == RUBRAVIEW_BOX_LOCKED_OPEN ||
@@ -98,7 +127,9 @@ bool rubraview_box_pointer(rubraview_box_t *box, const rubraview_tile_metrics_t 
 
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, metrics, px, py);
     bool inside_body = rubraview_rect_contains(rubraview_box_bounds(box, metrics), px, py) ||
-                       rubraview_rect_contains(rubraview_box_pin_rect(box, metrics), px, py);
+                       rubraview_rect_contains(rubraview_box_pin_rect(box, metrics), px, py) ||
+                       rubraview_rect_contains(rubraview_box_grip_rect(box, metrics), px, py) ||
+                       box->grip_active;   /* sizing: the pointer may run past the box */
 
     /* Only the hover half opens. Resting on the click half deliberately
        does nothing: that is the difference the reader can rely on. */
@@ -217,6 +248,8 @@ rubraview_rect_t rubraview_toolbox_button_rect(const rubraview_toolbox_layout_t 
 
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
     if (!box || !metrics) return (rubraview_rect_t){0};
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
+    metrics = &sized;
 
     if (!is_open(box) || box->tile_count <= 0) {
         /* Collapsed, the box *is* the two-button anchor bar. */
@@ -247,6 +280,8 @@ rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubra
     if (!box || !metrics || tile_index < 0 || tile_index >= box->tile_count || !is_open(box)) {
         return (rubraview_rect_t){0};
     }
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
+    metrics = &sized;
 
     rubraview_rect_t body = rubraview_box_bounds(box, metrics);
     if (box->kind == RUBRAVIEW_BOX_TOOLBOX) {
@@ -368,7 +403,7 @@ bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace
     if (!box) return false;
     /* Only a hover-expanded, unpinned box collapses on its own: pinned
        and click-locked boxes stay put (§3.6.1 pin, §3.6.3 lock). */
-    if (box->state != RUBRAVIEW_BOX_EXPANDED || box->pinned) return false;
+    if (box->state != RUBRAVIEW_BOX_EXPANDED || box->pinned || box->grip_active) return false;   /* not while being sized */
 
     box->idle_seconds += delta_seconds;
     if (box->idle_seconds < grace_seconds) return false;
@@ -432,14 +467,67 @@ rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubrav
     return (rubraview_rect_t){ x, box->anchor_y, a, a };
 }
 
+/* The grip sits past the pin, on the side the pin went: right of it, or
+   left of it when the pin had to go left or the window has no room. */
+rubraview_rect_t rubraview_box_grip_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
+    rubraview_rect_t pin = rubraview_box_pin_rect(box, m);
+    if (pin.width <= 0.0) return (rubraview_rect_t){0};
+    double a = m->anchor_size;
+    double x = pin.x > box->anchor_x ? pin.x + a : pin.x - a;
+    if (box->view_width > 0.0 && x + a > box->view_width) x = (pin.x > box->anchor_x ? box->anchor_x : pin.x) - a;
+    if (x < 0.0) x = pin.x > box->anchor_x ? pin.x + a : box->anchor_x + a * 2.0;
+    return (rubraview_rect_t){ x, box->anchor_y, a, a };
+}
+
+bool rubraview_box_grip_begin(rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
+    if (!box || !m) return false;
+    rubraview_rect_t grip = rubraview_box_grip_rect(box, m);
+    if (!rubraview_rect_contains(grip, px, py)) return false;
+    rubraview_rect_t body = rubraview_box_bounds(box, m);
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, m);
+    box->grip_active = true;
+    box->grip_x0 = px;
+    box->grip_y0 = py;
+    box->grip_scale0 = box->scale > 0.0 ? box->scale : 1.0;
+    box->grip_columns0 = box->kind == RUBRAVIEW_BOX_TOOLBOX ? sized.strip_columns : sized.columns;
+    /* Outward: the way the body grows. It hangs from the anchor's left
+       edge, growing right, unless the window pushed it left, when it grows
+       left; it hangs below the anchor or stands above it. */
+    box->grip_sx = body.x >= box->anchor_x - 0.5 ? 1.0 : -1.0;
+    box->grip_sy = body.y + body.height * 0.5 >= grip.y + grip.height * 0.5 ? 1.0 : -1.0;   /* body below: down */
+    return true;
+}
+
+bool rubraview_box_grip_drag(rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
+    if (!box || !m || !box->grip_active) return false;
+    bool toolbox = box->kind == RUBRAVIEW_BOX_TOOLBOX;
+    double k0 = box->grip_scale0;
+    double unit = (toolbox ? m->button_size + m->gutter / 2.0 : m->tile_size + m->gutter) * k0;
+    int32_t columns = box->grip_columns0 + (int32_t)lround((px - box->grip_x0) * box->grip_sx / unit);
+    /* A tile's own height dragged outward doubles the size's step: a quarter of the designed size. */
+    double base = toolbox ? m->button_size : m->tile_size;
+    double scale = k0 + (py - box->grip_y0) * box->grip_sy / (base * 4.0);
+    scale = round(scale * 20.0) / 20.0;   /* 5 % steps */
+    int32_t old_columns = box->columns;
+    double old_scale = box->scale;
+    rubraview_box_set_size(box, columns < 1 ? 1 : columns, scale);
+    return box->columns != old_columns || box->scale != old_scale;
+}
+
+void rubraview_box_grip_end(rubraview_box_t *box) {
+    if (box) box->grip_active = false;
+}
+
 rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
     if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
-    return body_relative(box, m, rubraview_toolbox_layout(m, box->tile_count, box->timeline).timeline);
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, m);
+    return body_relative(box, &sized, rubraview_toolbox_layout(&sized, box->tile_count, box->timeline).timeline);
 }
 
 rubraview_rect_t rubraview_box_title_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
     if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
-    return body_relative(box, m, rubraview_toolbox_layout(m, box->tile_count, box->timeline).title);
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(box, m);
+    return body_relative(box, &sized, rubraview_toolbox_layout(&sized, box->tile_count, box->timeline).title);
 }
 
 bool rubraview_box_pin_shown_on(const rubraview_box_t *box) {

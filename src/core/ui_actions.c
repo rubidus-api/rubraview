@@ -138,6 +138,17 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "next_archive", 0xE8AD },
         { "toggle_layout", 0xE89A },         /* TwoPage */
         { "fit_window", 0xE9A6 },            /* FitPage */
+        /* The fuller toolbox (owner, 2026-09-29). */
+        { "toggle_info", 0xE946 },           /* Info */
+        { "open_picker", 0xE8E5 },           /* OpenFile */
+        { "open_folder", 0xE838 },           /* FolderOpen */
+        { "open_settings", 0xE713 },         /* Settings */
+        { "toggle_help", 0xE897 },           /* Help */
+        { "open_edit", 0xE70F },             /* Edit */
+        { "quick_export", 0xE74E },          /* Save */
+        { "toggle_playlist", 0xE8FD },       /* BulletedList */
+        { "toggle_always_on_top", 0xE718 },  /* Pin */
+        { "rename_file", 0xE8AC },           /* Rename */
     };
     if (!f) return 0;
     if (rubraview_u8_eq_lit(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */

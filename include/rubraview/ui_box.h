@@ -83,6 +83,7 @@ typedef struct rubraview_tile_metrics {
     double header_height;/* the toolbox's seek-bar row */
     double title_height; /* the toolbox row with the file's name */
     int32_t strip_columns; /* toolbox buttons per row */
+    bool sized;            /* a box's own size is already applied (rubraview_box_metrics) */
 } rubraview_tile_metrics_t;
 
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale);
@@ -101,6 +102,15 @@ typedef struct rubraview_box {
        shifted to stay inside (RFC-0002 §4: ten tiles by a corner). */
     double view_width, view_height;
     bool timeline;               /* toolbox: a seek bar in the header row (a film or music) */
+    /* The box's own size, set with its grip (owner, 2026-09-29): tiles or
+       buttons a row (0: the metrics' own) and their size (1.0 as designed). */
+    int32_t columns;
+    double  scale;
+    /* A grip drag under way: where it started, what the size was, and which
+       way is "outward" (the side away from the grid's middle) on each axis. */
+    bool    grip_active;
+    double  grip_x0, grip_y0, grip_scale0, grip_sx, grip_sy;
+    int32_t grip_columns0;
 } rubraview_box_t;
 
 /*
@@ -116,6 +126,25 @@ typedef struct rubraview_toolbox_layout {
     double buttons_y;
     int32_t columns, rows;
 } rubraview_toolbox_layout_t;
+
+/* ---- A box's own size (owner, 2026-09-29) ---- */
+#define RUBRAVIEW_BOX_SCALE_MIN 0.75
+#define RUBRAVIEW_BOX_SCALE_MAX 2.0
+/** The metrics with the box's columns and scale applied; the anchor keeps its size. */
+rubraview_tile_metrics_t rubraview_box_metrics(const rubraview_box_t *box, const rubraview_tile_metrics_t *base);
+/** Columns and scale kept within what the box can show; 0 columns stays "the default". */
+void rubraview_box_set_size(rubraview_box_t *box, int32_t columns, double scale);
+/**
+ * The grip: a square on the anchor's row, beside the pin, while the box is
+ * open and docked. Pressed there, a drag sizes the box: sideways changes
+ * how many a row, up or down how big they are, pulling away from the box
+ * making it bigger. begin returns false when the point is not on the grip;
+ * drag returns true when the size changed.
+ */
+rubraview_rect_t rubraview_box_grip_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
+bool rubraview_box_grip_begin(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, double px, double py);
+bool rubraview_box_grip_drag(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, double px, double py);
+void rubraview_box_grip_end(rubraview_box_t *box);
 
 rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics_t *metrics, int32_t count, bool timeline);
 rubraview_rect_t rubraview_toolbox_button_rect(const rubraview_toolbox_layout_t *layout,
