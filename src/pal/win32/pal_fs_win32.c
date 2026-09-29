@@ -336,6 +336,93 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     return ok;
 }
 
+/* ---- mapped files that go away (2026-09-29) ----
+   A read from a view whose file has gone (a network drive dropped, a card
+   pulled out) raises EXCEPTION_IN_PAGE_ERROR in whatever thread touched
+   it — a decoder, the tile thread — and nothing there can catch it. The
+   guard below owns only the ranges it was told about: on the first such
+   error it swaps the view for reserved memory at the same addresses, and
+   from then on commits a zero page wherever that memory is touched. The
+   reader gets zeros, decodes nothing, and says the page failed. */
+
+#define GUARDED_MAPS 16
+
+static struct {
+    uintptr_t base;
+    uint64_t size;
+    volatile LONG lost;
+} g_guarded[GUARDED_MAPS];
+static SRWLOCK g_guard_lock = SRWLOCK_INIT;
+static PVOID g_guard_handler;
+
+static LONG CALLBACK mapping_guard(PEXCEPTION_POINTERS info) {
+    DWORD code = info->ExceptionRecord->ExceptionCode;
+    if ((code != EXCEPTION_IN_PAGE_ERROR && code != EXCEPTION_ACCESS_VIOLATION) ||
+        info->ExceptionRecord->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
+    uintptr_t at = (uintptr_t)info->ExceptionRecord->ExceptionInformation[1];
+    for (int i = 0; i < GUARDED_MAPS; ++i) {
+        uintptr_t base = g_guarded[i].base;
+        if (!base || at < base || at - base >= g_guarded[i].size) continue;
+        if (code == EXCEPTION_IN_PAGE_ERROR) {
+            AcquireSRWLockExclusive(&g_guard_lock);
+            if (!g_guarded[i].lost) {
+                UnmapViewOfFile((void*)base);
+                if (!VirtualAlloc((void*)base, (SIZE_T)g_guarded[i].size, MEM_RESERVE, PAGE_READONLY)) {
+                    ReleaseSRWLockExclusive(&g_guard_lock);
+                    return EXCEPTION_CONTINUE_SEARCH;
+                }
+                InterlockedExchange(&g_guarded[i].lost, 1);
+            }
+            ReleaseSRWLockExclusive(&g_guard_lock);
+        } else if (!g_guarded[i].lost) {
+            /* another thread is between the unmap and the reserve */
+            for (int wait = 0; wait < 1000 && !g_guarded[i].lost; ++wait) Sleep(1);
+            if (!g_guarded[i].lost) return EXCEPTION_CONTINUE_SEARCH;
+        }
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        uintptr_t page = at & ~((uintptr_t)si.dwPageSize - 1);
+        if (!VirtualAlloc((void*)page, si.dwPageSize, MEM_COMMIT, PAGE_READONLY)) return EXCEPTION_CONTINUE_SEARCH;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void guard_add(const void *view, uint64_t size) {
+    AcquireSRWLockExclusive(&g_guard_lock);
+    if (!g_guard_handler) g_guard_handler = AddVectoredExceptionHandler(1, mapping_guard);
+    for (int i = 0; i < GUARDED_MAPS; ++i) {
+        if (g_guarded[i].base) continue;
+        g_guarded[i].size = size;
+        g_guarded[i].lost = 0;
+        g_guarded[i].base = (uintptr_t)view;
+        break;
+    }
+    ReleaseSRWLockExclusive(&g_guard_lock);
+}
+
+/* True when the view had been swapped for zeros (it is then freed, not unmapped). */
+static bool guard_remove(const void *view) {
+    bool lost = false;
+    AcquireSRWLockExclusive(&g_guard_lock);
+    for (int i = 0; i < GUARDED_MAPS; ++i) {
+        if (g_guarded[i].base != (uintptr_t)view) continue;
+        lost = g_guarded[i].lost != 0;
+        g_guarded[i].base = 0;
+        break;
+    }
+    ReleaseSRWLockExclusive(&g_guard_lock);
+    return lost;
+}
+
+bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping) {
+    if (!mapping || !mapping->os) return false;
+    for (int i = 0; i < GUARDED_MAPS; ++i) {
+        if (g_guarded[i].base == (uintptr_t)mapping->os) return g_guarded[i].lost != 0;
+    }
+    return false;
+}
+
 bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {
     if (!out) return false;
     *out = (rubraview_fs_mapping_t){0};
@@ -361,11 +448,15 @@ bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {
     out->data = (const uint8_t*)view;
     out->size = (uint64_t)size.QuadPart;
     out->os = (void*)view;
+    guard_add(view, out->size);
     return true;
 }
 
 void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping) {
-    if (mapping && mapping->os) UnmapViewOfFile(mapping->os);
+    if (mapping && mapping->os) {
+        if (guard_remove(mapping->os)) VirtualFree(mapping->os, 0, MEM_RELEASE);   /* the zeros it became */
+        else UnmapViewOfFile(mapping->os);
+    }
     if (mapping) *mapping = (rubraview_fs_mapping_t){0};
 }
 

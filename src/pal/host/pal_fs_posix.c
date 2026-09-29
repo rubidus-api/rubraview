@@ -263,3 +263,8 @@ void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping) {
     munmap(mapping->os, (size_t)mapping->size);
     *mapping = (rubraview_fs_mapping_t){0};
 }
+
+bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping) {
+    (void)mapping;
+    return false;   /* the host build has no drives that go away under it to guard */
+}
