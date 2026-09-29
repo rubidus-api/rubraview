@@ -140,6 +140,13 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
  */
 size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, size_t index);
 
+/* Owner, 2026-09-29: a page far inside a streamed 7z block is read off the
+   main thread. Its cost in bytes to decode first (0 for a folder or ZIP
+   page), and the read's cancel and progress — see rubraview/sevenzip.h. */
+uint64_t rubraview_page_source_read_cost(const rubraview_page_source_t *source, size_t index);
+void rubraview_page_source_cancel(rubraview_page_source_t *source, bool cancel);
+void rubraview_page_source_progress(const rubraview_page_source_t *source, uint64_t *out_done, uint64_t *out_total);
+
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path);
 
 /**

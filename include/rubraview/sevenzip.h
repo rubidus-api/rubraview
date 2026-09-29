@@ -42,6 +42,7 @@ typedef enum rubraview_sz_err {
     RUBRAVIEW_SZ_ERR_TOO_LARGE,         /* the solid block exceeds the caller's cap, §10.2 */
     RUBRAVIEW_SZ_ERR_OUT_OF_MEMORY,
     RUBRAVIEW_SZ_ERR_BAD_INDEX,
+    RUBRAVIEW_SZ_ERR_CANCELLED,         /* rubraview_sz_cancel: the decoder stays where it got to */
 } rubraview_sz_err_t;
 
 typedef struct rubraview_sz_entry {
@@ -90,6 +91,25 @@ typedef struct rubraview_sz_data_result {
                                                                   rubraview_sz_archive_t *archive,
                                                                   size_t entry_index,
                                                                   uint64_t max_entry_bytes);
+
+/**
+ * A far page read off the main thread (owner, 2026-09-29). The bytes that
+ * must be decoded before the entry: 0 when its block is held or the
+ * stream is already there, the block's size when it will be decoded whole,
+ * the distance when it is streamed.
+ */
+uint64_t rubraview_sz_read_cost(const rubraview_sz_archive_t *archive, size_t entry_index);
+
+/*
+ * Call a read off (from any thread), or clear that before the next one.
+ * A cancelled read returns RUBRAVIEW_SZ_ERR_CANCELLED between two 1 MB
+ * chunks; the streamed decoder stays where it got to, so the next read
+ * goes on from there.
+ */
+void rubraview_sz_cancel(rubraview_sz_archive_t *archive, bool cancel);
+
+/* The read in progress (from any thread): bytes decoded of those it needs. */
+void rubraview_sz_progress(const rubraview_sz_archive_t *archive, uint64_t *out_done, uint64_t *out_total);
 
 /** Release the SDK index and the cached block. Safe on a failed open. */
 void rubraview_sz_close(rubraview_sz_archive_t *archive);
