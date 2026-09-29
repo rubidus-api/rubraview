@@ -4327,7 +4327,17 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
             rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
             osd_say(app, U8("the floating boxes are back in their corners"));
             return true;
-        case RUBRAVIEW_TITLEBAR_CAPTION:    rubraview_pal_window_begin_drag(app->window); return true;
+        case RUBRAVIEW_TITLEBAR_RESIZE:     rubraview_pal_window_begin_resize(app->window); return true;
+        case RUBRAVIEW_TITLEBAR_CAPTION:
+            /* A double press maximises or restores, as a system title bar does
+               (owner, 2026-09-29); a single one drags the window. */
+            if (rubraview_titlebar_caption_press(&app->titlebar, rubraview_pal_time_now_seconds(), x, y, 0.5,
+                                                 4.0 * rubraview_pal_window_dpi_scale(app->window))) {
+                rubraview_pal_window_toggle_maximize(app->window);
+            } else {
+                rubraview_pal_window_begin_drag(app->window);
+            }
+            return true;
         default: break;
     }
 
@@ -5362,11 +5372,11 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
         /* The box rescue button was hit-tested but never drawn; now it shows. */
         static const rubraview_titlebar_button_t BUTTONS[] = {
-            RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN,
+            RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN, RUBRAVIEW_TITLEBAR_RESIZE,
             RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE,
             RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_CLOSE,
         };
-        static const char *const GLYPHS[] = { "Box", "Pin", "_", "[]", "[ ]", "X" };
+        static const char *const GLYPHS[] = { "Box", "Pin", "Size", "_", "[]", "[ ]", "X" };
         bool on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
         for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); ++i) {
             rubraview_rect_t r = rubraview_titlebar_button_rect(&app->titlebar, BUTTONS[i], win_w);
@@ -7311,6 +7321,7 @@ static void info_gather(app_state_t *app) {
             if (bytes) {
                 rubraview_exif_info_t exif;
                 if (rubraview_exif_read(bytes, size, &exif)) rubraview_info_add_exif(a, &info, &exif);
+                else rubraview_info_add(a, &info, "EXIF", U8("none in this file"));
             }
             free(mem);
             rubraview_pal_fs_unmap(&map);
@@ -7402,7 +7413,7 @@ static void info_close(app_state_t *app) {
 }
 
 static void info_show(app_state_t *app) {
-    if (app->info_open) { info_close(app); return; }   /* Ctrl+I again puts it away */
+    if (app->info_open) { info_close(app); return; }   /* I or Ctrl+I again puts it away */
     rubraview_window_config_t config = {
         .title = "Rubraview - information", .width = 760, .height = 640, .owner = app->window,
     };
@@ -7572,7 +7583,7 @@ static size_t info_pump(app_state_t *app) {
                     app->info_dirty = true;
                     break;
                 }
-                if (key_is(k, "Escape") || (ctrl && key_is(k, "I"))) { info_close(app); return handled; }
+                if (key_is(k, "Escape") || key_is(k, "I")) { info_close(app); return handled; }
                 if (key_is(k, "Down")) info_scroll_by(app, 1);
                 else if (key_is(k, "Up")) info_scroll_by(app, -1);
                 else if (key_is(k, "PageDown")) info_scroll_by(app, info_visible_rows(app) - 1);

@@ -41,14 +41,14 @@ ships with, so it cannot drift from them.
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
 | `F4` | Filmstrip |
-| `I` | Information bar |
+| `Shift+I` | Information bar |
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
-| `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
+| `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |

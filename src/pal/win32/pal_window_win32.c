@@ -613,6 +613,12 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
         .lpfnWndProc = window_proc,
         .hInstance = instance,
         .hCursor = LoadCursorW(NULL, IDC_ARROW),
+        /* The eye (src/app/rubraview.rc, resource 1): the taskbar, Alt+Tab
+           and the title use it; a build without the resource gets NULL,
+           the system's default. */
+        .hIcon = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE),
+        .hIconSm = (HICON)LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                     GetSystemMetrics(SM_CYSMICON), 0),
         .lpszClassName = RUBRAVIEW_WINDOW_CLASS,
     };
     RegisterClassExW(&wc); /* a duplicate registration is harmless here */
@@ -1113,6 +1119,14 @@ void rubraview_pal_window_begin_drag(rubraview_window_t *window) {
     /* Hand the drag to the OS so Aero Snap keeps working (§3.21.2). */
     ReleaseCapture();
     SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_MOVE | 0x0002, 0);
+}
+
+void rubraview_pal_window_begin_resize(rubraview_window_t *window) {
+    if (!window || !window->hwnd || IsZoomed(window->hwnd)) return;
+    /* SC_SIZE + WMSZ_BOTTOMRIGHT: the system's own sizing loop, as if the
+       corner had been taken, so snapping and the minimum size still hold. */
+    ReleaseCapture();
+    SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_SIZE | WMSZ_BOTTOMRIGHT, 0);
 }
 
 void rubraview_pal_window_minimize(rubraview_window_t *window) {
