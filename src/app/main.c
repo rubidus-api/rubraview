@@ -287,7 +287,6 @@ typedef struct app_state {
     int32_t                ab_edit_field;     /* 0 = A, 1 = B */
     char                   ab_edit_text[2][32];
     size_t                 ab_edit_length[2];
-    bool                   timeline_dragging; /* RFC-0002 §4.2: the pointer holds the seek bar */
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
     bool                   pagebar_dragging, pagebar_detached;
@@ -298,7 +297,6 @@ typedef struct app_state {
     double                 toolbox_window_drawn;
     double                 toolbox_window_pointer_x, toolbox_window_pointer_y;   /* for the hovered button's caption */
     double                 toolbox_window_opacity;
-    double                 timeline_last_seek;/* wall time of the last seek while dragging */
     /* §3.16.1 / R135: the external subtitle file that goes with the
        video on screen. Empty when the film has none. */
     rubraview_subtitle_track_t subtitle;
@@ -4478,15 +4476,9 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
     return false;
 }
 
-/* RFC-0002 §4.2: the timeline strip above the information bar while a
-   video or music page is on screen — elapsed, the seek bar, total, and the
-   volume and speed. It shows with the OSD, and stays while paused. */
-static double timeline_alpha(const app_state_t *app) {
-    if (!app->media) return 0.0;
-    if (app->media_paused || app->timeline_dragging) return 1.0;
-    return rubraview_osd_opacity(&app->osd);
-}
-
+/* Where the timeline strip along the bottom was (RFC-0002 §4.2). The strip
+   is gone — the toolbox's seek bar is the one (owner, 2026-09-29: "툴바에만
+   뜨게") — but the subtitle box still sits above where it was. */
 static void timeline_geometry(const app_state_t *app, double win_w, double win_h,
                               rubraview_pal_rect_t *out_bar, rubraview_pal_rect_t *out_track) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -4497,68 +4489,6 @@ static void timeline_geometry(const app_state_t *app, double win_w, double win_h
     double width = win_w - left - right;
     if (width < 40.0 * dpi) width = 40.0 * dpi;
     *out_track = (rubraview_pal_rect_t){ left, out_bar->y + bar_h * 0.4, width, bar_h * 0.2 };
-}
-
-static bool timeline_hit(const app_state_t *app, double x, double y, rubraview_pal_rect_t *out_track) {
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->window, &w, &h);
-    rubraview_pal_rect_t bar, track;
-    timeline_geometry(app, (double)w, (double)h, &bar, &track);
-    if (out_track) *out_track = track;
-    return timeline_alpha(app) > 0.01 && y >= bar.y && y < bar.y + bar.height &&
-           x >= track.x - 6.0 && x <= track.x + track.width + 6.0;
-}
-
-static void timeline_seek_to_pointer(app_state_t *app, double x) {
-    rubraview_pal_rect_t track;
-    (void)timeline_hit(app, x, 0.0, &track);
-    double seconds = rubraview_seekbar_time(track.x, track.width, x, app->media_info.duration_seconds);
-    media_seek_to(app, seconds);
-    app->media_position = seconds;   /* the strip follows the pointer before the frame arrives */
-    app->timeline_last_seek = rubraview_pal_time_now_seconds();
-    note_activity(app);
-}
-
-static void draw_timeline(app_state_t *app, double win_w, double win_h) {
-    double a = timeline_alpha(app);
-    if (a <= 0.01 || app->media_info.duration_seconds <= 0.0) return;
-    uint32_t alpha = (uint32_t)(a * 255.0) & 0xFFu;
-    rubraview_pal_rect_t bar, track;
-    timeline_geometry(app, win_w, win_h, &bar, &track);
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    rubraview_pal_render_fill_rect(app->renderer, bar, (alpha / 2u) << 24, 0.0);
-    rubraview_pal_render_fill_rect(app->renderer, track, (alpha / 3u) << 24 | 0x00FFFFFFu, 2.0);
-    double duration = app->media_info.duration_seconds;
-    double done = rubraview_seekbar_fraction(app->media_position, duration);
-    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ track.x, track.y, track.width * done, track.height },
-                                   (alpha << 24) | 0x006FA8DCu, 2.0);
-    /* A-B repeat: the section, marked on the bar. */
-    if (app->ab_a >= 0.0) {
-        double ax = track.x + track.width * rubraview_seekbar_fraction(app->ab_a, duration);
-        double bx = app->ab_b > app->ab_a ? track.x + track.width * rubraview_seekbar_fraction(app->ab_b, duration) : ax + 2.0 * dpi;
-        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ ax, bar.y + bar.height * 0.2, bx - ax, bar.height * 0.6 },
-                                       (alpha / 3u) << 24 | 0x00F0C040u, 0.0);
-    }
-    uint32_t text = (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu);
-    char elapsed[32], total[32], right[96];
-    u8str_t e = rubraview_format_timecode(elapsed, sizeof(elapsed), app->media_position, false);
-    u8str_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
-    rubraview_pal_render_draw_text(app->renderer, e, (rubraview_pal_rect_t){ 0.0, bar.y, track.x - 8.0 * dpi, bar.height },
-                                   bar.height * 0.45, text, RUBRAVIEW_TEXT_RIGHT);
-    int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
-    bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
-    double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
-    int n = snprintf(right, sizeof(right), "%.*s   %s %d%%", (int)t.len, t.ptr, muted ? "muted" : "vol", volume);
-    if (n > 0 && fabs(speed - 1.0) > 1e-6 && (size_t)n + 12 < sizeof(right)) {
-        n += snprintf(right + n, sizeof(right) - (size_t)n, "   ");
-        n += speed_text(right + n, sizeof(right) - (size_t)n, speed);
-    }
-    if (app->ab_a >= 0.0 && n > 0 && (size_t)n + 8 < sizeof(right)) n += snprintf(right + n, sizeof(right) - (size_t)n, app->ab_b > app->ab_a ? "   A-B" : "   A-");
-    if (n > 0) {
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = right, .len = (size_t)n },
-                                       (rubraview_pal_rect_t){ track.x + track.width + 8.0 * dpi, bar.y, win_w, bar.height },
-                                       bar.height * 0.45, text, RUBRAVIEW_TEXT_LEFT);
-    }
 }
 
 /* The strip's bar for a still picture: its place in the folder or archive. */
@@ -4618,9 +4548,17 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
-    char place[48];
+    char place[96];
     int n = (pagebar_shown(app) || app->pagebar_dragging) && hovered < 0
         ? snprintf(place, sizeof(place), "%d / %zu", current_page_index(app) + 1, page_count(app)) : 0;
+    if (app->media && !app->pagebar_dragging && hovered < 0 && app->media_info.duration_seconds > 0.0) {
+        /* The film's time, its volume, speed and repeat: once on the bottom
+           strip, which is gone (owner, 2026-09-29). */
+        int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
+        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+        n = (int)rubraview_media_status(place, sizeof(place), app->media_position, app->media_info.duration_seconds,
+                                        volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
+    }
     if (n > 0) {
         /* The place at the right end of the line, the name in what is left. */
         double w = (double)n * l->title.height * 0.45;
@@ -5465,17 +5403,17 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 
     draw_subtitle(app, win_w, win_h);
-    draw_timeline(app, win_w, win_h);
 
     /* OSD (§3.1), skipped once it has faded out entirely. */
     if (rubraview_osd_opacity(&app->osd) > 0.01) {
         int32_t page = current_page_index(app);
         if (page >= 0 && (size_t)page < page_count(app) && app->pages[page].loaded) {
             char line[192];
-            u8str_t name = page_display_name(app, (size_t)page);
-            u8str_t text = rubraview_osd_format(line, sizeof(line), name,
+            /* The name and the position are on the toolbox's line: here only
+               what nothing else shows (owner, 2026-09-29). */
+            u8str_t text = rubraview_osd_format(line, sizeof(line), U8(""),
                                                 picture_w(&app->pages[page]), picture_h(&app->pages[page]),
-                                                app->zoom * 100.0, (size_t)page, page_count(app));
+                                                app->zoom * 100.0, 0, 0);
             static const char REDUCED[] = "  |  shown reduced";
             if (app->pages[page].reduced && text.ptr == line && text.len + sizeof(REDUCED) <= sizeof(line)) {
                 memcpy(line + text.len, REDUCED, sizeof(REDUCED));
@@ -10777,9 +10715,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) pagebar_drag(&app, event.mouse.x, false);
-                    if (app.timeline_dragging && rubraview_pal_time_now_seconds() - app.timeline_last_seek > 0.1) {
-                        timeline_seek_to_pointer(&app, event.mouse.x);   /* a seek every tenth of a second at most */
-                    }
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
                     rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
@@ -10904,12 +10839,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
                         subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
-                    /* RFC-0002 §4.2: the seek bar, before the canvas turns a page. */
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && timeline_hit(&app, event.mouse.x, event.mouse.y, NULL)) {
-                        app.timeline_dragging = true;
-                        timeline_seek_to_pointer(&app, event.mouse.x);
-                        break;
-                    }
                     /* The anchors answer before the rest of the chrome: a
                        press there is a click *or* the start of a drag. */
                     if (box_press(&app, event.mouse.x, event.mouse.y)) break;
@@ -10954,11 +10883,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         if (app.edit.crop.width < 4 || app.edit.crop.height < 4) {
                             app.edit.crop_active = false;
                         }
-                        break;
-                    }
-                    if (app.timeline_dragging) {
-                        app.timeline_dragging = false;
-                        timeline_seek_to_pointer(&app, event.mouse.x);
                         break;
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) {

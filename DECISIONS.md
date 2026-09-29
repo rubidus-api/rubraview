@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-54 The seek bar is the toolbox's only; nothing the toolbox says is said again
+
+- Status: Accepted (owner 2026-09-29: "현재 동영상 재생할 때, 툴바와 화면 아래에 동시에 재생막대가 뜹니다. 툴바에만 뜨게 해 주시고 나머지도 마찬가지로요.")
+- Decision:
+  - The timeline strip along the bottom (RFC-0002 §4.2) is gone, and with it its click and drag; the toolbox's seek bar (and page bar, D-44/D-46) is the one. What only the strip showed moves onto the toolbox's line under its bar, at the right as the page count is: the time and the length, the volume (or "muted"), the speed when it is not 1x, and "A-B" / "A-" while a repeat is set (`rubraview_media_status`).
+  - The status line (`I`) no longer repeats the name and the position, which the toolbox's line carries; it keeps the picture's size, the zoom and "shown reduced" (`rubraview_osd_format` with no name and no count).
+  - The subtitle box still sits, unplaced, above where the strip was.
+- Consequences: with the toolbox closed, the film's time is not on screen (the window's title still carries it). Measured on the Windows 11 VM: a paused film showed no strip at the bottom; the toolbox read `e_clip.mp4   00:10 / 00:10   vol 100%`, the status line `640 x 360 | 100%`.
+
 ## 2026-09-29: D-53 Help text copied, covers for large archives, a folder's summary
 
 - Status: Accepted (owner 2026-09-29: "세개 다 추가." — the three offered after D-52)

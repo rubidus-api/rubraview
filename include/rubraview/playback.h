@@ -88,6 +88,14 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
 u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds);
 
 /**
+ * The film's line in the toolbox (owner, 2026-09-29): "00:02 / 00:10   vol
+ * 100%", then the speed when it is not 1x and "A-B" or "A-" while a repeat
+ * is set (a point below 0 is unset). NUL-terminated.
+ */
+u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+                               int volume, bool muted, double speed, double ab_a, double ab_b);
+
+/**
  * The other way round (owner, 2026-09-24: the A-B points should be
  * settable by typing a time as well as by tapping a key, and the two
  * should cross over freely). Reads what `rubraview_format_timecode`

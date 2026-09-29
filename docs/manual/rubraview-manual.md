@@ -209,10 +209,14 @@ drag the left one to move the box. A box never opens past the window's
 edge. While a box is open, a pin appears beside its anchor: it says
 whether the box stays open when the pointer leaves — click it to switch.
 
-The toolbox is a strip: the seek bar (click to go there) with the file's
-name under it, then small icon buttons — previous and next file, back and
-forward 5 s, play or pause, stop, volume, and so on. Pointing at a button
-puts what it does where the name was.
+The toolbox is a strip: the seek bar (click or drag to go there) with the
+file's name under it, then small icon buttons — previous and next file,
+back and forward 5 s, play or pause, stop, volume, and so on. Pointing at a
+button puts what it does where the name was. For a film or a song the line
+under the bar ends with the time, the volume, the speed and the A-B repeat;
+for a picture, with its place in the folder or archive (`4 / 6`), and the
+bar is a page bar. The seek bar is only in the toolbox; the status line
+(`I`) keeps the picture's size and the zoom.
 
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use
