@@ -505,12 +505,22 @@ typedef struct app_state {
     rubraview_grid_selection_t info_sel;
     bool                       info_selecting;
     char                       info_message[64];
+    /* the folder's summary, kept while the folder stays the same */
+    char                       info_folder[1024];
+    uint64_t                   info_counts[7], info_bytes[7];   /* pictures, films, songs, archives, folders, other, all */
     bool                       help_dirty;
     int32_t                    help_scroll;      /* the first line on screen */
     double                     help_font, help_cell_w, help_cell_h;
     rubraview_help_line_t      help_lines[512];
     size_t                     help_count;
     int32_t                    help_key_cols;    /* the widest key list, so nothing overlaps */
+    /* Its text as rows on the grid it is drawn on, for marking and copying
+       (owner, 2026-09-29), as the settings and information windows do. */
+    char                     (*help_row_text)[256];
+    u8str_t                    help_rows[512];
+    rubraview_grid_selection_t help_sel;
+    bool                       help_selecting;
+    char                       help_message[48];
     int32_t                    help_frame[4];    /* where it was last put */
 
     rubraview_window_t        *settings_window;
@@ -7213,6 +7223,9 @@ static const char *track_kind_name(rubraview_track_kind_t kind) {
     return kind == RUBRAVIEW_TRACK_VIDEO ? "Video" : kind == RUBRAVIEW_TRACK_AUDIO ? "Sound" : "Subtitle";
 }
 
+static void info_folder_summary(app_state_t *app, u8str_t dir);
+static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info_t *info);
+
 /* What there is to say about the page on screen, gathered into rows. */
 static void info_gather(app_state_t *app) {
     if (!app->info_mem) {
@@ -7265,6 +7278,17 @@ static void info_gather(app_state_t *app) {
             rubraview_info_add(a, &info, "Kind", app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z ? U8("7z (CB7)") : U8("ZIP (CBZ)"));
             rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), app->archive_map.size) });
             rubraview_info_addf(a, &info, "Pages", "%zu", page_count(app));
+            /* the book's own summary: its folders and what it holds unpacked */
+            uint64_t unpacked = 0;
+            size_t folders = 0;
+            u8str_t last = { .ptr = "", .len = 0 };
+            for (size_t p = 0; p < page_count(app); ++p) {
+                unpacked += rubraview_page_source_entry_size(&app->source, p);
+                u8str_t dir = rubraview_path_dirname(app->source.pages[p].name);
+                if (dir.len > 0 && !(dir.len == last.len && memcmp(dir.ptr, last.ptr, dir.len) == 0)) { folders++; last = dir; }
+            }
+            if (folders) rubraview_info_addf(a, &info, "Folders inside", "%zu", folders);
+            rubraview_info_add(a, &info, "Pages unpacked", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), unpacked) });
         }
 
         bool film = app->media && app->media_page == index;
@@ -7354,6 +7378,14 @@ static void info_gather(app_state_t *app) {
         }
     }
 
+    /* What the folder holds (the book's folder when a book is open). */
+    if (index >= 0 && (size_t)index < page_count(app)) {
+        u8str_t dir = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER ? rubraview_path_dirname(app->source.archive_path)
+                                                                     : rubraview_path_dirname(app->source.pages[index].path);
+        info_folder_summary(app, dir);
+        info_add_summary(app, a, &info);
+    }
+
     proven_result_mem_mut_t rr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(u8str_t));
     proven_result_mem_mut_t hr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(bool));
     if (!proven_is_ok(rr.err) || !proven_is_ok(hr.err)) { app->info_count = 0; return; }
@@ -7363,6 +7395,53 @@ static void info_gather(app_state_t *app) {
     for (size_t i = 0, r = 0; i < info.count && r < app->info_count; ++i, ++r) app->info_heading[r] = info.lines[i].heading;
     if (app->info_scroll > (int32_t)app->info_count) app->info_scroll = 0;
     app->info_dirty = true;
+}
+
+/* What the folder holds, a kind at a time, listed once per folder (owner,
+   2026-09-29: "폴더 전체 요약"). Its own memory: a folder of a hundred
+   thousand files is a big listing. */
+enum { INFO_PICTURES, INFO_FILMS, INFO_SONGS, INFO_ARCHIVES, INFO_FOLDERS, INFO_OTHER, INFO_ALL };
+
+static void info_folder_summary(app_state_t *app, u8str_t dir) {
+    if (dir.len == 0 || dir.len >= sizeof(app->info_folder)) return;
+    if (strlen(app->info_folder) == dir.len && memcmp(app->info_folder, dir.ptr, dir.len) == 0) return;   /* the same one */
+    memset(app->info_counts, 0, sizeof(app->info_counts));
+    memset(app->info_bytes, 0, sizeof(app->info_bytes));
+    size_t budget = 64u * 1024u * 1024u;
+    void *mem = malloc(budget);
+    if (!mem) return;
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(&scratch, dir);
+    for (size_t i = 0; i < listing.count; ++i) {
+        const rubraview_fs_entry_t *e = &listing.entries[i];
+        int kind = e->is_directory ? INFO_FOLDERS
+                 : rubraview_glob_match_list(e->name, U8(IMAGE_FILTER)) ? INFO_PICTURES
+                 : rubraview_glob_match_list(e->name, U8(ARCHIVE_FILTER)) ? INFO_ARCHIVES
+                 : rubraview_glob_match_list(e->name, U8(MEDIA_FILTER))
+                     ? (rubraview_tags_is_music_name(e->name) ? INFO_SONGS : INFO_FILMS)
+                 : INFO_OTHER;
+        app->info_counts[kind]++;
+        if (!e->is_directory) {
+            app->info_bytes[kind] += e->size_bytes;
+            app->info_bytes[INFO_ALL] += e->size_bytes;
+            app->info_counts[INFO_ALL]++;
+        }
+    }
+    free(mem);
+    memcpy(app->info_folder, dir.ptr, dir.len);
+    app->info_folder[dir.len] = '\0';
+}
+
+static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info_t *info) {
+    static const char *const NAME[] = { "Pictures", "Films", "Songs", "Archives", "Folders", "Other files", "All files" };
+    rubraview_info_heading(a, info, "This folder");
+    char size[96];
+    for (int k = 0; k <= INFO_ALL; ++k) {
+        if (app->info_counts[k] == 0) continue;
+        if (k == INFO_FOLDERS) { rubraview_info_addf(a, info, NAME[k], "%llu", (unsigned long long)app->info_counts[k]); continue; }
+        rubraview_info_bytes(size, sizeof(size), app->info_bytes[k]);
+        rubraview_info_addf(a, info, NAME[k], "%llu, %s", (unsigned long long)app->info_counts[k], size);
+    }
 }
 
 /* Which page and which film the rows are of: gathered again when it changes. */
@@ -7595,6 +7674,24 @@ static void help_rebuild(app_state_t *app) {
     app->help_key_cols = (int32_t)widest + 4;
     if (app->help_key_cols < 20) app->help_key_cols = 20;
     if (app->help_key_cols > 48) app->help_key_cols = 48;
+    /* The rows as drawn: two cells in, the keys, the text from its column. */
+    if (!app->help_row_text) app->help_row_text = (char (*)[256])calloc(512, 256);
+    for (size_t i = 0; i < app->help_count && app->help_row_text; ++i) {
+        const rubraview_help_line_t *l = &app->help_lines[i];
+        char *row = app->help_row_text[i];
+        int n = 0;
+        if (l->kind == RUBRAVIEW_HELP_ENTRY) {
+            int pad = app->help_key_cols - 2 - (int)l->keys.len;
+            n = snprintf(row, 256, "  %.*s%*s%.*s", (int)l->keys.len, l->keys.ptr, pad > 1 ? pad : 1, "",
+                         (int)l->text.len, l->text.ptr);
+        } else if (l->kind != RUBRAVIEW_HELP_BLANK) {
+            n = snprintf(row, 256, "  %.*s", (int)l->text.len, l->text.ptr);
+        }
+        if (n < 0) n = 0;
+        if (n > 255) n = 255;
+        app->help_rows[i] = (u8str_t){ .ptr = row, .len = (size_t)n };
+    }
+    app->help_sel.active = false;
     app->help_dirty = true;
 }
 
@@ -7675,6 +7772,12 @@ static void draw_help_window(app_state_t *app) {
         if (index >= app->help_count) break;
         const rubraview_help_line_t *line = &app->help_lines[index];
         double y = ch * (double)row;
+        int32_t c0 = 0, c1 = 0;
+        if (rubraview_grid_selection_row(&app->help_sel, (int32_t)index, &c0, &c1)) {
+            int32_t last = (int32_t)((double)w / cw);
+            if (c1 > last) c1 = last;
+            if (c1 >= c0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * c0, y, cw * (c1 - c0 + 1), ch }, 0x704A90D9u, 0.0);
+        }
         switch (line->kind) {
             case RUBRAVIEW_HELP_HEADING:
                 rubraview_pal_render_draw_text_mono(r, line->text, keys_col, y, fs, HELP_HEADING);
@@ -7697,8 +7800,8 @@ static void draw_help_window(app_state_t *app) {
 
     /* The bottom line says how to move and how to leave. */
     char foot[128];
-    int written = snprintf(foot, sizeof(foot), " %zu keys   |   wheel or PageUp/PageDown scrolls   |   F1 or Esc closes",
-                           app->help_count);
+    int written = snprintf(foot, sizeof(foot), " %s%s%zu keys   |   drag to mark, Ctrl+C copies   |   F1 or Esc closes",
+                           app->help_message, app->help_message[0] ? "   |   " : "", app->help_count);
     if (written > 0) {
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
                                        0xFF1E1E1Eu, 0.0);
@@ -7731,8 +7834,54 @@ static size_t help_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 help_scroll_by(app, (int32_t)(-event.mouse.wheel_delta * 3.0));
                 break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP: {
+                /* A drag marks the text, as in the settings and information windows. */
+                int32_t col = (int32_t)(event.mouse.x / app->help_cell_w);
+                int32_t row = app->help_scroll + (int32_t)(event.mouse.y / app->help_cell_h);
+                if (row >= (int32_t)app->help_count) row = app->help_count ? (int32_t)app->help_count - 1 : 0;
+                if (row < 0) row = 0;
+                if (col < 0) col = 0;
+                if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN && event.mouse.button == RUBRAVIEW_MOUSE_LEFT) {
+                    app->help_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
+                    app->help_selecting = true;
+                    app->help_message[0] = '\0';
+                } else if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE && app->help_selecting) {
+                    app->help_sel.end_row = row;
+                    app->help_sel.end_col = col;
+                } else if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP && app->help_selecting) {
+                    app->help_selecting = false;
+                    if (app->help_sel.anchor_row == app->help_sel.end_row && app->help_sel.anchor_col == app->help_sel.end_col) {
+                        app->help_sel.active = false;
+                    }
+                } else {
+                    break;
+                }
+                app->help_dirty = true;
+                break;
+            }
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
                 rubraview_key_combo_t combo = event.key.combo;
+                bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+                if (ctrl && key_is(combo, "A")) {
+                    app->help_sel = (rubraview_grid_selection_t){ true, 0, 0, (int32_t)app->help_count, INT32_MAX / 2 };
+                    app->help_dirty = true;
+                    break;
+                }
+                if (ctrl && key_is(combo, "C")) {
+                    char *text = (char*)malloc(131072);
+                    if (!text) break;
+                    rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->help_count, INT32_MAX / 2 };
+                    size_t n = rubraview_grid_selection_copy(app->help_sel.active ? &app->help_sel : &all,
+                                                             app->help_rows, (int32_t)app->help_count, text, 131072);
+                    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->help_window, (u8str_t){ .ptr = text, .len = n });
+                    snprintf(app->help_message, sizeof(app->help_message), "%s",
+                             ok ? (app->help_sel.active ? "copied" : "copied everything") : "nothing to copy");
+                    free(text);
+                    app->help_dirty = true;
+                    break;
+                }
                 if (key_is(combo, "Escape") || key_is(combo, "F1")) { help_close(app); return handled; }
                 else if (key_is(combo, "Down")) help_scroll_by(app, 1);
                 else if (key_is(combo, "Up")) help_scroll_by(app, -1);

@@ -38,11 +38,9 @@ static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F,
 
 /* Owner, 2026-09-25: an archive's first page within a time limit, given up
    when the reading looks too slow to finish in it. */
-#define ARCHIVE_SECONDS 1.5
-#define ARCHIVE_MAX_FILE (2ull << 30)          /* a bigger one is not tried */
-#define ARCHIVE_7Z_MAX_FILE (24u << 20)        /* solid: its first page may need all of it */
+#define ARCHIVE_7Z_MAX_FILE (24u << 20)        /* a solid block past this is streamed, not held */
 #define ARCHIVE_MAX_ENTRY (24u << 20)
-#define ARCHIVE_CHUNK (1u << 20)
+#define ARCHIVE_MAX_COST (64u << 20)           /* bytes decoded before the first page, at most */
 
 struct rubraview_thumbs {
     SRWLOCK lock;
@@ -162,117 +160,33 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
     return result;
 }
 
-/* ---- an archive's first page, read in pieces under a time limit ---- */
-
-typedef struct timed_reader {
-    HANDLE file;
-    double started;
-    uint64_t done;       /* bytes read so far, all pieces together */
-} timed_reader_t;
-
-/* Reads [offset, offset + length) into `buffer + offset`, a megabyte at a
-   time, giving up as soon as the whole plan (`planned` bytes) could not be
-   finished within ARCHIVE_SECONDS at the speed seen so far. */
-static bool timed_read(timed_reader_t *r, uint8_t *buffer, uint64_t offset, uint64_t length, uint64_t planned) {
-    uint64_t end = offset + length;
-    while (offset < end) {
-        double elapsed = rubraview_pal_time_now_seconds() - r->started;
-        if (!rubraview_read_budget_ok(r->done, planned, elapsed, ARCHIVE_SECONDS)) return false;
-        DWORD want = (DWORD)(end - offset < ARCHIVE_CHUNK ? end - offset : ARCHIVE_CHUNK);
-        LARGE_INTEGER at;
-        at.QuadPart = (LONGLONG)offset;
-        DWORD got = 0;
-        if (!SetFilePointerEx(r->file, at, NULL, FILE_BEGIN) ||
-            !ReadFile(r->file, buffer + offset, want, &got, NULL) || got == 0) {
-            return false;
-        }
-        offset += got;
-        r->done += got;
-    }
-    return true;
-}
-
-static HANDLE open_utf8(u8str_t path) {
-    char narrow[MAX_PATH * 4];
-    WCHAR wide[MAX_PATH * 2];
-    if (path.len == 0 || path.len >= sizeof(narrow)) return INVALID_HANDLE_VALUE;
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0) return INVALID_HANDLE_VALUE;
-    return CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                       OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-}
-
-/*
- * The file gets a zero-filled buffer of its own size (committed memory the
- * system backs only where it is written), and only the pieces a reader
- * needs are read into it: for a ZIP the directory at the end and then the
- * first page's entry; a 7z, being solid, whole and only when small. The
- * page-source code then reads it as if it were all there — an entry that
- * was not read has no local header and is refused (test_archive).
- */
+/* ---- an archive's first page ----
+   Mapped (owner, 2026-09-29): its index is read where it lies and only the
+   first page's bytes are touched, so a book of several GB gets its cover
+   as quickly as a small one. It used to be read in timed pieces into a
+   buffer committed at the archive's whole size, which a large book did
+   not finish within 1.5 s — or could not even commit. A first page that
+   needs more than ARCHIVE_MAX_COST decoded before it (deep in a solid 7z
+   block) is let go, so one book cannot hold the queue up. */
 static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *factory, u8str_t path,
                                    u8str_t picture_filter, int32_t *out_w, int32_t *out_h) {
     uint8_t *result = NULL;
-    HANDLE file = open_utf8(path);
-    if (file == INVALID_HANDLE_VALUE) return NULL;
-    LARGE_INTEGER size_li;
-    uint8_t *buffer = NULL;
-    uint64_t size = 0;
-    bool seven = rubraview_path_has_ext(path, ".7z") || rubraview_path_has_ext(path, ".cb7");
-    if (!GetFileSizeEx(file, &size_li) || size_li.QuadPart <= 0) goto done;
-    size = (uint64_t)size_li.QuadPart;
-    if (size > ARCHIVE_MAX_FILE || (seven && size > ARCHIVE_7Z_MAX_FILE)) goto done;
-    buffer = (uint8_t*)VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!buffer) goto done;
-
-    timed_reader_t reader = { .file = file, .started = rubraview_pal_time_now_seconds() };
-    if (seven) {
-        if (!timed_read(&reader, buffer, 0, size, size)) goto done;
-    } else {
-        /* The end: the EOCD sits in the last 22 + 65535 bytes. */
-        uint64_t tail = size < 65557u ? size : 65557u;
-        if (!timed_read(&reader, buffer, size - tail, tail, tail)) goto done;
-        uint64_t cd_offset = 0, cd_size = 0;
-        if (!rubraview_zip_locate_directory(buffer + (size - tail), (size_t)tail, size, &cd_offset, &cd_size)) goto done;
-        uint64_t have_from = size - tail;
-        if (cd_offset < have_from &&
-            !timed_read(&reader, buffer, cd_offset, have_from - cd_offset, reader.done + (have_from - cd_offset))) {
-            goto done;
-        }
-    }
-
-    rubraview_page_source_t source = rubraview_page_source_from_archive(
-        scratch, buffer, (size_t)size, path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO, ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
-    if (source.page_count > 0) {
-        bool ready = true;
-        if (!seven && source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE) {
-            /* The first page's entry: its local header, then the rest. */
-            size_t entry = source.pages[0].entry_index;
-            if (entry < source.archive.entry_count) {
-                const rubraview_zip_entry_t *e = &source.archive.entries[entry];
-                uint64_t at = e->local_header_offset, span = 0;
-                ready = e->compressed_size <= ARCHIVE_MAX_ENTRY && at + 30 <= size &&
-                        timed_read(&reader, buffer, at, 30, reader.done + 30 + e->compressed_size) &&
-                        rubraview_zip_local_span(buffer + at, e->compressed_size, &span) && at + span <= size &&
-                        timed_read(&reader, buffer, at + 30, span - 30, reader.done + (span - 30));
-            } else {
-                ready = false;
-            }
-        }
-        if (ready && rubraview_pal_time_now_seconds() - reader.started < ARCHIVE_SECONDS) {
+    rubraview_fs_mapping_t map = {0};
+    if (!rubraview_pal_fs_map(path, &map)) return NULL;
+    if (map.size <= (uint64_t)SIZE_MAX) {
+        rubraview_page_source_t source = rubraview_page_source_from_archive(
+            scratch, map.data, (size_t)map.size, path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
+            ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
+        if (source.page_count > 0 && rubraview_page_source_read_cost(&source, 0) <= ARCHIVE_MAX_COST) {
             rubraview_page_bytes_t page = rubraview_page_source_read(scratch, &source, 0, ARCHIVE_MAX_ENTRY);
             if (page.ok && page.data.len > 0) {
                 result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.len,
                                            THUMB_DECODE_SIDE, out_w, out_h);
             }
         }
+        rubraview_page_source_close(&source);
     }
-    rubraview_page_source_close(&source);
-
-done:
-    if (buffer) VirtualFree(buffer, 0, MEM_RELEASE);
-    CloseHandle(file);
+    rubraview_pal_fs_unmap(&map);
     return result;
 }
 
