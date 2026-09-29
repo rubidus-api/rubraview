@@ -7,6 +7,7 @@
 #include <d3d11_4.h>   /* ID3D11Multithread (RV-062) */
 #include <dxgi1_2.h>
 #include <dwrite.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -117,9 +118,10 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
     if (tex) {
         renderer->free_textures = tex->next_free;
     } else {
-        proven_result_mem_mut_t res = proven_arena_alloc(renderer->arena, sizeof(struct rubraview_texture));
-        if (!proven_is_ok(res.err)) return NULL;
-        tex = (struct rubraview_texture*)(void*)res.value.ptr;
+        /* Its own memory, recycled through the free list: the arena the
+           renderer was made with may fill and be left behind (2026-09-29). */
+        tex = (struct rubraview_texture*)calloc(1, sizeof(struct rubraview_texture));
+        if (!tex) return NULL;
     }
 
     /* The size comes from the caller, not from GetPixelSize — see the
