@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-29: D-52 Inside a book: thumbnails, entering one unread, and a drive that goes away
+
+- Status: Accepted (owner 2026-09-29: "다음작업들 추천 순서대로 진행해 주세요" — the backlog left by D-47, in the order recommended)
+- Decision:
+  - Pages inside a book get thumbnails in the picker: the main thread reads the page (three a pass, never a page far inside a streamed 7z block) and hands a copy of its bytes to the thumbnail thread, which decodes it small. The queue owns those bytes and frees them however a request goes (`rubraview_thumbq_push_bytes`).
+  - A right-click on an archive in the picker, or Shift+Enter, opens the book and keeps the picker at its top, to choose where to start; a plain tap still opens it for reading.
+  - A mapped file whose drive goes away (a network drive, a card pulled out) no longer takes the viewer down: a vectored exception handler watching only the mapped ranges swaps a view that raised an in-page error for reserved memory at the same addresses and commits a zero page wherever it is read; the page fails and the viewer says "the archive is no longer there".
+- Consequences: measured on the Windows 11 VM: thumbnails appeared for `big.cbz`'s pages; a right-click on `big.cb7` showed its Vol 1-3 without reading. The drive going away could not be made to happen there: a loopback share removed under an open archive (sessions closed) did not stop reads — the build before this survived it as well — so the guard is built and harmless but not measured.
+
 ## 2026-09-29: D-51 The file's information in a window of its own, its text marked and copied
 
 - Status: Accepted (owner 2026-09-29: "지금 재생중인 파일의 용량/픽셀단위크기/코덱/EXIF/기타 자세한 정보를 보여주는 기능도 만들어 주세요. 있으면 잘 다듬어 주시고요. 나와있는 정보는 드래그해서 텍스트로 원하는 부분만 복사해 갈 수있어야 해요." — there was none; the `I` status line was all)

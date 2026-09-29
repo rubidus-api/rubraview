@@ -806,6 +806,10 @@ static app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool 
     }
     page_take_bytes(app, page, (size_t)index, bytes);
     free(mem);
+    if (rubraview_pal_fs_mapping_lost(&app->archive_map)) {
+        page->failed = !page->loaded;
+        osd_say(app, U8("the archive is no longer there (its drive went away)"));
+    }
     return page;
 }
 
@@ -2380,6 +2384,7 @@ static void picker_thumbs_step(app_state_t *app) {
     /* The newest request is made first, so the last tile on screen is asked
        for first and the first one last: they fill in from the top. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
+    int book_reads = 0;
     for (size_t k = visible.count; k-- > 0;) {
         size_t index = visible.first + k;
         if (index >= app->picker_thumb_count || index >= app->picker_listing.count) continue;
@@ -2390,7 +2395,29 @@ static void picker_thumbs_step(app_state_t *app) {
         /* A drive's first picture is not looked for: an empty reader or a
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
-        if (app->picker_in_book) { t->state = 2; continue; }   /* a page in the book has no file to ask about */
+        if (app->picker_in_book) {
+            /* A page in the book has no file to ask about: its bytes go to
+               the thread instead (owner, 2026-09-29) — three a pass, so the
+               picker keeps moving, and never a page far inside a streamed
+               7z block. */
+            size_t page = app->picker_page_of && index >= app->picker_page_skip
+                ? app->picker_page_of[index - app->picker_page_skip] : RUBRAVIEW_PICKER_NOT_A_PAGE;
+            if (entry->is_directory || page == RUBRAVIEW_PICKER_NOT_A_PAGE || page >= page_count(app) ||
+                page_read_cost(app, page) > PAGE_JOB_MIN_COST) { t->state = 2; continue; }
+            if (book_reads >= 3) continue;   /* the next pass */
+            book_reads++;
+            void *mem = NULL;
+            rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, page, &mem);
+            uint8_t *copy = pb.ok && pb.data.len > 0 ? (uint8_t*)malloc(pb.data.len) : NULL;
+            if (copy) memcpy(copy, pb.data.ptr, pb.data.len);
+            free(mem);
+            if (copy && rubraview_pal_thumbs_request_bytes(app->thumbs, app->picker_generation, index, tw / th, copy, pb.data.len)) {
+                t->state = 3;
+            } else {
+                t->state = 2;
+            }
+            continue;
+        }
         /* Asked again while waiting, it moves to the front of the queue. */
         if (rubraview_pal_thumbs_request(app->thumbs, app->picker_generation, index, entry->is_directory,
                                          tw / th, entry->path)) {
@@ -2798,6 +2825,21 @@ static void picker_open(app_state_t *app) {
             break;
         }
     }
+}
+
+/* Into an archive without reading it first (right-click, or Shift+Enter;
+   owner, 2026-09-29): the book is opened — cheap now that it is mapped —
+   and the picker stays, at the book's top, to choose where to start. */
+static bool picker_enter_book(app_state_t *app, size_t index) {
+    if (index >= app->picker_listing.count) return false;
+    const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+    if (entry->is_directory || !rubraview_glob_match_list(entry->name, U8(ARCHIVE_FILTER))) return false;
+    open_path(app, entry->path);
+    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len == 0) return false;
+    picker_navigate(app, app->source.archive_path);
+    app->picker.focus = 0;
+    app->picker_open = true;
+    return true;
 }
 
 /* Activating a tile enters a folder or opens a file. */
@@ -3579,6 +3621,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         return true;
     }
     if (combo.key_name.len == 5 && memcmp(combo.key_name.ptr, "Enter", 5) == 0) {
+        if ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && picker_enter_book(app, app->picker.focus)) return true;
         picker_activate(app, app->picker.focus);
         return true;
     }
@@ -10673,6 +10716,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         size_t index = row * PICKER_COLUMNS + column;
                         if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
                             app.picker.focus = index;
+                            /* Right-click on an archive: inside it, not reading it yet. */
+                            if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT && picker_enter_book(&app, index)) break;
                             /* In a picking mode the tap picks; otherwise it opens. */
                             /* In a book a tap always goes to the page, whatever mode was left on outside it. */
                             if (app.picker_in_book || !rubraview_picker_tap(&app.picker, index)) picker_activate(&app, index);

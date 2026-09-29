@@ -287,7 +287,10 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     int32_t w = 0, h = 0;
     uint8_t *raw = NULL;
 
-    if (job->folder) {
+    if (job->bytes) {
+        /* a page inside a book: decoded small from its bytes */
+        raw = decode_small_bgra(factory, job->bytes, job->bytes_len, THUMB_DECODE_SIDE, &w, &h);
+    } else if (job->folder) {
         /* Its first picture in the order it would open, else its first film;
            when the shell has nothing for one, the next — three at most, so
            a folder of odd files does not hold the queue up. */
@@ -354,6 +357,7 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
                                                                              .size = THUMB_SCRATCH_BYTES });
             result.bgra = make_one(t, &scratch, factory, &job, &result.width, &result.height);
         }
+        free(job.bytes);   /* taken: the thread's */
 
         AcquireSRWLockExclusive(&t->lock);
         t->working = false;
@@ -414,6 +418,7 @@ void rubraview_pal_thumbs_stop(rubraview_thumbs_t *t) {
     if (WaitForSingleObject(t->thread, 3000) == WAIT_OBJECT_0) {
         CloseHandle(t->thread);
         for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
+        rubraview_thumbq_set_generation(&t->queue, t->queue.generation + 1);   /* frees what is still queued */
         free(t);
     }
     /* Otherwise the thread still holds `t`; it is left, not freed under it. */
@@ -433,6 +438,16 @@ bool rubraview_pal_thumbs_request(rubraview_thumbs_t *t, uint32_t generation, si
     if (!t) return false;
     AcquireSRWLockExclusive(&t->lock);
     bool ok = rubraview_thumbq_push(&t->queue, generation, index, folder, aspect, path);
+    ReleaseSRWLockExclusive(&t->lock);
+    if (ok) WakeConditionVariable(&t->wake_worker);
+    return ok;
+}
+
+bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *t, uint32_t generation, size_t index,
+                                        double aspect, uint8_t *bytes, size_t len) {
+    if (!t) { free(bytes); return false; }
+    AcquireSRWLockExclusive(&t->lock);
+    bool ok = rubraview_thumbq_push_bytes(&t->queue, generation, index, aspect, bytes, len);
     ReleaseSRWLockExclusive(&t->lock);
     if (ok) WakeConditionVariable(&t->wake_worker);
     return ok;

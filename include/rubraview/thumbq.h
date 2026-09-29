@@ -29,6 +29,8 @@ typedef struct rubraview_thumb_job {
     double   aspect;           /* the tile's width / height */
     size_t   path_len;
     char     path[RUBRAVIEW_THUMBQ_PATH];   /* UTF-8, not NUL-terminated beyond path_len */
+    uint8_t *bytes;            /* a page inside a book: its bytes (malloc), the queue's until taken */
+    size_t   bytes_len;
 } rubraview_thumb_job_t;
 
 typedef struct rubraview_thumbq {
@@ -40,6 +42,12 @@ typedef struct rubraview_thumbq {
 /* False when refused: another generation, a path too long, or no storage. */
 bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t index, bool folder,
                            double aspect, u8str_t path);
+
+/* A picture given as bytes (a page inside a book, which has no file).
+   The queue owns `bytes` from here: it frees them if it refuses the
+   request or drops it later; a take hands them to the taker. */
+bool rubraview_thumbq_push_bytes(rubraview_thumbq_t *q, uint32_t generation, size_t index,
+                                 double aspect, uint8_t *bytes, size_t len);
 
 /* The newest request, removed from the queue; false when there is none. */
 bool rubraview_thumbq_take(rubraview_thumbq_t *q, rubraview_thumb_job_t *out);

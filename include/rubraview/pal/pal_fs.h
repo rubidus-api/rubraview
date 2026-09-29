@@ -75,6 +75,13 @@ typedef struct rubraview_fs_mapping {
 bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out);
 void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping);
 
+/*
+ * The file behind a mapping went away while mapped (a network drive, a
+ * card pulled out): its reads now give zeros instead of taking the
+ * viewer down, and this says so (2026-09-29).
+ */
+bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping);
+
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
 

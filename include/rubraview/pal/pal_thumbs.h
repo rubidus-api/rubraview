@@ -42,6 +42,10 @@ void rubraview_pal_thumbs_stop(rubraview_thumbs_t *thumbs);
 
 /* A new listing: queued requests and unread results of the old one go. */
 void rubraview_pal_thumbs_generation(rubraview_thumbs_t *thumbs, uint32_t generation);
+/* A page inside a book (owner, 2026-09-29): its bytes, owned by the thread
+   from here — freed if the request is refused or dropped. */
+bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
+                                        double aspect, uint8_t *bytes, size_t len);
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
                                   bool folder, double aspect, u8str_t path);
 /* A finished one of the current generation, or false. */
