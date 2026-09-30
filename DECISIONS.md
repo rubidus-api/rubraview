@@ -175,6 +175,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-30: D-60 Folders typed in the settings window; favourites renamed and moved
+
+- Status: Accepted (owner 2026-09-30: "경로 직접 입력 가능하게. 반대로 현재 경로를 편집 가능한 에디트 컨트롤에 넣어서 복사해갈 수도 있게. 즐겨찾기 이름 바꾸기와 순서 바꾸기도 구현.")
+- Decision:
+  - A path setting (the numbered folders) opens, on `Enter` or a click, a text box over its row with the path in it, all of it selected: typing replaces it, the editing keys and `Ctrl+A/C/X/V` work as in the rename box (the key code is now one `textbox_key` for both), `Ctrl+O` browses into the box, `Enter` keeps a folder that exists (quotes from Explorer's "Copy as path" are taken off; empty clears), `Esc` or a click elsewhere leaves the setting alone. The picker's path box already did this for the folder on screen (D-42).
+  - Favourites carry an optional `name` in their `favorites.ini` section (`rubraview_favorites_title/rename/move`): a right-click on a favourite chip opens the rename box with its title; a left press opens it on release, or, dragged 6 px or more, moves it where it is let go, with a bar showing where.
+- Consequences: measured on the Windows 11 VM: a favourite dragged from the third place to the first was written first; a right-click, `tunes`, `Enter` wrote `name = "tunes"` and the chip read `tunes`; in Settings › Files, Folder 1's path copied with `Ctrl+C`, pasted into Folder 2, edited to `rbinfo` and kept; a path that is not a folder said so and kept the box open. The VM's own `settings.ini` and `favorites.ini` were put back afterwards. Not measured: `Ctrl+O` in the box, typing Hangul there.
+
 ## 2026-09-30: D-59 A card that refuses a picture is simulated to run the halving
 
 - Status: Accepted (owner 2026-09-30: "백로그 있나요. 안한 것 있으면 진행 바람." — the halving had been left open since D-39 because no machine here refuses a bitmap)

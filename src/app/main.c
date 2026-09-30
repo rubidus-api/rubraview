@@ -466,7 +466,20 @@ typedef struct app_state {
     SRWLOCK                source_lock;/* held around every read of the page source */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
+    int32_t                rename_favorite;       /* the box renames this favourite, or -1 (owner, 2026-09-30) */
+    /* A favourite chip pressed: opened on release, or dragged to a new place. */
+    int32_t                fav_press;
+    double                 fav_press_x, fav_drag_x;
+    bool                   fav_dragging;
     char                   rename_buffer[1024];
+    /* A folder typed in the settings window (owner, 2026-09-30): the box
+       over the focused path row, its setting, and an unfinished IME syllable. */
+    bool                   spath_active;
+    rubraview_textedit_t   spath_edit;
+    char                   spath_buffer[1024];
+    char                   spath_composing[64];
+    size_t                 spath_composing_length;
+    u8str_t                spath_section, spath_key;
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
@@ -667,6 +680,7 @@ static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
+static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
 static void media_ab_check(app_state_t *app);
@@ -2181,7 +2195,7 @@ typedef struct picker_bar_item { u8str_t label, path; bool favorite; } picker_ba
 
 static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out) {
     if (index < app->favorites.count) {
-        *out = (picker_bar_item_t){ rubraview_favorites_label(app->favorites.paths[index]),
+        *out = (picker_bar_item_t){ rubraview_favorites_title(&app->favorites, index),
                                     app->favorites.paths[index], true };
         return true;
     }
@@ -2211,6 +2225,74 @@ static void picker_toggle_favorite(app_state_t *app) {
     if (app->favorites_path.len > 0 &&
         !rubraview_pal_fs_write_file(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites))) {
         osd_say(app, U8("could not write favorites.ini"));
+    }
+}
+
+static void favorites_save(app_state_t *app) {
+    if (app->favorites_path.len > 0 &&
+        !rubraview_pal_fs_write_file(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites))) {
+        osd_say(app, U8("could not write favorites.ini"));
+    }
+}
+
+/* Where the bar's chip `index` is, as drawn: false past the window's edge. */
+static bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w) {
+    double x = 8.0 * dpi;
+    picker_bar_item_t item;
+    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
+        double w = picker_chip_width(item.label, dpi);
+        if (!item.favorite && i == app->favorites.count && i > 0) x += 10.0 * dpi;
+        if (x + w > win_w) return false;
+        if (i == index) { *out_x = x; *out_w = w; return true; }
+        x += w + 6.0 * dpi;
+    }
+    return false;
+}
+
+/* The favourite a drag let go at `x` goes to: the one whose middle it passed. */
+static size_t favorite_drop_index(const app_state_t *app, double x, double dpi, double win_w) {
+    size_t to = 0;
+    for (size_t i = 0; i < app->favorites.count; ++i) {
+        double cx = 0.0, cw = 0.0;
+        if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) break;
+        if (x >= cx + cw * 0.5) to = i;
+    }
+    if (app->fav_press >= 0 && (size_t)app->fav_press > to) {
+        /* moving left: before the first chip whose middle is past x */
+        to = app->favorites.count - 1;
+        for (size_t i = 0; i < app->favorites.count; ++i) {
+            double cx = 0.0, cw = 0.0;
+            if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) break;
+            if (x < cx + cw * 0.5) { to = i; break; }
+        }
+    }
+    return to;
+}
+
+/* A right press on a favourite (owner, 2026-09-30): the rename box with its name, all of it chosen. */
+static void favorite_rename_begin(app_state_t *app, size_t index) {
+    if (index >= app->favorites.count || app->rename_active) return;
+    u8str_t now = rubraview_favorites_title(&app->favorites, index);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, now.len < sizeof(app->rename_buffer) ? now : U8(""));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_favorite = (int32_t)index;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, U8("a name for this favourite; empty gives the folder's name back"));
+}
+
+static void rename_insert(app_state_t *app, u8str_t text);
+static void rename_end(app_state_t *app);
+static void favorite_rename_commit(app_state_t *app) {
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    size_t index = (size_t)app->rename_favorite;
+    u8str_t name = app_keep(app, rubraview_textedit_text(&app->rename_edit));
+    rename_end(app);
+    if (rubraview_favorites_rename(&app->favorites, index, name)) {
+        favorites_save(app);
+        osd_say(app, U8("favourite renamed"));
     }
 }
 #define PICKER_ACTION_HEIGHT 96.0   /* two rows: the buttons, then what is picked */
@@ -3789,10 +3871,19 @@ static void rename_insert(app_state_t *app, u8str_t text) {
     (void)rubraview_textedit_insert(&app->rename_edit, (u8str_t){ .ptr = clean, .len = length });
 }
 
-/* The editing keys of the rename box. The characters themselves come as
-   text; these are the keys that move, select, delete and use the clipboard. */
-static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
-    rubraview_textedit_t *te = &app->rename_edit;
+/* Text for a box: whole UTF-8 characters, no control characters. */
+static void textbox_insert(rubraview_textedit_t *te, u8str_t text) {
+    if (text.len == 0) return;
+    char clean[1024];
+    size_t length = 0;
+    (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
+    (void)rubraview_textedit_insert(te, (u8str_t){ .ptr = clean, .len = length });
+}
+
+/* The editing keys of a text box (the rename box, the picker's path, the
+   settings window's folders). The characters themselves come as text;
+   these move, select, delete and use the clipboard of `window`. */
+static bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo) {
     bool shift = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
     bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
     if (key_is(combo, "Backspace")) {
@@ -3814,17 +3905,21 @@ static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
         rubraview_textedit_select_all(te);
     } else if (ctrl && (key_is(combo, "C") || key_is(combo, "X"))) {
         u8str_t chosen = rubraview_textedit_selection(te);
-        if (chosen.len > 0 && rubraview_pal_clipboard_set_text(app->window, chosen) && key_is(combo, "X")) {
+        if (chosen.len > 0 && rubraview_pal_clipboard_set_text(window, chosen) && key_is(combo, "X")) {
             rubraview_textedit_backspace(te);   /* removes the selection */
         }
     } else if (ctrl && key_is(combo, "V")) {
-        char pasted[sizeof(app->rename_buffer)];
-        size_t n = rubraview_pal_clipboard_get_text(app->window, pasted, sizeof(pasted));
-        rename_insert(app, (u8str_t){ .ptr = pasted, .len = n });
+        char pasted[1024];
+        size_t n = rubraview_pal_clipboard_get_text(window, pasted, sizeof(pasted));
+        textbox_insert(te, (u8str_t){ .ptr = pasted, .len = n });
     } else {
         return false;
     }
     return true;
+}
+
+static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
+    return textbox_key(app->window, &app->rename_edit, combo);
 }
 
 /* Everything §3.18 puts in front of the reader answers the next key
@@ -5034,7 +5129,20 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_stroke_rect(app->renderer, chip, item.favorite ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 2.0);
         rubraview_pal_render_draw_text(app->renderer, item.label, chip,
                                        crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (app->fav_dragging && (int32_t)i == app->fav_press) {
+            rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_TILE_CURRENT, 2.0, 2.0);
+        }
         place_x += w + 6.0 * dpi;
+    }
+    /* A favourite being dragged: a bar where it would land. */
+    if (app->fav_dragging && app->fav_press >= 0) {
+        size_t to = favorite_drop_index(app, app->fav_drag_x, dpi, win_w);
+        double cx = 0.0, cw = 0.0;
+        if (picker_chip_span(app, to, dpi, win_w, &cx, &cw)) {
+            double bx = to > (size_t)app->fav_press ? cx + cw + 2.0 * dpi : cx - 4.0 * dpi;
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ bx, crumb_h + 2.0 * dpi, 2.0 * dpi,
+                                           PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi }, COLOR_TILE_CURRENT, 0.0);
+        }
     }
 
     /* Action bar: the buttons, then the selection metrics (§3.15.2 tier three). */
@@ -6093,6 +6201,7 @@ static void rename_end(app_state_t *app) {
     app->rename_active = false;
     app->rename_is_extension = false;
     app->rename_is_path = false;
+    app->rename_favorite = -1;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, false);
 }
@@ -6241,6 +6350,7 @@ static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
+    if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
     rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
     rename_end(app);
@@ -7047,6 +7157,7 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
 /* 1a: the file is written as the window closes, and only when something
    in it changed. */
 static void settings_close(app_state_t *app) {
+    app->spath_active = false;   /* a folder being typed is dropped with the window */
     if (!app->settings_open) return;
     settings_write_if_changed(app, true);
     app->key_capture = 0;
@@ -7198,15 +7309,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, "folder cleared");
                 break;
             }
-            rubraview_file_dialog_opts_t opts = {
-                .title = "Choose a folder", .folder_mode = true,
-                .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
-            };
-            rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-            if (picked.accepted && picked.count > 0) {
-                rubraview_settings_set_text(&app->settings, def->section, def->key, picked.paths[0]);
-                settings_say(app, "folder chosen (Delete clears it)");
-            }
+            settings_path_begin(app, def);   /* typed, pasted, copied, or browsed with Ctrl+O */
             break;
         }
         case RUBRAVIEW_SEVENT_ACTION: {
@@ -7284,6 +7387,130 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
 }
 
 /* Everything the settings window's queue holds; returns how many. */
+/* ---- A folder typed or pasted in the settings window (owner, 2026-09-30:
+   "경로 직접 입력 가능하게. 반대로 현재 경로를 편집 가능한 에디트 컨트롤에
+   넣어서 복사해갈 수도 있게") ---- */
+
+static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
+    app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
+    u8str_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
+    rubraview_textedit_set(&app->spath_edit, now.len < sizeof(app->spath_buffer) ? now : U8(""));
+    rubraview_textedit_select_all(&app->spath_edit);
+    app->spath_section = def->section;
+    app->spath_key = def->key;
+    app->spath_composing_length = 0;
+    app->spath_active = true;
+    rubraview_pal_window_text_input(app->settings_window, true);
+    settings_say(app, "type or paste a folder; Enter keeps it, Esc leaves it, Ctrl+O browses, Ctrl+C copies");
+}
+
+static void settings_path_end(app_state_t *app) {
+    app->spath_active = false;
+    app->spath_composing_length = 0;
+    rubraview_pal_window_text_input(app->settings_window, false);
+    app->settings_dirty = true;
+}
+
+static void settings_path_commit(app_state_t *app) {
+    u8str_t text = rubraview_textedit_text(&app->spath_edit);
+    /* Explorer's "Copy as path" puts quotes round it; spaces at the ends are no part of a folder. */
+    while (text.len > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.len--; }
+    while (text.len > 0 && (text.ptr[text.len - 1] == ' ' || text.ptr[text.len - 1] == '"')) text.len--;
+    if (text.len == 0) {
+        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
+        settings_path_end(app);
+        settings_say(app, "folder cleared");
+        return;
+    }
+    rubraview_fs_entry_t found;
+    if (!rubraview_pal_fs_stat(app->arena, text, &found) || !found.is_directory) {
+        settings_say(app, "no such folder - put it right, or Esc");
+        return;
+    }
+    rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, text);
+    settings_path_end(app);
+    settings_say(app, "folder kept (Delete clears it)");
+}
+
+static void settings_path_browse(app_state_t *app) {
+    rubraview_file_dialog_opts_t opts = {
+        .title = "Choose a folder", .folder_mode = true,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
+    };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+    if (picked.accepted && picked.count > 0 && picked.paths[0].len < sizeof(app->spath_buffer)) {
+        rubraview_textedit_set(&app->spath_edit, picked.paths[0]);   /* in the box, for Enter to keep */
+    }
+}
+
+/* Keys while the box is open: true when it took the key. */
+static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->spath_active) return false;
+    bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+    if (key_is(combo, "Enter")) {
+        textbox_insert(&app->spath_edit, (u8str_t){ .ptr = app->spath_composing, .len = app->spath_composing_length });
+        app->spath_composing_length = 0;
+        settings_path_commit(app);
+    } else if (key_is(combo, "Escape")) {
+        settings_path_end(app);
+        settings_say(app, "folder left as it was");
+    } else if (ctrl && key_is(combo, "O")) {
+        settings_path_browse(app);
+    } else {
+        (void)textbox_key(app->settings_window, &app->spath_edit, combo);
+    }
+    app->settings_dirty = true;
+    return true;   /* nothing else happens while typing */
+}
+
+/* The box over the focused path row: its text, the selection, the caret. */
+static void settings_path_draw(app_state_t *app) {
+    if (!app->spath_active) return;
+    const rubraview_settings_view_t *v = &app->settings_view;
+    if (v->focus_line < 0) return;
+    rubraview_renderer_t *r = app->settings_renderer;
+    const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
+    int32_t content_row = v->lines[v->focus_line].row - v->scroll;
+    if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(v)) return;
+    double y = ch * (2 + content_row);
+    int32_t col0 = v->content_col + v->label_cols;
+    int32_t cols = v->cols - col0 - 1;
+    if (cols < 8) return;
+    rubraview_pal_rect_t box = { cw * col0, y, cw * cols, ch };
+    rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 0.0);
+    rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 0.0);
+    /* Columns are characters: a long path shows its end, where the caret usually is. */
+    u8str_t text = rubraview_textedit_text(&app->spath_edit);
+    size_t caret_chars = 0, total_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
+    rubraview_textedit_selection_range(&app->spath_edit, &a, &b);
+    for (size_t i = 0; i < text.len; ++i) {
+        if (((unsigned char)text.ptr[i] & 0xC0) == 0x80) continue;
+        if (i < app->spath_edit.caret) caret_chars++;
+        if (i < a) sel_a++;
+        if (i < b) sel_b++;
+        total_chars++;
+    }
+    size_t first = caret_chars + 2 > (size_t)cols ? caret_chars + 2 - (size_t)cols : 0;
+    size_t skip = 0, seen = 0;
+    while (skip < text.len && seen < first) {
+        skip++;
+        while (skip < text.len && ((unsigned char)text.ptr[skip] & 0xC0) == 0x80) skip++;
+        seen++;
+    }
+    if (sel_b > sel_a) {
+        double sx = sel_a > first ? (double)(sel_a - first) : 0.0, ex = (double)(sel_b - first);
+        if (ex > sx) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x + cw * sx, y, cw * (ex - sx), ch }, 0x704A90D9u, 0.0);
+    }
+    rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = text.ptr + skip, .len = text.len - skip }, box.x, y, fs, SETTINGS_TEXT);
+    double cx = box.x + cw * (double)(caret_chars - first);
+    if (app->spath_composing_length > 0) {
+        rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = app->spath_composing, .len = app->spath_composing_length },
+                                            cx, y, fs, 0xFFFFD27Fu);
+    }
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
+    (void)total_chars;
+}
+
 static size_t settings_pump(app_state_t *app) {
     size_t handled = 0;
     rubraview_window_event_t event;
@@ -7319,6 +7546,7 @@ static size_t settings_pump(app_state_t *app) {
                     app->settings_dirty = true;
                     break;
                 }
+                if (settings_path_key(app, event.key.combo)) break;
                 if (settings_copy_key(app, event.key.combo)) break;
                 rubraview_settings_key_t key;
                 if (settings_key_of(event.key.combo, &key)) {
@@ -7328,6 +7556,11 @@ static size_t settings_pump(app_state_t *app) {
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (app->spath_active) {   /* a click elsewhere keeps the folder as it was */
+                    settings_path_end(app);
+                    settings_say(app, "folder left as it was");
+                    break;
+                }
                 if (app->key_capture > 0) {
                     app->key_capture = 0;   /* a click elsewhere is a change of mind */
                     settings_say(app, "no key added");
@@ -7376,7 +7609,23 @@ static size_t settings_pump(app_state_t *app) {
                 app->settings_mouse_down = false;
                 rubraview_settings_view_release(view);
                 break;
+            case RUBRAVIEW_WINDOW_EVENT_TEXT:
+            case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+                if (app->spath_active) {
+                    u8str_t typed = { .ptr = event.text.utf8, .len = event.text.length };
+                    if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+                        textbox_insert(&app->spath_edit, typed);
+                        app->spath_composing_length = 0;
+                    } else {
+                        size_t n = typed.len < sizeof(app->spath_composing) ? typed.len : sizeof(app->spath_composing) - 1;
+                        memcpy(app->spath_composing, typed.ptr, n);
+                        app->spath_composing_length = n;
+                    }
+                    app->settings_dirty = true;
+                }
+                break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                if (app->spath_active) break;   /* the box stays over its row */
                 app->settings_sel.active = false;   /* the text under it has moved */
                 settings_event(app, rubraview_settings_view_scroll(view, event.mouse.wheel_delta > 0 ? -3 : 3));
                 break;
@@ -8489,6 +8738,8 @@ static void draw_settings_window(app_state_t *app) {
             settings_text(app, text, x0, y, color);
         }
     }
+
+    settings_path_draw(app);
 
     /* Under the page: the last action's result, then the buttons. */
     if (app->settings_message[0]) {
@@ -11034,6 +11285,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
     app.follow_for = -1;
+    app.rename_favorite = -1;
+    app.fav_press = -1;
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
     layout_load(&app);   /* §3.6: back where the reader left them */
@@ -11153,6 +11406,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) pagebar_drag(&app, event.mouse.x, false);
+                    if (app.fav_press >= 0) {
+                        app.fav_drag_x = event.mouse.x;
+                        if (fabs(event.mouse.x - app.fav_press_x) >= 6.0 * rubraview_pal_window_dpi_scale(app.window)) app.fav_dragging = true;
+                    }
                     if (app.titlebar_held != RUBRAVIEW_TITLEBAR_NONE) {
                         double dx = event.mouse.x - app.titlebar_held_x, dy = event.mouse.y - app.titlebar_held_y;
                         double slop = 4.0 * rubraview_pal_window_dpi_scale(app.window);
@@ -11227,8 +11484,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                                 if (!item.favorite && i == app.favorites.count && i > 0) x += 10.0 * dpi;   /* as drawn */
                                 if (event.mouse.x >= x && event.mouse.x < x + w) {
                                     if (app.rename_active) rename_end(&app);
-                                    picker_navigate(&app, item.path);
-                                    app.picker.focus = 0;
+                                    if (item.favorite && event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
+                                        favorite_rename_begin(&app, i);   /* owner, 2026-09-30 */
+                                    } else if (item.favorite && event.mouse.button == RUBRAVIEW_MOUSE_LEFT) {
+                                        /* opened on release; dragged, it moves (owner, 2026-09-30) */
+                                        app.fav_press = (int32_t)i;
+                                        app.fav_press_x = app.fav_drag_x = event.mouse.x;
+                                        app.fav_dragging = false;
+                                    } else {
+                                        picker_navigate(&app, item.path);
+                                        app.picker.focus = 0;
+                                    }
                                     break;
                                 }
                                 x += w + 6.0 * dpi;
@@ -11324,6 +11590,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
                     app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
+                    if (app.fav_press >= 0) {
+                        size_t from = (size_t)app.fav_press;
+                        if (app.fav_dragging && from < app.favorites.count) {
+                            int32_t fw = 0, fh = 0;
+                            rubraview_pal_window_get_size(app.window, &fw, &fh);
+                            size_t to = favorite_drop_index(&app, event.mouse.x, rubraview_pal_window_dpi_scale(app.window), (double)fw);
+                            if (to != from && rubraview_favorites_move(&app.favorites, from, to)) {
+                                favorites_save(&app);
+                                osd_say(&app, U8("favourite moved"));
+                            }
+                        } else if (from < app.favorites.count) {
+                            picker_navigate(&app, app.favorites.paths[from]);
+                            app.picker.focus = 0;
+                        }
+                        app.fav_press = -1;
+                        app.fav_dragging = false;
+                        break;
+                    }
                     if (app.listwin.dragging) { app.listwin.dragging = false; break; }
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         rubraview_subbox_end_drag(&app.subbox);
