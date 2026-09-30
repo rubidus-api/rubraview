@@ -2,6 +2,7 @@
 #define RUBRAVIEW_TAGS_H
 
 #include "rubraview/core.h"
+#include "rubraview/audio_dsp.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,10 @@ typedef struct rubraview_tags {
     const uint8_t *art;
     size_t         art_size;
     u8str_t        art_mime;
+
+    /* ReplayGain (owner, 2026-09-30): REPLAYGAIN_* in Vorbis comments, or
+       in ID3v2 TXXX frames; nothing set when the file does not say. */
+    rubraview_replaygain_t replaygain;
 } rubraview_tags_t;
 
 /** A cover larger than this is left alone: it is not a cover. */

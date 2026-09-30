@@ -70,6 +70,7 @@
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_listwin.h"
 #include "rubraview/repeat.h"
+#include "rubraview/lyrics.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
 #include "rubraview/favorites.h"
@@ -365,6 +366,16 @@ typedef struct app_state {
        from its cover. Both belong to the track on screen. */
     rubraview_tags_t           music_tags;
     bool                       music_tags_read;
+    /* The music features (owner, 2026-09-30): the lines of a `.lrc` beside
+       the song, a `.cue` cutting it into tracks, the analyser's bands and
+       their falling peaks, and where each lyric line was drawn (a click
+       there goes to it). */
+    rubraview_lyrics_t         music_lyrics;
+    rubraview_cue_sheet_t      music_cue;
+    float                      viz_bands[RUBRAVIEW_SPECTRUM_BANDS], viz_peaks[RUBRAVIEW_SPECTRUM_BANDS];
+    double                     viz_last;
+    int32_t                    lyric_row_index[7];
+    rubraview_rect_t           lyric_row_rect[7];
     rubraview_texture_t       *music_backdrop;
     /* RV-075: the next track, opened while this one still plays, so one
        runs into the next without a gap — and, when the reader asks for
@@ -1165,11 +1176,28 @@ static void media_close(app_state_t *app) {
    so a 300 MB record is not read to find out who is singing. */
 #define MUSIC_MAX_HEAD_BYTES (4u * 1024u * 1024u)
 
+static void audio_chain_update(app_state_t *app);
 static void music_clear(app_state_t *app) {
     if (app->music_backdrop) rubraview_pal_texture_destroy(app->music_backdrop);
     app->music_backdrop = NULL;
     app->music_tags = (rubraview_tags_t){0};
     app->music_tags_read = false;
+    app->music_lyrics = (rubraview_lyrics_t){0};
+    app->music_cue = (rubraview_cue_sheet_t){0};
+    memset(app->viz_peaks, 0, sizeof(app->viz_peaks));
+}
+
+/* The equaliser, ReplayGain's gain for the song playing and night mode,
+   handed to the sound output (owner, 2026-09-30). */
+static void audio_chain_update(app_state_t *app) {
+    rubraview_audio_chain_config_t config = { .eq_preset = RUBRAVIEW_EQ_FLAT, .night_mode = false, .gain = 1.0 };
+    int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
+    config.eq_preset = preset >= 0 && preset < RUBRAVIEW_EQ_PRESET_COUNT ? (rubraview_eq_preset_t)preset : RUBRAVIEW_EQ_FLAT;
+    config.night_mode = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5;
+    int rg = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("replaygain")));
+    const rubraview_tags_t *tags = app->bgm_media && !app->media ? &app->bgm_tags : &app->music_tags;
+    if (rg > 0) config.gain = rubraview_replaygain_factor(&tags->replaygain, (rubraview_replaygain_mode_t)rg, 0.0);
+    rubraview_pal_audio_set_chain(&config);
 }
 
 /* The cover, blurred: a small copy of it, softened, and left for the
@@ -1207,6 +1235,16 @@ static void music_load(app_state_t *app, u8str_t path) {
         .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
     app->music_tags_read = true;
     music_make_backdrop(app, &app->music_tags);
+    /* A `.lrc` of the same name beside it: the words, in time. */
+    u8str_t lrc = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".lrc"), 1024u * 1024u);
+    if (lrc.len > 0) app->music_lyrics = rubraview_lyrics_parse(app->arena, lrc);
+    /* A `.cue` of the same name: one file cut into the record's tracks. */
+    u8str_t cue = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".cue"), 1024u * 1024u);
+    if (cue.len > 0) {
+        app->music_cue = rubraview_cue_parse(app->arena, cue, app->music_tags.duration_seconds);
+        if (app->music_cue.count < 2) app->music_cue = (rubraview_cue_sheet_t){0};   /* one track: nothing to cut */
+    }
+    audio_chain_update(app);
 }
 
 static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
@@ -3210,6 +3248,18 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) return cstr(rubraview_repeat_caption(repeat_mode(app)));
+    if (rubraview_u8_eq_lit(tile->action, "media_eq_cycle")) {
+        int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
+        return preset <= 0 ? U8("EQ") : rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
+    }
+    if (rubraview_u8_eq_lit(tile->action, "media_night_toggle")) {
+        return rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5 ? U8("Night on") : U8("Night");
+    }
+    if (rubraview_u8_eq_lit(tile->action, "media_visualizer_cycle")) {
+        static const char *const V[] = { "Viz", "Bars", "Wave" };
+        int v = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")));
+        return cstr(V[v >= 0 && v < 3 ? v : 0]);
+    }
     if (rubraview_u8_eq_lit(tile->action, "media_ab_cycle")) {
         return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? U8("Set B") : U8("A-B off");
     }
@@ -3389,6 +3439,27 @@ static bool listwin_press(app_state_t *app, double x, double y) {
     }
 }
 
+/* With a `.cue` cutting the song into tracks (owner, 2026-09-30): the next
+   or previous track in the same file. The previous one goes back to the
+   start of this track first when it is more than 3 s in, as players do.
+   False when there is no cue, or no track that way (the file changes). */
+static bool cue_step(app_state_t *app, int direction) {
+    if (!app->media || app->media_info.has_video || app->music_cue.count < 2) return false;
+    const rubraview_cue_sheet_t *cue = &app->music_cue;
+    int32_t now = rubraview_cue_track_at(cue, app->media_position);
+    if (now < 0) now = 0;
+    int32_t target = now + direction;
+    if (direction < 0 && app->media_position - cue->tracks[now].start_seconds > 3.0) target = now;
+    if (target < 0 || (size_t)target >= cue->count) return false;
+    media_seek_to(app, cue->tracks[target].start_seconds);
+    app->media_position = cue->tracks[target].start_seconds;
+    char line[160];
+    int n = snprintf(line, sizeof(line), "%d / %zu  %.*s", cue->tracks[target].number, cue->count,
+                     (int)cue->tracks[target].title.len, cue->tracks[target].title.ptr);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
+    return true;
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -3399,10 +3470,31 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->panel.open) { panel_close(app); return; }
         if (app->listwin.open) { app->listwin.open = false; return; }
         rubraview_pal_window_request_close(app->window);
+    } else if (rubraview_u8_eq_lit(action, "next_page") && cue_step(app, +1)) {
+        /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
+    } else if (rubraview_u8_eq_lit(action, "prev_page") && cue_step(app, -1)) {
     } else if (rubraview_u8_eq_lit(action, "next_page")) {
         next_spread(app);
     } else if (rubraview_u8_eq_lit(action, "prev_page")) {
         prev_spread(app);
+    } else if (rubraview_u8_eq_lit(action, "media_eq_cycle")) {
+        int preset = ((int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset"))) + 1) % RUBRAVIEW_EQ_PRESET_COUNT;
+        rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)preset);
+        audio_chain_update(app);
+        char line[64];
+        u8str_t name = rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
+        int n = snprintf(line, sizeof(line), "equaliser: %.*s", (int)name.len, name.ptr);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    } else if (rubraview_u8_eq_lit(action, "media_night_toggle")) {
+        bool on = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) < 0.5;
+        rubraview_settings_set(&app->settings, U8("audio"), U8("night_mode"), on ? 1.0 : 0.0);
+        audio_chain_update(app);
+        osd_say(app, on ? U8("night mode: loud passages brought down") : U8("night mode off"));
+    } else if (rubraview_u8_eq_lit(action, "media_visualizer_cycle")) {
+        int v = ((int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer"))) + 1) % 3;
+        rubraview_settings_set(&app->settings, U8("audio"), U8("visualizer"), (double)v);
+        static const char *const SAY[] = { "analyser off", "analyser: spectrum", "analyser: oscilloscope" };
+        osd_say(app, cstr(SAY[v]));
     } else if (rubraview_u8_eq_lit(action, "first_page")) {
         go_to_spread(app, 0);
     } else if (rubraview_u8_eq_lit(action, "last_page")) {
@@ -4760,6 +4852,16 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         return true;
     }
 
+    /* A lyric line: the song goes to it (owner, 2026-09-30). */
+    if (app->media && !app->media_info.has_video && app->music_lyrics.count > 0) {
+        for (size_t i = 0; i < 7; ++i) {
+            if (app->lyric_row_index[i] < 0 || !rubraview_rect_contains(app->lyric_row_rect[i], x, y)) continue;
+            double t = rubraview_lyrics_time_of(&app->music_lyrics, app->lyric_row_index[i]) - app->music_lyrics.offset_seconds;
+            if (t >= 0.0) { media_seek_to(app, t); app->media_position = t; }
+            return true;
+        }
+    }
+
     /* The edge buttons (owner, 2026-09-29), under everything above. */
     rubraview_edge_hit_t edge = edge_nav_hit(app, x, y);
     if (edge.side != RUBRAVIEW_EDGE_NONE) {
@@ -5923,9 +6025,111 @@ static void draw_music_backdrop(app_state_t *app, int32_t win_w, int32_t win_h) 
 /* What the file says about the track, along the bottom: the name and who
    made it, then the record it came from, then what the sound itself is.
    A line the file does not answer is left out rather than shown empty. */
+/* Whether the analyser has something to draw now: a song playing on its page. */
+static bool visualizer_live(const app_state_t *app) {
+    return app->media && !app->media_info.has_video && !app->media_paused &&
+           rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")) > 0.5;
+}
+
+/* The music page's analyser and lyrics (owner, 2026-09-30). The analyser
+   is a strip above the song's words: 64 bands with falling peaks, or the
+   wave itself; the lyrics are the line being sung with three before and
+   three after, near the top, and a click on one goes there. */
+static void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
+    for (size_t i = 0; i < 7; ++i) app->lyric_row_index[i] = -1;
+    if (!app->media || app->media_info.has_video) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double chrome = 56.0 * dpi + (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
+
+    int viz = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")));
+    if (viz > 0) {
+        double h = 64.0 * dpi, w = (double)win_w * 0.6;
+        double x0 = ((double)win_w - w) * 0.5, y0 = (double)win_h - chrome - 96.0 * dpi - h;
+        static float samples[RUBRAVIEW_FFT_SIZE], imag[RUBRAVIEW_FFT_SIZE];
+        size_t n = rubraview_pal_audio_tap_read(samples, RUBRAVIEW_FFT_SIZE);
+        double now = rubraview_pal_time_now_seconds();
+        double dt = app->viz_last > 0.0 ? now - app->viz_last : 0.0;
+        app->viz_last = now;
+        uint32_t ink = (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u;
+        if (viz == 1) {
+            if (n == RUBRAVIEW_FFT_SIZE && !app->media_paused) {
+                memset(imag, 0, sizeof(imag));
+                rubraview_apply_hann(samples, RUBRAVIEW_FFT_SIZE);
+                rubraview_fft(samples, imag);
+                double rate = app->media_info.audio_sample_rate > 0 ? (double)app->media_info.audio_sample_rate : 48000.0;
+                rubraview_spectrum_bands(samples, imag, rate, -80.0, app->viz_bands, RUBRAVIEW_SPECTRUM_BANDS);
+            } else {
+                for (size_t b = 0; b < RUBRAVIEW_SPECTRUM_BANDS; ++b) app->viz_bands[b] = -80.0f;
+            }
+            rubraview_spectrum_peaks(app->viz_bands, app->viz_peaks, RUBRAVIEW_SPECTRUM_BANDS, dt > 0.5 ? 0.5 : dt, 40.0);
+            double bw = w / RUBRAVIEW_SPECTRUM_BANDS;
+            for (size_t b = 0; b < RUBRAVIEW_SPECTRUM_BANDS; ++b) {
+                double level = (app->viz_bands[b] + 80.0) / 80.0;
+                double peak = (app->viz_peaks[b] + 80.0) / 80.0;
+                if (level < 0.0) level = 0.0;
+                if (level > 1.0) level = 1.0;
+                if (peak < 0.0) peak = 0.0;
+                if (peak > 1.0) peak = 1.0;
+                rubraview_pal_rect_t bar = { x0 + b * bw + 1.0, y0 + h * (1.0 - level), bw - 2.0, h * level };
+                if (bar.height > 0.5) rubraview_pal_render_fill_rect(app->renderer, bar, ink, 0.0);
+                rubraview_pal_rect_t cap = { x0 + b * bw + 1.0, y0 + h * (1.0 - peak) - 2.0 * dpi, bw - 2.0, 2.0 * dpi };
+                rubraview_pal_render_fill_rect(app->renderer, cap, COLOR_TEXT, 0.0);
+            }
+        } else if (n > 0) {
+            /* The wave: the newest samples across the strip, a dot a column. */
+            size_t columns = (size_t)w / 2u;
+            if (columns > n) columns = n;
+            for (size_t c = 0; c < columns; ++c) {
+                float v = samples[n - columns + c];
+                if (v > 1.0f) v = 1.0f;
+                if (v < -1.0f) v = -1.0f;
+                double y = y0 + h * 0.5 - (double)v * h * 0.5;
+                rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ x0 + (double)c * 2.0, y - dpi, 2.0, 2.0 * dpi }, ink, 0.0);
+            }
+        }
+    }
+
+    const rubraview_lyrics_t *lyrics = &app->music_lyrics;
+    if (lyrics->count > 0) {
+        int32_t now = rubraview_lyrics_index_at(lyrics, app->media_position + lyrics->offset_seconds);
+        double size = 18.0 * dpi, row_h = size * 1.6;
+        double top = (double)win_h * 0.08;
+        rubraview_pal_rect_t band = { (double)win_w * 0.1, top - size * 0.3, (double)win_w * 0.8, row_h * 7.0 + size * 0.6 };
+        rubraview_pal_render_fill_rect(app->renderer, band, 0x80101010u, 6.0);
+        for (int32_t k = -3; k <= 3; ++k) {
+            int32_t index = (now < 0 ? 0 : now) + k;
+            if (now < 0 && k < 0) continue;
+            if (index < 0 || (size_t)index >= lyrics->count) continue;
+            u8str_t text = lyrics->lines[index].text;
+            rubraview_pal_rect_t row = { band.x, top + (double)(k + 3) * row_h, band.width, row_h };
+            bool current = index == now;
+            rubraview_pal_render_draw_text(app->renderer, text.len > 0 ? text : U8("\xE2\x99\xAA"), row,
+                                           current ? size * 1.1 : size * 0.85,
+                                           current ? COLOR_TEXT : 0x90F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            app->lyric_row_index[k + 3] = index;
+            app->lyric_row_rect[k + 3] = (rubraview_rect_t){ row.x, row.y, row.width, row.height };
+        }
+    }
+}
+
 static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (!app->media || app->media_info.has_video || !app->music_tags_read) return;
-    const rubraview_tags_t *t = &app->music_tags;
+    rubraview_tags_t cue_tags = app->music_tags;
+    if (app->music_cue.count > 1) {
+        /* With a `.cue`, the track playing is named, not the whole file. */
+        int32_t track = rubraview_cue_track_at(&app->music_cue, app->media_position);
+        if (track >= 0) {
+            const rubraview_cue_track_t *ct = &app->music_cue.tracks[track];
+            if (ct->title.len > 0) cue_tags.title = ct->title;
+            if (ct->performer.len > 0) cue_tags.artist = ct->performer;
+            else if (app->music_cue.album_performer.len > 0) cue_tags.artist = app->music_cue.album_performer;
+            if (app->music_cue.album_title.len > 0) cue_tags.album = app->music_cue.album_title;
+            static char number[16];
+            int n = snprintf(number, sizeof(number), "%d/%zu", ct->number, app->music_cue.count);
+            if (n > 0) cue_tags.track_number = (u8str_t){ .ptr = number, .len = (size_t)n };
+        }
+    }
+    const rubraview_tags_t *t = &cue_tags;
     if (t->title.len == 0 && t->artist.len == 0 && t->album.len == 0 && t->codec.len == 0) return;
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -7334,6 +7538,7 @@ static void settings_took_effect(app_state_t *app) {
     sorted = order;
 
     settings_apply_rest(app);
+    audio_chain_update(app);   /* the equaliser, ReplayGain and night mode (owner, 2026-09-30) */
 }
 
 /* §3.22.2: a keymap written out to share or keep, or read back in. What
@@ -9359,6 +9564,7 @@ static void render_frame(app_state_t *app) {
     }
 
     draw_music_words(app, win_w, win_h);
+    draw_music_extras(app, win_w, win_h);
 
     if (app->picker_open) {
         draw_picker(app, (double)win_w, (double)win_h);
@@ -11912,6 +12118,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            sound-only page, and the keys waited behind it). For the grace
            after an input every pass still draws, as the chrome's fades
            expect. */
+        /* The analyser moves some thirty times a second while a song plays on its page. */
+        if (visualizer_live(&app) && now - app.viz_last >= 1.0 / 30.0) app.media_new_picture = true;
         bool paced = media_playing && !others_moving && now - last_input_seconds > IDLE_REDRAW_GRACE;
         /* Settled: a frame when what it would show has changed, checked
            each pass, and one every ten seconds whatever the summary says. */

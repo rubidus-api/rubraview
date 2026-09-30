@@ -88,6 +88,13 @@ void rubraview_pal_audio_set_speed(double speed);
    asked of Windows, 20-100 ms; taken by the next output opened. */
 void rubraview_pal_audio_set_latency_ms(uint32_t milliseconds);
 
+/* The music features (owner, 2026-09-30): the equaliser, ReplayGain's gain
+   and night mode, applied by every output from its next buffer; and the
+   analyser's tap, the newest samples heard, mixed to one channel. */
+#include "rubraview/audio_chain.h"
+void rubraview_pal_audio_set_chain(const rubraview_audio_chain_config_t *config);
+size_t rubraview_pal_audio_tap_read(float *out, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

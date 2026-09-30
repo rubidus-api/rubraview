@@ -42,6 +42,27 @@ static const GUID RV_SUBTYPE_IEEE_FLOAT       = {0x00000003, 0x0000, 0x0010, {0x
 static volatile LONG g_device_buffer_100ns = DEVICE_BUFFER_100NS_DEFAULT;
 #define DEVICE_BUFFER_100NS ((REFERENCE_TIME)g_device_buffer_100ns)
 
+static SRWLOCK g_chain_lock = SRWLOCK_INIT;
+static rubraview_audio_chain_config_t g_chain_config = { .eq_preset = RUBRAVIEW_EQ_FLAT, .night_mode = false, .gain = 1.0 };
+static volatile LONG g_chain_version = 1;
+static SRWLOCK g_tap_lock = SRWLOCK_INIT;
+static rubraview_audio_tap_t g_tap;
+
+void rubraview_pal_audio_set_chain(const rubraview_audio_chain_config_t *config) {
+    if (!config) return;
+    AcquireSRWLockExclusive(&g_chain_lock);
+    g_chain_config = *config;
+    ReleaseSRWLockExclusive(&g_chain_lock);
+    InterlockedIncrement(&g_chain_version);
+}
+
+size_t rubraview_pal_audio_tap_read(float *out, size_t count) {
+    AcquireSRWLockShared(&g_tap_lock);
+    size_t n = rubraview_audio_tap_latest(&g_tap, out, count);
+    ReleaseSRWLockShared(&g_tap_lock);
+    return n;
+}
+
 void rubraview_pal_audio_set_latency_ms(uint32_t milliseconds) {
     if (milliseconds < 20) milliseconds = 20;
     if (milliseconds > 100) milliseconds = 100;
@@ -254,6 +275,11 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
     size_t scratch_frames = (size_t)buffer_frames * 4u + 2u;
     float *scratch = (float*)malloc(scratch_frames * out->channels * sizeof(float));
     if (!scratch) return false;
+    /* The equaliser, the gain and night mode, owned by this thread. */
+    rubraview_audio_chain_t *chain = (rubraview_audio_chain_t*)malloc(sizeof(*chain));
+    if (!chain) { free(scratch); return false; }
+    rubraview_audio_chain_init(chain, (double)out->rate, out->channels);
+    LONG chain_seen = 0;
     publish(out, base);
 
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
@@ -274,6 +300,7 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
             submitted = 0;
             source_frames = 0.0;
             resampler = rubraview_speed_resampler_create(out->channels);
+            rubraview_audio_chain_reset(chain);
             base = (double)atomic_load_explicit(&out->flush_base_100ns, memory_order_relaxed) / 1e7;
             fade_left = fade_length;
             publish(out, base);
@@ -301,7 +328,19 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
                 if (SUCCEEDED(hr) && data) {
                     rubraview_pcm_ring_read(out->ring, scratch, k * out->channels);
                     size_t m = rubraview_speed_resample(&resampler, scratch, k, step, (float*)(void*)data, space);
+                    LONG version = InterlockedCompareExchange(&g_chain_version, 0, 0);
+                    if (version != chain_seen) {
+                        AcquireSRWLockShared(&g_chain_lock);
+                        rubraview_audio_chain_config_t config = g_chain_config;
+                        ReleaseSRWLockShared(&g_chain_lock);
+                        rubraview_audio_chain_configure(chain, &config);
+                        chain_seen = version;
+                    }
+                    rubraview_audio_chain_process(chain, (float*)(void*)data, m);
                     rubraview_fade_in((float*)(void*)data, m, out->channels, &fade_left, fade_length);
+                    AcquireSRWLockExclusive(&g_tap_lock);
+                    rubraview_audio_tap_write(&g_tap, (const float*)(void*)data, m, out->channels);
+                    ReleaseSRWLockExclusive(&g_tap_lock);
                     /* RV-075: this output's own level, for a crossfade
                        between two tracks that are both playing. */
                     uint32_t gain_permille = atomic_load_explicit(&out->gain_permille, memory_order_relaxed);
@@ -344,6 +383,7 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
                               memory_order_release);
     }
     if (started && !lost) IAudioClient_Stop(client);
+    free(chain);
     free(scratch);
     /* What the device had queued is gone with it: go on from the ring. */
     *io_base = base + source_frames / (double)out->rate;

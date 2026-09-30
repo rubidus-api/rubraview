@@ -1,5 +1,6 @@
 #include "rubraview/tags.h"
 #include "rubraview/path.h"
+#include "rubraview/number.h"
 #include <string.h>
 
 /* Five formats keep their tags in five different places, and every one of
@@ -193,6 +194,8 @@ static void id3_picture(proven_arena_t *arena, const uint8_t *p, size_t len,
     out->art_mime = mime;
 }
 
+static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
+
 static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
                        rubraview_tags_t *out, size_t *out_end) {
     if (size < 10 || !three(bytes, "ID3")) return;
@@ -241,6 +244,7 @@ static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
             else if (four(frame, "TRCK")) out->track_number = id3_text(arena, data, frame_size);
             else if (four(frame, "TCON")) out->genre = id3_text(arena, data, frame_size);
             else if (four(frame, "APIC")) id3_picture(arena, data, frame_size, false, out);
+            else if (four(frame, "TXXX")) id3_txxx(arena, data, frame_size, out);
         }
         at = data_at + frame_size;
         (void)id_len;
@@ -266,6 +270,56 @@ static void read_id3v1(proven_arena_t *arena, const uint8_t *tail, size_t size, 
         n[at++] = (char)('0' + v % 10);
         out->track_number = arena_bytes(arena, n, (size_t)at);
     }
+}
+
+/* ---- ReplayGain, by name, from whichever tag carries it ---- */
+
+static bool same_ci(u8str_t a, const char *b) {
+    size_t n = strlen(b);
+    if (a.len != n) return false;
+    for (size_t i = 0; i < n; ++i) {
+        char c = a.ptr[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c != b[i]) return false;
+    }
+    return true;
+}
+
+/* A name and its value: a gain ("-7.23 dB") or a peak ("0.988"). */
+static void replaygain_value(rubraview_tags_t *out, u8str_t name, u8str_t value) {
+    double v = 0.0;
+    size_t used = 0;
+    while (value.len > 0 && (value.ptr[0] == ' ' || value.ptr[0] == '+')) { value.ptr++; value.len--; }
+    if (same_ci(name, "REPLAYGAIN_TRACK_GAIN") && rubraview_replaygain_parse_db(value, &v)) {
+        out->replaygain.has_track_gain = true; out->replaygain.track_gain_db = v;
+    } else if (same_ci(name, "REPLAYGAIN_ALBUM_GAIN") && rubraview_replaygain_parse_db(value, &v)) {
+        out->replaygain.has_album_gain = true; out->replaygain.album_gain_db = v;
+    } else if (same_ci(name, "REPLAYGAIN_TRACK_PEAK") && rubraview_parse_double_prefix(value, &v, &used) && v > 0.0) {
+        out->replaygain.track_peak = v;
+    } else if (same_ci(name, "REPLAYGAIN_ALBUM_PEAK") && rubraview_parse_double_prefix(value, &v, &used) && v > 0.0) {
+        out->replaygain.album_peak = v;
+    }
+}
+
+/* ID3v2's TXXX: an encoding byte, a description ending in a NUL (two for
+   UTF-16), then the value. */
+static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    if (len < 3) return;
+    uint8_t enc = p[0];
+    bool wide = enc == 1 || enc == 2;
+    size_t end = 1;
+    if (wide) { while (end + 1 < len && !(p[end] == 0 && p[end + 1] == 0)) end += 2; }
+    else      { while (end < len && p[end] != 0) end++; }
+    if (end >= len) return;
+    size_t value_at = end + (wide ? 2u : 1u);
+    u8str_t name = id3_text(arena, p, end);   /* the encoding byte and the description */
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, len - value_at + 1);
+    if (!proven_is_ok(res.err)) return;
+    uint8_t *buf = (uint8_t*)res.value.ptr;
+    buf[0] = enc;
+    memcpy(buf + 1, p + value_at, len - value_at);
+    u8str_t value = id3_text(arena, buf, len - value_at + 1);
+    replaygain_value(out, name, value);
 }
 
 /* ---- Vorbis comments: FLAC's, Ogg's and Opus's, all the same ---- */
@@ -338,6 +392,12 @@ static void read_vorbis_comment(proven_arena_t *arena, const uint8_t *p, size_t 
             out->track_number = trim(arena, entry + 12, size - 12);
         else if (key_is(entry, size, "GENRE") && out->genre.len == 0)
             out->genre = trim(arena, entry + 6, size - 6);
+        else if (key_is(entry, size, "REPLAYGAIN_TRACK_GAIN") || key_is(entry, size, "REPLAYGAIN_ALBUM_GAIN") ||
+                 key_is(entry, size, "REPLAYGAIN_TRACK_PEAK") || key_is(entry, size, "REPLAYGAIN_ALBUM_PEAK")) {
+            u8str_t name = { .ptr = (const char*)entry, .len = 21 };
+            u8str_t value = trim(arena, entry + 22, size - 22);
+            replaygain_value(out, name, value);
+        }
         else if (key_is(entry, size, "METADATA_BLOCK_PICTURE") && out->art_size == 0) {
             /* A FLAC picture block, base64'd, because a comment is text. */
             span_t raw = base64_decode(arena, entry + 23, size - 23);
