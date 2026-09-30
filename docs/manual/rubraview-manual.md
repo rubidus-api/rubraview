@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.23.exe              the viewer, as built
-dist/rubraview-v0.0.23/                 the release bundle
-dist/rubraview-v0.0.23.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.24.exe              the viewer, as built
+dist/rubraview-v0.0.24/                 the release bundle
+dist/rubraview-v0.0.24.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -102,7 +102,12 @@ after asking), `F2` renames it (the box edits like any text field: arrows
 and `Shift` select, `Ctrl+A`, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`), `Ctrl+Z` undoes a move,
 a copy or a rename, and `1`–`9` send it to a folder you chose.
 
-To use the number keys for sorting, put this in `settings.ini`:
+To use the number keys for sorting, give them folders in Settings › Files ›
+Number keys send the file to: `Enter` on a folder opens a box with the
+path in it, all of it chosen. Type or paste a path, or copy the one that is
+there (`Ctrl+C`); `Ctrl+O` browses for one; `Enter` keeps it (only a folder
+that exists), `Esc` leaves it as it was, and `Delete` on the row clears it.
+The same can be written in `settings.ini`:
 
 ```ini
 [curation]
@@ -295,6 +300,11 @@ to** send them to one of the numbered folders — press the number after
 the button — and **Clear** lets them all go. `Ctrl+Z` undoes any of it,
 one file at a time. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
+
+Your favourite folders come first on the bar under the path (`Ctrl+D` or the
+star adds or removes the folder on screen). Right-click one to give it a
+name of your own (an empty name gives the folder's back); drag one sideways
+to put it somewhere else on the bar. Both are kept in `favorites.ini`.
 
 `F2` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
