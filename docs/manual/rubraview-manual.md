@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.24.exe              the viewer, as built
-dist/rubraview-v0.0.24/                 the release bundle
-dist/rubraview-v0.0.24.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.25.exe              the viewer, as built
+dist/rubraview-v0.0.25/                 the release bundle
+dist/rubraview-v0.0.25.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -283,6 +283,27 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 `Alt` + arrows move it.
 
 ## Settings
+
+`F10` opens the settings. Every setting there now does what it says; most
+take effect at once, a few the next time something is opened (the archive
+filename code page, the memory cap). Some worth knowing:
+
+- **General › On startup** — started with no file, the viewer shows
+  nothing (`blank`), reopens what you read last (`last_file`), or opens the
+  picker in its folder (`last_folder`, the default). **Frameless window**
+  off gives the window Windows' own title bar and borders.
+- **Viewer** — the fit and the layout a new session starts with, the gap
+  between two pages, how much one zoom step is, whether a wide scan is cut
+  in two, and whether a narrow window shows one page at a time.
+- **Files** — **Remember the page** off keeps no reading history;
+  **Offer to resume** off opens where you stopped without asking.
+- **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
+  colour that marks the choice in use, and whether a picture's own colour
+  profile is used.
+- **Cache** — how much memory pages may take and how many are read ahead
+  and kept behind; **Always strip metadata on export** starts Export with
+  that box ticked.
+- **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
 In the file picker each tile shows its picture — softened and a little
 dark, so the name drawn over it stays readable — and a folder shows the

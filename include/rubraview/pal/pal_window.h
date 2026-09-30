@@ -230,6 +230,10 @@ void rubraview_pal_window_begin_drag(rubraview_window_t *window);
 /* The title bar's Resize button (owner, 2026-09-29): the OS sizes the
    window from its bottom-right corner while the button is held. */
 void rubraview_pal_window_begin_resize(rubraview_window_t *window);
+/* Settings › General › Frameless window (owner, 2026-09-30): the zero-margin
+   canvas, or Windows' own title bar and borders. Left alone in fullscreen,
+   which takes the choice on its way out. */
+void rubraview_pal_window_set_frameless(rubraview_window_t *window, bool frameless);
 
 /** §3.21.3: the minimize and maximize/restore controls. */
 void rubraview_pal_window_minimize(rubraview_window_t *window);

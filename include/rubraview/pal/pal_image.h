@@ -184,6 +184,11 @@ bool rubraview_pal_image_save_ico(u8str_t path,
                                   const rubraview_pixbuf_t *pixels,
                                   const int32_t *sizes, size_t size_count);
 
+/* Settings › Display › Use embedded ICC profiles (owner, 2026-09-30): on,
+   a picture with its own profile is converted to sRGB as it is decoded;
+   off, its numbers are shown as they are. Applies to what is decoded next. */
+void rubraview_pal_image_set_color_management(bool on);
+
 #ifdef __cplusplus
 }
 #endif
