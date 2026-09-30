@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.25.exe              the viewer, as built
-dist/rubraview-v0.0.25/                 the release bundle
-dist/rubraview-v0.0.25.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.26.exe              the viewer, as built
+dist/rubraview-v0.0.26/                 the release bundle
+dist/rubraview-v0.0.26.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -63,7 +63,10 @@ Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
 place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
-`.cb7` and `.7z` all open, and nothing is ever unpacked to your disk.
+`.cb7`, `.7z`, `.cbr` and `.rar` all open, and nothing is ever unpacked to
+your disk. A solid archive (7z or RAR) reads a far page by unpacking the
+pages before it first, with its progress on screen; a password-protected
+RAR, or one split into volumes, is not read.
 
 Drop files on the window to open them — several at once become one
 sequence. Pictures dragged out of a browser or a mail program work too:

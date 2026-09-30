@@ -43,6 +43,7 @@ cp CHANGELOG.md "$out/"
 cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"
 cp vendor/miniz/LICENSE "$out/licences/miniz-LICENSE.txt"
 cp vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"
+cp vendor/unrar-c/LICENSE.txt "$out/licences/unrar-LICENSE.txt"
 cp vendor/libjpeg-turbo/LICENSE.md "$out/licences/libjpeg-turbo-LICENSE.md"
 cp vendor/libjpeg-turbo/README.ijg "$out/licences/libjpeg-turbo-README.ijg"
 
