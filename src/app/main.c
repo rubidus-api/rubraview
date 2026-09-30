@@ -124,9 +124,13 @@
    real time, playing a little slow beats a slideshow of jumps. */
 #define MEDIA_RESYNC_SECONDS 0.25
 #define PIXEL_GRID_MIN_SCALE 4.0 /* §3.5: the grid appears from 400% zoom */
-#define ZOOM_STEP 1.1
+/* Settings › Viewer › Zoom step (owner, 2026-09-30): 10 % a step unless set. */
+static double g_zoom_step = 1.1;
+#define ZOOM_STEP g_zoom_step
 #define PAN_STEP 60.0
-#define GUTTER 8.0
+/* Settings › Viewer › Gutter: the gap between two pages, in pixels. */
+static double g_gutter = 8.0;
+#define GUTTER g_gutter
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
 #define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z"
@@ -151,7 +155,22 @@
 #define COLOR_TEXT        0xFFF0F0F0u
 #define COLOR_BAR_FILL    0xE1141414u
 #define COLOR_CLOSE_HOVER 0xFFE81123u
-#define COLOR_TILE_CURRENT 0xFF5B9BD5u   /* the choice in use among several (a layout, a fit) */
+/* The choice in use among several (a layout, a fit): Settings › Display ›
+   Accent colour (owner, 2026-09-30), crimson as the icon unless chosen. */
+static uint32_t g_accent = 0xFFC0304Au;
+#define COLOR_TILE_CURRENT g_accent
+
+/* Settings › Display › Touch tile size (owner, 2026-09-30): 48, 64 or 96
+   pixels a menu tile; the anchors and the toolbox's buttons grow with it. */
+static double g_tile_base = 64.0;
+static rubraview_tile_metrics_t tile_metrics(double dpi_scale) {
+    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi_scale);
+    double k = g_tile_base / 64.0;
+    m.tile_size *= k;
+    m.anchor_size *= k;
+    m.button_size *= k;
+    return m;
+}
 
 
 
@@ -416,6 +435,10 @@ typedef struct app_state {
     bool needs_relayout;
     bool fit_lock;       /* §3.4: keep the fit mode and zoom across page changes */
     bool spread_detect;  /* §3.3.4 / Shift+B: AR >= threshold treated as a pre-merged spread */
+    /* Settings read since 2026-09-30 (owner: every setting on the window does something). */
+    bool frameless;                        /* General › Frameless window */
+    rubraview_codepage_t archive_codepage; /* Files › Archive filenames, for the next archive */
+    size_t cache_budget;                   /* Cache › Memory cap, for the next source opened */
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
@@ -4064,6 +4087,20 @@ static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (app->ab_edit_length[f] > 0) app->ab_edit_text[f][--app->ab_edit_length[f]] = '\0';
         return true;
     }
+    /* Left / Right move the point in hand by Settings › Video › A-B step
+       (owner, 2026-09-30); a field still empty starts from where the film is. */
+    if (key_is(combo, "Left") || key_is(combo, "Right")) {
+        int32_t f = app->ab_edit_field;
+        double step = rubraview_settings_get(&app->settings, U8("video"), U8("ab_step_seconds"));
+        double now = app->media_position;
+        double parsed = 0.0;
+        if (app->ab_edit_length[f] > 0 &&
+            rubraview_parse_timecode((u8str_t){ .ptr = app->ab_edit_text[f], .len = app->ab_edit_length[f] }, &parsed)) now = parsed;
+        now += key_is(combo, "Left") ? -step : step;
+        if (now < 0.0) now = 0.0;
+        ab_edit_fill(app, f, now);
+        return true;
+    }
     /* The crossing-over the owner asked for: the keys that set a point
        put the playhead into the field in hand, as a number, and it can
        then be typed over. */
@@ -4289,7 +4326,7 @@ static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y,
     if (app->toolbox_window) return;
     toolbox_refresh(app);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+    rubraview_tile_metrics_t m = tile_metrics(dpi);
     int32_t w = 0, h = 0;
     toolbox_window_size(app, &m, &w, &h);
     rubraview_window_config_t config = {
@@ -4336,7 +4373,7 @@ static void draw_toolbox_window(app_state_t *app) {
     app->toolbox_window_drawn = now;
     toolbox_refresh(app);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+    rubraview_tile_metrics_t m = tile_metrics(dpi);
     int32_t want_w = 0, want_h = 0, cw = 0, ch = 0;
     toolbox_window_size(app, &m, &want_w, &want_h);
     rubraview_pal_window_get_size(app->toolbox_window, &cw, &ch);
@@ -4390,7 +4427,7 @@ static void toolbox_window_pump(app_state_t *app) {
     rubraview_window_event_t event;
     while (app->toolbox_window && rubraview_pal_window_poll_event(app->toolbox_window, &event)) {
         double dpi = rubraview_pal_window_dpi_scale(app->window);
-        rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi);
+        rubraview_tile_metrics_t m = tile_metrics(dpi);
         switch (event.kind) {
             case RUBRAVIEW_WINDOW_EVENT_CLOSE: {
                 int32_t w = 0, h = 0;
@@ -4570,7 +4607,7 @@ static bool edge_nav_allowed(const app_state_t *app) {
 }
 
 static bool over_a_box(app_state_t *app, double x, double y) {
-    rubraview_tile_metrics_t m = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t m = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_t *boxes[] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
@@ -4601,7 +4638,7 @@ static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
 static bool handle_chrome_click(app_state_t *app, double x, double y) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
-    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
     /* §3.21.3: the titlebar's controls take precedence while it is shown. */
     rubraview_titlebar_button_t button = rubraview_titlebar_hit(&app->titlebar, x, y, (double)win_w);
@@ -4777,7 +4814,7 @@ static double box_opacity(const app_state_t *app, const rubraview_box_t *box) {
 /* D-15: Alt + wheel over a box. Returns true when the wheel was spent on it. */
 static bool box_wheel_opacity(app_state_t *app, double x, double y, double notches, uint32_t modifiers) {
     if (!(modifiers & RUBRAVIEW_MOD_ALT)) return false;
-    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
@@ -5437,7 +5474,7 @@ static void draw_sub_list(app_state_t *app) {
 
 static bool sub_tile_anchor(app_state_t *app, double *x, double *y) {
     if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) return false;
-    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
         if (!rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) continue;
         rubraview_rect_t r = rubraview_box_tile_rect(&app->toolbox, &metrics, i);
@@ -5731,7 +5768,7 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
 }
 
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
-    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
     /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
        low-resolution thumbnail decoding arrives with the asynchronous
@@ -7179,6 +7216,95 @@ static void settings_close(app_state_t *app) {
 
 /* What a change means for the viewer right now, beyond what it reads
    every frame (the subtitle size and outline). */
+/* The settings the viewer did not read until the owner asked for all of
+   them (2026-09-30, "1-A"). Each takes effect now where it can; the ones
+   that belong to opening something take effect at the next open. Defaults
+   (fit, layout, pixel grid) apply at start and when they are changed, and
+   leave alone what the reader changed by hand in between. */
+static void load_keymap(app_state_t *app);
+static void settings_apply_rest(app_state_t *app) {
+    static bool first = true;
+    static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
+                  last_privacy = -1.0, last_keymap = -1.0, last_autosplit = -1.0, last_collapse = -1.0;
+    rubraview_settings_t *st = &app->settings;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+
+    /* General */
+    app->frameless = rubraview_settings_get(st, U8("general"), U8("frameless")) > 0.5;
+    rubraview_pal_window_set_frameless(app->window, app->frameless);
+    app->titlebar.trigger_zone = rubraview_settings_get(st, U8("general"), U8("titlebar_trigger_px")) * dpi;
+    app->titlebar.hide_delay = rubraview_settings_get(st, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
+
+    /* Viewer */
+    double fit = rubraview_settings_get(st, U8("viewer"), U8("fit_mode"));
+    if (fit != last_fit) {
+        static const rubraview_fit_mode_t FIT[] = { RUBRAVIEW_FIT_WINDOW, RUBRAVIEW_FIT_WIDTH, RUBRAVIEW_FIT_HEIGHT,
+                                                    RUBRAVIEW_FIT_ACTUAL_SIZE, RUBRAVIEW_FIT_SMART, RUBRAVIEW_FIT_STRETCH };
+        int f = (int)lround(fit);
+        app->fit_mode = FIT[f >= 0 && f < 6 ? f : 0];
+        if (!first) reset_view(app);
+        last_fit = fit;
+    }
+    double layout = rubraview_settings_get(st, U8("viewer"), U8("layout"));
+    if (layout != last_layout) {
+        static const rubraview_page_layout_t LAYOUT[] = { RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_PAGE_LAYOUT_DUAL,
+                                                          RUBRAVIEW_PAGE_LAYOUT_BOOK, RUBRAVIEW_PAGE_LAYOUT_WEBTOON };
+        int l = (int)lround(layout);
+        app->layout_opts.mode = LAYOUT[l >= 0 && l < 4 ? l : 0];
+        app->needs_relayout = true;
+        last_layout = layout;
+    }
+    double autosplit = rubraview_settings_get(st, U8("viewer"), U8("spread_autosplit"));
+    double collapse = rubraview_settings_get(st, U8("viewer"), U8("portrait_collapse"));
+    if (autosplit != last_autosplit || collapse != last_collapse) {
+        app->layout_opts.auto_split_wide_spreads = autosplit > 0.5;
+        app->layout_opts.portrait_collapse_ar = collapse > 0.5 ? 1.0 : 0.0;   /* 0: never collapse */
+        app->needs_relayout = true;
+        last_autosplit = autosplit;
+        last_collapse = collapse;
+    }
+    g_gutter = rubraview_settings_get(st, U8("viewer"), U8("gutter_px")) * dpi;
+    g_zoom_step = 1.0 + rubraview_settings_get(st, U8("viewer"), U8("zoom_step_percent")) / 100.0;
+    double grid = rubraview_settings_get(st, U8("viewer"), U8("pixel_grid"));
+    if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
+
+    /* Files */
+    int cp = (int)lround(rubraview_settings_get(st, U8("files"), U8("archive_codepage")));
+    app->archive_codepage = cp >= 0 && cp <= (int)RUBRAVIEW_CODEPAGE_WESTERN ? (rubraview_codepage_t)cp : RUBRAVIEW_CODEPAGE_AUTO;
+
+    /* Audio */
+    rubraview_pal_audio_set_latency_ms((uint32_t)lround(rubraview_settings_get(st, U8("audio"), U8("wasapi_latency_ms"))));
+
+    /* Display */
+    static const double TILE[] = { 48.0, 64.0, 96.0 };
+    int tile = (int)lround(rubraview_settings_get(st, U8("display"), U8("tile_base_px")));
+    g_tile_base = TILE[tile >= 0 && tile < 3 ? tile : 1];
+    double color = rubraview_settings_get(st, U8("display"), U8("color_management"));
+    if (color != last_color) {
+        rubraview_pal_image_set_color_management(color > 0.5);
+        if (!first) unload_all_pages(app);   /* decoded again, with or without the profile */
+        last_color = color;
+    }
+    static const uint32_t ACCENT[] = { 0xFFC0304Au, 0xFF3A78D8u, 0xFF2E9E6Au, 0xFFD08A1Eu, 0xFF1E9E9Eu, 0xFF8A4FD0u };
+    int accent = (int)lround(rubraview_settings_get(st, U8("display"), U8("accent")));
+    g_accent = ACCENT[accent >= 0 && accent < 6 ? accent : 0];
+
+    /* Cache */
+    app->cache_budget = (size_t)rubraview_settings_get(st, U8("cache"), U8("memory_cap_mb")) * 1024u * 1024u;
+    app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookahead")));
+    app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookbehind")));
+    double privacy = rubraview_settings_get(st, U8("cache"), U8("privacy_clean"));
+    if (privacy != last_privacy) { app->export_options.privacy_clean = privacy > 0.5; last_privacy = privacy; }
+
+    /* Keys */
+    double keymap = rubraview_settings_get(st, U8("keys"), U8("use_keymap_file"));
+    if (keymap != last_keymap) {
+        if (!first) load_keymap(app);
+        last_keymap = keymap;
+    }
+    first = false;
+}
+
 static void settings_took_effect(app_state_t *app) {
     app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
@@ -7206,6 +7332,8 @@ static void settings_took_effect(app_state_t *app) {
         if (here.len > 0 && !app->media) open_path(app, here);
     }
     sorted = order;
+
+    settings_apply_rest(app);
 }
 
 /* §3.22.2: a keymap written out to share or keep, or read back in. What
@@ -9308,7 +9436,9 @@ static void tick_timers(app_state_t *app, double dt) {
     rubraview_osd_tick(&app->osd, dt);
     /* Where the pointer is now, not where it last moved — the same reason
        as the boxes below: a pointer resting on the titlebar must keep it. */
-    rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
+    /* With Windows' own title bar (Settings › General › Frameless window off) ours stays away. */
+    if (app->frameless) rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
+    else app->titlebar.shown = false;
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
     animation_tick(app, dt);
@@ -9326,7 +9456,7 @@ static void tick_timers(app_state_t *app, double dt) {
        the mouse stops, and the box used to fold up under it half a second
        later. */
     rubraview_tile_metrics_t box_metrics =
-        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_pointer(&app->toolbox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_pointer(&app->menubox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_tick(&app->toolbox, dt, grace);
@@ -9396,14 +9526,39 @@ static uint64_t scene_signature(const app_state_t *app) {
 
 /* ---- startup ---- */
 
+/* Settings › General › On startup (owner, 2026-09-30), when no file was
+   given: nothing (the picker's PC page, as before), the last thing read,
+   or the picker in the folder it was in. */
+static void startup_without_file(app_state_t *app, bool no_file) {
+    if (!no_file || app->history.count == 0) return;
+    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("startup")));
+    if (mode == 0) return;
+    const rubraview_history_entry_t *last = &app->history.entries[0];
+    for (size_t i = 1; i < app->history.count; ++i) {
+        if (app->history.entries[i].timestamp > last->timestamp) last = &app->history.entries[i];
+    }
+    rubraview_fs_entry_t entry;
+    if (!rubraview_pal_fs_stat(app->arena, last->path, &entry)) return;   /* gone since: start as blank does */
+    if (mode == 1) {
+        open_path(app, last->path);
+    } else {
+        u8str_t folder = entry.is_directory ? last->path : rubraview_path_dirname(last->path);
+        picker_open(app);
+        picker_navigate(app, folder);
+        app->picker.focus = 0;
+    }
+}
+
 static void load_keymap(app_state_t *app) {
     /* §3.7.5 / D-14: keymap.ini lives where settings.ini does — beside the
        program in portable mode, in AppData otherwise — and replaces the
        built-in bindings wholesale. Before the settings window could write
        one it was read only from the working folder, so a file left there
        still counts when AppData has none. */
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->keymap_path, KEYMAP_MAX_BYTES);
-    if (text.len == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
+    /* Settings › Keys › Use keymap.ini: off, the built-in keys, whatever the file says. */
+    bool use_file = rubraview_settings_get(&app->settings, U8("keys"), U8("use_keymap_file")) > 0.5;
+    u8str_t text = use_file ? rubraview_pal_fs_read_file(app->arena, app->keymap_path, KEYMAP_MAX_BYTES) : U8("");
+    if (use_file && text.len == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
         text = rubraview_pal_fs_read_file(app->arena, U8("keymap.ini"), KEYMAP_MAX_BYTES);
     }
     if (text.len == 0) text = cstr(rubraview_default_keymap());
@@ -9615,6 +9770,8 @@ static void layout_save(app_state_t *app) {
 
 static void history_remember(app_state_t *app) {
     if (app->source_dir.len == 0 || page_count(app) == 0) return;
+    /* Settings › Files › Remember the page: off, nothing is written down. */
+    if (rubraview_settings_get(&app->settings, U8("files"), U8("reading_history")) < 0.5) return;
 
     int32_t current = current_page_index(app);
     if (current < 0) return;
@@ -9655,7 +9812,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     app->source = rubraview_page_source_from_archive(app->arena,
                                                      (const uint8_t*)bytes.ptr, bytes.len,
                                                      archive_path, U8(IMAGE_FILTER),
-                                                     RUBRAVIEW_CODEPAGE_AUTO, MAX_PAGE_BYTES,
+                                                     app->archive_codepage, MAX_PAGE_BYTES,
                                                      PAGE_CACHE_BUDGET);
     app->source_dir = rubraview_path_dirname(archive_path);
     return app->source.page_count > 0;
@@ -9690,9 +9847,13 @@ static void finish_open(app_state_t *app, size_t start_page) {
     memset(app->pages, 0, page_count(app) * sizeof(app_page_t));
     app->pending_decode_count = 0; /* those indices named the old source's pages */
 
-    app->page_cache = rubraview_lru_create(app->arena, page_count(app) + 8, PAGE_CACHE_BUDGET);
+    app->page_cache = rubraview_lru_create(app->arena, page_count(app) + 8,
+                                           app->cache_budget > 0 ? app->cache_budget : PAGE_CACHE_BUDGET);
     app->precache = rubraview_precache_create(app->jobs, &app->page_cache,
                                               page_count(app), ESTIMATED_PAGE_BYTES);
+    /* Settings › Cache: how many pages are read ahead and kept behind. */
+    app->precache.lookahead = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookahead")));
+    app->precache.lookbehind = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookbehind")));
 
     if (start_page >= page_count(app)) start_page = 0;
     ensure_page_loaded(app, (int32_t)start_page);
@@ -9700,7 +9861,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
 
     /* §3.8.5: let the archive's own manifest set the reading direction
        and mark its covers before the first spread is chosen. */
-    if (app->source.has_comicinfo) {
+    if (app->source.has_comicinfo && rubraview_settings_get(&app->settings, U8("files"), U8("comicinfo")) > 0.5) {
         rubraview_comicinfo_t info = rubraview_comicinfo_parse(app->arena, app->source.comicinfo_xml);
         proven_result_mem_mut_t infos_res =
             rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
@@ -9761,9 +9922,12 @@ static void open_path(app_state_t *app, u8str_t path) {
     /* §3.17.1: reopening something read before starts where it stopped,
        rather than dropping the reader back on page one. */
     size_t start_page = 0;
-    const rubraview_history_entry_t *seen = rubraview_history_find(&app->history, key);
+    const rubraview_history_entry_t *seen =
+        rubraview_settings_get(&app->settings, U8("files"), U8("reading_history")) > 0.5
+            ? rubraview_history_find(&app->history, key) : NULL;
     if (seen && rubraview_history_should_offer_resume(seen)) {
-        app->resume_offer = true;
+        /* Settings › Files › Offer to resume: off, it simply opens there. */
+        app->resume_offer = rubraview_settings_get(&app->settings, U8("files"), U8("resume_prompt")) > 0.5;
         app->resume_page = seen->page;
         if ((size_t)seen->page < app->source.page_count) start_page = (size_t)seen->page;
     } else {
@@ -11012,7 +11176,7 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
 
 static bool box_press(app_state_t *app, double x, double y) {
     rubraview_tile_metrics_t metrics =
-        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
     for (size_t i = 0; i < 2; ++i) {
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
@@ -11037,7 +11201,7 @@ static bool box_press(app_state_t *app, double x, double y) {
 
 static void box_drag_motion(app_state_t *app, double x, double y) {
     if (app->box_sizing) {
-        rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
         (void)rubraview_box_grip_drag(app->box_sizing, &metrics, x, y);
         return;
     }
@@ -11050,7 +11214,7 @@ static void box_drag_motion(app_state_t *app, double x, double y) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     rubraview_tile_metrics_t metrics =
-        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_drag_to(app->box_drag, &metrics, x - app->box_grab_dx, y - app->box_grab_dy,
                           (double)win_w, (double)win_h);
     /* §3.6.1 / RFC-0002 Q6: the toolbox dragged past the edge becomes a
@@ -11080,7 +11244,7 @@ static void box_release(app_state_t *app, double x, double y) {
     app->box_drag = NULL;
     if (app->box_drag_moved) return;   /* a drag: the box stays where it was let go */
     rubraview_tile_metrics_t metrics =
-        rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app->window));
+        tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     if (rubraview_box_click(box, &metrics, x, y) && box == &app->menubox) sync_menubox_tiles(app);
 }
 
@@ -11282,6 +11446,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
+    app.titlebar.trigger_zone = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px")) * dpi;
+    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
     app.follow_for = -1;
@@ -11325,6 +11491,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
         LocalFree(argv);
     }
+    startup_without_file(&app, argc <= 1);
 
     app.last_frame_seconds = rubraview_pal_time_now_seconds();
     double last_busy_seconds = app.last_frame_seconds;
@@ -11360,6 +11527,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
                     app.titlebar = rubraview_titlebar_create(event.dpi.scale);
+                    app.titlebar.trigger_zone = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px")) * event.dpi.scale;
+                    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
                     app.needs_relayout = true;
                     break;
 
@@ -11429,7 +11598,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.pointer_inside = true;
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
-                    rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
+                    if (app.frameless) rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
                     if (rubraview_cursor_hide_notify_motion(&app.cursor)) {
                         rubraview_pal_window_set_cursor_visible(app.window, true);
                     }
@@ -11437,7 +11606,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                     /* §3.6: the box model decides what a pointer over
                        it means — only the hover half opens anything. */
-                    rubraview_tile_metrics_t metrics = rubraview_tile_metrics_default(rubraview_pal_window_dpi_scale(app.window));
+                    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app.window));
                     rubraview_box_pointer(&app.toolbox, &metrics, event.mouse.x, event.mouse.y);
                     rubraview_box_pointer(&app.menubox, &metrics, event.mouse.x, event.mouse.y);
                     box_drag_motion(&app, event.mouse.x, event.mouse.y);
@@ -11646,7 +11815,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     rubraview_pointer_context_t ctx = pointer_context(&app);
-                    apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, event.mouse.modifiers));
+                    uint32_t wheel_mods = event.mouse.modifiers;
+                    /* Settings › Video › Wheel zoom during video: over a film the plain
+                       wheel zooms, as Ctrl + wheel does, rather than changing the file. */
+                    if (app.media && app.media_info.has_video && wheel_mods == 0 &&
+                        rubraview_settings_get(&app.settings, U8("video"), U8("video_wheel_zoom")) > 0.5) {
+                        wheel_mods = RUBRAVIEW_MOD_CTRL;
+                    }
+                    apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, wheel_mods));
                     break;
                 }
 

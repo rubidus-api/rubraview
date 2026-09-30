@@ -38,7 +38,15 @@ static const GUID RV_IID_IAudioClock          = {0xCD63314F, 0x3FBA, 0x4A1B, {0x
 static const GUID RV_IID_IAudioRenderClient   = {0xF294ACFC, 0x3146, 0x4483, {0xA7, 0xBF, 0xAD, 0xDC, 0xA7, 0xC2, 0x60, 0xE2}};
 static const GUID RV_SUBTYPE_IEEE_FLOAT       = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
-#define DEVICE_BUFFER_100NS 1000000   /* 100 ms: generous for a viewer, never a glitch */
+#define DEVICE_BUFFER_100NS_DEFAULT 400000   /* 40 ms, Settings › Audio's default */
+static volatile LONG g_device_buffer_100ns = DEVICE_BUFFER_100NS_DEFAULT;
+#define DEVICE_BUFFER_100NS ((REFERENCE_TIME)g_device_buffer_100ns)
+
+void rubraview_pal_audio_set_latency_ms(uint32_t milliseconds) {
+    if (milliseconds < 20) milliseconds = 20;
+    if (milliseconds > 100) milliseconds = 100;
+    InterlockedExchange(&g_device_buffer_100ns, (LONG)(milliseconds * 10000u));
+}
 #define OPEN_TIMEOUT_MS 3000
 #define FLUSH_TIMEOUT_MS 2000
 

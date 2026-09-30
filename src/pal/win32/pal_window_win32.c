@@ -1143,6 +1143,21 @@ void rubraview_pal_window_begin_resize(rubraview_window_t *window) {
     SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_SIZE | WMSZ_BOTTOMRIGHT, 0);
 }
 
+void rubraview_pal_window_set_frameless(rubraview_window_t *window, bool frameless) {
+    if (!window || !window->hwnd || window->tool || window->frameless == frameless) return;
+    window->frameless = frameless;
+    DWORD style = frameless ? (WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX)
+                            : WS_OVERLAPPEDWINDOW;
+    if (window->fullscreen) {   /* restored with this style when fullscreen ends */
+        window->saved_style = (LONG)(style | WS_VISIBLE);
+        return;
+    }
+    LONG keep = GetWindowLongW(window->hwnd, GWL_STYLE) & (WS_VISIBLE | WS_MAXIMIZE | WS_MINIMIZE);
+    SetWindowLongW(window->hwnd, GWL_STYLE, (LONG)style | keep);
+    SetWindowPos(window->hwnd, NULL, 0, 0, 0, 0,
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+}
+
 void rubraview_pal_window_minimize(rubraview_window_t *window) {
     if (!window || !window->hwnd) return;
     ShowWindow(window->hwnd, SW_MINIMIZE);

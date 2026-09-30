@@ -84,6 +84,10 @@ void rubraview_pal_audio_set_volume(double volume, bool muted);
  */
 void rubraview_pal_audio_set_speed(double speed);
 
+/* Settings › Audio › Audio latency (owner, 2026-09-30): the device buffer
+   asked of Windows, 20-100 ms; taken by the next output opened. */
+void rubraview_pal_audio_set_latency_ms(uint32_t milliseconds);
+
 #ifdef __cplusplus
 }
 #endif

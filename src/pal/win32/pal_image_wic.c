@@ -168,11 +168,15 @@ static IWICBitmapSource *upright_source(IWICImagingFactory *factory, IWICBitmapF
  * not the same thing — a transform that disagrees with its own source
  * about the size or the pixel format is not used.
  */
+static volatile LONG g_color_management = 1;   /* read by the decoding threads too */
+void rubraview_pal_image_set_color_management(bool on) { InterlockedExchange(&g_color_management, on ? 1 : 0); }
+
 static IWICBitmapSource *apply_color_management(IWICImagingFactory *factory,
                                                 IWICBitmapFrameDecode *frame,
                                                 IWICBitmapSource *source,
                                                 IWICColorTransform **out_transform) {
     *out_transform = NULL;
+    if (!g_color_management) return source;   /* the file's numbers, as they are */
 
     UINT context_count = 0;
     if (FAILED(IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &context_count)) || context_count == 0) {
