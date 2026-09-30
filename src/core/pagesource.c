@@ -3,7 +3,7 @@
 #include "rubraview/path.h"
 #include <string.h>
 
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
 #define COMICINFO_NAME "ComicInfo.xml"
 
 static bool name_is_comicinfo(u8str_t name) {
@@ -209,6 +209,63 @@ static rubraview_page_source_t page_source_from_7z(proven_arena_t *arena,
     return source;
 }
 
+/* RAR: RAR 4's names may be a code page's, as ZIP's are, and go through
+   the same plan (§3.8.3); RAR 5's are UTF-8. A solid archive reads like a
+   CB7's solid block, from the start of its chain (plan 2026-09-30-rar-reader). */
+static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
+                                                    const uint8_t *data, size_t size,
+                                                    u8str_t archive_path,
+                                                    u8str_t extension_filter,
+                                                    rubraview_codepage_t override_choice,
+                                                    uint32_t max_entry_bytes) {
+    rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR, .archive_path = archive_path };
+    rubraview_rar_result_t opened = rubraview_rar_open(arena, data, size);
+    if (opened.err != RUBRAVIEW_RAR_OK) return source;
+    source.archiverar = opened.value;
+
+    proven_result_mem_mut_t items_res =
+        rubraview_arena_alloc_array(arena, (opened.value.entry_count + 1), sizeof(rubraview_sort_item_t));
+    if (!proven_is_ok(items_res.err)) return source;
+    rubraview_sort_item_t *items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
+
+    ref_buf_t buf = {0};
+    size_t kept = 0;
+    for (size_t i = 0; i < opened.value.entry_count; ++i) {
+        rubraview_rar_entry_t *entry = &source.archiverar.entries[i];
+        if (entry->name_is_legacy) {
+            uint32_t codepage = 0;
+            if (rubraview_archive_filename_plan(entry->name, false, override_choice, &codepage)) {
+                u8str_t decoded = rubraview_pal_transcode_codepage(arena, entry->name, codepage);
+                if (decoded.len > 0) entry->name = decoded;
+            }
+        }
+        u8str_t name = entry->name;
+        if (name_is_comicinfo(name)) {
+            rubraview_rar_data_result_t xml = rubraview_rar_read_entry(arena, &source.archiverar, i, max_entry_bytes);
+            if (xml.err == RUBRAVIEW_RAR_OK) {
+                source.has_comicinfo = true;
+                source.comicinfo_xml = xml.data;
+            }
+            continue;
+        }
+        if (entry->encrypted || !rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
+        items[kept++] = (rubraview_sort_item_t){
+            .name = name,
+            .mtime = 0, .ctime = 0,
+            .size_bytes = entry->size > UINT32_MAX ? UINT32_MAX : (uint32_t)entry->size,
+            .tag = (uint64_t)i,
+        };
+    }
+    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_PATH_NATURAL, true, NULL);
+    for (size_t i = 0; i < kept; ++i) {
+        rubraview_page_ref_t ref = { .name = items[i].name, .path = { .ptr = "", .len = 0 }, .entry_index = (size_t)items[i].tag };
+        if (!ref_buf_push(arena, &buf, ref)) break;
+    }
+    source.pages = buf.data;
+    source.page_count = buf.count;
+    return source;
+}
+
 /* The extension is a hint, not evidence: a `.cbz` that is really a 7z
    happens often enough that the signature decides. */
 static bool looks_like_7z(const uint8_t *data, size_t size) {
@@ -227,6 +284,9 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
         return page_source_from_7z(arena, data, size, archive_path, extension_filter,
                                    max_entry_bytes, max_block_bytes);
     }
+    if (arena && data && size >= 7 && data[0] == 'R' && rubraview_rar_is_rar(data, size < 64 ? size : 64)) {
+        return page_source_from_rar(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes);
+    }
     return page_source_from_zip(arena, data, size, archive_path, extension_filter,
                                 override_choice, max_entry_bytes);
 }
@@ -234,6 +294,7 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
 void rubraview_page_source_close(rubraview_page_source_t *source) {
     if (!source) return;
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_close(&source->archive7z);
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) rubraview_rar_close(&source->archiverar);
     source->pages = NULL;
     source->page_count = 0;
 }
@@ -250,6 +311,15 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
            lets the image PAL decode straight from the file. */
         result.from_disk = true;
         result.ok = source->pages[index].path.len > 0;
+        return result;
+    }
+
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
+        rubraview_rar_data_result_t rar = rubraview_rar_read_entry(
+            arena, &source->archiverar, source->pages[index].entry_index, max_entry_bytes);
+        if (rar.err != RUBRAVIEW_RAR_OK) return result;
+        result.data = rar.data;
+        result.ok = true;
         return result;
     }
 
@@ -277,6 +347,9 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) {
         return entry < source->archive7z.entry_count ? source->archive7z.entries[entry].size : 0;
     }
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
+        return entry < source->archiverar.entry_count ? source->archiverar.entries[entry].size : 0;
+    }
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE) {
         return entry < source->archive.entry_count ? source->archive.entries[entry].uncompressed_size : 0;
     }
@@ -291,18 +364,23 @@ size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, 
 }
 
 uint64_t rubraview_page_source_read_cost(const rubraview_page_source_t *source, size_t index) {
-    if (!source || index >= source->page_count || source->kind != RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) return 0;
+    if (!source || index >= source->page_count) return 0;
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR)
+        return rubraview_rar_read_cost(&source->archiverar, source->pages[index].entry_index);
+    if (source->kind != RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) return 0;
     return rubraview_sz_read_cost(&source->archive7z, source->pages[index].entry_index);
 }
 
 void rubraview_page_source_cancel(rubraview_page_source_t *source, bool cancel) {
     if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_cancel(&source->archive7z, cancel);
+    if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) rubraview_rar_cancel(&source->archiverar, cancel);
 }
 
 void rubraview_page_source_progress(const rubraview_page_source_t *source, uint64_t *out_done, uint64_t *out_total) {
     if (out_done) *out_done = 0;
     if (out_total) *out_total = 0;
     if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_progress(&source->archive7z, out_done, out_total);
+    if (source && source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) rubraview_rar_progress(&source->archiverar, out_done, out_total);
 }
 
 int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path) {

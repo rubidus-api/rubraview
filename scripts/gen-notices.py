@@ -21,6 +21,7 @@ SOURCES = [
     "vendor/proven/THIRD_PARTY_NOTICES.md",
     "vendor/miniz/LICENSE",
     "vendor/lzma/LICENSE.txt",
+    "vendor/unrar-c/LICENSE.txt",
     "vendor/libjpeg-turbo/LICENSE.md",
     "vendor/libjpeg-turbo/README.ijg",
 ]

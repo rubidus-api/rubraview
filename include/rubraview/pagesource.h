@@ -4,6 +4,7 @@
 #include "rubraview/core.h"
 #include "rubraview/archive.h"
 #include "rubraview/sevenzip.h"
+#include "rubraview/rar.h"
 #include "rubraview/encoding.h"
 #include "rubraview/sort.h"
 #include "rubraview/pal/pal_fs.h"
@@ -28,6 +29,7 @@ typedef enum rubraview_page_source_kind {
     RUBRAVIEW_PAGE_SOURCE_FOLDER = 0,
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE,     /* CBZ / ZIP */
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z,  /* CB7 / 7z (§3.8.2) */
+    RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR, /* CBR / RAR (owner, 2026-09-30) */
 } rubraview_page_source_kind_t;
 
 typedef struct rubraview_page_ref {
@@ -46,6 +48,7 @@ typedef struct rubraview_page_source {
        heap memory, which is why closing a source is not optional. */
     rubraview_zip_archive_t archive;
     rubraview_sz_archive_t  archive7z;
+    rubraview_rar_archive_t archiverar;
     u8str_t archive_path;
 
     /* The ComicInfo.xml found in the archive, if any (§3.8.5). */
