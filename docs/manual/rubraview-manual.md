@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.26.exe              the viewer, as built
-dist/rubraview-v0.0.26/                 the release bundle
-dist/rubraview-v0.0.26.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.27.exe              the viewer, as built
+dist/rubraview-v0.0.27/                 the release bundle
+dist/rubraview-v0.0.27.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -65,8 +65,11 @@ place when you open it again — press `Enter` to take it.
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
 `.cb7`, `.7z`, `.cbr` and `.rar` all open, and nothing is ever unpacked to
 your disk. A solid archive (7z or RAR) reads a far page by unpacking the
-pages before it first, with its progress on screen; a password-protected
-RAR, or one split into volumes, is not read.
+pages before it first, with its progress on screen. A password-protected
+RAR asks for its password (it is shown as dots, and forgotten when the
+viewer closes; one that worked is tried first on the next locked book). A
+RAR split into volumes (`x.part1.rar`, `x.part2.rar`, ... or `x.rar`,
+`x.r00`, ...) opens as one book from whichever volume you open.
 
 Drop files on the window to open them — several at once become one
 sequence. Pictures dragged out of a browser or a mail program work too:
@@ -198,14 +201,19 @@ While it does:
   `.sup`) or from inside the film itself.
 - The sound can be shaped (Settings › Audio › Sound, the toolbox's **EQ**,
   **Night** and **Viz** buttons, or Playback › Sound): an equaliser with
-  eight presets, night mode, which brings loud passages down so quiet
+  eight presets and a window of ten sliders of its own (**EQ bands**:
+  drag a band, turn the wheel over it, right-click for 0 dB), night mode,
+  which brings loud passages down so quiet
   ones need not be turned up, and **Volume levelling**, which evens songs
   out by the ReplayGain they carry (by track or by album).
 - A song's page shows an analyser above its words — 64 bars with falling
   peaks, or the wave itself (`Viz` switches, or turns it off).
 - A `.lrc` beside a song, with the same name, shows its words in time:
   the line being sung, three before and three after; click a line to go
-  there. A `.cue` beside it cuts one long file into its record's tracks:
+  there. Without one, the words stored in the song itself are shown —
+  in time when they are timed, otherwise moving along with the song. A
+  `.cue` beside it (of any name, as long as it names the song; or opened
+  itself) cuts one long file into its record's tracks:
   the page names the track playing, and previous / next go track by track
   inside the file before they change file.
 - `Shift+P` puts the music in a small window of its own, on top of

@@ -85,7 +85,7 @@ u8str_t rubraview_settings_tab_name(rubraview_settings_tab_t tab);
 
 /* ---- values ---- */
 
-#define RUBRAVIEW_SETTINGS_MAX 64
+#define RUBRAVIEW_SETTINGS_MAX 96
 
 typedef struct rubraview_settings {
     double   values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */

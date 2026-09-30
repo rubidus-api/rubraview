@@ -54,6 +54,15 @@ typedef struct rubraview_page_source {
     /* The ComicInfo.xml found in the archive, if any (§3.8.5). */
     bool     has_comicinfo;
     u8str_t  comicinfo_xml;
+
+    /* A RAR that wants a password (owner, 2026-10-01): its headers or its
+       pages are encrypted and none was given (`needs_password`), or the one
+       given is wrong (`password_wrong` too). It then has no pages. */
+    bool     needs_password;
+    bool     password_wrong;
+    /* A RAR set's volumes, mapped by the source itself and let go when it closes. */
+    rubraview_fs_mapping_t *rar_maps;
+    size_t   rar_map_count;
 } rubraview_page_source_t;
 
 /**
@@ -89,6 +98,24 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
                                                             rubraview_codepage_t override_choice,
                                                             uint32_t max_entry_bytes,
                                                             uint64_t max_block_bytes);
+
+/**
+ * The same, with a password for an encrypted RAR (UTF-8; empty for none).
+ * A RAR that is one volume of a set (`x.part2.rar`, `x.r00`, or a header
+ * that says so) is opened from all of the set's volumes found beside
+ * `archive_path`, from the first, each mapped by the source.
+ */
+rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
+                                                                     const uint8_t *data, size_t size,
+                                                                     u8str_t archive_path,
+                                                                     u8str_t extension_filter,
+                                                                     rubraview_codepage_t override_choice,
+                                                                     uint32_t max_entry_bytes,
+                                                                     uint64_t max_block_bytes,
+                                                                     u8str_t password);
+
+/** A RAR volume after the first of its set (`x.part2.rar`, `x.r00`): it opens as its set, so lists skip it. */
+bool rubraview_page_source_is_later_volume(u8str_t name);
 
 /**
  * Release what an archive source holds. A CBZ holds nothing but arena

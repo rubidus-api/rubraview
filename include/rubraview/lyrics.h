@@ -26,6 +26,7 @@ typedef struct rubraview_lyrics {
 
     u8str_t title, artist, album;    /* from the `[ti:]`, `[ar:]`, `[al:]` tags */
     double  offset_seconds;          /* the `[offset:]` tag, in seconds */
+    bool    untimed;                 /* words with no times (ID3 USLT and the like): every line's time is -1 */
 } rubraview_lyrics_t;
 
 /**
@@ -35,7 +36,26 @@ typedef struct rubraview_lyrics {
  */
 rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text);
 
-/** The line that should be highlighted at a given moment, or -1. */
+/**
+ * Words stored in the music file itself (owner, 2026-10-01): text that is
+ * LRC is read as timed; any other text becomes untimed lines, blank lines
+ * kept out.
+ */
+rubraview_lyrics_t rubraview_lyrics_from_text(proven_arena_t *arena, u8str_t text);
+
+/** Timed lines from elsewhere (ID3 SYLT), copied and put in time order. */
+rubraview_lyrics_t rubraview_lyrics_from_lines(proven_arena_t *arena, const rubraview_lyric_line_t *lines, size_t count);
+
+/**
+ * Untimed words follow the song through its length: the line about as far
+ * into the words as the song is into itself. -1 when nothing fits.
+ */
+int32_t rubraview_lyrics_untimed_index(const rubraview_lyrics_t *lyrics, double time_seconds, double duration_seconds);
+
+/**
+ * The line that should be highlighted at a given moment (the song's own
+ * position; the `[offset:]` is applied here), or -1. Untimed words: -1.
+ */
 int32_t rubraview_lyrics_index_at(const rubraview_lyrics_t *lyrics, double time_seconds);
 
 /**
@@ -71,6 +91,13 @@ typedef struct rubraview_cue_sheet {
  * is the detail every naive cue parser gets wrong.
  */
 rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, double total_seconds);
+
+/**
+ * Does the sheet's `FILE` name this audio file (its name, without the
+ * folder)? Letter case is ignored, and so is the extension when the rest
+ * matches: a sheet written for `Album.wav` still cuts `Album.flac`.
+ */
+bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, u8str_t audio_name);
 
 /** Which track a moment falls in, or -1. */
 int32_t rubraview_cue_track_at(const rubraview_cue_sheet_t *sheet, double time_seconds);

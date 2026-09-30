@@ -3,6 +3,7 @@
 
 #include "rubraview/core.h"
 #include "rubraview/audio_dsp.h"
+#include "rubraview/lyrics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,6 +63,14 @@ typedef struct rubraview_tags {
     /* ReplayGain (owner, 2026-09-30): REPLAYGAIN_* in Vorbis comments, or
        in ID3v2 TXXX frames; nothing set when the file does not say. */
     rubraview_replaygain_t replaygain;
+
+    /* The words, when the file carries them (owner, 2026-10-01): ID3's
+       USLT, a Vorbis LYRICS / UNSYNCEDLYRICS comment or MP4's ©lyr as
+       text (which may itself be LRC), and ID3's SYLT as timed lines
+       (millisecond stamps only; MPEG-frame stamps are left out). */
+    u8str_t                 lyrics_text;
+    rubraview_lyric_line_t *synced_lyrics;
+    size_t                  synced_lyrics_count;
 } rubraview_tags_t;
 
 /** A cover larger than this is left alone: it is not a cover. */
