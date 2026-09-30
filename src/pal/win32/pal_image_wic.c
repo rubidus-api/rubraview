@@ -24,6 +24,21 @@
  * (RV-044) must either create its own factory or serialise access —
  * WIC objects are not free-threaded by default.
  */
+/* A diagnostic (2026-09-30): RUBRAVIEW_REFUSE_BITMAP_PIXELS=N makes the
+   viewer act as a card that refuses any bitmap over N pixels, so the
+   halving below can be run on a machine whose card never refuses (the
+   test VM's WARP takes anything). Unset, it costs one lookup. */
+static bool refused_for_test(int32_t w, int32_t h) {
+    static int state = -1;          /* -1 not read yet */
+    static long long limit = 0;
+    if (state < 0) {
+        const wchar_t *v = _wgetenv(L"RUBRAVIEW_REFUSE_BITMAP_PIXELS");
+        limit = v ? _wtoi64(v) : 0;
+        state = limit > 0 ? 1 : 0;
+    }
+    return state == 1 && (long long)w * (long long)h > limit;
+}
+
 /* One factory a thread: Save a copy decodes and writes on a thread of its
    own (owner, 2026-09-28), and a factory made in the main thread's
    apartment is not handed to another. */
@@ -314,7 +329,8 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
                     feed = (IWICBitmapSource*)scaled;
                 }
                 ID2D1Bitmap *bitmap = NULL;
-                hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, feed, NULL, &bitmap);
+                if (refused_for_test(tw, th)) hr = E_OUTOFMEMORY;   /* as a card short of memory says it */
+                else hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, feed, NULL, &bitmap);
                 if (scaled) IWICFormatConverter_Release(scaled);
                 if (scaler) IWICBitmapScaler_Release(scaler);
                 if (SUCCEEDED(hr) && bitmap) {
