@@ -175,11 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-30: D-59 A card that refuses a picture is simulated to run the halving
+
+- Status: Accepted (owner 2026-09-30: "백로그 있나요. 안한 것 있으면 진행 바람." — the halving had been left open since D-39 because no machine here refuses a bitmap)
+- Decision: `RUBRAVIEW_REFUSE_BITMAP_PIXELS=N` in the environment makes `pal_image_wic.c` treat any bitmap over N pixels as refused (`E_OUTOFMEMORY`, what a card short of memory returns), so the fall-back that halves a picture until the card takes it runs for real on the test VM. Unset, nothing changes; the variable is read once.
+- Consequences: measured on the Windows 11 VM with N = 4 000 000: `a_photo.jpg` (4032 x 3024, 12.2 megapixels) was refused at full size and shown at 2016 x 1512, the information window saying "reduced to 2016 x 1512 (the graphics card's limit)". The variable was removed from the VM afterwards. What is still unmeasured is a real card refusing, which only the owner's machines can show.
+
 ## 2026-09-29: D-58 A settled screen is drawn when it changes, not every second
 
 - Status: Accepted (owner 2026-09-29: "백로그 있나요. 안한 것 있으면 진행 바람." — found while measuring on the VM)
 - Decision: after the 3 s grace that follows any input or activity, the main loop no longer draws a frame each second. It sums up what is on screen (`scene_signature`: window size, the spread and its pages' loaded state and texture, zoom and pan, the boxes', title bar's, OSD's, notice's, playlist window's and picker's state, the media page, its pause and its time to the second, the far-page reader) each pass and draws when that changes, and every 10 s regardless, as a safety net for anything the summary misses.
-- Consequences: measured on the Windows 11 VM (WARP, no graphics card), a 4032x3024 photo at rest: 10.3 s of CPU in 30 s before, 1.38 s after; 0.0.17 had 4.1 s and 0.0.19 18.9 s. A page turn and a hover drew at once, as before. Something visible that changes without input and is not in the summary shows up to 10 s late; the list is the place to add it. Music playing under a picture still redraws four times a second (the paced path), which is left as it is.
+- Consequences: measured on the Windows 11 VM (WARP, no graphics card), a 4032x3024 photo at rest: 10.3 s of CPU in 30 s before, 1.38 s after; 0.0.17 had 4.1 s and 0.0.19 18.9 s. A page turn and a hover drew at once, as before. Something visible that changes without input and is not in the summary shows up to 10 s late; the list is the place to add it. Music playing under a picture costs nothing extra: it is held apart from the page (`bgm_media`), and only the mini player, a window of its own, shows its time (checked 2026-09-30; an earlier note here said otherwise).
 
 ## 2026-09-29: D-57 What happens when a film or a song ends
 
