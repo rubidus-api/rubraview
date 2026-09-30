@@ -175,6 +175,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-09-30: D-62 The music features are connected
+
+- Status: Accepted (owner 2026-09-30: "3. 전부 연결이요." — the analyser, the equaliser and night mode, ReplayGain, `.lrc` and `.cue`, all tested in core since M8 and never reaching the screen or the sound)
+- Decision:
+  - `src/core/audio_chain.c` (new, `test_audio_chain`) is what happens between the decoder and the device: the ten-band equaliser with its own state on each channel, a gain, night mode's -24 dB 4:1 compressor riding a level that rises in about 5 ms and falls in about 200 ms (the old per-sample gain would have distorted), and a tap keeping the newest 2048 samples mixed to one channel. The WASAPI output's thread runs it after the speed resampler and fills the tap; `rubraview_pal_audio_set_chain` and `rubraview_pal_audio_tap_read` are the viewer's side.
+  - ReplayGain is read by `tags.c` from Vorbis comments (FLAC, Ogg, Opus) and ID3v2 `TXXX` frames (`REPLAYGAIN_TRACK/ALBUM_GAIN/PEAK`); Settings › Audio › Volume levelling (off, track, album) turns it into the chain's gain for the song playing, the peak keeping it from clipping.
+  - Settings › Audio › Sound: Equaliser (flat, rock, pop, jazz, classical, bass, vocal, acoustic), Night mode, Analyser (off, spectrum, scope; spectrum by default). Toolbox buttons EQ / Night / Viz (EQ and Night on a film's too) and Playback › Sound cycle them.
+  - A song's page: the analyser in a strip above its words, redrawn about thirty times a second while it plays (the paced redraw's own four a second otherwise); a `.lrc` of the same name as seven lines near the top, the current one larger, a click seeking to its line; a `.cue` of the same name (two tracks or more) naming the track playing, and previous / next seeking track to track inside the file — back to the start of the track first when more than 3 s in — before they change file.
+- Consequences: the equaliser also colours a film's sound when chosen, which is what a player does. The chain is one set-up for every output, so two tracks crossfading share it. Not in this: a separate equaliser window with ten sliders (the presets are what the settings hold), embedded `SYLT`/`USLT` lyrics (only the `.lrc` file), and a `.cue` that names a different audio file than its own.
+
 ## 2026-09-30: D-61 Every setting on the window does something
 
 - Status: Accepted (owner 2026-09-30: "1-A" — all 27 settings that were shown and saved but never read, wired)

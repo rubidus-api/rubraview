@@ -193,6 +193,18 @@ While it does:
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
   `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
   `.sup`) or from inside the film itself.
+- The sound can be shaped (Settings › Audio › Sound, the toolbox's **EQ**,
+  **Night** and **Viz** buttons, or Playback › Sound): an equaliser with
+  eight presets, night mode, which brings loud passages down so quiet
+  ones need not be turned up, and **Volume levelling**, which evens songs
+  out by the ReplayGain they carry (by track or by album).
+- A song's page shows an analyser above its words — 64 bars with falling
+  peaks, or the wave itself (`Viz` switches, or turns it off).
+- A `.lrc` beside a song, with the same name, shows its words in time:
+  the line being sung, three before and three after; click a line to go
+  there. A `.cue` beside it cuts one long file into its record's tracks:
+  the page names the track playing, and previous / next go track by track
+  inside the file before they change file.
 - `Shift+P` puts the music in a small window of its own, on top of
   whatever you are reading: the cover, the track, a strip to move along
   and buttons to play, pause and change track. Music keeps playing when

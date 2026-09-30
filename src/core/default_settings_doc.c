@@ -71,7 +71,12 @@ static const char *const PARTS[] = {
 "  choice audio.at_end             \"When a file ends\"        stop | next | one | all | shuffle = next wired\n"
 "  toggle audio.gapless            \"Gapless playback\"        = true wired\n"
 "  float  audio.crossfade_seconds  \"Crossfade\"               0.0..5.0 step 0.1 unit \"s\" = 0.0 wired\n"
-"  choice audio.replaygain         \"Volume levelling\"        off | track | album = off\n"
+"  choice audio.replaygain         \"Volume levelling\"        off | track | album = off wired\n"
+"  section \"Sound\"\n"
+"  choice audio.eq_preset          \"Equaliser\"               flat | rock | pop | jazz | classical | bass | vocal | acoustic = flat wired\n"
+"  toggle audio.night_mode         \"Night mode\"              = false wired\n"
+"  choice audio.visualizer         \"Analyser\"                off | spectrum | scope = spectrum wired\n"
+"  note \"Volume levelling uses the ReplayGain the file carries; a .lrc and a .cue of the same name beside a song are read too.\"\n"
 "  int    audio.wasapi_latency_ms  \"Audio latency\"           20..100 step 5 unit \"ms\" = 40 wired\n"
 "  toggle audio.bgm_pause_on_video \"Pause music during video\" = true wired\n"
 "\n",
