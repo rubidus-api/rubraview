@@ -13,10 +13,18 @@ void rubraview_audio_chain_init(rubraview_audio_chain_t *chain, double sample_ra
 
 void rubraview_audio_chain_configure(rubraview_audio_chain_t *chain, const rubraview_audio_chain_config_t *config) {
     if (!chain || !config) return;
-    if (config->eq_preset != chain->config.eq_preset) {
+    bool changed = config->eq_custom != chain->config.eq_custom ||
+                   (config->eq_custom ? memcmp(config->eq_gains_db, chain->config.eq_gains_db, sizeof(config->eq_gains_db)) != 0
+                                      : config->eq_preset != chain->config.eq_preset);
+    if (changed) {
         for (uint32_t c = 0; c < chain->channels; ++c) {
-            rubraview_eq_set_preset(&chain->eq[c], chain->sample_rate, config->eq_preset);
-            chain->eq[c].enabled = config->eq_preset != RUBRAVIEW_EQ_FLAT;
+            if (config->eq_custom) {
+                for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) {
+                    rubraview_eq_set_gain(&chain->eq[c], chain->sample_rate, b, config->eq_gains_db[b]);
+                }
+            } else {
+                rubraview_eq_set_preset(&chain->eq[c], chain->sample_rate, config->eq_preset);
+            }
         }
     }
     chain->config = *config;
@@ -35,6 +43,10 @@ void rubraview_audio_chain_process(rubraview_audio_chain_t *chain, float *interl
     if (!chain || !interleaved || frames == 0) return;
     uint32_t ch = chain->channels;
     bool eq = chain->config.eq_preset != RUBRAVIEW_EQ_FLAT;
+    if (chain->config.eq_custom) {
+        eq = false;
+        for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) if (chain->config.eq_gains_db[b] != 0.0f) eq = true;
+    }
     double gain = chain->config.gain;
     /* Night mode: -24 dB threshold, 4:1, with a level that rises in about
        5 ms and falls in about 200 ms — a compressor, not a clipper. */

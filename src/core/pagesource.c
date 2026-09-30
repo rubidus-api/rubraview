@@ -1,6 +1,7 @@
 #include "rubraview/pagesource.h"
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
@@ -212,16 +213,86 @@ static rubraview_page_source_t page_source_from_7z(proven_arena_t *arena,
 /* RAR: RAR 4's names may be a code page's, as ZIP's are, and go through
    the same plan (§3.8.3); RAR 5's are UTF-8. A solid archive reads like a
    CB7's solid block, from the start of its chain (plan 2026-09-30-rar-reader). */
+bool rubraview_page_source_is_later_volume(u8str_t name) {
+    rubraview_rar_volume_name_kind_t kind = rubraview_rar_volume_name_kind(name);
+    return kind == RUBRAVIEW_RAR_NAME_OLD || (kind == RUBRAVIEW_RAR_NAME_PART && rubraview_rar_volume_number(name) > 1);
+}
+
+/* The volumes of the set `archive_path` belongs to, mapped from the first
+   while they are there (owner, 2026-10-01). 0 when it is not a set, or its
+   first volume is not beside it: then the archive is read on its own. */
+static size_t rar_map_set(proven_arena_t *arena, rubraview_page_source_t *source, const uint8_t *data, size_t size,
+                          u8str_t archive_path) {
+    rubraview_rar_volume_info_t info;
+    (void)rubraview_rar_volume_info(data, size, &info);
+    rubraview_rar_volume_name_kind_t kind = rubraview_rar_volume_name_kind(archive_path);
+    if (archive_path.len == 0 || (!info.is_volume && kind == RUBRAVIEW_RAR_NAME_PLAIN)) return 0;
+    bool old = kind == RUBRAVIEW_RAR_NAME_OLD || (kind == RUBRAVIEW_RAR_NAME_PLAIN && !info.new_numbering);
+    u8str_t name = rubraview_rar_first_volume(arena, archive_path, old);
+    size_t cap = 0;
+    for (size_t i = 0; i < 999 && name.len > 0; ++i) {
+        if (source->rar_map_count == cap) {
+            size_t grown = cap ? cap * 2 : 8;
+            rubraview_fs_mapping_t *maps = (rubraview_fs_mapping_t*)realloc(source->rar_maps, grown * sizeof(*maps));
+            if (!maps) break;
+            source->rar_maps = maps;
+            cap = grown;
+        }
+        rubraview_fs_mapping_t map = {0};
+        if (!rubraview_pal_fs_map(name, &map)) break;
+        if (map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&map); break; }
+        source->rar_maps[source->rar_map_count++] = map;
+        name = rubraview_rar_next_volume(arena, name, old);
+    }
+    return source->rar_map_count;
+}
+
+static void rar_unmap_set(rubraview_page_source_t *source) {
+    for (size_t i = 0; i < source->rar_map_count; ++i) rubraview_pal_fs_unmap(&source->rar_maps[i]);
+    free(source->rar_maps);
+    source->rar_maps = NULL;
+    source->rar_map_count = 0;
+}
+
 static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
                                                     const uint8_t *data, size_t size,
                                                     u8str_t archive_path,
                                                     u8str_t extension_filter,
                                                     rubraview_codepage_t override_choice,
-                                                    uint32_t max_entry_bytes) {
+                                                    uint32_t max_entry_bytes,
+                                                    u8str_t password) {
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR, .archive_path = archive_path };
-    rubraview_rar_result_t opened = rubraview_rar_open(arena, data, size);
+    rubraview_rar_volume_t one = { .data = data, .size = size };
+    const rubraview_rar_volume_t *volumes = &one;
+    size_t volume_count = 1;
+    size_t mapped = rar_map_set(arena, &source, data, size, archive_path);
+    if (mapped > 0) {
+        proven_result_mem_mut_t vres = rubraview_arena_alloc_array(arena, mapped, sizeof(rubraview_rar_volume_t));
+        if (proven_is_ok(vres.err)) {
+            rubraview_rar_volume_t *vols = (rubraview_rar_volume_t*)(void*)vres.value.ptr;
+            for (size_t i = 0; i < mapped; ++i) vols[i] = (rubraview_rar_volume_t){ source.rar_maps[i].data, (size_t)source.rar_maps[i].size };
+            volumes = vols;
+            volume_count = mapped;
+        }
+    }
+    rubraview_rar_result_t opened = rubraview_rar_open_volumes(arena, volumes, volume_count, password);
+    if (opened.err == RUBRAVIEW_RAR_ERR_ENCRYPTED || opened.err == RUBRAVIEW_RAR_ERR_BAD_PASSWORD) {
+        source.needs_password = true;                          /* its headers are locked */
+        source.password_wrong = opened.err == RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+        return source;
+    }
     if (opened.err != RUBRAVIEW_RAR_OK) return source;
     source.archiverar = opened.value;
+    if (rubraview_rar_needs_password(&source.archiverar)) {
+        /* Its pages are locked: the password is tried on one of them now. */
+        rubraview_rar_err_t tried = password.len > 0 ? rubraview_rar_set_password(&source.archiverar, password)
+                                                     : RUBRAVIEW_RAR_ERR_ENCRYPTED;
+        if (tried != RUBRAVIEW_RAR_OK) {
+            source.needs_password = true;
+            source.password_wrong = password.len > 0 && tried == RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+            return source;
+        }
+    }
 
     proven_result_mem_mut_t items_res =
         rubraview_arena_alloc_array(arena, (opened.value.entry_count + 1), sizeof(rubraview_sort_item_t));
@@ -248,7 +319,7 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
             }
             continue;
         }
-        if (entry->encrypted || !rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
+        if (entry->crypt == RUBRAVIEW_RAR_CRYPT_OLD || !rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
         items[kept++] = (rubraview_sort_item_t){
             .name = name,
             .mtime = 0, .ctime = 0,
@@ -280,12 +351,24 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
                                                             rubraview_codepage_t override_choice,
                                                             uint32_t max_entry_bytes,
                                                             uint64_t max_block_bytes) {
+    return rubraview_page_source_from_archive_password(arena, data, size, archive_path, extension_filter, override_choice,
+                                                       max_entry_bytes, max_block_bytes, (u8str_t){ .ptr = "", .len = 0 });
+}
+
+rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
+                                                                     const uint8_t *data, size_t size,
+                                                                     u8str_t archive_path,
+                                                                     u8str_t extension_filter,
+                                                                     rubraview_codepage_t override_choice,
+                                                                     uint32_t max_entry_bytes,
+                                                                     uint64_t max_block_bytes,
+                                                                     u8str_t password) {
     if (arena && data && looks_like_7z(data, size)) {
         return page_source_from_7z(arena, data, size, archive_path, extension_filter,
                                    max_entry_bytes, max_block_bytes);
     }
     if (arena && data && size >= 7 && data[0] == 'R' && rubraview_rar_is_rar(data, size < 64 ? size : 64)) {
-        return page_source_from_rar(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes);
+        return page_source_from_rar(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes, password);
     }
     return page_source_from_zip(arena, data, size, archive_path, extension_filter,
                                 override_choice, max_entry_bytes);
@@ -294,7 +377,10 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
 void rubraview_page_source_close(rubraview_page_source_t *source) {
     if (!source) return;
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z) rubraview_sz_close(&source->archive7z);
-    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) rubraview_rar_close(&source->archiverar);
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
+        rubraview_rar_close(&source->archiverar);
+        rar_unmap_set(source);
+    }
     source->pages = NULL;
     source->page_count = 0;
 }
@@ -414,10 +500,11 @@ u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
         arena, listing, current_archive_path, U8(ARCHIVE_FILTER), RUBRAVIEW_SORT_NAME_NATURAL, true);
     if (archives.count == 0 || !archives.found) return none;
 
-    if (forward) {
-        if (archives.current + 1 >= archives.count) return none;
-        return archives.paths[archives.current + 1];
+    /* A RAR set is one book (owner, 2026-10-01): its later volumes are stepped over. */
+    size_t at = archives.current;
+    for (;;) {
+        if (forward ? at + 1 >= archives.count : at == 0) return none;
+        at = forward ? at + 1 : at - 1;
+        if (!rubraview_page_source_is_later_volume(archives.paths[at])) return archives.paths[at];
     }
-    if (archives.current == 0) return none;
-    return archives.paths[archives.current - 1];
 }

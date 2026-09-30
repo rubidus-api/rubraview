@@ -25,6 +25,10 @@ extern "C" {
 
 typedef struct rubraview_audio_chain_config {
     rubraview_eq_preset_t eq_preset;   /* FLAT: the equaliser does nothing */
+    /* The equaliser window's own ten gains (owner, 2026-10-01): used in
+       place of the preset when `eq_custom` is set; all zero does nothing. */
+    bool   eq_custom;
+    float  eq_gains_db[RUBRAVIEW_EQ_BANDS];
     bool   night_mode;
     double gain;                       /* linear; 1.0 leaves the level alone */
 } rubraview_audio_chain_config_t;
@@ -39,7 +43,7 @@ typedef struct rubraview_audio_chain {
 
 void rubraview_audio_chain_init(rubraview_audio_chain_t *chain, double sample_rate, uint32_t channels);
 
-/** A new set-up: the equaliser is rebuilt only when its preset changed. */
+/** A new set-up: the equaliser is rebuilt only when its preset or its gains changed. */
 void rubraview_audio_chain_configure(rubraview_audio_chain_t *chain, const rubraview_audio_chain_config_t *config);
 
 /** A seek: the filters' memory and the level are of the sound that is gone. */

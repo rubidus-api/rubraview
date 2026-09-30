@@ -154,8 +154,43 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
     return lyrics;
 }
 
+rubraview_lyrics_t rubraview_lyrics_from_text(proven_arena_t *arena, u8str_t text) {
+    rubraview_lyrics_t lyrics = rubraview_lyrics_parse(arena, text);
+    if (lyrics.count > 0 || !arena) return lyrics;
+    lyrics = (rubraview_lyrics_t){ .untimed = true };
+    line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
+    lyric_buf_t lines = {0};
+    while (r.pos < r.len) {
+        u8str_t line = trim(read_line(&r));
+        if (line.len == 0) continue;
+        if (!lyric_push(arena, &lines, (rubraview_lyric_line_t){ .time_seconds = -1.0, .text = line })) break;
+    }
+    lyrics.lines = lines.data;
+    lyrics.count = lines.count;
+    return lyrics;
+}
+
+rubraview_lyrics_t rubraview_lyrics_from_lines(proven_arena_t *arena, const rubraview_lyric_line_t *lines, size_t count) {
+    rubraview_lyrics_t lyrics = {0};
+    if (!arena || !lines || count == 0) return lyrics;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, count, sizeof(rubraview_lyric_line_t));
+    if (!proven_is_ok(res.err)) return lyrics;
+    lyrics.lines = (rubraview_lyric_line_t*)(void*)res.value.ptr;
+    memcpy(lyrics.lines, lines, count * sizeof(rubraview_lyric_line_t));
+    lyrics.count = count;
+    sort_lyrics(lyrics.lines, count);
+    return lyrics;
+}
+
+int32_t rubraview_lyrics_untimed_index(const rubraview_lyrics_t *lyrics, double time_seconds, double duration_seconds) {
+    if (!lyrics || lyrics->count == 0 || !(duration_seconds > 0.0) || time_seconds < 0.0) return -1;
+    double at = time_seconds / duration_seconds;
+    if (at >= 1.0) return (int32_t)lyrics->count - 1;
+    return (int32_t)(at * (double)lyrics->count);
+}
+
 int32_t rubraview_lyrics_index_at(const rubraview_lyrics_t *lyrics, double time_seconds) {
-    if (!lyrics || lyrics->count == 0) return -1;
+    if (!lyrics || lyrics->count == 0 || lyrics->untimed) return -1;
 
     double t = time_seconds - lyrics->offset_seconds;
     if (t < lyrics->lines[0].time_seconds) return -1;
@@ -170,7 +205,7 @@ int32_t rubraview_lyrics_index_at(const rubraview_lyrics_t *lyrics, double time_
 }
 
 double rubraview_lyrics_time_of(const rubraview_lyrics_t *lyrics, int32_t index) {
-    if (!lyrics || index < 0 || (size_t)index >= lyrics->count) return -1.0;
+    if (!lyrics || lyrics->untimed || index < 0 || (size_t)index >= lyrics->count) return -1.0;
     return lyrics->lines[index].time_seconds + lyrics->offset_seconds;
 }
 
@@ -245,7 +280,14 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         if (line.len == 0) continue;
 
         if (rubraview_u8_starts_with_ci(line, "file ")) {
-            sheet.audio_file = quoted_or_rest((u8str_t){ .ptr = line.ptr + 5, .len = line.len - 5 });
+            u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 5, .len = line.len - 5 });
+            sheet.audio_file = quoted_or_rest(rest);
+            /* Unquoted, the file's type (WAVE, MP3, ...) follows the name. */
+            if (rest.len > 0 && rest.ptr[0] != '"') {
+                size_t cut = sheet.audio_file.len;
+                while (cut > 0 && sheet.audio_file.ptr[cut - 1] != ' ') cut--;
+                if (cut > 1) sheet.audio_file.len = cut - 1;
+            }
             continue;
         }
 
@@ -313,6 +355,37 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
     sheet.tracks = tracks;
     sheet.count = current;
     return sheet;
+}
+
+/* The name after the last folder separator, either kind. */
+static u8str_t cue_basename(u8str_t s) {
+    for (size_t i = s.len; i > 0; --i) {
+        if (s.ptr[i - 1] == '/' || s.ptr[i - 1] == '\\') return (u8str_t){ .ptr = s.ptr + i, .len = s.len - i };
+    }
+    return s;
+}
+
+static size_t cue_stem_len(u8str_t s) {
+    for (size_t i = s.len; i > 0; --i) if (s.ptr[i - 1] == '.') return i - 1;
+    return s.len;
+}
+
+static bool cue_same_ci(const char *a, const char *b, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        char x = a[i], y = b[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+        if (x != y) return false;
+    }
+    return true;
+}
+
+bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, u8str_t audio_name) {
+    if (!sheet || sheet->audio_file.len == 0 || audio_name.len == 0) return false;
+    u8str_t named = cue_basename(sheet->audio_file), have = cue_basename(audio_name);
+    if (named.len == have.len && cue_same_ci(named.ptr, have.ptr, have.len)) return true;
+    size_t a = cue_stem_len(named), b = cue_stem_len(have);
+    return a > 0 && a == b && cue_same_ci(named.ptr, have.ptr, a);
 }
 
 int32_t rubraview_cue_track_at(const rubraview_cue_sheet_t *sheet, double time_seconds) {

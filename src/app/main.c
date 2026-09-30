@@ -69,6 +69,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_listwin.h"
+#include "rubraview/ui_eqwin.h"
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
 #include "rubraview/filmstrip.h"
@@ -308,6 +309,14 @@ typedef struct app_state {
     /* The playlist window (owner, 2026-09-29): what is open, floating over the picture. */
     rubraview_listwin_t    listwin;
     int32_t                listwin_shown_page;   /* the page it last scrolled to, to follow a new one */
+    rubraview_eqwin_t      eqwin;                /* the equaliser's ten sliders (owner, 2026-10-01) */
+    /* The `.cue` sheets in the folder of the song playing, listed once a
+       folder: a listing each track grew the working arena, which is never
+       given back. */
+    char                   cue_scan_dir[1024];
+    size_t                 cue_scan_dir_len;
+    u8str_t               *cue_scan_paths;
+    size_t                 cue_scan_count;
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
     /* What plays after a film or a song ends (owner, 2026-09-29): the page
        decided for `follow_for` in `follow_mode`, and the shuffle's flags. */
@@ -501,6 +510,19 @@ typedef struct app_state {
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
     int32_t                rename_favorite;       /* the box renames this favourite, or -1 (owner, 2026-09-30) */
+    /* An encrypted RAR (owner, 2026-10-01): the box takes its password,
+       shown as dots, for the archive named here. The passwords that opened
+       something this session are tried first on the next one; they live in
+       memory only — never the settings, a log or the clipboard — and are
+       wiped when the viewer closes. */
+    bool                   rename_is_password;
+    char                   password_for[1024];
+    size_t                 password_for_len;
+    char                   passwords[8][512];
+    size_t                 password_lens[8];
+    size_t                 password_count;
+    const char            *open_password;         /* for the open under way, or NULL */
+    size_t                 open_password_len;
     /* A favourite chip pressed: opened on release, or dragged to a new place. */
     int32_t                fav_press;
     double                 fav_press_x, fav_drag_x;
@@ -681,6 +703,10 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
+static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong);
+static void secure_wipe(void *p, size_t n);
+static void password_commit(app_state_t *app);
+static void password_remember(app_state_t *app, u8str_t password);
 static void picker_path_begin(app_state_t *app);
 static u8str_t app_keep(app_state_t *app, u8str_t text);
 static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending);
@@ -696,6 +722,7 @@ static void mini_show(app_state_t *app);
 static bool mini_paused(const app_state_t *app);
 static void mini_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+static void draw_eqwin(app_state_t *app, double win_w, double win_h);
 static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void ab_edit_begin(app_state_t *app);
 static void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi);
@@ -1187,12 +1214,49 @@ static void music_clear(app_state_t *app) {
     memset(app->viz_peaks, 0, sizeof(app->viz_peaks));
 }
 
+/* The equaliser window's bands (owner, 2026-10-01): `audio.eq_band1..10`
+   in the settings, the Custom preset's gains. */
+static u8str_t eq_band_key(size_t band) {
+    static const char *const KEYS[RUBRAVIEW_EQ_BANDS] = {
+        "eq_band1", "eq_band2", "eq_band3", "eq_band4", "eq_band5",
+        "eq_band6", "eq_band7", "eq_band8", "eq_band9", "eq_band10",
+    };
+    return cstr(KEYS[band < RUBRAVIEW_EQ_BANDS ? band : 0]);
+}
+
+static double eq_band_db(const app_state_t *app, size_t band) {
+    return rubraview_settings_get(&app->settings, U8("audio"), eq_band_key(band));
+}
+
+static int eq_preset_now(const app_state_t *app) {
+    int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
+    return preset >= 0 && preset < RUBRAVIEW_EQWIN_PRESETS ? preset : 0;
+}
+
+static u8str_t eq_preset_label(int preset) {
+    return preset == RUBRAVIEW_EQWIN_CUSTOM ? U8("Custom") : rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
+}
+
+/* What the sliders show: the Custom gains, or the named preset's. */
+static void eq_shown_gains(const app_state_t *app, float *out) {
+    int preset = eq_preset_now(app);
+    if (preset == RUBRAVIEW_EQWIN_CUSTOM) {
+        for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) out[b] = (float)eq_band_db(app, b);
+    } else {
+        rubraview_eq_preset_gains((rubraview_eq_preset_t)preset, out);
+    }
+}
+
 /* The equaliser, ReplayGain's gain for the song playing and night mode,
    handed to the sound output (owner, 2026-09-30). */
 static void audio_chain_update(app_state_t *app) {
     rubraview_audio_chain_config_t config = { .eq_preset = RUBRAVIEW_EQ_FLAT, .night_mode = false, .gain = 1.0 };
     int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
     config.eq_preset = preset >= 0 && preset < RUBRAVIEW_EQ_PRESET_COUNT ? (rubraview_eq_preset_t)preset : RUBRAVIEW_EQ_FLAT;
+    if (preset == RUBRAVIEW_EQWIN_CUSTOM) {   /* the window's own ten gains (owner, 2026-10-01) */
+        config.eq_custom = true;
+        for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) config.eq_gains_db[b] = (float)eq_band_db(app, b);
+    }
     config.night_mode = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5;
     int rg = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("replaygain")));
     const rubraview_tags_t *tags = app->bgm_media && !app->media ? &app->bgm_tags : &app->music_tags;
@@ -1235,16 +1299,87 @@ static void music_load(app_state_t *app, u8str_t path) {
         .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
     app->music_tags_read = true;
     music_make_backdrop(app, &app->music_tags);
-    /* A `.lrc` of the same name beside it: the words, in time. */
+    /* A `.lrc` of the same name beside it: the words, in time. Else the
+       words the file carries (owner, 2026-10-01): SYLT's timed lines,
+       then USLT / LYRICS / ©lyr text, which is read as LRC when it is. */
     u8str_t lrc = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".lrc"), 1024u * 1024u);
     if (lrc.len > 0) app->music_lyrics = rubraview_lyrics_parse(app->arena, lrc);
-    /* A `.cue` of the same name: one file cut into the record's tracks. */
+    if (app->music_lyrics.count == 0 && app->music_tags.synced_lyrics_count > 0) {
+        app->music_lyrics = rubraview_lyrics_from_lines(app->arena, app->music_tags.synced_lyrics,
+                                                        app->music_tags.synced_lyrics_count);
+    }
+    if (app->music_lyrics.count == 0 && app->music_tags.lyrics_text.len > 0) {
+        app->music_lyrics = rubraview_lyrics_from_text(app->arena, app->music_tags.lyrics_text);
+    }
+    /* A `.cue` of the same name: one file cut into the record's tracks.
+       Else a sheet of any name beside it whose FILE names this file
+       (owner, 2026-10-01: `CDImage.cue` for `Album.flac`). */
     u8str_t cue = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".cue"), 1024u * 1024u);
-    if (cue.len > 0) {
-        app->music_cue = rubraview_cue_parse(app->arena, cue, app->music_tags.duration_seconds);
-        if (app->music_cue.count < 2) app->music_cue = (rubraview_cue_sheet_t){0};   /* one track: nothing to cut */
+    if (cue.len > 0) app->music_cue = rubraview_cue_parse(app->arena, cue, app->music_tags.duration_seconds);
+    if (app->music_cue.count < 2) {
+        app->music_cue = (rubraview_cue_sheet_t){0};
+        u8str_t dir = rubraview_path_dirname(path);
+        if (dir.len == 0) dir = U8(".");
+        if (dir.len >= sizeof(app->cue_scan_dir) || dir.len != app->cue_scan_dir_len ||
+            memcmp(dir.ptr, app->cue_scan_dir, dir.len) != 0) {
+            /* A folder not listed yet: its sheets, kept for the tracks after this one. */
+            app->cue_scan_count = 0;
+            app->cue_scan_paths = NULL;
+            app->cue_scan_dir_len = 0;
+            rubraview_fs_listing_t beside = rubraview_pal_fs_list_dir(app->arena, dir);
+            size_t sheets = 0;
+            for (size_t i = 0; i < beside.count; ++i) {
+                if (!beside.entries[i].is_directory && rubraview_glob_match_list(beside.entries[i].name, U8("*.cue"))) sheets++;
+            }
+            if (sheets > 64) sheets = 64;
+            proven_result_mem_mut_t res = sheets ? rubraview_arena_alloc_array(app->arena, sheets, sizeof(u8str_t))
+                                                 : (proven_result_mem_mut_t){ .err = PROVEN_OK };
+            if (sheets && proven_is_ok(res.err)) {
+                app->cue_scan_paths = (u8str_t*)(void*)res.value.ptr;
+                for (size_t i = 0; i < beside.count && app->cue_scan_count < sheets; ++i) {
+                    const rubraview_fs_entry_t *e = &beside.entries[i];
+                    if (e->is_directory || !rubraview_glob_match_list(e->name, U8("*.cue"))) continue;
+                    app->cue_scan_paths[app->cue_scan_count++] = app_keep(app, e->path);
+                }
+            }
+            if (dir.len < sizeof(app->cue_scan_dir)) {
+                memcpy(app->cue_scan_dir, dir.ptr, dir.len);
+                app->cue_scan_dir_len = dir.len;
+            }
+        }
+        for (size_t i = 0; i < app->cue_scan_count; ++i) {
+            u8str_t text = rubraview_pal_fs_read_file(app->arena, app->cue_scan_paths[i], 1024u * 1024u);
+            rubraview_cue_sheet_t sheet = rubraview_cue_parse(app->arena, text, app->music_tags.duration_seconds);
+            if (sheet.count >= 2 && rubraview_cue_names_audio(&sheet, rubraview_path_basename(path))) {
+                app->music_cue = sheet;
+                break;
+            }
+        }
     }
     audio_chain_update(app);
+}
+
+/* A `.cue` opened on its own (owner, 2026-10-01) plays the audio it
+   names — beside it, or with another extension of that name when the
+   record was converted after the sheet was written. "" when there is none. */
+static u8str_t cue_audio_path(app_state_t *app, u8str_t cue_path) {
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, cue_path, 1024u * 1024u);
+    rubraview_cue_sheet_t sheet = rubraview_cue_parse(app->arena, text, 0.0);
+    if (sheet.audio_file.len == 0) return U8("");
+    u8str_t named = sheet.audio_file;
+    for (size_t i = named.len; i > 0; --i) {
+        if (named.ptr[i - 1] == '/' || named.ptr[i - 1] == '\\') { named = (u8str_t){ named.ptr + i, named.len - i }; break; }
+    }
+    u8str_t dir = rubraview_path_dirname(cue_path);
+    u8str_t audio = rubraview_path_join(app->arena, dir, named);
+    rubraview_fs_entry_t found;
+    if (rubraview_pal_fs_stat(app->arena, audio, &found) && !found.is_directory) return audio;
+    static const char *const EXTS[] = { ".flac", ".wav", ".ape", ".wv", ".mp3", ".m4a", ".ogg", ".opus", ".tta" };
+    for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); ++i) {
+        u8str_t other = rubraview_path_with_ext(app->arena, audio, EXTS[i]);
+        if (rubraview_pal_fs_stat(app->arena, other, &found) && !found.is_directory) return other;
+    }
+    return U8("");
 }
 
 static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
@@ -2725,7 +2860,16 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
                                    : places ? rubraview_pal_fs_list_places(pa)
                                             : rubraview_pal_fs_list_dir(pa, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
-    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER));
+    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue"));
+    /* A RAR set is one book (owner, 2026-10-01): its first volume stands for it. */
+    if (!in_book) {
+        size_t kept = 0;
+        for (size_t i = 0; i < listing.count; ++i) {
+            if (!listing.entries[i].is_directory && rubraview_page_source_is_later_volume(listing.entries[i].name)) { hidden++; continue; }
+            listing.entries[kept++] = listing.entries[i];
+        }
+        listing.count = kept;
+    }
     if (listing.count == 0 && rubraview_picker_parent(dir).len == 0) {
         if (hidden > 0) osd_say(app, U8("nothing in that folder can be opened here"));
         return;
@@ -3249,8 +3393,8 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
     }
     if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) return cstr(rubraview_repeat_caption(repeat_mode(app)));
     if (rubraview_u8_eq_lit(tile->action, "media_eq_cycle")) {
-        int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
-        return preset <= 0 ? U8("EQ") : rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
+        int preset = eq_preset_now(app);
+        return preset <= 0 ? U8("EQ") : eq_preset_label(preset);
     }
     if (rubraview_u8_eq_lit(tile->action, "media_night_toggle")) {
         return rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5 ? U8("Night on") : U8("Night");
@@ -3439,6 +3583,68 @@ static bool listwin_press(app_state_t *app, double x, double y) {
     }
 }
 
+/* ---- The equaliser window (owner, 2026-10-01) ---- */
+
+static void eqwin_toggle(app_state_t *app) {
+    app->eqwin.open = !app->eqwin.open;
+    app->eqwin.sliding = -1;
+    app->eqwin.dragging = false;
+    if (!app->eqwin.open) return;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_eqwin_place(&app->eqwin, (double)w, (double)h);
+}
+
+/* A band moved: the curve on screen becomes Custom, starting from the
+   gains the sliders showed, so a named preset is a place to start from. */
+static void eqwin_set_band(app_state_t *app, size_t band, double db) {
+    if (band >= RUBRAVIEW_EQ_BANDS) return;
+    if (eq_preset_now(app) != RUBRAVIEW_EQWIN_CUSTOM) {
+        float shown[RUBRAVIEW_EQ_BANDS];
+        eq_shown_gains(app, shown);
+        for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) {
+            rubraview_settings_set(&app->settings, U8("audio"), eq_band_key(b), (double)shown[b]);
+        }
+        rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)RUBRAVIEW_EQWIN_CUSTOM);
+    }
+    rubraview_settings_set(&app->settings, U8("audio"), eq_band_key(band), db);
+    audio_chain_update(app);
+}
+
+/* A press on the window: true when it took it. A right click puts a band
+   back at 0 dB. */
+static bool eqwin_press(app_state_t *app, double x, double y, bool right) {
+    size_t index = 0;
+    switch (rubraview_eqwin_hit(&app->eqwin, x, y, &index)) {
+        case RUBRAVIEW_EQWIN_CLOSE: app->eqwin.open = false; return true;
+        case RUBRAVIEW_EQWIN_TITLE: rubraview_eqwin_drag_begin(&app->eqwin, x, y); return true;
+        case RUBRAVIEW_EQWIN_PRESET:
+            rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)index);
+            audio_chain_update(app);
+            return true;
+        case RUBRAVIEW_EQWIN_SLIDER:
+            if (right) { eqwin_set_band(app, index, 0.0); return true; }
+            app->eqwin.sliding = (int)index;
+            eqwin_set_band(app, index, rubraview_eqwin_db_at(&app->eqwin, index, y));
+            return true;
+        case RUBRAVIEW_EQWIN_BODY: return true;
+        default: return false;
+    }
+}
+
+/* The wheel over a band: half a decibel a notch. */
+static bool eqwin_wheel(app_state_t *app, double x, double y, double delta) {
+    size_t index = 0;
+    rubraview_eqwin_part_t part = rubraview_eqwin_hit(&app->eqwin, x, y, &index);
+    if (part == RUBRAVIEW_EQWIN_NONE) return false;
+    if (part == RUBRAVIEW_EQWIN_SLIDER) {
+        float shown[RUBRAVIEW_EQ_BANDS];
+        eq_shown_gains(app, shown);
+        eqwin_set_band(app, index, rubraview_eqwin_step(shown[index], delta > 0 ? 1 : -1));
+    }
+    return true;
+}
+
 /* With a `.cue` cutting the song into tracks (owner, 2026-09-30): the next
    or previous track in the same file. The previous one goes back to the
    start of this track first when it is more than 3 s in, as players do.
@@ -3469,6 +3675,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
         if (app->listwin.open) { app->listwin.open = false; return; }
+        if (app->eqwin.open) { app->eqwin.open = false; return; }
         rubraview_pal_window_request_close(app->window);
     } else if (rubraview_u8_eq_lit(action, "next_page") && cue_step(app, +1)) {
         /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
@@ -3478,13 +3685,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "prev_page")) {
         prev_spread(app);
     } else if (rubraview_u8_eq_lit(action, "media_eq_cycle")) {
-        int preset = ((int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset"))) + 1) % RUBRAVIEW_EQ_PRESET_COUNT;
+        int preset = (eq_preset_now(app) + 1) % RUBRAVIEW_EQWIN_PRESETS;
         rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)preset);
         audio_chain_update(app);
         char line[64];
-        u8str_t name = rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
+        u8str_t name = eq_preset_label(preset);
         int n = snprintf(line, sizeof(line), "equaliser: %.*s", (int)name.len, name.ptr);
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    } else if (rubraview_u8_eq_lit(action, "media_eq_window")) {
+        eqwin_toggle(app);
     } else if (rubraview_u8_eq_lit(action, "media_night_toggle")) {
         bool on = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) < 0.5;
         rubraview_settings_set(&app->settings, U8("audio"), U8("night_mode"), on ? 1.0 : 0.0);
@@ -4046,7 +4255,13 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        2026-09-28). */
     if (app->rename_active) {
         if (key_is(combo, "Enter")) { rename_commit(app); return true; }
-        if (key_is(combo, "Escape")) { rename_end(app); return true; }
+        if (key_is(combo, "Escape")) {
+            if (app->rename_is_password) osd_say(app, U8("not opened: it needs its password"));
+            rename_end(app);
+            return true;
+        }
+        /* A password is never copied out of its box. */
+        if (app->rename_is_password && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && (key_is(combo, "C") || key_is(combo, "X"))) return true;
         if (rename_edit_key(app, combo)) return true;
         /* The characters themselves arrive as text (rename_text), in
            either case and from the IME; the keys that make them are
@@ -4711,6 +4926,7 @@ static bool over_a_box(app_state_t *app, double x, double y) {
 static rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y) {
     if (!edge_nav_allowed(app) || over_a_box(app, x, y)) return RUBRAVIEW_EDGE_NONE;
     if (app->listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app->listwin), x, y)) return RUBRAVIEW_EDGE_NONE;
+    if (app->eqwin.open && rubraview_rect_contains(rubraview_eqwin_rect(&app->eqwin), x, y)) return RUBRAVIEW_EDGE_NONE;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
@@ -4856,7 +5072,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     if (app->media && !app->media_info.has_video && app->music_lyrics.count > 0) {
         for (size_t i = 0; i < 7; ++i) {
             if (app->lyric_row_index[i] < 0 || !rubraview_rect_contains(app->lyric_row_rect[i], x, y)) continue;
-            double t = rubraview_lyrics_time_of(&app->music_lyrics, app->lyric_row_index[i]) - app->music_lyrics.offset_seconds;
+            double t = rubraview_lyrics_time_of(&app->music_lyrics, app->lyric_row_index[i]);   /* -1 for untimed words */
             if (t >= 0.0) { media_seek_to(app, t); app->media_position = t; }
             return true;
         }
@@ -5670,6 +5886,9 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
     {
         double box_w = 560.0 * dpi, box_h = 64.0 * dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
+        /* A password is asked in the middle, clear of the toolbox's anchor
+           (VM, 2026-10-01: it showed through the box). */
+        if (app->rename_is_password) box.y = (win_h - box_h) * 0.5;
         /* The typed path sits where the path is, as an address bar does. */
         if (app->rename_is_path) {
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, PICKER_CRUMB_HEIGHT * dpi },
@@ -5684,12 +5903,41 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
            taking text). Widths come from the face the text is drawn in, so
            caret and shading sit under the right characters, Hangul too. */
         const rubraview_textedit_t *te = &app->rename_edit;
-        char shown[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
+        char shown[3 * (sizeof(app->rename_buffer) + sizeof(app->rename_composing))];
         size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
         memcpy(shown, app->rename_buffer, caret);
         memcpy(shown + caret, app->rename_composing, comp);
         memcpy(shown + caret + comp, app->rename_buffer + caret, len - caret);
         size_t total = len + comp;
+        size_t sel_a = 0, sel_b = 0;
+        bool has_selection = rubraview_textedit_has_selection(te);
+        if (has_selection) rubraview_textedit_selection_range(te, &sel_a, &sel_b);
+        if (app->rename_is_password) {
+            /* A dot a character (the IME's unfinished syllable too); the
+               caret and the selection are counted in characters. */
+            char plain[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
+            memcpy(plain, shown, total);
+            size_t dots = 0, at_caret = 0, at_a = 0, at_b = 0;
+            for (size_t i = 0; i <= total; ++i) {
+                if (i == caret + comp) at_caret = dots;
+                if (i == (sel_a >= caret ? sel_a + comp : sel_a)) at_a = dots;
+                if (i == (sel_b >= caret ? sel_b + comp : sel_b)) at_b = dots;
+                if (i < total && ((unsigned char)plain[i] & 0xC0) != 0x80) dots++;
+            }
+            secure_wipe(plain, sizeof(plain));
+            for (size_t d = 0; d < dots; ++d) memcpy(shown + 3 * d, "\xE2\x97\x8F", 3);   /* ● */
+            total = 3 * dots;
+            caret = 3 * at_caret;
+            comp = 0;
+            sel_a = 3 * at_a;
+            sel_b = 3 * at_b;
+            rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
+            char title[1200];
+            u8str_t name = rubraview_path_basename((u8str_t){ .ptr = app->password_for, .len = app->password_for_len });
+            int tn = snprintf(title, sizeof(title), "Password for %.*s", (int)name.len, name.ptr);
+            if (tn > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = title, .len = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
+                                                       label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
         double size = 18.0 * dpi, pad = 14.0 * dpi;
         double full = 0.0, to_caret = 0.0;
         (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = total }, size, &full);
@@ -5698,9 +5946,8 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
         double inner = box.width - 2.0 * pad;
         double x0 = full <= inner && !app->rename_is_path ? box.x + (box.width - full) * 0.5 : box.x + pad;
         if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
-        if (rubraview_textedit_has_selection(te)) {
-            size_t a = 0, b = 0;
-            rubraview_textedit_selection_range(te, &a, &b);
+        if (has_selection) {
+            size_t a = sel_a, b = sel_b;
             /* the composing text sits at the caret, which is one end of the selection */
             size_t da = a >= caret ? a + comp : a, db = b >= caret ? b + comp : b;
             double xa = 0.0, xb = 0.0;
@@ -5756,6 +6003,9 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
    anchor covered the start of a name being typed (VM, 2026-09-25). */
 static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     double chrome_dpi = rubraview_pal_window_dpi_scale(app->window);
+    /* The equaliser is worked by hand, so it sits over the floating boxes
+       (VM, 2026-10-01: the toolbox showed through it). */
+    draw_eqwin(app, win_w, win_h);
     if (app->confirm_purge) {
         double box_w = 520.0 * chrome_dpi, box_h = 90.0 * chrome_dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
@@ -5866,6 +6116,69 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
         double y = lw->y + lw->title_height + (track - h) * (double)lw->first / (double)(count - rows);
         rubraview_pal_rect_t bar = { lw->x + lw->width - 4.0, y, 3.0, h };
         rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
+    }
+}
+
+static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
+    rubraview_eqwin_t *w = &app->eqwin;
+    if (!w->open) return;
+    rubraview_eqwin_place(w, win_w, win_h);
+    rubraview_pal_rect_t body = { w->x, w->y, w->width, w->height };
+    rubraview_pal_render_fill_rect(app->renderer, body, (COLOR_BOX_FILL & 0x00FFFFFFu) | 0xF0000000u, 4.0);
+    rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 4.0);
+    double pad = w->label_height * 0.5;
+
+    int preset = eq_preset_now(app);
+    u8str_t name = eq_preset_label(preset);
+    char title[96];
+    int n = snprintf(title, sizeof(title), "Equaliser   %.*s", (int)name.len, name.ptr);
+    rubraview_pal_rect_t head = { w->x + pad, w->y, w->width - w->title_height - pad, w->title_height };
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ title, (size_t)n }, head, w->title_height * 0.45,
+                                              COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_rect_t cr = rubraview_eqwin_close_rect(w);
+    rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
+    if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
+        rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
+    }
+    rubraview_pal_render_draw_text(app->renderer, U8("X"), close, w->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    for (int p = 0; p < RUBRAVIEW_EQWIN_PRESETS; ++p) {
+        rubraview_rect_t r = rubraview_eqwin_preset_rect(w, (size_t)p);
+        rubraview_pal_rect_t chip = { r.x, r.y, r.width, r.height };
+        bool hover = rubraview_rect_contains(r, app->pointer_x, app->pointer_y);
+        uint32_t fill = p == preset ? ((COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u) : hover ? COLOR_TILE_FILL : 0x40202020u;
+        rubraview_pal_render_fill_rect(app->renderer, chip, fill, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, eq_preset_label(p), chip, w->preset_height * 0.36,
+                                       COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    float gains[RUBRAVIEW_EQ_BANDS];
+    eq_shown_gains(app, gains);
+    const double *freqs = rubraview_eq_frequencies();
+    for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) {
+        rubraview_rect_t col = rubraview_eqwin_band_rect(w, b);
+        rubraview_rect_t t = rubraview_eqwin_track_rect(w, b);
+        double cx = t.x + t.width * 0.5;
+        /* the track, the 0 dB line across it, and the knob */
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx - 2.0, t.y, 4.0, t.height }, 0x80A0A0A0u, 2.0);
+        double zero = rubraview_eqwin_y_of(w, b, 0.0);
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx - t.width * 0.25, zero - 0.5, t.width * 0.5, 1.0 }, 0x60F0F0F0u, 0.0);
+        double ky = rubraview_eqwin_y_of(w, b, gains[b]);
+        double kw = t.width * 0.5, kh = w->label_height * 0.5;
+        bool held = app->eqwin.sliding == (int)b;
+        bool hover = rubraview_rect_contains(col, app->pointer_x, app->pointer_y);
+        uint32_t knob = held ? COLOR_TILE_CURRENT : hover ? 0xFFFFFFFFu : 0xFFD0D0D0u;
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx - kw * 0.5, ky - kh * 0.5, kw, kh }, knob, 3.0);
+        char v[16];
+        int m = snprintf(v, sizeof(v), "%+.1f", (double)gains[b]);
+        rubraview_pal_rect_t top = { col.x, col.y, col.width, w->label_height };
+        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ v, (size_t)m }, top, w->label_height * 0.55,
+                                                  COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        char f[16];
+        m = freqs[b] >= 1000.0 ? snprintf(f, sizeof(f), "%gk", freqs[b] / 1000.0) : snprintf(f, sizeof(f), "%g", freqs[b]);
+        rubraview_pal_rect_t bottom = { col.x, col.y + col.height - w->label_height, col.width, w->label_height };
+        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ f, (size_t)m }, bottom, w->label_height * 0.55,
+                                                  0xC0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
     }
 }
 
@@ -6091,7 +6404,11 @@ static void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
 
     const rubraview_lyrics_t *lyrics = &app->music_lyrics;
     if (lyrics->count > 0) {
-        int32_t now = rubraview_lyrics_index_at(lyrics, app->media_position + lyrics->offset_seconds);
+        /* Untimed words (USLT and the like) follow the song through its
+           length, none of them marked as the one being sung. */
+        int32_t now = lyrics->untimed
+            ? rubraview_lyrics_untimed_index(lyrics, app->media_position, app->media_info.duration_seconds)
+            : rubraview_lyrics_index_at(lyrics, app->media_position);
         double size = 18.0 * dpi, row_h = size * 1.6;
         double top = (double)win_h * 0.08;
         rubraview_pal_rect_t band = { (double)win_w * 0.1, top - size * 0.3, (double)win_w * 0.8, row_h * 7.0 + size * 0.6 };
@@ -6102,7 +6419,7 @@ static void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
             if (index < 0 || (size_t)index >= lyrics->count) continue;
             u8str_t text = lyrics->lines[index].text;
             rubraview_pal_rect_t row = { band.x, top + (double)(k + 3) * row_h, band.width, row_h };
-            bool current = index == now;
+            bool current = index == now && !lyrics->untimed;
             rubraview_pal_render_draw_text(app->renderer, text.len > 0 ? text : U8("\xE2\x99\xAA"), row,
                                            current ? size * 1.1 : size * 0.85,
                                            current ? COLOR_TEXT : 0x90F0F0F0u, RUBRAVIEW_TEXT_CENTER);
@@ -6442,6 +6759,12 @@ static void rename_end(app_state_t *app) {
     app->rename_active = false;
     app->rename_is_extension = false;
     app->rename_is_path = false;
+    if (app->rename_is_password) {                       /* nothing of it stays behind */
+        secure_wipe(app->rename_buffer, sizeof(app->rename_buffer));
+        secure_wipe(app->rename_composing, sizeof(app->rename_composing));
+        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+        app->rename_is_password = false;
+    }
     app->rename_favorite = -1;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, false);
@@ -6591,6 +6914,7 @@ static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
+    if (app->rename_is_password) { password_commit(app); return; }
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
     rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
@@ -7760,7 +8084,10 @@ static void settings_path_commit(app_state_t *app) {
         settings_say(app, "no such folder - put it right, or Esc");
         return;
     }
-    rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, text);
+    /* The settings borrow their text: a copy, not the box's own buffer,
+       which the next folder typed would write over (VM, 2026-10-01: Folder
+       1 turned into Folder 2's path once Folder 2 was typed). */
+    rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
     settings_path_end(app);
     settings_say(app, "folder kept (Delete clears it)");
 }
@@ -8132,7 +8459,19 @@ static void info_gather(app_state_t *app) {
                                                      : U8("ZIP (CBZ)"));
             if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.solid_archive)
                 rubraview_info_add(a, &info, "Solid", U8("yes: a far page decodes the ones before it"));
-            rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), app->archive_map.size) });
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
+                const rubraview_rar_archive_t *ra = &app->source.archiverar;
+                if (ra->volume_count > 1) rubraview_info_addf(a, &info, "Volumes", "%zu, read as one", ra->volume_count);
+                bool locked = false;
+                for (size_t i = 0; i < ra->entry_count && !locked; ++i) locked = ra->entries[i].encrypted;
+                if (locked) rubraview_info_add(a, &info, "Encrypted", ra->headers_encrypted ? U8("yes, names too (AES)") : U8("yes (AES)"));
+            }
+            uint64_t archive_bytes = app->archive_map.size;
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.volume_count > 1) {
+                archive_bytes = 0;   /* a set: all its volumes */
+                for (size_t v = 0; v < app->source.archiverar.volume_count; ++v) archive_bytes += app->source.archiverar.volumes[v].size;
+            }
+            rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
             rubraview_info_addf(a, &info, "Pages", "%zu", page_count(app));
             /* the book's own summary: its folders and what it holds unpacked */
             uint64_t unpacked = 0;
@@ -9727,6 +10066,12 @@ static uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, (uintptr_t)app->media); SIG(&h, app->media_paused); SIG(&h, app->media_ended);
     SIG(&h, (int64_t)app->media_position);   /* the time the toolbox shows, to the second */
     SIG(&h, app->listwin.open); SIG(&h, app->listwin.first);
+    if (app->eqwin.open) {   /* the sliders move, and the pointer lights what it is over */
+        SIG(&h, (int64_t)app->eqwin.x); SIG(&h, (int64_t)app->eqwin.y); SIG(&h, app->eqwin.sliding);
+        SIG(&h, eq_preset_now(app));
+        for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) SIG(&h, (int64_t)lround(eq_band_db(app, b) * 2.0));
+        SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
+    }
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
     SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge);
@@ -10005,6 +10350,59 @@ static void source_close(app_state_t *app) {
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
 }
 
+/* ---- a RAR's password (owner, 2026-10-01) ---- */
+
+static void secure_wipe(void *p, size_t n) {
+    volatile unsigned char *v = (volatile unsigned char*)p;
+    while (n--) *v++ = 0;
+}
+
+static void password_remember(app_state_t *app, u8str_t password) {
+    if (password.len == 0 || password.len >= sizeof(app->passwords[0])) return;
+    for (size_t i = 0; i < app->password_count; ++i) {
+        if (app->password_lens[i] == password.len && memcmp(app->passwords[i], password.ptr, password.len) == 0) return;
+    }
+    size_t slot = app->password_count < 8 ? app->password_count++ : 7;   /* full: the newest takes the last place */
+    secure_wipe(app->passwords[slot], sizeof(app->passwords[slot]));
+    memcpy(app->passwords[slot], password.ptr, password.len);
+    app->password_lens[slot] = password.len;
+}
+
+/* The box, empty, over a locked archive; `wrong` when the last one typed was not it. */
+static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong) {
+    if (archive_path.len >= sizeof(app->password_for)) return;
+    memcpy(app->password_for, archive_path.ptr, archive_path.len);
+    app->password_for_len = archive_path.len;
+    if (app->rename_active) rename_end(app);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    app->rename_active = true;
+    app->rename_is_password = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, wrong ? U8("wrong password") : U8("this archive is locked: type its password, then Enter"));
+}
+
+/* Enter in the password box: the archive is opened again with it. */
+static void password_commit(app_state_t *app) {
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    char typed[sizeof(app->rename_buffer)];
+    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    size_t n = text.len < sizeof(typed) ? text.len : sizeof(typed) - 1;
+    memcpy(typed, text.ptr, n);
+    char path[sizeof(app->password_for)];
+    memcpy(path, app->password_for, app->password_for_len);
+    size_t path_len = app->password_for_len;
+    rename_end(app);                                      /* wipes the box */
+    if (n == 0) { secure_wipe(typed, sizeof(typed)); return; }
+    app->open_password = typed;
+    app->open_password_len = n;
+    open_path(app, (u8str_t){ .ptr = path, .len = path_len });
+    app->open_password = NULL;
+    app->open_password_len = 0;
+    secure_wipe(typed, sizeof(typed));
+}
+
 static bool open_archive(app_state_t *app, u8str_t archive_path) {
     /* Leaving one archive for another gives back what the old one held;
        a CB7's decoded solid block is heap memory, not arena memory. */
@@ -10020,12 +10418,28 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
 
     app->archive_bytes = bytes;
     app->list_is_set = false;
-    app->source = rubraview_page_source_from_archive(app->arena,
-                                                     (const uint8_t*)bytes.ptr, bytes.len,
-                                                     archive_path, U8(IMAGE_FILTER),
-                                                     app->archive_codepage, MAX_PAGE_BYTES,
-                                                     PAGE_CACHE_BUDGET);
+    u8str_t given = { .ptr = app->open_password ? app->open_password : "", .len = app->open_password ? app->open_password_len : 0 };
+    app->source = rubraview_page_source_from_archive_password(app->arena,
+                                                              (const uint8_t*)bytes.ptr, bytes.len,
+                                                              archive_path, U8(IMAGE_FILTER),
+                                                              app->archive_codepage, MAX_PAGE_BYTES,
+                                                              PAGE_CACHE_BUDGET, given);
+    /* Locked (owner, 2026-10-01): the passwords that worked this session
+       first, then the reader is asked. */
+    for (size_t i = 0; app->source.needs_password && given.len == 0 && i < app->password_count; ++i) {
+        rubraview_page_source_close(&app->source);
+        app->source = rubraview_page_source_from_archive_password(app->arena,
+                                                                  (const uint8_t*)bytes.ptr, bytes.len,
+                                                                  archive_path, U8(IMAGE_FILTER),
+                                                                  app->archive_codepage, MAX_PAGE_BYTES, PAGE_CACHE_BUDGET,
+                                                                  (u8str_t){ .ptr = app->passwords[i], .len = app->password_lens[i] });
+    }
     app->source_dir = rubraview_path_dirname(archive_path);
+    if (app->source.needs_password) {
+        password_ask(app, archive_path, given.len > 0);
+        return false;
+    }
+    if (given.len > 0) password_remember(app, given);
     return app->source.page_count > 0;
 }
 
@@ -10102,6 +10516,11 @@ static void open_path(app_state_t *app, u8str_t path) {
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
+    if (rubraview_glob_match_list(rubraview_path_basename(path), U8("*.cue"))) {
+        u8str_t audio = cue_audio_path(app, path);
+        if (audio.len == 0) { osd_say(app, U8("the cue sheet's audio file is not beside it")); return; }
+        path = app_keep(app, audio);
+    }
     rubraview_fs_entry_t entry;
     if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;
 
@@ -11661,6 +12080,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
+    app.eqwin = rubraview_eqwin_create(dpi);
     app.follow_for = -1;
     app.rename_favorite = -1;
     app.fav_press = -1;
@@ -11801,6 +12221,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             break;
                         }
                     }
+                    if (app.eqwin.dragging || app.eqwin.sliding >= 0) {
+                        int32_t eq_w = 0, eq_h = 0;
+                        rubraview_pal_window_get_size(app.window, &eq_w, &eq_h);
+                        if (app.eqwin.dragging) rubraview_eqwin_drag_to(&app.eqwin, event.mouse.x, event.mouse.y, (double)eq_w, (double)eq_h);
+                        else eqwin_set_band(&app, (size_t)app.eqwin.sliding,
+                                            rubraview_eqwin_db_at(&app.eqwin, (size_t)app.eqwin.sliding, event.mouse.y));
+                    }
                     if (app.listwin.dragging) {
                         int32_t lw_w = 0, lw_h = 0;
                         rubraview_pal_window_get_size(app.window, &lw_w, &lw_h);
@@ -11938,6 +12365,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (app.eqwin.open && eqwin_press(&app, event.mouse.x, event.mouse.y,
+                                                      event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (app.listwin.open && listwin_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
                         subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
@@ -11988,6 +12417,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         app.fav_dragging = false;
                         break;
                     }
+                    if (app.eqwin.dragging || app.eqwin.sliding >= 0) { app.eqwin.dragging = false; app.eqwin.sliding = -1; break; }
                     if (app.listwin.dragging) { app.listwin.dragging = false; break; }
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         rubraview_subbox_end_drag(&app.subbox);
@@ -12021,6 +12451,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     if (box_wheel_opacity(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta, event.mouse.modifiers)) break;
+                    if (app.eqwin.open && eqwin_wheel(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta)) break;
                     if (app.listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y)) {
                         rubraview_listwin_scroll(&app.listwin, event.mouse.wheel_delta > 0 ? -3 : 3, page_count(&app));
                         break;
@@ -12208,6 +12639,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     media_close(&app);
     unload_all_pages(&app);
     source_close(&app);
+    secure_wipe(app.passwords, sizeof(app.passwords));   /* owner, 2026-10-01: memory only, and not after */
     rubraview_pal_render_destroy(app.renderer);
     rubraview_pal_window_destroy(app.window);
     free(memory);
