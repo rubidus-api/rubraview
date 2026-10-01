@@ -175,6 +175,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-01: D-67 An archive's names read again in a code page chosen for it alone
+
+- Status: Accepted (owner 2026-10-01: "shift-jis 나 중국, 대만에서 널리 사용되는 인코딩으로 압축파일 내 파일명을 해석할 방법 ... 전역 설정으로 매번 바꾸는게 아니라 특정 파일 열 때마다 일회성으로 ... 현재 열고있는 압축파일을 새로 파일명을 해석하는 기능")
+- Decision:
+  - File › Names in archive (Auto, UTF-8, Korean, Japanese (Shift-JIS), Chinese (GBK), Chinese (Big5), Western) and `Shift+N` (the next of them, round again) open the archive on screen again with its names read in that code page, the same page kept on screen, and say "names read as <code page>: <the page's name>". Settings › Files › Archive filenames is not touched: the choice belongs to that archive while it is open, and any other archive opens with the setting again.
+  - It changes the names an archive stores without saying they are UTF-8: ZIP / CBZ without the UTF-8 flag and RAR 4 without Unicode names; 7z and RAR 5 names are Unicode already.
+- Consequences: measured on the Windows 11 VM (Korean system code page) with three CBZs whose names are raw Shift-JIS, GBK and Big5 bytes: Auto showed `묉덇쁞/긻?긙01.jpg`; `Shift+N` to Japanese showed `第一話/ページ01.jpg`, to GBK `第一话/页面03.jpg` and to Big5 `第一話/頁面03.jpg` with page 3/3 kept; the previous archive opened with Auto again; settings.ini still said `archive_codepage = "auto"`. Host builds have no code-page tables, so this is measured on Windows only.
+
 ## 2026-10-01: D-66 The UnRAR code is a module of its own: unrar_proprietary.dll
 
 - Status: Accepted (owner 2026-10-01: "unrar 모듈은 분리하도록 해요. 라이선스가 다르니까요. ... 따로 분리하거나 대체할 수 있게요", then "파일이름은 unrar_proprietary 이렇게 하고 동적으로 dll 연결하거나 해야지요" — plan `docs/plans/archive/2026-10-01-unrar-module.md`)

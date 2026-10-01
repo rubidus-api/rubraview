@@ -95,6 +95,7 @@ const char *rubraview_default_keymap(void) {
     "flip_horizontal = \"H\"\n"
     "flip_vertical = \"V\"\n"
     "toggle_nearest = \"N\"\n"
+    "archive_names_cycle = \"Shift+N\"\n"   /* the open archive's names, read in the next code page (owner, 2026-10-01) */
     "\n"
     "[slideshow]\n"
     "toggle_slideshow = \"S, F5\"\n"

@@ -459,6 +459,10 @@ typedef struct app_state {
     /* Settings read since 2026-09-30 (owner: every setting on the window does something). */
     bool frameless;                        /* General › Frameless window */
     rubraview_codepage_t archive_codepage; /* Files › Archive filenames, for the next archive */
+    /* The names of the archive open now, read in a code page chosen for it
+       alone (owner, 2026-10-01: Shift-JIS, GBK, Big5 ... once, not the
+       global setting); AUTO-and-unset is -1. Reset by the next archive. */
+    int32_t                names_codepage;
     size_t cache_budget;                   /* Cache › Memory cap, for the next source opened */
 
     /* M3 additions */
@@ -738,6 +742,8 @@ static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t 
 static bool point_in_curve_widget(const app_state_t *app, double px, double py);
 static void append_number(char *buf, size_t cap, size_t *pos, size_t value);
 static void history_remember(app_state_t *app);
+static bool open_archive(app_state_t *app, u8str_t archive_path);
+static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
 static void settings_open(app_state_t *app);
@@ -4063,6 +4069,24 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, true);
     } else if (rubraview_u8_eq_lit(action, "anim_speed_down")) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, false);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_auto")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_AUTO);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_utf8")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_UTF8);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_korean")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_KOREAN);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_japanese")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_JAPANESE);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_chinese_simplified")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_SIMPLIFIED_CHINESE);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_chinese_traditional")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_TRADITIONAL_CHINESE);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_western")) {
+        archive_names_reread(app, RUBRAVIEW_CODEPAGE_WESTERN);
+    } else if (rubraview_u8_eq_lit(action, "archive_names_cycle")) {
+        /* the code pages in their menu order, round again after Western */
+        int now = app->names_codepage >= 0 ? app->names_codepage : (int)app->archive_codepage;
+        archive_names_reread(app, (rubraview_codepage_t)((now + 1) % ((int)RUBRAVIEW_CODEPAGE_WESTERN + 1)));
     } else if (rubraview_u8_eq_lit(action, "next_archive")) {
         open_sibling_archive(app, true);
     } else if (rubraview_u8_eq_lit(action, "prev_archive")) {
@@ -10351,6 +10375,38 @@ static void source_close(app_state_t *app) {
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
 }
 
+/* ---- the open archive's names, read again (owner, 2026-10-01) ---- */
+
+/* "shift-jis 나 중국, 대만에서 널리 사용되는 인코딩으로 ... 특정 파일 열 때마다
+   일회성으로": the archive on screen is opened again with its names read in
+   `codepage`, the same page kept on screen; the global setting is not
+   touched, and the next archive goes back to it. Only names an archive
+   stores without saying they are UTF-8 change (ZIP without the flag, RAR 4
+   without Unicode); 7z's are always Unicode. */
+static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage) {
+    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len == 0) {
+        osd_say(app, U8("names: only an archive's can be read again"));
+        return;
+    }
+    u8str_t path = app_keep(app, app->source.archive_path);
+    int32_t current = current_page_index(app);
+    size_t entry = current >= 0 && (size_t)current < page_count(app) ? app->source.pages[current].entry_index : SIZE_MAX;
+    app->names_codepage = (int32_t)codepage;
+    history_remember(app);
+    unload_all_pages(app);
+    if (!open_archive(app, path)) return;
+    size_t start = 0;
+    for (size_t i = 0; i < page_count(app); ++i) if (app->source.pages[i].entry_index == entry) { start = i; break; }
+    app->resume_offer = false;
+    finish_open(app, start);
+    char line[512];
+    u8str_t label = rubraview_codepage_label(codepage);
+    u8str_t name = page_count(app) > 0 ? app->source.pages[start].name : U8("");
+    int n = snprintf(line, sizeof(line), "names read as %.*s:  %.*s", (int)label.len, label.ptr,
+                     (int)(name.len < 300 ? name.len : 300), name.ptr);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
+}
+
 /* ---- a RAR's password (owner, 2026-10-01) ---- */
 
 static void secure_wipe(void *p, size_t n) {
@@ -10420,10 +10476,11 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     app->archive_bytes = bytes;
     app->list_is_set = false;
     u8str_t given = { .ptr = app->open_password ? app->open_password : "", .len = app->open_password ? app->open_password_len : 0 };
+    rubraview_codepage_t names = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
     app->source = rubraview_page_source_from_archive_password(app->arena,
                                                               (const uint8_t*)bytes.ptr, bytes.len,
                                                               archive_path, U8(IMAGE_FILTER),
-                                                              app->archive_codepage, MAX_PAGE_BYTES,
+                                                              names, MAX_PAGE_BYTES,
                                                               PAGE_CACHE_BUDGET, given);
     /* Locked (owner, 2026-10-01): the passwords that worked this session
        first, then the reader is asked. */
@@ -10432,7 +10489,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
         app->source = rubraview_page_source_from_archive_password(app->arena,
                                                                   (const uint8_t*)bytes.ptr, bytes.len,
                                                                   archive_path, U8(IMAGE_FILTER),
-                                                                  app->archive_codepage, MAX_PAGE_BYTES, PAGE_CACHE_BUDGET,
+                                                                  names, MAX_PAGE_BYTES, PAGE_CACHE_BUDGET,
                                                                   (u8str_t){ .ptr = app->passwords[i], .len = app->password_lens[i] });
     }
     app->source_dir = rubraview_path_dirname(archive_path);
@@ -10521,6 +10578,7 @@ static void open_path(app_state_t *app, u8str_t path) {
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
+    app->names_codepage = -1;   /* a code page chosen for one archive's names stays with it */
     if (rubraview_glob_match_list(rubraview_path_basename(path), U8("*.cue"))) {
         u8str_t audio = cue_audio_path(app, path);
         if (audio.len == 0) { osd_say(app, U8("the cue sheet's audio file is not beside it")); return; }
@@ -12089,6 +12147,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
+    app.names_codepage = -1;
     app.eqwin = rubraview_eqwin_create(dpi);
     app.follow_for = -1;
     app.rename_favorite = -1;

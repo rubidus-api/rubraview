@@ -450,6 +450,7 @@ the keymap does not do is listed after it.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
+| `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
 **While a slide show runs**
 
