@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-01: D-69 The public repository holds the sources, the manual and the specs
+
+- Status: Accepted (owner 2026-10-01: "꼭 공개해야 하는 소스 코드와 매뉴얼, 스펙들 빼면 다 비공개 쪽으로 돌리고"; then: tests, tools and scripts private; the design RFCs and this file public; the history rewritten)
+- Decision:
+  - `.gitignore` is an allowlist: `README.md`, `README.ko.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `DECISIONS.md`, `Makefile`, `src/`, `include/`, `vendor/`, `resources/distribution/`, `docs/manual/`, `docs/specs/`, `docs/rfc/`, and the two packaging scripts (`scripts/package.sh`, `scripts/gen-notices.py`). A new file stays local until it is allowed on purpose.
+  - Everything else (the working docs, plans, the change log, tests and their fixtures, tools, operating scripts) is kept in a separate private repository and is not published.
+  - The history was rewritten to the same surface, so earlier commits do not carry the private files either; the release tags were moved to the rewritten commits.
+- Consequences: the public repository builds the program (`make win64`) but does not carry the tests (`make test`). The licence notices point to each `vendor/<name>/VENDORED.md` for provenance. Before the split, the bootstrap kit's blocklist `.gitignore` had published `docs/`, `tests/`, `tools/`, `scripts/` and `CHANGELOG.md` since the first commit (2026-09-07).
+
 ## 2026-10-01: D-68 Writing ZIP and 7z, all of it ours or public domain
 
 - Status: Accepted (owner 2026-10-01: "7z와 zip는 mit license로 만들 수 있다는 말이지요? ... 압축 지원은 7z와 zip까지"; plan `mit-archives`, step 5)

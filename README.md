@@ -183,14 +183,9 @@ this at the bottom of the page.
 - [RFC-0001: Architecture & Multimedia Pipeline](docs/rfc/rfc-0001-rubraview-architecture.md)
 - [RFC Index](docs/rfc/rfc-0000-index.md)
 - [User Manual](docs/manual/)
-- [Agent Operational Guidance](docs/agents/)
+- [Format specifications](docs/specs/)
 
-## Building & Testing
-
-### Linux Host (Unit Tests)
-```sh
-make test
-```
+## Building
 
 ### Windows Binary (Cross-Build)
 ```sh
