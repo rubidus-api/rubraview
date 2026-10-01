@@ -1,6 +1,6 @@
 <!-- Spec: RAR archive reading and decompression, for implementers. Written from libarchive 3.7.7
 (archive_read_support_format_rar.c, archive_read_support_format_rar5.c; BSD-2), nwaples/rardecode
-(BSD-2), RARLAB's "RAR 5.0 archive format" technote, the LZMA SDK's Ppmd7.h (public domain); standards
+(BSD-2), RARLAB's "RAR 5.0 archive format" technote, the LZMA SDK's Ppmd7.h and Ppmd7aDec.c (public domain); standards
 referred to: FIPS 197, FIPS 180-4, RFC 2104, RFC 8018, RFC 7693 and the BLAKE2 paper, ISO 3309 CRC-32. -->
 
 # RAR archives: headers, decompression, encryption (a specification for implementers)
@@ -18,7 +18,7 @@ section names where its content comes from.
 | **LA5** | libarchive 3.7.7, `libarchive/archive_read_support_format_rar5.c` | BSD-2 | RAR 5 headers, RAR 5 LZ and filters, BLAKE2sp use, multivolume blocks |
 | **RD** | nwaples/rardecode (Go, `master` as of 2026-09-26, commit `fa6448a`), all `*.go` files | BSD-2 | RAR 2.0 (LZ and audio), RAR 3 VM and Itanium filter, encryption (RAR 3 and RAR 5), MAC'd checksums, solid streams, volume naming |
 | **TN** | RARLAB, "RAR 5.0 archive format", https://www.rarlab.com/technote.htm (fetched 2026-10-01) | published description | RAR 5 header layout, flags and records |
-| **PPMD** | LZMA SDK `C/Ppmd7.h` (2023-04-02, public domain) | public domain | names of the PPMd var.H model entry points |
+| **PPMD** | LZMA SDK `C/Ppmd7.h` (2023-04-02) and `C/Ppmd7aDec.c` (2023-09-07; the copy in `vendor/lzma/`, allowed by the owner on 2026-10-01) | public domain | the PPMd var.H model entry points and the original range coder |
 
 Source functions are written as `LA4:parse_codes`, `RD:decode29_lz.go:decodeOffset` and so on. Coverage gaps
 of the sources, which matter when they disagree or only one speaks:
@@ -59,10 +59,13 @@ LA5:`bid_standard`, `bid_sfx`, `try_skip_sfx`; RD:`bufio.go` (format version fro
 
 The signature is normally at offset 0. A self-extracting archive (SFX) has an executable stub in front (it begins
 with `MZ` or `7F 45 4C 46`). TN says to search "from beginning and up to maximum SFX module size", currently 1 MB.
-LA4 searches the first 128 KiB and LA5 the first 512 KiB, both only at offsets that are multiples of 16; a decoder
-should search every offset up to 1 MiB. Everything before the signature is ignored.
+LA4 searches the first 128 KiB and LA5 the first 512 KiB, both only at offsets that are multiples of 16 and only
+when the file starts with `MZ` or an ELF header; a decoder should search **every** offset up to 1 MiB, whatever the
+file starts with. Everything before the signature is ignored.
 
-Fixtures: every `*.rar` (signature at offset 0). No SFX fixture exists.
+Fixtures: every `*.rar` (signature at offset 0); `rar3_sfx_stub.sfx` (RAR 4 signature at offset 127208, which is
+not a multiple of 16, so LA4's scan would miss it) and `rar5_sfx_stub.sfx` (RAR 5 signature at offset 244864). In
+both, the SFX module was replaced by other bytes of the same length, so they do not start with `MZ` or ELF.
 
 ---
 
@@ -185,6 +188,8 @@ File flags (LA4 `FHD_*`, RD `file*`):
 | 0x8000 | always set on file headers (data area follows) |
 
 Negative sizes (bit 63 set, other than the "unknown" value) are a corrupt header (LA4:`read_header`).
+Fixture for flag 0x0100: `rar4_64bit_size.rar` (one file of 4,499,963,925 bytes = UNP_SIZE 204,996,629 +
+HIGH_UNP_SIZE 1 << 32; header flags 0x91C0).
 
 Service headers (0x7A) use exactly this layout; their name (`CMT` comment, `ACL`, `STM` stream, `RR` recovery
 record, ...) says what the data is. A reader that only extracts files skips them (header, then PACK_SIZE bytes).
@@ -202,8 +207,8 @@ The comment data may be compressed (`rar_subblock.rar` has a `CMT` block with ME
 | 29 | RAR 2.9/3.x algorithm (LZ + PPMd + filters), sections 9 to 11 |
 | other | unknown: unsupported |
 
-Fixtures use UNP_VER 20 (stored files and directories only) and 29. `rar_ppmd_use_after_free.rar` (a fuzzing
-case) has 13.
+Fixtures use UNP_VER 20 (the `rar2_*` archives made by WinRAR 2.90, plus stored entries elsewhere) and 29.
+`rar_ppmd_use_after_free.rar` (a fuzzing case) has 13.
 
 **FILE_NAME** (LA4:`read_header`, RD:`decodeName`):
 
@@ -887,9 +892,13 @@ RD:`decode50.go:init`, RD:`decode20.go:init`.
 ## 8. RAR 2.0 algorithm (UNP_VER 20 and 26)
 
 Sources: RD only: `decode20.go` (`decoder20.init`, `readBlockHeader`, `fill`, `readCodeLengthTable20`),
-`decode20_lz.go`, `decode20_audio.go`; tables shared with `decode29_lz.go`. LA4 has no RAR 2.0 decoder.
-**No fixture contains RAR 2.0 compressed data** (the UNP_VER 20 entries in the fixtures are all stored), so this
-section is untested here; see section 15.
+`decode20_lz.go`, `decode20_audio.go`; tables shared with `decode29_lz.go`. LA4 has no RAR 2.0 decoder, so this
+section rests on one source; the `rar2_*` fixtures (made by WinRAR 2.90) are the test.
+
+Fixtures: `rar2_m1.rar`, `rar2_m5.rar` (LZ, 1 MiB dictionary), `rar2_md64.rar` (64 KiB dictionary),
+`rar2_mm_auto.rar`, `rar2_mm_forced.rar` (multimedia mode: audio blocks, 8.4, expected in `audio.wav` and
+`mono8.raw`), `rar2_mm_solid.rar` (solid, multimedia), `rar2_solid_md4096.rar` (solid, four files; the header
+still says 64 KiB). Oracle: `expected-oldrar.txt`.
 
 ### 8.1 Block header
 
@@ -1083,7 +1092,8 @@ support solid continuation.
 
 Fixtures: `rar_compress_normal.rar` (METHOD 0x33), `rar_multi_lzss_blocks.rar` (many LZ blocks, 20 MB output),
 `rar4_*` compressed fixtures (all LZ, UNP_VER 29), `rar_unicode.rar` (one compressed entry), `rar4_enc_solid.rar`
-(solid; encrypted).
+(solid; encrypted), `rar3_m1.rar`, `rar3_md4096.rar`, `rar3_auto_filters.rar` (solid, RAR 3.93 choosing filters),
+`rar4_64bit_size.rar` (LZ, 4.5 GB output: optional test).
 
 ---
 
@@ -1294,8 +1304,11 @@ for c in 0 .. ch-1:
         count += 1
 ```
 
-Fixtures: `rar_filter.rar` (`bsdcat.exe`, 204288 bytes: x86 filters). No fixture is known to exercise Itanium,
-RGB, Audio or Delta in RAR 3; section 15.
+Fixtures: `rar_filter.rar` (`bsdcat.exe`, 204288 bytes: x86 filters); made by RAR 3.93 with the filter forced:
+`rar3_filter_x86.rar`, `rar3_filter_itanium.rar`, `rar3_filter_delta4.rar` (4 channels), `rar3_filter_rgb.rar`,
+`rar3_filter_audio_stereo16.rar`, `rar3_filter_audio_mono8.rar`; `rar3_auto_filters.rar` (RAR's own choice).
+Forcing a filter does not guarantee RAR wrote one; nobody has looked inside these archives yet. Oracle:
+`expected-oldrar.txt`. No RARLAB program writes a non-standard VM program, so Appendix A has no fixture.
 
 ---
 
@@ -1307,9 +1320,14 @@ RD:`decode29_ppm.go` (`init`, `fill`, `readFilterData`), RD:`ppm_model.go` (`ran
 
 The model is PPMd variant H by Dmitry Shkarin, as implemented by the LZMA SDK's `Ppmd7` (`CPpmd7`,
 `Ppmd7_Construct`, `Ppmd7_Alloc`, `Ppmd7_Init`). RAR uses it with the **original PPMd range coder**, not 7-Zip's:
-in current LZMA SDK versions that pairing is `Ppmd7a_RangeDec_Init` / `Ppmd7a_DecodeSymbol` ("original PPMdH",
-per `Ppmd7.h`), not the `Ppmd7z_*` functions. 11.2 specifies the range coder so that it can be written or checked
-independently.
+in current LZMA SDK versions that pairing is `Ppmd7a_RangeDec_Init` / `Ppmd7a_DecodeSymbol` in `C/Ppmd7aDec.c`
+("original PPMdH", per `Ppmd7.h`), not the `Ppmd7z_*` functions of `C/Ppmd7Dec.c`. The owner has allowed the copy in
+`vendor/lzma/Ppmd7aDec.c`; use it. 11.2 describes the same range coder for checking (it was compared with that file).
+
+`Ppmd7a_DecodeSymbol` returns a byte (0..255), `PPMD7_SYM_END` (-1: an escape out of the order -1 context) or
+`PPMD7_SYM_ERROR` (-2). RAR has no use for -1; treat both negative values as corrupt data.
+`Ppmd7a_RangeDec_Init` returns false when the 4 initial bytes are all `FF`; that is corrupt data too. The model
+reads its input through the `IByteIn` set in `CPpmd7.rc.dec.Stream`; feed it the next byte of the packed stream.
 
 ### 11.1 PPMd block header
 
@@ -1337,7 +1355,8 @@ internal to the model, which overwrites it before use.
 
 ### 11.2 Range decoder (original PPMd)
 
-From RD:`ppm_model.go:rangeCoder` (all arithmetic unsigned 32-bit, mod 2^32; TOP = 2^24, BOT = 2^15):
+From RD:`ppm_model.go:rangeCoder`, and the same in PPMD:`Ppmd7aDec.c` (which keeps `code - low` in one variable
+instead of two; all arithmetic unsigned 32-bit, mod 2^32; TOP = 2^24, BOT = 2^15):
 
 ```
 init:        low = 0; range = 0xFFFFFFFF; code = 0; repeat 4: code = (code << 8) | next byte
@@ -1375,7 +1394,10 @@ loop:
 Matches here go through the same window as LZ matches but do not change the LZ distance history or last length.
 
 Fixtures: `rar_compress_best.rar` (METHOD 0x35), `rar_ppmd_lzss_conversion.rar` (switches between PPMd and LZ
-blocks; 241 MB output), `rar_ppmd_use_after_free.rar` (fuzzing case; must fail cleanly).
+blocks; 241 MB output), `rar_ppmd_use_after_free.rar` (fuzzing case; must fail cleanly); made by RAR 3.93:
+`rar3_ppmd.rar` (order 8, 16 MiB), `rar3_ppmd_order63.rar` (order 63: the mapping in 11.1),
+`rar3_ppmd_lz_solid.rar` (solid, PPMd and LZ mixed), `rar3_ppmd_filter_x86.rar` and `rar3_ppmd_filter_audio.rar`
+(PPMd with a filter forced: the candidates for escape code 3, not confirmed).
 
 ---
 
@@ -1511,7 +1533,9 @@ volumes in a solid archive), x86 data in `rar5_compressed.rar`/`rar5_solid.rar` 
 ### 12.6 Version 1 (RAR 7.0)
 
 Sources: TN (compression information), RD:`archive50.go:parseFileHeader`, RD:`decode50.go` (`offsetSize7`,
-`tableSize7`). Single-source for the decoding differences; no fixture.
+`tableSize7`). Single-source for the decoding differences. Fixture: `rar7_v70_md4352m.rar` (RAR 7.12 `-md6g`;
+compression information 0x13E81: version 1, method 5, N = 15, F = 2, so 4 GiB + 4 GiB / 32 * 2 = 4352 MiB,
+checked; 4.5 GB output and a dictionary over 4 GiB, so the test is optional).
 
 - Algorithm version 1 with bit 20 (0x100000) set: decode exactly as version 0; only the dictionary-size field uses
   the version-1 form.
@@ -1576,10 +1600,10 @@ under LA4's behaviour).
 
 | # | Topic | LA | RD | Recommendation |
 |---|---|---|---|---|
-| 1 | PPMd escape byte when a PPMd block header lacks flag 0x40 (11.1) | LA4 resets it to 2 | keeps the previous value (2 only at a non-solid file start) | Keep the previous value (RD). Fixture-neutral (`rar_ppmd_lzss_conversion.rar`, `rar_compress_best.rar` decode either way); revisit if a PPMd fixture fails |
-| 2 | Low-distance repeat state (`lowDist`, `lowRepeat`, 9.4) | LA4 never resets it, not even between files | reset at every LZ table read | Reset at every LZ table read (RD). Test on `rar_multi_lzss_blocks.rar` and `rar_ppmd_lzss_conversion.rar`; if either fails, try "reset only at a non-solid file start" |
+| 1 | PPMd escape byte when a PPMd block header lacks flag 0x40 (11.1) | LA4 resets it to 2 | keeps the previous value (2 only at a non-solid file start) | Keep the previous value (RD). Fixture-neutral for the libarchive fixtures (`rar_ppmd_lzss_conversion.rar`, `rar_compress_best.rar` decode either way); test on all `rar3_ppmd*` fixtures and switch if one fails |
+| 2 | Low-distance repeat state (`lowDist`, `lowRepeat`, 9.4) | LA4 never resets it, not even between files | reset at every LZ table read | Reset at every LZ table read (RD). Test on `rar_multi_lzss_blocks.rar`, `rar_ppmd_lzss_conversion.rar` and `rar3_ppmd_lz_solid.rar`; if one fails, try "reset only at a non-solid file start" |
 | 3 | Distances and last length at a non-solid file start (RAR 2.9, RAR 5) | LA4 keeps them from the previous entry; LA5:`init_unpack` does not reset `dist_cache`/`last_len` either | resets (`lz29Decoder.reset`, `decoder50.init`) | Reset (7.5) |
-| 4 | RAR 2.0 distances and last length at a non-solid file start | (no decoder) | not reset | Reset; valid data cannot depend on them |
+| 4 | RAR 2.0 distances and last length at a non-solid file start | (no decoder) | not reset | Reset; valid data cannot depend on them (`rar2_m5.rar` has two non-solid files) |
 | 5 | EXT_TIME fraction bytes (2.5) | LA4 accumulates `rem = byte << 16 | rem >> 8` per byte (the formula in 2.5) but then misuses the value | reads the wrong number of bytes for c = 1 and 2 | The formula in 2.5 (LA4's accumulation), consuming exactly c bytes. No oracle holds the time values |
 | 6 | Unicode name decoding stop (2.4) | stops at NAME_SIZE output units or at the end of the encoded bytes | stops when the output reaches the narrow name's length or the encoded bytes end | Stop at whichever comes first of: encoded bytes exhausted, output length = narrow length (needed anyway for mode 3 bounds) |
 | 7 | Filter-program reset (`vmnum` 0, 10.1) | LA4 also drops pending filters | RD keeps pending filters | Drop programs; keep already pending filters (they hold their own program). Fixture-neutral |
@@ -1597,14 +1621,15 @@ under LA4's behaviour).
 
 Single-source items (one source only; no fixture unless stated):
 
-- RAR 2.0 LZ and audio decoding (section 8): RD only; **no fixture**. In particular the RAR 2.0 repeat symbols
-  *push* the reused distance (`[d, D0, D1, D2]`) instead of moving it to the front as RAR 2.9 does, and symbol 256
-  pushes a copy of D0. These are surprising enough to deserve a test archive (`rar -ma4 -m...` cannot produce
-  RAR 2.0 data; an archive from RAR 2.x is needed).
-- RAR 3 Itanium filter (10.4) and the VM (Appendix A): RD only; no fixture.
+- RAR 2.0 LZ and audio decoding (section 8): RD only; tested by the `rar2_*` fixtures. Watch in particular the
+  RAR 2.0 repeat symbols, which *push* the reused distance (`[d, D0, D1, D2]`) instead of moving it to the front as
+  RAR 2.9 does, and symbol 256, which pushes a copy of D0. If `rar2_m5.rar` fails while the audio-only parts pass,
+  try move-to-front first.
+- RAR 3 Itanium filter (10.4): RD only; `rar3_filter_itanium.rar`, if RAR wrote the filter.
+- RAR 3 VM (Appendix A): RD only; no fixture (no RARLAB program writes a non-standard program).
 - RAR 4 old-style comment embedded in the main header (2.2): RD only; no fixture.
 - RAR 4/5 encryption, header encryption, MAC'd checksums (section 6): RD only, but verified on fixtures.
-- RAR 7 (version 1) decoding differences (12.6): RD only; no fixture.
+- RAR 7 (version 1) decoding differences (12.6): RD only; `rar7_v70_md4352m.rar` (optional: over 4 GiB dictionary).
 - Volume naming rules (4.1): RD only; the fixtures cover `.partNN.rar` and `.rar/.r00/.r01`.
 - BLAKE2sp construction (5.3): LA5 calls a library; the construction comes from the BLAKE2 paper and was verified
   with the reference test vectors only. It has not been checked against `rar5_blake2.rar`, because no fixture holds
@@ -1734,7 +1759,9 @@ if u32 G[0x30] > 0: save min(G[0x30], 0x2000 - 0x40) bytes of G[0x40 ..] as this
 All in `tests/fixtures/rar/` (see its `README.md`). Oracles, one line per extracted file as
 `archive|entry|size|crc32`: `expected.txt` (libarchive 3.7.7's output, for the libarchive fixtures) and
 `expected-unrar.txt` (UnRAR 7.3.1's output, for the fixtures made for this project; first volume named for
-volume sets). Passwords: `pass` for the project's `rar4_*`/`rar5_*` encrypted fixtures, U+BE44 U+BC00 U+0020 U+BC88
+volume sets), `expected-oldrar.txt` (UnRAR 7.3.1's output for the `rar2_*`, `rar3_*`, SFX, 64-bit and RAR 7
+fixtures, made with RARLAB's WinRAR 2.90, RAR 3.93, 6.24 and 7.12; each line also equals the CRC of the input, which
+`make-oldrar-inputs.py` regenerates; the README lists the switches). Passwords: `pass` for the project's `rar4_*`/`rar5_*` encrypted fixtures, U+BE44 U+BC00 U+0020 U+BC88
 U+D638 for `*_enc_hangul` (encodings in 6.1.2 and 6.2.5), `password` for `rar5_encrypted_filenames.rar` and
 `rar5_encrypted.rar`'s `b.txt`; unknown for `rar4_encrypted.rar`, `rar_encryption_header.rar` and
 `rar5_encrypted.rar`'s `d.txt`.
@@ -1781,8 +1808,21 @@ U+D638 for `*_enc_hangul` (encodings in 6.1.2 and 6.2.5), `password` for `rar5_e
 | `rar5_encrypted.rar` | libarchive's: two of four files encrypted (one with `password`) | 6.2 |
 | `rar5_encrypted_filenames.rar` | libarchive's: encrypted headers, password `password` | 6.2.4 |
 | `rar5_leftshift1.rar`, `rar5_readtables_overflow.rar`, `rar5_truncated_huff.rar` | corrupt RAR 5 (fuzzing); must fail cleanly | 14 |
+| `rar2_m1.rar`, `rar2_m5.rar` | RAR 2.0 LZ (WinRAR 2.90 `-m1`, `-m5`), text and x86 code | 8.1-8.3 |
+| `rar2_md64.rar` | RAR 2.0 LZ, 64 KiB dictionary | 8.3, 7.4 |
+| `rar2_mm_auto.rar`, `rar2_mm_forced.rar` | RAR 2.0 multimedia (audio) mode on WAV, 8-bit raw and BMP data | 8.4 |
+| `rar2_mm_solid.rar` | RAR 2.0 solid, multimedia | 8.4, 7.5 |
+| `rar2_solid_md4096.rar` | RAR 2.0 solid, four files | 8, 7.5 |
+| `rar3_filter_x86.rar`, `rar3_filter_itanium.rar`, `rar3_filter_delta4.rar`, `rar3_filter_rgb.rar`, `rar3_filter_audio_stereo16.rar`, `rar3_filter_audio_mono8.rar` | RAR 3.93 with each standard filter forced | 10 |
+| `rar3_auto_filters.rar` | RAR 3.93 solid, filters chosen by RAR | 9, 10, 7.5 |
+| `rar3_ppmd.rar`, `rar3_ppmd_order63.rar` | PPMd order 8 and order 63 | 11 |
+| `rar3_ppmd_filter_x86.rar`, `rar3_ppmd_filter_audio.rar` | PPMd with a filter forced (escape code 3 candidates) | 11.3, 10 |
+| `rar3_ppmd_lz_solid.rar` | solid, PPMd and LZ mixed | 9, 11, 7.5, 15 #1-2 |
+| `rar3_m1.rar`, `rar3_md4096.rar` | RAR 3.93 LZ `-m1`; 4 MiB dictionary | 9 |
+| `rar3_sfx_stub.sfx`, `rar5_sfx_stub.sfx` | SFX archives (module replaced), signature at 127208 and 244864 | 1 |
+| `rar4_64bit_size.rar` | RAR 4 with 64-bit sizes (flag 0x0100), 4.5 GB output (optional) | 2.3 |
+| `rar7_v70_md4352m.rar` | RAR 5 archive, algorithm version 1, 4352 MiB dictionary, 4.5 GB output (optional) | 3.5, 12.6 |
 
-Not covered by any fixture: SFX archives; RAR 2.0 compressed data (LZ and audio); RAR 3 Itanium, RGB, Audio and
-Delta filters (not confirmed) and non-standard VM programs; filter records inside PPMd; RAR 5 Delta filter (not
-confirmed); RAR 7 (version 1) data; RAR 4 large-file (flag 0x0100) headers; RAR 4 old-style comments; RAR 5
-unknown unpacked size; BLAKE2sp combined with MAC; RAR 5 redirection (link) records.
+Not covered by any fixture: RAR 1.5 data; non-standard RAR 3 VM programs; RAR 4 old-style comments; RAR 5
+unknown unpacked size; BLAKE2sp combined with MAC; RAR 5 redirection (link) records; a RAR 5 Delta filter (not
+confirmed). Filters inside PPMd blocks, and each forced RAR 3 filter, are covered only if RAR actually wrote them.
