@@ -34,16 +34,6 @@ MINIZ_OBJ_WIN = build/miniz-win.o
 # the SDK starting threads of its own.
 LZMA_DEFINES = -DZ7_ST -DZ7_PPMD_SUPPORT
 LZMA_INCLUDE = -Ivendor/lzma
-# RAR's decompression and decryption, under UnRAR's licence, are a module of
-# their own (owner, 2026-10-01): a DLL beside the program on Windows, linked
-# straight into the host tests. The program reaches it only through
-# include/rubraview/rar_codec.h.
-UNRAR_DIR = vendor/unrar_proprietary
-UNRAR_INCLUDE = -I$(UNRAR_DIR)
-# A clean-room copy (scripts/cleanroom.sh) has no module sources: everything else still builds.
-SRCS_UNRAR = $(wildcard $(UNRAR_DIR)/rar_unpack.c $(UNRAR_DIR)/rar_crypt.c $(UNRAR_DIR)/unrar_proprietary.c)
-UNRAR_DLL_TARGET = $(if $(SRCS_UNRAR),dist/$(UNRAR_DLL))
-UNRAR_DLL = unrar_proprietary.dll
 LZMA_SRCS = $(wildcard vendor/lzma/*.c)
 LZMA_OBJS = $(patsubst vendor/lzma/%.c,build/lzma/%.o,$(LZMA_SRCS))
 LZMA_OBJS_WIN = $(patsubst vendor/lzma/%.c,build/lzma-win/%.o,$(LZMA_SRCS))
@@ -164,9 +154,9 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_UNRAR) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(UNRAR_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -209,15 +199,7 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/ru
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
-# The UnRAR module: its own DLL, its own licence; nothing of it is in the exe.
-dist/$(UNRAR_DLL): $(SRCS_UNRAR) include/rubraview/rar_codec.h build/lzma-win/Ppmd7.o build/lzma-win/Ppmd7aDec.o
-	@mkdir -p dist
-	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -shared -DUNRAR_PROPRIETARY_DLL \
-		-Iinclude $(UNRAR_INCLUDE) -Ivendor/lzma $(SRCS_UNRAR) build/lzma-win/Ppmd7.o build/lzma-win/Ppmd7aDec.o \
-		-static-libgcc -Wl,--exclude-all-symbols -o $@
-	@echo "Linked: $@"
-
-win64: $(UNRAR_DLL_TARGET) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \

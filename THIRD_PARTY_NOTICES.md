@@ -35,25 +35,6 @@ came from is in its `vendor/<name>/VENDORED.md`.
 - Public domain imposes no condition; this notice is credit, not
   compliance.
 
-## UnRAR 7.3.1 (converted to C)
-
-- Converted to C at `vendor/unrar_proprietary/` (see `vendor/unrar_proprietary/VENDORED.md`)
-  and built as `unrar_proprietary.dll`, a module of its own beside `rubraview.exe`,
-  loaded at run time: the program itself contains none of it (owner, 2026-10-01):
-  the decompression of RAR 1.5 to 7.0 archives and the decryption of
-  RAR 3.x to 5.0 ones, for reading CBR comics.
-- Copyright Alexander L. Roshal. Licence text: `vendor/unrar_proprietary/LICENSE.txt`
-  (`licences/unrar_proprietary-LICENSE.txt` in the zip).
-- UnRAR source code may be used in any software to handle RAR archives
-  without limitations free of charge, but cannot be used to develop RAR
-  (WinRAR) compatible archiver and to re-create RAR compression algorithm,
-  which is proprietary. Distribution of modified UnRAR source code in
-  separate form or as a part of other software is permitted, provided that
-  full text of this paragraph, starting from "UnRAR source code" words, is
-  included in license, or in documentation if license is not available,
-  and in source code comments of resulting package.
-- Rubraview only reads RAR archives; it cannot make one.
-
 ## libjpeg-turbo 3.0.4
 
 - Vendored snapshot at `vendor/libjpeg-turbo/` (the libjpeg API library
