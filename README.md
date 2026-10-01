@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.28** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.28/rubraview-v0.0.28.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.29** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.29/rubraview-v0.0.29.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -102,6 +102,7 @@ ships with, so it cannot drift from them.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
+| `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
 **While a slide show runs**
 

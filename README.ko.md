@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.28** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.28/rubraview-v0.0.28.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.29** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.29/rubraview-v0.0.29.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -101,6 +101,7 @@
 | `H` | 좌우 뒤집기 |
 | `V` | 위아래 뒤집기 |
 | `N` | 도트 그림용 또렷한 확대 |
+| `Shift+N` | 열린 압축파일의 파일 이름을 다음 인코딩(Shift-JIS, GBK, Big5 …)으로 다시 읽기 — 그 파일에만 |
 
 **슬라이드 쇼 중**
 

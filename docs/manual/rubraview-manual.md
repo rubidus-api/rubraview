@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.28.exe              the viewer, as built
-dist/rubraview-v0.0.28/                 the release bundle
-dist/rubraview-v0.0.28.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.29.exe              the viewer, as built
+dist/rubraview-v0.0.29/                 the release bundle
+dist/rubraview-v0.0.29.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 dist/unrar_proprietary.dll              RAR's decompression and decryption, a module of its own
 ```
@@ -76,6 +76,13 @@ RAR asks for its password (it is shown as dots, and forgotten when the
 viewer closes; one that worked is tried first on the next locked book). A
 RAR split into volumes (`x.part1.rar`, `x.part2.rar`, ... or `x.rar`,
 `x.r00`, ...) opens as one book from whichever volume you open.
+
+When the names inside an archive come out garbled — made on a Japanese,
+Chinese or Taiwanese computer — press `Shift+N` to read them again in the
+next code page (Japanese Shift-JIS, Chinese GBK and Big5, Korean, UTF-8,
+Western), or pick one from File › Names in archive. The page you are on
+stays on screen, and the choice is for that archive only: the next one
+opens with Settings › Files › Archive filenames again.
 
 Drop files on the window to open them — several at once become one
 sequence. Pictures dragged out of a browser or a mail program work too:
@@ -471,6 +478,7 @@ listed under a later heading only means that while that is on screen.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
+| `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
 **While a slide show runs**
 
