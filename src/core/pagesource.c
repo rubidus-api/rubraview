@@ -276,6 +276,7 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
         }
     }
     rubraview_rar_result_t opened = rubraview_rar_open_volumes(arena, volumes, volume_count, password);
+    if (opened.err == RUBRAVIEW_RAR_ERR_NO_CODEC) { source.needs_codec = true; return source; }
     if (opened.err == RUBRAVIEW_RAR_ERR_ENCRYPTED || opened.err == RUBRAVIEW_RAR_ERR_BAD_PASSWORD) {
         source.needs_password = true;                          /* its headers are locked */
         source.password_wrong = opened.err == RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
@@ -283,6 +284,16 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
     }
     if (opened.err != RUBRAVIEW_RAR_OK) return source;
     source.archiverar = opened.value;
+    /* Without the UnRAR module only stored, unencrypted pages can be read:
+       a book that needs more says so rather than opening half-blank. */
+    for (size_t i = 0; i < source.archiverar.entry_count; ++i) {
+        const rubraview_rar_entry_t *e = &source.archiverar.entries[i];
+        if (rubraview_rar_needs_codec(&source.archiverar, i) &&
+            rubraview_glob_match_list(rubraview_path_basename(e->name), extension_filter)) {
+            source.needs_codec = true;
+            return source;
+        }
+    }
     if (rubraview_rar_needs_password(&source.archiverar)) {
         /* Its pages are locked: the password is tried on one of them now. */
         rubraview_rar_err_t tried = password.len > 0 ? rubraview_rar_set_password(&source.archiverar, password)

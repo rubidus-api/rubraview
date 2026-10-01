@@ -26,6 +26,15 @@ u8str_t rubraview_pal_process_executable(proven_arena_t *arena);
  */
 bool rubraview_pal_process_start_console(u8str_t command_line);
 
+/**
+ * The UnRAR-licensed module (owner, 2026-10-01): `unrar_proprietary.dll`
+ * from the program's own folder, and only from there, asked for the
+ * table rar_codec.h describes. NULL when it is not there or speaks another
+ * version; RAR pages that need it then say so. Loaded once, never let go.
+ */
+struct rubraview_rar_codec;
+const struct rubraview_rar_codec *rubraview_pal_process_load_rar_codec(void);
+
 #ifdef __cplusplus
 }
 #endif

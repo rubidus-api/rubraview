@@ -175,6 +175,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-01: D-66 The UnRAR code is a module of its own: unrar_proprietary.dll
+
+- Status: Accepted (owner 2026-10-01: "unrar 모듈은 분리하도록 해요. 라이선스가 다르니까요. ... 따로 분리하거나 대체할 수 있게요", then "파일이름은 unrar_proprietary 이렇게 하고 동적으로 dll 연결하거나 해야지요" — plan `docs/plans/archive/2026-10-01-unrar-module.md`)
+- Decision:
+  - `vendor/unrar-c/` is now `vendor/unrar_proprietary/`: the UnRAR-licensed `rar_unpack.c` and `rar_crypt.c`, and `unrar_proprietary.c`, which exports one function, `unrar_proprietary_api(version)`. On Windows it builds `unrar_proprietary.dll`; `rubraview.exe` contains none of it and loads it at run time (`LoadLibraryExW`, from the program's own folder only, then `GetProcAddress`).
+  - The boundary is `include/rubraview/rar_codec.h` (MIT, ours): a versioned table of functions — unpack, AES-CBC, RAR 3 and RAR 5 key derivation, the CRC MAC, SHA-256. `src/core/rar.c` (MIT, ours: the headers, volumes, passwords, CRCs) calls only through it. Any DLL of that name that answers version 1 with such a table can replace this one.
+  - Without the DLL: the headers still read and a stored, unencrypted CBR opens; a compressed or encrypted one says "this CBR needs unrar_proprietary.dll beside rubraview.exe" (`RUBRAVIEW_RAR_ERR_NO_CODEC`, `needs_codec` on the page source), and its picker tile has no cover.
+  - The zip carries the DLL and `licences/unrar_proprietary-LICENSE.txt`; the release offers the DLL as a download of its own beside `rubraview.exe`. The host tests link the module directly and register it.
+- Consequences: `rubraview.exe` is 53 KB smaller; the DLL is 173 KB and exports only `unrar_proprietary_api`; the exe has no import of it. `test_rar` checks, with no module registered, that stored files read and compressed or header-encrypted ones are refused as such, that a table of another version is not taken, and everything else with it registered. Measured on the Windows 11 VM: the exe with the DLL beside it read a compressed CBR to page 20; the exe alone read a stored CBR to page 20, showed the stored one's cover and none for the compressed one in the picker, and opening the compressed one said the DLL was missing.
+
 ## 2026-10-01: D-64 The music features finished: lyrics in the file, a cue of any name, the equaliser window
 
 - Status: Accepted (owner 2026-10-01: "하지 않은 것들 다 처리 바랍니다" — the items D-62 left open)

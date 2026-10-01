@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/archive.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/rar.c vendor/unrar-c/rar_unpack.c vendor/unrar-c/rar_crypt.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/rar.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # miniz is third-party and does not build clean under this project's
 # -Werror -pedantic settings, so it is compiled separately with warnings
 # off. It is still instrumented by the sanitisers on the host build:
@@ -33,7 +33,15 @@ MINIZ_OBJ_WIN = build/miniz-win.o
 # decoder — the viewer already has its own worker pool and does not want
 # the SDK starting threads of its own.
 LZMA_DEFINES = -DZ7_ST -DZ7_PPMD_SUPPORT
-LZMA_INCLUDE = -Ivendor/lzma -Ivendor/unrar-c
+LZMA_INCLUDE = -Ivendor/lzma
+# RAR's decompression and decryption, under UnRAR's licence, are a module of
+# their own (owner, 2026-10-01): a DLL beside the program on Windows, linked
+# straight into the host tests. The program reaches it only through
+# include/rubraview/rar_codec.h.
+UNRAR_DIR = vendor/unrar_proprietary
+UNRAR_INCLUDE = -I$(UNRAR_DIR)
+SRCS_UNRAR = $(UNRAR_DIR)/rar_unpack.c $(UNRAR_DIR)/rar_crypt.c $(UNRAR_DIR)/unrar_proprietary.c
+UNRAR_DLL = unrar_proprietary.dll
 LZMA_SRCS = $(wildcard vendor/lzma/*.c)
 LZMA_OBJS = $(patsubst vendor/lzma/%.c,build/lzma/%.o,$(LZMA_SRCS))
 LZMA_OBJS_WIN = $(patsubst vendor/lzma/%.c,build/lzma-win/%.o,$(LZMA_SRCS))
@@ -154,9 +162,9 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_UNRAR) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(UNRAR_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -199,7 +207,15 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/ru
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
-win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+# The UnRAR module: its own DLL, its own licence; nothing of it is in the exe.
+dist/$(UNRAR_DLL): $(SRCS_UNRAR) include/rubraview/rar_codec.h build/lzma-win/Ppmd7.o build/lzma-win/Ppmd7aDec.o
+	@mkdir -p dist
+	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -shared -DUNRAR_PROPRIETARY_DLL \
+		-Iinclude $(UNRAR_INCLUDE) -Ivendor/lzma $(SRCS_UNRAR) build/lzma-win/Ppmd7.o build/lzma-win/Ppmd7aDec.o \
+		-static-libgcc -Wl,--exclude-all-symbols -o $@
+	@echo "Linked: $@"
+
+win64: dist/$(UNRAR_DLL) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \

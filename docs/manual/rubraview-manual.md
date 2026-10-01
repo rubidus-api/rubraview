@@ -7,14 +7,20 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.27.exe              the viewer, as built
-dist/rubraview-v0.0.27/                 the release bundle
-dist/rubraview-v0.0.27.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.28.exe              the viewer, as built
+dist/rubraview-v0.0.28/                 the release bundle
+dist/rubraview-v0.0.28.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
+dist/unrar_proprietary.dll              RAR's decompression and decryption, a module of its own
 ```
 
-The bundle holds `rubraview.exe`, this manual, the changelog and the
-licences of the libraries it borrows. The same licences are also inside
+The bundle holds `rubraview.exe`, `unrar_proprietary.dll`, this manual,
+the changelog and the licences of the libraries it borrows.
+`unrar_proprietary.dll` is UnRAR's code, under UnRAR's licence rather than
+the program's, so it is a separate file that the program loads when it
+starts, from its own folder. Without it everything else works, and a CBR
+whose pages are stored uncompressed still opens; a compressed or
+password-protected one says the DLL is missing. The same licences are also inside
 the program, at the end of the F1 help window, so the executable can be
 downloaded on its own.
 

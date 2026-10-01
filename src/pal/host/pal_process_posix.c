@@ -13,4 +13,9 @@ bool rubraview_pal_process_start_console(u8str_t command_line) {
     (void)command_line;
     return false;
 }
+
+/* The host tests link the module and give it to rar.c themselves. */
+const struct rubraview_rar_codec *rubraview_pal_process_load_rar_codec(void) {
+    return NULL;
+}
 #endif

@@ -60,6 +60,9 @@ typedef struct rubraview_page_source {
        given is wrong (`password_wrong` too). It then has no pages. */
     bool     needs_password;
     bool     password_wrong;
+    /* A RAR whose pages need the UnRAR module (unrar_proprietary) that is
+       not there: compressed or encrypted. It then has no pages. */
+    bool     needs_codec;
     /* A RAR set's volumes, mapped by the source itself and let go when it closes. */
     rubraview_fs_mapping_t *rar_maps;
     size_t   rar_map_count;
