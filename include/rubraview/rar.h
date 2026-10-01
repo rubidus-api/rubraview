@@ -166,7 +166,7 @@ unsigned rubraview_rar_volume_number(u8str_t name);
 /** The first volume's path of the set `path` is in (`old` numbering: `.rar, .r00, ...`). */
 u8str_t rubraview_rar_first_volume(proven_arena_t *arena, u8str_t path, bool old);
 
-/** The next volume's path after `path`, as UnRAR names it. */
+/** The next volume's path after `path`, in RAR's volume naming. */
 u8str_t rubraview_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old);
 
 typedef struct rubraview_rar_data_result {
