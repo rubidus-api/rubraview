@@ -11,16 +11,10 @@ dist/rubraview-v0.0.29.exe              the viewer, as built
 dist/rubraview-v0.0.29/                 the release bundle
 dist/rubraview-v0.0.29.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
-dist/unrar_proprietary.dll              RAR's decompression and decryption, a module of its own
 ```
 
-The bundle holds `rubraview.exe`, `unrar_proprietary.dll`, this manual,
-the changelog and the licences of the libraries it borrows.
-`unrar_proprietary.dll` is UnRAR's code, under UnRAR's licence rather than
-the program's, so it is a separate file that the program loads when it
-starts, from its own folder. Without it everything else works, and a CBR
-whose pages are stored uncompressed still opens; a compressed or
-password-protected one says the DLL is missing. The same licences are also inside
+The bundle holds `rubraview.exe`, this manual, the changelog and the
+licences of the libraries it borrows. The same licences are also inside
 the program, at the end of the F1 help window, so the executable can be
 downloaded on its own.
 
@@ -70,7 +64,8 @@ place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
 `.cb7`, `.7z`, `.cbr` and `.rar` all open, and nothing is ever unpacked to
-your disk. A solid archive (7z or RAR) reads a far page by unpacking the
+your disk — for now a CBR / RAR only when its pages are stored uncompressed
+(see "What is not there yet"). A solid archive (7z or RAR) reads a far page by unpacking the
 pages before it first, with its progress on screen. A password-protected
 RAR asks for its password (it is shown as dots, and forgotten when the
 viewer closes; one that worked is tried first on the next locked book). A
@@ -391,7 +386,9 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
-- **Reading a `.cbr` (RAR) archive.**
+- **Compressed or password-protected `.cbr` (RAR) archives.** The program
+  uses no UnRAR code; RAR decoding of the project's own is being written.
+  Until then such a book says so, and a CBR with uncompressed pages opens.
 - **Selecting or pasting in the rename box.** It takes typing — Korean
   and other IMEs included — and Backspace, but no selection, arrow keys or
   clipboard yet. (The keys themselves work with the Korean IME in Hangul

@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-01: D-70 No UnRAR code in the program
+
+- Status: Accepted (owner 2026-10-01: "vendor/unrar_proprietary/ 이 자료는 ai-share/archive 밑으로 옮겨주세요. 우리는 unrar 안쓸거니까요"); supersedes D-66's module and D-63's use of UnRAR.
+- Decision:
+  - The C conversion of UnRAR leaves the repository (kept outside it, in the owner's archive). `unrar_proprietary.dll` is no longer built, shipped or loaded: the program's start-up lookup for it is removed, so a copy of the DLL beside the program is ignored.
+  - `include/rubraview/rar_codec.h` stays as the table a RAR decoder fills; the decoder will be the project's own, written in a clean room from `docs/specs/rar-decompression.md` (plan `mit-archives`), and registered with `rubraview_rar_set_codec`.
+  - Until then the RAR header reader opens a CBR / RAR whose pages are stored uncompressed and unencrypted; a compressed or password-protected one says that RAR decoding is not in this version.
+- Consequences: the UnRAR notice and licence leave THIRD_PARTY_NOTICES, the F1 help and the release zip; the README and the manual say what opens. Releases from here until the decoder lands read fewer CBR files than 0.0.26–0.0.29 did. `src/core/rar.c` (the header reader) was written beside UnRAR and is to be replaced by the clean-room one.
+
 ## 2026-10-01: D-69 The public repository holds the sources, the manual and the specs
 
 - Status: Accepted (owner 2026-10-01: "꼭 공개해야 하는 소스 코드와 매뉴얼, 스펙들 빼면 다 비공개 쪽으로 돌리고"; then: tests, tools and scripts private; the design RFCs and this file public; the history rewritten)

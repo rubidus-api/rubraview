@@ -4,7 +4,7 @@
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. Two optional DLLs go beside it: FFmpeg's, only for the formats Media Foundation cannot open, and `unrar_proprietary.dll` (in the zip, and a download of its own), for compressed or password-protected CBR / RAR comics — it is kept apart because UnRAR's licence is not the program's.
+Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. CBR / RAR comics open when their pages are stored uncompressed; compressed and password-protected ones wait for the project's own RAR decoder, which is being written (the program uses no UnRAR code).
 
 > This English README is the canonical version; the Korean one is its translation.
 

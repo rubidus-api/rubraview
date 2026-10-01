@@ -30,8 +30,8 @@ static const uint8_t SIG5[8] = { 'R', 'a', 'r', '!', 0x1A, 0x07, 0x01, 0x00 };
 #define RAR_KDF50_LG2_MAX   24
 #define RAR_MAX_PASSWORD    127
 
-/* Decompression and decryption are the UnRAR-licensed module's
-   (rar_codec.h, owner 2026-10-01); NULL until one is given. */
+/* Decompression and decryption are a registered decoder's (rar_codec.h,
+   D-70); NULL until one is given. */
 static const rubraview_rar_codec_t *g_codec;
 
 void rubraview_rar_set_codec(const rubraview_rar_codec_t *codec) {

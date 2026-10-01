@@ -10,26 +10,16 @@ extern "C" {
 #endif
 
 /*
- * The boundary between Rubraview (MIT) and the code under UnRAR's licence
- * (owner, 2026-10-01: "unrar 모듈은 분리하도록 해요. 라이선스가 다르니까요").
- *
- * RAR's decompression and decryption live in a module of their own,
- * `unrar_proprietary` — named so because UnRAR's licence is not an open one
- * (owner, 2026-10-01) — built on Windows as
- * `unrar_proprietary.dll` beside the program and loaded at start. The
- * program holds none of its code; it reads RAR headers itself (rar.c) and
- * asks this table for the rest. Without the module, a stored, unencrypted
- * CBR still opens; anything that needs decoding or a password does not.
- *
- * The module may be replaced by any other that exports
- * `unrar_proprietary_api` and answers RUBRAVIEW_RAR_CODEC_VERSION with a
- * table of these functions. This header is the whole contract.
+ * RAR's decompression and decryption, as a table rar.c asks for them; rar.c
+ * reads the headers itself. The program uses no UnRAR code (owner,
+ * 2026-10-01: "우리는 unrar 안쓸거니까요", D-70): the table is filled by a
+ * decoder of this project's own, written from docs/specs/rar-decompression.md
+ * and registered with rubraview_rar_set_codec. Until one is registered, a
+ * stored, unencrypted CBR still opens; anything that needs decoding or a
+ * password does not. This header is the whole contract.
  */
 
 #define RUBRAVIEW_RAR_CODEC_VERSION 1u
-#define RUBRAVIEW_RAR_CODEC_DLL     "unrar_proprietary.dll"
-#define RUBRAVIEW_RAR_CODEC_DLL_W   L"unrar_proprietary.dll"
-#define RUBRAVIEW_RAR_CODEC_EXPORT  "unrar_proprietary_api"
 
 /* The packed bytes come from `read` (as many as fit, 0 at the end) and the
    unpacked ones go to `write` (false stops the unpacking early). */
@@ -67,10 +57,6 @@ typedef struct rubraview_rar_codec {
     uint32_t (*crc_to_mac)(uint32_t crc, const uint8_t hash_key[32]);
     void  (*sha256)(const void *data, size_t size, uint8_t digest[32]);
 } rubraview_rar_codec_t;
-
-/* What the module exports: the table for `version`, or NULL when it does
-   not speak that version. */
-typedef const rubraview_rar_codec_t *(*rubraview_rar_codec_api_fn)(uint32_t version);
 
 #ifdef __cplusplus
 }

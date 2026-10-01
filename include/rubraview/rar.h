@@ -13,8 +13,8 @@ extern "C" {
 /*
  * CBR / RAR archives (owner, 2026-09-30, plan 2026-09-30-rar-reader):
  * RAR 1.5-4.x and RAR 5.0/7.0, stored and compressed, solid or not,
- * decoded by the C conversion of UnRAR in vendor/unrar_proprietary, a module
- * of its own reached through rar_codec.h. Shaped like the
+ * decoded through rar_codec.h by a decoder of the project's own (no UnRAR
+ * code, D-70; until it is registered, only stored pages). Shaped like the
  * 7z reader: open lists, read decodes one entry (a solid archive from the
  * start of its chain, or on from where the last read stopped), and a long
  * read can be cancelled and watched.
@@ -40,7 +40,7 @@ typedef enum rubraview_rar_err {
     RUBRAVIEW_RAR_ERR_CANCELLED,
     RUBRAVIEW_RAR_ERR_BAD_PASSWORD,     /* the password given is not this archive's */
     RUBRAVIEW_RAR_ERR_MISSING_VOLUME,   /* part of the file is in a volume that is not there */
-    RUBRAVIEW_RAR_ERR_NO_CODEC,         /* it needs the UnRAR module (unrar_proprietary), and there is none */
+    RUBRAVIEW_RAR_ERR_NO_CODEC,         /* it needs a RAR decoder (rar_codec.h), and none is registered */
 } rubraview_rar_err_t;
 
 /* A volume: its bytes, borrowed; they must outlive the archive. */
@@ -106,8 +106,8 @@ typedef struct rubraview_rar_result {
 bool rubraview_rar_is_rar(const uint8_t *data, size_t size);
 
 /*
- * The UnRAR-licensed module that decompresses and decrypts (rar_codec.h,
- * owner 2026-10-01). The headers are read without it, and a stored,
+ * The decoder that decompresses and decrypts (rar_codec.h; the project's own,
+ * D-70). The headers are read without it, and a stored,
  * unencrypted file too; the rest is ERR_NO_CODEC until one is given. Set
  * once at start, before any archive is read.
  */

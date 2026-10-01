@@ -284,7 +284,7 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
     }
     if (opened.err != RUBRAVIEW_RAR_OK) return source;
     source.archiverar = opened.value;
-    /* Without the UnRAR module only stored, unencrypted pages can be read:
+    /* Without a RAR decoder only stored, unencrypted pages can be read:
        a book that needs more says so rather than opening half-blank. */
     for (size_t i = 0; i < source.archiverar.entry_count; ++i) {
         const rubraview_rar_entry_t *e = &source.archiverar.entries[i];
