@@ -87,7 +87,8 @@ Common flags: `0x8000` (LONG_BLOCK / ADD_SIZE present): a u32 ADD_SIZE follows a
 data follow the header. `0x4000` appears on end-of-archive headers in the fixtures (LA4 names it
 HD_MARKDELETION); ignore it.
 
-The block occupies HEAD_SIZE bytes, then its data area (ADD_SIZE bytes, or PACK_SIZE for file blocks). To skip a
+The block occupies HEAD_SIZE bytes, then its data area (ADD_SIZE bytes, or PACK_SIZE for file blocks). The data
+area is not covered by HEAD_CRC (but see section 15 #18 for LA4's handling of skippable blocks). To skip a
 block of an unknown or uninteresting type: skip HEAD_SIZE, then skip ADD_SIZE if `0x8000` is set. HEAD_SIZE < 7
 is a corrupt archive.
 
@@ -864,6 +865,14 @@ RD:`decode50.go:init`, RD:`decode20.go:init`.
   the end; RAR 2.9 and RAR 5 streams are padded); discard the excess. Packed data that ends before the unpacked
   size is reached is an error ("decoded file too short", RD `ErrShortFile` / `ErrDecoderOutOfData`). With an
   unknown unpacked size, stop at the end-of-file signal (RAR 2.9: 9.4, 11.3; RAR 5: last block, 12.1).
+- **In a solid archive, decode each file's stream to its end**, not just to the unpacked size: RAR 2.9 up to and
+  including the end-of-file code (LZ symbol 256 with its two bits, 9.4, or PPMd escape code 2, 11.3), RAR 5 through
+  the block flagged "last" (12.1). Whatever comes after the last output byte still matters to the next file: the
+  end-of-file code's second bit says whether the next file starts with a block header, and a later block may carry
+  the tables or filters the next file uses. Bytes decoded beyond the unpacked size go into the window but are not
+  output. (RD:`decodeReader.nextFile` drains the decoder whenever the archive is solid; LA5:`rar5_read_data_skip`
+  processes blocks while packed bytes remain.) RAR 2.0 has no end-of-file code: RD stops at the unpacked size and
+  the next solid file continues the same block (8.3).
 - **Solid**: in a solid archive, a file marked solid (RAR 4 file flag 0x0010; RAR 5 compression-information bit
   0x40) continues the previous file's decoder state: the window and its write position, the Huffman tables and
   code lengths, the repeat-distance history and last length, the PPMd model and escape byte, and the filter program
@@ -1068,7 +1077,7 @@ else:
     t == 0: the next solid file starts directly with symbols, reusing the current tables
 ```
 
-End of file ends this file's stream. Reaching it before the unpacked size is a short file (an error) unless the
+End of file ends this file's stream (in a solid archive, read it even after the last output byte: 7.5). Reaching it before the unpacked size is a short file (an error) unless the
 size is unknown; output beyond the unpacked size is discarded (7.5). LA4 treats end of file as "stop" and does not
 support solid continuation.
 
@@ -1355,7 +1364,7 @@ loop:
     if c != esc: output byte c; continue
     code = decode a symbol
     code 0: end of block: read a new block header (9.1), which may switch to LZ
-    code 2: end of file (a following solid file starts with a block header)
+    code 2: end of file (a following solid file starts with a block header; read it in solid archives, 7.5)
     code 3: filter record (10.1), its bytes read as decoded symbols
     code 4: d = 0; repeat 3: d = (d << 8) | decode a symbol           # 24-bit big-endian
             L = decode a symbol; copy L + 32 bytes from distance d + 2
@@ -1384,18 +1393,20 @@ The packed stream of a file is a sequence of blocks, each starting at a byte bou
 
 | Byte | Field |
 |---|---|
-| 0 | flags: bits 0-2 = (number of valid bits in the block's last byte) - 1; bits 3-4 = (number of size bytes) - 1; bit 6 = last block of the file; bit 7 = tables present |
+| 0 | flags: bits 0-2 = (number of valid bits in the block's last byte) - 1; bits 3-5 = (number of size bytes) - 1, 0..2; bit 6 = last block of the file; bit 7 = tables present |
 | 1 | check byte: `0x5A ^ flags ^ size_byte_0 ^ size_byte_1 ^ size_byte_2` (the size bytes present) |
 | 2.. | block size S, 1 to 3 bytes, little-endian |
 
-A size-byte count of 4 (bits 3-4 = 3) is invalid. A check byte mismatch is a corrupt block. The block body is the
+Bits 3-5 above 2 are invalid (LA5 reads three bits and rejects values above 2; RD reads bits 3-4 and rejects 3;
+together: bit 5 must be clear and at most 3 size bytes). A check byte mismatch is a corrupt block. The block body is the
 next S bytes; it holds `(S - 1) * 8 + ((flags & 7) + 1)` valid bits, read MSB-first. The next block header follows
 the S bytes. If bit 7 is set, the body starts with the tables (12.2), which count toward the body's bits; otherwise
 the previous tables stay in force (the first block of a non-solid file must have tables).
 
 Decoding of a block stops when all its valid bits have been consumed (LA5 checks the position before each symbol;
 RD limits its bit reader to the block). A symbol that would need bits beyond the block is a data error. After the
-block flagged "last", the file's packed stream is complete.
+block flagged "last", the file's packed stream is complete (in a solid archive, decode up to it even past the
+unpacked size: 7.5).
 
 ### 12.2 Tables
 
@@ -1521,6 +1532,7 @@ for each file header (first part of a file):
     if stored: output = packed, cut to the unpacked size
     else: output = decompress(packed) with the algorithm of the header (8, 9-11, 12),
           continuing the solid state if the file is solid (7.5); cut to the unpacked size
+          (in a solid archive keep decoding to the end of the file's stream, 7.5)
     verify the CRC / BLAKE2sp of output (5.2, 6.2.5); a mismatch is an error for that file
 ```
 
@@ -1566,7 +1578,7 @@ under LA4's behaviour).
 |---|---|---|---|---|
 | 1 | PPMd escape byte when a PPMd block header lacks flag 0x40 (11.1) | LA4 resets it to 2 | keeps the previous value (2 only at a non-solid file start) | Keep the previous value (RD). Fixture-neutral (`rar_ppmd_lzss_conversion.rar`, `rar_compress_best.rar` decode either way); revisit if a PPMd fixture fails |
 | 2 | Low-distance repeat state (`lowDist`, `lowRepeat`, 9.4) | LA4 never resets it, not even between files | reset at every LZ table read | Reset at every LZ table read (RD). Test on `rar_multi_lzss_blocks.rar` and `rar_ppmd_lzss_conversion.rar`; if either fails, try "reset only at a non-solid file start" |
-| 3 | RAR 2.9 distances and last length at a non-solid file start | LA4 keeps them from the previous entry | resets | Reset (7.5) |
+| 3 | Distances and last length at a non-solid file start (RAR 2.9, RAR 5) | LA4 keeps them from the previous entry; LA5:`init_unpack` does not reset `dist_cache`/`last_len` either | resets (`lz29Decoder.reset`, `decoder50.init`) | Reset (7.5) |
 | 4 | RAR 2.0 distances and last length at a non-solid file start | (no decoder) | not reset | Reset; valid data cannot depend on them |
 | 5 | EXT_TIME fraction bytes (2.5) | LA4 accumulates `rem = byte << 16 | rem >> 8` per byte (the formula in 2.5) but then misuses the value | reads the wrong number of bytes for c = 1 and 2 | The formula in 2.5 (LA4's accumulation), consuming exactly c bytes. No oracle holds the time values |
 | 6 | Unicode name decoding stop (2.4) | stops at NAME_SIZE output units or at the end of the encoded bytes | stops when the output reaches the narrow name's length or the encoded bytes end | Stop at whichever comes first of: encoded bytes exhausted, output length = narrow length (needed anyway for mode 3 bounds) |
@@ -1580,6 +1592,8 @@ under LA4's behaviour).
 | 14 | RAR 5 unknown unpacked size | LA5 refuses | RD decodes to the end | Decode to the end (TN) |
 | 15 | Escape code 3 inside PPMd (filter record) | LA4 refuses | RD parses it | Parse it (11.3) |
 | 16 | RAR 3 filter chaining (10.2) | LA4 compares with a start value it has already cleared, so in effect does not chain | RD chains when the next filter has the same start and the input length matches | Chain (RD); fixture-neutral |
+| 17 | Pending filters at a solid file boundary | LA5:`reset_file_context` drops them for every file | RD keeps them when the next file is solid | Keep them (RD): a filter whose block straddles the boundary would otherwise be lost. Fixture-neutral |
+| 18 | CRC of skippable RAR 4 blocks with flag 0x8000 (COMM, AV, SUB, PROTECT, SIGN, ENDARC) | LA4 computes it over the header **and** the ADD_SIZE data | RD over the header only | Check over the header only (RD; the rule of 2.1); if that fails, try header + data before reporting damage. Only skippable blocks are affected; no fixture has one |
 
 Single-source items (one source only; no fixture unless stated):
 
