@@ -766,3 +766,604 @@ check value verified), `rar5_encrypted.rar` (libarchive's: `b.txt` uses password
 `d.txt` uses another, unknown one; `a.txt` and `c.txt` are not encrypted).
 
 ---
+
+## 7. Common decompression machinery
+
+### 7.1 Bit input
+
+Sources: LA4:`rar_br_fillup`, `rar_br_bits`; LA5:`read_bits_16`, `read_bits_32`, `skip_bits`;
+RD:`bit_reader.go` (`rarBitReader`, `rar5BitReader`).
+
+All three algorithms read their packed stream as a bit stream, most significant bit of each byte first (see
+Conventions). The decoders peek up to 16 bits (Huffman lookup) and then consume fewer. Near the end of the data a
+peek may run past the last byte; treat missing bits as zero for peeking, but consuming bits beyond the end of the
+packed data is a truncated-data error. Byte reads inside the bit stream (filter records, PPMd bytes) read 8 bits;
+they are byte-aligned only where stated.
+
+### 7.2 Canonical Huffman codes
+
+Sources: LA4:`create_code`, `add_value`, `make_table`, `read_next_symbol`; LA5:`create_decode_tables`,
+`decode_number`; RD:`huffman.go` (`huffmanDecoder.init`, `readSym`).
+
+Every Huffman table is transmitted as a list of code lengths, one per symbol, 0 = symbol unused, maximum 15.
+Codes are canonical: sort the used symbols by (length, symbol number); the first gets the all-zero code of its
+length; each next code is the previous code + 1, shifted left by the length difference when the length grows.
+Codes are read bit by bit from the stream, first bit = most significant bit of the code.
+
+```
+count[l] = number of symbols with length l (l = 1..15)
+code = 0; for l in 1..15: first_code[l] = code; code = (code + count[l]) << 1
+symbols of length l get codes first_code[l], first_code[l]+1, ... in increasing symbol order
+```
+
+Incomplete code sets (unused code space, including a single used symbol) occur and must be accepted; reading an
+unused code is a data error (RD returns `ErrHuffDecodeFailed`; LA4 "Invalid prefix code"; LA5 silently yields
+symbol 0 — do not copy that). An over-subscribed set (more codes than fit) is a data error.
+
+### 7.3 The precode (code-length tables), RAR 2.9 and RAR 5
+
+Sources: LA4:`parse_codes`; LA5:`parse_tables`; RD:`huffman.go:readCodeLengthTable`.
+
+The code lengths of the main tables are themselves sent with a 20-symbol "bit-length" code:
+
+```
+# 1. lengths of the 20 precode symbols, 4 bits each, with a zero-run escape
+i = 0
+while i < 20:
+    v = read 4 bits
+    if v == 15:
+        z = read 4 bits
+        if z == 0: bl[i] = 15; i += 1                    # a real length 15
+        else:      bl[i .. i+z+1] = 0; i += z + 2        # z + 2 zeros (clipped at 20)
+    else: bl[i] = v; i += 1
+build the canonical code from bl
+
+# 2. the table lengths, N entries (N given per algorithm)
+i = 0
+while i < N:
+    s = next precode symbol
+    if s < 16:  len[i] = s (RAR 5), or (old[i] + s) & 15 (RAR 2.9, see 9.2); i += 1
+    if s == 16: n = 3 + read 3 bits;  repeat previous length n times     # error if i == 0
+    if s == 17: n = 11 + read 7 bits; repeat previous length n times     # error if i == 0
+    if s == 18: n = 3 + read 3 bits;  write n zeros
+    if s == 19: n = 11 + read 7 bits; write n zeros
+    (repeats are clipped at N)
+```
+
+RAR 2.0 uses a different precode, section 8.2.
+
+### 7.4 The window
+
+Sources: LA4:`lzss_emit_literal`, `lzss_emit_match`, `expand`; LA5:`copy_string`, `do_uncompress_block`;
+RD:`decode_reader.go` (`decodeReader.writeByte`, `copyBytes`, `init`).
+
+Output goes through a circular window W of size `wsize`, a power of two at least the dictionary size of the file
+(RD uses at least 256 KiB; any larger power of two is equally correct). For a new non-solid file the window is
+filled with zeros and the write position is 0.
+
+- Literal b: `W[pos & (wsize-1)] = b; pos += 1`.
+- Match (length L, distance d): for k in 0..L-1: `W[(pos+k) & m] = W[(pos+k-d) & m]` with `m = wsize - 1`, copied
+  **one byte at a time in increasing order**, so that d < L repeats a pattern (d = 1 repeats the last byte).
+
+A distance larger than the number of bytes written so far in the current solid stream reads zeros (or data of
+earlier files in a solid archive); it does not occur in valid archives.
+
+Output: bytes leave the window in order, after filters (sections 10 and 12.5) have been applied to the ranges
+they cover. The reader must not overwrite window bytes that have not been output yet (LA4 limits each decoding
+burst to `wsize - 260` bytes, LA5 to `wsize / 2`).
+
+### 7.5 End of file, unpacked size, solid streams
+
+Sources: LA4:`read_data_compressed`; LA5:`do_uncompress_file`, `reset_file_context`, `process_head_file`;
+RD:`reader.go:newArchiveFileFrom` (`limitedReader`), RD:`decode_reader.go:init`, RD:`decode29.go:init`,
+RD:`decode50.go:init`, RD:`decode20.go:init`.
+
+- Produce exactly the unpacked size given in the header. A decoder may produce more (a final match can run past
+  the end; RAR 2.9 and RAR 5 streams are padded); discard the excess. Packed data that ends before the unpacked
+  size is reached is an error ("decoded file too short", RD `ErrShortFile` / `ErrDecoderOutOfData`). With an
+  unknown unpacked size, stop at the end-of-file signal (RAR 2.9: 9.4, 11.3; RAR 5: last block, 12.1).
+- **Solid**: in a solid archive, a file marked solid (RAR 4 file flag 0x0010; RAR 5 compression-information bit
+  0x40) continues the previous file's decoder state: the window and its write position, the Huffman tables and
+  code lengths, the repeat-distance history and last length, the PPMd model and escape byte, and the filter program
+  list (RAR 2.9). Only the packed input changes: the bit reader restarts at the first byte of the new file's packed
+  data (no bits carry over). A non-solid file resets all of it. Consequently, extracting file k of a solid archive
+  requires decoding files 0..k-1 (their output can be discarded; RD and LA5 do exactly that when skipping).
+- RD refuses to change algorithm inside one solid stream (`ErrMultipleDecoders`). RAR 5 solid files must keep the
+  window size of the first solid file (LA5 checks this).
+
+---
+
+## 8. RAR 2.0 algorithm (UNP_VER 20 and 26)
+
+Sources: RD only: `decode20.go` (`decoder20.init`, `readBlockHeader`, `fill`, `readCodeLengthTable20`),
+`decode20_lz.go`, `decode20_audio.go`; tables shared with `decode29_lz.go`. LA4 has no RAR 2.0 decoder.
+**No fixture contains RAR 2.0 compressed data** (the UNP_VER 20 entries in the fixtures are all stored), so this
+section is untested here; see section 15.
+
+### 8.1 Block header
+
+A block starts with two bits (no byte alignment):
+
+```
+audio = read 1 bit
+keep  = read 1 bit          # 0: clear the saved code lengths (all 1028 entries) to zero first
+if audio:
+    channels = read 2 bits + 1                 # 1..4
+    read channels * 257 code lengths (8.2) -> one 257-symbol table per channel
+else:
+    read 298 + 48 + 28 = 374 code lengths (8.2) -> main (298), distance (48), length (28) tables
+```
+
+The saved code-length array (1028 = 4 * 257 entries) persists between blocks and, in solid mode, between files;
+new lengths are **added** to the saved ones (8.2). If a new audio block has fewer channels than the current
+channel index, the current channel becomes 0.
+
+### 8.2 Code lengths (RAR 2.0 precode)
+
+```
+bl[0..18] = 19 values of 4 bits each (no escape)           # precode, 19 symbols
+i = 0
+while i < N:
+    s = next precode symbol
+    s < 16:  len[i] = (len[i] + s) & 15; i += 1
+    s == 16: n = 3 + read 2 bits; repeat len[i-1] n times   # error if i == 0
+    s == 17: n = 3 + read 3 bits; n zeros
+    s == 18: n = 11 + read 7 bits; n zeros
+    (clip at N)
+```
+
+### 8.3 LZ mode
+
+State: last length `L`, four distances `D[0..3]` (D[0] newest), all 0 at the start of a non-solid file (RD does
+not reset them; see section 15).
+
+Tables (shared with RAR 2.9, 9.3): `LBASE`, `LBITS` (28 entries), `DBASE`, `DBITS` (first 48 entries used),
+`SDBASE`, `SDBITS` (8 entries).
+
+Main symbol s:
+
+| s | Action |
+|---|---|
+| 0..255 | literal byte s |
+| 256 | repeat: `D = [D0, D0, D1, D2]` (push a copy of D0); copy L bytes from distance D[0] |
+| 257..260 | j = s - 257; d = D[j]; `D = [d, D0, D1, D2]` (push, not move-to-front); length symbol l from the length table, `L = LBASE[l] + 2 + read LBITS[l] bits`; then `L += 1` if d >= 0x101, another +1 if d >= 0x2000, another +1 if d >= 0x40000; copy L bytes from d |
+| 261..268 | j = s - 261; `d = SDBASE[j] + 1 + read SDBITS[j] bits`; push d; L = 2; copy |
+| 269 | end of block: read a new block header (8.1) |
+| 270..297 | j = s - 270; `L = LBASE[j] + 3 + read LBITS[j] bits`; distance symbol k from the distance table, `d = DBASE[k] + 1 + read DBITS[k] bits`; `L += 1` if d >= 0x2000, another +1 if d >= 0x40000; push d; copy |
+
+"Push d" is `D = [d, D0, D1, D2]`. There is no end-of-file symbol: decoding of a file stops when its unpacked
+size is reached; in solid mode the next file continues in the same block.
+
+### 8.4 Audio mode
+
+Each channel c has state `K[0..4]` (weights), `Dl[0..3]`, `lastDelta`, `dif[0..10]`, `count`, `lastChar`, all 0 at
+the start of a non-solid file; the decoder has one shared `chanDelta` (0) and the current channel index (0). Symbol
+256 of a channel's table ends the block; symbols 0..255 are deltas. For each decoded delta `s` (0..255) of channel c:
+
+```
+v = state[c]
+v.count += 1
+v.Dl[3] = v.Dl[2]; v.Dl[2] = v.Dl[1]; v.Dl[1] = v.lastDelta - v.Dl[0]; v.Dl[0] = v.lastDelta
+p = 8*v.lastChar + v.K0*v.Dl0 + v.K1*v.Dl1 + v.K2*v.Dl2 + v.K3*v.Dl3 + v.K4*chanDelta     # signed ints
+p = (p >> 3) & 0xFF                                                                    # arithmetic shift
+ch = (p - s) & 0xFF                      # output byte
+e = signed8(s) << 3                      # s taken as a signed byte
+v.dif[0] += |e|
+v.dif[1] += |e - v.Dl0|;  v.dif[2]  += |e + v.Dl0|
+v.dif[3] += |e - v.Dl1|;  v.dif[4]  += |e + v.Dl1|
+v.dif[5] += |e - v.Dl2|;  v.dif[6]  += |e + v.Dl2|
+v.dif[7] += |e - v.Dl3|;  v.dif[8]  += |e + v.Dl3|
+v.dif[9] += |e - chanDelta|; v.dif[10] += |e + chanDelta|
+chanDelta = signed8(ch - v.lastChar); v.lastDelta = chanDelta; v.lastChar = ch
+if v.count & 0x1F == 0:
+    j = index of the smallest v.dif[0..10] (first one on ties); set all v.dif to 0
+    if j > 0: t = (j - 1) / 2
+              if (j - 1) is even: if v.K[t] >= -16: v.K[t] -= 1
+              else:               if v.K[t] <  16:  v.K[t] += 1
+emit ch; c = (c + 1) mod channels
+```
+
+`lastChar` holds the output byte (0..255). (RD keeps it as an unmasked int; that gives the same bytes because
+only `p & 0xFF` and `signed8(...)` are used.) The output bytes go through the window like literals, so LZ blocks
+that follow can refer to them.
+
+---
+
+## 9. RAR 2.9 / 3.x algorithm (UNP_VER 29): blocks and LZ
+
+Sources: LA4:`parse_codes`, `expand`, `read_data_compressed`, `read_filter`; RD:`decode29.go`
+(`readBlockHeader`, `fill`), RD:`decode29_lz.go` (`init`, `fill`, `readEndOfBlock`, `decodeOffset`,
+`decodeLength`, `decodeShortOffset`, `readFilterData`, the tables).
+
+### 9.1 Blocks
+
+The packed stream of a file is a sequence of blocks. Each block header starts at a **byte boundary** (skip the
+remaining bits of the current byte; LA4 `rar_br_consume_unalined_bits`, RD `alignByte`):
+
+```
+align to byte
+ppm = read 1 bit
+if ppm: PPMd block, section 11
+else:   LZ block: keep = read 1 bit; read the tables (9.2); decode LZ symbols (9.4)
+```
+
+A file's stream starts with a block header, except a solid file that follows a file whose last block ended with
+"end of file, keep tables" (9.4): that file starts directly with LZ symbols using the current tables.
+
+### 9.2 LZ tables
+
+`keep` = 0: set the saved code-length array (404 entries) to zeros first. Then read 404 code lengths with the
+precode of 7.3, where symbols 0..15 are **added** to the saved length: `len[i] = (old[i] + s) & 15`. (LA4 always
+adds after optionally zeroing; RD assigns when keep = 0 and adds when keep = 1; same result.) The array is split:
+
+| Table | Entries | Use |
+|---|---|---|
+| main (MC) | 299 | literals and commands |
+| distance (DC) | 60 | distance slots |
+| low distance (LDC) | 17 | low 4 bits of long distances |
+| length (RC) | 28 | lengths for repeated distances |
+
+The saved array persists across blocks and, in solid mode, across files. Each LZ table read also resets the
+low-distance repeat state (9.4) in RD but not in LA4; see section 15.
+
+### 9.3 Tables of bases and extra bits
+
+These are the same in LA4 (`expand`) and RD (`decode29_lz.go`):
+
+```
+LBASE[28] = 0,1,2,3,4,5,6,7,8,10,12,14,16,20,24,28,32,40,48,56,64,80,96,112,128,160,192,224
+LBITS[28] = 0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5
+
+DBASE[60] = 0,1,2,3,4,6,8,12,16,24,32,48,64,96,128,192,256,384,512,768,1024,1536,2048,3072,
+            4096,6144,8192,12288,16384,24576,32768,49152,65536,98304,131072,196608,
+            262144,327680,393216,458752,524288,589824,655360,720896,786432,851968,917504,983040,
+            1048576,1310720,1572864,1835008,2097152,2359296,2621440,2883584,3145728,3407872,3670016,3932160
+DBITS[60] = 0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,
+            15,15,16,16,16,16,16,16,16,16,16,16,16,16,16,16,18,18,18,18,18,18,18,18,18,18,18,18
+
+SDBASE[8] = 0,4,8,16,32,64,128,192
+SDBITS[8] = 2,2,3,4,5,6,6,6
+```
+
+### 9.4 LZ symbols
+
+State (reset to 0 for a non-solid file): `D[0..3]` distances (D[0] newest), last length `L`, `lowDist`,
+`lowRepeat`.
+
+| Main symbol s | Action |
+|---|---|
+| 0..255 | literal byte |
+| 256 | end of block or file, below |
+| 257 | filter record, section 10.1 |
+| 258 | repeat the last match: if L != 0, copy L bytes from distance D[0] (D unchanged) |
+| 259..262 | j = s - 259; d = D[j]; **move to front**: `D[1..j] = D[0..j-1]`, `D[0] = d`; length symbol l from RC, `L = LBASE[l] + 2 + read LBITS[l] bits`; copy L bytes from d (no length bonus) |
+| 263..270 | j = s - 263; `d = SDBASE[j] + 1 + read SDBITS[j] bits`; push d (`D = [d, D0, D1, D2]`); L = 2; copy |
+| 271..298 | j = s - 271; `L = LBASE[j] + 3 + read LBITS[j] bits`; distance d (below); `L += 1` if d >= 0x2000, another +1 if d >= 0x40000; push d; copy |
+
+Distance for symbols 271..298:
+
+```
+k = next DC symbol (0..59)
+d = DBASE[k] + 1
+b = DBITS[k]
+if b >= 4:                                  # k >= 10
+    if b > 4: d += (read (b - 4) bits) << 4
+    if lowRepeat > 0: lowRepeat -= 1; d += lowDist
+    else:
+        x = next LDC symbol (0..16)
+        if x == 16: lowRepeat = 15; d += lowDist
+        else:       d += x; lowDist = x
+elif b > 0: d += read b bits
+```
+
+Symbol 256 (LA4:`expand`, RD:`readEndOfBlock`):
+
+```
+if read 1 bit == 1: end of block: a new block header follows (9.1) in the same file
+else:
+    end of file.  t = read 1 bit
+    t == 1: the next solid file starts with a block header (new tables)
+    t == 0: the next solid file starts directly with symbols, reusing the current tables
+```
+
+After end of file the decoder stops for this file even if fewer than the unpacked size bytes were produced only
+when the size is unknown; otherwise output is cut at the unpacked size (7.5). LA4 treats the end-of-file case as
+"stop" and does not support solid continuation.
+
+Fixtures: `rar_compress_normal.rar` (METHOD 0x33), `rar_multi_lzss_blocks.rar` (many LZ blocks, 20 MB output),
+`rar4_*` compressed fixtures (all LZ, UNP_VER 29), `rar_unicode.rar` (one compressed entry), `rar4_enc_solid.rar`
+(solid; encrypted).
+
+---
+
+## 10. RAR 3 filters
+
+Sources: LA4:`read_filter`, `parse_filter`, `compile_program`, `membr_next_rarvm_number`, `run_filters`,
+`execute_filter`, `execute_filter_e8`, `execute_filter_delta`, `execute_filter_rgb`, `execute_filter_audio`;
+RD:`decode29_lz.go:readFilterData`, `decode29_ppm.go:readFilterData`, `decode29.go:parseVMFilter`, `readVMCode`,
+`decode_reader.go:queueFilter`, `processFilters`, `filters.go` (all standard filters, `getV3Filter`,
+`vmFilter.execute`), `vm.go`, `bit_reader.go:readUint32`.
+
+RAR 3 transforms ranges of the output with programs for a small virtual machine. The programs that RAR actually
+emits are six fixed ones, recognised by checksum and replaced by native code (both sources do this; LA4 supports
+five, RD all six plus a full VM). A decoder may implement only the six and report others as unsupported; Appendix A
+describes the VM for completeness.
+
+### 10.1 The filter record
+
+In an LZ block, main symbol 257 introduces a filter record; in a PPMd block, escape code 3 does (11.3). The record
+is a byte string read through the current decoder (LZ: 8 raw bits per byte from the bit stream, not aligned; PPMd:
+one decoded PPMd symbol per byte):
+
+```
+flags = next byte
+n = (flags & 7) + 1
+if n == 7: n = next byte + 7
+if n == 8: n = next byte << 8; n |= next byte          # 16-bit big-endian length
+data = next n bytes
+```
+
+`data` is parsed with its own MSB-first bit reader (reads past its end yield 0 bits and make the record invalid,
+LA4 `membr_*`). `vmnum` is RAR 3's variable-length number (LA4:`membr_next_rarvm_number`, RD:`readUint32`):
+
+```
+vmnum: t = read 2 bits
+  t == 0: return read 4 bits
+  t == 1: v = read 8 bits
+          if v >= 16: return v
+          return 0xFFFFFF00 | (v << 4) | read 4 bits
+  t == 2: return read 16 bits
+  t == 3: return read 32 bits
+```
+
+Parsing (the decoder keeps a list of programs and, per program, its last block length):
+
+```
+if flags & 0x80:
+    num = vmnum
+    if num == 0: forget all programs and pending filters; num = 0
+    else: num -= 1
+    num must be <= number of known programs                  # == means "a new program"
+    last_num = num
+else:
+    num = last_num
+start = vmnum + (current window write position, as a count of bytes output in this file)   # LA4 lzss_position
+if flags & 0x40: start += 258
+if flags & 0x20: length = vmnum
+else:            length = the last length used with program num (0 if new)
+R[0..7] = 0; R[3] = 0x3C000; R[4] = length; R[5] = program num's use count; R[7] = 0x40000
+if flags & 0x10:
+    mask = read 7 bits
+    for i in 0..6: if mask & (1 << i): R[i] = vmnum      # bit 0 = R[0]
+if num is a new program:
+    clen = vmnum; require 1 <= clen <= 0x10000
+    code = clen bytes (8 bits each)
+    require code[0] == XOR of code[1..clen-1]
+    identify the program (10.3); append it to the list
+remember length as program num's last length
+if flags & 0x08:
+    glen = vmnum; require glen <= 0x2000 - 0x40
+    global = glen bytes                                    # user global data, used only by the VM (Appendix A)
+add filter (program, start, length, R, global) to the pending list
+```
+
+Validity checks from the sources: `length` is at most 0x3C000 (LA4: E8/E8E9 need length <= 0x3C000 and > 4;
+Delta, RGB, Audio need length <= 0x3C000 / 2); a new filter must not start before the previous pending filter
+(RD); when a filter has run, the next pending one must not start before its end (LA4). Treat violations as corrupt
+data. RD caps the program list at 1024 and the pending list at 8192 (LA5 also uses 8192 for RAR 5).
+
+### 10.2 Running filters
+
+Filters are applied in the order they were defined. When the decoder has produced all bytes up to
+`start + length` of the first pending filter (and has output everything before `start` unchanged):
+
+```
+buf = the `length` window bytes at [start, start + length)
+out = run the program on buf (10.4), with offset = start (bytes of this file before the block)
+while the next pending filter has the same start and its length == len(out):   # chained filters
+    out = run that program on out
+output out in place of the window bytes [start, start + length)
+```
+
+The window itself keeps the **unfiltered** bytes: later matches copy decoded (pre-filter) data. (LA4 runs filters
+in a separate VM memory; RD in a separate buffer.)
+
+### 10.3 Standard programs
+
+A program is identified by the CRC-32 (5.1) of its whole byte code (including the leading XOR byte) together with
+its length. LA4 combines both in one 40-bit "fingerprint" `crc | length << 32`.
+
+| Filter | CRC-32 | Length | Parameters |
+|---|---|---|---|
+| E8 | 0xAD576887 | 53 | none |
+| E8E9 | 0x3CD7E57E | 57 | none |
+| Itanium | 0x3769893F | 120 | none (RD only) |
+| Delta | 0x0E06077D | 29 | R[0] = channels |
+| RGB | 0x1C2C5DC8 | 149 | R[0] = width (bytes per row), R[1] = position of the red byte (0..2) |
+| Audio | 0xBC85E701 | 216 | R[0] = channels |
+
+Other programs: run the VM (Appendix A) or report unsupported (LA4 does the latter).
+
+### 10.4 Standard filter algorithms
+
+In all of them `n = len(buf)` and `off` is the file offset of buf[0].
+
+**E8 and E8E9** (LA4:`execute_filter_e8`, RD:`filterE8`; x86 CALL/JMP relative-to-absolute conversion undone).
+`FS = 0x1000000`.
+
+```
+i = 0
+while i <= n - 5:
+    if buf[i] == 0xE8 or (E8E9 and buf[i] == 0xE9):
+        pos  = (off + i + 1) mod 2^32                 # file position of the 4 address bytes
+        addr = u32 LE at buf[i+1]
+        if addr has bit 31 set (negative):
+            if (addr + pos) mod 2^32 has bit 31 clear:   store (addr + FS) mod 2^32
+        elif addr < FS:                                   store (addr - pos) mod 2^32
+        i += 5
+    else: i += 1
+```
+
+**Itanium** (RD:`itaniumFilterV3`, single source):
+
+```
+MASK[16] = 4,4,6,6,0,0,7,7,4,4,0,0,4,4,0,0
+fo = off >> 4
+p = 0
+while n - p > 21:                       # 16-byte bundles; the last bundles of the block are left alone
+    t = (buf[p] & 0x1F) - 0x10
+    if t >= 0 and MASK[t] != 0:
+        for slot in 0..2: if MASK[t] & (1 << slot):
+            bp = slot * 41 + 18                      # bit position inside the bundle, bit 0 = LSB of buf[p]
+            if getbits(bp + 24, 4) == 5:
+                v = getbits(bp, 20); setbits(bp, 20, (v - fo) & 0xFFFFF)
+    fo += 1; p += 16
+getbits(bp, c): x = u32 LE at buf[p + bp/8]; return (x >> (bp % 8)) & (2^c - 1)
+setbits(bp, c, v): read the same u32, replace those c bits with v, write the u32 back
+```
+
+**Delta** (LA4:`execute_filter_delta`, RD:`filterDelta`): `ch = R[0]` channels; the input holds each channel's
+bytes contiguously.
+
+```
+src = 0
+for c in 0 .. ch-1:
+    prev = 0
+    for j = c, c+ch, c+2ch, ... while j < n:
+        prev = (prev - buf[src]) & 0xFF; src += 1
+        out[j] = prev
+```
+
+**RGB** (LA4:`execute_filter_rgb`, RD:`filterRGBV3`): `w = R[0]` (row stride in bytes), `posR = R[1]`. LA4 requires
+`n >= 3`, `w <= n`, `posR <= 2`.
+
+```
+src = 0
+for c in 0..2:
+    prev = 0
+    for j = c, c+3, c+6, ... while j < n:
+        if j >= w:
+            up = out[j - w + 3]; upleft = out[j - w]
+            pa = |up - upleft|; pb = |prev - upleft|; pc = |up - upleft + prev - upleft|
+            pred = prev      if pa <= pb and pa <= pc
+                   up        elif pb <= pc
+                   upleft    otherwise
+        else: pred = prev
+        prev = (pred - buf[src]) & 0xFF; src += 1
+        out[j] = prev
+for i = posR, posR+3, ... while i <= n - 3:
+    out[i]   = (out[i]   + out[i+1]) & 0xFF
+    out[i+2] = (out[i+2] + out[i+1]) & 0xFF
+```
+
+(Byte values are taken as 0..255 integers in the comparisons.)
+
+**Audio** (LA4:`execute_filter_audio`, RD:`filterAudioV3`): `ch = R[0]`.
+
+```
+src = 0
+for c in 0 .. ch-1:
+    W[0..2] = 0 (signed weights); Dl[0..2] = 0; lastDelta = 0; dif[0..6] = 0; count = 0; last = 0
+    for j = c, c+ch, ... while j < n:
+        Dl[2] = Dl[1]; Dl[1] = lastDelta - Dl[0]; Dl[0] = lastDelta
+        pred = ((8*last + W0*Dl0 + W1*Dl1 + W2*Dl2) >> 3) & 0xFF
+        e = signed8(buf[src]); src += 1
+        b = (pred - e) & 0xFF
+        e8 = e << 3
+        dif[0] += |e8|
+        dif[1] += |e8 - Dl0|; dif[2] += |e8 + Dl0|
+        dif[3] += |e8 - Dl1|; dif[4] += |e8 + Dl1|
+        dif[5] += |e8 - Dl2|; dif[6] += |e8 + Dl2|
+        lastDelta = signed8(b - last); last = b; out[j] = b
+        if count & 0x1F == 0:                     # tested before incrementing: at bytes 0, 32, 64, ...
+            k = index of the smallest dif[0..6] (first on ties); dif[all] = 0
+            k == 1: if W0 >= -16: W0 -= 1     k == 2: if W0 < 16: W0 += 1
+            k == 3: if W1 >= -16: W1 -= 1     k == 4: if W1 < 16: W1 += 1
+            k == 5: if W2 >= -16: W2 -= 1     k == 6: if W2 < 16: W2 += 1
+        count += 1
+```
+
+Fixtures: `rar_filter.rar` (`bsdcat.exe`, 204288 bytes: x86 filters). No fixture is known to exercise Itanium,
+RGB, Audio or Delta in RAR 3; section 15.
+
+---
+
+## 11. PPMd blocks (RAR 2.9 / 3.x)
+
+Sources: LA4:`parse_codes` (PPMd branch), `read_data_compressed` (escape handling), `ppmd_read`;
+RD:`decode29_ppm.go` (`init`, `fill`, `readFilterData`), RD:`ppm_model.go` (`rangeCoder`, `model.init`); PPMD
+(`Ppmd7.h`).
+
+The model is PPMd variant H by Dmitry Shkarin, as implemented by the LZMA SDK's `Ppmd7` (`CPpmd7`,
+`Ppmd7_Construct`, `Ppmd7_Alloc`, `Ppmd7_Init`). RAR uses it with the **original PPMd range coder**, not 7-Zip's:
+in current LZMA SDK versions that pairing is `Ppmd7a_RangeDec_Init` / `Ppmd7a_DecodeSymbol` ("original PPMdH",
+per `Ppmd7.h`), not the `Ppmd7z_*` functions. 11.2 specifies the range coder so that it can be written or checked
+independently.
+
+### 11.1 PPMd block header
+
+After the block's `ppm` bit (9.1) — the header is byte-aligned, so the header's first byte holds that bit and these
+7 bits:
+
+```
+f = read 7 bits
+if f & 0x20: mem = next byte                         # model memory = (mem + 1) MiB
+if f & 0x40: esc = next byte                         # new escape byte
+order = (f & 0x1F) + 1
+if order > 16: order = 16 + (order - 16) * 3          # 2..64
+if f & 0x20:
+    if order == 1: corrupt                            # (order 1 cannot occur after the mapping only if f&0x1F==0)
+    allocate the model with (mem + 1) << 20 bytes (Ppmd7_Alloc), Ppmd7_Init(order)
+else:
+    a model must already exist (from an earlier block of this file or solid stream), else corrupt; keep it as is
+initialise the range decoder (11.2): reads 4 bytes
+```
+
+The bytes are read through the bit reader (8 bits each); since the header is aligned they are whole bytes. The
+escape byte starts at 2 for a non-solid file. When `f & 0x40` is clear, RD keeps the previous escape byte while LA4
+resets it to 2: section 15. Do not copy LA4's assignment of the escape byte to `CPpmd7.InitEsc`; that field is
+internal to the model, which overwrites it before use.
+
+### 11.2 Range decoder (original PPMd)
+
+From RD:`ppm_model.go:rangeCoder` (all arithmetic unsigned 32-bit, mod 2^32; TOP = 2^24, BOT = 2^15):
+
+```
+init:        low = 0; range = 0xFFFFFFFF; code = 0; repeat 4: code = (code << 8) | next byte
+get_freq(total):  range = range / total; return (code - low) / range
+decode(lo, size): low += range * lo; range *= size; normalize       # size = high - lo
+normalize:
+    loop:
+        if (low ^ (low + range)) >= TOP:
+            if range >= BOT: return
+            range = (0 - low) & (BOT - 1)
+        code = (code << 8) | next byte; range <<= 8; low <<= 8
+binary contexts: get_freq with total = 2^14 (BIN_SCALE); the bit is 0 if the count < the context's
+                 probability (decode(0, p)), else 1 (decode(p, 2^14 - p))
+```
+
+The bytes come from the packed stream at the current byte position. The decoder must take **only** the bytes the
+range coder asks for: when a PPMd block ends (escape code 0), the next block header starts at the next unread byte.
+
+### 11.3 Escape codes
+
+```
+loop:
+    c = decode a symbol (Ppmd7a_DecodeSymbol); c < 0 is a data error
+    if c != esc: output byte c; continue
+    code = decode a symbol
+    code 0: end of block: read a new block header (9.1), which may switch to LZ
+    code 2: end of file (a following solid file starts with a block header)
+    code 3: filter record (10.1), its bytes read as decoded symbols
+    code 4: d = 0; repeat 3: d = (d << 8) | decode a symbol           # 24-bit big-endian
+            L = decode a symbol; copy L + 32 bytes from distance d + 2
+    code 5: L = decode a symbol; copy L + 4 bytes from distance 1
+    other (1 and 6..255): output the byte esc
+```
+
+Matches here go through the same window as LZ matches but do not change the LZ distance history or last length.
+
+Fixtures: `rar_compress_best.rar` (METHOD 0x35), `rar_ppmd_lzss_conversion.rar` (switches between PPMd and LZ
+blocks; 241 MB output), `rar_ppmd_use_after_free.rar` (fuzzing case; must fail cleanly).
+
+---
