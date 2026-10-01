@@ -1,10 +1,10 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.27** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.27/rubraview-v0.0.27.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.28** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.28/rubraview-v0.0.28.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램도, 옆에 둬야 하는 파일도 없습니다. 예외는 FFmpeg 의 DLL 하나뿐이고, 그것도 Media Foundation 이 못 여는 형식에만 필요합니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. 옆에 두는 선택 DLL 이 둘 있습니다. FFmpeg 의 DLL 은 Media Foundation 이 못 여는 형식에만, `unrar_proprietary.dll`(zip 안에 있고 따로도 받을 수 있음)은 압축되었거나 암호가 걸린 CBR/RAR 만화에만 필요합니다. 후자는 UnRAR 라이선스가 이 프로그램의 라이선스와 달라서 따로 둡니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 

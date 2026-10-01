@@ -1,10 +1,10 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.27** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.27/rubraview-v0.0.27.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.28** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.28/rubraview-v0.0.28.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer and nothing to place beside it. FFmpeg's DLLs are the one exception, and only for the formats Media Foundation cannot open.
+Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. Two optional DLLs go beside it: FFmpeg's, only for the formats Media Foundation cannot open, and `unrar_proprietary.dll` (in the zip, and a download of its own), for compressed or password-protected CBR / RAR comics — it is kept apart because UnRAR's licence is not the program's.
 
 > This English README is the canonical version; the Korean one is its translation.
 

@@ -37,10 +37,13 @@ provenance record for each is in `docs/resources/sources-and-licenses.md`.
 
 ## UnRAR 7.3.1 (converted to C)
 
-- Converted to C at `vendor/unrar-c/` (see `vendor/unrar-c/VENDORED.md`):
+- Converted to C at `vendor/unrar_proprietary/` (see `vendor/unrar_proprietary/VENDORED.md`)
+  and built as `unrar_proprietary.dll`, a module of its own beside `rubraview.exe`,
+  loaded at run time: the program itself contains none of it (owner, 2026-10-01):
   the decompression of RAR 1.5 to 7.0 archives and the decryption of
   RAR 3.x to 5.0 ones, for reading CBR comics.
-- Copyright Alexander L. Roshal. Licence text: `vendor/unrar-c/LICENSE.txt`.
+- Copyright Alexander L. Roshal. Licence text: `vendor/unrar_proprietary/LICENSE.txt`
+  (`licences/unrar_proprietary-LICENSE.txt` in the zip).
 - UnRAR source code may be used in any software to handle RAR archives
   without limitations free of charge, but cannot be used to develop RAR
   (WinRAR) compatible archiver and to re-create RAR compression algorithm,

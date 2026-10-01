@@ -70,6 +70,7 @@
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_listwin.h"
 #include "rubraview/ui_eqwin.h"
+#include "rubraview/rar_codec.h"
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
 #include "rubraview/filmstrip.h"
@@ -10435,6 +10436,10 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
                                                                   (u8str_t){ .ptr = app->passwords[i], .len = app->password_lens[i] });
     }
     app->source_dir = rubraview_path_dirname(archive_path);
+    if (app->source.needs_codec) {
+        osd_say(app, U8("this CBR needs " RUBRAVIEW_RAR_CODEC_DLL " beside rubraview.exe (it is in the release zip)"));
+        return false;
+    }
     if (app->source.needs_password) {
         password_ask(app, archive_path, given.len > 0);
         return false;
@@ -11885,6 +11890,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        opened from it must read as an empty folder, not stop the viewer
        behind Windows' "There is no disk in the drive" box. */
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
+
+    /* RAR's decompression and decryption are a module of their own, under
+       UnRAR's licence (owner, 2026-10-01): beside the program, or not at all. */
+    rubraview_rar_set_codec(rubraview_pal_process_load_rar_codec());
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;

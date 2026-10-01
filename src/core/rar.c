@@ -1,6 +1,5 @@
 #include "rubraview/rar.h"
-#include "rar_unpack.h"
-#include "rar_crypt.h"
+#include "rubraview/rar_codec.h"
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +20,30 @@
 static const uint8_t SIG4[7] = { 'R', 'a', 'r', '!', 0x1A, 0x07, 0x00 };
 static const uint8_t SIG5[8] = { 'R', 'a', 'r', '!', 0x1A, 0x07, 0x01, 0x00 };
 #define SFX_SEARCH (1u << 20)
+
+/* The format's own sizes (RAR's headers say so; nothing of UnRAR's). */
+#define RAR_SALT30          8
+#define RAR_SALT50          16
+#define RAR_INITV           16
+#define RAR_PSWCHECK        8
+#define RAR_PSWCHECK_CSUM   4
+#define RAR_KDF50_LG2_MAX   24
+#define RAR_MAX_PASSWORD    127
+
+/* Decompression and decryption are the UnRAR-licensed module's
+   (rar_codec.h, owner 2026-10-01); NULL until one is given. */
+static const rubraview_rar_codec_t *g_codec;
+
+void rubraview_rar_set_codec(const rubraview_rar_codec_t *codec) {
+    g_codec = codec && codec->version == RUBRAVIEW_RAR_CODEC_VERSION ? codec : NULL;
+}
+
+const rubraview_rar_codec_t *rubraview_rar_codec(void) { return g_codec; }
+
+static void rar_wipe(void *p, size_t n) {
+    volatile uint8_t *v = (volatile uint8_t*)p;
+    while (n--) *v++ = 0;
+}
 #define MAX_VOLUMES 4096u
 #define KEY_CACHE 8
 
@@ -36,7 +59,7 @@ typedef struct key_entry {
 } key_entry_t;
 
 typedef struct rar_state {
-    rar_unpack_t *unpack;
+    void    *unpack;        /* the codec's */
     size_t next;            /* the entry a solid stream continues with; SIZE_MAX when none */
     _Atomic bool cancel;
     _Atomic uint64_t done, total;
@@ -126,6 +149,7 @@ static const key_entry_t *key_for(rar_state_t *st, rubraview_rar_crypt_t crypt, 
         if (k->used && k->crypt == crypt && k->salt_set == salt_set && k->lg2 == lg2 &&
             (!salt_set || memcmp(k->salt, salt, salt_len) == 0)) return k;
     }
+    if (!g_codec) return NULL;
     key_entry_t *k = &st->keys[st->key_next++ % KEY_CACHE];
     rar_wipe(k, sizeof(*k));
     k->crypt = crypt;
@@ -133,9 +157,9 @@ static const key_entry_t *key_for(rar_state_t *st, rubraview_rar_crypt_t crypt, 
     k->lg2 = lg2;
     if (salt_set) memcpy(k->salt, salt, salt_len);
     if (crypt == RUBRAVIEW_RAR_CRYPT_50) {
-        if (!rar_kdf50(st->pwd8, st->pwd8_len, salt, lg2, k->key, k->hash_key, k->psw_check)) return NULL;
+        if (lg2 > RAR_KDF50_LG2_MAX || !g_codec->kdf50(st->pwd8, st->pwd8_len, salt, lg2, k->key, k->hash_key, k->psw_check)) return NULL;
     } else {
-        rar_kdf30(st->pwd16, st->pwd16_len, salt_set ? salt : NULL, k->key, k->iv);
+        g_codec->kdf30(st->pwd16, st->pwd16_len, salt_set ? salt : NULL, k->key, k->iv);
     }
     k->used = true;
     return k;
@@ -301,18 +325,18 @@ static const uint8_t *decrypt_header(parse_t *p, size_t pos, size_t pre, size_of
     const key_entry_t *k = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50
         ? key_for(p->st, RUBRAVIEW_RAR_CRYPT_50, p->hdr_salt, true, p->hdr_lg2)
         : key_for(p->st, RUBRAVIEW_RAR_CRYPT_30, p->d + pos, true, 0);
-    if (!k) { *err = RUBRAVIEW_RAR_ERR_UNSUPPORTED; return NULL; }
+    if (!k) { *err = g_codec ? RUBRAVIEW_RAR_ERR_UNSUPPORTED : RUBRAVIEW_RAR_ERR_NO_CODEC; return NULL; }
     const uint8_t *iv = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50 ? p->d + pos : k->iv;
     unsigned bits = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50 ? 256 : 128;
-    rar_aes_t aes;
     uint8_t first[16];
     memcpy(first, p->d + pos + pre, 16);
-    rar_aes_init(&aes, k->key, bits, iv);
-    rar_aes_decrypt(&aes, first, 16);
+    void *aes = g_codec->aes_create(k->key, bits, iv);
+    if (!aes) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
+    g_codec->aes_decrypt(aes, first, 16);
+    g_codec->aes_destroy(aes);
     size_t head = size_of(first);
     size_t full = (head + 15) & ~(size_t)15;
     if (head == 0 || full > p->size - pos - pre) {
-        rar_wipe(&aes, sizeof(aes));
         *err = p->hdr_checked ? RUBRAVIEW_RAR_ERR_CORRUPT : RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
         return NULL;
     }
@@ -320,9 +344,10 @@ static const uint8_t *decrypt_header(parse_t *p, size_t pos, size_t pre, size_of
     if (!proven_is_ok(res.err)) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
     uint8_t *buf = (uint8_t*)res.value.ptr;
     memcpy(buf, p->d + pos + pre, full);
-    rar_aes_init(&aes, k->key, bits, iv);
-    rar_aes_decrypt(&aes, buf, full);
-    rar_wipe(&aes, sizeof(aes));
+    aes = g_codec->aes_create(k->key, bits, iv);
+    if (!aes) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
+    g_codec->aes_decrypt(aes, buf, full);
+    g_codec->aes_destroy(aes);
     *out_total = pre + full;
     *out_head = head;
     return buf;
@@ -356,6 +381,7 @@ static rubraview_rar_err_t read_rar4(parse_t *p, size_t pos) {
         const uint8_t *h = p->d + pos;
         size_t head_total = 0, head_size = 0;
         if (p->hdr_enc && pos > main_at) {
+            if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
             if (!p->st->has_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;
             rubraview_rar_err_t err;
             h = decrypt_header(p, pos, RAR_SALT30, rar4_size_of, &head_total, &head_size, &err);
@@ -490,13 +516,14 @@ static rubraview_rar_err_t read_rar5(parse_t *p, size_t pos) {
             p->hdr_lg2 = h[at++];
             memcpy(p->hdr_salt, h + at, RAR_SALT50);
             at += RAR_SALT50;
+            if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
             if (!p->st->has_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;
             if (p->hdr_lg2 > RAR_KDF50_LG2_MAX) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
             const key_entry_t *k = key_for(p->st, RUBRAVIEW_RAR_CRYPT_50, p->hdr_salt, true, p->hdr_lg2);
             if (!k) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
             if ((eflags & 0x0001) && at + RAR_PSWCHECK + RAR_PSWCHECK_CSUM <= end) {
                 uint8_t digest[32];
-                rar_sha256(h + at, RAR_PSWCHECK, digest);
+                g_codec->sha256(h + at, RAR_PSWCHECK, digest);
                 bool check_valid = memcmp(digest, h + at + RAR_PSWCHECK, RAR_PSWCHECK_CSUM) == 0;
                 if (check_valid && memcmp(k->psw_check, h + at, RAR_PSWCHECK) != 0) return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
             }
@@ -540,9 +567,9 @@ static rubraview_rar_err_t read_rar5(parse_t *p, size_t pos) {
                         memcpy(e.iv, h + rec, RAR_INITV); rec += RAR_INITV;
                         e.salt_set = true;
                         e.hash_mac = (cflags & 0x0002) != 0;
-                        if ((cflags & 0x0001) && rec + RAR_PSWCHECK + RAR_PSWCHECK_CSUM <= rec_end) {
+                        if (g_codec && (cflags & 0x0001) && rec + RAR_PSWCHECK + RAR_PSWCHECK_CSUM <= rec_end) {
                             uint8_t digest[32];
-                            rar_sha256(h + rec, RAR_PSWCHECK, digest);
+                            g_codec->sha256(h + rec, RAR_PSWCHECK, digest);
                             if (memcmp(digest, h + rec + RAR_PSWCHECK, RAR_PSWCHECK_CSUM) == 0) {
                                 e.psw_check_set = true;
                                 memcpy(e.psw_check, h + rec, RAR_PSWCHECK);
@@ -601,7 +628,7 @@ static rar_state_t *state_new(void) {
 
 static void state_free(rar_state_t *st) {
     if (!st) return;
-    rar_unpack_destroy(st->unpack);
+    if (st->unpack && g_codec) g_codec->unpack_destroy(st->unpack);
     rar_wipe(st, sizeof(*st));      /* the password and the keys with it */
     free(st);
 }
@@ -674,7 +701,7 @@ typedef struct source {
     uint32_t piece;         /* the next piece, from the entry's first */
     uint64_t in_piece;      /* how far into it */
     bool     decrypt;
-    rar_aes_t aes;
+    void    *aes;           /* the codec's */
     uint8_t  buf[16384];
     size_t   buf_pos, buf_len;
 } source_t;
@@ -702,7 +729,7 @@ static size_t source_read(void *ctx, uint8_t *buffer, size_t capacity) {
         if (s->buf_pos == s->buf_len) {
             size_t n = raw_read(s, s->buf, sizeof(s->buf)) & ~(size_t)15;   /* whole cipher blocks */
             if (n == 0) break;
-            rar_aes_decrypt(&s->aes, s->buf, n);
+            g_codec->aes_decrypt(s->aes, s->buf, n);
             s->buf_pos = 0;
             s->buf_len = n;
         }
@@ -736,6 +763,7 @@ static bool sink_write(void *ctx, const uint8_t *data, size_t size) {
 static rubraview_rar_err_t decode(rubraview_rar_archive_t *a, rar_state_t *st, size_t index, uint8_t *out) {
     const rubraview_rar_entry_t *e = &a->entries[index];
     if (e->split) return RUBRAVIEW_RAR_ERR_MISSING_VOLUME;
+    if (!g_codec && (e->encrypted || e->method != 0)) return RUBRAVIEW_RAR_ERR_NO_CODEC;
     source_t *src = (source_t*)calloc(1, sizeof(source_t));
     if (!src) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
     src->a = a;
@@ -749,8 +777,9 @@ static rubraview_rar_err_t decode(rubraview_rar_archive_t *a, rar_state_t *st, s
         if (!key) { result = RUBRAVIEW_RAR_ERR_UNSUPPORTED; goto done; }
         if (e->psw_check_set && memcmp(key->psw_check, e->psw_check, RAR_PSWCHECK) != 0) { result = RUBRAVIEW_RAR_ERR_BAD_PASSWORD; goto done; }
         src->decrypt = true;
-        if (e->crypt == RUBRAVIEW_RAR_CRYPT_50) rar_aes_init(&src->aes, key->key, 256, e->iv);
-        else rar_aes_init(&src->aes, key->key, 128, key->iv);
+        src->aes = e->crypt == RUBRAVIEW_RAR_CRYPT_50 ? g_codec->aes_create(key->key, 256, e->iv)
+                                                      : g_codec->aes_create(key->key, 128, key->iv);
+        if (!src->aes) { result = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto done; }
     }
     sink_t sink = { .out = out, .capacity = e->size, .crc = 0xFFFFFFFFu, .st = st };
     if (e->method == 0) {
@@ -763,11 +792,11 @@ static rubraview_rar_err_t decode(rubraview_rar_archive_t *a, rar_state_t *st, s
         }
     } else {
         if (e->method == 9999) { result = RUBRAVIEW_RAR_ERR_UNSUPPORTED; goto done; }
-        if (!st->unpack && !(st->unpack = rar_unpack_create())) { result = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto done; }
+        if (!st->unpack && !(st->unpack = g_codec->unpack_create())) { result = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto done; }
         bool solid = e->solid && st->next == index;
-        if (!rar_unpack_file(st->unpack, e->method, solid, e->dict_size, e->size, source_read, src, sink_write, &sink)) {
+        if (!g_codec->unpack_file(st->unpack, e->method, solid, e->dict_size, e->size, source_read, src, sink_write, &sink)) {
             if (atomic_load(&st->cancel)) { result = RUBRAVIEW_RAR_ERR_CANCELLED; goto done; }
-            if (e->dict_size > RAR_UNPACK_MAX_DICT) { result = RUBRAVIEW_RAR_ERR_TOO_LARGE; goto done; }
+            if (e->dict_size > g_codec->max_dict) { result = RUBRAVIEW_RAR_ERR_TOO_LARGE; goto done; }
             result = e->encrypted ? RUBRAVIEW_RAR_ERR_CORRUPT_STREAM : RUBRAVIEW_RAR_ERR_UNSUPPORTED;
             goto done;
         }
@@ -777,10 +806,11 @@ static rubraview_rar_err_t decode(rubraview_rar_archive_t *a, rar_state_t *st, s
     if (sink.written < e->size) { result = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM; goto done; }
     if (e->has_crc) {
         uint32_t crc = sink.crc ^ 0xFFFFFFFFu;
-        if (e->hash_mac && key) crc = rar_crc_to_mac(crc, key->hash_key);
+        if (e->hash_mac && key) crc = g_codec->crc_to_mac(crc, key->hash_key);
         if (crc != e->crc32) result = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
     }
 done:
+    if (src->aes) g_codec->aes_destroy(src->aes);
     rar_wipe(src, sizeof(*src));
     free(src);
     return result;
@@ -836,6 +866,11 @@ rubraview_rar_data_result_t rubraview_rar_read_entry(proven_arena_t *arena, rubr
     return r;
 }
 
+bool rubraview_rar_needs_codec(const rubraview_rar_archive_t *archive, size_t index) {
+    if (g_codec || !archive || index >= archive->entry_count) return false;
+    return archive->entries[index].encrypted || archive->entries[index].method != 0;
+}
+
 bool rubraview_rar_needs_password(const rubraview_rar_archive_t *archive) {
     if (!archive || !archive->state) return false;
     const rar_state_t *st = (const rar_state_t*)archive->state;
@@ -849,6 +884,7 @@ rubraview_rar_err_t rubraview_rar_set_password(rubraview_rar_archive_t *archive,
     rar_state_t *st = (rar_state_t*)archive->state;
     password_set(st, password);
     if (password.len == 0) return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+    if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
     /* The file to test it on: RAR 5 tells by its check value at once;
        otherwise the smallest encrypted file that starts a stream, decoded
        and checked by its CRC. */

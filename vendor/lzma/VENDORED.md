@@ -65,7 +65,7 @@ of a byte buffer by design, and that check fires on every header.
 ## Added 2026-09-30: `Ppmd7aDec.c`
 
 PPMd var.H with the original (Subbotin) range coder, which RAR 3.x uses —
-the RAR reader (`vendor/unrar-c`) decodes RAR's PPMd blocks through it.
+the RAR module (`vendor/unrar_proprietary`, its own DLL) decodes RAR's PPMd blocks through it.
 Taken unchanged from 7-Zip 24.08's source (`7z2408-src.7z`, SHA-256
 `4df7a62e5ce503892f500b1f96f0a954931c5266900c439102040957b25a90c6`, `C/Ppmd7aDec.c`), where it is marked public domain by Igor
 Pavlov; `Ppmd7.c` there is byte-identical to the one already here.

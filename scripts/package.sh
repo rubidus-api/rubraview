@@ -34,6 +34,10 @@ mkdir -p "$out" "$out/licences"
 cp "dist/$exe" "$out/rubraview.exe"
 # The same executable on its own, for the release's direct download.
 cp "dist/$exe" "dist/rubraview.exe"
+# RAR's decompression and decryption, under UnRAR's licence (proprietary),
+# are a DLL of their own, loaded at run time from beside the program
+# (owner, 2026-10-01). Left out, stored CBRs still open.
+cp dist/unrar_proprietary.dll "$out/unrar_proprietary.dll"
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
@@ -43,7 +47,7 @@ cp CHANGELOG.md "$out/"
 cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"
 cp vendor/miniz/LICENSE "$out/licences/miniz-LICENSE.txt"
 cp vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"
-cp vendor/unrar-c/LICENSE.txt "$out/licences/unrar-LICENSE.txt"
+cp vendor/unrar_proprietary/LICENSE.txt "$out/licences/unrar_proprietary-LICENSE.txt"
 cp vendor/libjpeg-turbo/LICENSE.md "$out/licences/libjpeg-turbo-LICENSE.md"
 cp vendor/libjpeg-turbo/README.ijg "$out/licences/libjpeg-turbo-README.ijg"
 

@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <string.h>
 #include "rubraview/pal/pal_process.h"
+#include "rubraview/rar_codec.h"
 
 static u8str_t wide_to_u8(proven_arena_t *arena, const WCHAR *wide) {
     int len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
@@ -44,5 +45,19 @@ bool rubraview_pal_process_start_console(u8str_t command_line) {
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return true;
+}
+
+const struct rubraview_rar_codec *rubraview_pal_process_load_rar_codec(void) {
+    /* The program's folder only: a DLL of this name anywhere else on the
+       search path is not ours to load. */
+    HMODULE module = LoadLibraryExW(RUBRAVIEW_RAR_CODEC_DLL_W, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    if (!module) return NULL;
+    rubraview_rar_codec_api_fn api = (rubraview_rar_codec_api_fn)(void (*)(void))GetProcAddress(module, RUBRAVIEW_RAR_CODEC_EXPORT);
+    const rubraview_rar_codec_t *codec = api ? api(RUBRAVIEW_RAR_CODEC_VERSION) : NULL;
+    if (!codec || codec->version != RUBRAVIEW_RAR_CODEC_VERSION) {
+        FreeLibrary(module);
+        return NULL;
+    }
+    return codec;
 }
 #endif /* _WIN32 */
