@@ -57,7 +57,7 @@ of a byte buffer by design, and that check fires on every header.
 ## Updating
 
 1. Fetch the new release, record its SHA-256 and the date above.
-2. Copy the same file list; do not add encoders or `7zFile.c`.
+2. Copy the same file list (the encoder files below included); do not add `7zFile.c`.
 3. Re-read `DOC/lzma-sdk.txt` and refresh `LICENSE.txt` — do not assume
    the terms carried over.
 4. `make test` (T038 reads real archives) and `make win64`.
@@ -69,3 +69,10 @@ the RAR module (`vendor/unrar_proprietary`, its own DLL) decodes RAR's PPMd bloc
 Taken unchanged from 7-Zip 24.08's source (`7z2408-src.7z`, SHA-256
 `4df7a62e5ce503892f500b1f96f0a954931c5266900c439102040957b25a90c6`, `C/Ppmd7aDec.c`), where it is marked public domain by Igor
 Pavlov; `Ppmd7.c` there is byte-identical to the one already here.
+
+## Added 2026-10-01: the LZMA encoder
+
+`LzmaEnc.c`, `LzmaEnc.h`, `LzFind.c`, `LzFind.h`, `LzFindOpt.c`, `LzHash.h`, unchanged from the same LZMA SDK
+24.08 release (`lzma2408.7z`, SHA-256 `105a12afcafcd5bdce70bc75e7f0e94eafd07293646278ea225e6601e048cf17`,
+`C/`), public domain by Igor Pavlov. Built single-threaded (`Z7_ST`). Used by `src/core/archive_write.c` to
+write 7z / CB7 archives (owner, 2026-10-01: "압축 지원은 7z와 zip까지").
