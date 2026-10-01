@@ -40,7 +40,9 @@ LZMA_INCLUDE = -Ivendor/lzma
 # include/rubraview/rar_codec.h.
 UNRAR_DIR = vendor/unrar_proprietary
 UNRAR_INCLUDE = -I$(UNRAR_DIR)
-SRCS_UNRAR = $(UNRAR_DIR)/rar_unpack.c $(UNRAR_DIR)/rar_crypt.c $(UNRAR_DIR)/unrar_proprietary.c
+# A clean-room copy (scripts/cleanroom.sh) has no module sources: everything else still builds.
+SRCS_UNRAR = $(wildcard $(UNRAR_DIR)/rar_unpack.c $(UNRAR_DIR)/rar_crypt.c $(UNRAR_DIR)/unrar_proprietary.c)
+UNRAR_DLL_TARGET = $(if $(SRCS_UNRAR),dist/$(UNRAR_DLL))
 UNRAR_DLL = unrar_proprietary.dll
 LZMA_SRCS = $(wildcard vendor/lzma/*.c)
 LZMA_OBJS = $(patsubst vendor/lzma/%.c,build/lzma/%.o,$(LZMA_SRCS))
@@ -215,7 +217,7 @@ dist/$(UNRAR_DLL): $(SRCS_UNRAR) include/rubraview/rar_codec.h build/lzma-win/Pp
 		-static-libgcc -Wl,--exclude-all-symbols -o $@
 	@echo "Linked: $@"
 
-win64: dist/$(UNRAR_DLL) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+win64: $(UNRAR_DLL_TARGET) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \

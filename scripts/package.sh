@@ -37,7 +37,7 @@ cp "dist/$exe" "dist/rubraview.exe"
 # RAR's decompression and decryption, under UnRAR's licence (proprietary),
 # are a DLL of their own, loaded at run time from beside the program
 # (owner, 2026-10-01). Left out, stored CBRs still open.
-cp dist/unrar_proprietary.dll "$out/unrar_proprietary.dll"
+[ -f dist/unrar_proprietary.dll ] && cp dist/unrar_proprietary.dll "$out/unrar_proprietary.dll"
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
