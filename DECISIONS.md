@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-01: D-68 Writing ZIP and 7z, all of it ours or public domain
+
+- Status: Accepted (owner 2026-10-01: "7z와 zip는 mit license로 만들 수 있다는 말이지요? ... 압축 지원은 7z와 zip까지"; plan `mit-archives`, step 5)
+- Decision:
+  - `src/core/archive_write.c` (MIT, written for this project) writes a list of entries held in memory as one archive, through a sink that appends and may rewrite bytes already written.
+  - ZIP / CBZ from PKWARE's APPNOTE: local headers and central directory, deflate (miniz's `tdefl`, MIT) where it is smaller and stored otherwise, the UTF-8 name flag for names that are not ASCII, ZIP64 records when a size, an offset or the entry count needs them, MS-DOS time and Info-ZIP's extended timestamp (UTC).
+  - 7z / CB7 from the LZMA SDK's `DOC/7zFormat.txt`: the start header, one solid folder of the non-empty files, LZMA (the SDK's `LzmaEnc`, public domain, added to `vendor/lzma`) or Copy at level 0, sizes and CRCs per file, empty files, UTF-16 names, modification times; the dictionary no larger than the data.
+  - Names are refused when empty, absolute, with a `.` or `..` part, an empty part or a control character; `\` becomes `/`.
+  - Nothing in the viewer uses it yet: it is for RV-090 / R149 (an edited book, a RAR converted to 7z or ZIP).
+- Consequences: `test_archive_write` writes ZIP and 7z at levels 0-9, ZIP64 forced, archives of empty files only and empty archives, and reads every one back through the program's own readers byte for byte; it refuses bad names, stops on every write a sink refuses, and cancels. Outside check (manual, T118): the system's `7z t` ("Everything is Ok"), `unzip -t` ("No errors detected") and Python's `zipfile.testzip()` accept the ZIP, the ZIP64 ZIP and the 7z; `7z l` shows the LZMA method, the Korean name, the times and the CRCs.
+
 ## 2026-10-01: D-67 An archive's names read again in a code page chosen for it alone
 
 - Status: Accepted (owner 2026-10-01: "shift-jis 나 중국, 대만에서 널리 사용되는 인코딩으로 압축파일 내 파일명을 해석할 방법 ... 전역 설정으로 매번 바꾸는게 아니라 특정 파일 열 때마다 일회성으로 ... 현재 열고있는 압축파일을 새로 파일명을 해석하는 기능")
