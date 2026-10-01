@@ -249,8 +249,8 @@ In every case replace `\` with `/` (RAR 4 writes `\` as the separator). With fla
 | 21-24 | month (1-12) |
 | 25-31 | year - 1980 |
 
-**EXT_TIME** (LA4:`read_exttime`, RD:`readExtTimes`): a u16 FLAGS, then for each of four times in this order —
-mtime (FLAGS bits 12-15), ctime (bits 8-11), atime (bits 4-7), archive time (bits 0-3) — a 4-bit field r:
+**EXT_TIME** (LA4:`read_exttime`, RD:`readExtTimes`): a u16 FLAGS, then for each of four times in this order --
+mtime (FLAGS bits 12-15), ctime (bits 8-11), atime (bits 4-7), archive time (bits 0-3) -- a 4-bit field r:
 
 - r & 8 clear: this time is absent; nothing is stored for it.
 - otherwise: for mtime the base is FTIME (nothing stored); for the other three a u32 MS-DOS time is stored first.
@@ -401,8 +401,8 @@ Fields after the common ones (TN; order matters):
 | Name | bytes | UTF-8, no terminator, `/` as separator (backslash is a name character on Unix hosts, invalid on Windows) |
 | Extra area, data area | | as in 3.2 |
 
-The data area of a file header is the packed file (its size is the header's Data size). File headers always have
-flag 0x0002 (LA5 rejects a file header without it, except that directories have data size 0).
+The data area of a file header is the packed file (its size is the header's Data size). File headers carry flag
+0x0002 even when empty (directories have data size 0); LA5 rejects a file header without it.
 
 **Compression information** (TN; LA5:`process_head_file`; RD:`parseFileHeader`):
 
@@ -612,8 +612,10 @@ record). LA4 and LA5 only detect encryption. All derivations below were checked 
 decrypts `rar4_enc_headers.rar` headers with valid CRCs, the RAR 5 check values match in every `rar5_enc_*`
 fixture, and the MAC'd CRC of `rar5_enc_data.rar` matches.
 
-Standards: AES (FIPS 197), CBC mode (NIST SP 800-38A, as FIPS 197 users know it), SHA-1 and SHA-256 (FIPS 180-4),
-HMAC (RFC 2104), PBKDF2 (RFC 8018).
+Standards: AES (FIPS 197), SHA-1 and SHA-256 (FIPS 180-4), HMAC (RFC 2104), PBKDF2 (RFC 8018). CBC decryption
+(NIST SP 800-38A), as used throughout: split the ciphertext into 16-byte blocks C1, C2, ...; with C0 = IV,
+plaintext block `Pi = AES-decrypt(key, Ci) XOR C(i-1)`. A CBC "chain" continues across reads: the last ciphertext
+block of one read is the C(i-1) of the next. No padding scheme is used; trailing bytes are cut by the known sizes.
 
 ### 6.1 RAR 4 (RAR 3.x encryption)
 
@@ -798,7 +800,7 @@ symbols of length l get codes first_code[l], first_code[l]+1, ... in increasing 
 
 Incomplete code sets (unused code space, including a single used symbol) occur and must be accepted; reading an
 unused code is a data error (RD returns `ErrHuffDecodeFailed`; LA4 "Invalid prefix code"; LA5 silently yields
-symbol 0 — do not copy that). An over-subscribed set (more codes than fit) is a data error.
+symbol 0 -- do not copy that). An over-subscribed set (more codes than fit) is a data error.
 
 ### 7.3 The precode (code-length tables), RAR 2.9 and RAR 5
 
@@ -1302,7 +1304,7 @@ independently.
 
 ### 11.1 PPMd block header
 
-After the block's `ppm` bit (9.1) — the header is byte-aligned, so the header's first byte holds that bit and these
+After the block's `ppm` bit (9.1) -- the header is byte-aligned, so the header's first byte holds that bit and these
 7 bits:
 
 ```
@@ -1513,8 +1515,7 @@ Sources: TN (compression information), RD:`archive50.go:parseFileHeader`, RD:`de
 ```
 open the first volume; read headers (2.7 / 3.9) until a file header
 for each file header (first part of a file):
-    skip directories, links (create them), and service headers as the caller wishes
-    if not solid-continued and the previous solid stream was not decoded: decode nothing yet
+    directories and links: create them; service headers: skip
     packed = concatenation of the data areas of all parts (4.2), read lazily, switching volumes
     if encrypted: packed = AES-CBC-decrypt(packed) with the file's key and IV (6.1 / 6.2)
     if stored: output = packed, cut to the unpacked size
@@ -1567,7 +1568,7 @@ under LA4's behaviour).
 | 2 | Low-distance repeat state (`lowDist`, `lowRepeat`, 9.4) | LA4 never resets it, not even between files | reset at every LZ table read | Reset at every LZ table read (RD). Test on `rar_multi_lzss_blocks.rar` and `rar_ppmd_lzss_conversion.rar`; if either fails, try "reset only at a non-solid file start" |
 | 3 | RAR 2.9 distances and last length at a non-solid file start | LA4 keeps them from the previous entry | resets | Reset (7.5) |
 | 4 | RAR 2.0 distances and last length at a non-solid file start | (no decoder) | not reset | Reset; valid data cannot depend on them |
-| 5 | EXT_TIME fraction bytes (2.5) | LA4 accumulates `rem = byte << 16 | rem >> 8` per byte (the formula in 2.5) but then misuses the value | reads the wrong number of bytes for c = 1 and 2 | The formula in 2.5 (LA4's accumulation), consuming exactly c bytes. Untested beyond parsing: the RAR 4 fixtures with EXT_TIME are checked only for consistent header parsing |
+| 5 | EXT_TIME fraction bytes (2.5) | LA4 accumulates `rem = byte << 16 | rem >> 8` per byte (the formula in 2.5) but then misuses the value | reads the wrong number of bytes for c = 1 and 2 | The formula in 2.5 (LA4's accumulation), consuming exactly c bytes. No oracle holds the time values |
 | 6 | Unicode name decoding stop (2.4) | stops at NAME_SIZE output units or at the end of the encoded bytes | stops when the output reaches the narrow name's length or the encoded bytes end | Stop at whichever comes first of: encoded bytes exhausted, output length = narrow length (needed anyway for mode 3 bounds) |
 | 7 | Filter-program reset (`vmnum` 0, 10.1) | LA4 also drops pending filters | RD keeps pending filters | Drop programs; keep already pending filters (they hold their own program). Fixture-neutral |
 | 8 | RAR 5 time record nanoseconds (3.6) | LA5 reads one u32 | RD reads one per present time | One per present time (TN) |
@@ -1592,8 +1593,9 @@ Single-source items (one source only; no fixture unless stated):
 - RAR 7 (version 1) decoding differences (12.6): RD only; no fixture.
 - Volume naming rules (4.1): RD only; the fixtures cover `.partNN.rar` and `.rar/.r00/.r01`.
 - BLAKE2sp construction (5.3): LA5 calls a library; the construction comes from the BLAKE2 paper and was verified
-  with the reference test vectors and against `rar5_blake2.rar` only indirectly (no plain copy of `cebula.txt`
-  exists among the fixtures; `rar5_multiarchive_solid` has it compressed, with its CRC).
+  with the reference test vectors only. It has not been checked against `rar5_blake2.rar`, because no fixture holds
+  `cebula.txt` uncompressed (it is compressed in `rar5_blake2.rar` and `rar5_multiarchive_solid`, with its CRC
+  7e5ec49e in the latter); a decoder that extracts it with the right CRC can then confirm the hash.
 
 ---
 
