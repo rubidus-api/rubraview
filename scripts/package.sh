@@ -41,7 +41,7 @@ cp "dist/$exe" "dist/rubraview.exe"
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
-cp CHANGELOG.md "$out/"
+[ -f CHANGELOG.md ] && cp CHANGELOG.md "$out/" || true
 [ -f LICENSE ] && cp LICENSE "$out/" || true
 
 cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"

@@ -181,14 +181,9 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 - [RFC-0001: 구조와 멀티미디어 파이프라인](docs/rfc/rfc-0001-rubraview-architecture.md)
 - [RFC 목록](docs/rfc/rfc-0000-index.md)
 - [사용 설명서](docs/manual/)
-- [에이전트 작업 지침](docs/agents/)
+- [형식 명세](docs/specs/)
 
-## 빌드와 시험
-
-### 리눅스 호스트(단위 시험)
-```sh
-make test
-```
+## 빌드
 
 ### 윈도우 실행 파일(교차 빌드)
 ```sh
