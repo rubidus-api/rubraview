@@ -1066,9 +1066,9 @@ else:
     t == 0: the next solid file starts directly with symbols, reusing the current tables
 ```
 
-After end of file the decoder stops for this file even if fewer than the unpacked size bytes were produced only
-when the size is unknown; otherwise output is cut at the unpacked size (7.5). LA4 treats the end-of-file case as
-"stop" and does not support solid continuation.
+End of file ends this file's stream. Reaching it before the unpacked size is a short file (an error) unless the
+size is unknown; output beyond the unpacked size is discarded (7.5). LA4 treats end of file as "stop" and does not
+support solid continuation.
 
 Fixtures: `rar_compress_normal.rar` (METHOD 0x33), `rar_multi_lzss_blocks.rar` (many LZ blocks, 20 MB output),
 `rar4_*` compressed fixtures (all LZ, UNP_VER 29), `rar_unicode.rar` (one compressed entry), `rar4_enc_solid.rar`
@@ -1127,11 +1127,11 @@ if flags & 0x80:
     last_num = num
 else:
     num = last_num
-start = vmnum + (current window write position, as a count of bytes output in this file)   # LA4 lzss_position
+start = vmnum + (number of bytes decoded so far in this file)     # LA4 lzss_position, RD relative to the write index
 if flags & 0x40: start += 258
 if flags & 0x20: length = vmnum
 else:            length = the last length used with program num (0 if new)
-R[0..7] = 0; R[3] = 0x3C000; R[4] = length; R[5] = program num's use count; R[7] = 0x40000
+R[0..7] = 0; R[3] = 0x3C000; R[4] = length; R[5] = number of earlier filters that used program num; R[7] = 0x40000
 if flags & 0x10:
     mask = read 7 bits
     for i in 0..6: if mask & (1 << i): R[i] = vmnum      # bit 0 = R[0]
@@ -1312,7 +1312,7 @@ if f & 0x40: esc = next byte                         # new escape byte
 order = (f & 0x1F) + 1
 if order > 16: order = 16 + (order - 16) * 3          # 2..64
 if f & 0x20:
-    if order == 1: corrupt                            # (order 1 cannot occur after the mapping only if f&0x1F==0)
+    if order == 1: corrupt                            # i.e. f & 0x1F == 0
     allocate the model with (mem + 1) << 20 bytes (Ppmd7_Alloc), Ppmd7_Init(order)
 else:
     a model must already exist (from an earlier block of this file or solid stream), else corrupt; keep it as is
@@ -1338,8 +1338,8 @@ normalize:
             if range >= BOT: return
             range = (0 - low) & (BOT - 1)
         code = (code << 8) | next byte; range <<= 8; low <<= 8
-binary contexts: get_freq with total = 2^14 (BIN_SCALE); the bit is 0 if the count < the context's
-                 probability (decode(0, p)), else 1 (decode(p, 2^14 - p))
+binary context (one symbol, probability p out of 2^14): count = get_freq(2^14);
+                 count < p: the symbol (decode(0, p)); otherwise escape (decode(p, 2^14 - p))
 ```
 
 The bytes come from the packed stream at the current byte position. The decoder must take **only** the bytes the
@@ -1367,3 +1367,406 @@ Fixtures: `rar_compress_best.rar` (METHOD 0x35), `rar_ppmd_lzss_conversion.rar` 
 blocks; 241 MB output), `rar_ppmd_use_after_free.rar` (fuzzing case; must fail cleanly).
 
 ---
+
+## 12. RAR 5 algorithm (compression information version 0, and version 1)
+
+Sources: LA5:`parse_block_header`, `process_block`, `parse_tables`, `create_decode_tables`, `decode_number`,
+`do_uncompress_block`, `decode_code_length`, `copy_string`, `dist_cache_push`, `dist_cache_touch`,
+`parse_filter`, `parse_filter_data`, `is_valid_filter_block_start`, `apply_filters`, `run_filter`,
+`run_delta_filter`, `run_e8e9_filter`, `run_arm_filter`; RD:`decode50.go` (all functions), RD:`filters.go`
+(`filterE8`, `filterDelta`, `filterArm`), RD:`decode_reader.go`; TN (compression information).
+
+### 12.1 Compressed blocks
+
+The packed stream of a file is a sequence of blocks, each starting at a byte boundary:
+
+| Byte | Field |
+|---|---|
+| 0 | flags: bits 0-2 = (number of valid bits in the block's last byte) - 1; bits 3-4 = (number of size bytes) - 1; bit 6 = last block of the file; bit 7 = tables present |
+| 1 | check byte: `0x5A ^ flags ^ size_byte_0 ^ size_byte_1 ^ size_byte_2` (the size bytes present) |
+| 2.. | block size S, 1 to 3 bytes, little-endian |
+
+A size-byte count of 4 (bits 3-4 = 3) is invalid. A check byte mismatch is a corrupt block. The block body is the
+next S bytes; it holds `(S - 1) * 8 + ((flags & 7) + 1)` valid bits, read MSB-first. The next block header follows
+the S bytes. If bit 7 is set, the body starts with the tables (12.2), which count toward the body's bits; otherwise
+the previous tables stay in force (the first block of a non-solid file must have tables).
+
+Decoding of a block stops when all its valid bits have been consumed (LA5 checks the position before each symbol;
+RD limits its bit reader to the block). A symbol that would need bits beyond the block is a data error. After the
+block flagged "last", the file's packed stream is complete.
+
+### 12.2 Tables
+
+Precode and run-length codes as in 7.3, values **assigned** (no adding). The lengths, in order:
+
+| Table | Version 0 | Version 1 | Use |
+|---|---|---|---|
+| main (NC) | 306 | 306 | literals and commands |
+| distance (DC) | 64 | 80 | distance slots |
+| low distance (LDC) | 16 | 16 | low 4 bits of long distances |
+| repeat length (RC) | 44 | 44 | length slots for repeated distances |
+| total | 430 | 446 | |
+
+### 12.3 Symbols
+
+State (reset to 0 for a non-solid file, kept for a solid one): `D[0..3]` distances, last length `L`.
+
+```
+slot_to_length(s):                       # s from 0 to 43
+    if s < 8: return s + 2
+    b = s / 4 - 1
+    return 2 + ((4 | (s & 3)) << b) + read b bits
+```
+
+| Main symbol s | Action |
+|---|---|
+| 0..255 | literal byte |
+| 256 | filter record (12.5) |
+| 257 | if L != 0: copy L bytes from distance D[0] (D unchanged) |
+| 258..261 | j = s - 258; d = D[j]; move to front (`D[1..j] = D[0..j-1]`, `D[0] = d`); `L = slot_to_length(next RC symbol)`; copy L bytes from d (no length bonus) |
+| 262..305 | `len = slot_to_length(s - 262)`; d = distance (below); `len += 1` if d > 0x100, another +1 if d > 0x2000, another +1 if d > 0x40000; push d (`D = [d, D0, D1, D2]`); L = len; copy |
+
+Distance:
+
+```
+k = next DC symbol
+if k < 4: d = k + 1
+else:
+    b = k / 2 - 1
+    d = 1 + ((2 | (k & 1)) << b)
+    if b >= 4:
+        if b > 4: d += (read (b - 4) bits) << 4
+        d += next LDC symbol                     # 0..15
+    else: d += read b bits
+```
+
+Note the bonus thresholds compare with `>` here and `>=` in RAR 2.9 (9.4); both sources agree on each. Distances
+fit in 32 bits for version 0 (largest slot 63: b = 30); version 1 needs 64-bit distances (12.6).
+
+### 12.4 Window and solid files
+
+Window as in 7.4, size at least the dictionary size from the compression information (LA5 uses exactly that size;
+RD at least 256 KiB). In a solid archive, a file with the solid bit continues the window, the tables, `D` and `L`
+(RD:`decoder50.init` resets them only when not solid; LA5 keeps the window and tables). Each file's packed stream
+begins with a new block header.
+
+### 12.5 Filters
+
+Filter record (main symbol 256), read from the bit stream:
+
+```
+fdata(): c = read 2 bits + 1; v = 0; for i in 0..c-1: v |= (read 8 bits) << (8 * i); return v   # little-endian
+start  = fdata() + (number of bytes decoded so far in this file)
+length = fdata()
+type   = read 3 bits
+if type == 0 (Delta): channels = read 5 bits + 1
+```
+
+| Type | Filter |
+|---|---|
+| 0 | Delta, `channels` channels (same algorithm as 10.4 Delta) |
+| 1 | E8 |
+| 2 | E8E9 |
+| 3 | ARM |
+| 4..7 | invalid in RAR 5 (LA5 names 4..7 Audio, RGB, Itanium, PPM, "not used in RARv5") |
+
+Validity (LA5): `4 <= length <= 0x400000`; a filter must start at or after the end of the previously defined one
+(filter ranges do not overlap, so they never chain); at most 8192 pending filters. Filters are applied in order:
+output the window bytes before `start` unchanged; once `[start, start + length)` has been fully decoded, output the
+filtered copy instead of those bytes. The window keeps the unfiltered data.
+
+The filters, with `off` = start (file offset of buf[0]) and `n = length`:
+
+**E8, E8E9** (LA5:`run_e8e9_filter`, RD:`filterE8` with `v5`): as in 10.4, except that the position is reduced
+modulo 2^24: `pos = (off + i + 1) mod 0x1000000`.
+
+**ARM** (LA5:`run_arm_filter`, RD:`filterArm`): ARM BL instructions, absolute-to-relative undone.
+
+```
+for i = 0, 4, 8, ... while i + 3 < n:
+    if buf[i+3] == 0xEB:
+        v = buf[i] | buf[i+1] << 8 | buf[i+2] << 16
+        v = (v - (off + i) / 4) & 0xFFFFFF                # integer division
+        buf[i], buf[i+1], buf[i+2] = the three bytes of v, little-endian
+```
+
+**Delta**: 10.4 with `ch = channels`.
+
+Fixtures: `rar5_arm.rar` (ARM ELF, 90808 bytes), `rar5_multiarchive_solid.part*.rar` (same file, split across
+volumes in a solid archive), x86 data in `rar5_compressed.rar`/`rar5_solid.rar` (not confirmed to contain filters).
+
+### 12.6 Version 1 (RAR 7.0)
+
+Sources: TN (compression information), RD:`archive50.go:parseFileHeader`, RD:`decode50.go` (`offsetSize7`,
+`tableSize7`). Single-source for the decoding differences; no fixture.
+
+- Algorithm version 1 with bit 20 (0x100000) set: decode exactly as version 0; only the dictionary-size field uses
+  the version-1 form.
+- Otherwise: the distance table has 80 entries (12.2) and distance slots up to 79 use the same formula as 12.3
+  (b up to 38, so distances need 64 bits). Everything else is as in version 0.
+- Dictionary size: `128 KiB << N` (N up to 23) plus `(that / 32) * F`, with F the 5-bit fraction (3.5).
+
+---
+
+## 13. Extracting a file: overview
+
+```
+open the first volume; read headers (2.7 / 3.9) until a file header
+for each file header (first part of a file):
+    skip directories, links (create them), and service headers as the caller wishes
+    if not solid-continued and the previous solid stream was not decoded: decode nothing yet
+    packed = concatenation of the data areas of all parts (4.2), read lazily, switching volumes
+    if encrypted: packed = AES-CBC-decrypt(packed) with the file's key and IV (6.1 / 6.2)
+    if stored: output = packed, cut to the unpacked size
+    else: output = decompress(packed) with the algorithm of the header (8, 9-11, 12),
+          continuing the solid state if the file is solid (7.5); cut to the unpacked size
+    verify the CRC / BLAKE2sp of output (5.2, 6.2.5); a mismatch is an error for that file
+```
+
+To skip a file in a solid archive, decode it and discard the output. To skip it in a non-solid archive, skip its
+data areas.
+
+---
+
+## 14. Limits and robustness
+
+Values from the sources, to apply before allocating or looping:
+
+| Item | Limit | Source |
+|---|---|---|
+| RAR 4 header size | 7 .. 65535 (u16); file header >= 32 | LA4:`read_header` |
+| RAR 5 header size | vint of at most 3 bytes (2 MiB) | TN, LA5, RD (`maxHeaderSize`) |
+| RAR 4 dictionary | 64 KiB .. 4 MiB | file flags |
+| RAR 5 dictionary | 128 KiB << 15 for version 0; refuse above a configured limit | TN, LA5 (64 MiB), RD (4 GiB default) |
+| RAR 5 KDF count | <= 24 | RD `maxKdfCount` |
+| RAR 3 program list | 1024 programs | RD `maxUniqueFilters` |
+| pending filters | 8192 | RD `maxQueuedFilters`, LA5 deque size |
+| RAR 3 program size | 1 .. 0x10000 bytes | LA4, RD |
+| RAR 3 global data | <= 0x2000 - 0x40 bytes | LA4, RD |
+| RAR 3 filter block | <= 0x3C000 bytes (E8/E8E9), <= 0x1E000 (Delta, RGB, Audio) | LA4 |
+| RAR 5 filter block | 4 .. 0x400000 bytes | LA5 |
+| RAR 3 VM | 25,000,000 instructions per run | RD `maxCommands` |
+| PPMd order | 2 .. 64 | 11.1 |
+| PPMd memory | 1 .. 256 MiB | 11.1 |
+| password | 128 characters | RD `maxPassword` |
+
+The fuzzing fixtures (`rar_invalid1.rar`, `rar_ppmd_use_after_free.rar`, `rar5_leftshift1.rar`,
+`rar5_readtables_overflow.rar`, `rar5_truncated_huff.rar`) must produce clean errors, not crashes or hangs.
+
+---
+
+## 15. Source disagreements and single-source items
+
+Where the sources disagree, the recommended rule is given first. "Fixture-neutral" means the fixtures decode the
+same either way (LA4 verifies file CRCs, so every libarchive fixture listed in `expected.txt` decodes correctly
+under LA4's behaviour).
+
+| # | Topic | LA | RD | Recommendation |
+|---|---|---|---|---|
+| 1 | PPMd escape byte when a PPMd block header lacks flag 0x40 (11.1) | LA4 resets it to 2 | keeps the previous value (2 only at a non-solid file start) | Keep the previous value (RD). Fixture-neutral (`rar_ppmd_lzss_conversion.rar`, `rar_compress_best.rar` decode either way); revisit if a PPMd fixture fails |
+| 2 | Low-distance repeat state (`lowDist`, `lowRepeat`, 9.4) | LA4 never resets it, not even between files | reset at every LZ table read | Reset at every LZ table read (RD). Test on `rar_multi_lzss_blocks.rar` and `rar_ppmd_lzss_conversion.rar`; if either fails, try "reset only at a non-solid file start" |
+| 3 | RAR 2.9 distances and last length at a non-solid file start | LA4 keeps them from the previous entry | resets | Reset (7.5) |
+| 4 | RAR 2.0 distances and last length at a non-solid file start | (no decoder) | not reset | Reset; valid data cannot depend on them |
+| 5 | EXT_TIME fraction bytes (2.5) | LA4 accumulates `rem = byte << 16 | rem >> 8` per byte (the formula in 2.5) but then misuses the value | reads the wrong number of bytes for c = 1 and 2 | The formula in 2.5 (LA4's accumulation), consuming exactly c bytes. Untested beyond parsing: the RAR 4 fixtures with EXT_TIME are checked only for consistent header parsing |
+| 6 | Unicode name decoding stop (2.4) | stops at NAME_SIZE output units or at the end of the encoded bytes | stops when the output reaches the narrow name's length or the encoded bytes end | Stop at whichever comes first of: encoded bytes exhausted, output length = narrow length (needed anyway for mode 3 bounds) |
+| 7 | Filter-program reset (`vmnum` 0, 10.1) | LA4 also drops pending filters | RD keeps pending filters | Drop programs; keep already pending filters (they hold their own program). Fixture-neutral |
+| 8 | RAR 5 time record nanoseconds (3.6) | LA5 reads one u32 | RD reads one per present time | One per present time (TN) |
+| 9 | RAR 5 main-header extra records | LA5 rejects any but the locator | RD ignores them | Skip unknown records (TN) |
+| 10 | RAR 5 stored CRC of 0 | LA5 does not check it | RD checks | Check whenever flag 0x0004 is set |
+| 11 | Unused Huffman code (7.2) | LA5 yields symbol 0; LA4 errors | RD errors | Error |
+| 12 | RAR 4 window size | LA4: from the unpacked size, power of two, max 4 MiB, ignoring the header | RD: header dictionary, min 256 KiB | Header dictionary rounded up to a power of two, at least 256 KiB (or always 4 MiB) |
+| 13 | Unknown RAR 4 block type | LA4 errors | RD skips | Skip (2.1) |
+| 14 | RAR 5 unknown unpacked size | LA5 refuses | RD decodes to the end | Decode to the end (TN) |
+| 15 | Escape code 3 inside PPMd (filter record) | LA4 refuses | RD parses it | Parse it (11.3) |
+| 16 | RAR 3 filter chaining (10.2) | LA4 compares with a start value it has already cleared, so in effect does not chain | RD chains when the next filter has the same start and the input length matches | Chain (RD); fixture-neutral |
+
+Single-source items (one source only; no fixture unless stated):
+
+- RAR 2.0 LZ and audio decoding (section 8): RD only; **no fixture**. In particular the RAR 2.0 repeat symbols
+  *push* the reused distance (`[d, D0, D1, D2]`) instead of moving it to the front as RAR 2.9 does, and symbol 256
+  pushes a copy of D0. These are surprising enough to deserve a test archive (`rar -ma4 -m...` cannot produce
+  RAR 2.0 data; an archive from RAR 2.x is needed).
+- RAR 3 Itanium filter (10.4) and the VM (Appendix A): RD only; no fixture.
+- RAR 4 old-style comment embedded in the main header (2.2): RD only; no fixture.
+- RAR 4/5 encryption, header encryption, MAC'd checksums (section 6): RD only, but verified on fixtures.
+- RAR 7 (version 1) decoding differences (12.6): RD only; no fixture.
+- Volume naming rules (4.1): RD only; the fixtures cover `.partNN.rar` and `.rar/.r00/.r01`.
+- BLAKE2sp construction (5.3): LA5 calls a library; the construction comes from the BLAKE2 paper and was verified
+  with the reference test vectors and against `rar5_blake2.rar` only indirectly (no plain copy of `cebula.txt`
+  exists among the fixtures; `rar5_multiarchive_solid` has it compressed, with its CRC).
+
+---
+
+## Appendix A. The RAR 3 virtual machine (optional)
+
+Source: RD only: `vm.go` (`execute`, the instruction functions, `decodeArg`, `fixJumpOp`, `readCommands`),
+`filters.go` (`getV3Filter`, `vmFilter.execute`). LA4 rejects programs that are not one of the standard filters.
+No fixture uses a non-standard program. A decoder may omit this appendix and report such filters as unsupported.
+
+### A.1 Program format
+
+The program bytes (10.1) are `code[0..clen-1]`; `code[0]` is the XOR check byte. Read `code[1..]` MSB-first:
+
+```
+if read 1 bit: static = (vmnum + 1) bytes, read 8 bits each    # RD requires <= 0x2000 - 0x40
+instructions until the bits run out:
+    op = read 4 bits
+    if op & 8: op = ((op << 2) | read 2 bits) - 24             # 0..7 directly, 8..39 with 6 bits
+    if op >= 40: invalid program
+    byte_mode = read 1 bit, only for ops marked "b" below
+    operands as below
+```
+
+| op | name | b | ops | | op | name | b | ops |
+|---|---|---|---|---|---|---|---|---|
+| 0 | MOV | b | 2 | | 20 | POP | | 1 |
+| 1 | CMP | b | 2 | | 21 | CALL | | 1 (jump) |
+| 2 | ADD | b | 2 | | 22 | RET | | 0 |
+| 3 | SUB | b | 2 | | 23 | NOT | b | 1 |
+| 4 | JZ | | 1 (jump) | | 24 | SHL | b | 2 |
+| 5 | JNZ | | 1 (jump) | | 25 | SHR | b | 2 |
+| 6 | INC | b | 1 | | 26 | SAR | b | 2 |
+| 7 | DEC | b | 1 | | 27 | NEG | b | 1 |
+| 8 | JMP | | 1 (jump) | | 28 | PUSHA | | 0 |
+| 9 | XOR | b | 2 | | 29 | POPA | | 0 |
+| 10 | AND | b | 2 | | 30 | PUSHF | | 0 |
+| 11 | OR | b | 2 | | 31 | POPF | | 0 |
+| 12 | TEST | b | 2 | | 32 | MOVZX | | 2 |
+| 13 | JS | | 1 (jump) | | 33 | MOVSX | | 2 |
+| 14 | JNS | | 1 (jump) | | 34 | XCHG | b | 2 |
+| 15 | JB | | 1 (jump) | | 35 | MUL | b | 2 |
+| 16 | JBE | | 1 (jump) | | 36 | DIV | b | 2 |
+| 17 | JA | | 1 (jump) | | 37 | ADC | b | 2 |
+| 18 | JAE | | 1 (jump) | | 38 | SBB | b | 2 |
+| 19 | PUSH | | 1 | | 39 | PRINT | | 0 (no operation) |
+
+Operand encoding:
+
+| Bits | Operand |
+|---|---|
+| `1 rrr` | register R[r] |
+| `0 0` + value | immediate: 8 bits in byte mode, else `vmnum` |
+| `0 1 0 rrr` | memory at `R[r] & 0x3FFFF` |
+| `0 1 1 0 rrr` + `vmnum` disp | memory at `(R[r] + disp) & 0x3FFFF` |
+| `0 1 1 1` + `vmnum` addr | memory at `addr & 0x3FFFF` |
+
+For one-operand jump instructions (JMP, Jcc, CALL) whose operand is an immediate n, the target instruction index is
+`n - 256` if n >= 256; otherwise adjust `n -= 264` if n >= 136, `n -= 8` if 16 <= n < 136, `n -= 16` if 8 <= n < 16,
+and the target is (index of this instruction + n) mod 2^32. Instruction indices count instructions, not bytes.
+Non-immediate jump operands are used as indices directly.
+
+### A.2 Machine
+
+Memory: 0x40000 bytes plus 4 spare bytes (32-bit accesses at 0x3FFFF..0x3FFFC stay in bounds). Registers R0..R7
+(32-bit), flags C = 1, Z = 2, S = 0x80000000. Word access is u32 little-endian; byte mode reads one byte (a
+register's low 8 bits) and writes one byte (a register's low 8 bits only). `a` is operand 1, `b` operand 2;
+"set Z/S" means `fl = Z if r == 0 else r & S`.
+
+| Instruction | Effect |
+|---|---|
+| MOV | a = b |
+| CMP | r = a - b; fl = Z if r == 0 else (C if r > a) \| (r & S) |
+| ADD | r = a + b (byte mode: & 0xFF); fl = (C if r < a) \| (Z if r == 0 else S if the sign bit of r is set; sign bit 0x80 in byte mode); a = r |
+| SUB | r = a - b; fl as CMP; a = r |
+| INC, DEC | r = a + 1 (byte mode & 0xFF) / a - 1; a = r; set Z/S |
+| XOR, AND, OR | r = a op b; a = r; set Z/S |
+| TEST | r = a & b; set Z/S |
+| NOT | a = ~a (no flags) |
+| NEG | r = 0 - a; a = r; fl = Z if r == 0 else (r & S) \| C |
+| SHL | r = a << b; a = r; set Z/S; C if (a << (b - 1)) has bit 31 |
+| SHR | r = a >> b; a = r; set Z/S; C if (a >> (b - 1)) & 1 |
+| SAR | r = (signed a) >> b; a = r; set Z/S; C if (a >> (b - 1)) & 1 |
+| MUL | a = a * b (mod 2^32); flags unchanged |
+| DIV | if b != 0: a = a / b (unsigned); flags unchanged |
+| ADC | r = a + b + C (byte mode & 0xFF); a = r; set Z/S; also C if r < a or (r == a and C was set) |
+| SBB | r = a - b - C (byte mode & 0xFF); a = r; set Z/S; also C if r > a or (r == a and C was set) |
+| MOVZX | a = byte(b) |
+| MOVSX | a = sign-extended byte(b) |
+| XCHG | swap a and b |
+| JMP, JZ (Z), JNZ (not Z), JS (S), JNS (not S), JB (C), JBE (C or Z), JA (neither), JAE (not C) | jump if the condition holds |
+| PUSH | R7 -= 4; mem32[R7 & 0x3FFFF] = a |
+| POP | a = mem32[R7 & 0x3FFFF]; R7 += 4 |
+| CALL | R7 -= 4; mem32[R7 & 0x3FFFF] = index of the next instruction; jump |
+| RET | if R7 >= 0x40000: stop; else ip = mem32[R7]; R7 += 4 |
+| PUSHA | sp = R7; for R0, R1, ..., R7 in turn: sp = (sp - 4) & 0x3FFFF; mem32[sp] = Ri; then R7 = sp |
+| POPA | sp = R7; for i = 7 down to 0: Ri = mem32[sp]; sp = (sp + 4) & 0x3FFFF |
+| PUSHF / POPF | push / pop the flags word |
+
+Execution starts at instruction 0 and stops when the instruction index is past the last instruction, on RET with
+R7 >= 0x40000, or after 25,000,000 instructions.
+
+### A.3 Running a filter in the VM
+
+```
+mem[0 .. n-1] = the block (n <= 0x3C000); the rest zero
+R = the registers from the filter record (10.1)
+G = mem[0x3C000 .. 0x3E000)                      # global area
+G[0x00 .. 0x1B] = R0 .. R6 (u32 each); G[0x1C] = n (u32); G[0x24] = file offset of the block (u64)
+G[0x2C] = number of earlier runs of this program (u32)
+G[0x40 ..] = this program's saved global data if it has any, else the record's global data; then its static data
+R6 = file offset of the block (low 32 bits)
+run
+out_len = G[0x1C] & 0x3FFFF; out_start = G[0x20] & 0x3FFFF
+if out_start + out_len > 0x40000: output nothing; else output mem[out_start .. out_start + out_len)
+if u32 G[0x30] > 0: save min(G[0x30], 0x2000 - 0x40) bytes of G[0x40 ..] as this program's saved global data
+```
+
+---
+
+## Appendix B. Test fixtures
+
+All in `tests/fixtures/rar/` (see its `README.md`). Oracles, one line per extracted file as
+`archive|entry|size|crc32`: `expected.txt` (libarchive 3.7.7's output, for the libarchive fixtures) and
+`expected-unrar.txt` (UnRAR 7.3.1's output, for the fixtures made for this project; first volume named for
+volume sets). Passwords: `pass` for the project's `rar4_*`/`rar5_*` encrypted fixtures, U+BE44 U+BC00 U+0020 U+BC88
+U+D638 for `*_enc_hangul` (encodings in 6.1.2 and 6.2.5), `password` for `rar5_encrypted_filenames.rar` and
+`rar5_encrypted.rar`'s `b.txt`; unknown for `rar4_encrypted.rar`, `rar_encryption_header.rar` and
+`rar5_encrypted.rar`'s `d.txt`.
+
+| Fixture | What it holds | Sections |
+|---|---|---|
+| `rar.rar` | RAR 4, Unix host, stored files, a symlink `testlink`, directories, `\` separators | 2.3-2.7 |
+| `rar_windows.rar` | RAR 4, Win32 host, stored files, directories | 2.3, 2.5 |
+| `rar_unicode.rar` | RAR 4 names with Shift-JIS narrow part + encoded UTF-16; one LZ-compressed file | 2.4, 9 |
+| `rar_noeof.rar` | RAR 4 without end-of-archive header | 2.6 |
+| `rar_subblock.rar` | RAR 4 NEWSUB `CMT` service header (compressed) before the file | 2.1, 2.3 |
+| `rar_compress_normal.rar` | RAR 2.9 LZ (METHOD 0x33) | 7, 9 |
+| `rar_compress_best.rar` | RAR 2.9 PPMd (METHOD 0x35) | 11 |
+| `rar_multi_lzss_blocks.rar` | RAR 2.9 LZ, many blocks and table changes, 20 MB output, 4 MiB dictionary | 9, 15 #2 |
+| `rar_ppmd_lzss_conversion.rar` | RAR 2.9 switching between PPMd and LZ blocks, 241 MB output | 9, 11, 15 #1-2 |
+| `rar_filter.rar` | RAR 2.9 with x86 filters (`bsdcat.exe`) | 10 |
+| `rar_invalid1.rar`, `rar_ppmd_use_after_free.rar` | corrupt RAR 4 (fuzzing); must fail cleanly | 14 |
+| `rar4_enc_data.rar` | RAR 4, data encrypted (`-p`), LZ, Unicode name with UTF-8 narrow part | 6.1.1, 6.1.2, 2.4 |
+| `rar4_enc_headers.rar` | RAR 4, headers encrypted (`-hp`) | 6.1.3 |
+| `rar4_enc_solid.rar` | RAR 4 solid, encrypted | 6.1.2, 7.5 |
+| `rar4_enc_stored.rar` | RAR 4 stored, encrypted (padding beyond the unpacked size) | 6.1.2 |
+| `rar4_enc_hangul.rar` | RAR 4 encrypted with a Hangul password | 6.1.1 |
+| `rar4_encrypted.rar` | libarchive's: two of four files encrypted, password unknown | 6.1 (detection) |
+| `rar_encryption_header.rar` | libarchive's: encrypted headers, password unknown | 6.1.3 (detection) |
+| `rar4_vol.part01..03.rar` | RAR 4 volumes, new naming, files split across volumes | 4 |
+| `rar4_oldvol.rar`, `.r00`, `.r01` | RAR 4 volumes, old naming | 4.1 |
+| `rar4_vol_enc.part01..03.rar` | RAR 4 volumes, solid, encrypted headers and data, one CBC chain across parts | 4.2, 6.1.3, 7.5 |
+| `rar5_stored.rar` | RAR 5, stored file | 3 |
+| `rar5_compressed.rar` | RAR 5, compressed file | 12 |
+| `rar5_multiple_files.rar` | RAR 5, four compressed files | 12 |
+| `rar5_multiple_files_solid.rar`, `rar5_solid.rar` | RAR 5 solid | 12.4, 7.5 |
+| `rar5_win32.rar` | RAR 5, Windows host, FILETIME time records | 3.6, 3.7 |
+| `rar5_fileattr.rar` | RAR 5, Windows attributes (read-only, hidden, system, directories) | 3.7 |
+| `rar5_blake2.rar` | RAR 5 with a BLAKE2sp hash record instead of a CRC | 5.3 |
+| `rar5_arm.rar` | RAR 5, ARM executable (ARM filter) | 12.5 |
+| `rar5_multiarchive_solid.part01..04.rar` | RAR 5 solid volume set; one file split over four volumes; blocks straddle volumes | 4.2, 12 |
+| `rar5_vol.part01..03.rar` | RAR 5 volumes | 4 |
+| `rar5_vol_enc.part01..03.rar` | RAR 5 volumes, solid, encrypted headers and data | 4, 6.2.4 |
+| `rar5_enc_data.rar` | RAR 5 encrypted data with MAC'd CRCs | 6.2.3, 6.2.5 |
+| `rar5_enc_headers.rar` | RAR 5 encrypted headers | 3.3, 6.2.4 |
+| `rar5_enc_solid.rar` | RAR 5 solid, encrypted | 6.2.3, 12.4 |
+| `rar5_enc_stored.rar` | RAR 5 stored, encrypted | 6.2.3 |
+| `rar5_enc_hangul.rar` | RAR 5 encrypted with a Hangul password | 6.2.1 |
+| `rar5_encrypted.rar` | libarchive's: two of four files encrypted (one with `password`) | 6.2 |
+| `rar5_encrypted_filenames.rar` | libarchive's: encrypted headers, password `password` | 6.2.4 |
+| `rar5_leftshift1.rar`, `rar5_readtables_overflow.rar`, `rar5_truncated_huff.rar` | corrupt RAR 5 (fuzzing); must fail cleanly | 14 |
+
+Not covered by any fixture: SFX archives; RAR 2.0 compressed data (LZ and audio); RAR 3 Itanium, RGB, Audio and
+Delta filters (not confirmed) and non-standard VM programs; filter records inside PPMd; RAR 5 Delta filter (not
+confirmed); RAR 7 (version 1) data; RAR 4 large-file (flag 0x0100) headers; RAR 4 old-style comments; RAR 5
+unknown unpacked size; BLAKE2sp combined with MAC; RAR 5 redirection (link) records.
