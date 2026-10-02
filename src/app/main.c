@@ -10515,7 +10515,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     }
     app->source_dir = rubraview_path_dirname(archive_path);
     if (app->source.needs_codec) {
-        osd_say(app, U8("this CBR's pages are compressed or encrypted: RAR decoding is not in this version yet"));
+        osd_say(app, U8("this CBR could not be read: no RAR decoder is registered"));
         return false;
     }
     if (app->source.needs_password) {

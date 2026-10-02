@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-02: D-73 RAR is read by the project's own decoder
+
+- Status: Accepted (owner 2026-10-01: "rar도 구현 바랍니다", plan `mit-archives`; the work of the `rar-spec` and `rar-decoder` clean rooms, collected 2026-10-02).
+- Decision: `src/core/rar.c` (the header reader) and `src/core/rarcodec/` (RAR 2.0, 2.9/3.x with PPMd and the six standard RAR 3 filters, 5.0 and 7.0; AES, SHA-1/256, HMAC, PBKDF2, BLAKE2sp) are MIT, written by a session that never saw UnRAR, from `docs/specs/rar-decompression.md`, which another session wrote from BSD-licensed sources (libarchive 3.7.7, rardecode) and RARLAB's technote. The codec is registered at start; `rar_codec.h` is version 2. The header reader written beside UnRAR (D-63, D-65) and its tests are replaced.
+- Consequences: CBR/RAR files that 0.0.26-0.0.29 read with UnRAR's code are read again, with no UnRAR code anywhere (D-70). RAR 1.5 compression waits for `rar15-blackbox` (D-72); a non-standard RAR 3 filter program is "not supported". The 4.5 GB fixtures are tested with `RUBRAVIEW_RAR_BIG_TESTS=1`.
+
 ## 2026-10-02: D-72 RAR 1.55 decoded from a black-box clean room; no general RAR 3 VM
 
 - Status: Accepted (owner 2026-10-02, confirmed directly: "구현해보려 합니다. 맞습니다."). Supersedes D-71.
