@@ -1,7 +1,9 @@
 /* RAR 1.5 decompression (unpack version 15). MIT licence (see LICENSE).
    Written from docs/specs/rar15.md (rar15-blackbox clean room); the section
    numbers in the comments are that document's. Bit order: docs/specs/
-   rar-decompression.md, Conventions (most significant bit first). */
+   rar-decompression.md, Conventions (most significant bit first).
+   Streaming input and output (rar15_unpack_stream) added by the rar-decoder
+   session, 2026-10-02; the decoding itself is unchanged. */
 #include "unpack15.h"
 
 #include <stdbool.h>
@@ -10,6 +12,8 @@
 
 #define WIN_SIZE 0x10000u
 #define WIN_MASK 0xFFFFu
+#define IN_SIZE 0x10000u
+#define OUT_SIZE 0x10000u
 
 /* --- 4.1 code tables: shortest length, then codes per length ------------- */
 
@@ -92,13 +96,23 @@ struct rar15_unpacker {
     uint32_t flags;
     int flagcnt;
 
-    /* per call */
-    const uint8_t *in;
-    size_t in_size;
+    /* per call: input pulled through a buffer, output pushed in pieces */
+    rar15_read_fn read;
+    void *read_ctx;
+    uint8_t inbuf[IN_SIZE];
+    uint64_t in_base;          /* stream offset of inbuf[0] */
+    size_t in_len;
+    bool in_eof;
+    uint64_t in_total;         /* bytes the stream had, once in_eof */
+    uint64_t max_overrun;      /* bits allowed past the end */
     uint64_t bitpos;
     int64_t left;
-    uint8_t *out;
+    rar15_write_fn write;
+    void *write_ctx;
+    uint8_t outbuf[OUT_SIZE];
+    size_t out_fill;
     uint64_t out_size, out_done;
+    int status;
 };
 
 static void regroup(order_table *o) {
@@ -156,13 +170,32 @@ static void reset_state(rar15_unpacker *u) {
 
 /* --- 3 bit input ---------------------------------------------------------- */
 
-static uint32_t peek16(const rar15_unpacker *u) {
+/* Makes the stream's bytes [at, at + 3) available, as far as they exist. */
+static void fill_input(rar15_unpacker *u, uint64_t at) {
+    while (!u->in_eof && at + 3 > u->in_base + u->in_len) {
+        size_t keep = at > u->in_base ? (size_t)(u->in_base + u->in_len - at) : u->in_len;
+        if (at > u->in_base + u->in_len) keep = 0;
+        if (keep > 0 && at > u->in_base) memmove(u->inbuf, u->inbuf + (at - u->in_base), keep);
+        if (at > u->in_base) u->in_base = at;
+        u->in_len = keep;
+        size_t got = u->read(u->read_ctx, u->inbuf + u->in_len, IN_SIZE - u->in_len);
+        if (got == 0) {
+            u->in_eof = true;
+            u->in_total = u->in_base + u->in_len;
+        }
+        u->in_len += got;
+    }
+}
+
+static uint32_t peek16(rar15_unpacker *u) {
     uint64_t byte = u->bitpos >> 3;
+    fill_input(u, byte);
     uint32_t v = 0;
     for (int k = 0; k < 3; k++) {
         v <<= 8;
-        if (byte + (uint64_t)k < u->in_size)
-            v |= u->in[byte + (uint64_t)k];
+        uint64_t at = byte + (uint64_t)k;
+        if (at >= u->in_base && at < u->in_base + u->in_len)
+            v |= u->inbuf[at - u->in_base];
     }
     return (v >> (8 - (u->bitpos & 7))) & 0xFFFFu;
 }
@@ -195,11 +228,21 @@ static uint32_t decode(rar15_unpacker *u, int table) {
 
 /* --- 11 output ------------------------------------------------------------ */
 
+static void flush_output(rar15_unpacker *u) {
+    if (u->out_fill > 0 && u->status == RAR15_OK && !u->write(u->write_ctx, u->outbuf, u->out_fill))
+        u->status = RAR15_STOPPED;
+    u->out_fill = 0;
+}
+
 static void emit(rar15_unpacker *u, uint8_t c) {
     u->window[u->pos] = c;
     u->pos = (u->pos + 1) & WIN_MASK;
-    if (u->out_done < u->out_size)
-        u->out[u->out_done++] = c;
+    if (u->out_done < u->out_size) {
+        u->outbuf[u->out_fill++] = c;
+        u->out_done++;
+        if (u->out_fill == OUT_SIZE)
+            flush_output(u);
+    }
 }
 
 static void put(rar15_unpacker *u, uint8_t c) {
@@ -468,23 +511,60 @@ void rar15_free(rar15_unpacker *u) {
     free(u);
 }
 
-int rar15_unpack(rar15_unpacker *u, const uint8_t *packed, size_t packed_size,
-                 uint8_t *out, uint64_t unp_size, int solid) {
+int rar15_unpack_stream(rar15_unpacker *u, rar15_read_fn read, void *read_ctx, rar15_write_fn write,
+                        void *write_ctx, uint64_t unp_size, int solid, uint64_t max_overrun_bits) {
     if (!solid)
         reset_state(u);
-    u->in = packed;
-    u->in_size = packed_size;
+    u->read = read;
+    u->read_ctx = read_ctx;
+    u->in_base = 0;
+    u->in_len = 0;
+    u->in_eof = false;
+    u->in_total = 0;
+    u->max_overrun = max_overrun_bits;
     u->bitpos = 0;
-    u->out = out;
+    u->write = write;
+    u->write_ctx = write_ctx;
+    u->out_fill = 0;
     u->out_size = unp_size;
     u->out_done = 0;
+    u->status = RAR15_OK;
     u->stored = 0; /* 6.3 */
-    u->left = (int64_t)unp_size - 1;
+    u->left = unp_size > (uint64_t)INT64_MAX ? -1 : (int64_t)unp_size - 1;
     if (u->left >= 0) {
         u->flags = read_flags(u);
         u->flagcnt = 8;
     }
-    while (u->left >= 0)
+    while (u->left >= 0 && u->status == RAR15_OK) {
         decode_token(u);
-    return RAR15_OK;
+        if (u->in_eof && u->max_overrun != UINT64_MAX && u->bitpos > u->in_total * 8 + u->max_overrun)
+            u->status = RAR15_OVERRUN;
+    }
+    flush_output(u);
+    return u->status;
+}
+
+/* rar15_unpack on memory */
+typedef struct mem_io { const uint8_t *in; size_t in_size, in_pos; uint8_t *out; size_t out_pos; } mem_io;
+
+static size_t mem_read(void *ctx, uint8_t *buffer, size_t capacity) {
+    mem_io *m = ctx;
+    size_t n = m->in_size - m->in_pos < capacity ? m->in_size - m->in_pos : capacity;
+    if (n)
+        memcpy(buffer, m->in + m->in_pos, n);
+    m->in_pos += n;
+    return n;
+}
+
+static int mem_write(void *ctx, const uint8_t *data, size_t size) {
+    mem_io *m = ctx;
+    memcpy(m->out + m->out_pos, data, size);
+    m->out_pos += size;
+    return 1;
+}
+
+int rar15_unpack(rar15_unpacker *u, const uint8_t *packed, size_t packed_size,
+                 uint8_t *out, uint64_t unp_size, int solid) {
+    mem_io m = { packed, packed ? packed_size : 0, 0, out, 0 };
+    return rar15_unpack_stream(u, mem_read, &m, mem_write, &m, unp_size, solid, UINT64_MAX);
 }

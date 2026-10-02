@@ -8,6 +8,7 @@
 
 #include "rc_internal.h"
 #include "Ppmd7.h"
+#include "unpack15.h"
 
 /* ---- spec 15: the readings chosen where the sources disagree; each can be flipped here ---- */
 
@@ -126,6 +127,9 @@ typedef struct rc_unpack {
     bool alive;
 
     rc_bits_t bits;
+
+    /* RAR 1.5 (unpack15.c, from docs/specs/rar15.md): its own 64 KiB window and state */
+    rar15_unpacker *v15;
 
     /* RAR 2.0 (unpack20.c) */
     struct {
