@@ -241,6 +241,7 @@ bool rc_flush(rc_unpack_t *u, bool all) {
         if (limit > u->flushed) {
             emit_window(u, u->flushed, limit);
             u->flushed = limit;
+            if (u->fcount > 0 && u->flushed == u->filters[0].start) continue;   /* the filter may be ready */
         }
         return !u->stopped;
     }
