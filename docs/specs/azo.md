@@ -14,9 +14,9 @@ should refuse it.
 ## 2026-10-02 round 3 result (authoritative)
 
 The authoritative decoding rules are now
-[the round-3 decoding model](../cleanroom/azo-2026-10-02-round3/decoding-model.md) and its
-[reference decoder](../cleanroom/azo-2026-10-02-round3/reference_decoder.py); the evidence summary is
-[the round-3 README](../cleanroom/azo-2026-10-02-round3/README.md). Where the text below disagrees with them,
+[the round-3 decoding model](azo-decoding-model.md) and its reference decoder
+(`docs/cleanroom/azo-2026-10-02-round3/reference_decoder.py`, kept with the evidence summary in the project's
+working files, not published). Where the text below disagrees with them,
 they win. The reference decoder reproduces all 18809 retained pairs byte for byte with EGG CRC (18764
 compressed AZO, 45 stored/empty controls), including six inputs compressed after the model was frozen.
 
