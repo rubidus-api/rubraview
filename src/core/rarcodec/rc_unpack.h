@@ -190,6 +190,10 @@ static inline bool rc_file_done(const rc_unpack_t *u) { return u->file_end != UI
 
 void rc_run_filter(const rc_filter_t *f, uint8_t *data, uint8_t *tmp, size_t n);   /* filters.c; result in data */
 
+/* Spec 9.3's bases and extra bits (unpack.c). */
+extern const uint8_t rc_lbase[28], rc_lbits[28], rc_dbits[60], rc_sdbase[8], rc_sdbits[8];
+extern const uint32_t rc_dbase[60];
+
 /* The algorithms: one file each, the state in `u` set up by unpack.c. */
 rubraview_rar_unpack_status_t rc_unpack20(rc_unpack_t *u, bool solid, uint64_t dest);
 rubraview_rar_unpack_status_t rc_unpack29(rc_unpack_t *u, bool solid, bool drain);
