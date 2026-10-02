@@ -17,20 +17,6 @@ typedef rubraview_rar_unpack_status_t status_t;
 #define LDC 17
 #define RC 28
 
-/* Spec 9.3. */
-static const uint8_t LBASE[28] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224 };
-static const uint8_t LBITS[28] = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5 };
-static const uint32_t DBASE[60] = {
-    0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072,
-    4096, 6144, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608,
-    262144, 327680, 393216, 458752, 524288, 589824, 655360, 720896, 786432, 851968, 917504, 983040,
-    1048576, 1310720, 1572864, 1835008, 2097152, 2359296, 2621440, 2883584, 3145728, 3407872, 3670016, 3932160 };
-static const uint8_t DBITS[60] = {
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14,
-    15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18 };
-static const uint8_t SDBASE[8] = { 0, 4, 8, 16, 32, 64, 128, 192 };
-static const uint8_t SDBITS[8] = { 2, 2, 3, 4, 5, 6, 6, 6 };
-
 /* ---- PPMd glue (spec 11) ---- */
 
 static void *ppm_alloc(ISzAllocPtr p, size_t size) { (void)p; return malloc(size); }
@@ -305,21 +291,21 @@ static status_t lz_run(rc_unpack_t *u, bool drain, run_t *how) {
             u->v29.D[0] = d;
             int l = rc_huff_decode(&u->v29.rc, b);
             if (l < 0) return S_BAD;
-            len = LBASE[l] + 2 + rc_get(b, LBITS[l]);
+            len = rc_lbase[l] + 2 + rc_get(b, rc_lbits[l]);
             u->v29.L = len;
         } else if (s < 271) {
             unsigned j = (unsigned)s - 263;
-            d = SDBASE[j] + 1 + rc_get(b, SDBITS[j]);
+            d = rc_sdbase[j] + 1 + rc_get(b, rc_sdbits[j]);
             push(u, d);
             len = 2;
             u->v29.L = len;
         } else {
             unsigned j = (unsigned)s - 271;
-            len = LBASE[j] + 3 + rc_get(b, LBITS[j]);
+            len = rc_lbase[j] + 3 + rc_get(b, rc_lbits[j]);
             int k = rc_huff_decode(&u->v29.dc, b);
             if (k < 0) return S_BAD;
-            d = DBASE[k] + 1;
-            unsigned bits = DBITS[k];
+            d = rc_dbase[k] + 1;
+            unsigned bits = rc_dbits[k];
             if (bits >= 4) {
                 if (bits > 4) d += rc_get(b, bits - 4) << 4;
                 if (u->v29.low_repeat > 0) {
