@@ -547,6 +547,15 @@ u8str_t rubraview_alz_volume_path(proven_arena_t *arena, u8str_t first_path, uns
     return (u8str_t){ .ptr = out, .len = first_path.len };
 }
 
+int32_t rubraview_alz_volume_number(const uint8_t *data, size_t size) {
+    if (!data || size < 8 || !rubraview_alz_is_alz(data, size)) return -1;
+    return (int32_t)le16(data + 6);
+}
+
+bool rubraview_alz_volume_is_last(const uint8_t *data, size_t size) {
+    return data && size >= 4 && data[size - 4] == 'C' && data[size - 3] == 'L' && data[size - 2] == 'Z' && data[size - 1] == 0x02;
+}
+
 void rubraview_alz_close(rubraview_alz_archive_t *archive) {
     if (!archive) return;
     alz_state_t *s = (alz_state_t*)archive->state;
