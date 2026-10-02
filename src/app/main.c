@@ -38,6 +38,7 @@
 #include <time.h>
 
 #include "rubraview/number.h"
+#include "rubraview/rarcodec.h"
 #include "rubraview/subbox.h"
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
@@ -11968,6 +11969,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        opened from it must read as an empty folder, not stop the viewer
        behind Windows' "There is no disk in the drive" box. */
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
+
+    /* CBR pages are decoded by the project's own RAR codec (MIT, written
+       from docs/specs/rar-decompression.md; D-70), set once before any
+       archive is read. */
+    rubraview_rar_set_codec(rubraview_rarcodec());
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;
