@@ -150,7 +150,7 @@ typedef struct rc_unpack {
         bool need_header, ppm_block, tables_ok;
         /* PPMd */
         CPpmd7 ppmd;
-        bool ppmd_alloc;
+        bool ppmd_constructed, ppmd_alloc, ppmd_ready;
         uint32_t ppmd_mem;
         int esc;
         bool ppm_error;
