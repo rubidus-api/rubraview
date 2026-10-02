@@ -387,8 +387,7 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
-- **RAR archives compressed by RAR 1.5** (made in 1994-1996): their pages
-  are not read yet; a decoder is being worked out. RAR files that carry a filter program of their own
+- RAR files that carry a filter program of their own
   (not one of RAR's six standard filters) are not read, by design.
 - **Selecting or pasting in the rename box.** It takes typing — Korean
   and other IMEs included — and Backspace, but no selection, arrow keys or

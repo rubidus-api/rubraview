@@ -4,7 +4,7 @@
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. CBR/RAR 만화(RAR 2.0~7.0, 솔리드, 분할, 암호)는 이 프로젝트 자체의 RAR 디코더(MIT, UnRAR 코드 없음)로 읽습니다. RAR 1.5 로 압축된 파일은 아직 읽지 못합니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. CBR/RAR 만화(RAR 1.5~7.0, 솔리드, 분할, 암호)는 이 프로젝트 자체의 RAR 디코더(MIT, UnRAR 코드 없음)로 읽습니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
