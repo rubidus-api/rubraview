@@ -175,7 +175,13 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
-## 2026-10-01: D-70 No UnRAR code in the program
+## 2026-10-02: D-71 RAR 1.5 compression is not supported
+
+- Status: Accepted (owner 2026-10-02: "지원 안 함으로 확정", asked whether RAR 1.5 decoding should be specified from The Unarchiver's LGPL code, worked out from DOS RAR 1.5x output alone, or left out).
+- Decision: files compressed with RAR 1.5's algorithm (unpack version 15, archives made by RAR 1.5x in 1994-1996) are not decoded; the RAR reader lists them and says the method is not supported. No permissively licensed, independently written description or decoder of that algorithm was found: the known ones are UnRAR, code derived from it, 7-Zip's (under the unRAR restriction) and The Unarchiver's (LGPL).
+- Consequences: the clean-room RAR decoder covers RAR 2.0, 2.9/3.x, 5.0 and 7.0 compression. The old RAR programs downloaded for test data are kept with the owner's Windows packages, outside the repository.
+
+No UnRAR code in the program
 
 - Status: Accepted (owner 2026-10-01: "vendor/unrar_proprietary/ 이 자료는 ai-share/archive 밑으로 옮겨주세요. 우리는 unrar 안쓸거니까요"); supersedes D-66's module and D-63's use of UnRAR.
 - Decision:
