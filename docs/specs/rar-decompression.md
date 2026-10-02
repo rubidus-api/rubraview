@@ -27,7 +27,8 @@ of the sources, which matter when they disagree or only one speaks:
   data, the Itanium filter, PPMd-embedded filters or non-standard RAR 3 VM programs. Those parts come from RD alone.
 - LA5 does not decrypt; RD does. LA5 checks BLAKE2sp; RD does not.
 - RAR 1.5 compression (unpack version 15) and the pre-RAR-3 ciphers are in neither source and are **out of
-  scope**: report such entries as unsupported.
+  scope**: report such entries as unsupported. RAR 1.5 is not covered by this specification; the owner (2026-10-02) has it worked out separately, by black-box
+  analysis in a clean room of its own (`docs/specs/rar15.md`, task `rar15-blackbox`).
 
 Section 15 lists every point where the sources disagree or only one source speaks, with the fixture that
 decides it. Facts checked against the fixtures in `tests/fixtures/rar/` during this session (header layouts, the
@@ -1203,7 +1204,7 @@ its length. LA4 combines both in one 40-bit "fingerprint" `crc | length << 32`.
 | RGB | 0x1C2C5DC8 | 149 | R[0] = width (bytes per row), R[1] = position of the red byte (0..2) |
 | Audio | 0xBC85E701 | 216 | R[0] = channels |
 
-Other programs: run the VM (Appendix A) or report unsupported (LA4 does the latter).
+Other programs: report the file as not supported (LA4 does the same; owner's decision, Appendix A).
 
 ### 10.4 Standard filter algorithms
 
@@ -1638,11 +1639,14 @@ Single-source items (one source only; no fixture unless stated):
 
 ---
 
-## Appendix A. The RAR 3 virtual machine (optional)
+## Appendix A. The RAR 3 virtual machine (reference only; not implemented)
 
 Source: RD only: `vm.go` (`execute`, the instruction functions, `decodeArg`, `fixJumpOp`, `readCommands`),
 `filters.go` (`getV3Filter`, `vmFilter.execute`). LA4 rejects programs that are not one of the standard filters.
-No fixture uses a non-standard program. A decoder may omit this appendix and report such filters as unsupported.
+No fixture uses a non-standard program. Owner's decision (2026-10-02): the general VM is **not implemented**, for
+security (it would run programs carried by the archive) and because RARLAB's programs only write the six standard
+filters (10.3). A filter whose program is not one of those six makes the file "not supported". This appendix stays
+for reference only.
 
 ### A.1 Program format
 
