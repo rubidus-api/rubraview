@@ -30,6 +30,7 @@ An ALZ archive is a sequence of records, each opening with a 4-byte signature:
 | `42 4C 5A 01` ("BLZ" 01) | 0x015A4C42 | local file header (one per file or folder), followed by its data |
 | `43 4C 5A 01` ("CLZ" 01) | 0x015A4C43 | central directory record |
 | `43 4C 5A 02` ("CLZ" 02) | 0x025A4C43 | end of central directory — the last record |
+| `43 4C 5A 03` ("CLZ" 03) | 0x035A4C43 | end of a volume tail, in split archives (§2) |
 
 Read records one after another until the end record or the end of the data. Any other signature means the
 archive is damaged from there on; what was listed before it can still be read (unalz's behaviour: "files whose
@@ -71,13 +72,14 @@ If `w` is not 0, these follow:
 | `w` | compressed size `c` (unsigned, little-endian, `w` bytes) |
 | `w` | uncompressed size `u` (same) |
 
-Entries with `w = 0` (folders, empty files) have no method, CRC or sizes; treat as 0.
+Entries with `w = 0` (folders, empty files) have no method, CRC or sizes; treat as 0. ALZip never encrypts an
+empty file, even in an encrypted archive: its descriptor is 00, with no encryption header (observed, 2026-10-01).
 
 Then:
 
 | Size | Field |
 |---|---|
-| `n` | the name — bytes in the code page of the machine that made the archive (in practice CP949, Korean); `\` separates folders. No flag marks UTF-8. Names longer than 255 bytes should be refused or cut. |
+| `n` | the name — bytes in the code page of the machine that made the archive (in practice CP949, Korean); `/` separates folders in every ALZip version observed (4.9 to 12.37), though `\` should be accepted too. No flag marks UTF-8. Names longer than 255 bytes should be refused or cut. |
 | 12 | only if encrypted: the encryption header (§4.1) |
 | `c` | the file's data (encrypted if the descriptor says so). `c` does **not** count the 12-byte encryption header. |
 
@@ -88,10 +90,11 @@ The next record's signature follows the data directly.
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 4 | *unknown* (observed 0) |
-| 4 | 4 | *unknown* (perhaps a CRC) |
-| 8 | 4 | *unknown* |
+| 4 | 4 | *unknown*: 0, except in ALZip 4.9's split archives, where it is non-zero and not the CRC-32 of the volume |
 
-Skip 12 bytes. It carries no file list: the local headers are the list.
+Skip **8** bytes (corrected 2026-10-01: an earlier version of this spec said 12; every archive ALZip 4.9 to 12.37
+wrote, and EggDotNet's `defaults.alz`, has 8, then `"CLZ" 02`). It carries no file list: the local headers are the
+list. A reader that ends the listing at the first `"CLZ" 01` or `"CLZ" 02` does not depend on this size.
 
 ### 1.4 End of central directory (after "CLZ" 02)
 
@@ -111,7 +114,16 @@ The volumes join into one logical byte stream, the archive described in §1:
 So volume `i` contributes its bytes `[h_i, size_i − t_i)`, with `h_0 = 0`, `h_i = 8` otherwise, and `t_i = 16`
 except `t_last = 0`. Records and file data may cross from one volume into the next anywhere.
 
-(The contents of the 8- and 16-byte pieces are not described by the source; they are skipped.)
+The pieces, as ALZip writes them (observed 2026-10-01; the source does not describe them):
+
+| Piece | Bytes |
+|---|---|
+| volume header (8) | `"ALZ" 01`, then `0a 00`, then the volume number as 16 bits little-endian (1 for `.a00`) |
+| volume tail (16) | `"CLZ" 01`, 8 bytes (as in §1.3), `"CLZ" 03` |
+
+So a `.alz` that ends in `"CLZ" 02` is whole, and a `.a00` beside it is not one of its volumes; a volume whose
+header names another number ends the set. A reader may use this to check volumes found by name, and should
+still accept a header that is not `"ALZ" 01` (skipping its 8 bytes).
 
 ## 3. Compression
 
@@ -186,7 +198,9 @@ decrypt(c):  p = c ^ stream_byte();  update(p);  return p
 `crc32_byte(k, b) = table[(k ^ b) & 0xFF] ^ (k >> 8)` with the standard reflected CRC-32 table
 (polynomial 0xEDB88320).
 
-The password's bytes are those typed, in the archive maker's code page (CP949 for Korean passwords).
+The password's bytes are those typed, in the archive maker's code page: ALZip stores a Korean password as CP949
+bytes (confirmed 2026-10-01 with a two-syllable Hangul password, which opens with its CP949 bytes and not with its UTF-8 ones). A reader
+whose password box gives Unicode tries the password in UTF-8, then in the chosen code page, CP949 and the system's.
 
 For each encrypted file: initialise the keys from the password, decrypt the 12-byte encryption header
 (§1.2), then go on decrypting the `c` data bytes with the same running keys, then decompress.
