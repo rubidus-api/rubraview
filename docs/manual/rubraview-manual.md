@@ -63,14 +63,16 @@ Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
 place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
-`.cb7`, `.7z`, `.cbr` and `.rar` all open, and nothing is ever unpacked to
+`.cb7`, `.7z`, `.cbr`, `.rar` and `.alz` all open, and nothing is ever unpacked to
 your disk — for now a CBR / RAR only when its pages are stored uncompressed
 (see "What is not there yet"). A solid archive (7z or RAR) reads a far page by unpacking the
 pages before it first, with its progress on screen. A password-protected
 RAR asks for its password (it is shown as dots, and forgotten when the
 viewer closes; one that worked is tried first on the next locked book). A
 RAR split into volumes (`x.part1.rar`, `x.part2.rar`, ... or `x.rar`,
-`x.r00`, ...) opens as one book from whichever volume you open.
+`x.r00`, ...) opens as one book from whichever volume you open. An ALZ
+asks for its password the same way, and a split one (`x.alz`, `x.a00`,
+`x.a01`, ...) opens as one book from its `.alz`.
 
 When the names inside an archive come out garbled — made on a Japanese,
 Chinese or Taiwanese computer — press `Shift+N` to read them again in the

@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/archive.c src/core/archive_write.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/rar.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/rar.c src/core/alz.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # miniz is third-party and does not build clean under this project's
 # -Werror -pedantic settings, so it is compiled separately with warnings
 # off. It is still instrumented by the sanitisers on the host build:
@@ -34,6 +34,15 @@ MINIZ_OBJ_WIN = build/miniz-win.o
 # the SDK starting threads of its own.
 LZMA_DEFINES = -DZ7_ST -DZ7_PPMD_SUPPORT
 LZMA_INCLUDE = -Ivendor/lzma
+# bzip2 1.0.8's decoder (bzip2 licence, BSD-style), its stream framing changed
+# to ALZ's cut-down one (docs/specs/alz-format.md §3.2; every change marked in
+# vendor/bzip2). Only src/core/alz.c uses it. Same treatment as the others:
+# warnings off, sanitisers on, because it decodes untrusted input.
+BZIP2_DEFINES = -DBZ_NO_STDIO -DBZ_EXPORT
+BZIP2_INCLUDE = -Ivendor/bzip2
+BZIP2_SRCS = vendor/bzip2/bzlib.c vendor/bzip2/decompress.c vendor/bzip2/huffman.c vendor/bzip2/crctable.c vendor/bzip2/randtable.c
+BZIP2_OBJS = $(patsubst vendor/bzip2/%.c,build/bzip2/%.o,$(BZIP2_SRCS))
+BZIP2_OBJS_WIN = $(patsubst vendor/bzip2/%.c,build/bzip2-win/%.o,$(BZIP2_SRCS))
 LZMA_SRCS = $(wildcard vendor/lzma/*.c)
 LZMA_OBJS = $(patsubst vendor/lzma/%.c,build/lzma/%.o,$(LZMA_SRCS))
 LZMA_OBJS_WIN = $(patsubst vendor/lzma/%.c,build/lzma-win/%.o,$(LZMA_SRCS))
@@ -122,7 +131,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_rar build/tests/test_archive_write build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_rar build/tests/test_alz build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
 .PHONY: all test check clean win64 package mfprobe
 
@@ -142,6 +151,10 @@ build/lzma/%.o: vendor/lzma/%.c
 	@mkdir -p build/lzma
 	$(CC) -std=c11 -O2 -w $(LZMA_DEFINES) $(LZMA_INCLUDE) -g -fsanitize=address,undefined -fno-sanitize=alignment -c $< -o $@
 
+build/bzip2/%.o: vendor/bzip2/%.c
+	@mkdir -p build/bzip2
+	$(CC) -std=c11 -O2 -w $(BZIP2_DEFINES) $(BZIP2_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
+
 build/libjpeg/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg
 	$(CC) -std=gnu11 -O2 -w $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
@@ -154,9 +167,9 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(BZIP2_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(BZIP2_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -180,6 +193,10 @@ build/lzma-win/%.o: vendor/lzma/%.c
 	@mkdir -p build/lzma-win
 	$(MINGW_CC) -std=c11 -O2 -w $(LZMA_DEFINES) $(LZMA_INCLUDE) -c $< -o $@
 
+build/bzip2-win/%.o: vendor/bzip2/%.c
+	@mkdir -p build/bzip2-win
+	$(MINGW_CC) -std=c11 -O2 -w $(BZIP2_DEFINES) $(BZIP2_INCLUDE) -c $< -o $@
+
 build/libjpeg-win/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg-win
 	$(MINGW_CC) -std=gnu11 -O2 -w $(JPEG_INCLUDE) -c $< -o $@
@@ -199,13 +216,13 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/ru
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
-win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(BZIP2_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
-		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(JPEG_INCLUDE) \
+		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(BZIP2_INCLUDE) $(JPEG_INCLUDE) \
 		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
-		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(SRCS_PROVEN_NUM) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
+		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(SRCS_PROVEN_NUM) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(BZIP2_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"

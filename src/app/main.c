@@ -135,7 +135,7 @@ static double g_gutter = 8.0;
 #define GUTTER g_gutter
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
 #define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
@@ -8474,12 +8474,22 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_bytes(packed, sizeof(packed), z->compressed_size);
                 rubraview_info_addf(a, &info, "In the archive", "%s, %s", how, packed);
             }
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ && ref->entry_index < app->source.archivealz.entry_count) {
+                const rubraview_alz_entry_t *z = &app->source.archivealz.entries[ref->entry_index];
+                const char *how = z->method == RUBRAVIEW_ALZ_METHOD_STORED ? "stored"
+                                : z->method == RUBRAVIEW_ALZ_METHOD_DEFLATE ? "deflate"
+                                : z->method == RUBRAVIEW_ALZ_METHOD_BZIP2 ? "bzip2" : "other";
+                char packed[96];
+                rubraview_info_bytes(packed, sizeof(packed), z->packed_size);
+                rubraview_info_addf(a, &info, "In the archive", "%s, %s", how, packed);
+            }
             rubraview_info_heading(a, &info, "Archive");
             rubraview_info_add(a, &info, "Name", rubraview_path_basename(app->source.archive_path));
             rubraview_info_add(a, &info, "Folder", rubraview_path_dirname(app->source.archive_path));
             rubraview_info_add(a, &info, "Kind", app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z ? U8("7z (CB7)")
                                                : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR
                                                      ? (app->source.archiverar.rar5 ? U8("RAR 5 (CBR)") : U8("RAR 4 (CBR)"))
+                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ ? U8("ALZ")
                                                      : U8("ZIP (CBZ)"));
             if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.solid_archive)
                 rubraview_info_add(a, &info, "Solid", U8("yes: a far page decodes the ones before it"));
@@ -8490,10 +8500,21 @@ static void info_gather(app_state_t *app) {
                 for (size_t i = 0; i < ra->entry_count && !locked; ++i) locked = ra->entries[i].encrypted;
                 if (locked) rubraview_info_add(a, &info, "Encrypted", ra->headers_encrypted ? U8("yes, names too (AES)") : U8("yes (AES)"));
             }
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ) {
+                const rubraview_alz_archive_t *za = &app->source.archivealz;
+                if (za->volume_count > 1) rubraview_info_addf(a, &info, "Volumes", "%zu, read as one", za->volume_count);
+                bool locked = false;
+                for (size_t i = 0; i < za->entry_count && !locked; ++i) locked = za->entries[i].encrypted;
+                if (locked) rubraview_info_add(a, &info, "Encrypted", U8("yes (ZIP 2.0)"));
+            }
             uint64_t archive_bytes = app->archive_map.size;
             if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.volume_count > 1) {
                 archive_bytes = 0;   /* a set: all its volumes */
                 for (size_t v = 0; v < app->source.archiverar.volume_count; ++v) archive_bytes += app->source.archiverar.volumes[v].size;
+            }
+            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ && app->source.archivealz.volume_count > 1) {
+                archive_bytes = 0;   /* a set: all its volumes */
+                for (size_t v = 0; v < app->source.archivealz.volume_count; ++v) archive_bytes += app->source.archivealz.volumes[v].size;
             }
             rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
             rubraview_info_addf(a, &info, "Pages", "%zu", page_count(app));

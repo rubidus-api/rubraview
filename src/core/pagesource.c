@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz"
 #define COMICINFO_NAME "ComicInfo.xml"
 
 static bool name_is_comicinfo(u8str_t name) {
@@ -348,6 +348,121 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
     return source;
 }
 
+/* ALZ (docs/specs/alz-format.md): names are a code page's bytes, as a legacy
+   ZIP's are, with `\` between folders; every file is compressed on its own.
+   A split archive's later volumes (`x.a00`, ...) are mapped here, from the
+   `.alz` on, until one is missing (spec §2). */
+static size_t alz_map_set(proven_arena_t *arena, rubraview_page_source_t *source, u8str_t archive_path) {
+    size_t cap = 0;
+    for (unsigned number = 1;; ++number) {
+        u8str_t name = rubraview_alz_volume_path(arena, archive_path, number);
+        if (name.len == 0) break;
+        if (source->alz_map_count == cap) {
+            size_t grown = cap ? cap * 2 : 8;
+            rubraview_fs_mapping_t *maps = (rubraview_fs_mapping_t*)realloc(source->alz_maps, grown * sizeof(*maps));
+            if (!maps) break;
+            source->alz_maps = maps;
+            cap = grown;
+        }
+        rubraview_fs_mapping_t map = {0};
+        if (!rubraview_pal_fs_map(name, &map)) break;
+        if (map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&map); break; }
+        source->alz_maps[source->alz_map_count++] = map;
+    }
+    return source->alz_map_count;
+}
+
+static void alz_unmap_set(rubraview_page_source_t *source) {
+    for (size_t i = 0; i < source->alz_map_count; ++i) rubraview_pal_fs_unmap(&source->alz_maps[i]);
+    free(source->alz_maps);
+    source->alz_maps = NULL;
+    source->alz_map_count = 0;
+}
+
+/* An entry's name for display: decoded from its code page (§3.8.3), then
+   `\` made `/`. Only after decoding: in Shift-JIS 0x5C can be a trail byte. */
+static u8str_t alz_display_name(proven_arena_t *arena, u8str_t raw, rubraview_codepage_t override_choice) {
+    u8str_t name = raw;
+    uint32_t codepage = 0;
+    if (rubraview_archive_filename_plan(raw, false, override_choice, &codepage)) {
+        u8str_t decoded = rubraview_pal_transcode_codepage(arena, raw, codepage);
+        if (decoded.len > 0) name = decoded;
+    }
+    if (!memchr(name.ptr, '\\', name.len)) return name;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, name.len + 1);
+    if (!proven_is_ok(res.err)) return name;
+    char *out = (char*)res.value.ptr;
+    for (size_t i = 0; i < name.len; ++i) out[i] = name.ptr[i] == '\\' ? '/' : name.ptr[i];
+    out[name.len] = '\0';
+    return (u8str_t){ .ptr = out, .len = name.len };
+}
+
+static rubraview_page_source_t page_source_from_alz(proven_arena_t *arena,
+                                                    const uint8_t *data, size_t size,
+                                                    u8str_t archive_path,
+                                                    u8str_t extension_filter,
+                                                    rubraview_codepage_t override_choice,
+                                                    uint32_t max_entry_bytes,
+                                                    u8str_t password) {
+    rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ, .archive_path = archive_path };
+    size_t later = alz_map_set(arena, &source, archive_path);
+    proven_result_mem_mut_t vres = rubraview_arena_alloc_array(arena, later + 1, sizeof(rubraview_alz_volume_t));
+    if (!proven_is_ok(vres.err)) return source;
+    rubraview_alz_volume_t *vols = (rubraview_alz_volume_t*)(void*)vres.value.ptr;
+    vols[0] = (rubraview_alz_volume_t){ data, size };
+    for (size_t i = 0; i < later; ++i) vols[i + 1] = (rubraview_alz_volume_t){ source.alz_maps[i].data, (size_t)source.alz_maps[i].size };
+
+    rubraview_alz_result_t opened = rubraview_alz_open_volumes(arena, vols, later + 1);
+    if (opened.err != RUBRAVIEW_ALZ_OK) return source;
+    source.archivealz = opened.value;
+    if (rubraview_alz_needs_password(&source.archivealz)) {
+        /* Its pages are locked: the password is tried on them now. */
+        rubraview_alz_err_t tried = password.len > 0 ? rubraview_alz_set_password(&source.archivealz, password)
+                                                     : RUBRAVIEW_ALZ_ERR_ENCRYPTED;
+        if (tried != RUBRAVIEW_ALZ_OK) {
+            source.needs_password = true;
+            source.password_wrong = password.len > 0 && tried == RUBRAVIEW_ALZ_ERR_BAD_PASSWORD;
+            return source;
+        }
+    }
+
+    proven_result_mem_mut_t items_res =
+        rubraview_arena_alloc_array(arena, opened.value.entry_count + 1, sizeof(rubraview_sort_item_t));
+    if (!proven_is_ok(items_res.err)) return source;
+    rubraview_sort_item_t *items = (rubraview_sort_item_t*)(void*)items_res.value.ptr;
+
+    ref_buf_t buf = {0};
+    size_t kept = 0;
+    for (size_t i = 0; i < opened.value.entry_count; ++i) {
+        const rubraview_alz_entry_t *entry = &source.archivealz.entries[i];
+        if (entry->truncated) continue;                /* cut off: nothing whole to show */
+        u8str_t name = alz_display_name(arena, entry->name, override_choice);
+        if (name_is_comicinfo(name)) {
+            rubraview_alz_data_result_t xml = rubraview_alz_read_entry(arena, &source.archivealz, i, max_entry_bytes);
+            if (xml.err == RUBRAVIEW_ALZ_OK) {
+                source.has_comicinfo = true;
+                source.comicinfo_xml = xml.data;
+            }
+            continue;
+        }
+        if (!rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
+        items[kept++] = (rubraview_sort_item_t){
+            .name = name,
+            .mtime = 0, .ctime = 0,
+            .size_bytes = entry->size > UINT32_MAX ? UINT32_MAX : (uint32_t)entry->size,
+            .tag = (uint64_t)i,
+        };
+    }
+    rubraview_sort_items(items, kept, RUBRAVIEW_SORT_PATH_NATURAL, true, NULL);
+    for (size_t i = 0; i < kept; ++i) {
+        rubraview_page_ref_t ref = { .name = items[i].name, .path = { .ptr = "", .len = 0 }, .entry_index = (size_t)items[i].tag };
+        if (!ref_buf_push(arena, &buf, ref)) break;
+    }
+    source.pages = buf.data;
+    source.page_count = buf.count;
+    return source;
+}
+
 /* The extension is a hint, not evidence: a `.cbz` that is really a 7z
    happens often enough that the signature decides. */
 static bool looks_like_7z(const uint8_t *data, size_t size) {
@@ -381,6 +496,9 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     if (arena && data && size >= 7 && data[0] == 'R' && rubraview_rar_is_rar(data, size < 64 ? size : 64)) {
         return page_source_from_rar(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes, password);
     }
+    if (arena && rubraview_alz_is_alz(data, size)) {
+        return page_source_from_alz(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes, password);
+    }
     return page_source_from_zip(arena, data, size, archive_path, extension_filter,
                                 override_choice, max_entry_bytes);
 }
@@ -391,6 +509,10 @@ void rubraview_page_source_close(rubraview_page_source_t *source) {
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
         rubraview_rar_close(&source->archiverar);
         rar_unmap_set(source);
+    }
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ) {
+        rubraview_alz_close(&source->archivealz);
+        alz_unmap_set(source);
     }
     source->pages = NULL;
     source->page_count = 0;
@@ -416,6 +538,15 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
             arena, &source->archiverar, source->pages[index].entry_index, max_entry_bytes);
         if (rar.err != RUBRAVIEW_RAR_OK) return result;
         result.data = rar.data;
+        result.ok = true;
+        return result;
+    }
+
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ) {
+        rubraview_alz_data_result_t alz = rubraview_alz_read_entry(
+            arena, &source->archivealz, source->pages[index].entry_index, max_entry_bytes);
+        if (alz.err != RUBRAVIEW_ALZ_OK) return result;
+        result.data = alz.data;
         result.ok = true;
         return result;
     }
@@ -446,6 +577,9 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
     }
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
         return entry < source->archiverar.entry_count ? source->archiverar.entries[entry].size : 0;
+    }
+    if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ) {
+        return entry < source->archivealz.entry_count ? source->archivealz.entries[entry].size : 0;
     }
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE) {
         return entry < source->archive.entry_count ? source->archive.entries[entry].uncompressed_size : 0;
