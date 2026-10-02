@@ -1,684 +1,814 @@
+/*
+ * CBR / RAR archives: headers, volumes, passwords, and reading an entry through the codec
+ * (rar_codec.h). Written from docs/specs/rar-decompression.md (sections 1-6, 13, 14) in the
+ * rar-decoder clean-room session; CRC-32 as ISO 3309 describes it. MIT, like the rest of Rubraview.
+ */
 #include "rubraview/rar.h"
 #include "rubraview/rar_codec.h"
+
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * The headers, read for this project from the format as UnRAR's
- * arcread.cpp / headers.hpp / headers5.hpp and libarchive's
- * archive_read_support_format_rar*.c describe it (both read side by side,
- * 2026-09-30). Every length is checked against the mapped volume.
- *
- * Encrypted headers and volumes (2026-10-01), as UnRAR's arcread.cpp,
- * volume.cpp and rdwrfn.cpp handle them: RAR 4 puts an 8-byte salt before
- * each encrypted header, RAR 5 a 16-byte IV, and each header is padded to
- * the cipher's 16 bytes; a file's packed bytes are one CBC stream even when
- * they run on across volumes.
- */
+/* ------------------------------------------------------------------ */
+/* the registered codec */
 
-static const uint8_t SIG4[7] = { 'R', 'a', 'r', '!', 0x1A, 0x07, 0x00 };
-static const uint8_t SIG5[8] = { 'R', 'a', 'r', '!', 0x1A, 0x07, 0x01, 0x00 };
-#define SFX_SEARCH (1u << 20)
-
-/* The format's own sizes (RAR's headers say so; nothing of UnRAR's). */
-#define RAR_SALT30          8
-#define RAR_SALT50          16
-#define RAR_INITV           16
-#define RAR_PSWCHECK        8
-#define RAR_PSWCHECK_CSUM   4
-#define RAR_KDF50_LG2_MAX   24
-#define RAR_MAX_PASSWORD    127
-
-/* Decompression and decryption are a registered decoder's (rar_codec.h,
-   D-70); NULL until one is given. */
 static const rubraview_rar_codec_t *g_codec;
 
-void rubraview_rar_set_codec(const rubraview_rar_codec_t *codec) {
-    g_codec = codec && codec->version == RUBRAVIEW_RAR_CODEC_VERSION ? codec : NULL;
+void rubraview_rar_set_codec(const struct rubraview_rar_codec *codec) {
+    g_codec = (codec && codec->version == RUBRAVIEW_RAR_CODEC_VERSION) ? codec : NULL;
 }
 
-const rubraview_rar_codec_t *rubraview_rar_codec(void) { return g_codec; }
+const struct rubraview_rar_codec *rubraview_rar_codec(void) { return g_codec; }
 
-static void rar_wipe(void *p, size_t n) {
+/* ------------------------------------------------------------------ */
+/* small helpers */
+
+static uint32_t crc_table[256];
+static bool crc_ready;
+
+static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
+    if (!crc_ready) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; ++k) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
+            crc_table[i] = c;
+        }
+        crc_ready = true;
+    }
+    crc = ~crc;
+    while (n--) crc = (crc >> 8) ^ crc_table[(crc ^ *p++) & 0xFF];
+    return ~crc;
+}
+
+static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+static uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static void wipe(void *p, size_t n) {
     volatile uint8_t *v = (volatile uint8_t*)p;
     while (n--) *v++ = 0;
 }
-#define MAX_VOLUMES 4096u
-#define KEY_CACHE 8
 
-/* A key made from the password once and kept: PBKDF2 at RAR 5's 2^15
-   rounds, or RAR 3's 2^18 SHA-1 rounds, would be felt on every page. */
-typedef struct key_entry {
-    bool     used;
-    rubraview_rar_crypt_t crypt;
-    bool     salt_set;
-    uint8_t  lg2;
-    uint8_t  salt[16];
-    uint8_t  key[32], iv[16], hash_key[32], psw_check[8];
-} key_entry_t;
+static const uint8_t SIG4[7] = { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 };
+static const uint8_t SIG5[8] = { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 };
 
-typedef struct rar_state {
-    void    *unpack;        /* the codec's */
-    size_t next;            /* the entry a solid stream continues with; SIZE_MAX when none */
-    _Atomic bool cancel;
-    _Atomic uint64_t done, total;
-    /* the password, as RAR 5 hashes it (UTF-8) and as RAR 3 does (UTF-16LE) */
-    uint8_t  pwd8[RAR_MAX_PASSWORD * 4];
-    size_t   pwd8_len;
-    uint8_t  pwd16[RAR_MAX_PASSWORD * 2];
-    size_t   pwd16_len;
-    bool     has_password, password_ok;
-    key_entry_t keys[KEY_CACHE];
-    unsigned key_next;
-} rar_state_t;
-
-static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
-static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
-
-static uint32_t crc_table[256];
-static void crc_init(void) {
-    if (crc_table[1]) return;
-    for (uint32_t i = 0; i < 256; i++) {
-        uint32_t c = i;
-        for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-        crc_table[i] = c;
+/* Spec 1: the signature at any offset in the first MiB. Returns 4, 5 or 0. */
+static int find_signature(const uint8_t *data, size_t size, size_t *at) {
+    size_t limit = size < (1u << 20) ? size : (1u << 20);
+    for (size_t i = 0; i < limit && i + 7 <= size; ++i) {
+        if (data[i] != 0x52) continue;
+        if (i + 8 <= size && memcmp(data + i, SIG5, 8) == 0) { *at = i; return 5; }
+        if (memcmp(data + i, SIG4, 7) == 0) { *at = i; return 4; }
     }
-}
-static uint32_t crc_update(uint32_t crc, const uint8_t *p, size_t n) {
-    for (size_t i = 0; i < n; i++) crc = crc_table[(crc ^ p[i]) & 0xff] ^ (crc >> 8);
-    return crc;
-}
-
-static long find_signature(const uint8_t *data, size_t size, bool *rar5) {
-    size_t limit = size < SFX_SEARCH ? size : SFX_SEARCH;
-    for (size_t i = 0; i + 7 <= limit; ++i) {
-        if (data[i] != 'R' || memcmp(data + i, SIG4, 6) != 0) continue;
-        if (data[i + 6] == 0x00) { *rar5 = false; return (long)i; }
-        if (i + 8 <= size && memcmp(data + i, SIG5, 8) == 0) { *rar5 = true; return (long)i; }
-    }
-    return -1;
+    return 0;
 }
 
 bool rubraview_rar_is_rar(const uint8_t *data, size_t size) {
-    bool rar5 = false;
-    return data && find_signature(data, size, &rar5) >= 0;
+    size_t at;
+    return data && find_signature(data, size, &at) != 0;
 }
 
-/* ---- the password and its keys ---- */
+/* ------------------------------------------------------------------ */
+/* the archive's heap state */
 
-/* UTF-8 in, RAR's two forms out: at most 127 UTF-16 units, as RAR cuts it,
-   and those same characters again as UTF-8. */
-static void password_set(rar_state_t *st, u8str_t password) {
-    rar_wipe(st->pwd8, sizeof(st->pwd8));
-    rar_wipe(st->pwd16, sizeof(st->pwd16));
-    st->pwd8_len = st->pwd16_len = 0;
-    st->has_password = password.len > 0;
-    st->password_ok = false;
-    for (unsigned i = 0; i < KEY_CACHE; ++i) rar_wipe(&st->keys[i], sizeof(st->keys[i]));
-    const uint8_t *p = (const uint8_t*)password.ptr;
-    size_t i = 0, units = 0;
-    while (i < password.len) {
-        uint32_t cp = p[i];
-        size_t n = 1;
-        if (cp >= 0xF0 && i + 3 < password.len) { cp = (cp & 7) << 18 | (p[i + 1] & 0x3Fu) << 12 | (p[i + 2] & 0x3Fu) << 6 | (p[i + 3] & 0x3Fu); n = 4; }
-        else if (cp >= 0xE0 && i + 2 < password.len) { cp = (cp & 15) << 12 | (p[i + 1] & 0x3Fu) << 6 | (p[i + 2] & 0x3Fu); n = 3; }
-        else if (cp >= 0xC0 && i + 1 < password.len) { cp = (cp & 31) << 6 | (p[i + 1] & 0x3Fu); n = 2; }
-        size_t need = cp >= 0x10000 ? 2 : 1;
-        if (units + need > RAR_MAX_PASSWORD) break;
-        if (cp >= 0x10000) {
-            uint32_t v = cp - 0x10000, hi = 0xD800 + (v >> 10), lo = 0xDC00 + (v & 0x3FF);
-            st->pwd16[st->pwd16_len++] = (uint8_t)hi; st->pwd16[st->pwd16_len++] = (uint8_t)(hi >> 8);
-            st->pwd16[st->pwd16_len++] = (uint8_t)lo; st->pwd16[st->pwd16_len++] = (uint8_t)(lo >> 8);
-        } else {
-            st->pwd16[st->pwd16_len++] = (uint8_t)cp; st->pwd16[st->pwd16_len++] = (uint8_t)(cp >> 8);
-        }
-        memcpy(st->pwd8 + st->pwd8_len, p + i, n);
-        st->pwd8_len += n;
-        units += need;
-        i += n;
-    }
-}
+typedef struct key30 { uint8_t salt[8]; bool has_salt; uint8_t key[16], iv[16]; } key30_t;
+typedef struct key50 { uint8_t salt[16]; uint8_t lg2; uint8_t key[32], hash_key[32], check[8]; } key50_t;
 
-/* The key for a salt, from the cache or made now. NULL when RAR 5's rounds
-   are more than it allows. */
-static const key_entry_t *key_for(rar_state_t *st, rubraview_rar_crypt_t crypt, const uint8_t *salt, bool salt_set, uint8_t lg2) {
-    size_t salt_len = crypt == RUBRAVIEW_RAR_CRYPT_50 ? RAR_SALT50 : RAR_SALT30;
-    for (unsigned i = 0; i < KEY_CACHE; ++i) {
-        const key_entry_t *k = &st->keys[i];
-        if (k->used && k->crypt == crypt && k->salt_set == salt_set && k->lg2 == lg2 &&
-            (!salt_set || memcmp(k->salt, salt, salt_len) == 0)) return k;
-    }
-    if (!g_codec) return NULL;
-    key_entry_t *k = &st->keys[st->key_next++ % KEY_CACHE];
-    rar_wipe(k, sizeof(*k));
-    k->crypt = crypt;
-    k->salt_set = salt_set;
-    k->lg2 = lg2;
-    if (salt_set) memcpy(k->salt, salt, salt_len);
-    if (crypt == RUBRAVIEW_RAR_CRYPT_50) {
-        if (lg2 > RAR_KDF50_LG2_MAX || !g_codec->kdf50(st->pwd8, st->pwd8_len, salt, lg2, k->key, k->hash_key, k->psw_check)) return NULL;
-    } else {
-        g_codec->kdf30(st->pwd16, st->pwd16_len, salt_set ? salt : NULL, k->key, k->iv);
-    }
-    k->used = true;
-    return k;
-}
-
-/* ---- names ---- */
-
-static size_t utf8_put(uint8_t *out, uint32_t cp) {
-    if (cp < 0x80) { out[0] = (uint8_t)cp; return 1; }
-    if (cp < 0x800) { out[0] = (uint8_t)(0xC0 | cp >> 6); out[1] = (uint8_t)(0x80 | (cp & 0x3F)); return 2; }
-    if (cp >= 0xD800 && cp < 0xE000) cp = 0xFFFD;
-    if (cp < 0x10000) {
-        out[0] = (uint8_t)(0xE0 | cp >> 12); out[1] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F)); out[2] = (uint8_t)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    out[0] = (uint8_t)(0xF0 | cp >> 18); out[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
-    out[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F)); out[3] = (uint8_t)(0x80 | (cp & 0x3F));
-    return 4;
-}
-
-static u8str_t keep(proven_arena_t *arena, const uint8_t *bytes, size_t len) {
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
-    char *p = (char*)res.value.ptr;
-    memcpy(p, bytes, len);
-    p[len] = '\0';
-    for (size_t i = 0; i < len; ++i) if (p[i] == '\\') p[i] = '/';   /* one separator, as ZIP's */
-    return (u8str_t){ .ptr = p, .len = len };
-}
-
-/* RAR 4's Unicode names: the plain part, then a small code that says,
-   character by character, how to widen it (UnRAR's EncodeFileName::Decode). */
-static u8str_t decode_rar4_unicode(proven_arena_t *arena, const uint8_t *name, size_t name_size,
-                                   const uint8_t *enc, size_t enc_size) {
-    uint16_t wide[1024];
-    size_t dec = 0, pos = 0;
-    uint8_t high = pos < enc_size ? enc[pos++] : 0;
-    uint8_t flags = 0;
-    int flag_bits = 0;
-    while (pos < enc_size && dec < 1024) {
-        if (flag_bits == 0) { flags = enc[pos++]; flag_bits = 8; }
-        switch (flags >> 6) {
-            case 0:
-                if (pos >= enc_size) break;
-                wide[dec++] = enc[pos++];
-                break;
-            case 1:
-                if (pos >= enc_size) break;
-                wide[dec++] = (uint16_t)(enc[pos++] + (high << 8));
-                break;
-            case 2:
-                if (pos + 1 >= enc_size) break;
-                wide[dec++] = (uint16_t)(enc[pos] + (enc[pos + 1] << 8));
-                pos += 2;
-                break;
-            case 3: {
-                if (pos >= enc_size) break;
-                int length = enc[pos++];
-                if (length & 0x80) {
-                    if (pos >= enc_size) break;
-                    uint8_t correction = enc[pos++];
-                    for (length = (length & 0x7f) + 2; length > 0 && dec < name_size && dec < 1024; length--, dec++)
-                        wide[dec] = (uint16_t)(((name[dec] + correction) & 0xff) + (high << 8));
-                } else {
-                    for (length += 2; length > 0 && dec < name_size && dec < 1024; length--, dec++) wide[dec] = name[dec];
-                }
-                break;
-            }
-        }
-        flags = (uint8_t)(flags << 2);
-        flag_bits -= 2;
-    }
-    uint8_t out[4096];
-    size_t n = 0;
-    for (size_t i = 0; i < dec && n + 4 < sizeof(out); ++i) {
-        uint32_t cp = wide[i];
-        if (cp >= 0xD800 && cp < 0xDC00 && i + 1 < dec && wide[i + 1] >= 0xDC00 && wide[i + 1] < 0xE000) {
-            cp = 0x10000 + ((cp - 0xD800) << 10) + (wide[i + 1] - 0xDC00);
-            ++i;
-        }
-        n += utf8_put(out + n, cp);
-    }
-    return keep(arena, out, n);
-}
-
-/* ---- the entry list ---- */
-
-typedef struct list {
-    proven_arena_t *arena;
-    rubraview_rar_entry_t *items;
-    size_t count, cap;
-    rubraview_rar_piece_t *pieces;
-    size_t piece_count, piece_cap;
-    bool open_split;        /* the last entry's last piece said more follows */
-} list_t;
-
-static bool grow(proven_arena_t *arena, void **items, size_t *cap, size_t count, size_t size) {
-    if (count < *cap) return true;
-    size_t n = *cap ? *cap * 2 : 64;
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, n * size);
-    if (!proven_is_ok(res.err)) return false;
-    if (count) memcpy(res.value.ptr, *items, count * size);
-    *items = res.value.ptr;
-    *cap = n;
-    return true;
-}
-
-static bool list_push(list_t *l, const rubraview_rar_entry_t *e, rubraview_rar_piece_t piece) {
-    if (!grow(l->arena, (void**)&l->items, &l->cap, l->count, sizeof(rubraview_rar_entry_t))) return false;
-    if (!grow(l->arena, (void**)&l->pieces, &l->piece_cap, l->piece_count, sizeof(rubraview_rar_piece_t))) return false;
-    l->items[l->count] = *e;
-    l->items[l->count].first_piece = (uint32_t)l->piece_count;
-    l->items[l->count].piece_count = 1;
-    l->count++;
-    l->pieces[l->piece_count++] = piece;
-    return true;
-}
-
-/* A file that runs on from the previous volume: its piece goes to the entry
-   it continues, and the last piece's CRC is the whole file's. */
-static bool list_continue(list_t *l, u8str_t name, rubraview_rar_piece_t piece, uint32_t crc, bool more) {
-    if (l->count == 0 || !l->open_split) return true;           /* its start is in a volume not given: left out */
-    rubraview_rar_entry_t *e = &l->items[l->count - 1];
-    if (e->name.len != name.len || memcmp(e->name.ptr, name.ptr, name.len) != 0) return true;
-    if (e->first_piece + e->piece_count != l->piece_count) return true;
-    if (!grow(l->arena, (void**)&l->pieces, &l->piece_cap, l->piece_count, sizeof(rubraview_rar_piece_t))) return false;
-    l->pieces[l->piece_count++] = piece;
-    e->piece_count++;
-    e->packed_size += piece.size;
-    if (!more) { e->crc32 = crc; e->split = false; }
-    l->open_split = more;
-    return true;
-}
-
-/* ---- parsing ---- */
-
-typedef struct parse {
-    proven_arena_t *arena;
-    rubraview_rar_archive_t *a;
-    rar_state_t *st;
-    list_t *l;
-    uint32_t vol;
-    const uint8_t *d;       /* this volume */
-    size_t size;
-    bool more_volumes;      /* its end header said another follows */
-    /* encrypted headers */
-    bool hdr_enc;
-    bool hdr_checked;       /* a header has decrypted with a good CRC: the password is right */
-    rubraview_rar_crypt_t hdr_crypt;
-    uint8_t hdr_salt[16], hdr_lg2;
-} parse_t;
-
-/* One encrypted header, decrypted into the arena: `pre` bytes of salt (RAR
-   4) or IV (RAR 5) at `pos`, then the header padded to 16. `size_of` reads
-   the header's own length from its first 16 bytes. NULL when it does not
-   fit; *err says why when it is the password. */
-typedef size_t (*size_of_fn)(const uint8_t *first16);
-
-static const uint8_t *decrypt_header(parse_t *p, size_t pos, size_t pre, size_of_fn size_of, size_t *out_total,
-                                     size_t *out_head, rubraview_rar_err_t *err) {
-    *err = RUBRAVIEW_RAR_OK;
-    if (pos + pre + 16 > p->size) return NULL;
-    const key_entry_t *k = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50
-        ? key_for(p->st, RUBRAVIEW_RAR_CRYPT_50, p->hdr_salt, true, p->hdr_lg2)
-        : key_for(p->st, RUBRAVIEW_RAR_CRYPT_30, p->d + pos, true, 0);
-    if (!k) { *err = g_codec ? RUBRAVIEW_RAR_ERR_UNSUPPORTED : RUBRAVIEW_RAR_ERR_NO_CODEC; return NULL; }
-    const uint8_t *iv = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50 ? p->d + pos : k->iv;
-    unsigned bits = p->hdr_crypt == RUBRAVIEW_RAR_CRYPT_50 ? 256 : 128;
-    uint8_t first[16];
-    memcpy(first, p->d + pos + pre, 16);
-    void *aes = g_codec->aes_create(k->key, bits, iv);
-    if (!aes) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
-    g_codec->aes_decrypt(aes, first, 16);
-    g_codec->aes_destroy(aes);
-    size_t head = size_of(first);
-    size_t full = (head + 15) & ~(size_t)15;
-    if (head == 0 || full > p->size - pos - pre) {
-        *err = p->hdr_checked ? RUBRAVIEW_RAR_ERR_CORRUPT : RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-        return NULL;
-    }
-    proven_result_mem_mut_t res = proven_arena_alloc(p->arena, full);
-    if (!proven_is_ok(res.err)) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
-    uint8_t *buf = (uint8_t*)res.value.ptr;
-    memcpy(buf, p->d + pos + pre, full);
-    aes = g_codec->aes_create(k->key, bits, iv);
-    if (!aes) { *err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return NULL; }
-    g_codec->aes_decrypt(aes, buf, full);
-    g_codec->aes_destroy(aes);
-    *out_total = pre + full;
-    *out_head = head;
-    return buf;
-}
-
-static size_t rar4_size_of(const uint8_t *h) { return le16(h + 5) >= 7 ? le16(h + 5) : 0; }
-
-/* RAR 5's numbers: seven bits a byte, low first, the top bit saying more follow. */
-static bool vint(const uint8_t *p, size_t end, size_t *at, uint64_t *out) {
-    uint64_t v = 0;
-    for (int shift = 0; shift < 64 && *at < end; shift += 7) {
-        uint8_t b = p[(*at)++];
-        v |= (uint64_t)(b & 0x7f) << shift;
-        if (!(b & 0x80)) { *out = v; return true; }
-    }
-    return false;
-}
-
-static size_t rar5_size_of(const uint8_t *h) {
-    size_t at = 4;
-    uint64_t size = 0;
-    if (!vint(h, 7, &at, &size) || size == 0 || size > (1u << 21)) return 0;   /* 2 MB: RAR 5's largest header */
-    return at + (size_t)size;
-}
-
-static rubraview_rar_err_t read_rar4(parse_t *p, size_t pos) {
-    rubraview_rar_archive_t *a = p->a;
-    list_t *l = p->l;
-    size_t main_at = pos;
-    while (pos + 7 <= p->size) {
-        const uint8_t *h = p->d + pos;
-        size_t head_total = 0, head_size = 0;
-        if (p->hdr_enc && pos > main_at) {
-            if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
-            if (!p->st->has_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;
-            rubraview_rar_err_t err;
-            h = decrypt_header(p, pos, RAR_SALT30, rar4_size_of, &head_total, &head_size, &err);
-            if (!h) return err != RUBRAVIEW_RAR_OK ? err : (l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT);
-            /* The header's CRC is the password's test. */
-            if (((crc_update(0xFFFFFFFFu, h + 2, head_size - 2) ^ 0xFFFFFFFFu) & 0xFFFF) != le16(h))
-                return p->hdr_checked ? RUBRAVIEW_RAR_ERR_CORRUPT : RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-            p->hdr_checked = true;
-        } else {
-            head_size = le16(h + 5);
-            head_total = head_size;
-            if (head_size < 7 || pos + head_size > p->size) return l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT;
-        }
-        uint8_t type = h[2];
-        uint16_t flags = le16(h + 3);
-        uint64_t data_at = pos + head_total, next = data_at;
-        if (type == 0x73) {                                  /* main */
-            a->is_volume = (flags & 0x0001) != 0;
-            a->new_numbering = (flags & 0x0010) != 0;
-            a->solid_archive = (flags & 0x0008) != 0;
-            if (flags & 0x0080) { a->headers_encrypted = true; p->hdr_enc = true; p->hdr_crypt = RUBRAVIEW_RAR_CRYPT_30; }
-        } else if (type == 0x74 || type == 0x7a) {           /* file, service */
-            if (head_size < 32) return RUBRAVIEW_RAR_ERR_CORRUPT;
-            uint64_t pack = le32(h + 7), unp = le32(h + 11);
-            uint32_t crc = le32(h + 16);
-            uint8_t unp_ver = h[24], method = h[25];
-            uint16_t name_size = le16(h + 26);
-            size_t name_at = 32;
-            if (flags & 0x0100) {                            /* large */
-                if (head_size < 40) return RUBRAVIEW_RAR_ERR_CORRUPT;
-                pack |= (uint64_t)le32(h + 32) << 32;
-                unp |= (uint64_t)le32(h + 36) << 32;
-                name_at = 40;
-            }
-            if (name_at + name_size > head_size) return RUBRAVIEW_RAR_ERR_CORRUPT;
-            if (pack > p->size || data_at + pack > p->size) {
-                /* the last file cut short: what came before is still readable */
-                return l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT;
-            }
-            bool dir = (flags & 0x00e0) == 0x00e0 || (unp_ver < 20 && (le32(h + 28) & 0x10));
-            if (type == 0x74 && !dir) {
-                rubraview_rar_entry_t e = {0};
-                const uint8_t *name = h + name_at;
-                size_t plain = 0;
-                while (plain < name_size && name[plain]) plain++;
-                if ((flags & 0x0200) && plain + 1 < name_size) {
-                    e.name = decode_rar4_unicode(p->arena, name, plain, name + plain + 1, name_size - plain - 1);
-                } else {
-                    e.name = keep(p->arena, name, plain);
-                    /* plain ASCII is what it is; anything else is a code page's */
-                    for (size_t i = 0; i < plain; ++i) if (name[i] >= 0x80) { e.name_is_legacy = true; break; }
-                }
-                rubraview_rar_piece_t piece = { .volume = p->vol, .offset = data_at, .size = pack };
-                bool more = (flags & 0x0002) != 0;
-                if (flags & 0x0001) {                        /* runs on from the volume before */
-                    if (!list_continue(l, e.name, piece, crc, more)) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
-                } else {
-                    e.size = unp;
-                    e.packed_size = pack;
-                    e.data_offset = data_at;
-                    e.crc32 = crc;
-                    e.has_crc = true;
-                    e.method = method == 0x30 ? 0 : unp_ver;
-                    e.dict_size = (uint64_t)0x10000 << ((flags & 0x00e0) >> 5);
-                    e.solid = (flags & 0x0010) != 0;
-                    e.encrypted = (flags & 0x0004) != 0;
-                    e.split = more;
-                    if (e.encrypted) {
-                        e.crypt = unp_ver >= 29 ? RUBRAVIEW_RAR_CRYPT_30 : RUBRAVIEW_RAR_CRYPT_OLD;
-                        if ((flags & 0x0400) && name_at + name_size + RAR_SALT30 <= head_size) {
-                            e.salt_set = true;
-                            memcpy(e.salt, h + name_at + name_size, RAR_SALT30);
-                        }
-                    }
-                    if (!list_push(l, &e, piece)) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
-                    l->open_split = more;
-                }
-            }
-            next += pack;
-        } else if (type == 0x7b) {                           /* end of archive */
-            p->more_volumes = (flags & 0x0001) != 0;
-            break;
-        } else if (flags & 0x8000) {                         /* a long block: its data follows */
-            if (head_size < 11) return RUBRAVIEW_RAR_ERR_CORRUPT;
-            next += le32(h + 7);
-        }
-        if (next <= pos || next > p->size) break;
-        pos = (size_t)next;
-    }
-    return RUBRAVIEW_RAR_OK;
-}
-
-static rubraview_rar_err_t read_rar5(parse_t *p, size_t pos) {
-    rubraview_rar_archive_t *a = p->a;
-    list_t *l = p->l;
-    while (pos + 7 <= p->size) {
-        const uint8_t *h = p->d + pos;
-        size_t head_total = 0, head_size = 0;
-        if (p->hdr_enc) {
-            rubraview_rar_err_t err;
-            h = decrypt_header(p, pos, RAR_INITV, rar5_size_of, &head_total, &head_size, &err);
-            if (!h) return err != RUBRAVIEW_RAR_OK ? err : (l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT);
-            if ((crc_update(0xFFFFFFFFu, h + 4, head_size - 4) ^ 0xFFFFFFFFu) != le32(h))
-                return p->hdr_checked ? RUBRAVIEW_RAR_ERR_CORRUPT : RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-            p->hdr_checked = true;
-        } else {
-            size_t at = pos + 4;
-            uint64_t header_size = 0;
-            if (!vint(p->d, p->size, &at, &header_size) || header_size == 0 || header_size > p->size - at)
-                return l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT;
-            head_size = at - pos + (size_t)header_size;
-            head_total = head_size;
-        }
-        size_t at = 4, end = head_size;
-        uint64_t header_size = 0;
-        if (!vint(h, end, &at, &header_size)) return RUBRAVIEW_RAR_ERR_CORRUPT;
-        uint64_t type = 0, hflags = 0, extra = 0, data_size = 0;
-        if (!vint(h, end, &at, &type) || !vint(h, end, &at, &hflags)) return RUBRAVIEW_RAR_ERR_CORRUPT;
-        if ((hflags & 0x0001) && !vint(h, end, &at, &extra)) return RUBRAVIEW_RAR_ERR_CORRUPT;
-        if ((hflags & 0x0002) && !vint(h, end, &at, &data_size)) return RUBRAVIEW_RAR_ERR_CORRUPT;
-        if (extra > header_size) return RUBRAVIEW_RAR_ERR_CORRUPT;
-        uint64_t data_at = (uint64_t)pos + head_total;
-        if (data_size > p->size - data_at) return l->count ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_CORRUPT;
-        if (type == 4) {                                     /* the archive's encryption: the headers after it */
-            uint64_t version = 0, eflags = 0;
-            if (!vint(h, end, &at, &version) || !vint(h, end, &at, &eflags) || at + 1 + RAR_SALT50 > end)
-                return RUBRAVIEW_RAR_ERR_CORRUPT;
-            if (version != 0) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
-            a->headers_encrypted = true;
-            p->hdr_enc = true;
-            p->hdr_crypt = RUBRAVIEW_RAR_CRYPT_50;
-            p->hdr_lg2 = h[at++];
-            memcpy(p->hdr_salt, h + at, RAR_SALT50);
-            at += RAR_SALT50;
-            if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
-            if (!p->st->has_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;
-            if (p->hdr_lg2 > RAR_KDF50_LG2_MAX) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
-            const key_entry_t *k = key_for(p->st, RUBRAVIEW_RAR_CRYPT_50, p->hdr_salt, true, p->hdr_lg2);
-            if (!k) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
-            if ((eflags & 0x0001) && at + RAR_PSWCHECK + RAR_PSWCHECK_CSUM <= end) {
-                uint8_t digest[32];
-                g_codec->sha256(h + at, RAR_PSWCHECK, digest);
-                bool check_valid = memcmp(digest, h + at + RAR_PSWCHECK, RAR_PSWCHECK_CSUM) == 0;
-                if (check_valid && memcmp(k->psw_check, h + at, RAR_PSWCHECK) != 0) return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-            }
-        } else if (type == 1) {
-            uint64_t arc_flags = 0;
-            if (!vint(h, end, &at, &arc_flags)) return RUBRAVIEW_RAR_ERR_CORRUPT;
-            a->is_volume = (arc_flags & 0x0001) != 0;
-            a->new_numbering = true;
-            a->solid_archive = (arc_flags & 0x0004) != 0;
-        } else if (type == 2) {
-            uint64_t file_flags = 0, unp = 0, attrs = 0, comp = 0, host = 0, name_len = 0;
-            if (!vint(h, end, &at, &file_flags) || !vint(h, end, &at, &unp) || !vint(h, end, &at, &attrs))
-                return RUBRAVIEW_RAR_ERR_CORRUPT;
-            if (file_flags & 0x0002) at += 4;                /* mtime */
-            uint32_t crc = 0;
-            if (file_flags & 0x0004) {
-                if (at + 4 > end) return RUBRAVIEW_RAR_ERR_CORRUPT;
-                crc = le32(h + at);
-                at += 4;
-            }
-            if (!vint(h, end, &at, &comp) || !vint(h, end, &at, &host) || !vint(h, end, &at, &name_len) ||
-                name_len > end - at)
-                return RUBRAVIEW_RAR_ERR_CORRUPT;
-            const uint8_t *name = h + at;
-            at += (size_t)name_len;
-            rubraview_rar_entry_t e = {0};
-            size_t extra_end = end, extra_at = end - (size_t)extra;
-            while (extra && extra_at < extra_end) {          /* the file's extra records: only encryption matters here */
-                uint64_t rec_size = 0, rec_type = 0;
-                size_t rec = extra_at;
-                if (!vint(h, extra_end, &rec, &rec_size) || rec_size == 0 || rec_size > extra_end - rec) break;
-                size_t rec_end = rec + (size_t)rec_size;
-                if (vint(h, rec_end, &rec, &rec_type) && rec_type == 0x01) {
-                    e.encrypted = true;
-                    uint64_t version = 0, cflags = 0;
-                    if (vint(h, rec_end, &rec, &version) && vint(h, rec_end, &rec, &cflags) && version == 0 &&
-                        rec + 1 + RAR_SALT50 + RAR_INITV <= rec_end) {
-                        e.crypt = RUBRAVIEW_RAR_CRYPT_50;
-                        e.lg2_count = h[rec++];
-                        memcpy(e.salt, h + rec, RAR_SALT50); rec += RAR_SALT50;
-                        memcpy(e.iv, h + rec, RAR_INITV); rec += RAR_INITV;
-                        e.salt_set = true;
-                        e.hash_mac = (cflags & 0x0002) != 0;
-                        if (g_codec && (cflags & 0x0001) && rec + RAR_PSWCHECK + RAR_PSWCHECK_CSUM <= rec_end) {
-                            uint8_t digest[32];
-                            g_codec->sha256(h + rec, RAR_PSWCHECK, digest);
-                            if (memcmp(digest, h + rec + RAR_PSWCHECK, RAR_PSWCHECK_CSUM) == 0) {
-                                e.psw_check_set = true;
-                                memcpy(e.psw_check, h + rec, RAR_PSWCHECK);
-                            }
-                        }
-                    } else {
-                        e.crypt = RUBRAVIEW_RAR_CRYPT_OLD;   /* a version this reader does not know */
-                    }
-                }
-                extra_at = rec_end;
-            }
-            if (!(file_flags & 0x0001)) {                    /* not a folder */
-                e.name = keep(p->arena, name, (size_t)name_len);
-                rubraview_rar_piece_t piece = { .volume = p->vol, .offset = data_at, .size = data_size };
-                bool more = (hflags & 0x0010) != 0;
-                if (hflags & 0x0008) {                       /* runs on from the volume before */
-                    if (!list_continue(l, e.name, piece, crc, more)) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
-                } else {
-                    e.size = unp;
-                    e.packed_size = data_size;
-                    e.data_offset = data_at;
-                    e.crc32 = crc;
-                    e.has_crc = (file_flags & 0x0004) != 0;
-                    uint64_t ver = comp & 0x3f;
-                    unsigned method = (unsigned)((comp >> 7) & 7);
-                    e.method = method == 0 ? 0 : ver == 0 ? 50 : ver == 1 ? 70 : 9999;
-                    uint64_t dict = (uint64_t)0x20000 << ((comp >> 10) & (ver == 0 ? 0x0f : 0x1f));
-                    if (ver == 1) {
-                        dict += dict / 32 * ((comp >> 15) & 0x1f);
-                        if (comp & 0x00100000) e.method = method == 0 ? 0 : 50;
-                    }
-                    e.dict_size = dict;
-                    e.solid = (comp & 0x0040) != 0;
-                    e.split = more;
-                    if (!list_push(l, &e, piece)) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
-                    l->open_split = more;
-                }
-            }
-        } else if (type == 5) {
-            uint64_t end_flags = 0;
-            if (vint(h, end, &at, &end_flags)) p->more_volumes = (end_flags & 0x0001) != 0;
-            break;
-        }
-        uint64_t next = data_at + data_size;
-        if (next <= pos || next > p->size) break;
-        pos = (size_t)next;
-    }
-    return RUBRAVIEW_RAR_OK;
-}
-
-static rar_state_t *state_new(void) {
-    rar_state_t *st = (rar_state_t*)calloc(1, sizeof(rar_state_t));
-    if (st) st->next = SIZE_MAX;
-    return st;
-}
+typedef struct rar_state {
+    void *unpack;
+    size_t next;                   /* the entry a solid stream continues with; SIZE_MAX when none */
+    bool have_password;
+    uint8_t pwd8[512];  size_t pwd8_len;
+    uint8_t pwd16[256]; size_t pwd16_len;
+    key30_t k30[4]; size_t k30_count, k30_next;
+    key50_t k50[4]; size_t k50_count, k50_next;
+    atomic_bool cancel;
+    _Atomic uint64_t done, total;
+} rar_state_t;
 
 static void state_free(rar_state_t *st) {
     if (!st) return;
     if (st->unpack && g_codec) g_codec->unpack_destroy(st->unpack);
-    rar_wipe(st, sizeof(*st));      /* the password and the keys with it */
+    wipe(st, sizeof(*st));
     free(st);
+}
+
+/* Spec 6.1.1 / 6.2.1 / 14: the password as UTF-8 and as UTF-16LE, 128 characters at most. */
+static void state_set_password(rar_state_t *st, u8str_t pw) {
+    size_t i = 0, chars = 0, n8 = 0, n16 = 0;
+    const uint8_t *s = (const uint8_t*)pw.ptr;
+    while (i < pw.len && chars < 128) {
+        uint32_t cp = s[i];
+        size_t len = 1;
+        if (cp >= 0xF0 && i + 3 < pw.len) { cp = (cp & 7) << 18 | (s[i + 1] & 0x3Fu) << 12 | (s[i + 2] & 0x3Fu) << 6 | (s[i + 3] & 0x3Fu); len = 4; }
+        else if (cp >= 0xE0 && i + 2 < pw.len) { cp = (cp & 15) << 12 | (s[i + 1] & 0x3Fu) << 6 | (s[i + 2] & 0x3Fu); len = 3; }
+        else if (cp >= 0xC0 && i + 1 < pw.len) { cp = (cp & 31) << 6 | (s[i + 1] & 0x3Fu); len = 2; }
+        if (n8 + len > sizeof(st->pwd8) || n16 + 4 > sizeof(st->pwd16)) break;
+        memcpy(st->pwd8 + n8, s + i, len);
+        n8 += len;
+        if (cp >= 0x10000) {
+            uint32_t v = cp - 0x10000, hi = 0xD800 + (v >> 10), lo = 0xDC00 + (v & 0x3FF);
+            st->pwd16[n16++] = (uint8_t)hi; st->pwd16[n16++] = (uint8_t)(hi >> 8);
+            st->pwd16[n16++] = (uint8_t)lo; st->pwd16[n16++] = (uint8_t)(lo >> 8);
+        } else {
+            st->pwd16[n16++] = (uint8_t)cp; st->pwd16[n16++] = (uint8_t)(cp >> 8);
+        }
+        i += len;
+        chars++;
+    }
+    st->pwd8_len = n8;
+    st->pwd16_len = n16;
+    st->have_password = true;
+    st->k30_count = st->k50_count = 0;
+}
+
+static void state_clear_password(rar_state_t *st) {
+    wipe(st->pwd8, sizeof(st->pwd8));
+    wipe(st->pwd16, sizeof(st->pwd16));
+    wipe(st->k30, sizeof(st->k30));
+    wipe(st->k50, sizeof(st->k50));
+    st->pwd8_len = st->pwd16_len = 0;
+    st->k30_count = st->k50_count = 0;
+    st->have_password = false;
+}
+
+/* Key derivations are slow by design: the last four are kept (spec 6.1.1). */
+static const key30_t *keys30(rar_state_t *st, const uint8_t *salt) {
+    for (size_t i = 0; i < st->k30_count; ++i) {
+        const key30_t *k = &st->k30[i];
+        if (k->has_salt == (salt != NULL) && (!salt || memcmp(k->salt, salt, 8) == 0)) return k;
+    }
+    key30_t *k = &st->k30[st->k30_next];
+    st->k30_next = (st->k30_next + 1) % 4;
+    if (st->k30_count < 4) st->k30_count++;
+    k->has_salt = salt != NULL;
+    if (salt) memcpy(k->salt, salt, 8);
+    g_codec->kdf30(st->pwd16, st->pwd16_len, salt, k->key, k->iv);
+    return k;
+}
+
+static const key50_t *keys50(rar_state_t *st, const uint8_t salt[16], uint8_t lg2) {
+    for (size_t i = 0; i < st->k50_count; ++i) {
+        const key50_t *k = &st->k50[i];
+        if (k->lg2 == lg2 && memcmp(k->salt, salt, 16) == 0) return k;
+    }
+    key50_t tmp;
+    memcpy(tmp.salt, salt, 16);
+    tmp.lg2 = lg2;
+    if (!g_codec->kdf50(st->pwd8, st->pwd8_len, salt, lg2, tmp.key, tmp.hash_key, tmp.check)) return NULL;
+    key50_t *k = &st->k50[st->k50_next];
+    st->k50_next = (st->k50_next + 1) % 4;
+    if (st->k50_count < 4) st->k50_count++;
+    *k = tmp;
+    wipe(&tmp, sizeof(tmp));
+    return k;
+}
+
+/* ------------------------------------------------------------------ */
+/* growable arrays while parsing */
+
+typedef struct vec { void *data; size_t count, cap, elem; } vec_t;
+
+static void *vec_push(vec_t *v) {
+    if (v->count == v->cap) {
+        size_t cap = v->cap ? v->cap * 2 : 16;
+        void *d = realloc(v->data, cap * v->elem);
+        if (!d) return NULL;
+        v->data = d;
+        v->cap = cap;
+    }
+    void *slot = (uint8_t*)v->data + v->count * v->elem;
+    memset(slot, 0, v->elem);
+    v->count++;
+    return slot;
+}
+
+/* ------------------------------------------------------------------ */
+/* parsing */
+
+typedef struct parser {
+    proven_arena_t *arena;
+    rar_state_t *st;
+    const rubraview_rar_volume_t *vols;
+    size_t vol_count;
+    vec_t entries, pieces;
+    long pending;                  /* the entry whose next part is due, or -1 */
+    bool rar5, solid, headers_encrypted, is_volume, new_numbering;
+    bool password_given;
+    uint8_t hkey[32];              /* RAR 5 header key of the current volume */
+    uint8_t *buf; size_t cap;      /* one header, decrypted */
+} parser_t;
+
+typedef enum perr { P_OK = 0, P_END, P_CORRUPT, P_ENCRYPTED, P_BAD_PASSWORD, P_NO_CODEC, P_MEMORY } perr_t;
+
+static bool reserve(parser_t *p, size_t n) {
+    if (n <= p->cap) return true;
+    size_t cap = p->cap ? p->cap : 256;
+    while (cap < n) cap *= 2;
+    uint8_t *b = (uint8_t*)realloc(p->buf, cap);
+    if (!b) return false;
+    p->buf = b;
+    p->cap = cap;
+    return true;
+}
+
+static u8str_t arena_copy(proven_arena_t *arena, const void *src, size_t n) {
+    proven_result_mem_mut_t r = proven_arena_alloc(arena, n + 1);
+    if (!proven_is_ok(r.err)) return (u8str_t){ .ptr = NULL, .len = 0 };
+    if (n) memcpy(r.value.ptr, src, n);
+    r.value.ptr[n] = 0;
+    return (u8str_t){ .ptr = (const char*)r.value.ptr, .len = n };
+}
+
+static size_t utf8_put(uint8_t *o, uint32_t cp) {
+    if (cp < 0x80) { o[0] = (uint8_t)cp; return 1; }
+    if (cp < 0x800) { o[0] = (uint8_t)(0xC0 | cp >> 6); o[1] = (uint8_t)(0x80 | (cp & 0x3F)); return 2; }
+    if (cp < 0x10000) {
+        o[0] = (uint8_t)(0xE0 | cp >> 12); o[1] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F)); o[2] = (uint8_t)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    o[0] = (uint8_t)(0xF0 | cp >> 18); o[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
+    o[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F)); o[3] = (uint8_t)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* Spec 2.4: the narrow name, then the encoded UTF-16 one; to UTF-8 with '/' separators. */
+static u8str_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len, bool unicode, bool *legacy) {
+    *legacy = false;
+    const uint8_t *zero = unicode ? memchr(name, 0, len) : NULL;
+    uint8_t *tmp = NULL;
+    size_t out_len = 0;
+    if (zero) {
+        size_t nlen = (size_t)(zero - name);
+        const uint8_t *enc = zero + 1;
+        size_t elen = len - nlen - 1;
+        uint16_t *u = (uint16_t*)malloc((nlen + 1) * sizeof(uint16_t));
+        tmp = (uint8_t*)malloc(nlen * 4 + 4);
+        if (!u || !tmp) { free(u); free(tmp); return (u8str_t){ .ptr = NULL, .len = 0 }; }
+        size_t n = 0;
+        if (elen > 0) {
+            uint8_t high = enc[0], flags = 0;
+            size_t pos = 1;
+            int flagbits = 0;
+            while (pos < elen && n < nlen) {
+                if (flagbits == 0) {
+                    flags = enc[pos++];
+                    flagbits = 8;
+                    if (pos == elen) break;
+                }
+                flagbits -= 2;
+                int mode = (flags >> flagbits) & 3;
+                if (mode == 0) u[n++] = enc[pos++];
+                else if (mode == 1) u[n++] = (uint16_t)(high << 8 | enc[pos++]);
+                else if (mode == 2) {
+                    if (pos + 2 > elen) break;
+                    u[n++] = (uint16_t)(enc[pos] | enc[pos + 1] << 8);
+                    pos += 2;
+                } else {
+                    uint8_t l = enc[pos++];
+                    size_t count = (size_t)(l & 0x7F) + 2;
+                    if (l & 0x80) {
+                        if (pos >= elen) break;
+                        uint8_t corr = enc[pos++];
+                        for (size_t k = 0; k < count && n < nlen; ++k) u[n] = (uint16_t)(high << 8 | ((name[n] + corr) & 0xFF)), n++;
+                    } else {
+                        for (size_t k = 0; k < count && n < nlen; ++k) u[n] = name[n], n++;
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < n; ++i) {
+            uint32_t cp = u[i];
+            if (cp >= 0xD800 && cp < 0xDC00 && i + 1 < n && u[i + 1] >= 0xDC00 && u[i + 1] < 0xE000) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (u[i + 1] - 0xDC00u);
+                i++;
+            } else if (cp >= 0xD800 && cp < 0xE000) cp = 0xFFFD;
+            out_len += utf8_put(tmp + out_len, cp);
+        }
+        free(u);
+        if (n == 0) { memcpy(tmp, name, nlen); out_len = nlen; }   /* nothing encoded: the narrow name */
+    } else {
+        tmp = (uint8_t*)malloc(len + 1);
+        if (!tmp) return (u8str_t){ .ptr = NULL, .len = 0 };
+        memcpy(tmp, name, len);
+        out_len = len;
+        *legacy = !unicode;
+    }
+    for (size_t i = 0; i < out_len; ++i) if (tmp[i] == '\\') tmp[i] = '/';
+    u8str_t r = arena_copy(arena, tmp, out_len);
+    free(tmp);
+    return r;
+}
+
+static rubraview_rar_entry_t *entry_at(parser_t *p, long i) {
+    return &((rubraview_rar_entry_t*)p->entries.data)[i];
+}
+
+static bool add_piece(parser_t *p, rubraview_rar_entry_t *e, uint32_t vol, uint64_t off, uint64_t size) {
+    rubraview_rar_piece_t *pc = (rubraview_rar_piece_t*)vec_push(&p->pieces);
+    if (!pc) return false;
+    pc->volume = vol;
+    pc->offset = off;
+    pc->size = size;
+    e->piece_count++;
+    return true;
+}
+
+/* A file part, after its header is parsed. `cont` is a part that continues one before it. */
+typedef struct part {
+    u8str_t name;                  /* raw, for matching parts */
+    bool before, after;
+    uint64_t data_off, data_size;
+    uint32_t crc; bool has_crc;
+    uint8_t hash[32]; bool has_hash;
+    uint8_t mac_salt[16]; uint8_t mac_lg2; bool mac_set;
+} part_t;
+
+static perr_t take_part(parser_t *p, uint32_t vol, const part_t *pt, const rubraview_rar_entry_t *proto, bool skip) {
+    if (skip) return P_OK;   /* directories and links */
+    if (pt->before) {
+        if (p->pending < 0) return P_OK;   /* the rest of a file that began in a volume not opened */
+        rubraview_rar_entry_t *e = entry_at(p, p->pending);
+        if (!rubraview_u8_eq(e->name, pt->name)) {
+            e->split = true;               /* "mismatch of file parts" (spec 4.2) */
+            p->pending = -1;
+            return P_OK;
+        }
+        if (!add_piece(p, e, vol, pt->data_off, pt->data_size)) return P_MEMORY;
+        e->packed_size += pt->data_size;
+        if (!pt->after) {
+            e->crc32 = pt->crc; e->has_crc = pt->has_crc;
+            memcpy(e->hash, pt->hash, 32); e->has_hash = pt->has_hash;
+            if (pt->mac_set) { memcpy(e->mac_salt, pt->mac_salt, 16); e->mac_lg2 = pt->mac_lg2; }
+            p->pending = -1;
+        }
+        return P_OK;
+    }
+    if (p->pending >= 0) { entry_at(p, p->pending)->split = true; p->pending = -1; }
+    rubraview_rar_entry_t *e = (rubraview_rar_entry_t*)vec_push(&p->entries);
+    if (!e) return P_MEMORY;
+    *e = *proto;
+    e->first_piece = (uint32_t)p->pieces.count;
+    e->piece_count = 0;
+    e->data_offset = pt->data_off;
+    e->packed_size = pt->data_size;
+    if (!add_piece(p, e, vol, pt->data_off, pt->data_size)) return P_MEMORY;
+    if (pt->after) p->pending = (long)(p->entries.count - 1);
+    else {
+        e->crc32 = pt->crc; e->has_crc = pt->has_crc;
+        memcpy(e->hash, pt->hash, 32); e->has_hash = pt->has_hash;
+    }
+    return P_OK;
+}
+
+/* ---- RAR 4 (spec 2) ---- */
+
+static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
+    const uint8_t *d = p->vols[vol].data;
+    size_t size = p->vols[vol].size;
+    size_t pos = start + 7;
+    bool enc = false, first_block = true;
+    *more = false;
+    for (;;) {
+        size_t hsize, block_end;
+        const uint8_t *h;
+        if (enc) {
+            if (size - pos < 8 + 16 || pos > size) return P_END;
+            if (!g_codec) return P_NO_CODEC;
+            const uint8_t *salt = d + pos;
+            const key30_t *k = keys30(p->st, salt);
+            if (!reserve(p, 16)) return P_MEMORY;
+            memcpy(p->buf, d + pos + 8, 16);
+            void *aes = g_codec->aes_create(k->key, 128, k->iv);
+            if (!aes) return P_MEMORY;
+            g_codec->aes_decrypt(aes, p->buf, 16);
+            hsize = rd16(p->buf + 5);
+            size_t n = (hsize + 15) & ~(size_t)15;
+            if (hsize < 7 || n > size - pos - 8) {
+                g_codec->aes_destroy(aes);
+                return first_block ? P_BAD_PASSWORD : P_CORRUPT;
+            }
+            if (!reserve(p, n)) { g_codec->aes_destroy(aes); return P_MEMORY; }
+            memcpy(p->buf + 16, d + pos + 8 + 16, n - 16);
+            g_codec->aes_decrypt(aes, p->buf + 16, n - 16);
+            g_codec->aes_destroy(aes);
+            h = p->buf;
+            block_end = pos + 8 + n;
+            if ((crc32_update(0, h + 2, hsize - 2) & 0xFFFF) != rd16(h)) return first_block ? P_BAD_PASSWORD : P_CORRUPT;
+        } else {
+            if (pos > size || size - pos < 7) return P_END;
+            h = d + pos;
+            hsize = rd16(h + 5);
+            if (hsize < 7 || hsize > size - pos) return P_CORRUPT;
+            block_end = pos + hsize;
+        }
+        first_block = false;
+        uint8_t type = h[2];
+        uint16_t flags = rd16(h + 3);
+        uint64_t add = 0;
+        if ((flags & 0x8000) && hsize >= 11) add = rd32(h + 7);
+        if (!enc) {
+            uint32_t crc;
+            if (type == 0x75) crc = crc32_update(0, h + 2, hsize < 13 ? hsize - 2 : 11);
+            else if (type == 0x73 && (flags & 0x0002) && hsize > 13) crc = crc32_update(0, h + 2, 11);
+            else crc = crc32_update(0, h + 2, hsize - 2);
+            if ((crc & 0xFFFF) != rd16(h)) {
+                bool ok = false;   /* spec 15 #18: a skippable block may count its data too */
+                if (type != 0x73 && type != 0x74 && type != 0x7A && (flags & 0x8000) && add <= size - block_end) {
+                    crc = crc32_update(crc32_update(0, h + 2, hsize - 2), d + block_end, (size_t)add);
+                    ok = (crc & 0xFFFF) == rd16(h);
+                }
+                if (!ok) return P_CORRUPT;
+            }
+        }
+        switch (type) {
+        case 0x73:
+            p->is_volume = flags & 0x0001;
+            p->solid = flags & 0x0008;
+            p->new_numbering = flags & 0x0010;
+            if (flags & 0x0080) {
+                p->headers_encrypted = true;
+                if (!p->password_given) return P_ENCRYPTED;
+                enc = true;
+                first_block = true;
+            }
+            if (!enc && (flags & 0x0002) && hsize > 13) block_end = pos + 13;   /* spec 2.2: old comment follows */
+            pos = block_end;
+            continue;
+        case 0x74: case 0x7A: {
+            if (hsize < 32) return P_CORRUPT;
+            uint64_t pack = rd32(h + 7), unp = rd32(h + 11);
+            uint8_t host = h[15];
+            uint32_t fcrc = rd32(h + 16);
+            uint8_t unp_ver = h[24], method = h[25];
+            size_t name_size = rd16(h + 26);
+            uint32_t attr = rd32(h + 28);
+            size_t at = 32;
+            bool unknown = false;
+            if (flags & 0x0100) {
+                if (hsize < 40) return P_CORRUPT;
+                pack |= (uint64_t)rd32(h + 32) << 32;
+                uint32_t hi = rd32(h + 36);
+                unknown = unp == 0xFFFFFFFFu && hi == 0xFFFFFFFFu;
+                unp |= (uint64_t)hi << 32;
+                at = 40;
+                if (!unknown && (unp >> 63)) return P_CORRUPT;
+                if (pack >> 63) return P_CORRUPT;
+            } else unknown = unp == 0xFFFFFFFFu;
+            if (name_size > hsize - at) return P_CORRUPT;
+            const uint8_t *name = h + at;
+            at += name_size;
+            const uint8_t *salt = NULL;
+            if (flags & 0x0400) {
+                if (hsize - at < 8) return P_CORRUPT;
+                salt = h + at;
+                at += 8;
+            }
+            if (pack > size - block_end) {
+                if (type == 0x7A) return P_END;
+                pack = size - block_end;   /* cut short: reading it will say so */
+            }
+            uint64_t data_off = block_end;
+            pos = block_end + (size_t)pack;
+            if (type == 0x7A) continue;
+            bool dir = (flags & 0x00E0) == 0x00E0;
+            bool link = host >= 3 && host <= 5 && (attr & 0xF000) == 0xA000;
+            size_t nlen = name_size;
+            if (flags & 0x0800) {   /* ";n" version suffix */
+                for (size_t i = nlen; i-- > 0;) {
+                    if (name[i] == ';') { nlen = i; break; }
+                    if (name[i] < '0' || name[i] > '9') break;
+                }
+            }
+            rubraview_rar_entry_t proto = {0};
+            bool legacy = false;
+            proto.name = rar4_name(p->arena, name, nlen, flags & 0x0200, &legacy);
+            if (!proto.name.ptr) return P_MEMORY;
+            part_t pt = {0};
+            pt.name = proto.name;
+            pt.before = flags & 0x0001;
+            pt.after = flags & 0x0002;
+            pt.data_off = data_off;
+            pt.data_size = pack;
+            pt.crc = fcrc;
+            pt.has_crc = true;
+            proto.name_is_legacy = legacy;
+            proto.size = unknown ? RUBRAVIEW_RAR_SIZE_UNKNOWN : unp;
+            proto.method = method == 0x30 ? 0 : unp_ver;
+            proto.dict_size = (uint64_t)0x10000 << ((flags >> 5) & 7);
+            proto.solid = flags & 0x0010;
+            if (flags & 0x0004) {
+                proto.encrypted = true;
+                proto.crypt = salt ? RUBRAVIEW_RAR_CRYPT_30 : RUBRAVIEW_RAR_CRYPT_OLD;
+                if (salt) { memcpy(proto.salt, salt, 8); proto.salt_set = true; }
+            }
+            perr_t r = take_part(p, vol, &pt, &proto, dir || link);
+            if (r != P_OK) return r;
+            continue;
+        }
+        case 0x7B:
+            *more = flags & 0x0001;
+            return P_END;
+        default:
+            pos = block_end;
+            if (flags & 0x8000) {
+                if (add > size - pos) return P_END;
+                pos += (size_t)add;
+            }
+            continue;
+        }
+    }
+}
+
+/* ---- RAR 5 (spec 3) ---- */
+
+typedef struct rd5 { const uint8_t *p; size_t n, at; bool bad; } rd5_t;
+
+static uint64_t vint(rd5_t *r) {
+    uint64_t v = 0;
+    for (int i = 0; i < 10; ++i) {
+        if (r->at >= r->n) { r->bad = true; return 0; }
+        uint8_t b = r->p[r->at++];
+        v |= (uint64_t)(b & 0x7F) << (7 * i);
+        if (!(b & 0x80)) return v;
+    }
+    r->bad = true;
+    return 0;
+}
+
+static const uint8_t *bytes5(rd5_t *r, size_t n) {
+    if (r->n - r->at < n || r->at > r->n) { r->bad = true; return NULL; }
+    const uint8_t *q = r->p + r->at;
+    r->at += n;
+    return q;
+}
+
+/* Reads one header at `pos`: plain, or decrypted with the volume's header key (spec 6.2.4). */
+static perr_t rar5_header(parser_t *p, uint32_t vol, size_t pos, bool enc, const uint8_t **out, size_t *len, size_t *end) {
+    const uint8_t *d = p->vols[vol].data;
+    size_t size = p->vols[vol].size;
+    if (pos > size) return P_END;
+    if (enc) {
+        if (size - pos < 32) return P_END;
+        if (!reserve(p, 16)) return P_MEMORY;
+        memcpy(p->buf, d + pos + 16, 16);
+        void *aes = g_codec->aes_create(p->hkey, 256, d + pos);
+        if (!aes) return P_MEMORY;
+        g_codec->aes_decrypt(aes, p->buf, 16);
+        rd5_t r = { p->buf + 4, 12, 0, false };
+        uint64_t hs = vint(&r);
+        if (r.bad || r.at > 3 || hs == 0) { g_codec->aes_destroy(aes); return P_CORRUPT; }
+        size_t total = 4 + r.at + (size_t)hs;
+        size_t n = (total + 15) & ~(size_t)15;
+        if (n > size - pos - 16) { g_codec->aes_destroy(aes); return P_CORRUPT; }
+        if (!reserve(p, n)) { g_codec->aes_destroy(aes); return P_MEMORY; }
+        memcpy(p->buf + 16, d + pos + 32, n - 16);
+        g_codec->aes_decrypt(aes, p->buf + 16, n - 16);
+        g_codec->aes_destroy(aes);
+        if (crc32_update(0, p->buf + 4, total - 4) != rd32(p->buf)) return P_CORRUPT;
+        *out = p->buf;
+        *len = total;
+        *end = pos + 16 + n;
+        return P_OK;
+    }
+    if (size - pos < 5) return P_END;
+    rd5_t r = { d + pos + 4, size - pos - 4, 0, false };
+    uint64_t hs = vint(&r);
+    if (r.bad || r.at > 3 || hs == 0 || hs > r.n - r.at) return P_CORRUPT;
+    size_t total = 4 + r.at + (size_t)hs;
+    if (crc32_update(0, d + pos + 4, total - 4) != rd32(d + pos)) return P_CORRUPT;
+    *out = d + pos;
+    *len = total;
+    *end = pos + total;
+    return P_OK;
+}
+
+static perr_t rar5_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
+    size_t pos = start + 8;
+    size_t size = p->vols[vol].size;
+    bool enc = false, first_enc = false;
+    *more = false;
+    for (;;) {
+        const uint8_t *h;
+        size_t hlen, hend;
+        perr_t e = rar5_header(p, vol, pos, enc, &h, &hlen, &hend);
+        if (e == P_CORRUPT && first_enc) return P_BAD_PASSWORD;   /* no check value, and it does not decrypt */
+        if (e != P_OK) return e;
+        first_enc = false;
+        rd5_t r = { h + 4, hlen - 4, 0, false };
+        (void)vint(&r);
+        uint64_t type = vint(&r), hflags = vint(&r);
+        uint64_t extra_size = (hflags & 1) ? vint(&r) : 0;
+        uint64_t data_size = (hflags & 2) ? vint(&r) : 0;
+        if (r.bad || extra_size > r.n - r.at) return P_CORRUPT;
+        size_t extra_at = r.n - (size_t)extra_size;
+        if (data_size > size - hend) {
+            if (type != 2) return P_END;
+            data_size = size - hend;
+        }
+        pos = hend + (size_t)data_size;
+        if (type == 4) {   /* spec 3.3 */
+            uint64_t ver = vint(&r), eflags = vint(&r);
+            const uint8_t *kdf = bytes5(&r, 1), *salt = bytes5(&r, 16);
+            const uint8_t *check = (eflags & 1) ? bytes5(&r, 12) : NULL;
+            if (r.bad || ver != 0) return P_CORRUPT;
+            p->headers_encrypted = true;
+            if (!g_codec) return P_NO_CODEC;
+            if (!p->password_given) return P_ENCRYPTED;
+            const key50_t *k = keys50(p->st, salt, kdf[0]);
+            if (!k) return P_CORRUPT;
+            if (check) {
+                uint8_t sum[32];
+                g_codec->sha256(check, 8, sum);
+                if (memcmp(sum, check + 8, 4) == 0 && memcmp(check, k->check, 8) != 0) return P_BAD_PASSWORD;
+            }
+            memcpy(p->hkey, k->key, 32);
+            enc = true;
+            first_enc = !check;
+            continue;
+        }
+        if (type == 1) {   /* spec 3.4 */
+            uint64_t aflags = vint(&r);
+            uint64_t number = (aflags & 2) ? vint(&r) : 0;
+            if (r.bad) return P_CORRUPT;
+            if (vol == 0) {
+                p->is_volume = aflags & 1;
+                p->solid = aflags & 4;
+            }
+            if (number != vol) return P_CORRUPT;
+            continue;
+        }
+        if (type == 5) { *more = vint(&r) & 1; return P_END; }
+        if (type != 2) continue;
+        /* spec 3.5 */
+        uint64_t fflags = vint(&r), unp = vint(&r);
+        (void)vint(&r);   /* attributes */
+        if (fflags & 2) (void)bytes5(&r, 4);
+        const uint8_t *crc = (fflags & 4) ? bytes5(&r, 4) : NULL;
+        uint64_t ci = vint(&r);
+        (void)vint(&r);   /* host OS */
+        uint64_t nlen = vint(&r);
+        if (r.bad || nlen > r.n - r.at) return P_CORRUPT;
+        const uint8_t *name = bytes5(&r, (size_t)nlen);
+        if (r.bad) return P_CORRUPT;
+        part_t pt = {0};
+        rubraview_rar_entry_t proto = {0};
+        bool link = false;
+        rd5_t x = { r.p, r.n, extra_at, false };
+        while (x.at < x.n) {   /* spec 3.6 */
+            uint64_t rsize = vint(&x);
+            if (x.bad || rsize == 0 || rsize > x.n - x.at) return P_CORRUPT;
+            size_t rend = x.at + (size_t)rsize;
+            rd5_t rr = { x.p, rend, x.at, false };
+            uint64_t rtype = vint(&rr);
+            if (rtype == 1) {
+                uint64_t ver = vint(&rr), ef = vint(&rr);
+                const uint8_t *kdf = bytes5(&rr, 1), *salt = bytes5(&rr, 16), *iv = bytes5(&rr, 16);
+                const uint8_t *check = (ef & 1) ? bytes5(&rr, 12) : NULL;
+                proto.encrypted = true;
+                if (rr.bad || ver != 0) proto.crypt = RUBRAVIEW_RAR_CRYPT_OLD;   /* nothing this reader knows */
+                else {
+                    proto.crypt = RUBRAVIEW_RAR_CRYPT_50;
+                    proto.lg2_count = kdf[0];
+                    memcpy(proto.salt, salt, 16); proto.salt_set = true;
+                    memcpy(proto.iv, iv, 16);
+                    proto.hash_mac = ef & 2;
+                    memcpy(pt.mac_salt, salt, 16); pt.mac_lg2 = kdf[0]; pt.mac_set = true;
+                    memcpy(proto.mac_salt, salt, 16); proto.mac_lg2 = kdf[0];
+                    if (check) {
+                        memcpy(proto.psw_check, check, 8);
+                        memcpy(proto.psw_check_sum, check + 8, 4);
+                        proto.psw_check_set = true;
+                    }
+                }
+            } else if (rtype == 2) {
+                uint64_t ht = vint(&rr);
+                const uint8_t *hv = bytes5(&rr, 32);
+                if (!rr.bad && ht == 0) { memcpy(pt.hash, hv, 32); pt.has_hash = true; }
+            } else if (rtype == 5) link = true;
+            x.at = rend;
+        }
+        if (fflags & 1) link = true;   /* a directory: not listed */
+        pt.name = arena_copy(p->arena, name, (size_t)nlen);
+        if (!pt.name.ptr) return P_MEMORY;
+        pt.before = hflags & 0x0008;
+        pt.after = hflags & 0x0010;
+        pt.data_off = hend;
+        pt.data_size = data_size;
+        if (crc) { pt.crc = rd32(crc); pt.has_crc = true; }
+        proto.name = pt.name;
+        proto.size = (fflags & 8) ? RUBRAVIEW_RAR_SIZE_UNKNOWN : unp;
+        unsigned ver = (unsigned)(ci & 0x3F), meth = (unsigned)((ci >> 7) & 7), n = (unsigned)((ci >> 10) & 0x1F);
+        proto.solid = ci & 0x40;
+        if (meth == 0) proto.method = 0;
+        else if (ver == 0) proto.method = n <= 15 ? 50 : 255;
+        else if (ver == 1) proto.method = (ci & 0x100000) ? 50 : 70;
+        else proto.method = 255;   /* unknown: refused when read */
+        uint64_t dict = (uint64_t)0x20000 << n;
+        if (ver == 1) dict += (dict / 32) * ((ci >> 15) & 0x1F);
+        proto.dict_size = dict;
+        perr_t pr = take_part(p, vol, &pt, &proto, link);
+        if (pr != P_OK) return pr;
+    }
+}
+
+/* ---- the whole set ---- */
+
+static rubraview_rar_err_t perr_map(perr_t e) {
+    switch (e) {
+    case P_OK: case P_END: return RUBRAVIEW_RAR_OK;
+    case P_ENCRYPTED: return RUBRAVIEW_RAR_ERR_ENCRYPTED;
+    case P_BAD_PASSWORD: return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+    case P_NO_CODEC: return RUBRAVIEW_RAR_ERR_NO_CODEC;
+    case P_MEMORY: return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
+    default: return RUBRAVIEW_RAR_ERR_CORRUPT;
+    }
 }
 
 rubraview_rar_result_t rubraview_rar_open_volumes(proven_arena_t *arena, const rubraview_rar_volume_t *volumes,
                                                   size_t volume_count, u8str_t password) {
-    rubraview_rar_result_t r = { .err = RUBRAVIEW_RAR_ERR_NOT_A_RAR };
-    if (!arena || !volumes || volume_count == 0 || !volumes[0].data) return r;
-    if (volume_count > MAX_VOLUMES) volume_count = MAX_VOLUMES;
-    bool rar5 = false;
-    long sig = find_signature(volumes[0].data, volumes[0].size, &rar5);
-    if (sig < 0) return r;
-    crc_init();
-    proven_result_mem_mut_t vres = proven_arena_alloc(arena, volume_count * sizeof(rubraview_rar_volume_t));
-    if (!proven_is_ok(vres.err)) { r.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return r; }
-    rubraview_rar_volume_t *vols = (rubraview_rar_volume_t*)(void*)vres.value.ptr;
-    memcpy(vols, volumes, volume_count * sizeof(rubraview_rar_volume_t));
-    rar_state_t *st = state_new();
-    if (!st) { r.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return r; }
-    password_set(st, password);
+    rubraview_rar_result_t out = { .err = RUBRAVIEW_RAR_ERR_NOT_A_RAR };
+    if (!arena || !volumes || volume_count == 0 || !volumes[0].data) return out;
+    size_t start;
+    int fmt = find_signature(volumes[0].data, volumes[0].size, &start);
+    if (fmt == 0) return out;
 
-    rubraview_rar_archive_t a = { .data = vols[0].data, .size = vols[0].size, .rar5 = rar5,
-                                  .volumes = vols, .volume_count = volume_count };
-    list_t l = { .arena = arena };
+    parser_t p = { .arena = arena, .vols = volumes, .vol_count = volume_count, .pending = -1 };
+    p.entries.elem = sizeof(rubraview_rar_entry_t);
+    p.pieces.elem = sizeof(rubraview_rar_piece_t);
+    p.rar5 = fmt == 5;
+    p.st = (rar_state_t*)calloc(1, sizeof(rar_state_t));
+    if (!p.st) { out.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return out; }
+    p.st->next = SIZE_MAX;
+    if (password.len > 0) { state_set_password(p.st, password); p.password_given = true; }
+
+    perr_t err = P_OK;
     size_t used = 0;
     for (size_t v = 0; v < volume_count; ++v) {
-        bool v5 = false;
-        long vs = v == 0 ? sig : (vols[v].data ? find_signature(vols[v].data, vols[v].size, &v5) : -1);
-        if (vs < 0 || (v > 0 && v5 != rar5)) break;
-        parse_t p = { .arena = arena, .a = &a, .st = st, .l = &l, .vol = (uint32_t)v,
-                      .d = vols[v].data, .size = vols[v].size };
-        rubraview_rar_err_t err = rar5 ? read_rar5(&p, (size_t)vs + 8) : read_rar4(&p, (size_t)vs + 7);
-        if (err != RUBRAVIEW_RAR_OK) {
-            /* A later volume that will not read ends the set there; the first is the archive. */
-            if (v == 0) { state_free(st); r.err = err; return r; }
-            break;
+        size_t vstart = start;
+        if (v > 0) {
+            if (!volumes[v].data || find_signature(volumes[v].data, volumes[v].size, &vstart) != fmt) break;
+        }
+        bool more = false;
+        perr_t e = p.rar5 ? rar5_volume(&p, (uint32_t)v, vstart, &more) : rar4_volume(&p, (uint32_t)v, vstart, &more);
+        if (e != P_END && e != P_OK) {
+            if (v == 0 || e == P_MEMORY) { err = e; break; }
+            break;   /* a later volume that does not read: what is in it is missing */
         }
         used = v + 1;
-        if (p.hdr_checked) st->password_ok = true;   /* its headers opened with it */
-        if (!p.more_volumes && !(a.is_volume && v + 1 < volume_count)) break;
+        if (v == 0 && !p.is_volume) break;
+        if (!more && p.pending < 0) break;
     }
-    a.volume_count = used;
-    a.entries = l.items;
-    a.entry_count = l.count;
-    a.pieces = l.pieces;
-    a.piece_count = l.piece_count;
-    a.state = st;
-    r.err = RUBRAVIEW_RAR_OK;
-    r.value = a;
-    return r;
+    if (err == P_OK && p.pending >= 0) entry_at(&p, p.pending)->split = true;
+    if (err != P_OK) {
+        out.err = perr_map(err);
+        if (out.err == RUBRAVIEW_RAR_OK) out.err = RUBRAVIEW_RAR_ERR_CORRUPT;
+        goto fail;
+    }
+    (void)used;
+
+    rubraview_rar_archive_t *a = &out.value;
+    a->data = volumes[0].data;
+    a->size = volumes[0].size;
+    proven_result_mem_mut_t vr = rubraview_arena_alloc_array(arena, volume_count, sizeof(rubraview_rar_volume_t));
+    proven_result_mem_mut_t er = rubraview_arena_alloc_array(arena, p.entries.count + 1, sizeof(rubraview_rar_entry_t));
+    proven_result_mem_mut_t pr = rubraview_arena_alloc_array(arena, p.pieces.count + 1, sizeof(rubraview_rar_piece_t));
+    if (!proven_is_ok(vr.err) || !proven_is_ok(er.err) || !proven_is_ok(pr.err)) { out.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto fail; }
+    memcpy(vr.value.ptr, volumes, volume_count * sizeof(rubraview_rar_volume_t));
+    if (p.entries.count) memcpy(er.value.ptr, p.entries.data, p.entries.count * sizeof(rubraview_rar_entry_t));
+    if (p.pieces.count) memcpy(pr.value.ptr, p.pieces.data, p.pieces.count * sizeof(rubraview_rar_piece_t));
+    a->volumes = (const rubraview_rar_volume_t*)(void*)vr.value.ptr;
+    a->volume_count = volume_count;
+    a->entries = (rubraview_rar_entry_t*)(void*)er.value.ptr;
+    a->entry_count = p.entries.count;
+    a->pieces = (rubraview_rar_piece_t*)(void*)pr.value.ptr;
+    a->piece_count = p.pieces.count;
+    a->rar5 = p.rar5;
+    a->solid_archive = p.solid;
+    a->headers_encrypted = p.headers_encrypted;
+    a->is_volume = p.is_volume;
+    a->new_numbering = p.rar5 || p.new_numbering;
+    /* Headers that opened with the password prove it (RAR 4: their CRCs; RAR 5: the check value). */
+    if (!p.headers_encrypted && p.st->have_password) state_clear_password(p.st);
+    a->state = p.st;
+    for (size_t i = 0; i < a->entry_count; ++i) {
+        if (a->entries[i].first_piece + a->entries[i].piece_count > a->piece_count) a->entries[i].split = true;
+    }
+    free(p.entries.data);
+    free(p.pieces.data);
+    free(p.buf);
+    out.err = RUBRAVIEW_RAR_OK;
+    return out;
+
+fail:
+    free(p.entries.data);
+    free(p.pieces.data);
+    free(p.buf);
+    state_free(p.st);
+    out.value = (rubraview_rar_archive_t){0};
+    return out;
 }
 
 rubraview_rar_result_t rubraview_rar_open(proven_arena_t *arena, const uint8_t *data, size_t size) {
@@ -687,233 +817,61 @@ rubraview_rar_result_t rubraview_rar_open(proven_arena_t *arena, const uint8_t *
 }
 
 void rubraview_rar_close(rubraview_rar_archive_t *archive) {
-    if (!archive || !archive->state) return;
+    if (!archive) return;
     state_free((rar_state_t*)archive->state);
     archive->state = NULL;
 }
 
-/* ---- decoding ---- */
-
-/* The packed bytes of one entry, piece after piece, decrypted when they are. */
-typedef struct source {
-    const rubraview_rar_archive_t *a;
-    const rubraview_rar_entry_t *e;
-    uint32_t piece;         /* the next piece, from the entry's first */
-    uint64_t in_piece;      /* how far into it */
-    bool     decrypt;
-    void    *aes;           /* the codec's */
-    uint8_t  buf[16384];
-    size_t   buf_pos, buf_len;
-} source_t;
-
-static size_t raw_read(source_t *s, uint8_t *out, size_t capacity) {
-    size_t got = 0;
-    while (got < capacity && s->piece < s->e->piece_count) {
-        const rubraview_rar_piece_t *pc = &s->a->pieces[s->e->first_piece + s->piece];
-        const rubraview_rar_volume_t *v = &s->a->volumes[pc->volume];
-        uint64_t left = pc->size - s->in_piece;
-        if (left == 0 || pc->offset + pc->size > v->size) { s->piece++; s->in_piece = 0; continue; }
-        size_t n = capacity - got < left ? capacity - got : (size_t)left;
-        memcpy(out + got, v->data + pc->offset + s->in_piece, n);
-        got += n;
-        s->in_piece += n;
-    }
-    return got;
-}
-
-static size_t source_read(void *ctx, uint8_t *buffer, size_t capacity) {
-    source_t *s = (source_t*)ctx;
-    if (!s->decrypt) return raw_read(s, buffer, capacity);
-    size_t got = 0;
-    while (got < capacity) {
-        if (s->buf_pos == s->buf_len) {
-            size_t n = raw_read(s, s->buf, sizeof(s->buf)) & ~(size_t)15;   /* whole cipher blocks */
-            if (n == 0) break;
-            g_codec->aes_decrypt(s->aes, s->buf, n);
-            s->buf_pos = 0;
-            s->buf_len = n;
-        }
-        size_t n = s->buf_len - s->buf_pos < capacity - got ? s->buf_len - s->buf_pos : capacity - got;
-        memcpy(buffer + got, s->buf + s->buf_pos, n);
-        s->buf_pos += n;
-        got += n;
-    }
-    return got;
-}
-
-typedef struct sink {
-    uint8_t *out;           /* NULL: count and forget (a solid chain's earlier files) */
-    uint64_t capacity, written;
-    uint32_t crc;
-    rar_state_t *st;
-} sink_t;
-static bool sink_write(void *ctx, const uint8_t *data, size_t size) {
-    sink_t *s = (sink_t*)ctx;
-    if (atomic_load(&s->st->cancel)) return false;
-    uint64_t room = s->capacity - s->written;
-    size_t n = size < room ? size : (size_t)room;
-    if (s->out && n) memcpy(s->out + s->written, data, n);
-    s->crc = crc_update(s->crc, data, n);
-    s->written += n;
-    atomic_fetch_add(&s->st->done, n);
-    return true;
-}
-
-/* One entry through the decoder, into `out` or nowhere. */
-static rubraview_rar_err_t decode(rubraview_rar_archive_t *a, rar_state_t *st, size_t index, uint8_t *out) {
-    const rubraview_rar_entry_t *e = &a->entries[index];
-    if (e->split) return RUBRAVIEW_RAR_ERR_MISSING_VOLUME;
-    if (!g_codec && (e->encrypted || e->method != 0)) return RUBRAVIEW_RAR_ERR_NO_CODEC;
-    source_t *src = (source_t*)calloc(1, sizeof(source_t));
-    if (!src) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
-    src->a = a;
-    src->e = e;
-    const key_entry_t *key = NULL;
-    rubraview_rar_err_t result = RUBRAVIEW_RAR_OK;
-    if (e->encrypted) {
-        if (e->crypt != RUBRAVIEW_RAR_CRYPT_30 && e->crypt != RUBRAVIEW_RAR_CRYPT_50) { result = RUBRAVIEW_RAR_ERR_UNSUPPORTED; goto done; }
-        if (!st->has_password) { result = RUBRAVIEW_RAR_ERR_ENCRYPTED; goto done; }
-        key = key_for(st, e->crypt, e->salt, e->salt_set, e->lg2_count);
-        if (!key) { result = RUBRAVIEW_RAR_ERR_UNSUPPORTED; goto done; }
-        if (e->psw_check_set && memcmp(key->psw_check, e->psw_check, RAR_PSWCHECK) != 0) { result = RUBRAVIEW_RAR_ERR_BAD_PASSWORD; goto done; }
-        src->decrypt = true;
-        src->aes = e->crypt == RUBRAVIEW_RAR_CRYPT_50 ? g_codec->aes_create(key->key, 256, e->iv)
-                                                      : g_codec->aes_create(key->key, 128, key->iv);
-        if (!src->aes) { result = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto done; }
-    }
-    sink_t sink = { .out = out, .capacity = e->size, .crc = 0xFFFFFFFFu, .st = st };
-    if (e->method == 0) {
-        /* stored: the bytes as they are (decrypted), cut at the size */
-        uint8_t chunk[16384];
-        while (sink.written < e->size) {
-            size_t n = source_read(src, chunk, sizeof(chunk));
-            if (n == 0) break;
-            if (!sink_write(&sink, chunk, n)) { result = RUBRAVIEW_RAR_ERR_CANCELLED; goto done; }
-        }
-    } else {
-        if (e->method == 9999) { result = RUBRAVIEW_RAR_ERR_UNSUPPORTED; goto done; }
-        if (!st->unpack && !(st->unpack = g_codec->unpack_create())) { result = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; goto done; }
-        bool solid = e->solid && st->next == index;
-        if (!g_codec->unpack_file(st->unpack, e->method, solid, e->dict_size, e->size, source_read, src, sink_write, &sink)) {
-            if (atomic_load(&st->cancel)) { result = RUBRAVIEW_RAR_ERR_CANCELLED; goto done; }
-            if (e->dict_size > g_codec->max_dict) { result = RUBRAVIEW_RAR_ERR_TOO_LARGE; goto done; }
-            result = e->encrypted ? RUBRAVIEW_RAR_ERR_CORRUPT_STREAM : RUBRAVIEW_RAR_ERR_UNSUPPORTED;
-            goto done;
-        }
-        if (atomic_load(&st->cancel)) { result = RUBRAVIEW_RAR_ERR_CANCELLED; goto done; }
-    }
-    st->next = index + 1;
-    if (sink.written < e->size) { result = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM; goto done; }
-    if (e->has_crc) {
-        uint32_t crc = sink.crc ^ 0xFFFFFFFFu;
-        if (e->hash_mac && key) crc = g_codec->crc_to_mac(crc, key->hash_key);
-        if (crc != e->crc32) result = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
-    }
-done:
-    if (src->aes) g_codec->aes_destroy(src->aes);
-    rar_wipe(src, sizeof(*src));
-    free(src);
-    return result;
-}
-
-/* Where decoding must start to reach `index`: itself, unless it continues a solid stream. */
-static size_t chain_start(const rubraview_rar_archive_t *a, const rar_state_t *st, size_t index) {
-    if (!a->entries[index].solid || a->entries[index].method == 0) return index;
-    if (st && st->next != SIZE_MAX && st->next <= index) {
-        bool unbroken = true;
-        for (size_t i = st->next; i <= index; ++i) if (i > st->next && !a->entries[i].solid) unbroken = false;
-        if (unbroken) return st->next;
-    }
-    size_t j = index;
-    while (j > 0 && (a->entries[j].solid || a->entries[j].method == 0)) --j;
-    return j;
-}
-
-uint64_t rubraview_rar_read_cost(const rubraview_rar_archive_t *archive, size_t index) {
-    if (!archive || index >= archive->entry_count) return 0;
-    size_t start = chain_start(archive, (const rar_state_t*)archive->state, index);
-    uint64_t cost = 0;
-    for (size_t i = start; i <= index; ++i) cost += archive->entries[i].size;
-    return cost;
-}
-
-rubraview_rar_data_result_t rubraview_rar_read_entry(proven_arena_t *arena, rubraview_rar_archive_t *archive,
-                                                      size_t index, uint64_t max_entry_bytes) {
-    rubraview_rar_data_result_t r = { .err = RUBRAVIEW_RAR_ERR_BAD_INDEX };
-    if (!arena || !archive || !archive->state || index >= archive->entry_count) return r;
-    rar_state_t *st = (rar_state_t*)archive->state;
-    const rubraview_rar_entry_t *e = &archive->entries[index];
-    if (e->size > max_entry_bytes || e->size > SIZE_MAX - 1) { r.err = RUBRAVIEW_RAR_ERR_TOO_LARGE; return r; }
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)e->size + 1);
-    if (!proven_is_ok(res.err)) { r.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return r; }
-    size_t start = chain_start(archive, st, index);
-    if (start != st->next) st->next = SIZE_MAX;              /* a fresh stream */
-    uint64_t total = 0;
-    for (size_t i = start; i <= index; ++i) total += archive->entries[i].size;
-    atomic_store(&st->done, 0);
-    atomic_store(&st->total, total);
-    for (size_t i = start; i < index; ++i) {                 /* the chain before it, decoded and let go */
-        if (archive->entries[i].method == 0) { st->next = i + 1; atomic_fetch_add(&st->done, archive->entries[i].size); continue; }
-        rubraview_rar_err_t err = decode(archive, st, i, NULL);
-        if (err != RUBRAVIEW_RAR_OK && err != RUBRAVIEW_RAR_ERR_CORRUPT_STREAM) { st->next = SIZE_MAX; r.err = err; return r; }
-    }
-    r.err = decode(archive, st, index, (uint8_t*)res.value.ptr);
-    if (r.err == RUBRAVIEW_RAR_ERR_CANCELLED) st->next = SIZE_MAX;
-    if (r.err == RUBRAVIEW_RAR_OK) {
-        ((uint8_t*)res.value.ptr)[e->size] = 0;
-        r.data = (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)e->size };
-    }
-    return r;
-}
+/* ------------------------------------------------------------------ */
+/* questions about entries */
 
 bool rubraview_rar_needs_codec(const rubraview_rar_archive_t *archive, size_t index) {
-    if (g_codec || !archive || index >= archive->entry_count) return false;
-    return archive->entries[index].encrypted || archive->entries[index].method != 0;
+    if (!archive || index >= archive->entry_count) return false;
+    const rubraview_rar_entry_t *e = &archive->entries[index];
+    return !g_codec && (e->method != 0 || e->encrypted);
 }
 
 bool rubraview_rar_needs_password(const rubraview_rar_archive_t *archive) {
     if (!archive || !archive->state) return false;
     const rar_state_t *st = (const rar_state_t*)archive->state;
-    if (st->password_ok) return false;
-    for (size_t i = 0; i < archive->entry_count; ++i) if (archive->entries[i].encrypted) return true;
+    if (st->have_password) return false;
+    for (size_t i = 0; i < archive->entry_count; ++i) {
+        const rubraview_rar_entry_t *e = &archive->entries[i];
+        if (e->encrypted && e->crypt != RUBRAVIEW_RAR_CRYPT_OLD) return true;
+    }
     return false;
 }
 
-rubraview_rar_err_t rubraview_rar_set_password(rubraview_rar_archive_t *archive, u8str_t password) {
-    if (!archive || !archive->state) return RUBRAVIEW_RAR_ERR_BAD_INDEX;
-    rar_state_t *st = (rar_state_t*)archive->state;
-    password_set(st, password);
-    if (password.len == 0) return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-    if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
-    /* The file to test it on: RAR 5 tells by its check value at once;
-       otherwise the smallest encrypted file that starts a stream, decoded
-       and checked by its CRC. */
-    size_t best = SIZE_MAX;
-    for (size_t i = 0; i < archive->entry_count; ++i) {
+/* The entries decoded before `index` when it is read now (spec 7.5): from the start of its solid chain,
+   or on from where the decoder stopped. */
+static size_t chain_start(const rubraview_rar_archive_t *a, size_t index) {
+    size_t s = index;
+    while (a->entries[s].solid && a->entries[s].method != 0) {
+        size_t q = s;
+        while (q > 0 && a->entries[q - 1].method == 0) q--;
+        if (q == 0) break;
+        s = q - 1;
+    }
+    return s;
+}
+
+static size_t read_from(const rubraview_rar_archive_t *a, size_t index) {
+    if (a->entries[index].method == 0) return index;
+    const rar_state_t *st = (const rar_state_t*)a->state;
+    size_t s = chain_start(a, index);
+    if (st && st->next != SIZE_MAX && st->next > s && st->next <= index) return st->next;
+    return s;
+}
+
+uint64_t rubraview_rar_read_cost(const rubraview_rar_archive_t *archive, size_t index) {
+    if (!archive || !archive->state || index >= archive->entry_count) return 0;
+    uint64_t cost = 0;
+    for (size_t i = read_from(archive, index); i <= index; ++i) {
         const rubraview_rar_entry_t *e = &archive->entries[i];
-        if (!e->encrypted || e->split) continue;
-        if (e->crypt != RUBRAVIEW_RAR_CRYPT_30 && e->crypt != RUBRAVIEW_RAR_CRYPT_50) continue;
-        if (e->psw_check_set) { best = i; break; }
-        if (e->solid && e->method != 0 && chain_start(archive, NULL, i) != i) continue;
-        if (best == SIZE_MAX || e->size < archive->entries[best].size) best = i;
+        if (i != index && e->method == 0) continue;
+        cost += e->size == RUBRAVIEW_RAR_SIZE_UNKNOWN ? e->packed_size : e->size;
     }
-    if (best == SIZE_MAX) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
-    const rubraview_rar_entry_t *e = &archive->entries[best];
-    rubraview_rar_err_t err;
-    if (e->psw_check_set) {
-        const key_entry_t *k = key_for(st, e->crypt, e->salt, e->salt_set, e->lg2_count);
-        err = !k ? RUBRAVIEW_RAR_ERR_UNSUPPORTED
-            : memcmp(k->psw_check, e->psw_check, RAR_PSWCHECK) == 0 ? RUBRAVIEW_RAR_OK : RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-    } else {
-        st->next = SIZE_MAX;
-        atomic_store(&st->done, 0);
-        atomic_store(&st->total, e->size);
-        err = decode(archive, st, best, NULL);
-        st->next = SIZE_MAX;                                 /* the next read starts its own stream */
-        if (err == RUBRAVIEW_RAR_ERR_CORRUPT_STREAM) err = RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
-    }
-    st->password_ok = err == RUBRAVIEW_RAR_OK;
-    return err;
+    return cost;
 }
 
 void rubraview_rar_cancel(rubraview_rar_archive_t *archive, bool cancel) {
@@ -931,161 +889,464 @@ void rubraview_rar_progress(const rubraview_rar_archive_t *archive, uint64_t *ou
     if (out_total) *out_total = total;
 }
 
-/* ---- volumes ---- */
+/* ------------------------------------------------------------------ */
+/* reading */
 
-bool rubraview_rar_volume_info(const uint8_t *data, size_t size, rubraview_rar_volume_info_t *out) {
-    rubraview_rar_volume_info_t info = {0};
-    bool rar5 = false;
-    long sig = data ? find_signature(data, size, &rar5) : -1;
-    if (sig < 0) { if (out) *out = info; return false; }
-    size_t pos = (size_t)sig + (rar5 ? 8 : 7);
-    if (!rar5) {
-        if (pos + 13 <= size && data[pos + 2] == 0x73) {
-            uint16_t flags = le16(data + pos + 3);
-            info.is_volume = (flags & 0x0001) != 0;
-            info.new_numbering = (flags & 0x0010) != 0;
-            info.first = !info.is_volume || (flags & 0x0100) != 0;
-            info.headers_encrypted = (flags & 0x0080) != 0;
+typedef struct src {
+    const rubraview_rar_archive_t *a;
+    const rubraview_rar_entry_t *e;
+    uint32_t piece;
+    uint64_t off;
+    void *aes;
+    rar_state_t *st;
+} src_t;
+
+static size_t src_raw(src_t *s, uint8_t *buf, size_t cap) {
+    size_t got = 0;
+    while (got < cap && s->piece < s->e->piece_count) {
+        const rubraview_rar_piece_t *pc = &s->a->pieces[s->e->first_piece + s->piece];
+        const rubraview_rar_volume_t *v = &s->a->volumes[pc->volume];
+        uint64_t avail = pc->size - s->off;
+        if (pc->offset > v->size || pc->size > v->size - pc->offset) avail = 0;   /* checked when opened; never trusted */
+        if (avail == 0) { s->piece++; s->off = 0; continue; }
+        size_t n = cap - got < avail ? cap - got : (size_t)avail;
+        memcpy(buf + got, v->data + pc->offset + s->off, n);
+        got += n;
+        s->off += n;
+    }
+    return got;
+}
+
+static size_t src_read(void *ctx, uint8_t *buf, size_t cap) {
+    src_t *s = (src_t*)ctx;
+    if (atomic_load(&s->st->cancel)) return 0;
+    if (!s->aes) return src_raw(s, buf, cap);
+    cap &= ~(size_t)15;   /* one CBC chain over all the parts (spec 4.2) */
+    size_t got = src_raw(s, buf, cap);
+    got &= ~(size_t)15;
+    g_codec->aes_decrypt(s->aes, buf, got);
+    return got;
+}
+
+typedef struct sink {
+    rar_state_t *st;
+    uint32_t crc;
+    void *b2;
+    uint64_t written, limit;
+    rubraview_rar_write_fn write;
+    void *ctx;
+    bool stopped;
+} sink_t;
+
+static bool sink_write(void *ctx, const uint8_t *data, size_t size) {
+    sink_t *k = (sink_t*)ctx;
+    if (atomic_load(&k->st->cancel)) { k->stopped = true; return false; }
+    if (k->limit != RUBRAVIEW_RAR_SIZE_UNKNOWN && size > k->limit - k->written) size = (size_t)(k->limit - k->written);
+    k->crc = crc32_update(k->crc, data, size);
+    if (k->b2) g_codec->blake2sp_update(k->b2, data, size);
+    k->written += size;
+    atomic_fetch_add(&k->st->done, size);
+    if (k->write && size && !k->write(k->ctx, data, size)) { k->stopped = true; return false; }
+    return true;
+}
+
+static rubraview_rar_err_t map_unpack(rubraview_rar_unpack_status_t s) {
+    switch (s) {
+    case RUBRAVIEW_RAR_UNPACK_OK: return RUBRAVIEW_RAR_OK;
+    case RUBRAVIEW_RAR_UNPACK_UNSUPPORTED: return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
+    case RUBRAVIEW_RAR_UNPACK_TOO_LARGE: return RUBRAVIEW_RAR_ERR_TOO_LARGE;
+    case RUBRAVIEW_RAR_UNPACK_NO_MEMORY: return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
+    case RUBRAVIEW_RAR_UNPACK_STOPPED: return RUBRAVIEW_RAR_ERR_CANCELLED;
+    default: return RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
+    }
+}
+
+/* What makes an entry unreadable before any byte of it is touched. */
+static rubraview_rar_err_t entry_check(const rubraview_rar_archive_t *a, const rubraview_rar_entry_t *e) {
+    const rar_state_t *st = (const rar_state_t*)a->state;
+    if (e->split) return RUBRAVIEW_RAR_ERR_MISSING_VOLUME;
+    if (e->crypt == RUBRAVIEW_RAR_CRYPT_OLD) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
+    if ((e->method != 0 || e->encrypted) && !g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
+    if (e->method != 0 && e->method != 20 && e->method != 26 && e->method != 29 && e->method != 50 && e->method != 70)
+        return RUBRAVIEW_RAR_ERR_UNSUPPORTED;   /* RAR 1.5 (spec 2.4) and the unknown */
+    if (g_codec && e->method != 0 && e->dict_size > g_codec->max_dict) return RUBRAVIEW_RAR_ERR_TOO_LARGE;
+    if (e->encrypted && !st->have_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;
+    return RUBRAVIEW_RAR_OK;
+}
+
+/* One entry, its decoder state continued (`solid`) or not, into `write` (NULL: discarded).
+   Checks its CRC / BLAKE2sp. */
+static rubraview_rar_err_t extract_one(rubraview_rar_archive_t *a, size_t index, bool check,
+                                       rubraview_rar_write_fn write, void *ctx) {
+    rar_state_t *st = (rar_state_t*)a->state;
+    const rubraview_rar_entry_t *e = &a->entries[index];
+    rubraview_rar_err_t err = entry_check(a, e);
+    if (err != RUBRAVIEW_RAR_OK) return err;
+
+    src_t src = { .a = a, .e = e, .st = st };
+    uint8_t hash_key[32];
+    bool have_hash_key = false;
+    if (e->encrypted) {
+        if (e->crypt == RUBRAVIEW_RAR_CRYPT_30) {
+            const key30_t *k = keys30(st, e->salt_set ? e->salt : NULL);
+            src.aes = g_codec->aes_create(k->key, 128, k->iv);
+        } else {
+            const key50_t *k = keys50(st, e->salt, e->lg2_count);
+            if (!k) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
+            if (e->psw_check_set && memcmp(k->check, e->psw_check, 8) != 0) {
+                uint8_t sum[32];
+                g_codec->sha256(e->psw_check, 8, sum);
+                if (memcmp(sum, e->psw_check_sum, 4) == 0) return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+            }
+            src.aes = g_codec->aes_create(k->key, 256, e->iv);
+            const key50_t *m = memcmp(e->mac_salt, e->salt, 16) == 0 && e->mac_lg2 == e->lg2_count
+                                   ? k : keys50(st, e->mac_salt, e->mac_lg2);
+            if (m) { memcpy(hash_key, m->hash_key, 32); have_hash_key = true; }
+        }
+        if (!src.aes) return RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
+    }
+
+    sink_t sink = { .st = st, .limit = e->size, .write = write, .ctx = ctx };
+    if (check && e->has_hash && g_codec) sink.b2 = g_codec->blake2sp_create();
+
+    if (e->method == 0) {
+        uint8_t buf[65536];
+        err = RUBRAVIEW_RAR_OK;
+        for (;;) {
+            if (e->size != RUBRAVIEW_RAR_SIZE_UNKNOWN && sink.written >= e->size) break;
+            size_t n = src_read(&src, buf, sizeof(buf));
+            if (atomic_load(&st->cancel)) { err = RUBRAVIEW_RAR_ERR_CANCELLED; break; }
+            if (n == 0) {
+                if (e->size != RUBRAVIEW_RAR_SIZE_UNKNOWN) err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
+                break;
+            }
+            if (!sink_write(&sink, buf, n)) { err = RUBRAVIEW_RAR_ERR_CANCELLED; break; }
         }
     } else {
-        size_t at = pos + 4;
-        uint64_t header_size = 0, type = 0, hflags = 0, skip = 0, arc_flags = 0;
-        if (vint(data, size, &at, &header_size) && header_size <= size - at) {
-            size_t end = at + (size_t)header_size;
-            if (vint(data, end, &at, &type) && vint(data, end, &at, &hflags)) {
-                if (type == 4) {
-                    info.headers_encrypted = true;
-                    info.new_numbering = true;
-                } else if (type == 1) {
-                    if ((hflags & 0x0001) && !vint(data, end, &at, &skip)) at = end;
-                    if ((hflags & 0x0002) && !vint(data, end, &at, &skip)) at = end;
-                    if (vint(data, end, &at, &arc_flags)) {
-                        info.is_volume = (arc_flags & 0x0001) != 0;
-                        info.first = !(arc_flags & 0x0002);   /* the volume number is there for all but the first */
-                        info.new_numbering = true;
-                    }
-                }
+        if (!st->unpack) st->unpack = g_codec->unpack_create();
+        if (!st->unpack) err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
+        else {
+            rubraview_rar_unpack_params_t prm = {
+                .method = e->method, .solid = e->solid && st->next == index, .drain = a->solid_archive,
+                .dict_size = e->dict_size, .dest_size = e->size,
+            };
+            st->next = SIZE_MAX;
+            rubraview_rar_unpack_status_t us = g_codec->unpack_file(st->unpack, &prm, src_read, &src, sink_write, &sink);
+            err = map_unpack(us);
+            if (err == RUBRAVIEW_RAR_ERR_CANCELLED && !atomic_load(&st->cancel) && !sink.stopped) err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
+            if (atomic_load(&st->cancel)) err = RUBRAVIEW_RAR_ERR_CANCELLED;
+            if (err == RUBRAVIEW_RAR_OK) {   /* stored files between do not touch the stream */
+                size_t nx = index + 1;
+                while (nx < a->entry_count && a->entries[nx].method == 0) nx++;
+                st->next = nx;
             }
+            if (err == RUBRAVIEW_RAR_OK && e->size != RUBRAVIEW_RAR_SIZE_UNKNOWN && sink.written != e->size)
+                err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
         }
     }
-    if (out) *out = info;
+    if (src.aes) g_codec->aes_destroy(src.aes);
+
+    uint8_t digest[32];
+    if (sink.b2) g_codec->blake2sp_final(sink.b2, digest);
+    if (err == RUBRAVIEW_RAR_OK && check) {
+        bool mac = e->hash_mac && have_hash_key;
+        if (e->has_crc) {
+            uint32_t want = mac ? g_codec->crc_to_mac(sink.crc, hash_key) : sink.crc;
+            if (want != e->crc32) err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
+        }
+        if (sink.b2) {
+            uint8_t m[32];
+            if (mac) g_codec->hmac_sha256(hash_key, 32, digest, 32, m);
+            if (memcmp(mac ? m : digest, e->hash, 32) != 0) err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
+        }
+    }
+    wipe(hash_key, sizeof(hash_key));
+    if (err != RUBRAVIEW_RAR_OK && e->method != 0) st->next = SIZE_MAX;
+    return err;
+}
+
+rubraview_rar_err_t rubraview_rar_extract(rubraview_rar_archive_t *archive, size_t index,
+                                          rubraview_rar_write_fn write, void *ctx) {
+    if (!archive || !archive->state || index >= archive->entry_count) return RUBRAVIEW_RAR_ERR_BAD_INDEX;
+    rar_state_t *st = (rar_state_t*)archive->state;
+    if (atomic_load(&st->cancel)) return RUBRAVIEW_RAR_ERR_CANCELLED;
+    rubraview_rar_err_t err = entry_check(archive, &archive->entries[index]);
+    if (err != RUBRAVIEW_RAR_OK) return err;
+    atomic_store(&st->total, rubraview_rar_read_cost(archive, index));
+    atomic_store(&st->done, 0);
+    for (size_t i = read_from(archive, index); i < index; ++i) {
+        if (archive->entries[i].method == 0) continue;
+        err = extract_one(archive, i, false, NULL, NULL);
+        if (err != RUBRAVIEW_RAR_OK) return err;
+    }
+    return extract_one(archive, index, true, write, ctx);
+}
+
+typedef struct grow { uint8_t *p; size_t len, cap; uint64_t max; bool too_large; } grow_t;
+
+static bool grow_write(void *ctx, const uint8_t *data, size_t size) {
+    grow_t *g = (grow_t*)ctx;
+    if (size > g->max - g->len) { g->too_large = true; return false; }
+    if (g->len + size > g->cap) {
+        size_t cap = g->cap ? g->cap : 65536;
+        while (cap < g->len + size) cap *= 2;
+        uint8_t *p = (uint8_t*)realloc(g->p, cap);
+        if (!p) return false;
+        g->p = p;
+        g->cap = cap;
+    }
+    memcpy(g->p + g->len, data, size);
+    g->len += size;
     return true;
+}
+
+typedef struct fixed { uint8_t *p; size_t len, cap; } fixed_t;
+
+static bool fixed_write(void *ctx, const uint8_t *data, size_t size) {
+    fixed_t *f = (fixed_t*)ctx;
+    if (size > f->cap - f->len) return false;
+    memcpy(f->p + f->len, data, size);
+    f->len += size;
+    return true;
+}
+
+rubraview_rar_data_result_t rubraview_rar_read_entry(proven_arena_t *arena, rubraview_rar_archive_t *archive,
+                                                     size_t index, uint64_t max_entry_bytes) {
+    rubraview_rar_data_result_t out = { .err = RUBRAVIEW_RAR_ERR_BAD_INDEX, .data = { .ptr = "", .len = 0 } };
+    if (!arena || !archive || !archive->state || index >= archive->entry_count) return out;
+    const rubraview_rar_entry_t *e = &archive->entries[index];
+    if (e->size != RUBRAVIEW_RAR_SIZE_UNKNOWN) {
+        if (e->size > max_entry_bytes || e->size >= SIZE_MAX) { out.err = RUBRAVIEW_RAR_ERR_TOO_LARGE; return out; }
+        proven_result_mem_mut_t r = proven_arena_alloc(arena, (size_t)e->size + 1);
+        if (!proven_is_ok(r.err)) { out.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; return out; }
+        fixed_t f = { r.value.ptr, 0, (size_t)e->size };
+        out.err = rubraview_rar_extract(archive, index, fixed_write, &f);
+        if (out.err != RUBRAVIEW_RAR_OK) return out;
+        r.value.ptr[f.len] = 0;
+        out.data = (u8str_t){ .ptr = (const char*)r.value.ptr, .len = f.len };
+        return out;
+    }
+    grow_t g = { .max = max_entry_bytes };
+    out.err = rubraview_rar_extract(archive, index, grow_write, &g);
+    if (out.err == RUBRAVIEW_RAR_ERR_CANCELLED && g.too_large) out.err = RUBRAVIEW_RAR_ERR_TOO_LARGE;
+    if (out.err == RUBRAVIEW_RAR_OK) {
+        out.data = arena_copy(arena, g.p ? g.p : (const uint8_t*)"", g.len);
+        if (!out.data.ptr) { out.err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY; out.data = (u8str_t){ .ptr = "", .len = 0 }; }
+    }
+    free(g.p);
+    return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* passwords */
+
+rubraview_rar_err_t rubraview_rar_set_password(rubraview_rar_archive_t *archive, u8str_t password) {
+    if (!archive || !archive->state) return RUBRAVIEW_RAR_ERR_BAD_INDEX;
+    rar_state_t *st = (rar_state_t*)archive->state;
+    if (!g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
+    state_set_password(st, password);
+    /* RAR 5: the stored check values (spec 6.2.2). */
+    bool any_check = false;
+    for (size_t i = 0; i < archive->entry_count; ++i) {
+        const rubraview_rar_entry_t *e = &archive->entries[i];
+        if (!e->encrypted || e->crypt != RUBRAVIEW_RAR_CRYPT_50 || !e->psw_check_set) continue;
+        uint8_t sum[32];
+        g_codec->sha256(e->psw_check, 8, sum);
+        if (memcmp(sum, e->psw_check_sum, 4) != 0) continue;   /* damaged: says nothing */
+        any_check = true;
+        const key50_t *k = keys50(st, e->salt, e->lg2_count);
+        if (k && memcmp(k->check, e->psw_check, 8) == 0) return RUBRAVIEW_RAR_OK;
+    }
+    if (any_check) { state_clear_password(st); return RUBRAVIEW_RAR_ERR_BAD_PASSWORD; }
+    /* RAR 4: decode the smallest encrypted file that starts a stream. */
+    size_t best = SIZE_MAX;
+    for (size_t i = 0; i < archive->entry_count; ++i) {
+        const rubraview_rar_entry_t *e = &archive->entries[i];
+        if (!e->encrypted || e->crypt == RUBRAVIEW_RAR_CRYPT_OLD || e->split) continue;
+        if (e->method != 0 && chain_start(archive, i) != i) continue;
+        if (best == SIZE_MAX || e->packed_size < archive->entries[best].packed_size) best = i;
+    }
+    if (best == SIZE_MAX) return RUBRAVIEW_RAR_OK;
+    atomic_store(&st->total, archive->entries[best].size);
+    atomic_store(&st->done, 0);
+    rubraview_rar_err_t err = extract_one(archive, best, true, NULL, NULL);
+    if (err == RUBRAVIEW_RAR_OK) return RUBRAVIEW_RAR_OK;
+    if (err == RUBRAVIEW_RAR_ERR_CORRUPT_STREAM || err == RUBRAVIEW_RAR_ERR_BAD_PASSWORD) {
+        state_clear_password(st);
+        return RUBRAVIEW_RAR_ERR_BAD_PASSWORD;
+    }
+    if (err != RUBRAVIEW_RAR_ERR_CANCELLED) state_clear_password(st);
+    return err;
+}
+
+/* ------------------------------------------------------------------ */
+/* volumes, by what the start of an archive says and by name (spec 4.1) */
+
+bool rubraview_rar_volume_info(const uint8_t *data, size_t size, rubraview_rar_volume_info_t *out) {
+    if (!out) return false;
+    *out = (rubraview_rar_volume_info_t){0};
+    size_t at;
+    int fmt = data ? find_signature(data, size, &at) : 0;
+    if (fmt == 4) {
+        size_t pos = at + 7;
+        while (pos <= size && size - pos >= 7) {
+            const uint8_t *h = data + pos;
+            size_t hs = rd16(h + 5);
+            if (hs < 7 || hs > size - pos) return false;
+            if (h[2] == 0x73) {
+                uint16_t f = rd16(h + 3);
+                out->is_volume = f & 0x0001;
+                out->new_numbering = f & 0x0010;
+                out->first = (f & 0x0100) || !(f & 0x0001);
+                out->headers_encrypted = f & 0x0080;
+                return true;
+            }
+            pos += hs;
+            if (h[2] != 0x72 && (rd16(h + 3) & 0x8000) && hs >= 11) pos += rd32(h + 7);
+        }
+        return false;
+    }
+    if (fmt == 5) {
+        size_t pos = at + 8;
+        if (size - pos < 5) return false;
+        rd5_t r = { data + pos + 4, size - pos - 4, 0, false };
+        uint64_t hs = vint(&r);
+        if (r.bad || hs > r.n - r.at) return false;
+        rd5_t b = { r.p + r.at, (size_t)hs, 0, false };
+        uint64_t type = vint(&b), hflags = vint(&b);
+        if (hflags & 1) (void)vint(&b);
+        if (hflags & 2) (void)vint(&b);
+        out->new_numbering = true;
+        if (type == 4) { out->headers_encrypted = true; out->first = true; return true; }
+        if (type != 1 || b.bad) return false;
+        uint64_t af = vint(&b);
+        out->is_volume = af & 1;
+        out->first = !(af & 2);
+        return !b.bad;
+    }
+    return false;
+}
+
+static size_t ext_dot(u8str_t name) {
+    for (size_t i = name.len; i-- > 0;) {
+        if (name.ptr[i] == '.') return i;
+        if (name.ptr[i] == '/' || name.ptr[i] == '\\') break;
+    }
+    return SIZE_MAX;
 }
 
 static bool is_digit(char c) { return c >= '0' && c <= '9'; }
-static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
-static size_t name_start(u8str_t path) {
-    for (size_t i = path.len; i > 0; --i) if (path.ptr[i - 1] == '/' || path.ptr[i - 1] == '\\') return i;
-    return 0;
-}
-
-/* `.partN.rar`: where the digits are, or false. */
-static bool part_digits(u8str_t name, size_t *from, size_t *to) {
-    if (name.len < 10) return false;
-    size_t ext = name.len - 4;
-    if (name.ptr[ext] != '.' || lower(name.ptr[ext + 1]) != 'r' || lower(name.ptr[ext + 2]) != 'a' || lower(name.ptr[ext + 3]) != 'r') return false;
-    size_t d = ext;
-    while (d > 0 && is_digit(name.ptr[d - 1])) d--;
-    if (d == ext || d < 5) return false;
-    const char *p = name.ptr + d - 5;
-    if (p[0] != '.' || lower(p[1]) != 'p' || lower(p[2]) != 'a' || lower(p[3]) != 'r' || lower(p[4]) != 't') return false;
-    *from = d;
-    *to = ext;
+/* `.partN` right before the extension: where its digits are. */
+static bool part_digits(u8str_t name, size_t dot, size_t *d0, size_t *d1) {
+    size_t e = dot, s = dot;
+    while (s > 0 && is_digit(name.ptr[s - 1])) s--;
+    if (s == e || s < 5) return false;
+    u8str_t tag = { name.ptr + s - 5, 5 };
+    if (!rubraview_u8_eq_lit_ci(tag, ".part")) return false;
+    *d0 = s; *d1 = e;
     return true;
 }
 
+static bool old_ext(u8str_t name, size_t dot) {
+    if (dot == SIZE_MAX || name.len - dot != 4) return false;
+    char c = rubraview_ascii_lower(name.ptr[dot + 1]);
+    return c >= 'r' && c <= 'z' && is_digit(name.ptr[dot + 2]) && is_digit(name.ptr[dot + 3]);
+}
+
 rubraview_rar_volume_name_kind_t rubraview_rar_volume_name_kind(u8str_t name) {
-    name = (u8str_t){ name.ptr + name_start(name), name.len - name_start(name) };
-    size_t a = 0, b = 0;
-    if (part_digits(name, &a, &b)) return RUBRAVIEW_RAR_NAME_PART;
-    if (name.len >= 5 && name.ptr[name.len - 4] == '.' && lower(name.ptr[name.len - 3]) >= 'r' &&
-        lower(name.ptr[name.len - 3]) <= 'z' && is_digit(name.ptr[name.len - 2]) && is_digit(name.ptr[name.len - 1]))
-        return RUBRAVIEW_RAR_NAME_OLD;
+    size_t dot = ext_dot(name), d0, d1;
+    if (old_ext(name, dot)) return RUBRAVIEW_RAR_NAME_OLD;
+    if (dot != SIZE_MAX && part_digits(name, dot, &d0, &d1)) return RUBRAVIEW_RAR_NAME_PART;
     return RUBRAVIEW_RAR_NAME_PLAIN;
 }
 
 unsigned rubraview_rar_volume_number(u8str_t name) {
-    name = (u8str_t){ name.ptr + name_start(name), name.len - name_start(name) };
-    size_t a = 0, b = 0;
-    if (part_digits(name, &a, &b)) {
+    size_t dot = ext_dot(name), d0, d1;
+    if (old_ext(name, dot)) {
+        unsigned letter = (unsigned)(rubraview_ascii_lower(name.ptr[dot + 1]) - 'r');
+        return letter * 100 + (unsigned)(name.ptr[dot + 2] - '0') * 10 + (unsigned)(name.ptr[dot + 3] - '0') + 2;
+    }
+    if (dot != SIZE_MAX && part_digits(name, dot, &d0, &d1)) {
         unsigned n = 0;
-        for (size_t i = a; i < b && n < 100000; ++i) n = n * 10 + (unsigned)(name.ptr[i] - '0');
+        for (size_t i = d0; i < d1 && n < 100000; ++i) n = n * 10 + (unsigned)(name.ptr[i] - '0');
         return n;
     }
-    if (rubraview_rar_volume_name_kind(name) == RUBRAVIEW_RAR_NAME_OLD) {
-        const char *e = name.ptr + name.len - 3;
-        return (unsigned)(lower(e[0]) - 'r') * 100 + (unsigned)(e[1] - '0') * 10 + (unsigned)(e[2] - '0') + 2;
+    if (dot != SIZE_MAX) {
+        u8str_t ext = { name.ptr + dot, name.len - dot };
+        if (rubraview_u8_eq_lit_ci(ext, ".rar") || rubraview_u8_eq_lit_ci(ext, ".cbr")) return 1;
     }
-    if (name.len >= 4 && name.ptr[name.len - 4] == '.') return 1;
     return 0;
 }
 
-static u8str_t copy_path(proven_arena_t *arena, u8str_t path, size_t extra, char **out) {
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, path.len + extra + 1);
-    if (!proven_is_ok(res.err)) { *out = NULL; return (u8str_t){ .ptr = "", .len = 0 }; }
-    *out = (char*)res.value.ptr;
-    memcpy(*out, path.ptr, path.len);
-    (*out)[path.len] = '\0';
-    return (u8str_t){ .ptr = *out, .len = path.len };
+static u8str_t splice(proven_arena_t *arena, u8str_t path, size_t from, size_t to, const char *mid, size_t mid_len) {
+    size_t n = from + mid_len + (path.len - to);
+    proven_result_mem_mut_t r = proven_arena_alloc(arena, n + 1);
+    if (!proven_is_ok(r.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    memcpy(r.value.ptr, path.ptr, from);
+    memcpy(r.value.ptr + from, mid, mid_len);
+    memcpy(r.value.ptr + from + mid_len, path.ptr + to, path.len - to);
+    r.value.ptr[n] = 0;
+    return (u8str_t){ .ptr = (const char*)r.value.ptr, .len = n };
 }
 
 u8str_t rubraview_rar_first_volume(proven_arena_t *arena, u8str_t path, bool old) {
-    size_t base = name_start(path);
-    u8str_t name = { path.ptr + base, path.len - base };
-    char *p = NULL;
-    size_t a = 0, b = 0;
-    if (part_digits(name, &a, &b)) {
-        u8str_t out = copy_path(arena, path, 0, &p);
-        if (!p) return out;
-        for (size_t i = base + a; i < base + b; ++i) p[i] = i + 1 == base + b ? '1' : '0';
-        return out;
+    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
+    size_t dot = ext_dot(path), d0, d1;
+    if (old_ext(path, dot)) {
+        bool upper = path.ptr[dot + 1] >= 'A' && path.ptr[dot + 1] <= 'Z';
+        return splice(arena, path, dot + 1, path.len, upper ? "RAR" : "rar", 3);
     }
-    if (old || rubraview_rar_volume_name_kind(name) == RUBRAVIEW_RAR_NAME_OLD) {
-        u8str_t out = copy_path(arena, path, 0, &p);
-        if (!p || name.len < 4 || name.ptr[name.len - 4] != '.') return out;
-        bool upper = name.ptr[name.len - 3] >= 'A' && name.ptr[name.len - 3] <= 'Z';
-        p[path.len - 3] = upper ? 'R' : 'r';
-        p[path.len - 2] = upper ? 'A' : 'a';
-        p[path.len - 1] = upper ? 'R' : 'r';
-        return out;
+    if (!old && dot != SIZE_MAX && part_digits(path, dot, &d0, &d1)) {
+        char digits[32];
+        size_t w = d1 - d0 < sizeof(digits) ? d1 - d0 : sizeof(digits) - 1;
+        memset(digits, '0', w);
+        digits[w - 1] = '1';
+        return splice(arena, path, d0, d1, digits, w);
     }
-    return copy_path(arena, path, 0, &p);
+    return splice(arena, path, 0, 0, "", 0);
 }
 
 u8str_t rubraview_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old) {
-    size_t base = name_start(path);
-    u8str_t name = { path.ptr + base, path.len - base };
-    char *p = NULL;
-    size_t a = 0, b = 0;
-    if (!old && part_digits(name, &a, &b)) {
-        u8str_t out = copy_path(arena, path, 1, &p);
-        if (!p) return out;
-        size_t i = base + b;
-        while (i > base + a) {
-            --i;
-            if (p[i] != '9') { p[i]++; return out; }
-            p[i] = '0';
+    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
+    size_t dot = ext_dot(path);
+    if (old) {
+        if (old_ext(path, dot)) {
+            char ext[3] = { path.ptr[dot + 1], path.ptr[dot + 2], path.ptr[dot + 3] };
+            unsigned n = (unsigned)(ext[1] - '0') * 10 + (unsigned)(ext[2] - '0') + 1;
+            if (n == 100) { n = 0; ext[0]++; }
+            ext[1] = (char)('0' + n / 10);
+            ext[2] = (char)('0' + n % 10);
+            return splice(arena, path, dot + 1, path.len, ext, 3);
         }
-        /* all nines: one digit more (part9 -> part10) */
-        memmove(p + base + a + 1, p + base + a, path.len - base - a + 1);
-        p[base + a] = '1';
-        out.len++;
-        return out;
+        bool upper = dot != SIZE_MAX && dot + 1 < path.len && path.ptr[dot + 1] >= 'A' && path.ptr[dot + 1] <= 'Z';
+        if (dot == SIZE_MAX) return splice(arena, path, path.len, path.len, upper ? ".R00" : ".r00", 4);
+        return splice(arena, path, dot + 1, path.len, upper ? "R00" : "r00", 3);
     }
-    if (name.len < 4 || name.ptr[name.len - 4] != '.') return copy_path(arena, path, 0, &p);
-    u8str_t out = copy_path(arena, path, 0, &p);
-    if (!p) return out;
-    char *e = p + path.len - 3;
-    if (!is_digit(e[1]) || !is_digit(e[2])) {                /* .rar -> .r00 */
-        e[1] = '0';
-        e[2] = '0';
-        return out;
+    /* New naming: the last run of digits before the extension, its width kept; in `x.part3of5.rar`
+       the first of the last two numbers (spec 4.1). */
+    size_t end = dot == SIZE_MAX ? path.len : dot;
+    size_t e = end;
+    while (e > 0 && !is_digit(path.ptr[e - 1])) e--;
+    size_t s = e;
+    while (s > 0 && is_digit(path.ptr[s - 1])) s--;
+    if (s == e) return (u8str_t){ .ptr = "", .len = 0 };
+    if (s >= 2 && rubraview_ascii_lower(path.ptr[s - 2]) == 'o' && rubraview_ascii_lower(path.ptr[s - 1]) == 'f') {
+        size_t e2 = s - 2, s2 = e2;
+        while (s2 > 0 && is_digit(path.ptr[s2 - 1])) s2--;
+        if (s2 < e2) { s = s2; e = e2; }
     }
-    for (int i = 2; i >= 0; --i) {                           /* .r99 -> .s00, as UnRAR counts */
-        if (i > 0 && e[i] == '9') { e[i] = '0'; continue; }
-        e[i]++;
+    char digits[34];
+    size_t w = e - s;
+    if (w > 32) return (u8str_t){ .ptr = "", .len = 0 };
+    memcpy(digits + 1, path.ptr + s, w);
+    digits[0] = '0';
+    size_t i = w;
+    for (;;) {
+        if (digits[i] == '9') { digits[i] = '0'; i--; continue; }
+        digits[i]++;
         break;
     }
-    return out;
+    if (digits[0] != '0') return splice(arena, path, s, e, digits, w + 1);
+    return splice(arena, path, s, e, digits + 1, w);
 }

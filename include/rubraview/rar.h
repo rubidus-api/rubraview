@@ -2,6 +2,7 @@
 #define RUBRAVIEW_RAR_H
 
 #include "rubraview/core.h"
+#include "rubraview/rar_codec.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -65,12 +66,14 @@ typedef enum rubraview_rar_crypt {
 typedef struct rubraview_rar_entry {
     u8str_t  name;          /* '/' between folders; UTF-8 unless `name_is_legacy` */
     bool     name_is_legacy;/* RAR 4 without Unicode: the bytes of a code page, as ZIP's are */
-    uint64_t size, packed_size;
+    uint64_t size, packed_size;   /* size RUBRAVIEW_RAR_SIZE_UNKNOWN: the header does not say */
     uint64_t data_offset;   /* of its first piece, in its volume */
     uint32_t first_piece, piece_count;   /* in the archive's `pieces` */
     uint32_t crc32;         /* the last piece's: the whole file's (a MAC when `hash_mac`) */
     bool     has_crc;
-    unsigned method;        /* 0 stored; else the decoder's: 15, 20, 26, 29, 36, 50, 70 */
+    uint8_t  hash[32];      /* RAR 5 BLAKE2sp of the file (a MAC when `hash_mac`), spec 5.3 */
+    bool     has_hash;
+    unsigned method;        /* 0 stored; else the decoder's: 15, 20, 26, 29, 36, 50, 70 (255: unknown) */
     uint64_t dict_size;
     bool     solid;         /* continues the previous file's stream */
     bool     encrypted;
@@ -80,6 +83,8 @@ typedef struct rubraview_rar_entry {
     bool     salt_set, psw_check_set, hash_mac;
     uint8_t  lg2_count;
     uint8_t  salt[16], iv[16], psw_check[8];
+    uint8_t  psw_check_sum[4];          /* RAR 5: SHA-256 of psw_check, to tell damage from a wrong password */
+    uint8_t  mac_salt[16], mac_lg2;     /* RAR 5: the checksum key's, from the last part (spec 4.2) */
 } rubraview_rar_entry_t;
 
 typedef struct rubraview_rar_archive {
@@ -173,6 +178,15 @@ typedef struct rubraview_rar_data_result {
     rubraview_rar_err_t err;
     u8str_t data;           /* in the caller's arena on success */
 } rubraview_rar_data_result_t;
+
+/**
+ * Entry `index` streamed into `write` (a solid archive's chain before it
+ * decoded and discarded), its CRC / BLAKE2sp checked at the end: the bytes
+ * are handed over before the check, so OK is what says they were right.
+ * For entries too large to hold (spec 2.3's 64-bit sizes).
+ */
+rubraview_rar_err_t rubraview_rar_extract(rubraview_rar_archive_t *archive, size_t index,
+                                          rubraview_rar_write_fn write, void *ctx);
 
 [[nodiscard]] rubraview_rar_data_result_t rubraview_rar_read_entry(proven_arena_t *arena, rubraview_rar_archive_t *archive,
                                                                     size_t index, uint64_t max_entry_bytes);
