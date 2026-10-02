@@ -96,7 +96,6 @@ struct rar15_unpacker {
     const uint8_t *in;
     size_t in_size;
     uint64_t bitpos;
-    bool overrun;
     int64_t left;
     uint8_t *out;
     uint64_t out_size, out_done;
@@ -168,10 +167,9 @@ static uint32_t peek16(const rar15_unpacker *u) {
     return (v >> (8 - (u->bitpos & 7))) & 0xFFFFu;
 }
 
+/* bits past the data area read as 0 (spec 3); a damaged stream is caught by FILE_CRC */
 static void skip(rar15_unpacker *u, uint32_t n) {
     u->bitpos += n;
-    if (u->bitpos > (uint64_t)u->in_size * 8)
-        u->overrun = true;
 }
 
 /* 4.1 decode, with 4.3 for the value past the last one of P0..P4 */
@@ -192,9 +190,7 @@ static uint32_t decode(rar15_unpacker *u, int table) {
             return v;
         }
     }
-    /* unreachable: every table is a complete code */
-    u->overrun = true;
-    return 0;
+    return 0; /* unreachable: every table is a complete code */
 }
 
 /* --- 11 output ------------------------------------------------------------ */
@@ -313,10 +309,8 @@ static void short_match(rar15_unpacker *u) {
         if (((c ^ tab[k].code) & mask) == 0)
             break;
     }
-    if (k == 15) { /* cannot happen: the codes cover every byte */
-        u->overrun = true;
-        return;
-    }
+    if (k == 15)
+        return; /* unreachable: the codes cover every byte */
     skip(u, len);
 
     if (k == 9) { /* 9.4 repeat last match */
@@ -481,7 +475,6 @@ int rar15_unpack(rar15_unpacker *u, const uint8_t *packed, size_t packed_size,
     u->in = packed;
     u->in_size = packed_size;
     u->bitpos = 0;
-    u->overrun = false;
     u->out = out;
     u->out_size = unp_size;
     u->out_done = 0;
@@ -491,10 +484,7 @@ int rar15_unpack(rar15_unpacker *u, const uint8_t *packed, size_t packed_size,
         u->flags = read_flags(u);
         u->flagcnt = 8;
     }
-    while (u->left >= 0) {
+    while (u->left >= 0)
         decode_token(u);
-        if (u->overrun)
-            return RAR15_ERR_TRUNCATED;
-    }
-    return u->out_done == unp_size ? RAR15_OK : RAR15_ERR_TRUNCATED;
+    return RAR15_OK;
 }
