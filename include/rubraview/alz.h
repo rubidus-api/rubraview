@@ -124,6 +124,21 @@ typedef struct rubraview_alz_data_result {
  */
 u8str_t rubraview_alz_volume_path(proven_arena_t *arena, u8str_t first_path, unsigned number);
 
+/*
+ * What a volume's own bytes say about its set. Not in the spec (its section 2
+ * leaves the 8-byte head and 16-byte tail undescribed); observed in the
+ * output of ALZip 4.9, 6.7 and 12.37 (docs/cleanroom/questions-alz-decoder.md):
+ * a later volume starts "ALZ" 01 0a 00 and its number (16 bits, 1 for `.a00`),
+ * and every volume ends "CLZ" 03 except the last, which ends "CLZ" 02 as an
+ * archive that is not split does.
+ */
+
+/** The volume number in a volume's head: 0 for the `.alz`, 1 for `.a00`, ...; -1 when it has no "ALZ" 01 head. */
+int32_t rubraview_alz_volume_number(const uint8_t *data, size_t size);
+
+/** The archive ends in this volume: its last bytes are the end record "CLZ" 02. */
+bool rubraview_alz_volume_is_last(const uint8_t *data, size_t size);
+
 /** Wipe the password and let it go. Safe on a failed open. */
 void rubraview_alz_close(rubraview_alz_archive_t *archive);
 

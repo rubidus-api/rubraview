@@ -352,7 +352,13 @@ static rubraview_page_source_t page_source_from_rar(proven_arena_t *arena,
    ZIP's are, with `\` between folders; every file is compressed on its own.
    A split archive's later volumes (`x.a00`, ...) are mapped here, from the
    `.alz` on, until one is missing (spec §2). */
-static size_t alz_map_set(proven_arena_t *arena, rubraview_page_source_t *source, u8str_t archive_path) {
+static size_t alz_map_set(proven_arena_t *arena, rubraview_page_source_t *source, const uint8_t *data, size_t size,
+                          u8str_t archive_path) {
+    /* What ALZip writes tells more than the names (rubraview/alz.h): an
+       archive that ends in its end record is whole, so a stray `.a00` beside
+       it is not joined; a volume whose head names another number ends the
+       set. A head that is not ALZip's is taken, as the spec says to. */
+    if (rubraview_alz_volume_is_last(data, size)) return 0;
     size_t cap = 0;
     for (unsigned number = 1;; ++number) {
         u8str_t name = rubraview_alz_volume_path(arena, archive_path, number);
@@ -367,7 +373,10 @@ static size_t alz_map_set(proven_arena_t *arena, rubraview_page_source_t *source
         rubraview_fs_mapping_t map = {0};
         if (!rubraview_pal_fs_map(name, &map)) break;
         if (map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&map); break; }
+        int32_t said = rubraview_alz_volume_number(map.data, (size_t)map.size);
+        if (said >= 0 && said != (int32_t)number) { rubraview_pal_fs_unmap(&map); break; }
         source->alz_maps[source->alz_map_count++] = map;
+        if (rubraview_alz_volume_is_last(map.data, (size_t)map.size)) break;
     }
     return source->alz_map_count;
 }
@@ -428,7 +437,7 @@ static rubraview_page_source_t page_source_from_alz(proven_arena_t *arena,
                                                     uint32_t max_entry_bytes,
                                                     u8str_t password) {
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ, .archive_path = archive_path };
-    size_t later = alz_map_set(arena, &source, archive_path);
+    size_t later = alz_map_set(arena, &source, data, size, archive_path);
     proven_result_mem_mut_t vres = rubraview_arena_alloc_array(arena, later + 1, sizeof(rubraview_alz_volume_t));
     if (!proven_is_ok(vres.err)) return source;
     rubraview_alz_volume_t *vols = (rubraview_alz_volume_t*)(void*)vres.value.ptr;
