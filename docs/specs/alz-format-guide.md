@@ -437,7 +437,7 @@ After the last entry come two short records.
 
 | Record | After the signature | Notes |
 |---|---|---|
-| `CLZ` 01, central directory | **8 bytes** in every archive ALZip made; the spec says 12 | ALZip 5.03 and later: 8 zeros. ALZip 4.9: 4 zeros then 4 non-zero bytes (perhaps a CRC) |
+| `CLZ` 01, central directory | **8 bytes** in every archive ALZip made; the spec says 12 | 8 zeros, except in ALZip 4.9's **split** archives: 4 zeros then 4 other bytes (not the CRC-32 of the volume; unexplained) |
 | `CLZ` 02, end of archive | nothing | the last 4 bytes of the archive (or of its last volume) |
 
 Despite its name, the "central directory" holds **no file list**: the local headers are the only list.
@@ -572,6 +572,7 @@ head (8 bytes), every volume after the first:
 tail (16 bytes), every volume but the last:
   43 4C 5A 01   xx xx xx xx xx xx xx xx   43 4C 5A 03
   "CLZ" 01      8 bytes (zeros; ALZip 4.9: 4 zeros + 4 others)   "CLZ" 03
+                (the last volume's closing "CLZ" 01 record has the same 4 + 4 in 4.9)
 ```
 
 Note that the head is exactly the archive header of section 3: the `.alz` is volume 0. These facts are useful
@@ -1022,7 +1023,7 @@ about 29 000 such archives (100 000 reads; four runs of 45 seconds) without a fa
 
 | Version | ALZ methods it writes | Command line | Notes |
 |---|---|---|---|
-| 4.9 (4.9.0.66) | bzip2 ("maximum"); stored ("no compression"): the only two ALZ choices | none (GUI only) | `CLZ` 01 record carries 4 non-zero bytes |
+| 4.9 (4.9.0.66) | bzip2 ("maximum"); stored ("no compression"): the only two ALZ choices | none (GUI only) | in split archives, 4 non-zero bytes after `CLZ` 01 |
 | 5.03 (file version 4.99.0.1) | deflate ("normal" tested); offers normal, fast, faster, no compression | none (GUI only) | "maximum" is no longer offered for ALZ; its volume splitting failed on the test machine ("not enough disk space" with 49 GB free) |
 | 6.32 | (not tested: no command line) | none | |
 | 6.7 | deflate (maximum and default tested) | `ALZip.exe -a -m# -p -v` | |
@@ -1039,8 +1040,9 @@ after `CLZ` 01; volumes no smaller than 64 KB (12.37).
 
 - **Descriptor flag 0x08** (password check from the time) is in the spec but no ALZip version tested sets it;
   the reference reader implements it as the spec says, tested only on generated archives.
-- **The 4 non-zero bytes ALZip 4.9 writes after `CLZ` 01** (and in volume tails) are unexplained (perhaps a
-  CRC). Skipping them is safe.
+- **The 4 non-zero bytes ALZip 4.9 writes after `CLZ` 01 in split archives** (volume tails and the last
+  record) are unexplained: they are not the CRC-32 of the volume, with or without its head and tail
+  (`tools/alz_re_experiments.py`, section 6.5 of `docs/cleanroom/alz-reverse-engineering.md`). Skipping them is safe.
 - **The unknown byte after the descriptor and after the method** were 0 in every archive seen.
 - **The `0A 00` in the archive header** is constant in every archive seen.
 - **Older ALZip versions** (before 4.9) were not available; they may differ.
