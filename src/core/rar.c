@@ -398,7 +398,10 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             block_end = pos + 8 + n;
             if ((crc32_update(0, h + 2, hsize - 2) & 0xFFFF) != rd16(h)) return first_block ? P_BAD_PASSWORD : P_CORRUPT;
         } else {
-            if (pos > size || size - pos < 7) return P_END;
+            if (pos > size || size - pos < 7) {
+                *more = p->is_volume;   /* RAR 1.55 writes no end block; a volume's end says nothing (rar15.md 2) */
+                return P_END;
+            }
             h = d + pos;
             hsize = rd16(h + 5);
             if (hsize < 7 || hsize > size - pos) return P_CORRUPT;
@@ -787,6 +790,17 @@ rubraview_rar_result_t rubraview_rar_open_volumes(proven_arena_t *arena, const r
     a->piece_count = p.pieces.count;
     a->rar5 = p.rar5;
     a->solid_archive = p.solid;
+    /* RAR 1.5 marks a solid archive in its main header only: every compressed file after the first
+       continues the stream (rar15.md 2, 6.3). */
+    if (!p.rar5 && p.solid) {
+        bool first = true;
+        for (size_t i = 0; i < a->entry_count; ++i) {
+            rubraview_rar_entry_t *e = &a->entries[i];
+            if (e->method != 15) continue;
+            if (!first) e->solid = true;
+            first = false;
+        }
+    }
     a->headers_encrypted = p.headers_encrypted;
     a->is_volume = p.is_volume;
     a->new_numbering = p.rar5 || p.new_numbering;
@@ -967,7 +981,7 @@ static rubraview_rar_err_t entry_check(const rubraview_rar_archive_t *a, const r
     if (e->split) return RUBRAVIEW_RAR_ERR_MISSING_VOLUME;
     if (e->crypt == RUBRAVIEW_RAR_CRYPT_OLD) return RUBRAVIEW_RAR_ERR_UNSUPPORTED;
     if ((e->method != 0 || e->encrypted) && !g_codec) return RUBRAVIEW_RAR_ERR_NO_CODEC;
-    if (e->method != 0 && e->method != 20 && e->method != 26 && e->method != 29 && e->method != 50 && e->method != 70)
+    if (e->method != 0 && e->method != 15 && e->method != 20 && e->method != 26 && e->method != 29 && e->method != 50 && e->method != 70)
         return RUBRAVIEW_RAR_ERR_UNSUPPORTED;   /* RAR 1.5 (spec 2.4) and the unknown */
     if (g_codec && e->method != 0 && e->dict_size > g_codec->max_dict) return RUBRAVIEW_RAR_ERR_TOO_LARGE;
     if (e->encrypted && !st->have_password) return RUBRAVIEW_RAR_ERR_ENCRYPTED;

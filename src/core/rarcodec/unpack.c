@@ -282,12 +282,42 @@ void rc_unpack_destroy(void *p) {
     rc_unpack_t *u = (rc_unpack_t*)p;
     if (!u) return;
     rc_unpack29_free(u);
+    if (u->v15) rar15_free(u->v15);
     free(u->win);
     free(u->filters);
     free(u->fbuf);
     free(u->fbuf2);
     free(u->bits.buf);
     free(u);
+}
+
+/* RAR 1.5 goes to unpack15.c, which keeps its own window; a solid archive's files share its state
+   (docs/specs/rar15.md 6.3). It has no end-of-file code, so the size must be known. */
+typedef struct v15_write { rubraview_rar_write_fn write; void *ctx; } v15_write_t;
+
+static int v15_write(void *ctx, const uint8_t *data, size_t size) {
+    v15_write_t *w = (v15_write_t*)ctx;
+    return w->write(w->ctx, data, size) ? 1 : 0;
+}
+
+/* How far past the packed data a RAR 1.5 stream may read before it is called damaged: RAR's own
+   streams never read past it (rar15.md 3); this only stops a broken header's size from running on. */
+#define V15_MAX_OVERRUN_BITS 4096u
+
+static rubraview_rar_unpack_status_t unpack15(rc_unpack_t *u, const rubraview_rar_unpack_params_t *prm, bool solid,
+                                              rubraview_rar_read_fn read, void *read_ctx,
+                                              rubraview_rar_write_fn write, void *write_ctx) {
+    u->alive = false;
+    if (prm->dest_size == RUBRAVIEW_RAR_SIZE_UNKNOWN) return RUBRAVIEW_RAR_UNPACK_CORRUPT;
+    if (!u->v15) u->v15 = rar15_new();
+    if (!u->v15) return RUBRAVIEW_RAR_UNPACK_NO_MEMORY;
+    v15_write_t w = { write, write_ctx };
+    int r = rar15_unpack_stream(u->v15, read, read_ctx, v15_write, &w, prm->dest_size, solid, V15_MAX_OVERRUN_BITS);
+    u->family = 15;
+    rubraview_rar_unpack_status_t st = r == RAR15_OK ? RUBRAVIEW_RAR_UNPACK_OK
+                                     : r == RAR15_STOPPED ? RUBRAVIEW_RAR_UNPACK_STOPPED : RUBRAVIEW_RAR_UNPACK_CORRUPT;
+    u->alive = st == RUBRAVIEW_RAR_UNPACK_OK;
+    return st;
 }
 
 rubraview_rar_unpack_status_t rc_unpack_file(void *p, const rubraview_rar_unpack_params_t *prm,
@@ -297,14 +327,17 @@ rubraview_rar_unpack_status_t rc_unpack_file(void *p, const rubraview_rar_unpack
     if (!u || !prm || !read || !write) return RUBRAVIEW_RAR_UNPACK_CORRUPT;
     unsigned family;
     switch (prm->method) {
+    case 15: family = 15; break;
     case 20: case 26: family = 20; break;
     case 29: family = 29; break;
     case 50: case 70: family = 50; break;
-    default: return RUBRAVIEW_RAR_UNPACK_UNSUPPORTED;   /* 15 (RAR 1.5) and the unknown */
+    default: return RUBRAVIEW_RAR_UNPACK_UNSUPPORTED;   /* the unknown */
     }
     if (prm->dict_size > ((uint64_t)1 << 36)) return RUBRAVIEW_RAR_UNPACK_TOO_LARGE;
     bool solid = prm->solid;
     if (solid && (!u->alive || u->family != family)) return RUBRAVIEW_RAR_UNPACK_CORRUPT;   /* spec 7.5 */
+
+    if (family == 15) return unpack15(u, prm, solid, read, read_ctx, write, write_ctx);
 
     uint64_t need = (prm->dict_size > RC_MIN_WINDOW ? prm->dict_size : RC_MIN_WINDOW) + 2 * (uint64_t)RC_MARGIN;
     if (need > SIZE_MAX) return RUBRAVIEW_RAR_UNPACK_TOO_LARGE;
