@@ -175,9 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
-## 2026-10-02: D-71 RAR 1.5 compression is not supported
+## 2026-10-02: D-72 RAR 1.55 decoded from a black-box clean room; no general RAR 3 VM
 
-- Status: Accepted (owner 2026-10-02: "지원 안 함으로 확정", asked whether RAR 1.5 decoding should be specified from The Unarchiver's LGPL code, worked out from DOS RAR 1.5x output alone, or left out).
+- Status: Accepted (owner 2026-10-02, confirmed directly: "구현해보려 합니다. 맞습니다."). Supersedes D-71.
+- Decision:
+  - RAR 1.5 compression (unpack version 15) is worked out by a clean-room session of its own (`rar15-blackbox`) from the behaviour of RAR 1.55 for DOS, run in DOSBox on inputs the session chooses: output only, no disassembly, and no outside description of the format. Every test and inference is logged step by step in the copy, and the resulting spec (`docs/specs/rar15.md`) cites the log. The decoder is written from that spec, MIT.
+  - The general RAR 3 virtual machine is not implemented: it would run programs carried by an archive, and RARLAB's programs write only the six standard filters. A file with any other filter program is "not supported".
+- Consequences: RAR 1.55 itself is used as a black box only and is never committed or redistributed. Encryption of RAR 1.5 archives, the RAR 1.4 format and any compressor are out of scope.
+
+RAR 1.5 compression is not supported
+
+- Status: Superseded by D-72 (same day); was Accepted (owner 2026-10-02: "지원 안 함으로 확정", asked whether RAR 1.5 decoding should be specified from The Unarchiver's LGPL code, worked out from DOS RAR 1.5x output alone, or left out).
 - Decision: files compressed with RAR 1.5's algorithm (unpack version 15, archives made by RAR 1.5x in 1994-1996) are not decoded; the RAR reader lists them and says the method is not supported. No permissively licensed, independently written description or decoder of that algorithm was found: the known ones are UnRAR, code derived from it, 7-Zip's (under the unRAR restriction) and The Unarchiver's (LGPL).
 - Consequences: the clean-room RAR decoder covers RAR 2.0, 2.9/3.x, 5.0 and 7.0 compression. The old RAR programs downloaded for test data are kept with the owner's Windows packages, outside the repository.
 
