@@ -1026,8 +1026,12 @@ static rubraview_rar_err_t extract_one(rubraview_rar_archive_t *a, size_t index,
         if (!st->unpack) st->unpack = g_codec->unpack_create();
         if (!st->unpack) err = RUBRAVIEW_RAR_ERR_OUT_OF_MEMORY;
         else {
+            /* Spec 7.5: in a solid archive the stream runs to its end; so too when the next file says it continues. */
+            size_t nx = index + 1;
+            while (nx < a->entry_count && a->entries[nx].method == 0) nx++;
+            bool drain = a->solid_archive || (nx < a->entry_count && a->entries[nx].solid);
             rubraview_rar_unpack_params_t prm = {
-                .method = e->method, .solid = e->solid && st->next == index, .drain = a->solid_archive,
+                .method = e->method, .solid = e->solid && st->next == index, .drain = drain,
                 .dict_size = e->dict_size, .dest_size = e->size,
             };
             st->next = SIZE_MAX;
@@ -1035,11 +1039,7 @@ static rubraview_rar_err_t extract_one(rubraview_rar_archive_t *a, size_t index,
             err = map_unpack(us);
             if (err == RUBRAVIEW_RAR_ERR_CANCELLED && !atomic_load(&st->cancel) && !sink.stopped) err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
             if (atomic_load(&st->cancel)) err = RUBRAVIEW_RAR_ERR_CANCELLED;
-            if (err == RUBRAVIEW_RAR_OK) {   /* stored files between do not touch the stream */
-                size_t nx = index + 1;
-                while (nx < a->entry_count && a->entries[nx].method == 0) nx++;
-                st->next = nx;
-            }
+            if (err == RUBRAVIEW_RAR_OK) st->next = nx;   /* stored files between do not touch the stream */
             if (err == RUBRAVIEW_RAR_OK && e->size != RUBRAVIEW_RAR_SIZE_UNKNOWN && sink.written != e->size)
                 err = RUBRAVIEW_RAR_ERR_CORRUPT_STREAM;
         }
