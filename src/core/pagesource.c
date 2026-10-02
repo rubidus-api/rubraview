@@ -397,6 +397,29 @@ static u8str_t alz_display_name(proven_arena_t *arena, u8str_t raw, rubraview_co
     return (u8str_t){ .ptr = out, .len = name.len };
 }
 
+/* ALZip encrypts with the password's bytes in its maker's code page (CP949
+   for a Korean one), and the box gives UTF-8: a password that is not ASCII
+   is tried as typed, then in the reader's chosen code page, CP949 and the
+   system's. Each copy is wiped once tried. */
+static rubraview_alz_err_t alz_try_password(proven_arena_t *arena, rubraview_alz_archive_t *archive, u8str_t password,
+                                            rubraview_codepage_t override_choice) {
+    rubraview_alz_err_t err = rubraview_alz_set_password(archive, password);
+    bool ascii = true;
+    for (size_t i = 0; i < password.len; ++i) ascii = ascii && (unsigned char)password.ptr[i] < 0x80;
+    if (err != RUBRAVIEW_ALZ_ERR_BAD_PASSWORD || ascii) return err;
+    const uint32_t pages[3] = { rubraview_codepage_id(override_choice), 949, 0 };
+    for (size_t i = 0; i < 3; ++i) {
+        if (pages[i] == 65001 || (i > 0 && pages[i] == pages[0]) || (i == 2 && pages[2] == pages[1])) continue;
+        u8str_t bytes = rubraview_pal_encode_codepage(arena, password, pages[i]);
+        if (bytes.len == 0) continue;
+        err = rubraview_alz_set_password(archive, bytes);
+        volatile char *wipe = (volatile char*)(uintptr_t)bytes.ptr;
+        for (size_t k = 0; k < bytes.len; ++k) wipe[k] = 0;
+        if (err != RUBRAVIEW_ALZ_ERR_BAD_PASSWORD) return err;
+    }
+    return RUBRAVIEW_ALZ_ERR_BAD_PASSWORD;
+}
+
 static rubraview_page_source_t page_source_from_alz(proven_arena_t *arena,
                                                     const uint8_t *data, size_t size,
                                                     u8str_t archive_path,
@@ -417,7 +440,7 @@ static rubraview_page_source_t page_source_from_alz(proven_arena_t *arena,
     source.archivealz = opened.value;
     if (rubraview_alz_needs_password(&source.archivealz)) {
         /* Its pages are locked: the password is tried on them now. */
-        rubraview_alz_err_t tried = password.len > 0 ? rubraview_alz_set_password(&source.archivealz, password)
+        rubraview_alz_err_t tried = password.len > 0 ? alz_try_password(arena, &source.archivealz, password, override_choice)
                                                      : RUBRAVIEW_ALZ_ERR_ENCRYPTED;
         if (tried != RUBRAVIEW_ALZ_OK) {
             source.needs_password = true;

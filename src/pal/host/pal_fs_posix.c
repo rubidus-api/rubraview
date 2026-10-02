@@ -152,6 +152,12 @@ u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, u
     return (u8str_t){ .ptr = "", .len = 0 };
 }
 
+u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint32_t codepage_id) {
+    (void)arena; (void)utf8; (void)codepage_id;
+    /* No code-page tables here either: the caller keeps the UTF-8 bytes. */
+    return (u8str_t){ .ptr = "", .len = 0 };
+}
+
 bool rubraview_pal_fs_exists(u8str_t path) {
     if (path.len == 0 || !path.ptr) return false;
 

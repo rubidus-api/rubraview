@@ -94,8 +94,10 @@ bool rubraview_alz_is_alz(const uint8_t *data, size_t size);
                                                                 size_t volume_count);
 
 /**
- * The password for the encrypted files, as bytes (the archive's are in its
- * maker's code page; UTF-8 typed in the box matches for ASCII). Checked at
+ * The password for the encrypted files, as bytes: ALZip uses the password's
+ * bytes in its maker's code page (CP949 for a Korean one), so UTF-8 matches
+ * only for ASCII; the page source tries the code pages (rubraview_pal_encode_codepage).
+ * Checked at
  * once: the check byte of every encrypted file, then the smallest of them
  * decoded and its CRC-32 compared. OK or ERR_BAD_PASSWORD. Kept (in memory
  * only, wiped on close) until the archive is closed.
