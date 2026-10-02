@@ -35,6 +35,16 @@ came from is in its `vendor/<name>/VENDORED.md`.
 - Public domain imposes no condition; this notice is credit, not
   compliance.
 
+## bzip2 1.0.8 (decoder, altered)
+
+- Vendored at `vendor/bzip2/` (the decoder only; see `vendor/bzip2/VENDORED.md`)
+- Copyright (C) 1996-2019 Julian R Seward
+- Licence: bzip2 licence (BSD-style) — see `vendor/bzip2/LICENSE`
+- Used for: the bzip2-compressed entries of ALZ archives. **Altered
+  source:** its stream framing was changed to ALZ's cut-down one and its
+  CRC checks removed; every change is marked `RUBRAVIEW CHANGE`. It is not
+  the original libbzip2 and does not read standard `.bz2` files.
+
 ## libjpeg-turbo 3.0.4
 
 - Vendored snapshot at `vendor/libjpeg-turbo/` (the libjpeg API library
