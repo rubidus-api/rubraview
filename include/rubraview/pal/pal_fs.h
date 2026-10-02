@@ -106,6 +106,15 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
 u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id);
 
 /**
+ * The other way: UTF-8 text into a legacy code page's bytes (0 = the host's
+ * active one). For a password an archive keeps in its maker's code page —
+ * ALZip encrypts with the CP949 bytes of a Korean password, and the
+ * password box gives UTF-8. Empty when the platform cannot transcode, or a
+ * character has no exact place in that code page (no best-fit guesses).
+ */
+u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint32_t codepage_id);
+
+/**
  * Write a whole file, replacing it. Used for the small state files
  * §3.17 keeps (history.ini, settings.ini); returns false if the file
  * cannot be written, which in portable mode on read-only media is a

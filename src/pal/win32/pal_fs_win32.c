@@ -261,6 +261,32 @@ u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, u
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)utf8_len };
 }
 
+u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint32_t codepage_id) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || utf8.len == 0 || !utf8.ptr || utf8.len > (size_t)INT32_MAX) return empty;
+    UINT cp = (codepage_id == 0) ? CP_ACP : (UINT)codepage_id;
+    if (cp == CP_UTF8) return empty;
+
+    int wide_len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.ptr, (int)utf8.len, NULL, 0);
+    if (wide_len <= 0) return empty;
+    proven_result_mem_mut_t wide_res = rubraview_arena_alloc_array(arena, (size_t)wide_len, sizeof(WCHAR));
+    if (!proven_is_ok(wide_res.err)) return empty;
+    WCHAR *wide = (WCHAR*)(void*)wide_res.value.ptr;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.ptr, (int)utf8.len, wide, wide_len) != wide_len) return empty;
+
+    /* A character the code page lacks would become '?' or a look-alike:
+       for a password that is a different password, so it is refused. */
+    BOOL used_default = FALSE;
+    int out_len = WideCharToMultiByte(cp, WC_NO_BEST_FIT_CHARS, wide, wide_len, NULL, 0, NULL, &used_default);
+    if (out_len <= 0 || used_default) return empty;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)out_len + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    if (WideCharToMultiByte(cp, WC_NO_BEST_FIT_CHARS, wide, wide_len, (char*)res.value.ptr, out_len, NULL, &used_default) != out_len ||
+        used_default) return empty;
+    res.value.ptr[out_len] = '\0';
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)out_len };
+}
+
 bool rubraview_pal_fs_exists(u8str_t path) {
     if (path.len == 0 || !path.ptr || path.len >= MAX_PATH * 4) return false;
 
