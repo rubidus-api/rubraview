@@ -23,9 +23,10 @@ RAR 1.55 for DOS (released 20 August 1995) was run in DOSBox and was only ever u
    wrote out. RAR keeps the extracted file even when its CRC fails, which makes it a decoder oracle [L0007].
 
 No RAR program was disassembled or read inside, and no text that describes this format was consulted. The decoder
-model in `tools/rar15_model.py` agrees with RAR 1.55 on every output recorded: 5478 probe streams
-(`tests/fixtures/rar15/runs/`, checked by `tools/rar15_verify_runs.py`) and all 74 entries of the 27 fixture
-archives [L0024, L0029, L0031-L0034].
+model in `tools/rar15_model.py` agrees with RAR 1.55 on every output recorded: 5478 probe streams with a spec
+string (`tests/fixtures/rar15/runs/`, checked by `tools/rar15_verify_runs.py`), the 534 named probes of the first
+runs (except HTRUNC, section 3) and all 74 entries of the 27 fixture archives [L0013, L0024, L0029, L0031-L0034,
+L0039]. The C decoder written from this document passes the 74 entries and 5903 probes [L0038, L0040].
 
 **Limitation (the owner's decision Q1, `docs/cleanroom/questions-rar15-blackbox.md`).** This session is a language
 model whose training data very likely contains UnRAR's source and other descriptions of this format. The overall
@@ -69,10 +70,12 @@ The packed stream is read most significant bit first (`rar-decompression.md`, Co
   them.
 - `skip(n)`: consume n bits.
 
-A decoder may look ahead past the end of the data area while peeking. Bits there read as 0. RAR's own streams never
-*consume* a bit past their data area. They end on a token boundary and pad the last byte with 0 to 8 unused bits
-[L0034]. A stream that does consume past its end is corrupt. RAR itself does not need the last byte when it holds
-no used bits [L0010].
+A decoder reads bits past the end of the data area as 0, for peeking and for consuming. RAR's own streams never
+consume them: they end on a token boundary and pad the last byte with 0 to 8 unused bits [L0034]. What RAR 1.55
+reads there is not defined by the format. It appears to be whatever its input buffer still holds. A stream cut by
+3 bits (HTRUNC) decoded correctly right after the uncut stream had been extracted, and 20 one-byte-plus-zeros probes
+that consume up to 11 bits past their end agree with zero bits after probes that left zeros there [L0039]
+(`obs`). A damaged stream is caught by `FILE_CRC`, as RAR does ("CRC failed") [L0007].
 
 ## 4. Prefix codes
 
@@ -220,7 +223,8 @@ Each file after the first is decoded with `continue_solid` set: window, pos, all
 tables, old distances, last match, repcount, fartoggle and litrun carry over. Only `stored` is cleared, and a new
 flags byte is read [L0028] (`obs`: keeping the stored mode, skipping the flags read, or also clearing litrun each
 make RAR's solid archives decode wrongly). A file's bit input starts at its own data area (section 3). An empty
-file reads nothing and changes nothing except `stored` [L0029].
+file reads nothing [L0029]; the decoder clears `stored` as at any file start (not observed for an empty file that
+follows one ending in the stored mode).
 
 ## 7. Flags and token choice [L0012, L0013, L0015] (`prior, confirmed`)
 
@@ -455,7 +459,8 @@ content at pos). A decoder outputs exactly `UNP_SIZE` bytes per file (6.2).
   `expected-rar15.txt` [L0033].
 - `tests/fixtures/rar15/runs/*.json`: 5478 probe streams with RAR 1.55's output. They cover sections 4.3, 9.1 and
   9.4, which RAR's own archives rarely or never reach [L0015-L0024, L0031].
-- `tests/fixtures/rar15/probes-rar15.txt`: a subset with outputs, replayed by the C decoder's tests.
+- `tests/fixtures/rar15/probes-rar15.txt`: 5903 probes (spec and the CRC-32 of RAR's first `UNP_SIZE` bytes),
+  replayed by the C decoder's tests [L0037, L0039].
 
 ## 13. Rules and evidence
 
@@ -466,6 +471,7 @@ content at pos). A decoder outputs exactly `UNP_SIZE` bytes per file (6.2).
 | solid via main flag only; state carries over | 2, 6.3 | L0008, L0009, L0028 | obs |
 | volumes: joined data areas, CRC on the last part | 2 | L0008, L0009, L0029 | obs |
 | MSB-first bits, token-boundary file ends | 3 | L0010, L0034 | obs |
+| bits past the data area: undefined in RAR 1.55; read as 0 | 3 | L0039 | obs |
 | code tables P0..P4, N1, N2 | 4.1 | L0012, L0032 (L0011, L0013) | prior, confirmed |
 | code past the last value: short outside stored mode | 4.3 | L0016, L0018, L0031, L0035 | obs |
 | ... full length in stored mode | 4.3, 8.2 | L0027 | obs |
