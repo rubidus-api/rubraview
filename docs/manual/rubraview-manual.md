@@ -64,8 +64,7 @@ place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
 `.cb7`, `.7z`, `.cbr`, `.rar` and `.alz` all open, and nothing is ever unpacked to
-your disk — for now a CBR / RAR only when its pages are stored uncompressed
-(see "What is not there yet"). A solid archive (7z or RAR) reads a far page by unpacking the
+your disk. A solid archive (7z or RAR) reads a far page by unpacking the
 pages before it first, with its progress on screen. A password-protected
 RAR asks for its password (it is shown as dots, and forgotten when the
 viewer closes; one that worked is tried first on the next locked book). A
@@ -388,9 +387,9 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
-- **Compressed or password-protected `.cbr` (RAR) archives.** The program
-  uses no UnRAR code; RAR decoding of the project's own is being written.
-  Until then such a book says so, and a CBR with uncompressed pages opens.
+- **RAR archives compressed by RAR 1.5** (made in 1994-1996): their pages
+  are not read yet; a decoder is being worked out. RAR files that carry a filter program of their own
+  (not one of RAR's six standard filters) are not read, by design.
 - **Selecting or pasting in the rename box.** It takes typing — Korean
   and other IMEs included — and Backspace, but no selection, arrow keys or
   clipboard yet. (The keys themselves work with the Korean IME in Hangul
