@@ -190,13 +190,13 @@ Do not store credentials, private infrastructure details, personal data, private
 - Done (2026-10-02): the spec (`docs/specs/rar15.md`) and `src/core/rarcodec/unpack15.c`, from the black-box clean room; wired into the codec in the rar-decoder session's second round (streamed, one state across a solid archive's files; a RAR 1.55 volume without an end block continues into the next). `expected-rar15.txt`: 74 files of 22 archives.
 - Consequences: RAR 1.55 itself is used as a black box only and is never committed or redistributed. Limitation the owner accepted (2026-10-02, in the clean-room session, option (a)): the session is a language model whose training data very likely includes UnRAR and other descriptions of RAR 1.5, so the log cannot prove that the choice of hypotheses was free of that; every rule is still confirmed against RAR 1.55's own output, and every log line marks its hypothesis `src=obs` (from earlier observations) or `src=prior` (from general knowledge, possibly recall). Encryption of RAR 1.5 archives, the RAR 1.4 format and any compressor are out of scope.
 
-RAR 1.5 compression is not supported
+## 2026-10-02: D-71 RAR 1.5 compression is not supported
 
 - Status: Superseded by D-72 (same day); was Accepted (owner 2026-10-02: "지원 안 함으로 확정", asked whether RAR 1.5 decoding should be specified from The Unarchiver's LGPL code, worked out from DOS RAR 1.5x output alone, or left out).
 - Decision: files compressed with RAR 1.5's algorithm (unpack version 15, archives made by RAR 1.5x in 1994-1996) are not decoded; the RAR reader lists them and says the method is not supported. No permissively licensed, independently written description or decoder of that algorithm was found: the known ones are UnRAR, code derived from it, 7-Zip's (under the unRAR restriction) and The Unarchiver's (LGPL).
 - Consequences: the clean-room RAR decoder covers RAR 2.0, 2.9/3.x, 5.0 and 7.0 compression. The old RAR programs downloaded for test data are kept with the owner's Windows packages, outside the repository.
 
-No UnRAR code in the program
+## 2026-10-01: D-70 No UnRAR code in the program
 
 - Status: Accepted (owner 2026-10-01: "vendor/unrar_proprietary/ 이 자료는 ai-share/archive 밑으로 옮겨주세요. 우리는 unrar 안쓸거니까요"); supersedes D-66's module and D-63's use of UnRAR.
 - Decision:
