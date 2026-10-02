@@ -525,7 +525,12 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
         return page_source_from_7z(arena, data, size, archive_path, extension_filter,
                                    max_entry_bytes, max_block_bytes);
     }
-    if (arena && data && size >= 7 && data[0] == 'R' && rubraview_rar_is_rar(data, size < 64 ? size : 64)) {
+    /* RAR at the start, or after a self-extractor's stub (spec 1: anywhere in the first MiB); a ZIP's
+       own signature keeps it a ZIP. */
+    bool rar = arena && data && size >= 7 &&
+               ((data[0] == 'R' && rubraview_rar_is_rar(data, size < 64 ? size : 64)) ||
+                (!(data[0] == 'P' && data[1] == 'K') && rubraview_rar_is_rar(data, size)));
+    if (rar) {
         return page_source_from_rar(arena, data, size, archive_path, extension_filter, override_choice, max_entry_bytes, password);
     }
     if (arena && rubraview_alz_is_alz(data, size)) {
