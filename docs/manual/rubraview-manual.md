@@ -63,15 +63,15 @@ Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
 place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
-`.cb7`, `.7z`, `.cbr`, `.rar` and `.alz` all open, and nothing is ever unpacked to
+`.cb7`, `.7z`, `.cbr` and `.rar` all open, and nothing is ever unpacked to
 your disk. A solid archive (7z or RAR) reads a far page by unpacking the
 pages before it first, with its progress on screen. A password-protected
-RAR asks for its password (it is shown as dots, and forgotten when the
-viewer closes; one that worked is tried first on the next locked book). A
-RAR split into volumes (`x.part1.rar`, `x.part2.rar`, ... or `x.rar`,
-`x.r00`, ...) opens as one book from whichever volume you open. An ALZ
-asks for its password the same way, and a split one (`x.alz`, `x.a00`,
-`x.a01`, ...) opens as one book from its `.alz`.
+book — RAR, ZIP or 7z — asks for its password (it is shown as dots, and
+forgotten when the viewer closes; one that worked is tried first on the
+next locked book). A RAR split into volumes (`x.part1.rar`,
+`x.part2.rar`, ... or `x.rar`, `x.r00`, ...) opens as one book from
+whichever volume you open. A page whose data is damaged (its checksum
+does not match) is not shown.
 
 When the names inside an archive come out garbled — made on a Japanese,
 Chinese or Taiwanese computer — press `Shift+N` to read them again in the
@@ -387,6 +387,10 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
+- **ALZ and EGG archives, and RAR archives compressed by RAR 1.5** (made
+  in 1994-1996). Versions 0.0.30 and 0.0.31 read ALZ and RAR 1.5; archives
+  are now read by FultaArc, which does not have these yet. They return
+  when it does.
 - RAR files that carry a filter program of their own
   (not one of RAR's six standard filters) are not read, by design.
 - **Selecting or pasting in the rename box.** It takes typing — Korean

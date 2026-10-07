@@ -19,7 +19,6 @@
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/thumbq.h"
 #include "rubraview/thumb.h"
-#include "rubraview/archive.h"
 #include "rubraview/pagesource.h"
 #include "rubraview/glob.h"
 #include "rubraview/path.h"

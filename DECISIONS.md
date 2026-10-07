@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-08: D-74 Every archive is read and written by FultaArc
+
+- Status: Accepted (owner 2026-10-08: "fultaarc 벤더링 해서 코드 고치고"; asked what becomes of ALZ and RAR 1.5: "FultaArc 범위만"; file associations: ".cbr·.cbz·.cb7만"). Carries out RV-100; supersedes D-68 (the writer here) and D-73 (the RAR decoder here) as to where the code lives.
+- Decision:
+  - `vendor/fultaarc` (FultaArc 0.1.0, commit `e3dcb85`, MIT; the library that was started from this project's archive work) is the only archive code: ZIP, 7z and RAR 2.0-7.0, solid, split and password-protected, and ZIP / 7z writing, through `fulta/arc.h`. `src/core/pagesource.c` is rewritten on it; the viewer's own readers and decoders (`archive.c`, `sevenzip.c`, `rar.c`, `rarcodec/`, `alz.c`, `archive_write.c`), their headers and tests, and `vendor/lzma`, `vendor/miniz`, `vendor/bzip2` leave the tree. FultaArc brings its own LZMA SDK, miniz, bzip2 (unmodified) and zstd, and is built on this project's `vendor/proven`, moved to the same snapshot (`981911b`).
+  - What FultaArc does not ship yet is not read: ALZ, EGG and RAR 1.5 (FultaArc holds them until its clean rooms deliver). ALZ and RAR 1.5, read by 0.0.30-0.0.31, stop being read until then.
+  - Names: a code page the reader chooses (`Shift+N`) is applied by FultaArc; with none chosen, names that are not Unicode are still read in the machine's code page, from the stored bytes, as before.
+  - The format documents (`docs/specs/`) leave the public tree with the code they described; FultaArc publishes its own.
+  - Explorer associations stay the picture, film, music and comic-book ones: `.zip` and `.alz` leave the list; `.cbz`, `.cb7`, `.cbr` stay.
+- Consequences: gained with FultaArc — encrypted ZIP and 7z, more ZIP and 7z methods (bzip2, LZMA, PPMd, zstd, Deflate64, the old PKZIP ones), every page's checksum verified (a damaged page is refused rather than shown in part). Lost — ALZ, RAR 1.5, and a 7z's progress while it skips inside a solid block (the read still runs off the main thread and can be cancelled). `test_archives` reads the RAR fixtures' three manifests through the page source; the per-decoder tests went with the decoders. Backlog RV-092 to RV-099 (ALZ, EGG and AZO work here) are closed as FultaArc's.
+
 ## 2026-10-02: D-73 RAR is read by the project's own decoder
 
 - Status: Accepted (owner 2026-10-01: "rar도 구현 바랍니다", plan `mit-archives`; the work of the `rar-spec` and `rar-decoder` clean rooms, collected 2026-10-02).

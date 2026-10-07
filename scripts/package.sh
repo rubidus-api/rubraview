@@ -34,9 +34,6 @@ mkdir -p "$out" "$out/licences"
 cp "dist/$exe" "$out/rubraview.exe"
 # The same executable on its own, for the release's direct download.
 cp "dist/$exe" "dist/rubraview.exe"
-# RAR's decompression and decryption, under UnRAR's licence (proprietary),
-# are a DLL of their own, loaded at run time from beside the program
-# (owner, 2026-10-01). Left out, stored CBRs still open.
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
@@ -44,9 +41,12 @@ cp THIRD_PARTY_NOTICES.md "$out/"
 [ -f LICENSE ] && cp LICENSE "$out/" || true
 
 cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"
-cp vendor/miniz/LICENSE "$out/licences/miniz-LICENSE.txt"
-cp vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"
-cp vendor/bzip2/LICENSE "$out/licences/bzip2-LICENSE.txt"
+cp vendor/fultaarc/LICENSE "$out/licences/fultaarc-LICENSE.txt"
+cp vendor/fultaarc/THIRD_PARTY_NOTICES.md "$out/licences/fultaarc-THIRD_PARTY_NOTICES.md"
+cp vendor/fultaarc/vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"
+cp vendor/fultaarc/vendor/miniz/LICENSE "$out/licences/miniz-LICENSE.txt"
+cp vendor/fultaarc/vendor/bzip2/LICENSE "$out/licences/bzip2-LICENSE.txt"
+cp vendor/fultaarc/vendor/zstd/LICENSE "$out/licences/zstd-LICENSE.txt"
 cp vendor/libjpeg-turbo/LICENSE.md "$out/licences/libjpeg-turbo-LICENSE.md"
 cp vendor/libjpeg-turbo/README.ijg "$out/licences/libjpeg-turbo-README.ijg"
 

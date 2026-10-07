@@ -278,5 +278,5 @@ u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension) {
 }
 
 u8str_t rubraview_shell_extensions(void) {
-    return U8("jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;zip;alz;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
+    return U8("jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
 }
