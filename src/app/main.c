@@ -38,7 +38,6 @@
 #include <time.h>
 
 #include "rubraview/number.h"
-#include "rubraview/rarcodec.h"
 #include "rubraview/subbox.h"
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
@@ -136,7 +135,7 @@ static double g_gutter = 8.0;
 #define GUTTER g_gutter
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
 #define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
@@ -8468,55 +8467,30 @@ static void info_gather(app_state_t *app) {
         if (in_archive) {
             file_bytes = rubraview_page_source_entry_size(&app->source, (size_t)index);
             rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), file_bytes) });
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE && ref->entry_index < app->source.archive.entry_count) {
-                const rubraview_zip_entry_t *z = &app->source.archive.entries[ref->entry_index];
-                const char *how = z->compression_method == 0 ? "stored" : z->compression_method == 8 ? "deflate" : "other";
+            const fulta_arc_entry_t *en = rubraview_page_source_entry(&app->source, (size_t)index);
+            if (en) {
+                /* The method as the archive names it (FultaArc's word for it); a
+                   solid block has no packed size of its page's own. */
                 char packed[96];
-                rubraview_info_bytes(packed, sizeof(packed), z->compressed_size);
-                rubraview_info_addf(a, &info, "In the archive", "%s, %s", how, packed);
-            }
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ && ref->entry_index < app->source.archivealz.entry_count) {
-                const rubraview_alz_entry_t *z = &app->source.archivealz.entries[ref->entry_index];
-                const char *how = z->method == RUBRAVIEW_ALZ_METHOD_STORED ? "stored"
-                                : z->method == RUBRAVIEW_ALZ_METHOD_DEFLATE ? "deflate"
-                                : z->method == RUBRAVIEW_ALZ_METHOD_BZIP2 ? "bzip2" : "other";
-                char packed[96];
-                rubraview_info_bytes(packed, sizeof(packed), z->packed_size);
-                rubraview_info_addf(a, &info, "In the archive", "%s, %s", how, packed);
+                rubraview_info_bytes(packed, sizeof(packed), en->packed_size);
+                if (en->packed_size > 0) rubraview_info_addf(a, &info, "In the archive", "%s, %s", en->method ? en->method : "?", packed);
+                else rubraview_info_addf(a, &info, "In the archive", "%s", en->method ? en->method : "?");
             }
             rubraview_info_heading(a, &info, "Archive");
             rubraview_info_add(a, &info, "Name", rubraview_path_basename(app->source.archive_path));
             rubraview_info_add(a, &info, "Folder", rubraview_path_dirname(app->source.archive_path));
             rubraview_info_add(a, &info, "Kind", app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z ? U8("7z (CB7)")
-                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR
-                                                     ? (app->source.archiverar.rar5 ? U8("RAR 5 (CBR)") : U8("RAR 4 (CBR)"))
-                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ ? U8("ALZ")
+                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR ? U8("RAR (CBR)")
                                                      : U8("ZIP (CBZ)"));
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.solid_archive)
+            if (rubraview_page_source_is_solid(&app->source))
                 rubraview_info_add(a, &info, "Solid", U8("yes: a far page decodes the ones before it"));
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR) {
-                const rubraview_rar_archive_t *ra = &app->source.archiverar;
-                if (ra->volume_count > 1) rubraview_info_addf(a, &info, "Volumes", "%zu, read as one", ra->volume_count);
-                bool locked = false;
-                for (size_t i = 0; i < ra->entry_count && !locked; ++i) locked = ra->entries[i].encrypted;
-                if (locked) rubraview_info_add(a, &info, "Encrypted", ra->headers_encrypted ? U8("yes, names too (AES)") : U8("yes (AES)"));
+            uint64_t archive_bytes = app->archive_map.size, set_bytes = 0;
+            size_t volumes = rubraview_page_source_volumes(&app->source, &set_bytes);
+            if (volumes > 1) {
+                rubraview_info_addf(a, &info, "Volumes", "%zu, read as one", volumes);
+                archive_bytes = set_bytes;   /* a set: the volumes read so far */
             }
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ) {
-                const rubraview_alz_archive_t *za = &app->source.archivealz;
-                if (za->volume_count > 1) rubraview_info_addf(a, &info, "Volumes", "%zu, read as one", za->volume_count);
-                bool locked = false;
-                for (size_t i = 0; i < za->entry_count && !locked; ++i) locked = za->entries[i].encrypted;
-                if (locked) rubraview_info_add(a, &info, "Encrypted", U8("yes (ZIP 2.0)"));
-            }
-            uint64_t archive_bytes = app->archive_map.size;
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR && app->source.archiverar.volume_count > 1) {
-                archive_bytes = 0;   /* a set: all its volumes */
-                for (size_t v = 0; v < app->source.archiverar.volume_count; ++v) archive_bytes += app->source.archiverar.volumes[v].size;
-            }
-            if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ && app->source.archivealz.volume_count > 1) {
-                archive_bytes = 0;   /* a set: all its volumes */
-                for (size_t v = 0; v < app->source.archivealz.volume_count; ++v) archive_bytes += app->source.archivealz.volumes[v].size;
-            }
+            if (rubraview_page_source_is_encrypted(&app->source)) rubraview_info_add(a, &info, "Encrypted", U8("yes"));
             rubraview_info_add(a, &info, "Size", (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
             rubraview_info_addf(a, &info, "Pages", "%zu", page_count(app));
             /* the book's own summary: its folders and what it holds unpacked */
@@ -10514,10 +10488,6 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
                                                                   (u8str_t){ .ptr = app->passwords[i], .len = app->password_lens[i] });
     }
     app->source_dir = rubraview_path_dirname(archive_path);
-    if (app->source.needs_codec) {
-        osd_say(app, U8("this CBR could not be read: no RAR decoder is registered"));
-        return false;
-    }
     if (app->source.needs_password) {
         password_ask(app, archive_path, given.len > 0);
         return false;
@@ -11969,11 +11939,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        opened from it must read as an empty folder, not stop the viewer
        behind Windows' "There is no disk in the drive" box. */
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
-
-    /* CBR pages are decoded by the project's own RAR codec (MIT, written
-       from docs/specs/rar-decompression.md; D-70), set once before any
-       archive is read. */
-    rubraview_rar_set_codec(rubraview_rarcodec());
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;

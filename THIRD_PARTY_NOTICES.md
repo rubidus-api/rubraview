@@ -9,41 +9,61 @@ came from is in its `vendor/<name>/VENDORED.md`.
 - Vendored snapshot at `vendor/proven/`
 - Licence: MIT — see `vendor/proven/LICENSE`
 - Used for: memory arenas, UTF-8 string slices, dynamic collections, and
-  the job scheduler behind the pre-cache worker.
+  the job scheduler behind the pre-cache worker; FultaArc is built on it
+  too.
 - Additional notices from that project: `vendor/proven/THIRD_PARTY_NOTICES.md`
 
-## miniz 3.1.2
+## FultaArc 0.1.0
 
-- Vendored snapshot at `vendor/miniz/`
-- Copyright 2013-2014 RAD Game Tools and Valve Software; copyright
-  2010-2014 Rich Geldreich and Tenacious Software LLC
-- Licence: MIT — see `vendor/miniz/LICENSE`
-- Used for: DEFLATE decompression of CBZ (ZIP) entries only. The ZIP
-  container itself is parsed by rubraview's own reader.
+- Vendored snapshot at `vendor/fultaarc/` (see `vendor/fultaarc/VENDORED.md`)
+- Licence: MIT — see `vendor/fultaarc/LICENSE`
+- Used for: reading every archive (ZIP / CBZ, 7z / CB7, RAR / CBR 2.0 to
+  7.0, with their solid, split and password-protected forms) and writing
+  ZIP and 7z. Its RAR decoder was written in a clean room from a
+  specification; it contains no UnRAR code.
+- It brings the parts below with it; its own list, with the Unicode
+  licence's text, is `vendor/fultaarc/THIRD_PARTY_NOTICES.md`.
 
-## LZMA SDK 24.08
+### LZMA SDK 24.08 (inside FultaArc)
 
-- Vendored snapshot at `vendor/lzma/` (decode subset; see
-  `vendor/lzma/VENDORED.md` for exactly which files and why)
+- At `vendor/fultaarc/vendor/lzma/`
 - Written and placed in the **public domain** by Igor Pavlov. Some of it
   is based on public-domain code by other authors: PPMd var.H (2001) by
   Dmitry Shkarin.
-- Licence text: `vendor/lzma/LICENSE.txt`
-- Used for: reading 7z (CB7) comic archives, including the solid blocks
-  §3.8.2 needs a persistent decoder for. No encoder, no file I/O and no
-  encryption support is included.
-- Public domain imposes no condition; this notice is credit, not
-  compliance.
+- Licence text: `vendor/fultaarc/vendor/lzma/LICENSE.txt`
+- Used for: LZMA, LZMA2, PPMd and the 7z filters.
 
-## bzip2 1.0.8 (decoder, altered)
+### miniz 3.1.2 (inside FultaArc)
 
-- Vendored at `vendor/bzip2/` (the decoder only; see `vendor/bzip2/VENDORED.md`)
+- At `vendor/fultaarc/vendor/miniz/`
+- Copyright 2013-2014 RAD Game Tools and Valve Software; copyright
+  2010-2014 Rich Geldreich and Tenacious Software LLC
+- Licence: MIT — see `vendor/fultaarc/vendor/miniz/LICENSE`
+- Used for: DEFLATE when writing ZIP.
+
+### bzip2 1.0.8 (inside FultaArc)
+
+- At `vendor/fultaarc/vendor/bzip2/`, unmodified
 - Copyright (C) 1996-2019 Julian R Seward
-- Licence: bzip2 licence (BSD-style) — see `vendor/bzip2/LICENSE`
-- Used for: the bzip2-compressed entries of ALZ archives. **Altered
-  source:** its stream framing was changed to ALZ's cut-down one and its
-  CRC checks removed; every change is marked `RUBRAVIEW CHANGE`. It is not
-  the original libbzip2 and does not read standard `.bz2` files.
+- Licence: bzip2 licence (BSD-style) — see `vendor/fultaarc/vendor/bzip2/LICENSE`
+- Used for: bzip2-compressed ZIP and 7z entries.
+
+### Zstandard 1.5.7 decoder (inside FultaArc)
+
+- At `vendor/fultaarc/vendor/zstd/`
+- Copyright (c) Meta Platforms, Inc. and affiliates
+- Licence: BSD-3-Clause — see `vendor/fultaarc/vendor/zstd/LICENSE`
+  (upstream is dual BSD / GPLv2; the BSD licence is the one taken)
+- Used for: zstd-compressed ZIP and 7z entries.
+
+### Unicode mapping data (inside FultaArc)
+
+- Generated into `vendor/fultaarc/src/text/cp_tables.c` from the Unicode
+  Consortium's mapping files (code pages 437, 866, 1251, 1252, 932, 936,
+  949, 950; KOI8-R)
+- Licence: Unicode License v3 — its text is in
+  `vendor/fultaarc/THIRD_PARTY_NOTICES.md`
+- Used for: file names that an archive stores in a legacy code page.
 
 ## libjpeg-turbo 3.0.4
 

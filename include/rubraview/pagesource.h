@@ -2,11 +2,8 @@
 #define RUBRAVIEW_PAGESOURCE_H
 
 #include "rubraview/core.h"
-#include "rubraview/archive.h"
-#include "rubraview/sevenzip.h"
-#include "rubraview/rar.h"
-#include "rubraview/alz.h"
 #include "rubraview/encoding.h"
+#include "fulta/arc.h"
 #include "rubraview/sort.h"
 #include "rubraview/pal/pal_fs.h"
 
@@ -20,10 +17,14 @@ extern "C" {
  * pages — so they are the same thing to the viewer: one ordered list of
  * page names, and one call that produces a page's bytes.
  *
- * Archive pages never touch the disk. The bytes come straight out of
- * the caller's in-memory archive buffer (§3.8.1's zero-disk invariant),
- * decompressed into an arena when the entry is deflated. Folder pages
- * report a path instead, which the image PAL opens directly.
+ * Archive pages never touch the disk. The bytes come out of the caller's
+ * in-memory archive buffer (§3.8.1's zero-disk invariant), decoded into an
+ * arena. Folder pages report a path instead, which the image PAL opens
+ * directly.
+ *
+ * Every archive is read by FultaArc (vendor/fultaarc, `fulta/arc.h`; owner,
+ * 2026-10-08, D-74): ZIP, 7z and RAR 2.0-7.0, with their solid, split and
+ * password-protected forms.
  */
 
 typedef enum rubraview_page_source_kind {
@@ -31,7 +32,6 @@ typedef enum rubraview_page_source_kind {
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE,     /* CBZ / ZIP */
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z,  /* CB7 / 7z (§3.8.2) */
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR, /* CBR / RAR (owner, 2026-09-30) */
-    RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ, /* ALZ (docs/specs/alz-format.md) */
 } rubraview_page_source_kind_t;
 
 typedef struct rubraview_page_ref {
@@ -45,33 +45,22 @@ typedef struct rubraview_page_source {
     rubraview_page_ref_t *pages;
     size_t page_count;
 
-    /* Archive sources only. The archive borrows the caller's buffer.
-       Which of the two is live is decided by `kind`; a CB7 also owns
-       heap memory, which is why closing a source is not optional. */
-    rubraview_zip_archive_t archive;
-    rubraview_sz_archive_t  archive7z;
-    rubraview_rar_archive_t archiverar;
-    rubraview_alz_archive_t archivealz;
+    /* Archive sources only. The archive borrows the caller's buffer and
+       owns heap memory (FultaArc's index and decoder state, the volumes
+       mapped for a set), which is why closing a source is not optional. */
+    fulta_arc_t *arc;
+    struct rubraview_page_source_io *io;
     u8str_t archive_path;
 
     /* The ComicInfo.xml found in the archive, if any (§3.8.5). */
     bool     has_comicinfo;
     u8str_t  comicinfo_xml;
 
-    /* A RAR or ALZ that wants a password (owner, 2026-10-01): its headers or
+    /* An archive that wants a password (owner, 2026-10-01): its headers or
        its pages are encrypted and none was given (`needs_password`), or the
        one given is wrong (`password_wrong` too). It then has no pages. */
     bool     needs_password;
     bool     password_wrong;
-    /* A RAR whose pages need a RAR decoder (rar_codec.h) that is not
-       registered: compressed or encrypted. It then has no pages. */
-    bool     needs_codec;
-    /* A RAR set's volumes, mapped by the source itself and let go when it closes. */
-    rubraview_fs_mapping_t *rar_maps;
-    size_t   rar_map_count;
-    /* A split ALZ's volumes after the first (`x.a00`, `x.a01`, ...), the same way. */
-    rubraview_fs_mapping_t *alz_maps;
-    size_t   alz_map_count;
 } rubraview_page_source_t;
 
 /**
@@ -109,12 +98,11 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
                                                             uint64_t max_block_bytes);
 
 /**
- * The same, with a password for an encrypted RAR or ALZ (UTF-8; empty for none).
- * A RAR that is one volume of a set (`x.part2.rar`, `x.r00`, or a header
- * that says so) is opened from all of the set's volumes found beside
- * `archive_path`, from the first, each mapped by the source. An ALZ (its
- * signature "ALZ" 01 decides) named `x.alz` is read with the volumes
- * `x.a00`, `x.a01`, ... found beside it, in order until one is missing.
+ * The same, with a password for an encrypted archive (UTF-8; empty for none).
+ * A split archive is read with its other volumes, found beside
+ * `archive_path` by the names its format gives them and mapped by the
+ * source. A RAR opened by a later volume's name (`x.part2.rar`, `x.r00`)
+ * is opened from the set's first volume.
  */
 rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
                                                                      const uint8_t *data, size_t size,
@@ -174,6 +162,17 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
  */
 uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source, size_t index);
 
+/* What the archive's own index says, for the information window (nothing
+   is decoded). The entry behind a page (NULL for a folder page); the
+   format's name ("ZIP", "7z", "RAR"); whether a far page decodes the ones
+   before it; whether anything in it is encrypted; how many volumes have
+   been read, and their size together (0 and 0 when it is one file). */
+const fulta_arc_entry_t *rubraview_page_source_entry(const rubraview_page_source_t *source, size_t index);
+u8str_t rubraview_page_source_format_name(const rubraview_page_source_t *source);
+bool rubraview_page_source_is_solid(const rubraview_page_source_t *source);
+bool rubraview_page_source_is_encrypted(const rubraview_page_source_t *source);
+size_t rubraview_page_source_volumes(const rubraview_page_source_t *source, uint64_t *out_bytes);
+
 /**
  * How large an arena rubraview_page_source_read needs for this page (RV-085:
  * the tile thread's copy is read into one of just that size, not into the
@@ -181,9 +180,11 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
  */
 size_t rubraview_page_source_read_budget(const rubraview_page_source_t *source, size_t index);
 
-/* Owner, 2026-09-29: a page far inside a streamed 7z block is read off the
-   main thread. Its cost in bytes to decode first (0 for a folder or ZIP
-   page), and the read's cancel and progress — see rubraview/sevenzip.h. */
+/* Owner, 2026-09-29: a page far inside a solid block is read off the main
+   thread. Its cost in bytes to decode first (0 for a folder page or one
+   compressed on its own; an estimate from the index for a 7z), and the
+   read's cancel and progress. Cancel may be called from another thread
+   while a read runs; progress counts the bytes decoded so far. */
 uint64_t rubraview_page_source_read_cost(const rubraview_page_source_t *source, size_t index);
 void rubraview_page_source_cancel(rubraview_page_source_t *source, bool cancel);
 void rubraview_page_source_progress(const rubraview_page_source_t *source, uint64_t *out_done, uint64_t *out_total);

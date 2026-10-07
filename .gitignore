@@ -1,4 +1,4 @@
-# Allowlist (owner, 2026-10-01): the public repository holds the source, the manual and the specs, and
+# Allowlist (owner, 2026-10-01): the public repository holds the source and the manual, and
 # nothing else. Everything is ignored unless re-allowed below; the working notes, tests, tools and
 # operating scripts live in the sibling private repository and are linked in locally.
 /*
@@ -18,7 +18,6 @@
 !/docs/
 /docs/*
 !/docs/manual/
-!/docs/specs/
 !/docs/rfc/
 !/scripts/
 /scripts/*

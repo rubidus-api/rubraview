@@ -6,47 +6,37 @@ EXE_NAME := rubraview-v$(VERSION).exe
 PROBE_NAME := rubraview-mfprobe-v$(VERSION).exe
 
 CC ?= gcc
-CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
+CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
 LDFLAGS ?= -lm -lpthread
 
 SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq.c src/core/textedit.c src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
-            src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/archive.c src/core/archive_write.c src/core/comicinfo.c \
+            src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/rar.c src/core/alz.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/sevenzip.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c \
-            $(wildcard src/core/rarcodec/*.c)
-# miniz is third-party and does not build clean under this project's
-# -Werror -pedantic settings, so it is compiled separately with warnings
-# off. It is still instrumented by the sanitisers on the host build:
-# inflate runs on hostile input (§10.2), which is exactly where ASan
-# earns its place. Only decompression is enabled — the ZIP container is
-# parsed by rubraview's own reader (§3.8.1).
-MINIZ_DEFINES = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS \
-                -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
-MINIZ_INCLUDE = -Ivendor/miniz
-MINIZ_OBJ = build/miniz.o
-MINIZ_OBJ_WIN = build/miniz-win.o
-
-# The LZMA SDK (public domain) supplies the 7z container parser and the
-# LZMA/LZMA2/PPMd/BCJ decoders for CB7 (owner decision D-3). Same
-# treatment as miniz: warnings off because it is not our code, sanitisers
-# on because it parses untrusted input. Z7_ST builds the single-threaded
-# decoder — the viewer already has its own worker pool and does not want
-# the SDK starting threads of its own.
-LZMA_DEFINES = -DZ7_ST -DZ7_PPMD_SUPPORT
-LZMA_INCLUDE = -Ivendor/lzma
-# bzip2 1.0.8's decoder (bzip2 licence, BSD-style), its stream framing changed
-# to ALZ's cut-down one (docs/specs/alz-format.md §3.2; every change marked in
-# vendor/bzip2). Only src/core/alz.c uses it. Same treatment as the others:
-# warnings off, sanitisers on, because it decodes untrusted input.
-BZIP2_DEFINES = -DBZ_NO_STDIO -DBZ_EXPORT
-BZIP2_INCLUDE = -Ivendor/bzip2
-BZIP2_SRCS = vendor/bzip2/bzlib.c vendor/bzip2/decompress.c vendor/bzip2/huffman.c vendor/bzip2/crctable.c vendor/bzip2/randtable.c
-BZIP2_OBJS = $(patsubst vendor/bzip2/%.c,build/bzip2/%.o,$(BZIP2_SRCS))
-BZIP2_OBJS_WIN = $(patsubst vendor/bzip2/%.c,build/bzip2-win/%.o,$(BZIP2_SRCS))
-LZMA_SRCS = $(wildcard vendor/lzma/*.c)
-LZMA_OBJS = $(patsubst vendor/lzma/%.c,build/lzma/%.o,$(LZMA_SRCS))
-LZMA_OBJS_WIN = $(patsubst vendor/lzma/%.c,build/lzma-win/%.o,$(LZMA_SRCS))
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+# FultaArc (MIT; vendor/fultaarc, D-74) reads and writes every archive: ZIP,
+# 7z and RAR 2.0-7.0, with the decoders it vendors itself (LZMA SDK, miniz,
+# bzip2, zstd). It is built once as a static library, with its own flags and
+# on this project's vendor/proven (the same snapshot it is written against):
+# warnings off because it is not our code, sanitisers on because it parses
+# untrusted input. The alignment check alone is off for the LZMA SDK, which
+# reads 32- and 64-bit fields straight out of a byte buffer by design.
+FULTA = vendor/fultaarc
+FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Ivendor/proven/platform \
+                 -I$(FULTA)/vendor/lzma -I$(FULTA)/vendor/miniz -I$(FULTA)/vendor/bzip2 -I$(FULTA)/vendor/zstd
+FULTA_MINIZ_DEF = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
+FULTA_OWN_SRCS = $(wildcard $(FULTA)/src/core/*.c $(FULTA)/src/codec/*.c $(FULTA)/src/crypto/*.c $(FULTA)/src/text/*.c \
+                   $(FULTA)/src/platform/*.c $(FULTA)/src/zip/*.c $(FULTA)/src/7z/*.c $(FULTA)/src/write/*.c \
+                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c)
+FULTA_LZMA_SRCS = $(wildcard $(FULTA)/vendor/lzma/*.c)
+FULTA_BZ_SRCS = $(addprefix $(FULTA)/vendor/bzip2/,bzlib.c decompress.c compress.c blocksort.c huffman.c crctable.c randtable.c)
+FULTA_OTHER_SRCS = $(FULTA)/vendor/miniz/miniz.c $(FULTA)/vendor/zstd/zstddeclib.c
+FULTA_SRCS = $(FULTA_OWN_SRCS) $(FULTA_LZMA_SRCS) $(FULTA_BZ_SRCS) $(FULTA_OTHER_SRCS)
+FULTA_OBJS = $(patsubst $(FULTA)/%.c,build/fulta/%.o,$(FULTA_SRCS))
+FULTA_OBJS_WIN = $(patsubst $(FULTA)/%.c,build/fulta-win/%.o,$(FULTA_SRCS))
+FULTA_LIB = build/libfultaarc.a
+FULTA_LIB_WIN = build/libfultaarc-win.a
+FULTA_VENDOR_DEF = -DZ7_ST -DBZ_NO_STDIO -DZSTD_NO_TRACE $(FULTA_MINIZ_DEF)
 
 # libjpeg-turbo (IJG + BSD-3) supplies the DCT-coefficient API that
 # rotates a JPEG without decoding it (owner decision D-5, RV-069). Same
@@ -79,26 +69,22 @@ JPEG16_OBJS = $(patsubst %,build/libjpeg16/%.o,$(JPEG16_NAMES))
 JPEG12_OBJS_WIN = $(patsubst %,build/libjpeg12-win/%.o,$(JPEG12_NAMES))
 JPEG16_OBJS_WIN = $(patsubst %,build/libjpeg16-win/%.o,$(JPEG16_NAMES))
 
-SRCS_PROVEN = vendor/proven/src/proven/arena.c \
-              vendor/proven/src/proven/memory.c \
-              vendor/proven/src/proven/panic.c \
-              vendor/proven/src/proven/job.c \
-              vendor/proven/src/proven/algorithm.c \
-              vendor/proven/platform/proven_sys_mem.c \
-              vendor/proven/platform/proven_sys_thread.c
+# proven_c_lib, whole, as a static library (FultaArc uses more of it than the
+# viewer does; the linker takes what is referred to). Without -pedantic:
+# float_decimal.c uses unsigned __int128 for its exact arithmetic.
+PROVEN_SRCS = $(wildcard vendor/proven/src/proven/*.c vendor/proven/platform/*.c)
+PROVEN_OBJS = $(patsubst vendor/proven/%.c,build/proven/%.o,$(PROVEN_SRCS))
+PROVEN_OBJS_WIN = $(patsubst vendor/proven/%.c,build/proven-win/%.o,$(PROVEN_SRCS))
+PROVEN_LIB = build/libproven.a
+PROVEN_LIB_WIN = build/libproven-win.a
 
-# proven's number parsers. float_decimal.c uses unsigned __int128 for its
-# exact arithmetic, which -pedantic refuses, so the host builds these three
-# as objects without it (like the other vendored code; the sources stay as
-# vendored). The Windows build has no -pedantic and compiles them directly.
-SRCS_PROVEN_NUM = vendor/proven/src/proven/float_parse.c \
-                  vendor/proven/src/proven/float_decimal.c \
-                  vendor/proven/src/proven/scan.c
-PROVEN_NUM_OBJS = $(patsubst vendor/proven/src/proven/%.c,build/proven/%.o,$(SRCS_PROVEN_NUM))
+build/proven/%.o: vendor/proven/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c23 -O2 -w -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined -c $< -o $@
 
-build/proven/%.o: vendor/proven/src/proven/%.c
-	@mkdir -p build/proven
-	$(CC) $(filter-out -pedantic,$(CFLAGS)) -c $< -o $@
+$(PROVEN_LIB): $(PROVEN_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
 
 # Portable logic layered on the PAL; compiled into both builds.
 SRCS_PAL_COMMON = src/pal/pal_fs_common.c
@@ -130,31 +116,29 @@ SRCS_APP = src/app/main.c
 
 TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_number build/tests/test_subbox build/tests/test_thumb build/tests/test_thumbq build/tests/test_textedit build/tests/test_sort \
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
-            build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archive build/tests/test_comicinfo \
+            build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archives build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_rar build/tests/test_alz build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_sevenzip build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock build/tests/test_unpack15
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
 .PHONY: all test check clean win64 package mfprobe
 
 all: test
 
-$(MINIZ_OBJ): vendor/miniz/miniz.c
-	@mkdir -p build
-	$(CC) -std=c11 -O2 -w $(MINIZ_DEFINES) $(MINIZ_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
+build/fulta/vendor/lzma/%.o: $(FULTA)/vendor/lzma/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -fno-sanitize=alignment -c $< -o $@
 
-# The alignment check is the one sanitiser turned off here. The SDK
-# reads 32- and 64-bit fields straight out of a byte buffer, which is
-# deliberate in its design and harmless on x86-64, but it is still
-# undefined behaviour and it drowns the real findings. Everything else —
-# ASan, and the rest of UBSan — stays on, because this code parses
-# untrusted input.
-build/lzma/%.o: vendor/lzma/%.c
-	@mkdir -p build/lzma
-	$(CC) -std=c11 -O2 -w $(LZMA_DEFINES) $(LZMA_INCLUDE) -g -fsanitize=address,undefined -fno-sanitize=alignment -c $< -o $@
+build/fulta/vendor/%.o: $(FULTA)/vendor/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
 
-build/bzip2/%.o: vendor/bzip2/%.c
-	@mkdir -p build/bzip2
-	$(CC) -std=c11 -O2 -w $(BZIP2_DEFINES) $(BZIP2_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
+build/fulta/src/%.o: $(FULTA)/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
+
+$(FULTA_LIB): $(FULTA_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
 
 build/libjpeg/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg
@@ -168,14 +152,9 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-# RAR 1.5 decoder (docs/specs/rar15.md), self-contained
-build/tests/test_unpack15: tests/test_unpack15.c src/core/rarcodec/unpack15.c src/core/rarcodec/unpack15.h
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS) $(FULTA_LIB) $(PROVEN_LIB)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) tests/test_unpack15.c src/core/rarcodec/unpack15.c $(LDFLAGS) -o $@
-
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(SRCS_PROVEN) $(PROVEN_NUM_OBJS) $(MINIZ_OBJ) $(LZMA_OBJS) $(BZIP2_OBJS) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS)
-	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(BZIP2_INCLUDE) $(JPEG_INCLUDE) $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(JPEG_INCLUDE) $(FULTA_MINIZ_DEF) -I$(FULTA)/vendor/miniz $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -191,17 +170,27 @@ check:
 
 MINGW_CC ?= x86_64-w64-mingw32-gcc
 
-$(MINIZ_OBJ_WIN): vendor/miniz/miniz.c
-	@mkdir -p build
-	$(MINGW_CC) -std=c11 -O2 -w $(MINIZ_DEFINES) $(MINIZ_INCLUDE) -c $< -o $@
+MINGW_AR ?= x86_64-w64-mingw32-ar
 
-build/lzma-win/%.o: vendor/lzma/%.c
-	@mkdir -p build/lzma-win
-	$(MINGW_CC) -std=c11 -O2 -w $(LZMA_DEFINES) $(LZMA_INCLUDE) -c $< -o $@
+build/fulta-win/vendor/%.o: $(FULTA)/vendor/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -c $< -o $@
 
-build/bzip2-win/%.o: vendor/bzip2/%.c
-	@mkdir -p build/bzip2-win
-	$(MINGW_CC) -std=c11 -O2 -w $(BZIP2_DEFINES) $(BZIP2_INCLUDE) -c $< -o $@
+build/fulta-win/src/%.o: $(FULTA)/src/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -c $< -o $@
+
+$(FULTA_LIB_WIN): $(FULTA_OBJS_WIN)
+	@rm -f $@
+	$(MINGW_AR) rcs $@ $^
+
+build/proven-win/%.o: vendor/proven/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=c23 -O2 -w -Ivendor/proven/include -Ivendor/proven/platform -c $< -o $@
+
+$(PROVEN_LIB_WIN): $(PROVEN_OBJS_WIN)
+	@rm -f $@
+	$(MINGW_AR) rcs $@ $^
 
 build/libjpeg-win/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg-win
@@ -222,13 +211,14 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/ru
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
-win64: $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(BZIP2_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
-		$(MINIZ_DEFINES) $(MINIZ_INCLUDE) $(LZMA_INCLUDE) $(BZIP2_INCLUDE) $(JPEG_INCLUDE) \
-		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
-		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(SRCS_PROVEN) $(SRCS_PROVEN_NUM) $(MINIZ_OBJ_WIN) $(LZMA_OBJS_WIN) $(BZIP2_OBJS_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
+		$(JPEG_INCLUDE) \
+		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
+		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
+		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) -lbcrypt \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"
