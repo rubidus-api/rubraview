@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-08: D-75 Copy to a folder (F6) and move to a folder (F7)
+
+- Status: Accepted (owner 2026-10-08: "현재 보고있는 파일을 미리 지정한 특정 폴더에 저장하거나, 혹은 옮기는 기능 … 두개 따로요. 압축파일 안의 이미지/영상인 경우에는 복사만 허용 … 겹치는 이름이 있을 경우에는 … 뒤에 -1 … -2")
+- Decision:
+  - Two actions, `copy_to_folder` and `move_to_folder`, with a folder each: `[curation] copy_dir` and `move_dir` (Settings › Files › The file on screen, to a folder). They are beside the number-key folders (§3.18.3), which keep working as they did.
+  - Keys: `F6` copies, `F7` moves (both were free; `F5` beside them is the slide show, `F2` rename). Toolbox: "Copy to" and "Move to" after Export / Rename and before List in every profile, with Segoe MDL2's Copy and MoveToFolder icons; the archive profile has Copy to only, and the Move tile is dimmed wherever an archive page is on screen. Menu › File has both.
+  - A page inside an archive is copied by writing its bytes as a file named after the page; moving it is refused with a notice. The archive is never changed (editing archives is R149).
+  - A name already in the folder is never replaced: `name.ext`, then `name-1.ext`, `name-2.ext`, ... — the first free number, before the extension (`rubraview_filing_target`).
+  - A move into the folder the file is already in does nothing and says so; with no folder set the notice says where to set it. Both are undone by `Ctrl+Z` like the number keys' moves and copies.
+- Consequences: `test_filemanage` covers the naming and the two settings; VM measured (T123). Not done: choosing the folder at the moment of the key press when none is set; several preset folders per action (the number keys do that).
+
 ## 2026-10-08: D-74 Every archive is read and written by FultaArc
 
 - Status: Accepted (owner 2026-10-08: "fultaarc 벤더링 해서 코드 고치고"; asked what becomes of ALZ and RAR 1.5: "FultaArc 범위만"; file associations: ".cbr·.cbz·.cb7만"). Carries out RV-100; supersedes D-68 (the writer here) and D-73 (the RAR decoder here) as to where the code lives.

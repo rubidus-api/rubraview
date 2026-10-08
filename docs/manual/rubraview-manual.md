@@ -134,6 +134,16 @@ curation_mode = move    ; or copy
 A number key sorts only when you have given it a folder; the ones you
 have not keep their usual meaning.
 
+Two more keys do the same with a folder each, whatever the number keys are
+set to: `F6` **copies** the file on screen to one folder and `F7` **moves**
+it to another (Settings › Files › The file on screen, to a folder; or
+`copy_dir` and `move_dir` under `[curation]`). They are in the toolbox too
+(Copy to, Move to) and in Menu › File. A page inside an archive can be
+copied out with `F6` — it is written as a file of its own — but not moved:
+the archive is left as it is. Nothing in the folder is ever replaced: when
+the name is taken the file goes in as `name-1.jpg`, then `name-2.jpg`, and
+so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
+
 **`Ctrl+Z` cannot bring a file back from the recycle bin.** Windows keeps
 that undo for File Explorer. Restore it from the recycle bin instead.
 Moves, copies and renames do undo properly.
@@ -435,6 +445,8 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `F7` | Move the file on screen to the folder set for it |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |

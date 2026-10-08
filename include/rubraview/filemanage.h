@@ -126,6 +126,11 @@ typedef enum rubraview_curation_mode {
 typedef struct rubraview_curation {
     u8str_t dirs[9];                  /* dir_1 .. dir_9; an empty slot is unbound */
     rubraview_curation_mode_t mode;
+    /* Owner, 2026-10-08: the file on screen copied to one folder, or moved
+       to one, each its own key (`copy_to_folder`, `move_to_folder`).
+       Empty: not set. */
+    u8str_t copy_dir;
+    u8str_t move_dir;
 } rubraview_curation_t;
 
 /** Read the `[curation]` section of settings.ini (§3.18.3). */
@@ -144,6 +149,18 @@ u8str_t rubraview_curation_target(const rubraview_curation_t *curation, int32_t 
  * copy mode unusable.
  */
 bool rubraview_curation_advances(const rubraview_curation_t *curation);
+
+/**
+ * Where a file named `filename` goes in `dir` without replacing what is
+ * there (owner, 2026-10-08): the name itself when it is free, else the
+ * name with `-1` before its extension, `-2` when that is taken, and so on
+ * (`page.jpg`, `page-1.jpg`, `page-2.jpg`). `exists` answers for a full
+ * path. Empty when no free name was found in 9999 tries or the arena is
+ * full.
+ */
+typedef bool (*rubraview_path_exists_fn)(void *ctx, u8str_t path);
+u8str_t rubraview_filing_target(proven_arena_t *arena, u8str_t dir, u8str_t filename,
+                                rubraview_path_exists_fn exists, void *ctx);
 
 /* ---- §3.19.2 drops ---- */
 

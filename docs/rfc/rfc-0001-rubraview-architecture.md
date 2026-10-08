@@ -406,6 +406,8 @@ the keymap does not do is listed after it.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `F7` | Move the file on screen to the folder set for it |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |

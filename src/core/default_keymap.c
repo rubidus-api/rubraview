@@ -46,6 +46,11 @@ const char *rubraview_default_keymap(void) {
     "purge_file = \"Shift+Delete\"\n"
     "undo = \"Ctrl+Z\"\n"
     "rename_file = \"F2\"\n"
+    /* Owner, 2026-10-08: the file on screen copied to its folder, or moved
+       to its own (Settings > Files); beside F5, which has nothing to do
+       with files here. */
+    "copy_to_folder = \"F6\"\n"
+    "move_to_folder = \"F7\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
        arrows move it — everywhere, whatever is on screen. */
     "window_narrower = \"Ctrl+Left\"\n"
