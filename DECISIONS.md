@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-08: D-76 The file list window (F3): the archive's files, a preview, in a window of its own
+
+- Status: Accepted (owner 2026-10-08: "압축파일 내부 파일들 목록들을 볼 수 있고 거기서 이동도 가능하며 프리뷰도 보여주는 압축파일 내 파일목록창", then "위의 창은 모달리스여야 … 원래 창은 원래대로 계속 보여주고 있고 외부의 창으로 파일을 제어")
+- Decision:
+  - A separate window owned by the viewer ("Rubraview files"), like the information window and the mini player: its own renderer and message queue, resizable, its place remembered for the session, closed by `F3`, `Esc` or its close button. It is not the `P` list, which floats inside the viewer and stays as it was.
+  - Left: the files of what is open — an archive, and also a folder or a playlist, since the list is the same thing — numbered, with their sizes (an archive's index gives them; a folder's files are not asked), the one on screen marked and kept in view. Right: a preview fitted to its room, with the name, the picture's pixels and its size.
+  - Pointing at a row previews it after the pointer has rested 0.12 s; `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` move a selection of the window's own and preview at once; a click or `Enter` turns the viewer to the file. Every other key pressed there goes to the viewer's own key handling.
+  - The preview is decoded by that window's renderer from the same bytes the viewer reads (a texture belongs to one renderer). Not decoded for a glance: a film or a sound, and a page that costs more than 32 MB of decoding to reach inside a solid archive (the viewer's own threshold for a far read); neither while the viewer's far read is running.
+  - Key `F3` (free; beside `F2` rename and `F4` filmstrip). Toolbox "Files" after "List" in the archive, image, multi-page and animation profiles; Menu › File.
+- Consequences: geometry, the selection step and the preview fit are in `ui_listwin.c` (`rubraview_filewin_*`) and host-tested; the window itself is measured on the VM (T124). Not done: only the files the viewer shows are listed (pictures; an archive's other files are not), a search box, thumbnails in the rows, remembering the window's place across runs.
+
 ## 2026-10-08: D-75 Copy to a folder (F6) and move to a folder (F7)
 
 - Status: Accepted (owner 2026-10-08: "현재 보고있는 파일을 미리 지정한 특정 폴더에 저장하거나, 혹은 옮기는 기능 … 두개 따로요. 압축파일 안의 이미지/영상인 경우에는 복사만 허용 … 겹치는 이름이 있을 경우에는 … 뒤에 -1 … -2")

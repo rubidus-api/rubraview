@@ -413,6 +413,26 @@ typedef struct app_state {
     bool                       mini_open;
     bool                       mini_dirty;
     int32_t                    mini_frame[4];
+    /* The file list window (owner, 2026-10-08): a window of its own beside
+       the viewer — the archive's (or the folder's) files on the left, a
+       preview on the right; a row clicked or Enter turns the viewer to it. */
+    rubraview_window_t        *files_window;
+    rubraview_renderer_t      *files_renderer;
+    bool                       files_open, files_dirty;
+    int32_t                    files_frame[4];
+    rubraview_listwin_t        files_list;         /* the rows, in that window's own pixels */
+    rubraview_rect_t           files_preview_rect;
+    const rubraview_page_ref_t *files_pages;       /* the list it was last drawn for: another one resets it */
+    size_t                     files_count;
+    int32_t                    files_selected;     /* the row the keys moved to; -1: none */
+    int32_t                    files_hover;        /* the row under the pointer; -1 */
+    int32_t                    files_followed;     /* the file on screen it last scrolled to */
+    int32_t                    files_want;         /* the file whose preview is wanted */
+    double                     files_want_since;
+    bool                       files_want_now;     /* chosen by a key: no waiting for the pointer to rest */
+    rubraview_texture_t       *files_preview;      /* belongs to files_renderer */
+    int32_t                    files_preview_page, files_preview_w, files_preview_h;
+    int32_t                    files_preview_state;
     int32_t                    mini_hover;      /* which button the pointer is on, -1 for none */
     double                     music_end_seen;     /* wall time the backend first said "finished", or 0 */
     rubraview_mat3x2_t         video_transform;     /* where the film was last drawn */
@@ -726,6 +746,8 @@ static void info_show(app_state_t *app);
 static void mini_show(app_state_t *app);
 static bool mini_paused(const app_state_t *app);
 static void mini_close(app_state_t *app);
+static void files_show(app_state_t *app);
+static void files_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_eqwin(app_state_t *app, double win_w, double win_h);
 static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
@@ -3820,6 +3842,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         triage_undo(app);
     } else if (rubraview_u8_eq_lit(action, "rename_file")) {
         rename_begin(app);
+    } else if (rubraview_u8_eq_lit(action, "toggle_file_list")) {
+        files_show(app);
     } else if (rubraview_u8_eq_lit(action, "copy_to_folder")) {
         filing_put(app, false);
     } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
@@ -9448,6 +9472,391 @@ static size_t mini_pump(app_state_t *app) {
     return handled;
 }
 
+/* ---- The file list window (owner, 2026-10-08) ----
+   "압축파일 내부 파일들 목록들을 볼 수 있고 거기서 이동도 가능하며 프리뷰도
+   보여주는 … 모달리스 … 원래 창은 원래대로 계속 보여주고 있고 외부의 창으로
+   파일을 제어". A window of its own, owned by the viewer and never in its
+   way: the viewer goes on showing its page while this one lists what the
+   archive (or the folder, or the playlist) holds. Pointing at a row, or
+   moving to it with the arrow keys, shows that picture on the right; a
+   click or Enter turns the viewer to it. The preview is decoded by this
+   window's own renderer from the same bytes the viewer would read. */
+
+enum {
+    FILES_PREVIEW_NONE = 0,   /* nothing asked for yet */
+    FILES_PREVIEW_SHOWN,
+    FILES_PREVIEW_FAILED,     /* it could not be read or is not a picture */
+    FILES_PREVIEW_FAR,        /* deep in a solid archive: read only when it is opened */
+    FILES_PREVIEW_MEDIA,      /* a film or a sound */
+};
+
+#define FILES_BACKGROUND 0xFF181818u
+#define FILES_HOVER_REST 0.12   /* seconds the pointer rests on a row before its picture is read */
+
+static void files_preview_drop(app_state_t *app) {
+    if (app->files_preview) rubraview_pal_texture_destroy(app->files_preview);
+    app->files_preview = NULL;
+    app->files_preview_page = -1;
+    app->files_preview_w = app->files_preview_h = 0;
+    app->files_preview_state = FILES_PREVIEW_NONE;
+}
+
+static void files_close(app_state_t *app) {
+    if (!app->files_open) return;
+    rubraview_pal_window_get_frame(app->files_window, &app->files_frame[0], &app->files_frame[1],
+                                   &app->files_frame[2], &app->files_frame[3]);
+    files_preview_drop(app);
+    if (app->files_renderer) rubraview_pal_render_destroy(app->files_renderer);
+    if (app->files_window) rubraview_pal_window_destroy(app->files_window);
+    app->files_renderer = NULL;
+    app->files_window = NULL;
+    app->files_open = false;
+}
+
+static void files_layout(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->files_window, &w, &h);
+    app->files_preview_rect = rubraview_filewin_layout(&app->files_list, (double)w, (double)h,
+                                                       rubraview_pal_window_dpi_scale(app->files_window));
+    app->files_dirty = true;
+}
+
+static void files_show(app_state_t *app) {
+    if (app->files_open) { files_close(app); return; }   /* the same key puts it away */
+    if (page_count(app) == 0) {
+        osd_say(app, U8("nothing is open to list"));
+        return;
+    }
+    rubraview_window_config_t config = { .title = "Rubraview files", .width = 760, .height = 560, .owner = app->window };
+    app->files_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->files_window) {
+        osd_say(app, U8("the file list could not be opened"));
+        return;
+    }
+    if (app->files_frame[2] > 0 && app->files_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->files_window, app->files_frame[0], app->files_frame[1],
+                                       app->files_frame[2], app->files_frame[3]);
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->files_window, &w, &h);
+    app->files_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->files_window), w, h);
+    if (!app->files_renderer) {
+        rubraview_pal_window_destroy(app->files_window);
+        app->files_window = NULL;
+        osd_say(app, U8("the file list could not be drawn"));
+        return;
+    }
+    app->files_open = true;
+    app->files_list = (rubraview_listwin_t){0};
+    app->files_pages = NULL;                     /* the first frame takes the list as new */
+    app->files_selected = app->files_hover = -1;
+    app->files_followed = -1;
+    app->files_want = -1;
+    files_preview_drop(app);
+    files_layout(app);
+}
+
+/* The file whose picture the right side shows: the one pointed at, else the
+   one the keys chose, else the one on screen. */
+static int32_t files_target(const app_state_t *app) {
+    if (app->files_hover >= 0) return app->files_hover;
+    if (app->files_selected >= 0) return app->files_selected;
+    return current_page_index(app);
+}
+
+/* Turn the viewer to a file of the list. */
+static void files_go_to(app_state_t *app, int32_t index) {
+    if (index < 0 || (size_t)index >= page_count(app)) return;
+    if (index != current_page_index(app)) {
+        go_to_spread(app, spread_index_for_page(app, index));
+        update_precache(app);
+    }
+    app->files_selected = -1;                    /* the keys start again from the file on screen */
+    app->files_dirty = true;
+}
+
+/* Read the wanted file's picture, once the pointer has rested on its row.
+   A page that costs a long decode to reach (far inside a solid archive) is
+   not read for a glance; while the viewer's own far read runs, this waits. */
+static void files_preview_step(app_state_t *app, double now) {
+    if (!app->files_open) return;
+    int32_t target = files_target(app);
+    if (target != app->files_want) {
+        app->files_want = target;
+        app->files_want_since = now;
+    }
+    if (app->files_want == app->files_preview_page) return;
+    if (!app->files_want_now && app->files_hover >= 0 && now - app->files_want_since < FILES_HOVER_REST) return;
+    if (app->page_job) return;
+    app->files_want_now = false;
+
+    int32_t page = app->files_want;
+    files_preview_drop(app);
+    app->files_preview_page = page;
+    app->files_dirty = true;
+    if (page < 0 || (size_t)page >= page_count(app)) return;
+    if (is_media_path(app->source.pages[page].path)) { app->files_preview_state = FILES_PREVIEW_MEDIA; return; }
+    if (page_read_cost(app, (size_t)page) > PAGE_JOB_MIN_COST) { app->files_preview_state = FILES_PREVIEW_FAR; return; }
+
+    void *mem = NULL;
+    rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page, &mem);
+    rubraview_image_load_result_t loaded = {0};
+    if (bytes.ok) {
+        loaded = bytes.from_disk
+            ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[page].path, true)
+            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
+    }
+    free(mem);
+    if (!loaded.ok || !loaded.texture) { app->files_preview_state = FILES_PREVIEW_FAILED; return; }
+    app->files_preview = loaded.texture;
+    app->files_preview_w = loaded.full_width > 0 ? loaded.full_width : loaded.width;
+    app->files_preview_h = loaded.full_height > 0 ? loaded.full_height : loaded.height;
+    app->files_preview_state = FILES_PREVIEW_SHOWN;
+}
+
+/* "1.2 MB": a size short enough for a row. */
+static int files_size_text(char *buf, size_t cap, uint64_t bytes) {
+    if (bytes < 1024u) return snprintf(buf, cap, "%u B", (unsigned)bytes);
+    if (bytes < 1024u * 1024u) return snprintf(buf, cap, "%.0f KB", (double)bytes / 1024.0);
+    if (bytes < 1024ull * 1024ull * 1024ull) return snprintf(buf, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+    return snprintf(buf, cap, "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+}
+
+/* As much of `text` as about fits `width` at `size`, cut at a whole
+   character with "..." (there is no clipping to lean on). */
+static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width, double size) {
+    size_t room = size > 0.0 ? (size_t)(width / (size * 0.56)) : 0;
+    size_t chars = 0, at = 0;
+    while (at < text.len) {
+        size_t next = at + 1;
+        while (next < text.len && ((unsigned char)text.ptr[next] & 0xC0) == 0x80) next++;
+        /* a CJK character is about twice a Latin one wide */
+        chars += (unsigned char)text.ptr[at] >= 0xE0 ? 2 : 1;
+        if (chars > room) break;
+        at = next;
+    }
+    if (at >= text.len) return text;
+    while (at > 0 && chars + 3 > room) {         /* make room for the dots */
+        size_t prev = at - 1;
+        while (prev > 0 && ((unsigned char)text.ptr[prev] & 0xC0) == 0x80) prev--;
+        chars -= (unsigned char)text.ptr[prev] >= 0xE0 ? 2 : 1;
+        at = prev;
+    }
+    if (at + 4 > cap) at = cap > 4 ? cap - 4 : 0;
+    memcpy(buf, text.ptr, at);
+    memcpy(buf + at, "...", 3);
+    return (u8str_t){ .ptr = buf, .len = at + 3 };
+}
+
+static void draw_files_window(app_state_t *app) {
+    if (!app->files_open) return;
+    size_t count = page_count(app);
+    int32_t current = current_page_index(app);
+    /* Another archive, folder or playlist: its list starts afresh. */
+    if (app->files_pages != app->source.pages || app->files_count != count) {
+        app->files_pages = app->source.pages;
+        app->files_count = count;
+        app->files_list.first = 0;
+        app->files_selected = app->files_hover = -1;
+        app->files_followed = -1;
+        app->files_want = -1;
+        files_preview_drop(app);
+        app->files_dirty = true;
+    }
+    if (current != app->files_followed && current >= 0) {     /* follow the file on screen */
+        rubraview_listwin_reveal(&app->files_list, (size_t)current, count);
+        app->files_followed = current;
+        app->files_dirty = true;
+    }
+    if (!app->files_dirty) return;
+    app->files_dirty = false;
+
+    rubraview_renderer_t *r = app->files_renderer;
+    const rubraview_listwin_t *lw = &app->files_list;
+    double dpi = rubraview_pal_window_dpi_scale(app->files_window);
+    double font = lw->row_height * 0.5;
+    rubraview_pal_render_begin(r, FILES_BACKGROUND);
+
+    /* The header: what the list is, and where the file on screen is in it. */
+    bool in_archive = app->source.archive_path.len > 0 && !app->list_is_set;
+    char head[640], cut[640];
+    u8str_t what = app->list_is_set ? U8("Playlist")
+                 : in_archive ? rubraview_path_basename(app->source.archive_path)
+                 : rubraview_path_basename(app->source_dir);
+    int hn = current >= 0 ? snprintf(head, sizeof(head), "%d / %zu   %.*s", current + 1, count, (int)(what.len < 560 ? what.len : 560), what.ptr)
+                          : snprintf(head, sizeof(head), "%zu   %.*s", count, (int)(what.len < 560 ? what.len : 560), what.ptr);
+    rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, lw->title_height };
+    rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
+    rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, lw->title_height };
+    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)hn }, head_text.width, font),
+                                               head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
+        rubraview_rect_t rr = rubraview_listwin_row_rect(lw, i, count);
+        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 8.0, rr.height };
+        if ((int32_t)i == current) rubraview_pal_render_fill_rect(r, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
+        else if ((int32_t)i == app->files_hover) rubraview_pal_render_fill_rect(r, row, COLOR_TILE_FILL, 2.0);
+        if ((int32_t)i == app->files_selected) rubraview_pal_render_stroke_rect(r, row, COLOR_TEXT, 1.0, 2.0);
+
+        /* its size at the right (an archive knows it; a folder's files are not asked), its name in what is left */
+        char size_text[32];
+        uint64_t bytes = rubraview_page_source_entry_size(&app->source, i);
+        double size_w = 0.0;
+        if (bytes > 0) {
+            int sn = files_size_text(size_text, sizeof(size_text), bytes);
+            size_w = font * 0.56 * 9.0;
+            rubraview_pal_rect_t size_box = { row.x + row.width - size_w - lw->row_height * 0.3, row.y, size_w, row.height };
+            if (sn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ size_text, (size_t)sn }, size_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
+        }
+        char line[640];
+        u8str_t name = page_display_name(app, i);
+        int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.len < 600 ? name.len : 600), name.ptr);
+        rubraview_pal_rect_t text = { row.x + lw->row_height * 0.3, row.y, row.width - lw->row_height * 0.9 - size_w, row.height };
+        if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
+                                                  text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+    if (count > rows && rows > 0) {              /* where in a long list the rows are */
+        double track = lw->height - lw->title_height;
+        double bh = track * (double)rows / (double)count;
+        if (bh < lw->row_height * 0.5) bh = lw->row_height * 0.5;
+        double by = lw->y + lw->title_height + (track - bh) * (double)lw->first / (double)(count - rows);
+        rubraview_pal_rect_t bar = { lw->x + lw->width - 5.0, by, 3.0, bh };
+        rubraview_pal_render_fill_rect(r, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
+    }
+
+    /* The preview: the picture fitted above two lines that say what it is. */
+    rubraview_rect_t pv = app->files_preview_rect;
+    if (pv.width > 0.0) {
+        rubraview_pal_rect_t edge = { pv.x, pv.y, 1.0, pv.height };
+        rubraview_pal_render_fill_rect(r, edge, COLOR_BOX_BORDER, 0.0);
+        double caption_h = lw->row_height * 2.4;
+        rubraview_rect_t room = { pv.x, pv.y, pv.width, pv.height - caption_h };
+        int32_t page = app->files_preview_page;
+        const char *say = NULL;
+        switch (app->files_preview_state) {
+            case FILES_PREVIEW_SHOWN: {
+                int32_t tw = 0, th = 0;
+                rubraview_pal_texture_size(app->files_preview, &tw, &th);
+                rubraview_rect_t fit = rubraview_filewin_fit(room, (double)app->files_preview_w, (double)app->files_preview_h, 8.0 * dpi);
+                if (fit.width > 0.0 && tw > 0 && th > 0) {
+                    rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+                        rubraview_mat3x2_scale(fit.width / (double)tw, fit.height / (double)th),
+                        rubraview_mat3x2_translate(fit.x, fit.y));
+                    rubraview_pal_render_draw_texture(r, app->files_preview, place, RUBRAVIEW_INTERP_LINEAR);
+                }
+                break;
+            }
+            case FILES_PREVIEW_FAILED: say = "no preview: it could not be read as a picture"; break;
+            case FILES_PREVIEW_FAR:    say = "deep in a solid archive: Enter or a click opens it"; break;
+            case FILES_PREVIEW_MEDIA:  say = "a film or a sound: Enter or a click plays it"; break;
+            default:                   say = page >= 0 ? NULL : "point at a file, or use the arrow keys"; break;
+        }
+        if (say) {
+            rubraview_pal_rect_t mid = { room.x + 8.0 * dpi, room.y, room.width - 16.0 * dpi, room.height };
+            rubraview_pal_render_draw_text(r, (u8str_t){ say, strlen(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+        if (page >= 0 && (size_t)page < count) {
+            rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, caption_h * 0.5 };
+            rubraview_pal_rect_t line2 = { line1.x, line1.y + caption_h * 0.5 - 2.0, line1.width, caption_h * 0.5 };
+            u8str_t name = page_display_name(app, (size_t)page);
+            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), name, line1.width, font), line1, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            char facts[160], size_text[32];
+            int fn = 0;
+            uint64_t bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+            if (bytes > 0) files_size_text(size_text, sizeof(size_text), bytes); else size_text[0] = '\0';
+            if (app->files_preview_state == FILES_PREVIEW_SHOWN) {
+                fn = bytes > 0 ? snprintf(facts, sizeof(facts), "%d x %d   %s", app->files_preview_w, app->files_preview_h, size_text)
+                               : snprintf(facts, sizeof(facts), "%d x %d", app->files_preview_w, app->files_preview_h);
+            } else if (bytes > 0) {
+                fn = snprintf(facts, sizeof(facts), "%s", size_text);
+            }
+            if (fn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+    if (!rubraview_pal_render_end(r)) files_close(app);   /* its device went: the key opens it again */
+}
+
+static size_t files_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->files_open && rubraview_pal_window_poll_event(app->files_window, &event)) {
+        handled++;
+        size_t count = page_count(app), index = 0;
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                files_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->files_renderer, event.resize.width, event.resize.height);
+                files_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+            case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
+                files_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                int32_t was = app->files_hover;
+                app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                                     ? (int32_t)index : -1;
+                if (app->files_hover != was) app->files_dirty = true;
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE:
+                if (app->files_hover != -1) { app->files_hover = -1; app->files_dirty = true; }
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW) {
+                    files_go_to(app, (int32_t)index);
+                }
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                rubraview_listwin_scroll(&app->files_list, event.mouse.wheel_delta > 0 ? -3 : 3, count);
+                /* the row under the pointer is another one now */
+                app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                                     ? (int32_t)index : -1;
+                app->files_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_key_combo_t combo = event.key.combo;
+                long rows = (long)rubraview_listwin_rows_visible(&app->files_list);
+                long step = 0;
+                if (key_is(combo, "Escape")) { files_close(app); return handled; }
+                if (key_is(combo, "Enter")) {
+                    files_go_to(app, app->files_selected >= 0 ? app->files_selected : files_target(app));
+                    break;
+                }
+                if (key_is(combo, "Up")) step = -1;
+                else if (key_is(combo, "Down")) step = +1;
+                else if (key_is(combo, "PageUp")) step = -(rows > 1 ? rows - 1 : 1);
+                else if (key_is(combo, "PageDown")) step = rows > 1 ? rows - 1 : 1;
+                else if (key_is(combo, "Home")) step = -(long)count;
+                else if (key_is(combo, "End")) step = (long)count;
+                if (step != 0) {
+                    int32_t current = current_page_index(app);
+                    size_t to = rubraview_filewin_step(app->files_selected >= 0 ? (size_t)app->files_selected : SIZE_MAX,
+                                                       current >= 0 ? (size_t)current : SIZE_MAX, step, count);
+                    if (to != SIZE_MAX) {
+                        app->files_selected = (int32_t)to;
+                        app->files_hover = -1;           /* the keys have it now, wherever the pointer was left */
+                        app->files_want_now = true;
+                        rubraview_listwin_reveal(&app->files_list, to, count);
+                        app->files_dirty = true;
+                    }
+                    break;
+                }
+                /* Any other key is the viewer's: its own key closes this window, the rest work as there. */
+                dispatch_key(app, combo);
+                app->files_dirty = true;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return handled;
+}
+
 static void settings_grid_keep(app_state_t *app, int32_t row, u8str_t text) {
     if (row < 0 || row >= (int32_t)(sizeof(app->settings_grid_len) / sizeof(app->settings_grid_len[0]))) return;
     size_t n = text.len < sizeof(app->settings_grid_text[0]) ? text.len : sizeof(app->settings_grid_text[0]) - 1;
@@ -12636,6 +13045,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         handled += help_pump(&app);
         handled += info_pump(&app);
         handled += mini_pump(&app);
+        handled += files_pump(&app);
 
         if (app.needs_relayout) {
             int32_t page = current_page_index(&app);
@@ -12716,6 +13126,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            redrawn each pass it is playing. */
         if (app.mini_open && !mini_paused(&app)) app.mini_dirty = true;
         draw_mini_window(&app);
+        files_preview_step(&app, now);
+        draw_files_window(&app);
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 
@@ -12739,6 +13151,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     /* §3.22: closing the viewer with the settings window open still
        writes what was changed in it. */
     settings_close(&app);
+    files_close(&app);
     settings_write_if_changed(&app, false);   /* a volume or opacity changed with the window shut */
     if (app.toolbox_window) {
         rubraview_pal_render_destroy(app.toolbox_renderer);

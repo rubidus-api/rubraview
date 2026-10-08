@@ -71,6 +71,34 @@ void rubraview_listwin_reveal(rubraview_listwin_t *lw, size_t index, size_t coun
 void rubraview_listwin_drag_begin(rubraview_listwin_t *lw, double px, double py);
 void rubraview_listwin_drag_to(rubraview_listwin_t *lw, double px, double py, double view_w, double view_h);
 
+/* ---- the file list window (owner, 2026-10-08) ----
+   A window of its own beside the viewer: the files of the archive (or the
+   folder) in a list on the left, the picture of the one pointed at on the
+   right. Its rows are a rubraview_listwin_t laid over the window's left
+   part; these are the two sums it needs besides. */
+
+/**
+ * The list's place in a `client_w` x `client_h` window at `dpi_scale`: the
+ * left part, 42 % of the width but no narrower than ten rows are tall and
+ * no wider than twenty; all of a window too narrow for both. Sets `lw` up
+ * with a header row; keeps its scroll position. Returns the preview's
+ * rectangle (empty when there is no room for one).
+ */
+rubraview_rect_t rubraview_filewin_layout(rubraview_listwin_t *lw, double client_w, double client_h, double dpi_scale);
+
+/**
+ * The row a key moves the selection to: `delta` rows from `selected`, or
+ * from `current` (the file on screen) when nothing is selected yet, kept
+ * within the list. SIZE_MAX when the list is empty.
+ */
+size_t rubraview_filewin_step(size_t selected, size_t current, long delta, size_t count);
+
+/**
+ * A `w` x `h` picture fitted into `box` with `margin` around it, centred,
+ * its shape kept; a picture smaller than the room is not enlarged.
+ */
+rubraview_rect_t rubraview_filewin_fit(rubraview_rect_t box, double w, double h, double margin);
+
 #ifdef __cplusplus
 }
 #endif

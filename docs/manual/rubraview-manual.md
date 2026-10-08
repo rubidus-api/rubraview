@@ -306,6 +306,18 @@ files when there is none. The file on screen is marked and kept in view; a
 click goes to a file, the wheel scrolls, the title drags it, `X` or `Esc`
 closes it.
 
+`F3` (the Files button, or File › File list window) opens the same list in
+**a window of its own**, with a preview. The viewer goes on showing its
+page; the other window lists what the archive holds — or the folder, or
+the playlist — each file with its size, the one on screen marked. Point at
+a row, or move to it with `Up` and `Down` (`PageUp`, `PageDown`, `Home`,
+`End` go further), and its picture is shown on the right with its name,
+its pixels and its size. A click, or `Enter`, turns the viewer to that
+file. Any other key pressed there does what it does in the viewer, so
+`F3` or `Esc` closes it. A film or a sound has no preview, and a page far
+inside a solid archive is not decoded for a glance: both say so, and open
+with `Enter`.
+
 `I` (or `Ctrl+I`, or File › Information) opens the file's information: its
 size, dates, pixels and format, and for a photo what the camera wrote —
 camera and lens, when it was taken (with the time zone), exposure, aperture,
@@ -445,6 +457,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
 | `Ctrl+Left` | Window narrower |
