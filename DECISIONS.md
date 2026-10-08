@@ -175,6 +175,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-08: D-77 The reader's rotation with two pages; the information bar only when asked for
+
+- Status: Accepted (owner 2026-10-08: "2장보기 모드에서 rotate 시켰을 때, 90도일 때와 180도일 때 화면이 이상하게 보입니다 … 돌린 이미지 기준으로 비율을 봐서 가로로 길면 1장씩, 세로로 길면 2장", and of the translucent bar with the picture's size: "이거 없앴으면 좋겠는데요")
+- Decision:
+  - Pairing goes by the page as turned (it already did): wide stands alone, tall pairs. A page that a quarter turn laid on its side is one page shown whole; "Split wide spreads" does not cut it in two. That was the fault at 90 degrees: the turned page was split, and a split half was drawn from the unturned picture.
+  - A half turn, or a mirror left to right, makes the two pages of a pair change places, as a book turned upside down has them (the implementer's reading of "이상하게" at 180 degrees, where each page had been turned where it stood). The two halves of a split spread change places the same way. The reading direction setting itself is not changed.
+  - A split half is drawn through the orientation, so a wide scan turned over or mirrored shows the right half the right way up.
+  - Turning or mirroring keeps the page: of a pair, the earlier one. Before, the spread's number was kept while the spreads were made again, so the book jumped.
+  - The information bar (the picture's size and the zoom, along the bottom) no longer comes up by itself at every page. `Shift+I` and Menu › View › Info still turn it on, and then it stays.
+- Consequences: `rubraview_layout_opts_turned`, `rubraview_orientation_swaps_sides` and `rubraview_orientation_region` are host-tested (T125); the rest was measured on the VM. Not done: the crop overlay on a split half of a turned page; remembering the bar's state across runs (it starts off).
+
 ## 2026-10-08: D-76 The file list window (F3): the archive's files, a preview, in a window of its own
 
 - Status: Accepted (owner 2026-10-08: "압축파일 내부 파일들 목록들을 볼 수 있고 거기서 이동도 가능하며 프리뷰도 보여주는 압축파일 내 파일목록창", then "위의 창은 모달리스여야 … 원래 창은 원래대로 계속 보여주고 있고 외부의 창으로 파일을 제어")
