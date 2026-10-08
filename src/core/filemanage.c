@@ -194,12 +194,47 @@ rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, u8str_t set
         if (value && value->len > 0) curation.dirs[i - 1] = *value;
     }
 
+    const u8str_t *copy_dir = rubraview_ini_get(&doc, U8("curation"), U8("copy_dir"));
+    if (copy_dir && copy_dir->len > 0) curation.copy_dir = *copy_dir;
+    const u8str_t *move_dir = rubraview_ini_get(&doc, U8("curation"), U8("move_dir"));
+    if (move_dir && move_dir->len > 0) curation.move_dir = *move_dir;
+
     const u8str_t *mode = rubraview_ini_get(&doc, U8("curation"), U8("curation_mode"));
     if (mode && mode->len == 4 && memcmp(mode->ptr, "copy", 4) == 0) {
         curation.mode = RUBRAVIEW_CURATION_COPY;
     }
 
     return curation;
+}
+
+u8str_t rubraview_filing_target(proven_arena_t *arena, u8str_t dir, u8str_t filename,
+                                rubraview_path_exists_fn exists, void *ctx) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    if (!arena || !exists || dir.len == 0 || filename.len == 0) return none;
+    u8str_t target = rubraview_path_join(arena, dir, filename);
+    if (target.len == 0 || !exists(ctx, target)) return target;
+
+    /* The number goes before the extension; a name with none, or one that
+       only starts with a dot, takes it at its end. */
+    size_t stem = rubraview_rename_stem_length(filename);
+    for (uint32_t n = 1; n <= 9999; ++n) {
+        char digits[8];
+        size_t d = 0;
+        for (uint32_t v = n; v > 0; v /= 10) digits[d++] = (char)('0' + v % 10);
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, filename.len + d + 2);
+        if (!proven_is_ok(res.err)) return none;
+        char *name = (char*)res.value.ptr;
+        size_t at = 0;
+        memcpy(name, filename.ptr, stem); at = stem;
+        name[at++] = '-';
+        while (d > 0) name[at++] = digits[--d];
+        memcpy(name + at, filename.ptr + stem, filename.len - stem); at += filename.len - stem;
+        name[at] = '\0';
+        target = rubraview_path_join(arena, dir, (u8str_t){ .ptr = name, .len = at });
+        if (target.len == 0) return none;
+        if (!exists(ctx, target)) return target;
+    }
+    return none;
 }
 
 u8str_t rubraview_curation_target(const rubraview_curation_t *curation, int32_t digit) {

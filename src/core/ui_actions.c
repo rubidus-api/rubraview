@@ -4,7 +4,7 @@
 
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
-    "rename_file", "delete_file",
+    "rename_file", "delete_file", "copy_to_folder", "move_to_folder",
     "layout_single", "layout_dual", "layout_book", "toggle_layout",
     "toggle_reading_order", "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
@@ -20,6 +20,8 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         if (rubraview_u8_eq_lit(action, NEEDS_PAGE[i])) st.enabled = f->has_page;
     }
     if (rubraview_u8_eq_lit(action, "next_archive") || rubraview_u8_eq_lit(action, "prev_archive")) st.enabled = f->archive_series;
+    /* A page inside an archive is not a file to take away: it can be copied out, not moved. */
+    if (rubraview_u8_eq_lit(action, "move_to_folder")) st.enabled = f->has_page && !f->archive_series;
     /* Export writes a picture: a film or a sound has none to write. */
     if (rubraview_u8_eq_lit(action, "quick_export")) st.enabled = f->has_page && !f->media;
     /* Sound has no frames to step. */
@@ -150,6 +152,8 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_playlist", 0xE8FD },       /* BulletedList */
         { "toggle_always_on_top", 0xE718 },  /* Pin */
         { "rename_file", 0xE8AC },           /* Rename */
+        { "copy_to_folder", 0xE8C8 },        /* Copy */
+        { "move_to_folder", 0xE8DE },        /* MoveToFolder */
     };
     if (!f) return 0;
     if (rubraview_u8_eq_lit(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */

@@ -705,6 +705,7 @@ static void source_close(app_state_t *app);
 static void triage_delete(app_state_t *app, bool permanent);
 static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
+static void filing_put(app_state_t *app, bool moving);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
 static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong);
@@ -3819,6 +3820,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         triage_undo(app);
     } else if (rubraview_u8_eq_lit(action, "rename_file")) {
         rename_begin(app);
+    } else if (rubraview_u8_eq_lit(action, "copy_to_folder")) {
+        filing_put(app, false);
+    } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
+        filing_put(app, true);
     } else if (rubraview_u8_eq_lit(action, "open_settings")) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
@@ -6730,6 +6735,81 @@ static void triage_curate(app_state_t *app, int32_t digit) {
     if (rubraview_curation_advances(&app->curation)) {
         reopen_after_removal(app, (size_t)page);
     }
+}
+
+/* ---- the file on screen, to its folder (owner, 2026-10-08) ----
+   `copy_to_folder` and `move_to_folder`, each with a folder of its own from
+   Settings > Files. A name already there is never replaced: the file goes
+   in as `name-1.ext`, `name-2.ext`, ... A page inside an archive is not a
+   file, so it can be copied out (its bytes written as a file) but not
+   moved. */
+static bool filing_exists(void *ctx, u8str_t path) {
+    (void)ctx;
+    return rubraview_pal_fs_exists(path);
+}
+
+static void filing_put(app_state_t *app, bool moving) {
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+    u8str_t dir = moving ? app->curation.move_dir : app->curation.copy_dir;
+    if (dir.len == 0) {
+        osd_say(app, moving ? U8("no folder to move to yet: Settings (F10) > Files > Move to")
+                            : U8("no folder to copy to yet: Settings (F10) > Files > Copy to"));
+        return;
+    }
+    bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
+    if (in_archive && moving) {
+        osd_say(app, U8("a page inside an archive can be copied (F6), not moved"));
+        return;
+    }
+    u8str_t path = in_archive ? (u8str_t){ .ptr = "", .len = 0 } : app->source.pages[page].path;
+    u8str_t name = rubraview_path_basename(in_archive ? app->source.pages[page].name : path);
+    if (name.len == 0) return;
+
+    if (!rubraview_pal_fs_make_dirs(dir) && !rubraview_pal_fs_exists(dir)) {
+        osd_say(app, U8("that folder could not be made"));
+        return;
+    }
+    u8str_t target = rubraview_filing_target(app->arena, dir, name, filing_exists, NULL);
+    if (target.len == 0) {
+        osd_say(app, U8("no free name left in that folder"));
+        return;
+    }
+    /* The same file onto itself would be a copy named -1 beside it: allowed;
+       a move into the folder it is already in is nothing to do. */
+    if (moving && rubraview_path_same(rubraview_path_dirname(path), dir)) {
+        osd_say(app, U8("it is already in that folder"));
+        return;
+    }
+
+    bool ok = false;
+    if (in_archive) {
+        void *mem = NULL;
+        rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page, &mem);
+        ok = bytes.ok && rubraview_pal_fs_write_file(target, bytes.data);
+        free(mem);
+    } else {
+        ok = moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target);
+    }
+    if (!ok) {
+        osd_say(app, U8("could not put the file there"));
+        return;
+    }
+
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+        .source_path = path,
+        .target_path = target,
+        .playlist_index = (size_t)page,
+    });
+
+    /* Say the name it has there: it is not always the name it had. */
+    char said[sizeof(app->notice)];
+    u8str_t put = rubraview_path_basename(target);
+    int n = snprintf(said, sizeof(said), "%s: %.*s", moving ? "moved" : "copied", (int)(put.len < 160 ? put.len : 160), put.ptr);
+    osd_say(app, (u8str_t){ .ptr = said, .len = n > 0 ? (size_t)n : 0 });
+
+    if (moving) reopen_after_removal(app, (size_t)page);
 }
 
 static void triage_undo(app_state_t *app) {
