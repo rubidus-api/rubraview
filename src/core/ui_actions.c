@@ -4,7 +4,7 @@
 
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
-    "rename_file", "delete_file", "copy_to_folder", "move_to_folder",
+    "rename_file", "delete_file", "copy_to_folder", "move_to_folder", "toggle_file_list",
     "layout_single", "layout_dual", "layout_book", "toggle_layout",
     "toggle_reading_order", "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
@@ -152,6 +152,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_playlist", 0xE8FD },       /* BulletedList */
         { "toggle_always_on_top", 0xE718 },  /* Pin */
         { "rename_file", 0xE8AC },           /* Rename */
+        { "toggle_file_list", 0xE8A9 },      /* ViewAll: the files in the archive, with a preview */
         { "copy_to_folder", 0xE8C8 },        /* Copy */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
     };

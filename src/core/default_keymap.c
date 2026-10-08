@@ -49,6 +49,9 @@ const char *rubraview_default_keymap(void) {
     /* Owner, 2026-10-08: the file on screen copied to its folder, or moved
        to its own (Settings > Files); beside F5, which has nothing to do
        with files here. */
+    /* Owner, 2026-10-08: the list of what the archive (or the folder) holds,
+       with a preview, in a window of its own. */
+    "toggle_file_list = \"F3\"\n"
     "copy_to_folder = \"F6\"\n"
     "move_to_folder = \"F7\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +

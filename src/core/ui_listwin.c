@@ -105,3 +105,48 @@ void rubraview_listwin_drag_to(rubraview_listwin_t *lw, double px, double py, do
     lw->y = py - lw->grab_dy;
     rubraview_listwin_place(lw, view_w, view_h);
 }
+
+/* ---- the file list window ---- */
+
+rubraview_rect_t rubraview_filewin_layout(rubraview_listwin_t *lw, double client_w, double client_h, double dpi_scale) {
+    rubraview_rect_t none = {0};
+    if (!lw || client_w <= 0.0 || client_h <= 0.0) return none;
+    if (dpi_scale <= 0.0) dpi_scale = 1.0;
+    lw->title_height = 30.0 * dpi_scale;
+    lw->row_height = 24.0 * dpi_scale;
+    double list_w = clampd(client_w * 0.42, lw->row_height * 10.0, lw->row_height * 20.0);
+    double preview_w = client_w - list_w;
+    if (preview_w < lw->row_height * 6.0) {          /* too narrow for both: the list has it all */
+        list_w = client_w;
+        preview_w = 0.0;
+    }
+    lw->open = true;
+    lw->placed = true;
+    lw->x = 0.0;
+    lw->y = 0.0;
+    lw->width = list_w;
+    lw->height = client_h;
+    if (preview_w <= 0.0) return none;
+    return (rubraview_rect_t){ list_w, 0.0, preview_w, client_h };
+}
+
+size_t rubraview_filewin_step(size_t selected, size_t current, long delta, size_t count) {
+    if (count == 0) return SIZE_MAX;
+    size_t from = selected < count ? selected : current < count ? current : 0;
+    if (delta < 0) {
+        size_t back = (size_t)(-delta);
+        return back > from ? 0 : from - back;
+    }
+    size_t on = (size_t)delta;
+    return on >= count - from ? count - 1 : from + on;
+}
+
+rubraview_rect_t rubraview_filewin_fit(rubraview_rect_t box, double w, double h, double margin) {
+    rubraview_rect_t none = {0};
+    double room_w = box.width - margin * 2.0, room_h = box.height - margin * 2.0;
+    if (w <= 0.0 || h <= 0.0 || room_w <= 0.0 || room_h <= 0.0) return none;
+    double scale = room_w / w < room_h / h ? room_w / w : room_h / h;
+    if (scale > 1.0) scale = 1.0;
+    double fw = w * scale, fh = h * scale;
+    return (rubraview_rect_t){ box.x + (box.width - fw) * 0.5, box.y + (box.height - fh) * 0.5, fw, fh };
+}
