@@ -11,11 +11,8 @@ rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mo
     };
 }
 
-rubraview_layout_opts_t rubraview_layout_opts_turned(rubraview_layout_opts_t opts, bool swaps_axes, bool swaps_sides) {
+rubraview_layout_opts_t rubraview_layout_opts_turned(rubraview_layout_opts_t opts, bool swaps_axes) {
     if (swaps_axes) opts.auto_split_wide_spreads = false;
-    if (swaps_sides) {
-        opts.direction = (opts.direction == RUBRAVIEW_READING_LTR) ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR;
-    }
     return opts;
 }
 

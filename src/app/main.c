@@ -1102,11 +1102,10 @@ static void rebuild_layout(app_state_t *app) {
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
 
     /* The reader's rotation (owner, 2026-10-08): a page it has laid on its
-       side is one page shown whole, not a spread to cut in two; a book
-       turned upside down, or mirrored, has its two pages change places. */
+       side is one page shown whole, not a spread to cut in two. Turned
+       upside down, each page is turned where it stands (owner, 2026-10-09). */
     rubraview_layout_opts_t opts = rubraview_layout_opts_turned(
-        app->layout_opts, rubraview_orientation_swaps_axes(app->orientation),
-        rubraview_orientation_swaps_sides(app->orientation));
+        app->layout_opts, rubraview_orientation_swaps_axes(app->orientation));
 
     app->layout = rubraview_layout_compute(app->arena, infos, page_count(app),
                                            (double)win_w, (double)win_h, opts);

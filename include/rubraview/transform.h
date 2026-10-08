@@ -65,14 +65,6 @@ void rubraview_orientation_apply_size(rubraview_orientation_t o, double width, d
 rubraview_mat3x2_t rubraview_orientation_matrix(rubraview_orientation_t o, double width, double height);
 
 /**
- * True when the orientation puts what was on the left on the right: a
- * half turn, or a mirror left to right (not both, which is a mirror top
- * to bottom). Two pages side by side then change places, as the two
- * pages of a book turned upside down do.
- */
-bool rubraview_orientation_swaps_sides(rubraview_orientation_t o);
-
-/**
  * Part of an oriented picture, for drawing from the picture as stored.
  * `left..bottom` is the part, in oriented pixels. The out rectangle is
  * the same part in the stored picture's pixels; the matrix returned takes

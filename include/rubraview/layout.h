@@ -73,11 +73,9 @@ rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mo
 /**
  * The options for pages the reader has turned (their sizes given as
  * turned). `swaps_axes`: a quarter turn — a page it laid on its side is
- * one page shown whole, never a spread to cut in two. `swaps_sides`: a
- * half turn or a mirror — the two pages of a pair change places, and so
- * do the two halves of a split spread.
+ * one page shown whole, never a spread to cut in two.
  */
-rubraview_layout_opts_t rubraview_layout_opts_turned(rubraview_layout_opts_t opts, bool swaps_axes, bool swaps_sides);
+rubraview_layout_opts_t rubraview_layout_opts_turned(rubraview_layout_opts_t opts, bool swaps_axes);
 
 typedef struct rubraview_layout_result {
     rubraview_spread_t *spreads;
