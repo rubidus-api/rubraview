@@ -96,6 +96,33 @@ rubraview_mat3x2_t rubraview_orientation_matrix(rubraview_orientation_t o, doubl
     return rubraview_mat3x2_multiply(rotation, flip);
 }
 
+bool rubraview_orientation_swaps_sides(rubraview_orientation_t o) {
+    return (o.rotation == RUBRAVIEW_ROTATE_180) != o.flip_horizontal;
+}
+
+rubraview_mat3x2_t rubraview_orientation_region(rubraview_orientation_t o, double width, double height,
+                                                double left, double top, double right, double bottom,
+                                                double *out_left, double *out_top,
+                                                double *out_right, double *out_bottom) {
+    rubraview_mat3x2_t m = rubraview_orientation_matrix(o, width, height);
+    /* The matrix only swaps and negates axes, so its inverse is exact and
+       the part's corners come back as the corners of a rectangle. */
+    double det = m.a * m.d - m.b * m.c;
+    double ia = m.d / det, ib = -m.b / det, ic = -m.c / det, id = m.a / det;
+    double ie = -(m.e * ia + m.f * ic), jf = -(m.e * ib + m.f * id);
+    double x0 = ia * left + ic * top + ie, y0 = ib * left + id * top + jf;
+    double x1 = ia * right + ic * bottom + ie, y1 = ib * right + id * bottom + jf;
+    double sl = x0 < x1 ? x0 : x1, sr = x0 < x1 ? x1 : x0;
+    double st = y0 < y1 ? y0 : y1, sb = y0 < y1 ? y1 : y0;
+    if (out_left) *out_left = sl;
+    if (out_top) *out_top = st;
+    if (out_right) *out_right = sr;
+    if (out_bottom) *out_bottom = sb;
+    return rubraview_mat3x2_multiply(
+        rubraview_mat3x2_multiply(rubraview_mat3x2_translate(sl, st), m),
+        rubraview_mat3x2_translate(-left, -top));
+}
+
 rubraview_pixbuf_t rubraview_pixbuf_orient(proven_arena_t *arena,
                                            const rubraview_pixbuf_t *src,
                                            rubraview_orientation_t orientation) {

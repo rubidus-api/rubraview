@@ -1101,8 +1101,15 @@ static void rebuild_layout(app_state_t *app) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
 
+    /* The reader's rotation (owner, 2026-10-08): a page it has laid on its
+       side is one page shown whole, not a spread to cut in two; a book
+       turned upside down, or mirrored, has its two pages change places. */
+    rubraview_layout_opts_t opts = rubraview_layout_opts_turned(
+        app->layout_opts, rubraview_orientation_swaps_axes(app->orientation),
+        rubraview_orientation_swaps_sides(app->orientation));
+
     app->layout = rubraview_layout_compute(app->arena, infos, page_count(app),
-                                           (double)win_w, (double)win_h, app->layout_opts);
+                                           (double)win_w, (double)win_h, opts);
     if (app->spread_index >= app->layout.count && app->layout.count > 0) {
         app->spread_index = app->layout.count - 1;
     }
@@ -3787,18 +3794,31 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "zoom_out")) {
         app->zoom /= ZOOM_STEP;
         if (app->zoom < 0.01) app->zoom = 0.01;
-    } else if (rubraview_u8_eq_lit(action, "rotate_cw")) {
-        app->orientation = rubraview_orientation_rotate_cw(app->orientation);
-        app->needs_relayout = true;
-        reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "rotate_ccw")) {
-        app->orientation = rubraview_orientation_rotate_ccw(app->orientation);
-        app->needs_relayout = true;
-        reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "flip_horizontal")) {
-        app->orientation = rubraview_orientation_flip_h(app->orientation);
-    } else if (rubraview_u8_eq_lit(action, "flip_vertical")) {
-        app->orientation = rubraview_orientation_flip_v(app->orientation);
+    } else if (rubraview_u8_eq_lit(action, "rotate_cw") || rubraview_u8_eq_lit(action, "rotate_ccw") ||
+               rubraview_u8_eq_lit(action, "flip_horizontal") || rubraview_u8_eq_lit(action, "flip_vertical")) {
+        /* Turning changes which pages pair, so the spreads are made again
+           and the page that was on screen is found among them: of two,
+           the earlier one, whichever side it was on. */
+        int32_t page = current_page_index(app);
+        if (page >= 0) {
+            int32_t other = app->layout.spreads[app->spread_index].right_index;
+            if (other >= 0 && other < page) page = other;
+        }
+        bool turn = true;
+        if (rubraview_u8_eq_lit(action, "rotate_cw")) {
+            app->orientation = rubraview_orientation_rotate_cw(app->orientation);
+        } else if (rubraview_u8_eq_lit(action, "rotate_ccw")) {
+            app->orientation = rubraview_orientation_rotate_ccw(app->orientation);
+        } else if (rubraview_u8_eq_lit(action, "flip_horizontal")) {
+            app->orientation = rubraview_orientation_flip_h(app->orientation);
+            turn = false;
+        } else {
+            app->orientation = rubraview_orientation_flip_v(app->orientation);
+            turn = false;
+        }
+        rebuild_layout(app);
+        if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+        if (turn) reset_view(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_pixel_grid")) {
         app->pixel_grid = !app->pixel_grid;
     } else if (rubraview_u8_eq_lit(action, "toggle_nearest")) {
@@ -6348,7 +6368,9 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     draw_subtitle(app, win_w, win_h);
 
     /* OSD (§3.1), skipped once it has faded out entirely. */
-    if (rubraview_osd_opacity(&app->osd) > 0.01) {
+    /* Only when asked for with Shift+I: it no longer comes up by itself
+       at every page (owner, 2026-10-08). */
+    if (app->osd.always_on && rubraview_osd_opacity(&app->osd) > 0.01) {
         int32_t page = current_page_index(app);
         if (page >= 0 && (size_t)page < page_count(app) && app->pages[page].loaded) {
             char line[192];
@@ -6642,21 +6664,25 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                                                          page->width, page->height, 0x40FFFFFFu);
                 }
             } else {
-                /* A split half of a wide spread (§3.3.7). The source
-                   sub-rectangle is expressed in oriented coordinates, so
-                   the user's own rotation is not applied to this case —
-                   splitting and manual rotation together is left to the
-                   editing workbench in M6. */
+                /* A split half of a wide spread (§3.3.7). The command names
+                   the half in the picture as the reader sees it; the part
+                   of the stored picture that is, and the turn that puts it
+                   upright, come from the orientation. */
                 /* The command speaks in picture pixels; a reduced texture
                    has fewer, so the rectangle shrinks and the transform
                    grows by the same ratio. */
                 rubraview_mat3x2_t pre = page_texture_prescale(page);
+                double sl = 0.0, st = 0.0, sr = 0.0, sb = 0.0;
+                rubraview_mat3x2_t turn = rubraview_orientation_region(
+                    app->orientation, (double)picture_w(page), (double)picture_h(page),
+                    cmd->src_left, cmd->src_top, cmd->src_right, cmd->src_bottom, &sl, &st, &sr, &sb);
                 rubraview_src_rect_t src = {
-                    .left = cmd->src_left / pre.a, .top = cmd->src_top / pre.d,
-                    .right = cmd->src_right / pre.a, .bottom = cmd->src_bottom / pre.d,
+                    .left = sl / pre.a, .top = st / pre.d, .right = sr / pre.a, .bottom = sb / pre.d,
                 };
                 rubraview_pal_render_draw_texture_region(app->renderer, page->texture, src,
-                                                         rubraview_mat3x2_multiply(pre, cmd->transform), interp);
+                                                         rubraview_mat3x2_multiply(
+                                                             rubraview_mat3x2_multiply(pre, turn), cmd->transform),
+                                                         interp);
             }
         }
     }

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.34.exe              the viewer, as built
-dist/rubraview-v0.0.34/                 the release bundle
-dist/rubraview-v0.0.34.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.35.exe              the viewer, as built
+dist/rubraview-v0.0.35/                 the release bundle
+dist/rubraview-v0.0.35.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -51,9 +51,13 @@ pages side by side, `M` reads right to left. Two pages are shown at the
 same height, so a small scan beside a large one is not drawn small (at
 actual size, `4`, each keeps its own pixels).
 
+Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
+they are shown one at a time, whole; standing tall, two at a time. Turned
+upside down, the two pages change places, as the book's would.
+
 A picture too large for the graphics card — tens of thousands of pixels a
-side, or over 128 megapixels — opens reduced; the status line says
-"shown reduced" and still gives its real size. Zoom in, and the part on
+side, or over 128 megapixels — opens reduced; the information bar
+(`Shift+I`) says "shown reduced" and still gives its real size. Zoom in, and the part on
 screen is read again from the file at full detail: it sharpens a moment
 after, tile by tile, and so does whatever you move to. Every key is in **Keys** at the
 end of this manual.
@@ -272,8 +276,8 @@ back and forward 5 s, play or pause, stop, volume, and so on. Pointing at a
 button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
 for a picture, with its place in the folder or archive (`4 / 6`), and the
-bar is a page bar. The seek bar is only in the toolbox; the status line
-(`Shift+I`) keeps the picture's size and the zoom.
+bar is a page bar. The seek bar is only in the toolbox; the information
+bar (`Shift+I`, off until asked for) keeps the picture's size and the zoom.
 
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use
