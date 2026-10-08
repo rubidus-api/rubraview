@@ -180,11 +180,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Status: Accepted (owner 2026-10-08: "2장보기 모드에서 rotate 시켰을 때, 90도일 때와 180도일 때 화면이 이상하게 보입니다 … 돌린 이미지 기준으로 비율을 봐서 가로로 길면 1장씩, 세로로 길면 2장", and of the translucent bar with the picture's size: "이거 없앴으면 좋겠는데요")
 - Decision:
   - Pairing goes by the page as turned (it already did): wide stands alone, tall pairs. A page that a quarter turn laid on its side is one page shown whole; "Split wide spreads" does not cut it in two. That was the fault at 90 degrees: the turned page was split, and a split half was drawn from the unturned picture.
-  - A half turn, or a mirror left to right, makes the two pages of a pair change places, as a book turned upside down has them (the implementer's reading of "이상하게" at 180 degrees, where each page had been turned where it stood). The two halves of a split spread change places the same way. The reading direction setting itself is not changed.
+  - A half turn turns each page where it stands; the pair keeps its sides. (0.0.35 made the two pages change places at a half turn, the implementer's reading of "이상하게" at 180 degrees. Withdrawn in 0.0.36 — owner 2026-10-09: "180도일 때 순서 바꾸는 동작 취소바람. 내가 270도를 잘못 쓴거야": the fault reported was at 90 and 270 degrees.)
   - A split half is drawn through the orientation, so a wide scan turned over or mirrored shows the right half the right way up.
   - Turning or mirroring keeps the page: of a pair, the earlier one. Before, the spread's number was kept while the spreads were made again, so the book jumped.
   - The information bar (the picture's size and the zoom, along the bottom) no longer comes up by itself at every page. `Shift+I` and Menu › View › Info still turn it on, and then it stays.
-- Consequences: `rubraview_layout_opts_turned`, `rubraview_orientation_swaps_sides` and `rubraview_orientation_region` are host-tested (T125); the rest was measured on the VM. Not done: the crop overlay on a split half of a turned page; remembering the bar's state across runs (it starts off).
+- Consequences: `rubraview_layout_opts_turned` and `rubraview_orientation_region` are host-tested (T125); the rest was measured on the VM. Not done: the crop overlay on a split half of a turned page; remembering the bar's state across runs (it starts off).
 
 ## 2026-10-08: D-76 The file list window (F3): the archive's files, a preview, in a window of its own
 

@@ -96,10 +96,6 @@ rubraview_mat3x2_t rubraview_orientation_matrix(rubraview_orientation_t o, doubl
     return rubraview_mat3x2_multiply(rotation, flip);
 }
 
-bool rubraview_orientation_swaps_sides(rubraview_orientation_t o) {
-    return (o.rotation == RUBRAVIEW_ROTATE_180) != o.flip_horizontal;
-}
-
 rubraview_mat3x2_t rubraview_orientation_region(rubraview_orientation_t o, double width, double height,
                                                 double left, double top, double right, double bottom,
                                                 double *out_left, double *out_top,

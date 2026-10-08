@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.35.exe              the viewer, as built
-dist/rubraview-v0.0.35/                 the release bundle
-dist/rubraview-v0.0.35.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.36.exe              the viewer, as built
+dist/rubraview-v0.0.36/                 the release bundle
+dist/rubraview-v0.0.36.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -53,7 +53,7 @@ actual size, `4`, each keeps its own pixels).
 
 Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
 they are shown one at a time, whole; standing tall, two at a time. Turned
-upside down, the two pages change places, as the book's would.
+upside down, each page is turned where it stands.
 
 A picture too large for the graphics card — tens of thousands of pixels a
 side, or over 128 megapixels — opens reduced; the information bar
