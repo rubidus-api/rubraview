@@ -3,11 +3,11 @@
 
 #include <stdlib.h>
 
-/* The scope FultaArc ships (owner, 2026-10-08: "완성된 핵심만"): the fully-analysed formats. ALZ, EGG and AZO are
- * held out of the build and this registry until their clean rooms deliver and that work is ported; their sources
- * stay in src/alz, src/egg, src/azo and are excluded by the Makefile. RAR 1.5 compression is likewise pending. */
+/* The formats FultaArc ships. ALZ and EGG (with AZO, EGG's own method) were held out until the
+ * fultaarc-cleanroom-alzegg clean room delivered; that work is now integrated (ALZ from the clean room's black-box
+ * reader, EGG/AZO from the project readers corrected per its reader-notes). RAR 1.5 compression is still pending. */
 static const fa_format_ops_t *const FORMATS[] = {
-    &fa_rar_ops, &fa_7z_ops, &fa_zip_ops,
+    &fa_rar_ops, &fa_7z_ops, &fa_zip_ops, &fa_alz_ops, &fa_egg_ops,
 };
 
 const char *fulta_arc_format_name(fulta_arc_format_t f) {
@@ -149,7 +149,27 @@ fulta_arc_err_t fulta_arc_extract(fulta_arc_t *arc, size_t index, const fulta_ar
     if (!arc || !sink || !sink->write) return FULTA_ARC_ERR_INVALID_ARG;
     if (index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
     if (arc->entries[index].pub.flags & FULTA_ARC_ENTRY_DIR) return FULTA_ARC_OK;
+    arc->progress_done = 0;
+    arc->progress_total = (arc->entries[index].pub.flags & FULTA_ARC_ENTRY_UNKNOWN_SIZE) ? 0 : arc->entries[index].pub.size;
     return arc->ops->extract(arc, index, sink);
+}
+
+fulta_arc_err_t fulta_arc_check_password(fulta_arc_t *arc, size_t index) {
+    if (!arc || index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
+    if (!arc->ops->check_password) return FULTA_ARC_ERR_UNSUPPORTED;
+    return arc->ops->check_password(arc, index);
+}
+
+fulta_arc_editable_t fulta_arc_editable(const fulta_arc_t *arc) {
+    if (!arc) return FULTA_ARC_EDIT_FORMAT_NOT_WRITABLE;
+    /* An encrypted archive is refused outright (the owner's rule): no in-place edit, no conversion. */
+    for (size_t i = 0; i < arc->count; i++)
+        if (arc->entries[i].pub.flags & FULTA_ARC_ENTRY_ENCRYPTED) return FULTA_ARC_EDIT_ENCRYPTED;
+    if (arc->nvolumes > 1) return FULTA_ARC_EDIT_MULTIVOLUME;
+    if (arc->format != FULTA_ARC_FORMAT_ZIP && arc->format != FULTA_ARC_FORMAT_7Z)
+        return FULTA_ARC_EDIT_FORMAT_NOT_WRITABLE;
+    if (arc->ops->editable) return arc->ops->editable(arc);   /* 7z: solid-folder check */
+    return FULTA_ARC_EDIT_OK;                                 /* ZIP */
 }
 
 typedef struct mem_sink { fa_buf_t b; uint64_t limit; } mem_sink_t;
@@ -167,17 +187,34 @@ fulta_arc_err_t fulta_arc_extract_alloc(fulta_arc_t *arc, size_t index, void **o
     mem_sink_t m = {.limit = SIZE_MAX};
     fulta_arc_sink_t sink = {.ctx = &m, .write = mem_sink_write};
     fulta_arc_err_t e = fulta_arc_extract(arc, index, &sink);
-    if (e) { fa_buf_free(&m.b); return e; }
+    if (e && e != FULTA_ARC_DAMAGED) { fa_buf_free(&m.b); return e; }
     if (!m.b.data) {
         m.b.data = malloc(1);
         if (!m.b.data) return FULTA_ARC_ERR_NOMEM;
     }
     *out_data = m.b.data;
     *out_size = m.b.size;
-    return FULTA_ARC_OK;
+    return e;   /* FULTA_ARC_OK, or FULTA_ARC_DAMAGED with the bytes that decoded */
 }
 
 /* ---- helpers for the format readers ----------------------------------------------------------------------- */
+
+void fa_progress(fulta_arc_t *arc, uint64_t delta) {
+    if (!arc) return;
+    arc->progress_done += delta;
+    if (arc->opt.progress) arc->opt.progress(arc->opt.progress_ctx, arc->progress_done, arc->progress_total);
+}
+
+char *fa_decode_name(const fulta_arc_t *arc, const uint8_t *raw, size_t n, bool unicode_flagged,
+                     fulta_arc_codepage_t fallback, bool *not_unicode) {
+    if (not_unicode) *not_unicode = false;
+    if (unicode_flagged || fa_utf8_valid(raw, n))
+        return fa_codepage_to_utf8(raw, n, FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);   /* already Unicode */
+    fulta_arc_codepage_t cp = arc->opt.codepage;
+    if (cp == FULTA_ARC_CP_AUTO) cp = arc->opt.auto_codepage ? arc->opt.auto_codepage : fallback;
+    if (not_unicode) *not_unicode = true;
+    return fa_codepage_to_utf8(raw, n, cp, fallback);
+}
 
 fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_size, const char *utf8_name,
                          const char *method) {
@@ -190,6 +227,7 @@ fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_s
     }
     fa_entry_t *en = &arc->entries[arc->count];
     memset(en, 0, sizeof *en);
+    en->pub.solid_group = (uint32_t)arc->count;   /* distinct unless the reader groups a solid unit */
     en->raw_owned = fa_malloc(raw_size);
     en->name_owned = fa_strndup(utf8_name, strlen(utf8_name));
     en->method_owned = fa_strndup(method ? method : "", method ? strlen(method) : 0);
@@ -262,7 +300,7 @@ void fa_password_ok(fulta_arc_t *arc, const char *pw) {
 bool fa_cancelled(const fulta_arc_t *arc) { return arc->opt.cancel && arc->opt.cancel(arc->opt.cancel_ctx); }
 
 fulta_arc_err_t fa_pump(fa_stream_t *s, uint64_t size, bool has_crc, uint32_t crc, const fulta_arc_sink_t *sink,
-                        const fulta_arc_t *arc) {
+                        fulta_arc_t *arc, bool allow_damaged) {
     uint8_t *buf = fa_malloc(65536);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
     uint64_t total = 0;
@@ -282,12 +320,17 @@ fulta_arc_err_t fa_pump(fa_stream_t *s, uint64_t size, bool has_crc, uint32_t cr
         }
         c = fa_crc32(c, buf, got);
         total += got;
+        fa_progress(arc, got);
         if (sink && sink->write) {
-            e = sink->write(sink->ctx, buf, got);
-            if (e) break;
+            fulta_arc_err_t we = sink->write(sink->ctx, buf, got);
+            if (we) { fa_free(buf); return we; }   /* a sink failure is the caller's, never "damaged" */
         }
     }
     fa_free(buf);
     if (!e && has_crc && c != crc) e = FULTA_ARC_ERR_CHECKSUM;
+    /* keep what decoded: a decode-side failure becomes FULTA_ARC_DAMAGED, the sink already has the bytes */
+    if (e && allow_damaged && arc && arc->opt.keep_damaged && e != FULTA_ARC_ERR_CANCELLED &&
+        e != FULTA_ARC_ERR_NOMEM)
+        return FULTA_ARC_DAMAGED;
     return e;
 }

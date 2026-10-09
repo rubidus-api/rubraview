@@ -175,6 +175,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-10: D-85 FultaArc at `4fb7c06`: ALZ and EGG open again
+
+- Status: Accepted (owner 2026-10-10, on "re-vendor FultaArc to turn ALZ and EGG back on, and start RV-090?": "둘다 지금 진행해 주시고").
+- Decision: `vendor/fultaarc` is replaced by FultaArc's commit `4fb7c06` (its D-017: ALZ and EGG with EGG's own method, from its clean room; the edit routes of RV-090), unmodified, with `src/alz`, `src/egg`, `src/azo` and `vendor/bzip2_alz` now taken and built as its own Makefile builds them. `.alz` and `.egg` join the archive filter (the picker, the folder's list, the neighbours of a book); the page source says which it opened (`RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ` / `_EGG`, the information window's Kind). They are not added to the file types the viewer registers (D-74 took `.zip` and `.alz` out; unchanged).
+- Consequences: FultaArc's `4fb7c06` was a local commit there when taken, so Rubraview's public tree shows that ALZ / EGG code before FultaArc's own does. Host: `test_archives` reads an ALZ, an EGG in deflate, one in EGG's own method and a solid EGG back by size and CRC-32 (FultaArc's fixtures); the decoders' tests are FultaArc's. VM 2026-10-10: an `.alz` and an `.egg` of three pictures made there with ALZip open as books and turn pages.
+
 ## 2026-10-09: D-84 APNG plays; an animation is as long as its file
 
 - Status: Accepted (owner 2026-10-09: "apng 구현 바람. 프레임 전체 384MB 및 8192 프레임 제한 이상 길이의 파일도 지원 바람.").

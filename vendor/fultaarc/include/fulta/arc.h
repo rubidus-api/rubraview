@@ -20,6 +20,7 @@
 #ifndef FULTA_ARC_H
 #define FULTA_ARC_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -51,6 +52,7 @@ typedef int32_t fulta_arc_err_t;
 #define FULTA_ARC_ERR_LIMIT            0x1008  /* a configured limit (dictionary, memory, size) was exceeded */
 #define FULTA_ARC_ERR_CANCELLED        0x1009  /* the cancel callback said stop */
 #define FULTA_ARC_ERR_BAD_NAME         0x100A  /* writing: a name that may not be stored */
+#define FULTA_ARC_DAMAGED              0x100B  /* with options.keep_damaged: bytes were delivered to the sink but failed the checksum or ended early */
 
 /* A short English description of an error code (static string). */
 const char *fulta_arc_strerror(fulta_arc_err_t err);
@@ -118,6 +120,17 @@ typedef struct fulta_arc_options {
     /* Polled during long operations; return nonzero to cancel. May be NULL. */
     int (*cancel)(void *ctx);
     void *cancel_ctx;
+    /* Reports decoding progress during an extraction, including the skip over earlier entries of a solid unit.
+       `done` is cumulative bytes decoded in the current fulta_arc_extract call; `total` is the entry's unpacked
+       size when known (0 otherwise), so `done` may exceed it across a solid skip. May be NULL. */
+    void (*progress)(void *ctx, uint64_t done, uint64_t total);
+    void *progress_ctx;
+    /* The code page for a name that is not flagged Unicode when `codepage` is AUTO; 0 = the format's default
+       (CP437 for ZIP, the OEM page for RAR). Lets a caller pick the machine's ANSI page for legacy names. */
+    fulta_arc_codepage_t auto_codepage;
+    /* Keep the bytes that did decode when an entry fails its checksum or ends early: fulta_arc_extract then writes
+       what it has to the sink and returns FULTA_ARC_DAMAGED instead of a hard error. */
+    bool keep_damaged;
 } fulta_arc_options_t;
 
 /* ---- entries ------------------------------------------------------------------------------------------------ */
@@ -131,6 +144,7 @@ typedef struct fulta_arc_options {
 #define FULTA_ARC_ENTRY_HAS_MTIME  0x0040u
 #define FULTA_ARC_ENTRY_UNSUPPORTED 0x0080u  /* listed, but its method/encryption cannot be decoded */
 #define FULTA_ARC_ENTRY_UNKNOWN_SIZE 0x0100u /* the stored size is "unknown": decode to the stream's end */
+#define FULTA_ARC_ENTRY_NAME_NOT_UNICODE 0x0200u /* the name was not stored as Unicode; it was decoded through a code page (see name_raw, options.auto_codepage) */
 
 typedef struct fulta_arc_entry {
     const char *name;                 /* UTF-8, '/' between folders, NUL-terminated; never absolute, no ".." */
@@ -143,6 +157,7 @@ typedef struct fulta_arc_entry {
     uint32_t crc32;                   /* when FULTA_ARC_ENTRY_HAS_CRC32 */
     uint32_t attributes;              /* Windows attributes, or (attributes >> 16) = Unix mode when unix_mode != 0 */
     uint32_t unix_mode;               /* Unix st_mode when the archive gives one, else 0 */
+    uint32_t solid_group;             /* entries decoded from one solid unit (7z folder, RAR solid run) share this; the first entry of a group is where decoding starts. Distinct per entry when not solid. */
     uint32_t flags;                   /* FULTA_ARC_ENTRY_* */
     const char *method;               /* short method name, e.g. "Deflate", "LZMA2:BCJ", "RAR5", "AZO" */
 } fulta_arc_entry_t;
@@ -181,6 +196,12 @@ const fulta_arc_entry_t *fulta_arc_entry(const fulta_arc_t *arc, size_t index); 
  * the entries before it are decoded first (and discarded) unless they were just extracted in order. */
 fulta_arc_err_t fulta_arc_extract(fulta_arc_t *arc, size_t index, const fulta_arc_sink_t *sink);
 
+/* Check a password against entry `index` without decoding it, using the format's check value.
+   FULTA_ARC_OK: a supplied password matched (and is cached for extraction); FULTA_ARC_ERR_PASSWORD_WRONG: none
+   matched; FULTA_ARC_ERR_PASSWORD_NEEDED: no password callback; FULTA_ARC_ERR_UNSUPPORTED: this entry/format has
+   no cheap check value (extract it to find out). The entry need not be encrypted (then FULTA_ARC_OK). */
+fulta_arc_err_t fulta_arc_check_password(fulta_arc_t *arc, size_t index);
+
 /* Extract into memory: *out_data is allocated with malloc (free it with free()). */
 fulta_arc_err_t fulta_arc_extract_alloc(fulta_arc_t *arc, size_t index, void **out_data, size_t *out_size);
 
@@ -203,11 +224,24 @@ typedef struct fulta_arc_write_sink {
     fulta_arc_err_t (*patch)(void *ctx, uint64_t offset, const void *data, size_t n); /* overwrite earlier bytes */
 } fulta_arc_write_sink_t;
 
+/* How to encrypt written entries. Only used when `password` is set; all schemes are strong AES (no legacy
+   ZipCrypto on write). AES primitives are FultaArc's own (MIT); key derivation is PBKDF2-HMAC-SHA1 (WinZip AES)
+   or 7-Zip's SHA-256 scheme (7zAES). */
+typedef enum fulta_arc_encrypt {
+    FULTA_ARC_ENCRYPT_DEFAULT = 0,    /* with a password: ZIP -> WinZip AES-256, 7z -> 7zAES (AES-256) */
+    FULTA_ARC_ENCRYPT_ZIP_AES128,
+    FULTA_ARC_ENCRYPT_ZIP_AES192,
+    FULTA_ARC_ENCRYPT_ZIP_AES256,
+    FULTA_ARC_ENCRYPT_7Z_AES256
+} fulta_arc_encrypt_t;
+
 typedef struct fulta_arc_write_options {
     int level;                        /* 0 store/copy, 1..9 compress; out of range = 6 */
     int zip64;                        /* ZIP: write Zip64 records even when nothing needs them */
     int (*progress)(void *ctx, uint64_t done, uint64_t total);   /* nonzero cancels; may be NULL */
     void *progress_ctx;
+    const char *password;             /* NULL = no encryption; otherwise every file entry is encrypted (UTF-8) */
+    fulta_arc_encrypt_t encryption;   /* scheme when `password` is set; must match the output format */
 } fulta_arc_write_options_t;
 
 /* Write `entries`, in order, as one ZIP or 7z archive. `options` may be NULL. */
@@ -218,6 +252,56 @@ fulta_arc_err_t fulta_arc_write(fulta_arc_format_t format, const fulta_arc_write
 fulta_arc_err_t fulta_arc_write_file(const char *path, fulta_arc_format_t format,
                                      const fulta_arc_write_entry_t *entries, size_t count,
                                      const fulta_arc_write_options_t *options);
+
+/* ---- editing (ZIP and 7z) ----------------------------------------------------------------------------------- */
+
+/* Whether an open archive can be edited in its own format, and if not, why. The reason tells the caller whether to
+   offer conversion: SOLID/MULTIVOLUME/FORMAT_NOT_WRITABLE can proceed by converting into a ZIP or 7z (see
+   fulta_arc_edit_write with a different format); ENCRYPTED is refused outright (editing an encrypted archive is not
+   supported, by design — neither in place nor by conversion). */
+typedef enum fulta_arc_editable {
+    FULTA_ARC_EDIT_OK = 0,              /* ZIP, or 7z where every folder holds one file: edit in place */
+    FULTA_ARC_EDIT_SOLID,               /* 7z with a shared (solid) folder: convert to proceed */
+    FULTA_ARC_EDIT_MULTIVOLUME,         /* split archive: convert to proceed */
+    FULTA_ARC_EDIT_FORMAT_NOT_WRITABLE, /* RAR/ALZ/EGG/...: convert to proceed */
+    FULTA_ARC_EDIT_ENCRYPTED            /* the archive is encrypted: editing is refused */
+} fulta_arc_editable_t;
+
+fulta_arc_editable_t fulta_arc_editable(const fulta_arc_t *arc);
+
+/* A pull source for a new or replaced file's bytes. read() returns FULTA_ARC_OK with *got set (0 == end of data),
+   or an error to abort the write. */
+typedef struct fulta_arc_reader {
+    void *ctx;
+    fulta_arc_err_t (*read)(void *ctx, void *buf, size_t cap, size_t *got);
+    uint64_t size;                    /* the file's size, or UINT64_MAX when not known ahead of time */
+    int64_t mtime;                    /* seconds since 1970-01-01 UTC; 0 when not known */
+    uint32_t attributes;              /* Windows attributes; 0 for none */
+} fulta_arc_reader_t;
+
+/* An edit in progress. Begin from an open archive; every existing entry is copied unless removed or replaced. */
+typedef struct fulta_arc_edit fulta_arc_edit_t;
+
+fulta_arc_err_t fulta_arc_edit_begin(fulta_arc_t *arc, fulta_arc_edit_t **out);
+
+/* Remove / replace existing entry `index`; add a new entry. `name` on replace is NULL to keep the old name.
+   `reader`'s bytes are pulled during the write, not now. */
+fulta_arc_err_t fulta_arc_edit_remove(fulta_arc_edit_t *edit, size_t index);
+fulta_arc_err_t fulta_arc_edit_replace(fulta_arc_edit_t *edit, size_t index, const char *name,
+                                       const fulta_arc_reader_t *reader);
+fulta_arc_err_t fulta_arc_edit_add(fulta_arc_edit_t *edit, const char *name, const fulta_arc_reader_t *reader);
+
+/* Write the edited archive. When `format` is the source's own format the untouched entries are copied without
+   re-encoding (requires fulta_arc_editable(arc) == FULTA_ARC_EDIT_OK); a different ZIP/7z re-encodes everything
+   (the convert route, streamed). `opts` carries the level, progress/cancel, and a password to encrypt the output.
+   The source archive is never modified. */
+fulta_arc_err_t fulta_arc_edit_write(fulta_arc_edit_t *edit, fulta_arc_format_t format,
+                                     const fulta_arc_write_sink_t *sink, const fulta_arc_write_options_t *opts);
+/* As above, to a file: written to a temporary beside `path` and renamed over it only on success. */
+fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_format_t format, const char *path,
+                                          const fulta_arc_write_options_t *opts);
+
+void fulta_arc_edit_free(fulta_arc_edit_t *edit);
 
 #ifdef __cplusplus
 }

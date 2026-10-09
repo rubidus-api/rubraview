@@ -202,17 +202,33 @@ fulta_arc_err_t fa_stream_memory(const void *data, size_t size, fa_stream_t **ou
     return FULTA_ARC_OK;
 }
 
-typedef struct limit_stream { fa_stream_t base; fa_stream_t *in; uint64_t left; } limit_stream_t;
+typedef struct limit_stream { fa_stream_t base; fa_stream_t *in; uint64_t left; bool strict, drained; } limit_stream_t;
+
+/* strict: the declared size is reached; draw one more inner byte so the inner decoder validates whatever follows
+ * the data (e.g. AZO's end record), and reject anything that does not cleanly end there. Done eagerly, the moment
+ * `left` hits 0, because the consumer (fa_pump) stops reading once it has the declared size and would never give us
+ * a later read to trigger on. */
+static fulta_arc_err_t limit_drain(limit_stream_t *l) {
+    if (!l->strict || l->drained) return FULTA_ARC_OK;
+    l->drained = true;
+    uint8_t x;
+    size_t g = 0;
+    fulta_arc_err_t e = l->in->read(l->in, &x, 1, &g);
+    if (e) return e;
+    if (g) return FULTA_ARC_ERR_CORRUPT;                 /* more data than the declared size */
+    return FULTA_ARC_OK;
+}
 
 static fulta_arc_err_t limit_read(fa_stream_t *s, void *buf, size_t n, size_t *got) {
     limit_stream_t *l = (limit_stream_t *)s;
     *got = 0;
-    if (!l->left) return FULTA_ARC_OK;
+    if (!l->left) return limit_drain(l);                 /* size was 0, or a later read after the last bytes */
     if (n > l->left) n = (size_t)l->left;
     fulta_arc_err_t e = l->in->read(l->in, buf, n, got);
     if (e) return e;
     if (!*got) return FULTA_ARC_ERR_TRUNCATED;
     l->left -= *got;
+    if (!l->left) { fulta_arc_err_t de = limit_drain(l); if (de) return de; }   /* reached the size: validate now */
     return FULTA_ARC_OK;
 }
 
@@ -222,15 +238,27 @@ static void limit_destroy(fa_stream_t *s) {
     fa_free(l);
 }
 
-fulta_arc_err_t fa_stream_limit(fa_stream_t *in, uint64_t size, fa_stream_t **out) {
+static fulta_arc_err_t limit_make(fa_stream_t *in, uint64_t size, bool strict, fa_stream_t **out) {
     limit_stream_t *l = fa_calloc(1, sizeof *l);
     if (!l) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     l->in = in;
     l->left = size;
+    l->strict = strict;
     l->base.read = limit_read;
     l->base.destroy = limit_destroy;
     *out = &l->base;
     return FULTA_ARC_OK;
+}
+
+fulta_arc_err_t fa_stream_limit(fa_stream_t *in, uint64_t size, fa_stream_t **out) {
+    return limit_make(in, size, false, out);
+}
+
+/* Like fa_stream_limit, but after `size` bytes it draws one more byte from `in` and fails (CORRUPT) unless `in`
+ * is cleanly at its end there — so a decoder with a trailer (AZO's end record) still validates it even though the
+ * consumer stops at the declared size. */
+fulta_arc_err_t fa_stream_limit_strict(fa_stream_t *in, uint64_t size, fa_stream_t **out) {
+    return limit_make(in, size, true, out);
 }
 
 void fa_bytes_init(fa_bytes_t *b, fa_stream_t *in) {

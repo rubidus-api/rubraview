@@ -23,15 +23,19 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
 # reads 32- and 64-bit fields straight out of a byte buffer by design.
 FULTA = vendor/fultaarc
 FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Ivendor/proven/platform \
-                 -I$(FULTA)/vendor/lzma -I$(FULTA)/vendor/miniz -I$(FULTA)/vendor/bzip2 -I$(FULTA)/vendor/zstd
+                 -I$(FULTA)/vendor/lzma -I$(FULTA)/vendor/miniz -I$(FULTA)/vendor/bzip2 -I$(FULTA)/vendor/zstd \
+                 -I$(FULTA)/vendor/bzip2_alz
 FULTA_MINIZ_DEF = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
 FULTA_OWN_SRCS = $(wildcard $(FULTA)/src/core/*.c $(FULTA)/src/codec/*.c $(FULTA)/src/crypto/*.c $(FULTA)/src/text/*.c \
                    $(FULTA)/src/platform/*.c $(FULTA)/src/zip/*.c $(FULTA)/src/7z/*.c $(FULTA)/src/write/*.c \
-                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c)
+                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c \
+                   $(FULTA)/src/alz/*.c $(FULTA)/src/egg/*.c $(FULTA)/src/azo/*.c)
 FULTA_LZMA_SRCS = $(wildcard $(FULTA)/vendor/lzma/*.c)
 FULTA_BZ_SRCS = $(addprefix $(FULTA)/vendor/bzip2/,bzlib.c decompress.c compress.c blocksort.c huffman.c crctable.c randtable.c)
+# ALZ's own bzip2: the decoder's files, built under other names (FultaArc's Makefile, BZA_SRCS).
+FULTA_BZA_SRCS = $(addprefix $(FULTA)/vendor/bzip2_alz/,bzlib.c decompress.c huffman.c crctable.c randtable.c)
 FULTA_OTHER_SRCS = $(FULTA)/vendor/miniz/miniz.c $(FULTA)/vendor/zstd/zstddeclib.c
-FULTA_SRCS = $(FULTA_OWN_SRCS) $(FULTA_LZMA_SRCS) $(FULTA_BZ_SRCS) $(FULTA_OTHER_SRCS)
+FULTA_SRCS = $(FULTA_OWN_SRCS) $(FULTA_LZMA_SRCS) $(FULTA_BZ_SRCS) $(FULTA_BZA_SRCS) $(FULTA_OTHER_SRCS)
 FULTA_OBJS = $(patsubst $(FULTA)/%.c,build/fulta/%.o,$(FULTA_SRCS))
 FULTA_OBJS_WIN = $(patsubst $(FULTA)/%.c,build/fulta-win/%.o,$(FULTA_SRCS))
 FULTA_LIB = build/libfultaarc.a
@@ -128,6 +132,10 @@ build/fulta/vendor/lzma/%.o: $(FULTA)/vendor/lzma/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -fno-sanitize=alignment -c $< -o $@
 
+build/fulta/vendor/bzip2_alz/%.o: $(FULTA)/vendor/bzip2_alz/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/vendor/bzip2_alz/alz_bzip2_rename.h -I$(FULTA)/vendor/bzip2_alz -g -fsanitize=address,undefined -c $< -o $@
+
 build/fulta/vendor/%.o: $(FULTA)/vendor/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
@@ -171,6 +179,10 @@ check:
 MINGW_CC ?= x86_64-w64-mingw32-gcc
 
 MINGW_AR ?= x86_64-w64-mingw32-ar
+
+build/fulta-win/vendor/bzip2_alz/%.o: $(FULTA)/vendor/bzip2_alz/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/vendor/bzip2_alz/alz_bzip2_rename.h -I$(FULTA)/vendor/bzip2_alz -c $< -o $@
 
 build/fulta-win/vendor/%.o: $(FULTA)/vendor/%.c
 	@mkdir -p $(dir $@)

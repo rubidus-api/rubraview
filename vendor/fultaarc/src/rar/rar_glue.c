@@ -132,10 +132,12 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
     }
     g->map = fa_calloc(g->ar.entry_count ? g->ar.entry_count : 1, sizeof *g->map);
     if (!g->map) return FULTA_ARC_ERR_NOMEM;
+    uint32_t rar_group = 0;   /* solid-group counter (API: per-entry solid_group) */
     for (size_t i = 0; i < g->ar.entry_count; i++) {
         const fa_rar_entry_t *re = &g->ar.entries[i];
+        bool name_nu = false;
         char *uname = re->name_is_legacy
-                          ? fa_codepage_to_utf8((const uint8_t *)re->name.ptr, re->name.len, arc->opt.codepage, FULTA_ARC_CP_437)
+                          ? fa_decode_name(arc, (const uint8_t *)re->name.ptr, re->name.len, false, FULTA_ARC_CP_437, &name_nu)
                           : fa_strndup(re->name.ptr, re->name.len);
         if (!uname) return FULTA_ARC_ERR_NOMEM;
         char method[32];
@@ -150,6 +152,9 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
         if (re->has_crc && !re->hash_mac && re->piece_count) { en->pub.crc32 = re->crc32; en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32; }
         if (re->encrypted) en->pub.flags |= FULTA_ARC_ENTRY_ENCRYPTED;
         if (re->solid) en->pub.flags |= FULTA_ARC_ENTRY_SOLID;
+        else rar_group++;   /* a non-solid entry starts a new solid group */
+        en->pub.solid_group = rar_group;
+        if (name_nu) en->pub.flags |= FULTA_ARC_ENTRY_NAME_NOT_UNICODE;
         if (re->piece_count > 1) en->pub.flags |= FULTA_ARC_ENTRY_SPLIT;
         if (re->method == 15 || re->method == 255 || re->crypt == FA_RAR_CRYPT_OLD || re->split)
             en->pub.flags |= FULTA_ARC_ENTRY_UNSUPPORTED;
@@ -205,4 +210,4 @@ static void rar_close(fulta_arc_t *arc) {
     arc->state = NULL;
 }
 
-const fa_format_ops_t fa_rar_ops = {FULTA_ARC_FORMAT_RAR, rar_probe, rar_open, rar_extract, rar_close};
+const fa_format_ops_t fa_rar_ops = {FULTA_ARC_FORMAT_RAR, rar_probe, rar_open, rar_extract, rar_close, NULL, NULL};
