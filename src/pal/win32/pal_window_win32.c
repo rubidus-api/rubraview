@@ -1311,6 +1311,31 @@ static bool for_each_extension(u8str_t list, bool (*each)(const WCHAR *ext, cons
     return all_ok;
 }
 
+static HKEY g_shell_root = HKEY_CURRENT_USER;   /* where the next registration writes; main thread only */
+
+#define SHELL_WAS L"Rubraview.Was"   /* the type's default before us, kept under the extension */
+
+/* A key's default string; false when it has none. */
+static bool read_default(HKEY root, const WCHAR *subkey, WCHAR *out, DWORD out_bytes) {
+    HKEY key = NULL;
+    out[0] = 0;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) return false;
+    DWORD type = 0, size = out_bytes;
+    bool ok = RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)out, &size) == ERROR_SUCCESS && type == REG_SZ;
+    RegCloseKey(key);
+    return ok;
+}
+
+/* Removes a key that holds no value and no key. */
+static void delete_if_empty(HKEY root, const WCHAR *subkey) {
+    HKEY key = NULL;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) return;
+    DWORD keys = 1, values = 1;
+    LONG got = RegQueryInfoKeyW(key, NULL, NULL, NULL, &keys, NULL, NULL, &values, NULL, NULL, NULL, NULL);
+    RegCloseKey(key);
+    if (got == ERROR_SUCCESS && keys == 0 && values == 0) RegDeleteKeyW(root, subkey);
+}
+
 static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR exe[MAX_PATH * 2];
     if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
@@ -1325,7 +1350,7 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, progid);
     wcscat(subkey, L"\\shell\\open\\command");
-    if (!write_key(HKEY_CURRENT_USER, subkey, NULL, command)) return false;
+    if (!write_key(g_shell_root, subkey, NULL, command)) return false;
 
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, progid);
@@ -1333,14 +1358,26 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR icon[MAX_PATH * 2 + 8];
     wcscpy(icon, exe);
     wcscat(icon, L",0");
-    write_key(HKEY_CURRENT_USER, subkey, NULL, icon);
+    write_key(g_shell_root, subkey, NULL, icon);
 
-    /* The extension points at the ProgID. Writing this under HKCU rather
-       than HKCR means no administrator rights are needed and nothing
-       another user relies on is touched. */
+    /* Also among the programs "Open with" offers for the type, whoever
+       its default is. */
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, ext);
-    return write_key(HKEY_CURRENT_USER, subkey, NULL, progid);
+    wcscat(subkey, L"\\OpenWithProgids");
+    write_key(g_shell_root, subkey, progid, L"");
+
+    /* The extension points at the ProgID. Under HKCU no administrator
+       rights are needed and nothing another user relies on is touched;
+       under HKLM (every user) the caller has asked for exactly that. */
+    wcscpy(subkey, L"Software\\Classes\\");
+    wcscat(subkey, ext);
+    /* Whose the type was is kept beside it, and given back on removal. */
+    WCHAR was[128];
+    if (read_default(g_shell_root, subkey, was, sizeof(was)) && was[0] && wcscmp(was, progid) != 0) {
+        write_key(g_shell_root, subkey, SHELL_WAS, was);
+    }
+    return write_key(g_shell_root, subkey, NULL, progid);
 }
 
 /* Deletes a key and everything under it. */
@@ -1353,39 +1390,105 @@ static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
 
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, progid);
-    delete_tree(HKEY_CURRENT_USER, subkey);
+    delete_tree(g_shell_root, subkey);
 
-    /* The extension key is only removed when it still points at us: a
-       reader who has since chosen another program must not have their
-       choice deleted. */
+    /* Under the extension only what registering wrote is taken back: the
+       default when it still points at us (the program it was before is
+       put back), our "Open with" entry, and the note of whose it was.
+       Another program's entries, and a choice made since, stay; the key
+       goes only when nothing is left in it (VM, 2026-10-09: removing the
+       whole key would have taken another program's entries with it). */
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, ext);
 
     HKEY key = NULL;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, subkey, 0, KEY_READ, &key) == ERROR_SUCCESS) {
-        WCHAR value[128];
-        DWORD size = sizeof(value);
-        DWORD type = 0;
-        bool ours = RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)value, &size) == ERROR_SUCCESS &&
-                    type == REG_SZ && wcscmp(value, progid) == 0;
-        RegCloseKey(key);
-        if (ours) delete_tree(HKEY_CURRENT_USER, subkey);
+    if (RegOpenKeyExW(g_shell_root, subkey, 0, KEY_READ | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return true;
+    WCHAR value[128], was[128];
+    DWORD size = sizeof(value), type = 0;
+    bool ours = RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)value, &size) == ERROR_SUCCESS &&
+                type == REG_SZ && wcscmp(value, progid) == 0;
+    size = sizeof(was);
+    bool had = RegQueryValueExW(key, SHELL_WAS, NULL, &type, (BYTE*)was, &size) == ERROR_SUCCESS && type == REG_SZ && was[0];
+    if (ours) {
+        if (had) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((wcslen(was) + 1) * sizeof(WCHAR)));
+        else RegDeleteValueW(key, NULL);
     }
+    RegDeleteValueW(key, SHELL_WAS);
+    RegCloseKey(key);
+
+    WCHAR with[300];
+    wcscpy(with, subkey);
+    wcscat(with, L"\\OpenWithProgids");
+    HKEY open_with = NULL;
+    if (RegOpenKeyExW(g_shell_root, with, 0, KEY_SET_VALUE, &open_with) == ERROR_SUCCESS) {
+        RegDeleteValueW(open_with, progid);
+        RegCloseKey(open_with);
+    }
+    delete_if_empty(g_shell_root, with);
+    delete_if_empty(g_shell_root, subkey);
     return true;
 }
 
-bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list) {
+/* Is this process allowed to write under HKLM? */
+static bool shell_can_write_machine(void) {
+    HKEY key = NULL;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Classes", 0, KEY_WRITE, &key) != ERROR_SUCCESS) return false;
+    RegCloseKey(key);
+    return true;
+}
+
+bool rubraview_pal_shell_register_for(u8str_t extensions_semicolon_list, bool all_users) {
+    if (all_users && !shell_can_write_machine()) return false;
+    g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, register_one);
+    g_shell_root = HKEY_CURRENT_USER;
     /* Explorer caches associations; without this the change does not
        show until the next sign-in. */
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
     return ok;
 }
 
-bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list) {
+bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool all_users) {
+    if (all_users && !shell_can_write_machine()) return false;
+    g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, unregister_one);
+    g_shell_root = HKEY_CURRENT_USER;
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
     return ok;
+}
+
+bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list) {
+    return rubraview_pal_shell_register_for(extensions_semicolon_list, false);
+}
+
+bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list) {
+    return rubraview_pal_shell_unregister_for(extensions_semicolon_list, false);
+}
+
+bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
+    WCHAR exe[MAX_PATH * 2];
+    if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
+    WCHAR args[512];
+    int n = MultiByteToWideChar(CP_UTF8, 0, arguments.ptr, (int)arguments.len, args, 511);
+    if (n <= 0) return false;
+    args[n] = 0;
+    SHELLEXECUTEINFOW info = { .cbSize = sizeof(info) };
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = L"runas";      /* Windows asks for an administrator here */
+    info.lpFile = exe;
+    info.lpParameters = args;
+    info.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&info) || !info.hProcess) return false;   /* refused at the prompt */
+    WaitForSingleObject(info.hProcess, 30000);
+    DWORD code = 1;
+    GetExitCodeProcess(info.hProcess, &code);
+    CloseHandle(info.hProcess);
+    if (out_exit_code) *out_exit_code = (int)code;
+    return true;
+}
+
+void rubraview_pal_shell_open_default_apps(void) {
+    ShellExecuteW(NULL, L"open", L"ms-settings:defaultapps", NULL, NULL, SW_SHOWNORMAL);
 }
 
 #endif /* _WIN32 */

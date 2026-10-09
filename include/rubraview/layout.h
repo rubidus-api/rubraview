@@ -21,6 +21,8 @@ typedef enum rubraview_page_layout {
     RUBRAVIEW_PAGE_LAYOUT_DUAL,
     RUBRAVIEW_PAGE_LAYOUT_BOOK,
     RUBRAVIEW_PAGE_LAYOUT_WEBTOON,
+    RUBRAVIEW_PAGE_LAYOUT_COMIC,     /* one page at a time, a wide scan as its two halves (owner, 2026-10-09) */
+    RUBRAVIEW_PAGE_LAYOUT_COUNT,
 } rubraview_page_layout_t;
 
 typedef enum rubraview_reading_dir {
@@ -76,6 +78,32 @@ rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mo
  * one page shown whole, never a spread to cut in two.
  */
 rubraview_layout_opts_t rubraview_layout_opts_turned(rubraview_layout_opts_t opts, bool swaps_axes);
+
+/*
+ * The strip (the webtoon layout; owner, 2026-10-09: "세로로 길게 자연스럽게
+ * 이어지는 것 ... 폭을 똑같이"). Every page is drawn at one width, one under
+ * the other, and the reader scrolls through them as through one long page.
+ * A place in the strip is the page at the top of the window and how far
+ * into it the window's top edge is, in screen pixels.
+ */
+typedef struct rubraview_strip_pos {
+    size_t top;
+    double offset;
+} rubraview_strip_pos_t;
+
+/* A page's height on screen at the strip's width (at least one pixel). */
+typedef double (*rubraview_strip_height_fn)(void *context, size_t page);
+
+/**
+ * Move by `delta` screen pixels (positive: further down the strip), over
+ * `count` pages in a window `view_height` tall. The strip stops with its
+ * first page's top at the window's top and its last page's bottom at the
+ * window's bottom (a strip shorter than the window stays at its top).
+ * Returns how much of `delta` was not moved because an end was reached;
+ * a delta of zero only brings a position back inside those ends.
+ */
+double rubraview_strip_scroll(rubraview_strip_pos_t *pos, double delta, size_t count, double view_height,
+                              rubraview_strip_height_fn height, void *context);
 
 typedef struct rubraview_layout_result {
     rubraview_spread_t *spreads;

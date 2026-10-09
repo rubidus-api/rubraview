@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.36** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.36/rubraview-v0.0.36.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.37** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.37/rubraview-v0.0.37.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -81,7 +81,7 @@ ships with, so it cannot drift from them.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Single page / two pages / book |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them |
 | `M` | Left-to-right / right-to-left (manga) |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |

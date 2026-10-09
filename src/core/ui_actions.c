@@ -5,7 +5,7 @@
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
     "rename_file", "delete_file", "copy_to_folder", "move_to_folder", "toggle_file_list",
-    "layout_single", "layout_dual", "layout_book", "toggle_layout",
+    "layout_single", "layout_dual", "layout_book", "layout_webtoon", "layout_comic", "toggle_layout",
     "toggle_reading_order", "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
     "rotate_cw", "rotate_ccw", "flip_horizontal", "flip_vertical",
@@ -58,11 +58,19 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     }
 
     if (rubraview_u8_eq_lit(action, "toggle_reading_order")) st.value = f->rtl ? "R>L" : "L>R";
+    if (rubraview_u8_eq_lit(action, "toggle_layout")) {
+        st.value = f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL ? "2"
+                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_BOOK ? "book"
+                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_WEBTOON ? "webtoon"
+                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_COMIC ? "comic" : "1";
+    }
 
     static const struct { const char *action; rubraview_page_layout_t layout; } LAYOUTS[] = {
         { "layout_single", RUBRAVIEW_PAGE_LAYOUT_SINGLE },
         { "layout_dual",   RUBRAVIEW_PAGE_LAYOUT_DUAL },
         { "layout_book",   RUBRAVIEW_PAGE_LAYOUT_BOOK },
+        { "layout_webtoon", RUBRAVIEW_PAGE_LAYOUT_WEBTOON },
+        { "layout_comic",  RUBRAVIEW_PAGE_LAYOUT_COMIC },
     };
     for (size_t i = 0; i < sizeof(LAYOUTS) / sizeof(LAYOUTS[0]); ++i) {
         if (rubraview_u8_eq_lit(action, LAYOUTS[i].action) && f->layout == LAYOUTS[i].layout) st.mark = RUBRAVIEW_MARK_CURRENT;
@@ -139,7 +147,6 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "subpage_next", 0xE76C },
         { "prev_archive", 0xE8AC },          /* folder with a way back: "Back" to the previous book */
         { "next_archive", 0xE8AD },
-        { "toggle_layout", 0xE89A },         /* TwoPage */
         { "fit_window", 0xE9A6 },            /* FitPage */
         /* The fuller toolbox (owner, 2026-09-29). */
         { "toggle_info", 0xE946 },           /* Info */
@@ -160,6 +167,16 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
     if (rubraview_u8_eq_lit(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */
     if (rubraview_u8_eq_lit(action, "media_mute")) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
     if (rubraview_u8_eq_lit(action, "toggle_fullscreen")) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */
+    if (rubraview_u8_eq_lit(action, "toggle_layout")) {
+        /* The layout it is in now: Page, TwoPage, ReadingMode (a book), ScrollUpDown (the strip). */
+        switch (f->layout) {
+            case RUBRAVIEW_PAGE_LAYOUT_DUAL:    return 0xE89A;
+            case RUBRAVIEW_PAGE_LAYOUT_BOOK:    return 0xE736;
+            case RUBRAVIEW_PAGE_LAYOUT_WEBTOON: return 0xEC8F;
+            case RUBRAVIEW_PAGE_LAYOUT_COMIC:   return 0xE8A1;   /* PreviewLink: a page cut down the middle */
+            default:                            return 0xE7C3;
+        }
+    }
     if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
         /* RepeatOne / RepeatAll / Shuffle; "Once" and "Next" say it in words. */
         switch (f->repeat_mode) {

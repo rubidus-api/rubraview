@@ -1,4 +1,5 @@
 #include "rubraview/batchrun.h"
+#include "rubraview/filemanage.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
 #include <limits.h>
@@ -123,6 +124,14 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (rubraview_u8_eq_lit(arg, "--batch")) { result.batch_mode = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--register-shell")) { result.register_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--all-users")) { result.shell_all_users = true; continue; }
+        if (starts_with(arg, "--types=", &value)) {
+            result.shell_groups = rubraview_shell_groups_parse(value);
+            if (result.shell_groups == 0) {
+                result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
+            }
+            continue;
+        }
         if (rubraview_u8_eq_lit(arg, "--new-instance")) { result.new_instance = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--diag")) { result.diagnostics = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--version") || rubraview_u8_eq_lit(arg, "-v")) { result.show_version = true; continue; }

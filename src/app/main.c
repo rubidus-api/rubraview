@@ -470,6 +470,9 @@ typedef struct app_state {
     rubraview_fit_mode_t fit_mode;
     double zoom;
     double pan_x, pan_y;
+    double strip_offset;       /* the strip (webtoon layout): how far into the top page the window's top edge is */
+    double strip_base_w;       /* the picture width every page of the strip is drawn at, before the window and zoom */
+    size_t strip_base_count;   /* the page count it was taken for */
     bool pixel_grid;
     bool force_nearest;
     bool needs_relayout;
@@ -2348,8 +2351,68 @@ static void media_step(app_state_t *app, bool forward) {
     }
 }
 
+/* ---- the strip (webtoon layout; owner, 2026-10-09) ----
+   Every page at one width, one under the other, scrolled as one long
+   page. The layout holds one page a spread, so the spread on screen is
+   the page at the top of the window. A film, a song or an animation on
+   that page is shown the ordinary way. */
+static bool strip_active(const app_state_t *app) {
+    return app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_WEBTOON && page_count(app) > 0 &&
+           app->media_page < 0 && !app->anim_active && app->layout.count == page_count(app);
+}
+
+/* The strip's width on screen: the width of the page it was entered on,
+   no wider than the window, times the zoom. */
+static double strip_width(app_state_t *app, double win_w) {
+    if (app->strip_base_w <= 0.0 || app->strip_base_count != page_count(app)) {
+        app_page_t *page = ensure_page_loaded(app, (int32_t)app->spread_index);
+        if (page && page->loaded) {
+            double w = 0.0, h = 0.0;
+            rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &w, &h);
+            app->strip_base_w = w;
+            app->strip_base_count = page_count(app);
+        }
+    }
+    double base = app->strip_base_w > 0.0 ? app->strip_base_w : win_w;
+    return (base < win_w ? base : win_w) * app->zoom;
+}
+
+static double strip_page_height(void *context, size_t index) {
+    app_state_t *app = (app_state_t *)context;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double width = strip_width(app, (double)win_w);
+    app_page_t *page = ensure_page_loaded(app, (int32_t)index);
+    if (!page || page->failed) return width * 0.1;
+    if (!page->loaded) return width * 1.5;      /* on its way: a page's usual shape until it is here */
+    double w = 0.0, h = 0.0;
+    rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &w, &h);
+    return w > 0.0 ? width * h / w : width * 1.5;
+}
+
+/* Moves the strip; returns what could not be moved (an end was reached). */
+static double strip_scroll_by(app_state_t *app, double delta) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) return delta;   /* minimised: there is no strip to measure */
+    rubraview_strip_pos_t pos = { app->spread_index, app->strip_offset };
+    double left = rubraview_strip_scroll(&pos, delta, page_count(app), (double)win_h, strip_page_height, app);
+    app->strip_offset = pos.offset;
+    if (pos.top != app->spread_index) {
+        /* Another page is at the top: it is the one the title, the page bar
+           and the lists speak of. No fade, no view reset — nothing jumped. */
+        app->spread_index = pos.top;
+        app->prev_spread_valid = false;
+        rubraview_filmstrip_reveal(&app->filmstrip, pos.top);
+        update_window_title(app);
+        update_precache(app);
+    }
+    return left;
+}
+
 static void go_to_spread(app_state_t *app, size_t index) {
     if (app->layout.count == 0) return;
+    app->strip_offset = 0.0;
     if (index >= app->layout.count) index = app->layout.count - 1;
     if (index != app->spread_index) {
         /* Remember what is leaving the screen, so the cross-fade has
@@ -2375,6 +2438,15 @@ static void go_to_spread(app_state_t *app, size_t index) {
 static void open_sibling_archive(app_state_t *app, bool forward);
 
 static void next_spread(app_state_t *app) {
+    if (strip_active(app)) {
+        /* A window's worth, less a little to keep one's place. */
+        int32_t win_w = 0, win_h = 0;
+        rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+        double step = (double)win_h * 0.9;
+        if (strip_scroll_by(app, step) < step - 1.0) return;
+        open_sibling_archive(app, true);
+        return;
+    }
     if (app->spread_index + 1 < app->layout.count) {
         go_to_spread(app, app->spread_index + 1);
         update_precache(app);
@@ -2385,6 +2457,14 @@ static void next_spread(app_state_t *app) {
 }
 
 static void prev_spread(app_state_t *app) {
+    if (strip_active(app)) {
+        int32_t win_w = 0, win_h = 0;
+        rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+        double step = (double)win_h * 0.9;
+        if (strip_scroll_by(app, -step) > -(step - 1.0)) return;
+        open_sibling_archive(app, false);
+        return;
+    }
     if (app->spread_index > 0) {
         go_to_spread(app, app->spread_index - 1);
         update_precache(app);
@@ -2414,6 +2494,13 @@ static void toggle_slideshow(app_state_t *app) {
 #define PICKER_CRUMB_HEIGHT 44.0
 #define PICKER_PLACES_HEIGHT 40.0   /* the places bar under the path (owner, 2026-09-28) */
 #define PICKER_HEADER_HEIGHT (PICKER_CRUMB_HEIGHT + PICKER_PLACES_HEIGHT)
+
+/* A band above the path, the title bar's height, holding nothing to press:
+   the floating title bar comes down over it, not over the path (owner,
+   2026-10-09). With Windows' own title bar there is none. */
+static double picker_top(const app_state_t *app) {
+    return app->frameless ? app->titlebar.height : 0.0;
+}
 
 /* A chip in the path or the places bar, as wide as its label. */
 static double picker_chip_width(u8str_t label, double dpi) {
@@ -2996,7 +3083,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     if (pa != app->arena) app->picker_side ^= 1;   /* the new listing is the one shown */
     app->picker_listing = listing;
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
-                                          (double)win_h - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
+                                          (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           PICKER_COLUMNS);
     app->picker.selected = app->picker_selected;
     rubraview_picker_set_mode(&app->picker, mode);
@@ -3701,6 +3788,30 @@ static bool cue_step(app_state_t *app, int direction) {
     return true;
 }
 
+/* The layout, from the tile, the menu or the key: written to the setting
+   (Settings › Viewer › Layout shows the same thing and is saved with the
+   rest), which is what applies it. The page on screen stays. */
+static void layout_set(app_state_t *app, rubraview_page_layout_t mode, bool say) {
+    int32_t page = current_page_index(app);
+    if (page >= 0 && app->spread_index < app->layout.count) {
+        int32_t other = app->layout.spreads[app->spread_index].right_index;
+        if (other >= 0 && other < page) page = other;
+    }
+    rubraview_settings_set(&app->settings, U8("viewer"), U8("layout"), (double)(int)mode);
+    settings_took_effect(app);
+    rebuild_layout(app);
+    if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+    reset_view(app);
+    menu_rebuild(app);
+    sync_menubox_tiles(app);
+    if (say) {
+        static const char *const SAY[] = { "one page", "two pages", "book: the cover alone, then two pages",
+                                           "webtoon: every page one under the other, at one width",
+                                           "comic: one page, a wide scan as its two halves" };
+        osd_say(app, cstr(SAY[(int)mode >= 0 && (int)mode < 5 ? (int)mode : 0]));
+    }
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -3831,17 +3942,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         menu_rebuild(app);
         sync_menubox_tiles(app);
     } else if (rubraview_u8_eq_lit(action, "layout_single")) {
-        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
-        app->needs_relayout = true;
-        reset_view(app);
+        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_SINGLE, false);
     } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
-        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;
-        app->needs_relayout = true;
-        reset_view(app);
+        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_DUAL, false);
     } else if (rubraview_u8_eq_lit(action, "layout_book")) {
-        app->layout_opts.mode = RUBRAVIEW_PAGE_LAYOUT_BOOK;
-        app->needs_relayout = true;
-        reset_view(app);
+        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_BOOK, false);
+    } else if (rubraview_u8_eq_lit(action, "layout_webtoon")) {
+        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_WEBTOON, false);
+    } else if (rubraview_u8_eq_lit(action, "layout_comic")) {
+        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_COMIC, false);
     } else if (rubraview_u8_eq_lit(action, "toggle_toolbox")) {
         /* A toolbox that is its own window is put back, not shown twice. */
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
@@ -4152,15 +4261,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_pal_window_set_fullscreen(app->window,
                                             !rubraview_pal_window_is_fullscreen(app->window));
     } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
-        int32_t page = current_page_index(app);
-        app->layout_opts.mode = (app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_SINGLE)
-            ? RUBRAVIEW_PAGE_LAYOUT_DUAL
-            : (app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_DUAL
-                ? RUBRAVIEW_PAGE_LAYOUT_BOOK
-                : RUBRAVIEW_PAGE_LAYOUT_SINGLE);
-        rebuild_layout(app);
-        if (page >= 0) app->spread_index = spread_index_for_page(app, page);
-        reset_view(app);
+        /* One page, two pages, a book (the cover alone), the webtoon strip,
+           comic (wide scans in halves), and round again (owner, 2026-10-09). */
+        layout_set(app, (rubraview_page_layout_t)(((int)app->layout_opts.mode + 1) % (int)RUBRAVIEW_PAGE_LAYOUT_COUNT), true);
     } else if (rubraview_u8_eq_lit(action, "toggle_reading_order")) {
         int32_t page = current_page_index(app);
         app->layout_opts.direction = (app->layout_opts.direction == RUBRAVIEW_READING_LTR)
@@ -4942,7 +5045,7 @@ static rubraview_pointer_context_t pointer_context(const app_state_t *app) {
         .window_width = (double)win_w,
         .reading_direction = app->layout_opts.direction,
         .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || page_count(app) > 1,
-        .zoomed_in = app->zoom > 1.001,
+        .zoomed_in = app->zoom > 1.001 || strip_active(app),   /* a drag moves the strip */
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
     };
 }
@@ -5014,13 +5117,13 @@ static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
     return rubraview_edgenav_hit(&nav, x, y, (double)w, (double)h);
 }
 
-/* Returns true when the chrome consumed the click. */
-static bool handle_chrome_click(app_state_t *app, double x, double y) {
+/* §3.21.3: the titlebar's controls take precedence while it is shown,
+   over the viewer and over the picker alike. True when it took the click. */
+static bool titlebar_click(app_state_t *app, double x, double y) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
-    /* §3.21.3: the titlebar's controls take precedence while it is shown. */
     rubraview_titlebar_button_t button = rubraview_titlebar_hit(&app->titlebar, x, y, (double)win_w);
     switch (button) {
         case RUBRAVIEW_TITLEBAR_CLOSE:      rubraview_pal_window_request_close(app->window); return true;
@@ -5056,6 +5159,16 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
             return true;
         default: break;
     }
+    return false;
+}
+
+/* Returns true when the chrome consumed the click. */
+static bool handle_chrome_click(app_state_t *app, double x, double y) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+
+    if (titlebar_click(app, x, y)) return true;
 
     /* The anchor's two buttons answer first: they sit on top of the
        box, and a click there is never a tile. */
@@ -5443,10 +5556,12 @@ static rubraview_interpolation_t page_interpolation(const app_state_t *app) {
     }
 }
 
+static void draw_titlebar(app_state_t *app, double win_w);
 static void draw_picker(app_state_t *app, double win_w, double win_h) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
-    double header_h = PICKER_HEADER_HEIGHT * dpi;
+    double top = picker_top(app);
+    double header_h = top + PICKER_HEADER_HEIGHT * dpi;
     double action_h = PICKER_ACTION_HEIGHT * dpi;
 
     rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
@@ -5512,11 +5627,21 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
        show through (seen on the VM, 2026-09-25). */
     rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, header_h };
     rubraview_pal_render_fill_rect(app->renderer, crumb_bar, 0xFF101010u, 0.0);
+    if (top > 0.0) {
+        /* What this screen is, and nothing to press. */
+        rubraview_pal_rect_t band = { 0.0, 0.0, win_w, top };
+        rubraview_pal_render_fill_rect(app->renderer, band, 0xFF181818u, 0.0);
+        rubraview_pal_rect_t words = { 12.0 * dpi, 0.0, win_w - 24.0 * dpi, top };
+        rubraview_pal_render_draw_text(app->renderer,
+                                       app->picker_in_book ? U8("Rubraview  ·  Pages of this book")
+                                                           : U8("Rubraview  ·  Open a file or a folder"),
+                                       words, top * 0.36, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+    }
     rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
     double crumb_x = 8.0 * dpi;
     for (size_t i = 0; i < crumbs.count; ++i) {
         double w = picker_chip_width(crumbs.items[i].label, dpi);
-        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+        rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
         rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
         rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
@@ -5526,7 +5651,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     u8str_t star = picker_star_label(app);
     if (star.len > 0) {
         double w = picker_chip_width(star, dpi);
-        rubraview_pal_rect_t chip = { crumb_x, 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+        rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
         bool lit = rubraview_favorites_contains(&app->favorites, app->picker_dir);
         rubraview_pal_render_fill_rect(app->renderer, chip, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
@@ -5535,7 +5660,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
     /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
     if (!app->rename_is_path && crumb_x + 200.0 * dpi < win_w) {
-        rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, 0.0, win_w - crumb_x - 16.0 * dpi, crumb_h };
+        rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, top, win_w - crumb_x - 16.0 * dpi, crumb_h };
         rubraview_pal_render_draw_text(app->renderer, U8("tap here or Ctrl+L to type a path"), hint,
                                        crumb_h * 0.30, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
     }
@@ -5549,7 +5674,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         /* A little gap between the reader's favourites and the fixed places. */
         if (!item.favorite && i == app->favorites.count && i > 0) place_x += 10.0 * dpi;
         if (place_x + w > win_w) break;
-        rubraview_pal_rect_t chip = { place_x, crumb_h + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
+        rubraview_pal_rect_t chip = { place_x, top + crumb_h + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
         bool here = rubraview_path_same(item.path, app->picker_dir);
         rubraview_pal_render_fill_rect(app->renderer, chip,
                                        here ? COLOR_TILE_CURRENT : item.favorite ? COLOR_TILE_FILL : COLOR_BAR_FILL, 2.0);
@@ -5567,7 +5692,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         double cx = 0.0, cw = 0.0;
         if (picker_chip_span(app, to, dpi, win_w, &cx, &cw)) {
             double bx = to > (size_t)app->fav_press ? cx + cw + 2.0 * dpi : cx - 4.0 * dpi;
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ bx, crumb_h + 2.0 * dpi, 2.0 * dpi,
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ bx, top + crumb_h + 2.0 * dpi, 2.0 * dpi,
                                            PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi }, COLOR_TILE_CURRENT, 0.0);
         }
     }
@@ -5606,6 +5731,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     /* The picker covers the chrome: its text box and its messages are drawn here. */
     draw_rename_box(app, win_w, win_h, dpi);
     draw_notice(app, win_w, win_h, dpi);
+    draw_titlebar(app, win_w);   /* over the band at the top */
 }
 
 /* Text with a dark outline around it, for subtitles and their preview.
@@ -5963,9 +6089,9 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
         if (app->rename_is_password) box.y = (win_h - box_h) * 0.5;
         /* The typed path sits where the path is, as an address bar does. */
         if (app->rename_is_path) {
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, PICKER_CRUMB_HEIGHT * dpi },
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, picker_top(app), win_w, PICKER_CRUMB_HEIGHT * dpi },
                                            0xFF101010u, 0.0);   /* the chips under it do not show through */
-            box = (rubraview_pal_rect_t){ 4.0 * dpi, 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
+            box = (rubraview_pal_rect_t){ 4.0 * dpi, picker_top(app) + 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
         }
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
@@ -6254,6 +6380,49 @@ static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* Hover titlebar (§3.21.2, §3.21.3). Over the viewer it names the file;
+   over the picker, the folder. */
+static void draw_titlebar(app_state_t *app, double win_w) {
+    if (!app->titlebar.shown) return;
+    rubraview_pal_rect_t bar = { 0.0, 0.0, win_w, app->titlebar.height };
+    rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
+
+    int32_t page = current_page_index(app);
+    rubraview_pal_rect_t title = { 12.0, 0.0, win_w * 0.6, app->titlebar.height };
+    if (app->picker_open) {
+        rubraview_pal_render_draw_text(app->renderer, app->picker_dir.len > 0 ? app->picker_dir : U8("Rubraview"),
+                                       title, app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    } else if (page >= 0 && (size_t)page < page_count(app)) {
+        rubraview_pal_render_draw_text(app->renderer, page_display_name(app, (size_t)page), title,
+                                       app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    /* The box rescue button was hit-tested but never drawn; now it shows. */
+    static const rubraview_titlebar_button_t BUTTONS[] = {
+        RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN, RUBRAVIEW_TITLEBAR_RESIZE,
+        RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE,
+        RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_CLOSE,
+    };
+    static const char *const GLYPHS[] = { "Box", "Pin", "Size", "_", "[]", "[ ]", "X" };
+    bool on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
+    for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); ++i) {
+        rubraview_rect_t r = rubraview_titlebar_button_rect(&app->titlebar, BUTTONS[i], win_w);
+        rubraview_pal_rect_t br = { r.x, r.y, r.width, r.height };
+        bool hovered = rubraview_rect_contains(r, app->pointer_x, app->pointer_y);
+        if (BUTTONS[i] == RUBRAVIEW_TITLEBAR_PIN && on_top) {
+            /* On: lit, so the state is visible at a glance. */
+            rubraview_pal_render_fill_rect(app->renderer, br, 0xFF2D4A6Eu, 0.0);
+        }
+        if (hovered) {
+            rubraview_pal_render_fill_rect(app->renderer, br,
+                                           BUTTONS[i] == RUBRAVIEW_TITLEBAR_CLOSE ? COLOR_CLOSE_HOVER : COLOR_TILE_FILL,
+                                           0.0);
+        }
+        rubraview_pal_render_draw_text(app->renderer, cstr(GLYPHS[i]), br,
+                                       app->titlebar.height * 0.35, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
@@ -6308,44 +6477,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     draw_listwin(app, win_w, win_h);
 
-    /* Hover titlebar (§3.21.2, §3.21.3). */
-    if (app->titlebar.shown) {
-        rubraview_pal_rect_t bar = { 0.0, 0.0, win_w, app->titlebar.height };
-        rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
-
-        int32_t page = current_page_index(app);
-        if (page >= 0 && (size_t)page < page_count(app)) {
-            u8str_t name = page_display_name(app, (size_t)page);
-            rubraview_pal_rect_t title = { 12.0, 0.0, win_w * 0.6, app->titlebar.height };
-            rubraview_pal_render_draw_text(app->renderer, name, title,
-                                           app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        }
-
-        /* The box rescue button was hit-tested but never drawn; now it shows. */
-        static const rubraview_titlebar_button_t BUTTONS[] = {
-            RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN, RUBRAVIEW_TITLEBAR_RESIZE,
-            RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE,
-            RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_CLOSE,
-        };
-        static const char *const GLYPHS[] = { "Box", "Pin", "Size", "_", "[]", "[ ]", "X" };
-        bool on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
-        for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); ++i) {
-            rubraview_rect_t r = rubraview_titlebar_button_rect(&app->titlebar, BUTTONS[i], win_w);
-            rubraview_pal_rect_t br = { r.x, r.y, r.width, r.height };
-            bool hovered = rubraview_rect_contains(r, app->pointer_x, app->pointer_y);
-            if (BUTTONS[i] == RUBRAVIEW_TITLEBAR_PIN && on_top) {
-                /* On: lit, so the state is visible at a glance. */
-                rubraview_pal_render_fill_rect(app->renderer, br, 0xFF2D4A6Eu, 0.0);
-            }
-            if (hovered) {
-                rubraview_pal_render_fill_rect(app->renderer, br,
-                                               BUTTONS[i] == RUBRAVIEW_TITLEBAR_CLOSE ? COLOR_CLOSE_HOVER : COLOR_TILE_FILL,
-                                               0.0);
-            }
-            rubraview_pal_render_draw_text(app->renderer, cstr(GLYPHS[i]), br,
-                                           app->titlebar.height * 0.35, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
-    }
+    draw_titlebar(app, win_w);
 
     /* §3.17.1: an unobtrusive prompt offering the remembered page. */
     if (app->resume_offer) {
@@ -6590,6 +6722,43 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
             rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = what, .len = (size_t)w },
                                            rect, size * 0.75, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
+    }
+}
+
+/* The strip: the page at the top of the window and those under it, as
+   far as the window reaches, all at the strip's width. */
+static void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
+    double width = strip_width(app, (double)win_w);
+    /* Wider than the window (zoomed in): the pan moves it sideways, inside its edges. */
+    double slack = width > (double)win_w ? (width - (double)win_w) / 2.0 : 0.0;
+    if (app->pan_x > slack) app->pan_x = slack;
+    if (app->pan_x < -slack) app->pan_x = -slack;
+    double x0 = ((double)win_w - width) / 2.0 + app->pan_x;
+    double y = -app->strip_offset;
+    rubraview_interpolation_t interp = page_interpolation(app);
+
+    for (size_t i = app->spread_index; i < page_count(app) && y < (double)win_h; ++i) {
+        double h = strip_page_height(app, i);
+        app_page_t *page = &app->pages[i];
+        if (page->loaded && page->texture) {
+            double ow = 0.0, oh = 0.0;
+            rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &ow, &oh);
+            double scale = ow > 0.0 ? width / ow : 1.0;
+            rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
+                rubraview_mat3x2_multiply(
+                    rubraview_orientation_matrix(app->orientation, (double)picture_w(page), (double)picture_h(page)),
+                    rubraview_mat3x2_scale(scale, scale)),
+                rubraview_mat3x2_translate(x0, y));
+            rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture,
+                                                      rubraview_mat3x2_multiply(page_texture_prescale(page), place),
+                                                      interp, 1.0);
+            /* A long page held reduced (D-39): the part on screen sharper,
+               for the page across the window's middle (the tiles serve one page). */
+            if (page->reduced && y <= (double)win_h * 0.5 && y + h > (double)win_h * 0.5) {
+                draw_page_tiles(app, (int32_t)i, page, place, scale, win_w, win_h, 1.0, interp);
+            }
+        }
+        y += h;
     }
 }
 
@@ -7906,7 +8075,7 @@ static void load_keymap(app_state_t *app);
 static void settings_apply_rest(app_state_t *app) {
     static bool first = true;
     static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
-                  last_privacy = -1.0, last_keymap = -1.0, last_autosplit = -1.0, last_collapse = -1.0;
+                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0;
     rubraview_settings_t *st = &app->settings;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
 
@@ -7928,20 +8097,26 @@ static void settings_apply_rest(app_state_t *app) {
     }
     double layout = rubraview_settings_get(st, U8("viewer"), U8("layout"));
     if (layout != last_layout) {
-        static const rubraview_page_layout_t LAYOUT[] = { RUBRAVIEW_PAGE_LAYOUT_SINGLE, RUBRAVIEW_PAGE_LAYOUT_DUAL,
-                                                          RUBRAVIEW_PAGE_LAYOUT_BOOK, RUBRAVIEW_PAGE_LAYOUT_WEBTOON };
+        /* The one place the layout is set from: the settings window, the
+           toolbox's tile, the menu and the key all write this setting, so
+           they cannot disagree (owner, 2026-10-09). The setting's order is
+           the enum's. */
         int l = (int)lround(layout);
-        app->layout_opts.mode = LAYOUT[l >= 0 && l < 4 ? l : 0];
+        app->layout_opts.mode = (l >= 0 && l < (int)RUBRAVIEW_PAGE_LAYOUT_COUNT) ? (rubraview_page_layout_t)l
+                                                                                 : RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+        /* Comic is one page at a time with a wide scan as its two halves;
+           every other layout shows a wide scan whole. */
+        app->layout_opts.auto_split_wide_spreads = app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_COMIC;
         app->needs_relayout = true;
+        app->strip_offset = 0.0;
+        app->strip_base_w = 0.0;
+        if (!first) reset_view(app);
         last_layout = layout;
     }
-    double autosplit = rubraview_settings_get(st, U8("viewer"), U8("spread_autosplit"));
     double collapse = rubraview_settings_get(st, U8("viewer"), U8("portrait_collapse"));
-    if (autosplit != last_autosplit || collapse != last_collapse) {
-        app->layout_opts.auto_split_wide_spreads = autosplit > 0.5;
+    if (collapse != last_collapse) {
         app->layout_opts.portrait_collapse_ar = collapse > 0.5 ? 1.0 : 0.0;   /* 0: never collapse */
         app->needs_relayout = true;
-        last_autosplit = autosplit;
         last_collapse = collapse;
     }
     g_gutter = rubraview_settings_get(st, U8("viewer"), U8("gutter_px")) * dpi;
@@ -8055,6 +8230,49 @@ static void settings_say(app_state_t *app, const char *text) {
     snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
 }
 
+/* Settings › General › File types: the kinds switched on, for this user
+   or — through this program run again as an administrator — for every user. */
+static void shell_types_action(app_state_t *app, u8str_t name) {
+    const struct { bool on; uint32_t group; const char *word; } KINDS[] = {
+        { rubraview_settings_get(&app->settings, U8("shell"), U8("pictures")) > 0.5, RUBRAVIEW_SHELL_PICTURES, "pictures" },
+        { rubraview_settings_get(&app->settings, U8("shell"), U8("comics")) > 0.5, RUBRAVIEW_SHELL_COMICS, "comics" },
+        { rubraview_settings_get(&app->settings, U8("shell"), U8("video")) > 0.5, RUBRAVIEW_SHELL_VIDEO, "video" },
+        { rubraview_settings_get(&app->settings, U8("shell"), U8("music")) > 0.5, RUBRAVIEW_SHELL_MUSIC, "music" },
+    };
+    uint32_t groups = 0;
+    char words[64] = "";
+    for (size_t i = 0; i < sizeof(KINDS) / sizeof(KINDS[0]); ++i) {
+        if (!KINDS[i].on) continue;
+        groups |= KINDS[i].group;
+        if (words[0]) strcat(words, ",");
+        strcat(words, KINDS[i].word);
+    }
+    if (groups == 0) { settings_say(app, "switch on at least one kind of file first"); return; }
+
+    bool adding = rubraview_u8_eq_lit(name, "shell.register") || rubraview_u8_eq_lit(name, "shell.register_all");
+    bool all = rubraview_u8_eq_lit(name, "shell.register_all") || rubraview_u8_eq_lit(name, "shell.unregister_all");
+    bool ok = false;
+    if (!all) {
+        u8str_t list = rubraview_shell_extensions_for(app->arena, groups);
+        ok = adding ? rubraview_pal_shell_register_for(list, false) : rubraview_pal_shell_unregister_for(list, false);
+    } else {
+        char args[160];
+        int n = snprintf(args, sizeof(args), "%s --all-users --types=%s",
+                         adding ? "--register-shell" : "--unregister-shell", words);
+        int code = 1;
+        if (n <= 0 || !rubraview_pal_shell_run_elevated((u8str_t){ .ptr = args, .len = (size_t)n }, &code)) {
+            settings_say(app, "not done: the administrator's permission was not given");
+            return;
+        }
+        ok = code == 0;
+    }
+    char say[120];
+    snprintf(say, sizeof(say), ok ? "%s %s: %s" : "could not %s %s: %s",
+             ok ? (adding ? "registered" : "removed") : (adding ? "register" : "remove"),
+             all ? "for every user" : "for this user", words);
+    settings_say(app, say);
+}
+
 static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
     switch (event) {
         case RUBRAVIEW_SEVENT_NONE:
@@ -8125,12 +8343,11 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_ACTION: {
             const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
             if (!node) break;
-            if (rubraview_u8_eq_lit(node->name, "shell.register")) {
-                settings_say(app, rubraview_pal_shell_register(rubraview_shell_extensions())
-                                      ? "file types registered" : "could not register the file types");
-            } else if (rubraview_u8_eq_lit(node->name, "shell.unregister")) {
-                settings_say(app, rubraview_pal_shell_unregister(rubraview_shell_extensions())
-                                      ? "file types removed" : "could not remove the file types");
+            if (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
+                rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all")) {
+                shell_types_action(app, node->name);
+            } else if (rubraview_u8_eq_lit(node->name, "shell.defaults")) {
+                rubraview_pal_shell_open_default_apps();
             } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
                 keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
             }
@@ -10436,6 +10653,8 @@ static void render_frame(app_state_t *app) {
         } else if (fading) {
             draw_spread(app, app->prev_spread_index, 1.0 - progress, win_w, win_h);
             draw_spread(app, app->spread_index, progress, win_w, win_h);
+        } else if (strip_active(app)) {
+            draw_strip(app, win_w, win_h);
         } else {
             draw_spread(app, app->spread_index, 1.0, win_w, win_h);
         }
@@ -12553,9 +12772,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
             /* §3.19.3: registering associations is a job, not a launch. */
             if (cli.register_shell || cli.unregister_shell) {
+                u8str_t types = cli.shell_groups ? rubraview_shell_extensions_for(&arena, cli.shell_groups)
+                                                 : rubraview_shell_extensions();
                 bool ok = cli.register_shell
-                            ? rubraview_pal_shell_register(rubraview_shell_extensions())
-                            : rubraview_pal_shell_unregister(rubraview_shell_extensions());
+                            ? rubraview_pal_shell_register_for(types, cli.shell_all_users)
+                            : rubraview_pal_shell_unregister_for(types, cli.shell_all_users);
                 console_line(ok ? "rubraview: file associations updated"
                                 : "rubraview: could not update the file associations");
                 free(memory);
@@ -12823,9 +13044,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                     if (app.picker_open) {
                         double dpi = rubraview_pal_window_dpi_scale(app.window);
-                        double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
-                        double header_h = PICKER_HEADER_HEIGHT * dpi;
+                        double top = picker_top(&app);
+                        double crumb_h = top + PICKER_CRUMB_HEIGHT * dpi;
+                        double header_h = top + PICKER_HEADER_HEIGHT * dpi;
 
+                        if (titlebar_click(&app, event.mouse.x, event.mouse.y)) break;
+                        if (event.mouse.y < top) break;   /* the band holds nothing to press */
                         if (event.mouse.y < crumb_h) {
                             /* A breadcrumb chip navigates to its prefix; the
                                bar past the last chip takes a typed path. */
@@ -13025,6 +13249,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         rubraview_listwin_scroll(&app.listwin, event.mouse.wheel_delta > 0 ? -3 : 3, page_count(&app));
                         break;
                     }
+                    if (strip_active(&app) && event.mouse.modifiers == 0) {
+                        /* The wheel moves the strip, the way it moves any long page. */
+                        strip_scroll_by(&app, -event.mouse.wheel_delta * 120.0 * rubraview_pal_window_dpi_scale(app.window));
+                        note_activity(&app);
+                        break;
+                    }
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     uint32_t wheel_mods = event.mouse.modifiers;
                     /* Settings › Video › Wheel zoom during video: over a film the plain
@@ -13076,6 +13306,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             int32_t page = current_page_index(&app);
             rebuild_layout(&app);
             if (page >= 0) app.spread_index = spread_index_for_page(&app, page);
+        }
+        if (strip_active(&app)) {
+            /* Whatever panned the page up or down — a drag, a touch, a key —
+               moved the strip; with nothing to move, this keeps it inside its ends. */
+            double dy = app.pan_y;
+            app.pan_y = 0.0;
+            strip_scroll_by(&app, -dy);
         }
 
         double now = rubraview_pal_time_now_seconds();

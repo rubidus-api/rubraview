@@ -211,6 +211,20 @@ u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension);
 /** The extensions §3.19.3 offers to associate, as a `;`-separated list. */
 u8str_t rubraview_shell_extensions(void);
 
+/* The same list by kind, so a reader can give Rubraview the comics and
+   leave the pictures with another program (owner, 2026-10-09). */
+#define RUBRAVIEW_SHELL_PICTURES 1u
+#define RUBRAVIEW_SHELL_COMICS   2u
+#define RUBRAVIEW_SHELL_VIDEO    4u
+#define RUBRAVIEW_SHELL_MUSIC    8u
+#define RUBRAVIEW_SHELL_ALL      15u
+
+/** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
+u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);
+
+/** "pictures,comics,video,music" (any of them, any order) as a mask; 0 when a word is not one of them. */
+uint32_t rubraview_shell_groups_parse(u8str_t words);
+
 #ifdef __cplusplus
 }
 #endif

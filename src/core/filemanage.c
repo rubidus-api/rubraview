@@ -315,3 +315,53 @@ u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension) {
 u8str_t rubraview_shell_extensions(void) {
     return U8("jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
 }
+
+static const struct { uint32_t group; const char *word; const char *extensions; } SHELL_GROUPS[] = {
+    { RUBRAVIEW_SHELL_PICTURES, "pictures", "jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico" },
+    { RUBRAVIEW_SHELL_COMICS,   "comics",   "cbz;cb7;cbr" },
+    { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov" },
+    { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
+};
+
+u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena) return empty;
+    size_t total = 0;
+    for (size_t i = 0; i < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++i) {
+        if (groups & SHELL_GROUPS[i].group) total += strlen(SHELL_GROUPS[i].extensions) + 1;
+    }
+    if (total == 0) return empty;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, total);
+    if (!proven_is_ok(res.err)) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t at = 0;
+    for (size_t i = 0; i < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++i) {
+        if (!(groups & SHELL_GROUPS[i].group)) continue;
+        if (at > 0) out[at++] = ';';
+        size_t n = strlen(SHELL_GROUPS[i].extensions);
+        memcpy(out + at, SHELL_GROUPS[i].extensions, n);
+        at += n;
+    }
+    out[at] = '\0';
+    return (u8str_t){ .ptr = out, .len = at };
+}
+
+uint32_t rubraview_shell_groups_parse(u8str_t words) {
+    uint32_t mask = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= words.len; ++i) {
+        if (i != words.len && words.ptr[i] != ',') continue;
+        u8str_t word = { .ptr = words.ptr + start, .len = i - start };
+        start = i + 1;
+        if (word.len == 0) continue;
+        uint32_t found = 0;
+        for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
+            if (word.len == strlen(SHELL_GROUPS[g].word) && memcmp(word.ptr, SHELL_GROUPS[g].word, word.len) == 0) {
+                found = SHELL_GROUPS[g].group;
+            }
+        }
+        if (!found) return 0;
+        mask |= found;
+    }
+    return mask;
+}
