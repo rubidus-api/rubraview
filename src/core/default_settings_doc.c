@@ -51,6 +51,7 @@ static const char *const PARTS[] = {
 "  int    viewer.zoom_step_percent \"Zoom step\"               5..50 step 1 unit \"%\" = 10 wired\n"
 "  choice viewer.interpolation     \"Scaling filter\"          nearest | bilinear | bicubic | lanczos3 = bicubic wired\n"
 "  choice viewer.enlarge           \"Enlarging a small picture\" smooth | sharp = sharp wired\n"
+"  choice viewer.animation_end     \"When an animation ends\"  loop | once | next = loop wired\n"
 "  toggle viewer.pixel_grid        \"Pixel grid past 400%\"    = false wired\n"
 "\n",
 "page files \"Files\"\n"

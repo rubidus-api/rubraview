@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.38.exe              the viewer, as built
-dist/rubraview-v0.0.38/                 the release bundle
-dist/rubraview-v0.0.38.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.39.exe              the viewer, as built
+dist/rubraview-v0.0.39/                 the release bundle
+dist/rubraview-v0.0.39.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -119,8 +119,22 @@ when it closes.
 
 ## Animated images
 
-While a GIF, WebP or APNG is on screen, `Space` pauses it, `.` and `,`
-step a frame, and `Ctrl+]` / `Ctrl+[` change its speed.
+An animated GIF or WebP is played as a film is. `Space` pauses it, `.`
+and `,` step a frame, `Left` and `Right` seek five seconds, `[` and `]`
+set the two ends of a repeat and `\` clears it, and `Ctrl+]` / `Ctrl+[`
+change its speed from 0.25x to 4x. The toolbox has the same on buttons,
+with Stop and a seek bar to click; paused, the title says where it is.
+
+At its end an animation goes round again. Settings › Viewer › When an
+animation ends — or `Ctrl+R` while one is on screen — makes it stop
+there, or go on to the next file. (An APNG is shown as a still picture.)
+
+In the toolbox, the back and forward buttons seek five seconds. Hold one
+down and five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag
+onto one and let go. This is the same for a film and for music.
+
+`Ctrl+Enter` opens an Explorer window with the file on screen picked
+out — the archive itself, for a page inside one.
 
 A multi-page TIFF or a multi-size `.ico` uses `.` and `,` to step
 through its pages, and opens an `.ico` at its largest layer.
@@ -320,8 +334,8 @@ the viewer can open, and says how many others it left out.
 Most of what the viewer does has a toolbox button: turning pages one, ten
 or all the way, zoom and fit, turning and flipping, the slide show, the
 filmstrip, the playlist, the information, editing and exporting, opening,
-always on top, the settings and full screen; for a film, 5 s and 30 s back
-and on as well. While a box is open, a second square beside its pin, with
+always on top, the settings and full screen; for a film, 5 s back and on
+as well (held, those two offer steps up to 5 min). While a box is open, a second square beside its pin, with
 three dots, sizes it: drag it sideways for more or fewer buttons (or menu
 tiles) a row, and away from the box or back for bigger or smaller ones; the
 size is kept, and Settings › Display has the same four numbers.
@@ -493,6 +507,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
@@ -561,8 +576,8 @@ listed under a later heading only means that while that is on screen.
 | `,` | One frame back |
 | `Ctrl+]` | Faster (0.25x a step) |
 | `Ctrl+[` | Slower (0.25x a step) |
-| `Right` | 5 seconds on |
-| `Left` | 5 seconds back |
+| `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
+| `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
 | `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |

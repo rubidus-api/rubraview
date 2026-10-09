@@ -547,3 +547,65 @@ bool rubraview_box_pin_click(rubraview_box_t *box, const rubraview_tile_metrics_
     box->idle_seconds = 0.0;
     return true;
 }
+
+/* ---- the seek buttons' choices (owner, 2026-10-09) ---- */
+
+static const double SEEKFAN_SECONDS[RUBRAVIEW_SEEKFAN_COUNT] = { 5.0, 10.0, 30.0, 60.0, 300.0 };
+static const char *const SEEKFAN_LABELS[RUBRAVIEW_SEEKFAN_COUNT] = { "5s", "10s", "30s", "1m", "5m" };
+
+double rubraview_seekfan_seconds(int32_t i) {
+    return i >= 0 && i < RUBRAVIEW_SEEKFAN_COUNT ? SEEKFAN_SECONDS[i] : 0.0;
+}
+
+const char *rubraview_seekfan_label(int32_t i) {
+    return i >= 0 && i < RUBRAVIEW_SEEKFAN_COUNT ? SEEKFAN_LABELS[i] : "";
+}
+
+void rubraview_seekfan_press(rubraview_seekfan_t *fan, bool forward, double now, rubraview_rect_t tile) {
+    if (!fan) return;
+    *fan = (rubraview_seekfan_t){ .down = true, .open = false, .forward = forward,
+                                  .pressed_at = now, .tile = tile, .hover = -1 };
+}
+
+bool rubraview_seekfan_tick(rubraview_seekfan_t *fan, double now) {
+    if (!fan || !fan->down || fan->open) return false;
+    if (now - fan->pressed_at < RUBRAVIEW_SEEKFAN_HOLD_SECONDS) return false;
+    fan->open = true;
+    fan->hover = -1;
+    return true;
+}
+
+rubraview_rect_t rubraview_seekfan_button(const rubraview_seekfan_t *fan, int32_t i, double gap,
+                                          double bounds_width, double bounds_height) {
+    rubraview_rect_t none = { 0.0, 0.0, 0.0, 0.0 };
+    if (!fan || i < 0 || i >= RUBRAVIEW_SEEKFAN_COUNT) return none;
+    double w = fan->tile.width, h = fan->tile.height;
+    double row = w * RUBRAVIEW_SEEKFAN_COUNT + gap * (RUBRAVIEW_SEEKFAN_COUNT - 1);
+    double x = fan->tile.x + w * 0.5 - row * 0.5;
+    if (x + row > bounds_width) x = bounds_width - row;
+    if (x < 0.0) x = 0.0;
+    double y = fan->tile.y - gap - h;
+    if (y < 0.0) y = fan->tile.y + h + gap;                 /* no room over it: under it */
+    if (y + h > bounds_height) y = bounds_height - h;       /* nor under: as low as it goes */
+    if (y < 0.0) y = 0.0;
+    /* Back is mirrored: the smallest step on the right, next to nothing further. */
+    int32_t place = fan->forward ? i : RUBRAVIEW_SEEKFAN_COUNT - 1 - i;
+    return (rubraview_rect_t){ x + (double)place * (w + gap), y, w, h };
+}
+
+void rubraview_seekfan_pointer(rubraview_seekfan_t *fan, double x, double y, double gap,
+                               double bounds_width, double bounds_height) {
+    if (!fan || !fan->open) return;
+    fan->hover = -1;
+    for (int32_t i = 0; i < RUBRAVIEW_SEEKFAN_COUNT; ++i) {
+        if (rubraview_rect_contains(rubraview_seekfan_button(fan, i, gap, bounds_width, bounds_height), x, y)) fan->hover = i;
+    }
+}
+
+double rubraview_seekfan_release(rubraview_seekfan_t *fan) {
+    if (!fan || !fan->down) return 0.0;
+    double seconds = !fan->open ? SEEKFAN_SECONDS[0] : rubraview_seekfan_seconds(fan->hover);
+    double sign = fan->forward ? 1.0 : -1.0;
+    *fan = (rubraview_seekfan_t){ .hover = -1 };
+    return seconds * sign;
+}

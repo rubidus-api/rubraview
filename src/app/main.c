@@ -282,6 +282,13 @@ typedef struct app_state {
     rubraview_frame_t     *anim_frames;
     int32_t                anim_page;    /* which page these frames describe; -1 for none */
     bool                   anim_active;
+    /* D-82: an animated GIF or WebP is kept open and laid together frame
+       by frame; a short one keeps every picture it has shown. */
+    rubraview_anim_reader_t *anim_reader;
+    rubraview_frame_canvas_t anim_canvas;
+    uint8_t               *anim_buffers;  /* the canvas's three, in one piece */
+    uint8_t              **anim_cache;    /* a frame's finished picture, or NULL; `animation.frame_count` of them */
+    rubraview_texture_t   *anim_texture;  /* the page's texture while it is one this made */
 
     /* M5: the video on the current page, when it is one (D-8, D-9). */
     rubraview_media_t      *media;
@@ -455,6 +462,10 @@ typedef struct app_state {
        a double tap or a held press opens. */
     rubraview_subbox_t             subbox;
     rubraview_tap_t                sub_tap;
+    /* Owner, 2026-10-09: the seek buttons — a tap is 5 s, held they offer
+       5 s to 5 min to drag onto. */
+    rubraview_seekfan_t            seekfan;
+    bool                           seekfan_detached;   /* pressed in the toolbox's own window */
     int32_t                        subtitle_last;        /* the track the Sub tile turns back on, -1 for none */
     bool                           sub_list_open;
     double                         sub_list_anchor_x, sub_list_anchor_y;
@@ -979,13 +990,95 @@ static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, ru
 
 /* ---- animated images and sub-pages (§3.20) ---- */
 
-#define ANIM_MAX_FRAMES 512
+#define ANIM_MAX_FRAMES 8192
+/* Every finished frame of an animation is kept while all of them together
+   fit in this; a longer one is drawn again as it goes. */
+#define ANIM_CACHE_BYTES ((uint64_t)384 << 20)
+
+static void next_spread(app_state_t *app);
+
+/* D-82: an animation that plays by itself, and so is handled as a film
+   is — a place in seconds, a seek bar, A-B, speed, stop. */
+static bool anim_plays(const app_state_t *app) {
+    return app->anim_active && !app->media && app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION;
+}
+
+/* What happens at its end: 0 round again, 1 stop there, 2 the next file. */
+static int anim_end_mode(const app_state_t *app) {
+    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("animation_end")));
+    return mode >= 0 && mode <= 2 ? mode : 0;
+}
+
+static void anim_close(app_state_t *app) {
+    if (app->anim_cache) {
+        for (size_t i = 0; i < app->animation.frame_count; ++i) free(app->anim_cache[i]);
+        free(app->anim_cache);
+        app->anim_cache = NULL;
+    }
+    free(app->anim_buffers);
+    app->anim_buffers = NULL;
+    rubraview_pal_anim_close(app->anim_reader);
+    app->anim_reader = NULL;
+    app->anim_texture = NULL;   /* the page owns it */
+}
+
+static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride) {
+    app_state_t *app = (app_state_t*)ctx;
+    return rubraview_pal_anim_read(app->anim_reader, index, dst, stride, app->anim_frames[index].height);
+}
+
+/* One frame of the open animation as the whole picture, on the page. */
+static void anim_show(app_state_t *app, size_t frame_index) {
+    app_page_t *page = &app->pages[app->anim_page];
+    rubraview_frame_canvas_t *canvas = &app->anim_canvas;
+    size_t stride = (size_t)canvas->width * 4;
+    size_t whole = stride * (size_t)canvas->height;
+
+    const uint8_t *picture = app->anim_cache ? app->anim_cache[frame_index] : NULL;
+    if (!picture) {
+        if (!rubraview_frame_canvas_show(canvas, frame_index, anim_read_frame, app)) return;
+        /* The texture has no see-through: what shows through is the
+           window's own colour, as around any picture. */
+        const uint8_t back[3] = { COLOR_CANVAS & 0xFF, (COLOR_CANVAS >> 8) & 0xFF, (COLOR_CANVAS >> 16) & 0xFF };
+        uint8_t *flat = canvas->scratch;
+        for (size_t i = 0; i < whole; i += 4) {
+            uint32_t a = canvas->pixels[i + 3];
+            if (a == 255) { memcpy(flat + i, canvas->pixels + i, 4); continue; }
+            uint32_t keep = 255 - a;
+            for (int c = 0; c < 3; ++c) {
+                uint32_t v = canvas->pixels[i + c] + (back[c] * keep + 127) / 255;
+                flat[i + c] = (uint8_t)(v > 255 ? 255 : v);
+            }
+            flat[i + 3] = 255;
+        }
+        picture = flat;
+        if (app->anim_cache) {
+            uint8_t *kept = (uint8_t*)malloc(whole);
+            if (kept) { memcpy(kept, flat, whole); app->anim_cache[frame_index] = kept; }
+        }
+    }
+
+    if (!page->texture || page->texture != app->anim_texture) {
+        rubraview_texture_t *texture = rubraview_pal_texture_create_bgra(app->renderer, canvas->width, canvas->height);
+        if (!texture) return;
+        if (page->texture) rubraview_pal_texture_destroy(page->texture);
+        page->texture = texture;
+        app->anim_texture = texture;
+        if (page->width != canvas->width || page->height != canvas->height) app->needs_relayout = true;
+        page->width = page->full_width = canvas->width;
+        page->height = page->full_height = canvas->height;
+        page->reduced = false;
+        page->loaded = true;
+    }
+    (void)rubraview_pal_texture_upload_bgra(page->texture, picture, (int32_t)stride);
+}
 
 /* Replaces the page's texture with one frame of it. The page keeps its
    own dimensions from the frame, because an ICO's mipmaps genuinely
    differ in size and the layout has to follow. */
 static void show_frame(app_state_t *app, size_t frame_index) {
     if (app->anim_page < 0) return;
+    if (app->anim_reader) { anim_show(app, frame_index); return; }
     app_page_t *page = &app->pages[app->anim_page];
 
     u8str_t path = app->source.pages[app->anim_page].path;
@@ -1020,6 +1113,7 @@ static void show_frame(app_state_t *app, size_t frame_index) {
    clock, or — for an ICO — jump straight to the biggest mipmap, which
    §3.20.2 says is the one worth showing. */
 static void animation_prepare(app_state_t *app) {
+    anim_close(app);
     app->anim_active = false;
     app->anim_page = -1;
 
@@ -1037,9 +1131,40 @@ static void animation_prepare(app_state_t *app) {
     }
 
     if (!app->anim_frames) {
-        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
-        if (!proven_is_ok(res.err)) { free(mem); return; }
-        app->anim_frames = (rubraview_frame_t*)(void*)res.value.ptr;
+        /* Kept for the session: one list, for whichever page animates. */
+        app->anim_frames = (rubraview_frame_t*)calloc(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
+        if (!app->anim_frames) { free(mem); return; }
+    }
+
+    /* D-82: an animated GIF or WebP first — kept open, laid together and
+       played as a film is. */
+    size_t timed_count = 0;
+    int32_t canvas_w = 0, canvas_h = 0;
+    app->anim_reader = rubraview_pal_anim_open(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+                                               app->anim_frames, ANIM_MAX_FRAMES, &timed_count, &canvas_w, &canvas_h);
+    if (app->anim_reader) {
+        free(mem);
+        size_t whole = (size_t)canvas_w * (size_t)canvas_h * 4;
+        app->anim_buffers = (uint8_t*)malloc(whole * 3);
+        if (!app->anim_buffers) { anim_close(app); return; }
+        rubraview_frame_canvas_init(&app->anim_canvas, app->anim_frames, timed_count, canvas_w, canvas_h,
+                                    app->anim_buffers, app->anim_buffers + whole, app->anim_buffers + whole * 2);
+        app->animation = rubraview_animation_create(RUBRAVIEW_FRAMES_ANIMATION, app->anim_frames, timed_count);
+        if ((uint64_t)whole * timed_count <= ANIM_CACHE_BYTES) {
+            app->anim_cache = (uint8_t**)calloc(timed_count, sizeof(uint8_t*));
+        }
+        app->animation.speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
+        app->anim_page = page_index;
+        app->anim_active = true;
+        app->ab_a = app->ab_b = -1.0;   /* a repeat belongs to the file it was set in */
+        if (app->slides && app->spread_index < app->layout.count) {
+            app->slides[app->spread_index].kind = RUBRAVIEW_MEDIA_ANIMATED;
+            app->slides[app->spread_index].duration_seconds = rubraview_animation_cycle_seconds(&app->animation);
+        }
+        /* The first frame as the whole picture: the page's own decode is
+           the container's first frame alone, which may be a part of it. */
+        show_frame(app, 0);
+        return;
     }
 
     size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
@@ -1075,8 +1200,44 @@ static void animation_prepare(app_state_t *app) {
 
 static void animation_tick(app_state_t *app, double dt) {
     if (!app->anim_active) return;
+    app->animation.ab_a = app->ab_a;
+    app->animation.ab_b = app->ab_b;
+    int at_end = anim_end_mode(app);
+    /* A slide show turns the page itself, after one pass. */
+    app->animation.once = at_end != 0 && !app->slideshow_running;
     rubraview_animation_event_t event = rubraview_animation_tick(&app->animation, dt);
-    if (event != RUBRAVIEW_ANIMATION_NONE) show_frame(app, app->animation.current);
+    if (event == RUBRAVIEW_ANIMATION_NONE) return;
+    show_frame(app, app->animation.current);
+    app->media_new_picture = true;
+    /* The title is not rewritten for every frame: Windows answers each
+       change with a message, and the loop would never rest (a film's is
+       not either). It says the time when paused, stepped or sought. */
+    if (event == RUBRAVIEW_ANIMATION_ENDED) update_window_title(app);
+    if (event == RUBRAVIEW_ANIMATION_ENDED && at_end == 2 && app->spread_index + 1 < app->layout.count) next_spread(app);
+}
+
+/* D-82: where what plays is, how long it is, and going there — a film, a
+   song or an animation alike. */
+static void media_seek_to(app_state_t *app, double seconds);
+static double play_position(const app_state_t *app) {
+    return app->media ? app->media_position : anim_plays(app) ? rubraview_animation_position(&app->animation) : 0.0;
+}
+static double play_duration(const app_state_t *app) {
+    return app->media ? app->media_info.duration_seconds
+         : anim_plays(app) ? rubraview_animation_cycle_seconds(&app->animation) : 0.0;
+}
+static void play_seek(app_state_t *app, double seconds) {
+    if (app->media) {
+        media_seek_to(app, seconds);
+        app->media_position = seconds;
+        return;
+    }
+    if (!anim_plays(app)) return;
+    double duration = rubraview_animation_cycle_seconds(&app->animation);
+    if (seconds > duration) seconds = duration;
+    rubraview_animation_seek(&app->animation, seconds);
+    show_frame(app, app->animation.current);
+    update_window_title(app);
 }
 
 /* ---- layout ---- */
@@ -1175,6 +1336,14 @@ static void update_window_title(app_state_t *app) {
                          (int)a.len, a.ptr, (int)t.len, t.ptr,
                          app->media_paused ? " paused" : "",
                          app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
+            if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
+        } else if (anim_plays(app) && page == app->anim_page) {
+            /* D-82: an animation says where it is as a film does. */
+            char at[32], total[32];
+            u8str_t a = rubraview_format_timecode(at, sizeof(at), rubraview_animation_position(&app->animation), true);
+            u8str_t t = rubraview_format_timecode(total, sizeof(total), rubraview_animation_cycle_seconds(&app->animation), true);
+            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
+                         (int)a.len, a.ptr, (int)t.len, t.ptr, app->animation.paused ? " paused" : "");
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
@@ -2818,7 +2987,9 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
         if (!ts->tiles) return;
     }
     if (ts->page != index || ts->page_texture != page->texture) {
-        tiles_reset(app);
+        /* This set only: the other page of a pair keeps its own tiles
+           (resetting both made each undo the other's on every frame). */
+        tile_set_reset(ts);
         ts->page = index;
         ts->page_texture = page->texture;
         if (path.len > 0) {
@@ -3475,7 +3646,7 @@ static void toolbox_refresh(app_state_t *app) {
     app->toolbox.tile_count = count;
     /* The strip's seek bar, for a film or music; for a still picture with
        others around it, where it is among them (owner, 2026-09-28). */
-    app->toolbox.timeline = app->media != NULL || page_count(app) > 1 || app->pagebar_dragging;
+    app->toolbox.timeline = app->media != NULL || anim_plays(app) || page_count(app) > 1 || app->pagebar_dragging;
     /* The menu follows what is on screen too, but only while it is at its
        root: a reader halfway down a submenu is not pulled back. */
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
@@ -3507,7 +3678,11 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .subtitle_shown = app->tracks.current_subtitle >= 0,
         .has_subtitles = rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) > 0,
         .slideshow = app->slideshow_running,
-        .repeat_mode = (int32_t)repeat_mode(app),
+        /* D-82: an animation's own end, said in the film's words. */
+        .repeat_mode = anim_plays(app) ? (anim_end_mode(app) == 0 ? (int32_t)RUBRAVIEW_REPEAT_ONE
+                                        : anim_end_mode(app) == 1 ? (int32_t)RUBRAVIEW_REPEAT_STOP
+                                                                  : (int32_t)RUBRAVIEW_REPEAT_NEXT)
+                                     : (int32_t)repeat_mode(app),
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
         .toolbox_pinned = app->toolbox.pinned,
@@ -3547,7 +3722,10 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) return cstr(rubraview_repeat_caption(repeat_mode(app)));
+    if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) {
+        if (anim_plays(app)) return anim_end_mode(app) == 0 ? U8("Loop") : anim_end_mode(app) == 1 ? U8("Once") : U8("Next");
+        return cstr(rubraview_repeat_caption(repeat_mode(app)));
+    }
     if (rubraview_u8_eq_lit(tile->action, "media_eq_cycle")) {
         int preset = eq_preset_now(app);
         return preset <= 0 ? U8("EQ") : eq_preset_label(preset);
@@ -3995,6 +4173,14 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
+    } else if (rubraview_u8_eq_lit(action, "reveal_in_explorer")) {
+        /* Owner, 2026-10-09: the file on screen picked out in Explorer; a
+           page inside an archive has no file of its own, so the archive. */
+        int32_t at = current_page_index(app);
+        u8str_t path = app->source.archive_path.len > 0 ? app->source.archive_path
+                     : (at >= 0 && (size_t)at < page_count(app)) ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
+        if (path.len == 0) osd_say(app, U8("there is no file to show"));
+        else if (!rubraview_pal_shell_reveal(path)) osd_say(app, U8("Explorer could not show the file"));
     } else if (rubraview_u8_eq_lit(action, "delete_file")) {
         triage_delete(app, false);
     } else if (rubraview_u8_eq_lit(action, "purge_file")) {
@@ -4079,6 +4265,13 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
         help_show(app);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
+        /* D-82: an animation's own end — round again, stop there, the next file. */
+        int mode = (anim_end_mode(app) + 1) % 3;
+        rubraview_settings_set(&app->settings, U8("viewer"), U8("animation_end"), (double)mode);
+        osd_say(app, mode == 0 ? U8("an animation goes round and round")
+                   : mode == 1 ? U8("an animation plays once and stops")
+                               : U8("after an animation, the next file"));
     } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
         /* What happens at the end of a film or a song (owner, 2026-09-29). */
         rubraview_repeat_mode_t mode = rubraview_repeat_cycle(repeat_mode(app));
@@ -4186,7 +4379,21 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (!app->media && app->bgm_media && rubraview_u8_eq_lit(action, "media_play_pause")) {
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_stop")) {
+        /* D-82: an animation takes a film's keys and tiles from here on. */
+        rubraview_animation_stop(&app->animation);
+        show_frame(app, 0);
+        update_window_title(app);
+        osd_say(app, U8("stopped"));
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward")) {
+        play_seek(app, play_position(app) + MEDIA_SEEK_STEP);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back")) {
+        play_seek(app, play_position(app) - MEDIA_SEEK_STEP);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward_long")) {
+        play_seek(app, play_position(app) + MEDIA_SEEK_LONG);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
+        play_seek(app, play_position(app) - MEDIA_SEEK_LONG);
+    } else if (!app->media && !anim_plays(app) && app->bgm_media && rubraview_u8_eq_lit(action, "media_play_pause")) {
         /* §3.14.6: with a picture on screen and music behind it, the
            play key is the music's — and the listener's own pause
            outranks the arbiter from then on. */
@@ -4198,17 +4405,23 @@ static void handle_action(app_state_t *app, u8str_t action) {
                                   bgm_pause_for_sound(app));
         osd_say(app, pausing ? U8("the music is paused") : U8("the music plays on"));
     } else if (rubraview_u8_eq_lit(action, "anim_toggle_pause") || rubraview_u8_eq_lit(action, "media_play_pause")) {
+        bool ended = app->animation.ended;
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
+        if (ended) show_frame(app, app->animation.current);   /* played again: from the first frame */
+        update_window_title(app);
     } else if (rubraview_u8_eq_lit(action, "anim_step_forward") || rubraview_u8_eq_lit(action, "subpage_next")) {
         rubraview_animation_step(&app->animation, true);
         show_frame(app, app->animation.current);
+        update_window_title(app);
     } else if (rubraview_u8_eq_lit(action, "anim_step_back") || rubraview_u8_eq_lit(action, "subpage_prev")) {
         rubraview_animation_step(&app->animation, false);
         show_frame(app, app->animation.current);
-    } else if (app->media && (rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "anim_speed_down") ||
-                              rubraview_u8_eq_lit(action, "media_speed_up") || rubraview_u8_eq_lit(action, "media_speed_down") ||
-                              rubraview_u8_eq_lit(action, "media_speed_reset") || rubraview_u8_eq_lit(action, "media_speed_cycle"))) {
+        update_window_title(app);
+    } else if ((app->media || anim_plays(app)) &&
+               (rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "anim_speed_down") ||
+                rubraview_u8_eq_lit(action, "media_speed_up") || rubraview_u8_eq_lit(action, "media_speed_down") ||
+                rubraview_u8_eq_lit(action, "media_speed_reset") || rubraview_u8_eq_lit(action, "media_speed_cycle"))) {
         /* D-15: 0.25x to 4x a quarter at a time; the tile cycles the usual ones. */
         double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
         if (rubraview_u8_eq_lit(action, "media_speed_reset")) {
@@ -4225,8 +4438,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (speed < 0.25) speed = 0.25;
         if (speed > 4.0) speed = 4.0;
         app->media_speed = speed;
-        rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
-        rubraview_pal_audio_set_speed(speed);
+        if (app->media) {
+            rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
+            rubraview_pal_audio_set_speed(speed);
+        } else {
+            app->animation.speed = speed;   /* D-82: the same ladder, and kept for the session as a film's is */
+        }
         char line[32];
         char text[16];
         speed_text(text, sizeof(text), speed);
@@ -4234,19 +4451,20 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     } else if (rubraview_u8_eq_lit(action, "media_ab_edit")) {
         ab_edit_begin(app);
-    } else if (app->media && (rubraview_u8_eq_lit(action, "media_ab_a") || rubraview_u8_eq_lit(action, "media_ab_b") ||
-                              rubraview_u8_eq_lit(action, "media_ab_clear") || rubraview_u8_eq_lit(action, "media_ab_cycle"))) {
+    } else if ((app->media || anim_plays(app)) &&
+               (rubraview_u8_eq_lit(action, "media_ab_a") || rubraview_u8_eq_lit(action, "media_ab_b") ||
+                rubraview_u8_eq_lit(action, "media_ab_clear") || rubraview_u8_eq_lit(action, "media_ab_cycle"))) {
         /* D-15 A-B repeat. The tile walks A, then B, then off. */
         char line[64];
         int n = 0;
         bool set_a = rubraview_u8_eq_lit(action, "media_ab_a") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a < 0.0);
         bool set_b = rubraview_u8_eq_lit(action, "media_ab_b") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
         if (set_a) {
-            app->ab_a = app->media_position;
+            app->ab_a = play_position(app);
             if (app->ab_b >= 0.0 && app->ab_b <= app->ab_a) app->ab_b = -1.0;
             n = snprintf(line, sizeof(line), "repeat from %.1f s", app->ab_a);
-        } else if (set_b && app->ab_a >= 0.0 && app->media_position > app->ab_a) {
-            app->ab_b = app->media_position;
+        } else if (set_b && app->ab_a >= 0.0 && play_position(app) > app->ab_a) {
+            app->ab_b = play_position(app);
             n = snprintf(line, sizeof(line), "repeating %.1f - %.1f s", app->ab_a, app->ab_b);
         } else if (set_b) {
             n = snprintf(line, sizeof(line), "B must come after A");
@@ -4542,7 +4760,7 @@ static void ab_edit_fill(app_state_t *app, int32_t field, double seconds) {
 }
 
 static void ab_edit_begin(app_state_t *app) {
-    if (!app->media) { osd_say(app, U8("nothing is playing")); return; }
+    if (!app->media && !anim_plays(app)) { osd_say(app, U8("nothing is playing")); return; }
     app->ab_edit_open = true;
     app->ab_edit_field = 0;
     ab_edit_fill(app, 0, app->ab_a);
@@ -4882,6 +5100,54 @@ static void toolbox_dock(app_state_t *app, double client_x, double client_y) {
     note_activity(app);
 }
 
+/* ---- the seek buttons' choices (owner, 2026-10-09) ---- */
+
+static bool seek_tile_action(u8str_t action, bool *out_forward) {
+    if (rubraview_u8_eq_lit(action, "media_seek_forward")) { *out_forward = true; return true; }
+    if (rubraview_u8_eq_lit(action, "media_seek_back")) { *out_forward = false; return true; }
+    return false;
+}
+
+/* The window the pressed button is in: the choices stay inside it. */
+static void seekfan_bounds(const app_state_t *app, double *out_w, double *out_h) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->seekfan_detached && app->toolbox_window ? app->toolbox_window : app->window, &w, &h);
+    *out_w = (double)w;
+    *out_h = (double)h;
+}
+
+static void seekfan_pointer(app_state_t *app, double x, double y) {
+    if (!app->seekfan.open) return;
+    double bw = 0.0, bh = 0.0;
+    seekfan_bounds(app, &bw, &bh);
+    rubraview_seekfan_pointer(&app->seekfan, x, y, 4.0 * rubraview_pal_window_dpi_scale(app->window), bw, bh);
+}
+
+static void seekfan_let_go(app_state_t *app) {
+    if (!app->seekfan.down) return;
+    double seconds = rubraview_seekfan_release(&app->seekfan);
+    app->toolbox_window_drawn = 0.0;
+    if (seconds != 0.0 && play_duration(app) > 0.0) play_seek(app, play_position(app) + seconds);
+}
+
+static void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detached) {
+    if (!app->seekfan.open || app->seekfan_detached != detached) return;
+    double bw = 0.0, bh = 0.0;
+    seekfan_bounds(app, &bw, &bh);
+    double gap = 4.0 * rubraview_pal_window_dpi_scale(app->window);
+    for (int32_t i = 0; i < RUBRAVIEW_SEEKFAN_COUNT; ++i) {
+        rubraview_rect_t b = rubraview_seekfan_button(&app->seekfan, i, gap, bw, bh);
+        rubraview_pal_rect_t rect = { b.x, b.y, b.width, b.height };
+        bool on = i == app->seekfan.hover;
+        rubraview_pal_render_fill_rect(r, rect, on ? COLOR_TILE_CURRENT : 0xF0202020u, 3.0);
+        rubraview_pal_render_stroke_rect(r, rect, on ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 3.0);
+        char caption[8];
+        int n = snprintf(caption, sizeof(caption), "%s%s", app->seekfan.forward ? "+" : "-", rubraview_seekfan_label(i));
+        if (n > 0) rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = caption, .len = (size_t)n }, rect,
+                                                  rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 static void draw_toolbox_window(app_state_t *app) {
     if (!app->toolbox_window || !app->toolbox_renderer) return;
     double now = rubraview_pal_time_now_seconds();
@@ -4924,6 +5190,7 @@ static void draw_toolbox_window(app_state_t *app) {
         draw_strip_button(app, r, (rubraview_pal_rect_t){ t.x, t.y, t.width, t.height }, i, &facts, i == hovered,
                           COLOR_TILE_FILL, COLOR_BOX_BORDER);
     }
+    draw_seekfan(app, r, true);
     if (!rubraview_pal_render_end(r)) app->toolbox_window_drawn = 0.0;
 }
 
@@ -4968,6 +5235,7 @@ static void toolbox_window_pump(app_state_t *app) {
                 app->toolbox_window_pointer_x = event.mouse.x;
                 app->toolbox_window_pointer_y = event.mouse.y;
                 app->toolbox_window_drawn = 0.0;
+                if (app->seekfan_detached) seekfan_pointer(app, event.mouse.x, event.mouse.y);
                 if (app->pagebar_dragging && app->pagebar_detached) pagebar_drag(app, event.mouse.x, false);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
@@ -4989,13 +5257,12 @@ static void toolbox_window_pump(app_state_t *app) {
                     break;
                 }
                 rubraview_toolbox_layout_t l = toolbox_window_layout(app, &m);
-                if (app->media && app->media_info.duration_seconds > 0.0 && l.timeline.width > 0.0 &&
+                if (play_duration(app) > 0.0 && l.timeline.width > 0.0 &&
                     event.mouse.x >= l.timeline.x && event.mouse.x < l.timeline.x + l.timeline.width &&
                     event.mouse.y >= m.anchor_size + l.timeline.y - l.timeline.height &&
                     event.mouse.y < m.anchor_size + l.timeline.y + l.timeline.height * 2.0) {
-                    double seconds = rubraview_seekbar_time(l.timeline.x, l.timeline.width, event.mouse.x, app->media_info.duration_seconds);
-                    media_seek_to(app, seconds);
-                    app->media_position = seconds;
+                    double seconds = rubraview_seekbar_time(l.timeline.x, l.timeline.width, event.mouse.x, play_duration(app));
+                    play_seek(app, seconds);
                     app->toolbox_window_drawn = 0.0;
                     break;
                 }
@@ -5014,6 +5281,13 @@ static void toolbox_window_pump(app_state_t *app) {
                     if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) {
                         /* D-33: decided on release, a double tap or a hold */
                         sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
+                    } else if (enabled && seek_tile_action(app->toolbox_tiles[i].action, &(bool){ false })) {
+                        /* A tap seeks on release; held, it offers longer steps. */
+                        bool forward = false;
+                        (void)seek_tile_action(app->toolbox_tiles[i].action, &forward);
+                        app->seekfan_detached = true;
+                        rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
+                                                toolbox_window_tile(app, &m, i));
                     } else if (enabled) {
                         handle_action(app, app->toolbox_tiles[i].action);
                     }
@@ -5029,6 +5303,7 @@ static void toolbox_window_pump(app_state_t *app) {
                     break;
                 }
                 sub_tile_result(app, rubraview_tap_release(&app->sub_tap, rubraview_pal_time_now_seconds()));
+                seekfan_let_go(app);
                 break;
             default:
                 break;
@@ -5217,13 +5492,12 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     if (rubraview_box_pin_click(&app->menubox, &metrics, x, y)) return true;
     if (toolbox_here && rubraview_box_pin_click(&app->toolbox, &metrics, x, y)) return true;
     /* The strip's seek bar: a click puts the film there. */
-    if (toolbox_here && app->media && app->media_info.duration_seconds > 0.0) {
+    if (toolbox_here && play_duration(app) > 0.0) {
         rubraview_rect_t bar = rubraview_box_timeline_rect(&app->toolbox, &metrics);
         if (bar.width > 0.0 && x >= bar.x && x < bar.x + bar.width &&
             y >= bar.y - bar.height && y < bar.y + bar.height * 2.0) {   /* a little taller than drawn: easier to hit */
-            double seconds = rubraview_seekbar_time(bar.x, bar.width, x, app->media_info.duration_seconds);
-            media_seek_to(app, seconds);
-            app->media_position = seconds;
+            double seconds = rubraview_seekbar_time(bar.x, bar.width, x, play_duration(app));
+            play_seek(app, seconds);
             note_activity(app);
             return true;
         }
@@ -5280,6 +5554,14 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
                 /* D-33: a tap toggles, a double tap or a hold chooses —
                    so this tile is decided on release, not on the press. */
                 sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
+            } else if (enabled && seek_tile_action(app->toolbox_tiles[tile].action, &(bool){ false })) {
+                /* Owner, 2026-10-09: a tap seeks 5 s on release; held, the
+                   button offers longer steps to drag onto. */
+                bool forward = false;
+                (void)seek_tile_action(app->toolbox_tiles[tile].action, &forward);
+                app->seekfan_detached = false;
+                rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
+                                        rubraview_box_tile_rect(&app->toolbox, &metrics, tile));
             } else if (enabled) {
                 handle_action(app, app->toolbox_tiles[tile].action);
             }
@@ -5384,7 +5666,7 @@ static void timeline_geometry(const app_state_t *app, double win_w, double win_h
 
 /* The strip's bar for a still picture: its place in the folder or archive. */
 static bool pagebar_shown(const app_state_t *app) {
-    return !app->media && page_count(app) > 1;
+    return !app->media && !anim_plays(app) && page_count(app) > 1;
 }
 
 /* A click on that bar: the page whose share of the bar it landed in. */
@@ -5427,8 +5709,8 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         rubraview_pal_rect_t track = { ox + l->timeline.x, oy + l->timeline.y + l->timeline.height * 0.35,
                                        l->timeline.width, l->timeline.height * 0.3 };
         rubraview_pal_render_fill_rect(r, track, 0x60FFFFFFu, track.height * 0.5);
-        double duration = app->media_info.duration_seconds;
-        double f = duration > 0.0 ? app->media_position / duration : 0.0;
+        double duration = play_duration(app);
+        double f = duration > 0.0 ? play_position(app) / duration : 0.0;
         bool pages = pagebar_shown(app) || app->pagebar_dragging;   /* held, it stays a page bar */
         if (pages) f = rubraview_pagebar_fraction((size_t)current_page_index(app), page_count(app));
         if (f < 0.0) f = 0.0;
@@ -5449,6 +5731,16 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
         n = (int)rubraview_media_status(place, sizeof(place), app->media_position, app->media_info.duration_seconds,
                                         volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
+    }
+    if (anim_plays(app) && !app->pagebar_dragging && hovered < 0) {
+        /* D-82: an animation's time, and its speed when that is not 1x. */
+        char at[32], total[32], speed[16] = "";
+        u8str_t a = rubraview_format_timecode(at, sizeof(at), play_position(app), false);
+        u8str_t t = rubraview_format_timecode(total, sizeof(total), play_duration(app), false);
+        if (fabs(app->animation.speed - 1.0) > 1e-6) speed_text(speed, sizeof(speed), app->animation.speed);
+        n = snprintf(place, sizeof(place), "%.*s / %.*s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr,
+                     speed[0] ? "  " : "", speed, app->ab_a < 0.0 ? "" : app->ab_b < 0.0 ? "  A-" : "  A-B");
+        if (n < 0 || (size_t)n >= sizeof(place)) n = 0;
     }
     if (n > 0) {
         /* The place at the right end of the line, the name in what is left. */
@@ -10705,6 +10997,7 @@ static void render_frame(app_state_t *app) {
         draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_sub_list(app);   /* D-33: on top of every box */
+        draw_seekfan(app, app->renderer, false);
         draw_chrome_answers(app, (double)win_w, (double)win_h);
         draw_panel(app);
         draw_curve_widget(app);
@@ -11328,6 +11621,9 @@ static void finish_open(app_state_t *app, size_t start_page) {
     rubraview_filmstrip_reveal(&app->filmstrip, start_page);
     build_slides(app);
     update_precache(app);
+    /* A file opened straight onto an animation: it plays from the start,
+       not only once a page has been turned (found 2026-10-09, D-82). */
+    animation_prepare(app);
     media_prepare(app);
     update_window_title(app);
 }
@@ -13001,6 +13297,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                    if (!app.seekfan_detached) seekfan_pointer(&app, event.mouse.x, event.mouse.y);
                     if (app.view_dragging) {
                         app.pan_x += event.mouse.x - app.view_drag_x;
                         app.pan_y += event.mouse.y - app.view_drag_y;
@@ -13240,6 +13537,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                     app.view_dragging = false;
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
+                    seekfan_let_go(&app);
                     app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
                     if (app.fav_press >= 0) {
                         size_t from = (size_t)app.fav_press;
@@ -13377,6 +13675,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         app.last_frame_seconds = now;
         tick_timers(&app, dt);
         sub_tile_result(&app, rubraview_tap_tick(&app.sub_tap, now));   /* D-33: a tap decided, or a hold */
+        if (rubraview_seekfan_tick(&app.seekfan, now)) app.toolbox_window_drawn = 0.0;   /* held: its choices open */
         /* D-34: thumbnails for the picker's tiles, a few a pass; given back when it closes. */
         if (app.picker_open) {
             picker_thumbs_step(&app);
@@ -13400,11 +13699,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         /* Redraw only while something can change on screen. Without a
            GPU, Direct2D rasterises on the CPU, and a loop that redrew
            the same still image kept two cores busy doing it. */
-        bool media_playing = app.media && !app.media_paused;
-        bool others_moving = app.slideshow_running || app.anim_active ||
+        /* D-82: an animation is paced as a film is — a frame when it has a
+           new picture, not on every pass (VM, 2026-10-09: every pass kept
+           two cores busy on a GIF and the keys waited behind it). */
+        bool media_playing = (app.media && !app.media_paused) || (anim_plays(&app) && !app.animation.paused);
+        bool others_moving = app.slideshow_running ||
                              app.notice_seconds > 0.0 || app.pending_decode_count > 0 ||
                              app.rename_active ||   /* the caret blinks (owner, 2026-09-23) */
                              rubraview_tap_waiting(&app.sub_tap) ||   /* D-33: a tap or a hold being decided */
+                             app.seekfan.down ||                      /* a seek button held: its choices open and light up */
                              app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE ||
                              app.picker_thumbs_arrived ||   /* D-34: a picture came in; the thread wakes the loop */
                              app.tiles_arrived;             /* D-40: a sharper tile came in */

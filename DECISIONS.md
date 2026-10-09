@@ -175,6 +175,26 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-09: D-83 The seek buttons: a tap is 5 s, held they offer 5 s to 5 min; Ctrl+Enter shows the file in Explorer
+
+- Status: Accepted (owner 2026-10-09: "툴바에서 영상 재생중일 때 앞으로 뒤로가 30초가 기본인건 너무 많아요. 5초로 줄여주시고 누르고 있으면 드래그로 5초 10초 30초 1분 5분 버튼들 띄워주세요", then "-30s +30s 버튼은 없애고 ... 기본 뒤로 앞으로 버튼에 프레스 홀드 기능을 추가"; and "Ctrl+Enter 를 하면 현재 보고 있는 파일(압축파일 내라면 압축파일 전체)을 선택한 상태의 탐색기 창을 열게 해 주세요").
+- Decision:
+  - The toolbox's −30 s and +30 s buttons are gone (video and music). Back and forward seek 5 s on a tap, decided when the button is let go. Held 0.4 s, a row of five buttons opens over the button — 5 s, 10 s, 30 s, 1 min, 5 min, mirrored for back — the pointer is dragged onto one and let go; let go elsewhere, nothing happens. The same in the detached toolbox, inside its own window. `rubraview_seekfan_*` in `ui_box.c`. `Shift`+arrows and the edge buttons' second step keep their 30 s.
+  - `reveal_in_explorer`, `Ctrl+Enter`, File menu "Show in Explorer": `SHOpenFolderAndSelectItems` on the file on screen, or on the archive for a page inside one.
+- Consequences: the row's place (over the button, under it when there is no room), the 0.4 s and the mirroring are the implementer's picks. VM: tap, hold-and-choose, hold-and-let-go-elsewhere in the docked toolbox; Explorer with the archive picked out. Not run: the detached toolbox's row, a finger.
+
+## 2026-10-09: D-82 An animated GIF or WebP is played as a film is, and laid together frame by frame
+
+- Status: Accepted (owner 2026-10-09: "애니메이티드 webp는 동영상처럼 처리하게 해 주세요. 재생 가능하고 구간반복 가능하고 등등."; "애니메이티드 gif 도 색이 조금 이상하게 보여요").
+- Context: measured on the VM — an animated WebP did not play at all (only the GIF's delay was read, so its frames had none and it was taken for a multi-page file); a GIF's frames were shown as the container holds them, each often a rectangle of the picture with see-through pixels, so sizes and colours jumped; each frame reopened and re-read the file; a file opened straight onto an animation did not start until a page was turned.
+- Decision:
+  - `rubraview_pal_anim_open/read/close`: the decoder stays open. WebP's time comes from `/ANMF/FrameDuration` (the Windows codec hands each frame over whole); a GIF's place, disposal and the whole picture's size from its metadata. A delay of 10 ms or less is shown as 100 ms, as browsers do.
+  - `rubraview_frame_canvas_*` (core, host-tested) lays frames over one another — keep, clear, restore — starting from the nearest frame that needs none before it. Every finished frame is kept while all fit in 384 MB; a longer animation is drawn again when it goes back.
+  - It is played as a film: a place in seconds, the toolbox's seek bar (click), ±5 s (arrows, buttons, D-83), frame steps, Stop, A-B (`[`, `]`, `\`, the typed box), speed on the film's ladder 0.25x–4x (kept for the session), the time in the title when paused, stepped or sought. `media_repeat_cycle` (`Ctrl+R`, the At the end button) cycles the animation's own end — `viewer.animation_end`: `loop` (default), `once`, `next` — apart from a film's, so a folder of GIFs does not start turning its own pages.
+  - A tick's left-over time goes to the next frame (it was dropped, so every animation ran slow by up to a tick a frame), and the loop draws when a frame is up rather than on every pass.
+  - Applies to every animated GIF and WebP alike (one path). APNG is not animated by Windows' PNG codec and stays a still.
+- Consequences: found on the way and fixed — D-81's two tile sets reset each other on every frame in a two-page layout (`tiles_reset` for both where one was meant). Not done: sound (none exists), an animation past 8192 frames (the rest is cut), going back in an animation too long to keep costs a decode from its start, colour profiles in animations. VM: T131.
+
 ## 2026-10-09: D-81 Enlarging is our own: Lanczos-3, echoes removed, sharpened inside the neighbours' range
 
 - Status: Accepted (owner 2026-10-09: "저해상도 이미지를 고해상도로 리사이징 할 때 되도록 잘 보이게 리사이징 모듈을 잘 선택하고 다듬어 주세요. 뭔가 고화질 공개된 리사이징 라이브러리 있는지 살펴보시고 벤더링 ... 라이선스는 mit", then "자체구현으로도 충분하면 자체구현도 좋습니다")

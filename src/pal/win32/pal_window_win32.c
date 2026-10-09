@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <math.h>
+#include <limits.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -1485,6 +1486,22 @@ bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
     CloseHandle(info.hProcess);
     if (out_exit_code) *out_exit_code = (int)code;
     return true;
+}
+
+bool rubraview_pal_shell_reveal(u8str_t path) {
+    WCHAR wide[MAX_PATH * 2];
+    if (path.len == 0 || path.len > INT_MAX) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
+    if (n <= 0) return false;
+    wide[n] = L'\0';
+    /* The shell names a file with backslashes only. */
+    for (int i = 0; i < n; ++i) if (wide[i] == L'/') wide[i] = L'\\';
+    PIDLIST_ABSOLUTE item = ILCreateFromPathW(wide);
+    if (!item) return false;
+    /* The folder's own window if one is open, a new one otherwise. */
+    HRESULT hr = SHOpenFolderAndSelectItems(item, 0, NULL, 0);
+    ILFree(item);
+    return SUCCEEDED(hr);
 }
 
 void rubraview_pal_shell_open_default_apps(void) {

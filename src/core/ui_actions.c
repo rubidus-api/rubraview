@@ -4,7 +4,7 @@
 
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
-    "rename_file", "delete_file", "copy_to_folder", "move_to_folder", "toggle_file_list",
+    "rename_file", "delete_file", "reveal_in_explorer", "copy_to_folder", "move_to_folder", "toggle_file_list",
     "layout_single", "layout_dual", "layout_book", "layout_webtoon", "layout_comic", "toggle_layout",
     "toggle_reading_order", "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",

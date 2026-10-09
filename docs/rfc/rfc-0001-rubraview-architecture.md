@@ -406,6 +406,7 @@ the keymap does not do is listed after it.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
@@ -474,8 +475,8 @@ the keymap does not do is listed after it.
 | `,` | One frame back |
 | `Ctrl+]` | Faster (0.25x a step) |
 | `Ctrl+[` | Slower (0.25x a step) |
-| `Right` | 5 seconds on |
-| `Left` | 5 seconds back |
+| `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
+| `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
 | `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
