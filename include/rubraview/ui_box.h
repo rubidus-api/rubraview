@@ -279,6 +279,54 @@ double rubraview_box_opacity_step(double percent, double notches);
 /** A colour with its alpha scaled by `percent` (of what it had); red, green and blue untouched. */
 uint32_t rubraview_box_fade(uint32_t argb, double percent);
 
+/*
+ * The seek buttons' choices (owner, 2026-10-09). A tap on "back" or
+ * "forward" seeks five seconds. Held, a row of longer steps opens over the
+ * button — 5 s, 10 s, 30 s, 1 min, 5 min — and the pointer, still down, is
+ * dragged onto one; letting go there seeks by it, letting go anywhere else
+ * does nothing. For "back" the row is mirrored, so further from the button
+ * is further back.
+ */
+#define RUBRAVIEW_SEEKFAN_COUNT 5
+#define RUBRAVIEW_SEEKFAN_HOLD_SECONDS 0.4
+
+typedef struct rubraview_seekfan {
+    bool    down;        /* a seek button is being pressed */
+    bool    open;        /* held long enough: the row is up */
+    bool    forward;
+    double  pressed_at;
+    rubraview_rect_t tile;   /* the button that was pressed */
+    int32_t hover;       /* the choice under the pointer, -1 none */
+} rubraview_seekfan_t;
+
+/** The step of choice `i` in seconds, and its caption ("5s" ... "5m"). */
+double rubraview_seekfan_seconds(int32_t i);
+const char *rubraview_seekfan_label(int32_t i);
+
+void rubraview_seekfan_press(rubraview_seekfan_t *fan, bool forward, double now, rubraview_rect_t tile);
+
+/** Each pass while a button is down. True the moment the row opens. */
+bool rubraview_seekfan_tick(rubraview_seekfan_t *fan, double now);
+
+/**
+ * Where choice `i` is drawn: a row of buttons the tile's size over the
+ * tile, centred on it and kept inside `bounds_width`; under the tile when
+ * there is no room over it.
+ */
+rubraview_rect_t rubraview_seekfan_button(const rubraview_seekfan_t *fan, int32_t i, double gap,
+                                          double bounds_width, double bounds_height);
+
+/** The pointer moved (still down): which choice it is over. */
+void rubraview_seekfan_pointer(rubraview_seekfan_t *fan, double x, double y, double gap,
+                               double bounds_width, double bounds_height);
+
+/**
+ * The button was let go. The seconds to seek by, signed: five for a tap,
+ * the chosen step from the open row, 0 when the row was open and the
+ * pointer on none of it (or nothing was down).
+ */
+double rubraview_seekfan_release(rubraview_seekfan_t *fan);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.38** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.38/rubraview-v0.0.38.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.39** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.39/rubraview-v0.0.39.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -57,6 +57,7 @@
 | `Shift+Delete` | 완전 삭제(확인함) |
 | `Ctrl+Z` | 이동·복사·이름 바꾸기 되돌리기 |
 | `F2` | 이름 바꾸기 |
+| `Ctrl+Enter` | 이 파일을 선택한 탐색기 창 열기(압축 파일 안이면 압축 파일) |
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
@@ -125,8 +126,8 @@
 | `,` | 한 프레임 뒤로 |
 | `Ctrl+]` | 빠르게(0.25배씩) |
 | `Ctrl+[` | 느리게(0.25배씩) |
-| `Right` | 5초 뒤로 |
-| `Left` | 5초 앞으로 |
+| `Right` | 5초 뒤로; 툴바 버튼을 길게 누르면 5초·10초·30초·1분·5분이 떠서 끌어다 놓아 고름 |
+| `Left` | 5초 앞으로; 툴바 버튼을 길게 누르면 같은 방식으로 5초~5분 |
 | `Shift+Right` | 30초 뒤로 |
 | `Shift+Left` | 30초 앞으로 |
 | `Up` | 소리 5% 크게 |
@@ -192,6 +193,8 @@
 | 창의 왼쪽·오른쪽 3분의 1을 클릭 | 폴더나 압축 파일을 열었을 때 이전·다음 쪽 (오른쪽→왼쪽 읽기에서는 좌우가 바뀜) |
 | 가운데를 클릭 (그림 한 장만 열었을 때는 어디든) | 도구 상자 열기/닫기 |
 | 왼쪽 버튼을 누른 채 끌기 | 창보다 크게 확대한 그림, 그리고 웹툰 스트립을 옮김 |
+| 도구 상자의 뒤로/앞으로 버튼을 길게 누름 | 버튼 위에 5초·10초·30초·1분·5분이 뜸 — 끌어다 놓아 고름 (짧게 누르면 5초) |
+| 도구 상자의 탐색 막대를 클릭 | 그 위치로 이동 (동영상, 음악, 움직이는 GIF/WebP) |
 | 가운데 버튼 클릭 | 실제 크기 ↔ 창에 맞춤 |
 | 마우스의 뒤로/앞으로 버튼 | 이전/다음 쪽 |
 | `Ctrl` + 휠 | 확대/축소 |

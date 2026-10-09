@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.38** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.38/rubraview-v0.0.38.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.39** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.39/rubraview-v0.0.39.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -58,6 +58,7 @@ ships with, so it cannot drift from them.
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
+| `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
@@ -126,8 +127,8 @@ ships with, so it cannot drift from them.
 | `,` | One frame back |
 | `Ctrl+]` | Faster (0.25x a step) |
 | `Ctrl+[` | Slower (0.25x a step) |
-| `Right` | 5 seconds on |
-| `Left` | 5 seconds back |
+| `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
+| `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
 | `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
@@ -193,6 +194,8 @@ ships with, so it cannot drift from them.
 | Click the left or right third of the window | Previous or next page, when a folder or an archive is open (the sides swap when reading right to left) |
 | Click the middle (or anywhere on a single picture) | The toolbox opens or closes |
 | Hold the left button and drag | Moves a picture zoomed past the window, and the webtoon strip |
+| Hold a toolbox back / forward button | Five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag onto one and let go (a tap seeks 5 s) |
+| Click the toolbox's seek bar | Goes there, in a film, a song or an animated GIF / WebP |
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | `Ctrl` + wheel | Zoom in or out |

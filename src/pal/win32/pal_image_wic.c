@@ -8,6 +8,7 @@
 #include <wincodec.h>
 #include <d2d1.h>
 #include <string.h>
+#include <stdlib.h>
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/tiles.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
@@ -515,6 +516,7 @@ size_t rubraview_pal_image_frame_info(u8str_t path,
     if (FAILED(hr)) count = 0;
 
     for (UINT i = 0; out_frames && i < count && (size_t)i < cap; ++i) {
+        out_frames[i] = (rubraview_frame_t){ 0 };
         out_frames[i].delay_seconds = frame_delay_seconds(decoder, i);
         out_frames[i].width = 0;
         out_frames[i].height = 0;
@@ -567,6 +569,164 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
     IWICBitmapDecoder_Release(decoder);
     if (stream) IWICStream_Release(stream);
     return result;
+}
+
+/* ---- an animation kept open (D-82) ---- */
+
+struct rubraview_anim_reader {
+    IWICBitmapDecoder *decoder;
+    IWICStream        *stream;   /* over `owned`, for a page that came as bytes */
+    uint8_t           *owned;
+};
+
+/* The WebP codec ships apart from Windows' own; its GUID is not in every SDK's headers. */
+static const GUID ANIM_CONTAINER_WEBP = { 0xe094b0e2, 0x67f2, 0x45b3, { 0xb0, 0xea, 0x11, 0x53, 0x37, 0xca, 0x7c, 0xf3 } };
+
+static bool query_uint(IWICMetadataQueryReader *reader, const WCHAR *name, uint32_t *out) {
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    bool ok = false;
+    if (SUCCEEDED(IWICMetadataQueryReader_GetMetadataByName(reader, name, &value))) {
+        ok = true;
+        switch (value.vt) {
+            case VT_UI1: *out = value.bVal; break;
+            case VT_UI2: *out = value.uiVal; break;
+            case VT_UI4: *out = value.ulVal; break;
+            case VT_I4:  *out = value.lVal > 0 ? (uint32_t)value.lVal : 0; break;
+            case VT_BOOL: *out = value.boolVal ? 1 : 0; break;
+            default: ok = false; break;
+        }
+    }
+    PropVariantClear(&value);
+    return ok;
+}
+
+/* A delay of a hundredth of a second or less is not meant: writers leave
+   it so for "as fast as it goes", and every browser shows a tenth. */
+static double anim_delay(double seconds) {
+    return seconds <= 0.0101 ? 0.1 : seconds;
+}
+
+void rubraview_pal_anim_close(rubraview_anim_reader_t *reader) {
+    if (!reader) return;
+    if (reader->decoder) IWICBitmapDecoder_Release(reader->decoder);
+    if (reader->stream) IWICStream_Release(reader->stream);
+    free(reader->owned);
+    free(reader);
+}
+
+rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *data, size_t size,
+                                                 rubraview_frame_t *out_frames, size_t cap, size_t *out_count,
+                                                 int32_t *out_canvas_width, int32_t *out_canvas_height) {
+    if (!out_frames || cap == 0 || !out_count || !out_canvas_width || !out_canvas_height) return NULL;
+    *out_count = 0;
+    *out_canvas_width = *out_canvas_height = 0;
+
+    rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)calloc(1, sizeof(*reader));
+    if (!reader) return NULL;
+    if (path.len > 0) {
+        reader->decoder = decoder_for_path(path);
+    } else if (data && size > 0) {
+        /* The stream reads the bytes for as long as the decoder lives. */
+        reader->owned = (uint8_t*)malloc(size);
+        if (reader->owned) {
+            memcpy(reader->owned, data, size);
+            reader->decoder = decoder_for_memory(reader->owned, size, &reader->stream);
+        }
+    }
+    GUID container;
+    UINT count = 0;
+    if (!reader->decoder ||
+        FAILED(IWICBitmapDecoder_GetContainerFormat(reader->decoder, &container)) ||
+        FAILED(IWICBitmapDecoder_GetFrameCount(reader->decoder, &count)) || count <= 1) {
+        rubraview_pal_anim_close(reader);
+        return NULL;
+    }
+    bool gif = IsEqualGUID(&container, &GUID_ContainerFormatGif);
+    bool webp = IsEqualGUID(&container, &ANIM_CONTAINER_WEBP);
+    if (!gif && !webp) {
+        rubraview_pal_anim_close(reader);
+        return NULL;
+    }
+
+    /* A GIF says the whole picture's size apart from its frames'. */
+    uint32_t canvas_w = 0, canvas_h = 0;
+    if (gif) {
+        IWICMetadataQueryReader *whole = NULL;
+        if (SUCCEEDED(IWICBitmapDecoder_GetMetadataQueryReader(reader->decoder, &whole)) && whole) {
+            (void)query_uint(whole, L"/logscrdesc/Width", &canvas_w);
+            (void)query_uint(whole, L"/logscrdesc/Height", &canvas_h);
+            IWICMetadataQueryReader_Release(whole);
+        }
+    }
+
+    size_t described = 0;
+    for (UINT i = 0; i < count && described < cap; ++i) {
+        IWICBitmapFrameDecode *frame = NULL;
+        if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, i, &frame)) || !frame) break;
+        UINT w = 0, h = 0;
+        if (FAILED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) || w == 0 || h == 0 || w > INT32_MAX || h > INT32_MAX) {
+            IWICBitmapFrameDecode_Release(frame);
+            break;
+        }
+        rubraview_frame_t *out = &out_frames[described];
+        *out = (rubraview_frame_t){ .delay_seconds = 0.1, .width = (int32_t)w, .height = (int32_t)h,
+                                    .disposal = RUBRAVIEW_FRAME_KEEP, .replaces = webp };
+        IWICMetadataQueryReader *meta = NULL;
+        if (SUCCEEDED(IWICBitmapFrameDecode_GetMetadataQueryReader(frame, &meta)) && meta) {
+            uint32_t v = 0;
+            if (gif) {
+                if (query_uint(meta, L"/grctlext/Delay", &v)) out->delay_seconds = anim_delay((double)v / 100.0);
+                if (query_uint(meta, L"/grctlext/Disposal", &v)) {
+                    out->disposal = v == 2 ? RUBRAVIEW_FRAME_CLEAR : v == 3 ? RUBRAVIEW_FRAME_RESTORE : RUBRAVIEW_FRAME_KEEP;
+                }
+                if (query_uint(meta, L"/imgdesc/Left", &v)) out->left = (int32_t)v;
+                if (query_uint(meta, L"/imgdesc/Top", &v)) out->top = (int32_t)v;
+            } else {
+                /* The WebP codec hands each frame over as the whole picture
+                   already laid together; only its time is read. */
+                if (query_uint(meta, L"/ANMF/FrameDuration", &v)) out->delay_seconds = anim_delay((double)v / 1000.0);
+            }
+            IWICMetadataQueryReader_Release(meta);
+        }
+        IWICBitmapFrameDecode_Release(frame);
+        if (described == 0 && (canvas_w == 0 || canvas_h == 0)) { canvas_w = w; canvas_h = h; }
+        ++described;
+    }
+    if (described <= 1 || canvas_w == 0 || canvas_h == 0 || canvas_w > 32767 || canvas_h > 32767) {
+        rubraview_pal_anim_close(reader);
+        return NULL;
+    }
+    *out_count = described;
+    *out_canvas_width = (int32_t)canvas_w;
+    *out_canvas_height = (int32_t)canvas_h;
+    return reader;
+}
+
+bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint8_t *dst, size_t stride, int32_t rows) {
+    IWICImagingFactory *factory = wic_factory();
+    if (!reader || !reader->decoder || !factory || !dst || rows <= 0 || index > UINT_MAX) return false;
+
+    IWICBitmapFrameDecode *frame = NULL;
+    if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, (UINT)index, &frame)) || !frame) return false;
+
+    bool ok = false;
+    IWICFormatConverter *converter = NULL;
+    if (SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter) {
+        UINT w = 0, h = 0;
+        if (SUCCEEDED(IWICFormatConverter_Initialize(converter, (IWICBitmapSource*)frame,
+                                                     &GUID_WICPixelFormat32bppPBGRA,
+                                                     WICBitmapDitherTypeNone, NULL, 0.0,
+                                                     WICBitmapPaletteTypeCustom)) &&
+            SUCCEEDED(IWICFormatConverter_GetSize(converter, &w, &h)) &&
+            w > 0 && h > 0 && (size_t)w * 4 <= stride && h <= (UINT)rows &&
+            stride <= UINT_MAX && stride * (size_t)h <= UINT_MAX) {
+            ok = SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, (UINT)stride, (UINT)(stride * h), dst));
+        }
+        IWICFormatConverter_Release(converter);
+    }
+    IWICBitmapFrameDecode_Release(frame);
+    return ok;
 }
 
 rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_renderer_t *renderer,

@@ -166,6 +166,10 @@ bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool 
  *  not run — the question was refused. */
 bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code);
 
+/** An Explorer window on the file's folder with the file picked out.
+ *  False when there is no such file to show. */
+bool rubraview_pal_shell_reveal(u8str_t path);
+
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
 
