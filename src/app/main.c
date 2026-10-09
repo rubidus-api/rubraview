@@ -470,6 +470,8 @@ typedef struct app_state {
     rubraview_fit_mode_t fit_mode;
     double zoom;
     double pan_x, pan_y;
+    bool   view_dragging;      /* the left button held on a picture larger than the window: it follows the pointer */
+    double view_drag_x, view_drag_y;
     double strip_offset;       /* the strip (webtoon layout): how far into the top page the window's top edge is */
     double strip_base_w;       /* the picture width every page of the strip is drawn at, before the window and zoom */
     size_t strip_base_count;   /* the page count it was taken for */
@@ -692,19 +694,23 @@ typedef struct app_state {
 
     /* D-40: sharper tiles over a page shown reduced (D-39), decoded on a
        thread from the file and drawn over the reduced texture. */
-    rubraview_tiles_t     *tiles;              /* the thread, started with the first page that needs it */
-    uint32_t               tile_generation;    /* one per page: late tiles are known by it */
-    int32_t                tile_page;          /* the page the tiles are for, -1 none */
-    rubraview_texture_t   *tile_page_texture;  /* ...and its texture then: reloaded is a new page */
-    struct tile_slot {
-        rubraview_tile_key_t key;
-        rubraview_texture_t *texture;
-        uint64_t used;
-        bool live, failed;
-    } tile_slots[96];
-    uint64_t               tile_clock;
-    rubraview_tile_key_t   tile_asked[128];    /* the last request, so an unchanged view asks nothing */
-    size_t                 tile_asked_count;
+    /* Two sets, one for each page of a pair (owner, 2026-10-09: enlarged
+       pages get tiles too, and both pages of a spread must match). */
+    struct tile_set {
+        rubraview_tiles_t     *tiles;          /* the thread, started with the first page that needs it */
+        uint32_t               generation;     /* one per page: late tiles are known by it */
+        int32_t                page;           /* the page the tiles are for, -1 none */
+        rubraview_texture_t   *page_texture;   /* ...and its texture then: reloaded is a new page */
+        struct tile_slot {
+            rubraview_tile_key_t key;
+            rubraview_texture_t *texture;
+            uint64_t used;
+            bool live, failed;
+        } slots[96];
+        uint64_t               clock;
+        rubraview_tile_key_t   asked[128];     /* the last request, so an unchanged view asks nothing */
+        size_t                 asked_count;
+    } tile_sets[2];
     bool                   tiles_arrived;      /* a tile came in this pass: draw */
     bool                   picker_has_pending;
     rubraview_confirm_t    picker_confirm;
@@ -2674,50 +2680,54 @@ static void thumbs_wake(void *context) {
 
 /* ---- D-40: tiles over a page shown reduced ---- */
 
-#define TILE_SLOTS (sizeof(((app_state_t*)0)->tile_slots) / sizeof(((app_state_t*)0)->tile_slots[0]))
-#define TILE_ASK_MAX (sizeof(((app_state_t*)0)->tile_asked) / sizeof(((app_state_t*)0)->tile_asked[0]))
+#define TILE_SLOTS (sizeof(((struct tile_set*)0)->slots) / sizeof(((struct tile_set*)0)->slots[0]))
+#define TILE_ASK_MAX (sizeof(((struct tile_set*)0)->asked) / sizeof(((struct tile_set*)0)->asked[0]))
+#define TILE_SETS 2
 
 /* Every tile goes, and what the thread still makes for them is known as
    late by the new generation. */
-static void tiles_reset(app_state_t *app) {
+static void tile_set_reset(struct tile_set *ts) {
     for (size_t i = 0; i < TILE_SLOTS; ++i) {
-        if (app->tile_slots[i].texture) rubraview_pal_texture_destroy(app->tile_slots[i].texture);
-        app->tile_slots[i] = (struct tile_slot){0};
+        if (ts->slots[i].texture) rubraview_pal_texture_destroy(ts->slots[i].texture);
+        ts->slots[i] = (struct tile_slot){0};
     }
-    app->tile_generation++;
-    app->tile_page = -1;
-    app->tile_page_texture = NULL;
-    app->tile_asked_count = 0;
-    if (app->tiles) rubraview_pal_tiles_want(app->tiles, app->tile_generation, NULL, 0);
+    ts->generation++;
+    ts->page = -1;
+    ts->page_texture = NULL;
+    ts->asked_count = 0;
+    if (ts->tiles) rubraview_pal_tiles_want(ts->tiles, ts->generation, NULL, 0);
+}
+
+static void tiles_reset(app_state_t *app) {
+    for (size_t i = 0; i < TILE_SETS; ++i) tile_set_reset(&app->tile_sets[i]);
 }
 
 static bool tile_key_eq(rubraview_tile_key_t a, rubraview_tile_key_t b) {
     return a.level == b.level && a.tx == b.tx && a.ty == b.ty;
 }
 
-static struct tile_slot *tile_find(app_state_t *app, rubraview_tile_key_t key) {
+static struct tile_slot *tile_find(struct tile_set *ts, rubraview_tile_key_t key) {
     for (size_t i = 0; i < TILE_SLOTS; ++i) {
-        if (app->tile_slots[i].live && tile_key_eq(app->tile_slots[i].key, key)) return &app->tile_slots[i];
+        if (ts->slots[i].live && tile_key_eq(ts->slots[i].key, key)) return &ts->slots[i];
     }
     return NULL;
 }
 
 /* Each pass: turn what the thread has made into textures, the least
    recently drawn tile making room when every slot is taken. */
-static void tiles_take_all(app_state_t *app) {
-    app->tiles_arrived = false;
-    if (!app->tiles) return;
+static void tile_set_take_all(app_state_t *app, struct tile_set *ts) {
+    if (!ts->tiles) return;
     rubraview_tile_result_t done;
-    while (rubraview_pal_tiles_take(app->tiles, &done)) {
-        if (done.generation == app->tile_generation && !tile_find(app, done.key)) {
+    while (rubraview_pal_tiles_take(ts->tiles, &done)) {
+        if (done.generation == ts->generation && !tile_find(ts, done.key)) {
             struct tile_slot *slot = NULL;
             for (size_t i = 0; i < TILE_SLOTS && !slot; ++i) {
-                if (!app->tile_slots[i].live) slot = &app->tile_slots[i];
+                if (!ts->slots[i].live) slot = &ts->slots[i];
             }
             if (!slot) {
-                struct tile_slot *oldest = &app->tile_slots[0];
+                struct tile_slot *oldest = &ts->slots[0];
                 for (size_t k = 1; k < TILE_SLOTS; ++k) {
-                    if (app->tile_slots[k].used < oldest->used) oldest = &app->tile_slots[k];
+                    if (ts->slots[k].used < oldest->used) oldest = &ts->slots[k];
                 }
                 if (oldest->texture) rubraview_pal_texture_destroy(oldest->texture);
                 *oldest = (struct tile_slot){0};
@@ -2731,7 +2741,7 @@ static void tiles_take_all(app_state_t *app) {
                     texture = NULL;
                 }
             }
-            *slot = (struct tile_slot){ .key = done.key, .texture = texture, .used = ++app->tile_clock,
+            *slot = (struct tile_slot){ .key = done.key, .texture = texture, .used = ++ts->clock,
                                         .live = true, .failed = texture == NULL };
             app->tiles_arrived = true;
         }
@@ -2739,12 +2749,17 @@ static void tiles_take_all(app_state_t *app) {
     }
 }
 
+static void tiles_take_all(app_state_t *app) {
+    app->tiles_arrived = false;
+    for (size_t i = 0; i < TILE_SETS; ++i) tile_set_take_all(app, &app->tile_sets[i]);
+}
+
 /* RV-085: an archive page has no file for the thread to read, so it is
    read here once — the page source (a CB7's solid block, the SDK's index)
    belongs to this thread — into an arena of just its size, not the app's,
    and handed over as a copy. Without it every tile fails once and is not
    asked for again, as for a file that cannot be read. */
-static void tiles_give_archive_page(app_state_t *app, int32_t index, int32_t pw, int32_t ph) {
+static void tiles_give_archive_page(app_state_t *app, struct tile_set *ts, int32_t index, int32_t pw, int32_t ph) {
     uint8_t *copy = NULL;
     size_t copy_size = 0;
     uint64_t size = rubraview_page_source_entry_size(&app->source, (size_t)index);
@@ -2766,31 +2781,50 @@ static void tiles_give_archive_page(app_state_t *app, int32_t index, int32_t pw,
         }
         free(mem);
     }
-    rubraview_pal_tiles_source_bytes(app->tiles, app->tile_generation, copy, copy_size, true, pw, ph);
+    rubraview_pal_tiles_source_bytes(ts->tiles, ts->generation, copy, copy_size, true, pw, ph);
+}
+
+/* D-81: is this page, shown larger than its own pixels, to be enlarged
+   sharp? Not with the pixel-art toggle or a plainer scaling filter chosen
+   (the reader asked for those pixels), nor for a film or an animation,
+   whose picture changes under the tiles. */
+static bool enlarge_sharp(const app_state_t *app, int32_t index) {
+    if (app->force_nearest || app->anim_active || index == app->media_page) return false;
+    if (rubraview_settings_get(&app->settings, U8("viewer"), U8("enlarge")) < 0.5) return false;
+    return (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("interpolation"))) >= 2;
 }
 
 /* After a reduced page is drawn: the tiles on screen, sharper, over it,
    and a request for those not yet made. `place` maps picture pixels to
    the screen (the reader's rotation included); `scale` is its size. */
-static void draw_page_tiles(app_state_t *app, int32_t index, const app_page_t *page,
+static void draw_page_tiles(app_state_t *app, int which, int32_t index, const app_page_t *page,
                             rubraview_mat3x2_t place, double scale, int32_t win_w, int32_t win_h,
                             double opacity, rubraview_interpolation_t interp) {
+    struct tile_set *ts = &app->tile_sets[which == 1 ? 1 : 0];
     int32_t pw = 0, ph = 0;
     page_picture_size(page, &pw, &ph);
-    if (!page->reduced || !rubraview_tiles_wanted(scale, pw, page->width)) return;
-    u8str_t path = app->source.pages[index].path;
-    if (!app->tiles) {
-        app->tiles = rubraview_pal_tiles_start(thumbs_wake, app->window);
-        if (!app->tiles) return;
+    /* Sharper than the texture in two cases: the page is held reduced and
+       shown larger than that (D-40), or it is shown larger than its own
+       pixels and enlarging is set to sharp (D-81). */
+    bool reduced = page->reduced && rubraview_tiles_wanted(scale, pw, page->width);
+    bool enlarged = !reduced && rubraview_tile_level_enlarged(scale) < 0 && enlarge_sharp(app, index);
+    if (!reduced && !enlarged) {
+        if (ts->page == index && ts->page_texture) tile_set_reset(ts);   /* back at its own size: the tiles are of no use */
+        return;
     }
-    if (app->tile_page != index || app->tile_page_texture != page->texture) {
+    u8str_t path = app->source.pages[index].path;
+    if (!ts->tiles) {
+        ts->tiles = rubraview_pal_tiles_start(thumbs_wake, app->window);
+        if (!ts->tiles) return;
+    }
+    if (ts->page != index || ts->page_texture != page->texture) {
         tiles_reset(app);
-        app->tile_page = index;
-        app->tile_page_texture = page->texture;
+        ts->page = index;
+        ts->page_texture = page->texture;
         if (path.len > 0) {
-            rubraview_pal_tiles_source(app->tiles, app->tile_generation, path, true, pw, ph);
+            rubraview_pal_tiles_source(ts->tiles, ts->generation, path, true, pw, ph);
         } else {
-            tiles_give_archive_page(app, index, pw, ph);
+            tiles_give_archive_page(app, ts, index, pw, ph);
         }
     }
 
@@ -2808,16 +2842,16 @@ static void draw_page_tiles(app_state_t *app, int32_t index, const app_page_t *p
         if (ys[i] < y0) y0 = ys[i];
         if (ys[i] > y1) y1 = ys[i];
     }
-    int32_t level = rubraview_tile_level(scale);
-    double margin = (double)((int64_t)RUBRAVIEW_TILE_SIDE << level) / 2.0;   /* a little around, for a pan */
+    int32_t level = enlarged ? rubraview_tile_level_enlarged(scale) : rubraview_tile_level(scale);
+    double margin = rubraview_tile_span(level) / 2.0;   /* a little around, for a pan */
 
     rubraview_tile_key_t keys[128], missing[128];
     size_t n = rubraview_tiles_visible(x0 - margin, y0 - margin, x1 + margin, y1 + margin, level, pw, ph, keys, 128);
     size_t m = 0;
     for (size_t i = 0; i < n; ++i) {
-        struct tile_slot *slot = tile_find(app, keys[i]);
+        struct tile_slot *slot = tile_find(ts, keys[i]);
         if (!slot) { missing[m++] = keys[i]; continue; }
-        slot->used = ++app->tile_clock;
+        slot->used = ++ts->clock;
         int32_t x, y, w, h, ow, oh;
         if (!slot->texture || !rubraview_tile_geometry(keys[i], pw, ph, &x, &y, &w, &h, &ow, &oh)) continue;
         rubraview_mat3x2_t tile = rubraview_mat3x2_multiply(
@@ -2826,10 +2860,10 @@ static void draw_page_tiles(app_state_t *app, int32_t index, const app_page_t *p
             place);
         rubraview_pal_render_draw_texture_opacity(app->renderer, slot->texture, tile, interp, opacity);
     }
-    if (m != app->tile_asked_count || memcmp(missing, app->tile_asked, m * sizeof(missing[0])) != 0) {
-        rubraview_pal_tiles_want(app->tiles, app->tile_generation, missing, m);
-        if (m) memcpy(app->tile_asked, missing, m * sizeof(missing[0]));
-        app->tile_asked_count = m;
+    if (m != ts->asked_count || memcmp(missing, ts->asked, m * sizeof(missing[0])) != 0) {
+        rubraview_pal_tiles_want(ts->tiles, ts->generation, missing, m);
+        if (m) memcpy(ts->asked, missing, m * sizeof(missing[0]));
+        ts->asked_count = m;
     }
 }
 
@@ -6755,7 +6789,7 @@ static void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
             /* A long page held reduced (D-39): the part on screen sharper,
                for the page across the window's middle (the tiles serve one page). */
             if (page->reduced && y <= (double)win_h * 0.5 && y + h > (double)win_h * 0.5) {
-                draw_page_tiles(app, (int32_t)i, page, place, scale, win_w, win_h, 1.0, interp);
+                draw_page_tiles(app, 0, (int32_t)i, page, place, scale, win_w, win_h, 1.0, interp);
             }
         }
         y += h;
@@ -6817,9 +6851,9 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                     app->video_page_h = page->height;
                 }
                 rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
-                if (page->reduced && opacity >= 1.0) {
-                    /* D-40: zoomed past the reduced texture, the sharper tiles on top. */
-                    draw_page_tiles(app, cmd->page_index, page,
+                if (opacity >= 1.0) {
+                    /* D-40, D-81: zoomed past the texture, the sharper tiles on top. */
+                    draw_page_tiles(app, (int)i, cmd->page_index, page,
                                     rubraview_mat3x2_multiply(
                                         rubraview_orientation_matrix(app->orientation, (double)picture_w(page),
                                                                      (double)picture_h(page)),
@@ -12967,6 +13001,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                    if (app.view_dragging) {
+                        app.pan_x += event.mouse.x - app.view_drag_x;
+                        app.pan_y += event.mouse.y - app.view_drag_y;
+                        app.view_drag_x = event.mouse.x;
+                        app.view_drag_y = event.mouse.y;
+                        note_activity(&app);
+                    }
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         subbox_drag_motion(&app, event.mouse.x, event.mouse.y);   /* D-33 */
                         app.pointer_x = event.mouse.x;
@@ -13184,12 +13225,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         intent = rubraview_pointer_right_click(&ctx);
                     } else {
                         intent = rubraview_pointer_click(&ctx, event.mouse.x, false);
+                        if (intent == RUBRAVIEW_INTENT_PAN) {
+                            /* A picture larger than the window, or the strip: held, it
+                               follows the pointer (there was a touch pan and no mouse one). */
+                            app.view_dragging = true;
+                            app.view_drag_x = event.mouse.x;
+                            app.view_drag_y = event.mouse.y;
+                        }
                     }
                     apply_intent(&app, intent);
                     break;
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    app.view_dragging = false;
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
                     app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
                     if (app.fav_press >= 0) {
@@ -13263,7 +13312,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         rubraview_settings_get(&app.settings, U8("video"), U8("video_wheel_zoom")) > 0.5) {
                         wheel_mods = RUBRAVIEW_MOD_CTRL;
                     }
-                    apply_intent(&app, rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, wheel_mods));
+                    rubraview_pointer_intent_t wheel_intent = rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, wheel_mods);
+                    if (wheel_intent == RUBRAVIEW_INTENT_SCROLL_VERTICAL) {
+                        /* Both ways: it only ever moved the page one way, whichever way the wheel turned. */
+                        app.pan_y += event.mouse.wheel_delta > 0.0 ? PAN_STEP : -PAN_STEP;
+                        note_activity(&app);
+                        break;
+                    }
+                    apply_intent(&app, wheel_intent);
                     break;
                 }
 
@@ -13437,7 +13493,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
     save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
-    rubraview_pal_tiles_stop(app.tiles);
+    for (size_t i = 0; i < TILE_SETS; ++i) rubraview_pal_tiles_stop(app.tile_sets[i].tiles);
     rubraview_pal_gpu_resample_stop();       /* D-38 */
     app.thumbs = NULL;
     if (app.jobs) {

@@ -175,6 +175,15 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-09: D-81 Enlarging is our own: Lanczos-3, echoes removed, sharpened inside the neighbours' range
+
+- Status: Accepted (owner 2026-10-09: "저해상도 이미지를 고해상도로 리사이징 할 때 되도록 잘 보이게 리사이징 모듈을 잘 선택하고 다듬어 주세요. 뭔가 고화질 공개된 리사이징 라이브러리 있는지 살펴보시고 벤더링 ... 라이선스는 mit", then "자체구현으로도 충분하면 자체구현도 좋습니다")
+- Decision:
+  - Looked at: AMD FidelityFX FSR 1 (EASU + RCAS, MIT) and classic kernels. Measured on four pictures (a drawn comic page with text, lines and screentone; three photographs), each reduced 1.5x to 4x with Lanczos and enlarged back, against the original: FSR's EASU was below plain Lanczos-3 in PSNR and SSIM on every picture and factor (it is made for 1.3-2x of rendered frames); Lanczos-3 with its results kept inside the four surrounding pixels and RCAS was better than Lanczos-3; the same with an unsharp mask kept inside the 3x3 neighbours' range instead of RCAS was as good or better, at every factor. That last one is taken, written here (`rubraview_enlarge_region`, `resample.c`): no third-party code, nothing vendored. Neural enlargers (Real-ESRGAN, waifu2x, Anime4K) were not taken: models and a GPU runtime many times the size of the viewer, and they draw detail that is not in the picture.
+  - On screen it comes through the tile thread (D-40), which now also makes enlarged tiles: levels -1, -2, -3 are 2x, 4x and 8x, the least that is at least as sharp as the screen; a tile's picture pixels are read with five around them and the middle kept, which gives the same bytes as enlarging the whole. Direct2D's cubic draws first and the tiles come over it. There are two tile sets, one for each page of a pair.
+  - Settings › Viewer › Enlarging a small picture: `sharp` (default) or `smooth`. Not for pixel art (`N`), a nearest or bilinear scaling filter, a film or an animation, the webtoon strip, or past 8x.
+- Consequences: host test T129 (against a true drawing at 2x, 4x and 8x the error is below cubic's and Lanczos-3's — 187 against 356 and 381 at 2x — nothing outside the drawing's tones, tiles equal to the whole byte for byte). On the VM a 640x376 page at 2x: 23.15 dB against the original with `sharp`, 22.43 dB with `smooth`. What it cannot do: bring back detail a small picture never had.
+
 ## 2026-10-09: D-80 File types: by kind, for this user or for every user, and given back on removal
 
 - Status: Accepted (owner 2026-10-09: "확장자 연결 기능 설정 창에 넣어주세요. 현재 사용자만/관리자 전체 등 다양하게요")

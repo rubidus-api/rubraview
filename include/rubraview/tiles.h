@@ -35,6 +35,22 @@ bool rubraview_tiles_wanted(double screen_scale, int32_t picture_w, int32_t text
 /** The coarsest level still at least as sharp as `screen_scale`. */
 int32_t rubraview_tile_level(double screen_scale);
 
+/*
+ * Enlarged tiles (D-81). A picture shown larger than its own pixels is
+ * enlarged for the screen by the resampler in resample.h, in tiles like
+ * the ones above: level -1 holds two output pixels for every picture
+ * pixel each way, -2 four, -3 eight — the least that is at least as sharp
+ * as the screen. Past eight times the picture's pixels are plainly squares
+ * and nothing more is made.
+ */
+#define RUBRAVIEW_TILE_MIN_LEVEL (-3)
+
+/** 0 when the picture is not enlarged (by more than 5 %), else -1, -2 or -3. */
+int32_t rubraview_tile_level_enlarged(double screen_scale);
+
+/** Picture pixels a full tile covers at `level`, a side. */
+double rubraview_tile_span(int32_t level);
+
 /** The picture rectangle a tile covers, clipped to the picture, and the
  *  output size it is decoded at. False for a tile outside the picture. */
 bool rubraview_tile_geometry(rubraview_tile_key_t key, int32_t picture_w, int32_t picture_h,

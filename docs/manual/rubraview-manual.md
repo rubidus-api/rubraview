@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.37.exe              the viewer, as built
-dist/rubraview-v0.0.37/                 the release bundle
-dist/rubraview-v0.0.37.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.38.exe              the viewer, as built
+dist/rubraview-v0.0.38/                 the release bundle
+dist/rubraview-v0.0.38.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -72,6 +72,12 @@ Settings › Viewer › Layout shows and keeps the same choice:
 
 Two pages are shown at the same height, so a small scan beside a large one
 is not drawn small (at actual size, `4`, each keeps its own pixels).
+
+A picture smaller than the window is enlarged, and a moment after the view
+settles the part on screen is drawn again more sharply — lines and letters
+crisper, with no halo beside them. Settings › Viewer › **Enlarging a small
+picture** set to `smooth` leaves it as first drawn. Zoomed past the
+window, hold the left button and drag to move the picture.
 
 Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
 they are shown one at a time, whole; standing tall, two at a time. Turned
@@ -578,5 +584,39 @@ listed under a later heading only means that while that is on screen.
 |---|---|
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
+
+**No key of its own: in the toolbox or the menu**
+
+| Where | What it does |
+|---|---|
+| Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
+| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
+| Toolbox `A-B` | A-B repeat: from here, to here, off |
+| Toolbox `1x` | The next playback speed |
+| Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
+| Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Menu `Auto` | Read the open archive's file names in the code page that fits them |
+| Menu `UTF-8` | Read the open archive's file names as UTF-8 |
+| Menu `Korean` | Read the open archive's file names as Korean (CP949) |
+| Menu `Japanese (Shift-JIS)` | Read the open archive's file names as Japanese (Shift-JIS) |
+| Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
+| Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
+| Menu `Western` | Read the open archive's file names as Western (CP1252) |
+| Menu `Single` | Layout: one page at a time |
+| Menu `Dual` | Layout: two pages side by side |
+| Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Menu `Webtoon` | Layout: every page one under the other, one long strip |
+| Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
+| Menu `Slower` | Play slower |
+| Menu `Faster` | Play faster |
+| Menu `Choose` | Choose the subtitles from a list |
+| Menu `100%` | The floating boxes fully opaque |
+| Menu `80%` | The floating boxes 80 % opaque |
+| Menu `60%` | The floating boxes 60 % opaque |
+| Menu `40%` | The floating boxes 40 % opaque |
+| Menu `Change keys` | Settings, opened on its Keys page |
+| Menu `About` | About Rubraview: the version and the licences of what it carries |
 
 <!-- keys:end -->

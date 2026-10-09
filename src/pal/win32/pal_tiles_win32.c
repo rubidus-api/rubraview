@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "rubraview/pal/pal_tiles.h"
+#include "rubraview/resample.h"
 #include "rubraview/pal/pal_image_wic_internal.h"
 
 #define TILES_WANT_MAX 128
@@ -109,6 +110,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
     size_t byte_count = 0;
     uint32_t bytes_generation = 0;
     rubraview_tile_key_t work[TILES_WANT_MAX];
+    bool finished[TILES_WANT_MAX];
 
     for (;;) {
         AcquireSRWLockExclusive(&t->lock);
@@ -145,8 +147,43 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         /* One band per tile row: the rows above it are decoded to reach it
            either way, so a row is read once and cut, not tile by tile. */
         bool superseded = false;
+        memset(finished, 0, sizeof(finished));
         for (size_t i = 0; i < count && !superseded; ++i) {
-            if (work[i].level < 0) continue;   /* done as part of an earlier row */
+            if (finished[i]) continue;   /* done as part of an earlier row */
+            if (work[i].level < 0) {
+                /* D-81: an enlarged tile. Its picture pixels, with a few
+                   around them, are read at their own size and enlarged by
+                   the core's resampler; the middle is the tile. */
+                rubraview_tile_result_t result = { .generation = generation, .key = work[i] };
+                int32_t x, y, w, h, ow, oh;
+                if (bytes && factory && rubraview_tile_geometry(work[i], pw, ph, &x, &y, &w, &h, &ow, &oh)) {
+                    int32_t factor = 1 << -work[i].level, m = RUBRAVIEW_ENLARGE_MARGIN;
+                    int32_t sx0 = x - m < 0 ? 0 : x - m, sy0 = y - m < 0 ? 0 : y - m;
+                    int32_t sx1 = x + w + m > pw ? pw : x + w + m, sy1 = y + h + m > ph ? ph : y + h + m;
+                    int32_t sw = sx1 - sx0, sh = sy1 - sy0;
+                    uint8_t *part = (uint8_t*)malloc((size_t)sw * (size_t)sh * 4u);
+                    result.bgra = (uint8_t*)malloc((size_t)ow * (size_t)oh * 4u);
+                    if (part && result.bgra &&
+                        rubraview_wic_region_pbgra(factory, bytes, byte_count, exif, sx0, sy0, sw, sh, sw, sh,
+                                                   part, (uint32_t)sw * 4u) &&
+                        rubraview_enlarge_region(part, sw, sh, (size_t)sw * 4u, factor,
+                                                 (x - sx0) * factor, (y - sy0) * factor, ow, oh,
+                                                 result.bgra, (size_t)ow * 4u)) {
+                        result.width = ow;
+                        result.height = oh;
+                    } else {
+                        free(result.bgra);
+                        result.bgra = NULL;
+                    }
+                    free(part);
+                }
+                post_result(t, result);
+                finished[i] = true;
+                AcquireSRWLockExclusive(&t->lock);
+                superseded = t->stop || t->want_serial != serial || t->generation != generation;
+                ReleaseSRWLockExclusive(&t->lock);
+                continue;
+            }
             int32_t level = work[i].level, ty = work[i].ty;
             int32_t tx0 = work[i].tx, tx1 = work[i].tx;
             for (size_t j = i; j < count; ++j) {
@@ -174,7 +211,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                 }
             }
             for (size_t j = i; j < count; ++j) {
-                if (work[j].level != level || work[j].ty != ty) continue;
+                if (finished[j] || work[j].level != level || work[j].ty != ty) continue;
                 rubraview_tile_result_t result = { .generation = generation, .key = work[j] };
                 int32_t x, y, w, h, ow, oh;
                 if (band && rubraview_tile_geometry(work[j], pw, ph, &x, &y, &w, &h, &ow, &oh)) {
@@ -190,7 +227,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                     }
                 }
                 post_result(t, result);
-                work[j].level = -1;
+                finished[j] = true;
             }
             free(band);
 

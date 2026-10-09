@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.37** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.37/rubraview-v0.0.37.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.38** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.38/rubraview-v0.0.38.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -149,7 +149,88 @@
 | `.` | 파일 안 다음 쪽 |
 | `,` | 파일 안 이전 쪽 |
 
+**단축키 없이 도구 상자나 메뉴에서 쓰는 동작**
+
+| 있는 곳 | 하는 일 |
+|---|---|
+| 도구 상자 `Stop`, 메뉴 `Stop` | 정지하고 처음으로 |
+| 도구 상자 `Sub`, 메뉴 `On/off` | 자막 켜기/끄기 |
+| 도구 상자 `A-B` | A-B 반복: 여기서부터 → 여기까지 → 끄기 |
+| 도구 상자 `1x` | 다음 재생 속도 |
+| 도구 상자 `EQ`, 메뉴 `Equaliser` | 이퀄라이저 다음 프리셋 |
+| 도구 상자 `EQ bands`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
+| 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
+| 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
+| 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
+| 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |
+| 메뉴 `Korean` | 열린 압축 파일의 파일 이름을 한국어(CP949)로 읽기 |
+| 메뉴 `Japanese (Shift-JIS)` | 열린 압축 파일의 파일 이름을 일본어(Shift-JIS)로 읽기 |
+| 메뉴 `Chinese (GBK)` | 열린 압축 파일의 파일 이름을 중국어 간체(GBK)로 읽기 |
+| 메뉴 `Chinese (Big5)` | 열린 압축 파일의 파일 이름을 중국어 번체(Big5)로 읽기 |
+| 메뉴 `Western` | 열린 압축 파일의 파일 이름을 서유럽어(CP1252)로 읽기 |
+| 메뉴 `Single` | 보기 방식: 한 장씩 |
+| 메뉴 `Dual` | 보기 방식: 두 장 나란히 |
+| 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
+| 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
+| 메뉴 `Comic` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서(코믹) |
+| 메뉴 `Slower` | 더 느리게 재생 |
+| 메뉴 `Faster` | 더 빠르게 재생 |
+| 메뉴 `Choose` | 목록에서 자막 고르기 |
+| 메뉴 `100%` | 떠 있는 상자를 불투명하게 |
+| 메뉴 `80%` | 떠 있는 상자 불투명도 80% |
+| 메뉴 `60%` | 떠 있는 상자 불투명도 60% |
+| 메뉴 `40%` | 떠 있는 상자 불투명도 40% |
+| 메뉴 `Change keys` | 설정을 단축키 쪽에서 열기 |
+| 메뉴 `About` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
+
 <!-- keys:end -->
+
+## 마우스와 터치
+
+| 이렇게 하면 | 이렇게 됩니다 |
+|---|---|
+| 창의 왼쪽·오른쪽 3분의 1을 클릭 | 폴더나 압축 파일을 열었을 때 이전·다음 쪽 (오른쪽→왼쪽 읽기에서는 좌우가 바뀜) |
+| 가운데를 클릭 (그림 한 장만 열었을 때는 어디든) | 도구 상자 열기/닫기 |
+| 왼쪽 버튼을 누른 채 끌기 | 창보다 크게 확대한 그림, 그리고 웹툰 스트립을 옮김 |
+| 가운데 버튼 클릭 | 실제 크기 ↔ 창에 맞춤 |
+| 마우스의 뒤로/앞으로 버튼 | 이전/다음 쪽 |
+| `Ctrl` + 휠 | 확대/축소 |
+| `Shift` + 휠 | 10쪽 뒤로/앞으로 |
+| 휠 | 웹툰 스트립과 폭 맞춤으로 본 쪽을 스크롤. 그 밖에는 아무 일도 없음 (쪽 넘김은 휠이 아니라 키로) |
+| 떠 있는 상자 위에서 `Alt` + 휠 | 그 상자를 더 투명하게/덜 투명하게 |
+| 창 맨 위 가장자리에 포인터 | 제목 표시줄: 끌면 창 이동, 두 번 클릭하면 최대화, **Size**로 크기 조절, **Pin**은 항상 맨 위, **Box**는 떠 있는 상자를 제자리로 |
+| 왼쪽·오른쪽 가장자리 가운데 근처에 포인터 | 이전·다음 쪽 버튼 |
+| 파일이나 폴더를 창에 끌어다 놓기 | 열기 |
+| 터치: 끌기, 두 손가락 벌리기 | 그림 옮기기, 확대/축소 |
+
+## 다른 창에서 쓰는 키
+
+각 창에 고정된 키이며 단축키 설정에는 나오지 않습니다.
+
+| 어디서 | 키 |
+|---|---|
+| 파일 열기 화면 (`O`) | 방향키로 이동, `Enter`로 열기 (`Shift+Enter`는 압축 파일의 쪽들을 타일로), `Backspace`는 위 폴더, 글자·숫자는 그 글자로 시작하는 다음 이름으로, `Ctrl+L`은 경로 입력, `Ctrl+D`는 폴더 즐겨찾기, `Esc`는 닫기. 압축 파일을 오른쪽 클릭하면 그 안의 쪽들, 즐겨찾기를 오른쪽 클릭하면 이름 바꾸기 |
+| 파일 목록 창 (`F3`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 파일을 골라 미리보기, `Enter`나 클릭으로 그 파일로 이동, `Esc`로 닫기. 그 밖의 키는 뷰어에서와 같이 동작 |
+| 설정 (`F10`) | `Up` / `Down` 이동, `Left` / `Right` 값 바꾸기 (`PageUp` / `PageDown`은 열 단계씩), `Enter`나 `Space`로 켜고 끄거나 누르기, `Tab` / `Shift+Tab` 쪽 바꾸기, `Esc` 닫기 |
+| 도움말 (`F1`), 파일 정보 (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 스크롤, `Esc`로 닫기 |
+| 재생 목록 (`P`) | 클릭하면 그 파일로, 휠로 스크롤, `Esc`로 닫기 |
+| 이름 바꾸기 (`F2`), 경로 입력, 암호 | `Enter` 확인, `Esc` 취소 |
+
+## 보기 방식
+
+`B`, 도구 상자의 Layout 버튼, Menu > View > Layout에서 다섯 가지 중 하나를 고르고, Settings > Viewer > Layout에 그대로 저장됩니다:
+**single**(한 장), **dual**(두 장 나란히), **book**(표지만 한 장, 그다음부터 두 장), **webtoon**(모든 쪽을 같은 폭으로 세로로 이어
+하나의 긴 스트립으로)과 **comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서).
+
+## 명령줄
+
+| 실행 | 용도 |
+|---|---|
+| `rubraview.exe 파일` (폴더나 압축 파일도) | 열기. 이미 창이 떠 있으면 그 창에 넘김 |
+| `--new-instance` | 그래도 창을 하나 더 |
+| `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하거나 되돌림. `--types=pictures,comics,video,music`으로 종류만 골라서, 관리자 프롬프트에서 `--all-users`로 모든 사용자용으로. Settings > General에도 같은 기능이 있음 |
+| `--batch ...` | 창 없이 여러 파일 변환. 옵션은 [설명서](docs/manual/rubraview-manual.md)에 |
+| `--version` | 버전 |
 
 ## 무엇으로 지었나
 

@@ -498,6 +498,40 @@ the keymap does not do is listed after it.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
+**No key of its own: in the toolbox or the menu**
+
+| Where | What it does |
+|---|---|
+| Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
+| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
+| Toolbox `A-B` | A-B repeat: from here, to here, off |
+| Toolbox `1x` | The next playback speed |
+| Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
+| Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Menu `Auto` | Read the open archive's file names in the code page that fits them |
+| Menu `UTF-8` | Read the open archive's file names as UTF-8 |
+| Menu `Korean` | Read the open archive's file names as Korean (CP949) |
+| Menu `Japanese (Shift-JIS)` | Read the open archive's file names as Japanese (Shift-JIS) |
+| Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
+| Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
+| Menu `Western` | Read the open archive's file names as Western (CP1252) |
+| Menu `Single` | Layout: one page at a time |
+| Menu `Dual` | Layout: two pages side by side |
+| Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Menu `Webtoon` | Layout: every page one under the other, one long strip |
+| Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
+| Menu `Slower` | Play slower |
+| Menu `Faster` | Play faster |
+| Menu `Choose` | Choose the subtitles from a list |
+| Menu `100%` | The floating boxes fully opaque |
+| Menu `80%` | The floating boxes 80 % opaque |
+| Menu `60%` | The floating boxes 60 % opaque |
+| Menu `40%` | The floating boxes 40 % opaque |
+| Menu `Change keys` | Settings, opened on its Keys page |
+| Menu `About` | About Rubraview: the version and the licences of what it carries |
+
 <!-- keys:end -->
 
 **Planned here, not built:** seek ±30 s (`Ctrl+Left` / `Ctrl+Right` size the

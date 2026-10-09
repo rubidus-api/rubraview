@@ -75,6 +75,35 @@ bool rubraview_resample_accel_wanted(rubraview_resample_filter_t filter, rubravi
 bool rubraview_resample_try_accel(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst,
                                   rubraview_resample_filter_t filter);
 
+/* ---- D-81: enlarging for the screen ----
+ *
+ * A small picture shown large (owner, 2026-10-09: "저해상도 이미지를 고해상도로
+ * 리사이징 할 때 되도록 잘 보이게"). Three steps, chosen by measurement
+ * against pictures reduced and enlarged again (docs/tests, T129):
+ *   1. Lanczos-3, which keeps more detail than a cubic;
+ *   2. each result kept within the range of the four picture pixels around
+ *      it, which removes the bright and dark echoes Lanczos leaves beside
+ *      an edge;
+ *   3. an unsharp mask sized to the enlargement (sigma 0.3 x the factor,
+ *      amount 1), each result kept within the range of its neighbours
+ *      before sharpening, so edges steepen and nothing overshoots.
+ * No part of it guesses detail that is not in the picture.
+ *
+ * `src` is `sw` x `sh` pixels of four bytes (any channel order; alpha is
+ * treated as a channel, so premultiplied stays premultiplied). The whole
+ * of it is enlarged by `factor` (2, 4 or 8) and the part of the result
+ * starting at (`out_x`, `out_y`), `out_w` x `out_h`, is written to `dst`.
+ * A caller cutting tiles gives a few pixels around the tile and takes the
+ * middle. False when memory ran out or an argument is out of range.
+ */
+bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t src_stride, int32_t factor,
+                              int32_t out_x, int32_t out_y, int32_t out_w, int32_t out_h,
+                              uint8_t *dst, size_t dst_stride);
+
+/* Picture pixels of margin a tile needs around it for the result to be
+   the same as if the whole picture had been enlarged at once. */
+#define RUBRAVIEW_ENLARGE_MARGIN 5
+
 #ifdef __cplusplus
 }
 #endif

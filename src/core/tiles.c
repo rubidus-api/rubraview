@@ -16,12 +16,25 @@ int32_t rubraview_tile_level(double screen_scale) {
     return level;
 }
 
+int32_t rubraview_tile_level_enlarged(double screen_scale) {
+    if (!(screen_scale > 1.05)) return 0;
+    int32_t k = (int32_t)ceil(log2(screen_scale) - 1e-9);
+    if (k < 1) k = 1;
+    if (k > -RUBRAVIEW_TILE_MIN_LEVEL) k = -RUBRAVIEW_TILE_MIN_LEVEL;
+    return -k;
+}
+
+double rubraview_tile_span(int32_t level) {
+    if (level >= 0) return (double)((int64_t)RUBRAVIEW_TILE_SIDE << (level > RUBRAVIEW_TILE_MAX_LEVEL ? RUBRAVIEW_TILE_MAX_LEVEL : level));
+    return (double)(RUBRAVIEW_TILE_SIDE >> (level < RUBRAVIEW_TILE_MIN_LEVEL ? -RUBRAVIEW_TILE_MIN_LEVEL : -level));
+}
+
 bool rubraview_tile_geometry(rubraview_tile_key_t key, int32_t picture_w, int32_t picture_h,
                              int32_t *x, int32_t *y, int32_t *w, int32_t *h,
                              int32_t *out_w, int32_t *out_h) {
-    if (key.level < 0 || key.level > RUBRAVIEW_TILE_MAX_LEVEL || key.tx < 0 || key.ty < 0 ||
+    if (key.level < RUBRAVIEW_TILE_MIN_LEVEL || key.level > RUBRAVIEW_TILE_MAX_LEVEL || key.tx < 0 || key.ty < 0 ||
         picture_w <= 0 || picture_h <= 0) return false;
-    int64_t span = (int64_t)RUBRAVIEW_TILE_SIDE << key.level;   /* picture pixels a tile covers */
+    int64_t span = (int64_t)rubraview_tile_span(key.level);   /* picture pixels a tile covers */
     int64_t x0 = (int64_t)key.tx * span, y0 = (int64_t)key.ty * span;
     if (x0 >= picture_w || y0 >= picture_h) return false;
     int64_t x1 = x0 + span < picture_w ? x0 + span : picture_w;
@@ -30,6 +43,12 @@ bool rubraview_tile_geometry(rubraview_tile_key_t key, int32_t picture_w, int32_
     *y = (int32_t)y0;
     *w = (int32_t)(x1 - x0);
     *h = (int32_t)(y1 - y0);
+    if (key.level < 0) {
+        /* Enlarged: every picture pixel is 2^-level output pixels a side. */
+        *out_w = *w << -key.level;
+        *out_h = *h << -key.level;
+        return true;
+    }
     int64_t step = (int64_t)1 << key.level;
     *out_w = (int32_t)((*w + step - 1) / step);
     *out_h = (int32_t)((*h + step - 1) / step);
@@ -40,7 +59,7 @@ size_t rubraview_tiles_visible(double x0, double y0, double x1, double y1, int32
                                int32_t picture_w, int32_t picture_h,
                                rubraview_tile_key_t *out, size_t cap) {
     if (!out || cap == 0 || picture_w <= 0 || picture_h <= 0 ||
-        level < 0 || level > RUBRAVIEW_TILE_MAX_LEVEL) return 0;
+        level < RUBRAVIEW_TILE_MIN_LEVEL || level > RUBRAVIEW_TILE_MAX_LEVEL) return 0;
     if (x0 > x1) { double t = x0; x0 = x1; x1 = t; }
     if (y0 > y1) { double t = y0; y0 = y1; y1 = t; }
     if (x0 < 0.0) x0 = 0.0;
@@ -49,7 +68,7 @@ size_t rubraview_tiles_visible(double x0, double y0, double x1, double y1, int32
     if (y1 > (double)picture_h) y1 = (double)picture_h;
     if (x1 <= x0 || y1 <= y0) return 0;
 
-    double span = (double)((int64_t)RUBRAVIEW_TILE_SIDE << level);
+    double span = rubraview_tile_span(level);
     int32_t tx0 = (int32_t)floor(x0 / span), ty0 = (int32_t)floor(y0 / span);
     int32_t tx1 = (int32_t)ceil(x1 / span) - 1, ty1 = (int32_t)ceil(y1 / span) - 1;
 
