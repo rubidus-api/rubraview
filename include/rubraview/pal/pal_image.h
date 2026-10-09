@@ -83,21 +83,23 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
                                                              double *out_delay_seconds);
 
 /*
- * D-82: an animated GIF or WebP kept open, so its frames come one after
- * another without the file being opened again for each. Each frame is
- * given as the container holds it — a GIF's may be a part of the picture;
- * `rubraview_frame_canvas_show` lays them together. NULL for anything that
- * is not an animation of those two kinds, which then goes the way of
- * `rubraview_pal_image_frame_info` (a TIFF's pages, an ICO's sizes).
+ * D-82, D-84: an animated GIF, WebP or PNG kept open, so its frames come
+ * one after another without the file being opened again for each. Each
+ * frame is given as the container holds it — a GIF's or an APNG's may be a
+ * part of the picture; `rubraview_frame_canvas_show` lays them together.
+ * NULL for anything that is not an animation of those kinds, which then
+ * goes the way of `rubraview_pal_image_frame_info` (a TIFF's pages, an
+ * ICO's sizes).
  *
- * `out_frames` gets up to `cap` frames with their delay, place and manner
- * of leaving; `out_count` how many were described; the canvas is the whole
- * picture's size. Bytes given without a path are copied.
+ * `out_frames` is the reader's own list, as long as the file has frames
+ * and alive until the reader is closed: each frame's delay, place and
+ * manner of leaving. The canvas is the whole picture's size. The reader
+ * keeps its own copy of the file.
  */
 typedef struct rubraview_anim_reader rubraview_anim_reader_t;
 
 rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *data, size_t size,
-                                                 rubraview_frame_t *out_frames, size_t cap, size_t *out_count,
+                                                 const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height);
 
 /** One frame as premultiplied BGRA into `dst`: `stride` bytes a row, `rows` rows of room. */

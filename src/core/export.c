@@ -57,7 +57,7 @@ rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename) {
     if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
 
     if (rubraview_u8_eq_lit_ci(ext, "jpg") || rubraview_u8_eq_lit_ci(ext, "jpeg") || rubraview_u8_eq_lit_ci(ext, "jpe")) return RUBRAVIEW_EXPORT_JPEG;
-    if (rubraview_u8_eq_lit_ci(ext, "png")) return RUBRAVIEW_EXPORT_PNG;
+    if (rubraview_u8_eq_lit_ci(ext, "png") || rubraview_u8_eq_lit_ci(ext, "apng")) return RUBRAVIEW_EXPORT_PNG;
     if (rubraview_u8_eq_lit_ci(ext, "webp")) return RUBRAVIEW_EXPORT_WEBP;
     if (rubraview_u8_eq_lit_ci(ext, "gif")) return RUBRAVIEW_EXPORT_GIF;
     if (rubraview_u8_eq_lit_ci(ext, "bmp")) return RUBRAVIEW_EXPORT_BMP;

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "rubraview/pal/pal_image.h"
+#include "rubraview/apng.h"
 #include "rubraview/tiles.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/viewport.h"
@@ -574,9 +575,14 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
 /* ---- an animation kept open (D-82) ---- */
 
 struct rubraview_anim_reader {
-    IWICBitmapDecoder *decoder;
-    IWICStream        *stream;   /* over `owned`, for a page that came as bytes */
-    uint8_t           *owned;
+    IWICBitmapDecoder *decoder;  /* a GIF or a WebP; NULL for an APNG */
+    IWICStream        *stream;   /* over `owned` */
+    uint8_t           *owned;    /* the file */
+    rubraview_frame_t *frames;
+    /* D-84: an APNG, whose frames are each written out as a PNG of their own. */
+    rubraview_apng_t   apng;
+    uint8_t           *png;
+    size_t             png_cap;
 };
 
 /* The WebP codec ships apart from Windows' own; its GUID is not in every SDK's headers. */
@@ -607,112 +613,181 @@ static double anim_delay(double seconds) {
     return seconds <= 0.0101 ? 0.1 : seconds;
 }
 
+/* The file whole, read with full sharing and closed at once (see decoder_for_path). */
+static uint8_t *file_read_whole(u8str_t path, size_t *out_size) {
+    *out_size = 0;
+    if (path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+    char narrow[MAX_PATH * 4];
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+    WCHAR wide[MAX_PATH * 2];
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return NULL;
+
+    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER file_size;
+    if (!GetFileSizeEx(file, &file_size) || file_size.QuadPart <= 0 ||
+        file_size.QuadPart > (LONGLONG)MAX_IMAGE_FILE_BYTES) {
+        CloseHandle(file);
+        return NULL;
+    }
+    DWORD size = (DWORD)file_size.QuadPart;
+    uint8_t *bytes = (uint8_t*)malloc(size);
+    DWORD total = 0;
+    while (bytes && total < size) {
+        DWORD got = 0;
+        if (!ReadFile(file, bytes + total, size - total, &got, NULL) || got == 0) break;
+        total += got;
+    }
+    CloseHandle(file);
+    if (!bytes || total != size) { free(bytes); return NULL; }
+    *out_size = size;
+    return bytes;
+}
+
 void rubraview_pal_anim_close(rubraview_anim_reader_t *reader) {
     if (!reader) return;
     if (reader->decoder) IWICBitmapDecoder_Release(reader->decoder);
     if (reader->stream) IWICStream_Release(reader->stream);
+    rubraview_apng_free(&reader->apng);
+    free(reader->png);
+    free(reader->frames);
     free(reader->owned);
     free(reader);
 }
 
+/* D-84: the frames of an APNG, from the file's own chunks. */
+static bool anim_open_apng(rubraview_anim_reader_t *reader, size_t size, size_t *out_count,
+                           uint32_t *canvas_w, uint32_t *canvas_h) {
+    if (!rubraview_apng_parse(reader->owned, size, &reader->apng) || reader->apng.frame_count <= 1) return false;
+    size_t count = reader->apng.frame_count;
+    reader->frames = (rubraview_frame_t*)calloc(count, sizeof(rubraview_frame_t));
+    if (!reader->frames) return false;
+    for (size_t i = 0; i < count; ++i) {
+        const rubraview_apng_frame_t *in = &reader->apng.frames[i];
+        reader->frames[i] = (rubraview_frame_t){
+            .delay_seconds = anim_delay(in->delay_seconds),
+            .width = (int32_t)in->width, .height = (int32_t)in->height,
+            .left = (int32_t)in->left, .top = (int32_t)in->top,
+            .disposal = in->dispose == RUBRAVIEW_APNG_DISPOSE_BACKGROUND ? RUBRAVIEW_FRAME_CLEAR
+                      : in->dispose == RUBRAVIEW_APNG_DISPOSE_PREVIOUS ? RUBRAVIEW_FRAME_RESTORE
+                      : RUBRAVIEW_FRAME_KEEP,
+            .replaces = in->replaces,
+        };
+    }
+    *out_count = count;
+    *canvas_w = reader->apng.width;
+    *canvas_h = reader->apng.height;
+    return true;
+}
+
 rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *data, size_t size,
-                                                 rubraview_frame_t *out_frames, size_t cap, size_t *out_count,
+                                                 const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height) {
-    if (!out_frames || cap == 0 || !out_count || !out_canvas_width || !out_canvas_height) return NULL;
+    if (!out_frames || !out_count || !out_canvas_width || !out_canvas_height) return NULL;
+    *out_frames = NULL;
     *out_count = 0;
     *out_canvas_width = *out_canvas_height = 0;
 
     rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)calloc(1, sizeof(*reader));
     if (!reader) return NULL;
+    /* The reader reads the bytes for as long as it lives, so it has its own. */
     if (path.len > 0) {
-        reader->decoder = decoder_for_path(path);
+        reader->owned = file_read_whole(path, &size);
     } else if (data && size > 0) {
-        /* The stream reads the bytes for as long as the decoder lives. */
         reader->owned = (uint8_t*)malloc(size);
-        if (reader->owned) {
-            memcpy(reader->owned, data, size);
-            reader->decoder = decoder_for_memory(reader->owned, size, &reader->stream);
-        }
+        if (reader->owned) memcpy(reader->owned, data, size);
     }
-    GUID container;
-    UINT count = 0;
-    if (!reader->decoder ||
-        FAILED(IWICBitmapDecoder_GetContainerFormat(reader->decoder, &container)) ||
-        FAILED(IWICBitmapDecoder_GetFrameCount(reader->decoder, &count)) || count <= 1) {
-        rubraview_pal_anim_close(reader);
-        return NULL;
-    }
-    bool gif = IsEqualGUID(&container, &GUID_ContainerFormatGif);
-    bool webp = IsEqualGUID(&container, &ANIM_CONTAINER_WEBP);
-    if (!gif && !webp) {
-        rubraview_pal_anim_close(reader);
-        return NULL;
-    }
+    if (!reader->owned) { rubraview_pal_anim_close(reader); return NULL; }
 
-    /* A GIF says the whole picture's size apart from its frames'. */
     uint32_t canvas_w = 0, canvas_h = 0;
-    if (gif) {
-        IWICMetadataQueryReader *whole = NULL;
-        if (SUCCEEDED(IWICBitmapDecoder_GetMetadataQueryReader(reader->decoder, &whole)) && whole) {
-            (void)query_uint(whole, L"/logscrdesc/Width", &canvas_w);
-            (void)query_uint(whole, L"/logscrdesc/Height", &canvas_h);
-            IWICMetadataQueryReader_Release(whole);
-        }
-    }
-
     size_t described = 0;
-    for (UINT i = 0; i < count && described < cap; ++i) {
-        IWICBitmapFrameDecode *frame = NULL;
-        if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, i, &frame)) || !frame) break;
-        UINT w = 0, h = 0;
-        if (FAILED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) || w == 0 || h == 0 || w > INT32_MAX || h > INT32_MAX) {
-            IWICBitmapFrameDecode_Release(frame);
-            break;
+    if (rubraview_apng_is_png(reader->owned, size)) {
+        /* Windows' PNG codec shows an APNG as its one still picture. */
+        if (!anim_open_apng(reader, size, &described, &canvas_w, &canvas_h)) {
+            rubraview_pal_anim_close(reader);
+            return NULL;
         }
-        rubraview_frame_t *out = &out_frames[described];
-        *out = (rubraview_frame_t){ .delay_seconds = 0.1, .width = (int32_t)w, .height = (int32_t)h,
-                                    .disposal = RUBRAVIEW_FRAME_KEEP, .replaces = webp };
-        IWICMetadataQueryReader *meta = NULL;
-        if (SUCCEEDED(IWICBitmapFrameDecode_GetMetadataQueryReader(frame, &meta)) && meta) {
-            uint32_t v = 0;
-            if (gif) {
-                if (query_uint(meta, L"/grctlext/Delay", &v)) out->delay_seconds = anim_delay((double)v / 100.0);
-                if (query_uint(meta, L"/grctlext/Disposal", &v)) {
-                    out->disposal = v == 2 ? RUBRAVIEW_FRAME_CLEAR : v == 3 ? RUBRAVIEW_FRAME_RESTORE : RUBRAVIEW_FRAME_KEEP;
-                }
-                if (query_uint(meta, L"/imgdesc/Left", &v)) out->left = (int32_t)v;
-                if (query_uint(meta, L"/imgdesc/Top", &v)) out->top = (int32_t)v;
-            } else {
-                /* The WebP codec hands each frame over as the whole picture
-                   already laid together; only its time is read. */
-                if (query_uint(meta, L"/ANMF/FrameDuration", &v)) out->delay_seconds = anim_delay((double)v / 1000.0);
+    } else {
+        reader->decoder = decoder_for_memory(reader->owned, size, &reader->stream);
+        GUID container;
+        UINT count = 0;
+        if (!reader->decoder ||
+            FAILED(IWICBitmapDecoder_GetContainerFormat(reader->decoder, &container)) ||
+            FAILED(IWICBitmapDecoder_GetFrameCount(reader->decoder, &count)) || count <= 1) {
+            rubraview_pal_anim_close(reader);
+            return NULL;
+        }
+        bool gif = IsEqualGUID(&container, &GUID_ContainerFormatGif);
+        bool webp = IsEqualGUID(&container, &ANIM_CONTAINER_WEBP);
+        if (!gif && !webp) {
+            rubraview_pal_anim_close(reader);
+            return NULL;
+        }
+        reader->frames = (rubraview_frame_t*)calloc(count, sizeof(rubraview_frame_t));
+        if (!reader->frames) { rubraview_pal_anim_close(reader); return NULL; }
+
+        /* A GIF says the whole picture's size apart from its frames'. */
+        if (gif) {
+            IWICMetadataQueryReader *whole = NULL;
+            if (SUCCEEDED(IWICBitmapDecoder_GetMetadataQueryReader(reader->decoder, &whole)) && whole) {
+                (void)query_uint(whole, L"/logscrdesc/Width", &canvas_w);
+                (void)query_uint(whole, L"/logscrdesc/Height", &canvas_h);
+                IWICMetadataQueryReader_Release(whole);
             }
-            IWICMetadataQueryReader_Release(meta);
         }
-        IWICBitmapFrameDecode_Release(frame);
-        if (described == 0 && (canvas_w == 0 || canvas_h == 0)) { canvas_w = w; canvas_h = h; }
-        ++described;
+
+        for (UINT i = 0; i < count; ++i) {
+            IWICBitmapFrameDecode *frame = NULL;
+            if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, i, &frame)) || !frame) break;
+            UINT w = 0, h = 0;
+            if (FAILED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) || w == 0 || h == 0 || w > INT32_MAX || h > INT32_MAX) {
+                IWICBitmapFrameDecode_Release(frame);
+                break;
+            }
+            rubraview_frame_t *out = &reader->frames[described];
+            *out = (rubraview_frame_t){ .delay_seconds = 0.1, .width = (int32_t)w, .height = (int32_t)h,
+                                        .disposal = RUBRAVIEW_FRAME_KEEP, .replaces = webp };
+            IWICMetadataQueryReader *meta = NULL;
+            if (SUCCEEDED(IWICBitmapFrameDecode_GetMetadataQueryReader(frame, &meta)) && meta) {
+                uint32_t v = 0;
+                if (gif) {
+                    if (query_uint(meta, L"/grctlext/Delay", &v)) out->delay_seconds = anim_delay((double)v / 100.0);
+                    if (query_uint(meta, L"/grctlext/Disposal", &v)) {
+                        out->disposal = v == 2 ? RUBRAVIEW_FRAME_CLEAR : v == 3 ? RUBRAVIEW_FRAME_RESTORE : RUBRAVIEW_FRAME_KEEP;
+                    }
+                    if (query_uint(meta, L"/imgdesc/Left", &v)) out->left = (int32_t)v;
+                    if (query_uint(meta, L"/imgdesc/Top", &v)) out->top = (int32_t)v;
+                } else {
+                    /* The WebP codec hands each frame over as the whole picture
+                       already laid together; only its time is read. */
+                    if (query_uint(meta, L"/ANMF/FrameDuration", &v)) out->delay_seconds = anim_delay((double)v / 1000.0);
+                }
+                IWICMetadataQueryReader_Release(meta);
+            }
+            IWICBitmapFrameDecode_Release(frame);
+            if (described == 0 && (canvas_w == 0 || canvas_h == 0)) { canvas_w = w; canvas_h = h; }
+            ++described;
+        }
     }
     if (described <= 1 || canvas_w == 0 || canvas_h == 0 || canvas_w > 32767 || canvas_h > 32767) {
         rubraview_pal_anim_close(reader);
         return NULL;
     }
+    *out_frames = reader->frames;
     *out_count = described;
     *out_canvas_width = (int32_t)canvas_w;
     *out_canvas_height = (int32_t)canvas_h;
     return reader;
 }
 
-bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint8_t *dst, size_t stride, int32_t rows) {
+/* One decoded frame as premultiplied BGRA. */
+static bool anim_copy_frame(IWICBitmapFrameDecode *frame, uint8_t *dst, size_t stride, int32_t rows) {
     IWICImagingFactory *factory = wic_factory();
-    if (!reader || !reader->decoder || !factory || !dst || rows <= 0 || index > UINT_MAX) return false;
-
-    IWICBitmapFrameDecode *frame = NULL;
-    if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, (UINT)index, &frame)) || !frame) return false;
-
     bool ok = false;
     IWICFormatConverter *converter = NULL;
-    if (SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter) {
+    if (factory && SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter) {
         UINT w = 0, h = 0;
         if (SUCCEEDED(IWICFormatConverter_Initialize(converter, (IWICBitmapSource*)frame,
                                                      &GUID_WICPixelFormat32bppPBGRA,
@@ -725,6 +800,41 @@ bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint
         }
         IWICFormatConverter_Release(converter);
     }
+    return ok;
+}
+
+bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint8_t *dst, size_t stride, int32_t rows) {
+    if (!reader || !dst || rows <= 0 || index > UINT_MAX) return false;
+
+    if (!reader->decoder) {
+        /* An APNG's frame: as a PNG of its own, which the PNG codec reads. */
+        size_t need = rubraview_apng_frame_png_size(&reader->apng, index);
+        if (need == 0) return false;
+        if (need > reader->png_cap) {
+            uint8_t *more = (uint8_t*)realloc(reader->png, need);
+            if (!more) return false;
+            reader->png = more;
+            reader->png_cap = need;
+        }
+        if (rubraview_apng_frame_png(&reader->apng, index, reader->png, reader->png_cap) != need) return false;
+        IWICStream *stream = NULL;
+        IWICBitmapDecoder *decoder = decoder_for_memory(reader->png, need, &stream);
+        bool ok = false;
+        if (decoder) {
+            IWICBitmapFrameDecode *frame = NULL;
+            if (SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame) {
+                ok = anim_copy_frame(frame, dst, stride, rows);
+                IWICBitmapFrameDecode_Release(frame);
+            }
+            IWICBitmapDecoder_Release(decoder);
+        }
+        if (stream) IWICStream_Release(stream);
+        return ok;
+    }
+
+    IWICBitmapFrameDecode *frame = NULL;
+    if (FAILED(IWICBitmapDecoder_GetFrame(reader->decoder, (UINT)index, &frame)) || !frame) return false;
+    bool ok = anim_copy_frame(frame, dst, stride, rows);
     IWICBitmapFrameDecode_Release(frame);
     return ok;
 }

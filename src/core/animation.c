@@ -328,3 +328,21 @@ bool rubraview_frame_canvas_show(rubraview_frame_canvas_t *canvas, size_t index,
     canvas->shown = (int64_t)index;
     return true;
 }
+
+void rubraview_frame_canvas_seed(rubraview_frame_canvas_t *canvas, size_t index, const uint8_t *pixels) {
+    if (!canvas || !canvas->pixels || !pixels || index >= canvas->frame_count) return;
+    memcpy(canvas->pixels, pixels, (size_t)canvas->width * 4 * (size_t)canvas->height);
+    canvas->shown = (int64_t)index;
+}
+
+bool rubraview_frame_canvas_keepable(const rubraview_frame_canvas_t *canvas, size_t index) {
+    return canvas && index < canvas->frame_count && canvas->frames[index].disposal != RUBRAVIEW_FRAME_RESTORE;
+}
+
+size_t rubraview_frame_keep_stride(uint64_t picture_bytes, size_t frame_count, uint64_t budget) {
+    if (picture_bytes == 0 || frame_count == 0) return 1;
+    uint64_t fit = budget / picture_bytes;
+    if (fit >= frame_count) return 1;
+    if (fit == 0) return frame_count;
+    return (size_t)((frame_count + fit - 1) / fit);
+}

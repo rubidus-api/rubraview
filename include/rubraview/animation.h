@@ -147,6 +147,22 @@ size_t rubraview_frame_canvas_start(const rubraview_frame_canvas_t *canvas, size
 /** Make `pixels` the picture at `index`. False when a frame could not be read. */
 bool rubraview_frame_canvas_show(rubraview_frame_canvas_t *canvas, size_t index, rubraview_frame_read_fn read, void *ctx);
 
+/*
+ * D-84: an animation too long to keep every finished frame of. The picture
+ * as it stands after some frames is kept instead, and any frame is reached
+ * from the nearest kept one before it. `seed` puts such a kept picture back:
+ * `pixels` is the canvas as it stood after `index`.
+ */
+void rubraview_frame_canvas_seed(rubraview_frame_canvas_t *canvas, size_t index, const uint8_t *pixels);
+
+/** Whether the picture after `index` is enough to go on from: not when that
+    frame is to be taken back off, which needs the picture before it too. */
+bool rubraview_frame_canvas_keepable(const rubraview_frame_canvas_t *canvas, size_t index);
+
+/** How far apart kept pictures lie so that all of them fit in `budget`
+    bytes: 1 keeps every frame. */
+size_t rubraview_frame_keep_stride(uint64_t picture_bytes, size_t frame_count, uint64_t budget);
+
 /** §3.20.2: the largest frame, which is the one an ICO should open at. */
 size_t rubraview_animation_largest_frame(const rubraview_animation_t *animation);
 

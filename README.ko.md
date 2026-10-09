@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.39** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.39/rubraview-v0.0.39.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.40** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.40/rubraview-v0.0.40.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -194,7 +194,7 @@
 | 가운데를 클릭 (그림 한 장만 열었을 때는 어디든) | 도구 상자 열기/닫기 |
 | 왼쪽 버튼을 누른 채 끌기 | 창보다 크게 확대한 그림, 그리고 웹툰 스트립을 옮김 |
 | 도구 상자의 뒤로/앞으로 버튼을 길게 누름 | 버튼 위에 5초·10초·30초·1분·5분이 뜸 — 끌어다 놓아 고름 (짧게 누르면 5초) |
-| 도구 상자의 탐색 막대를 클릭 | 그 위치로 이동 (동영상, 음악, 움직이는 GIF/WebP) |
+| 도구 상자의 탐색 막대를 클릭 | 그 위치로 이동 (동영상, 음악, 움직이는 GIF/WebP/PNG) |
 | 가운데 버튼 클릭 | 실제 크기 ↔ 창에 맞춤 |
 | 마우스의 뒤로/앞으로 버튼 | 이전/다음 쪽 |
 | `Ctrl` + 휠 | 확대/축소 |

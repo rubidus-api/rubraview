@@ -313,11 +313,11 @@ u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension) {
 }
 
 u8str_t rubraview_shell_extensions(void) {
-    return U8("jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
+    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
 }
 
 static const struct { uint32_t group; const char *word; const char *extensions; } SHELL_GROUPS[] = {
-    { RUBRAVIEW_SHELL_PICTURES, "pictures", "jpg;jpeg;png;gif;bmp;tif;tiff;webp;ico" },
+    { RUBRAVIEW_SHELL_PICTURES, "pictures", "jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;ico" },
     { RUBRAVIEW_SHELL_COMICS,   "comics",   "cbz;cb7;cbr" },
     { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov" },
     { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
