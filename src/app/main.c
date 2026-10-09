@@ -110,7 +110,7 @@
 #include "rubraview/playback.h"
 
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
-#define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
+#define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
 /* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
 #define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
 #define AUDIO_FILTER "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
@@ -287,7 +287,9 @@ typedef struct app_state {
     rubraview_anim_reader_t *anim_reader;
     rubraview_frame_canvas_t anim_canvas;
     uint8_t               *anim_buffers;  /* the canvas's three, in one piece */
-    uint8_t              **anim_cache;    /* a frame's finished picture, or NULL; `animation.frame_count` of them */
+    uint8_t              **anim_cache;    /* the picture as it stood after a frame, or NULL; `animation.frame_count` of them */
+    size_t                 anim_keep_stride;  /* D-84: how far apart kept pictures lie; 1 keeps every frame */
+    uint64_t               anim_kept_bytes;
     rubraview_texture_t   *anim_texture;  /* the page's texture while it is one this made */
 
     /* M5: the video on the current page, when it is one (D-8, D-9). */
@@ -990,9 +992,11 @@ static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, ru
 
 /* ---- animated images and sub-pages (§3.20) ---- */
 
+/* A TIFF's pages or an ICO's sizes; an animation's frames are as many as the file has. */
 #define ANIM_MAX_FRAMES 8192
-/* Every finished frame of an animation is kept while all of them together
-   fit in this; a longer one is drawn again as it goes. */
+/* Every frame's picture is kept while all of them together fit in this.
+   Of a longer animation (D-84) every so-manieth is kept, and the frames
+   between are drawn again from the nearest kept one before them. */
 #define ANIM_CACHE_BYTES ((uint64_t)384 << 20)
 
 static void next_spread(app_state_t *app);
@@ -1015,8 +1019,16 @@ static void anim_close(app_state_t *app) {
         free(app->anim_cache);
         app->anim_cache = NULL;
     }
+    app->anim_kept_bytes = 0;
     free(app->anim_buffers);
     app->anim_buffers = NULL;
+    if (app->anim_reader) {
+        /* The frame list was the reader's. */
+        app->animation.frames = NULL;
+        app->animation.frame_count = 0;
+        app->anim_canvas.frames = NULL;
+        app->anim_canvas.frame_count = 0;
+    }
     rubraview_pal_anim_close(app->anim_reader);
     app->anim_reader = NULL;
     app->anim_texture = NULL;   /* the page owns it */
@@ -1024,7 +1036,7 @@ static void anim_close(app_state_t *app) {
 
 static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride) {
     app_state_t *app = (app_state_t*)ctx;
-    return rubraview_pal_anim_read(app->anim_reader, index, dst, stride, app->anim_frames[index].height);
+    return rubraview_pal_anim_read(app->anim_reader, index, dst, stride, app->animation.frames[index].height);
 }
 
 /* One frame of the open animation as the whole picture, on the page. */
@@ -1036,26 +1048,51 @@ static void anim_show(app_state_t *app, size_t frame_index) {
 
     const uint8_t *picture = app->anim_cache ? app->anim_cache[frame_index] : NULL;
     if (!picture) {
+        /* From the nearest kept picture before it, unless the canvas
+           already stands nearer. */
+        size_t start = rubraview_frame_canvas_start(canvas, frame_index);
+        size_t near_kept = frame_index;
+        bool kept_before = false;
+        if (app->anim_cache) {
+            while (near_kept > start) {
+                --near_kept;
+                if (app->anim_cache[near_kept]) { kept_before = true; break; }
+            }
+        }
+        bool canvas_nearer = canvas->shown >= 0 && (size_t)canvas->shown <= frame_index &&
+                             (!kept_before || (size_t)canvas->shown >= near_kept);
+        if (kept_before && !canvas_nearer) rubraview_frame_canvas_seed(canvas, near_kept, app->anim_cache[near_kept]);
         if (!rubraview_frame_canvas_show(canvas, frame_index, anim_read_frame, app)) return;
+        picture = canvas->pixels;
+        /* Kept when it is far enough from the last kept one, and there is room. */
+        size_t apart = kept_before ? frame_index - near_kept : frame_index - start + app->anim_keep_stride;
+        if (app->anim_cache && apart >= app->anim_keep_stride &&
+            rubraview_frame_canvas_keepable(canvas, frame_index) &&
+            app->anim_kept_bytes + whole <= ANIM_CACHE_BYTES) {
+            uint8_t *kept = (uint8_t*)malloc(whole);
+            if (kept) {
+                memcpy(kept, canvas->pixels, whole);
+                app->anim_cache[frame_index] = kept;
+                app->anim_kept_bytes += whole;
+            }
+        }
+    }
+    {
         /* The texture has no see-through: what shows through is the
            window's own colour, as around any picture. */
         const uint8_t back[3] = { COLOR_CANVAS & 0xFF, (COLOR_CANVAS >> 8) & 0xFF, (COLOR_CANVAS >> 16) & 0xFF };
         uint8_t *flat = canvas->scratch;
         for (size_t i = 0; i < whole; i += 4) {
-            uint32_t a = canvas->pixels[i + 3];
-            if (a == 255) { memcpy(flat + i, canvas->pixels + i, 4); continue; }
+            uint32_t a = picture[i + 3];
+            if (a == 255) { memcpy(flat + i, picture + i, 4); continue; }
             uint32_t keep = 255 - a;
             for (int c = 0; c < 3; ++c) {
-                uint32_t v = canvas->pixels[i + c] + (back[c] * keep + 127) / 255;
+                uint32_t v = picture[i + c] + (back[c] * keep + 127) / 255;
                 flat[i + c] = (uint8_t)(v > 255 ? 255 : v);
             }
             flat[i + 3] = 255;
         }
         picture = flat;
-        if (app->anim_cache) {
-            uint8_t *kept = (uint8_t*)malloc(whole);
-            if (kept) { memcpy(kept, flat, whole); app->anim_cache[frame_index] = kept; }
-        }
     }
 
     if (!page->texture || page->texture != app->anim_texture) {
@@ -1130,29 +1167,24 @@ static void animation_prepare(app_state_t *app) {
         if (!bytes.ok) return;
     }
 
-    if (!app->anim_frames) {
-        /* Kept for the session: one list, for whichever page animates. */
-        app->anim_frames = (rubraview_frame_t*)calloc(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
-        if (!app->anim_frames) { free(mem); return; }
-    }
-
-    /* D-82: an animated GIF or WebP first — kept open, laid together and
-       played as a film is. */
+    /* D-82, D-84: an animated GIF, WebP or PNG first — kept open, laid
+       together and played as a film is. */
     size_t timed_count = 0;
     int32_t canvas_w = 0, canvas_h = 0;
+    const rubraview_frame_t *timed_frames = NULL;
     app->anim_reader = rubraview_pal_anim_open(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
-                                               app->anim_frames, ANIM_MAX_FRAMES, &timed_count, &canvas_w, &canvas_h);
+                                               &timed_frames, &timed_count, &canvas_w, &canvas_h);
     if (app->anim_reader) {
         free(mem);
         size_t whole = (size_t)canvas_w * (size_t)canvas_h * 4;
         app->anim_buffers = (uint8_t*)malloc(whole * 3);
         if (!app->anim_buffers) { anim_close(app); return; }
-        rubraview_frame_canvas_init(&app->anim_canvas, app->anim_frames, timed_count, canvas_w, canvas_h,
+        rubraview_frame_canvas_init(&app->anim_canvas, timed_frames, timed_count, canvas_w, canvas_h,
                                     app->anim_buffers, app->anim_buffers + whole, app->anim_buffers + whole * 2);
-        app->animation = rubraview_animation_create(RUBRAVIEW_FRAMES_ANIMATION, app->anim_frames, timed_count);
-        if ((uint64_t)whole * timed_count <= ANIM_CACHE_BYTES) {
-            app->anim_cache = (uint8_t**)calloc(timed_count, sizeof(uint8_t*));
-        }
+        app->animation = rubraview_animation_create(RUBRAVIEW_FRAMES_ANIMATION, timed_frames, timed_count);
+        app->anim_keep_stride = rubraview_frame_keep_stride(whole, timed_count, ANIM_CACHE_BYTES);
+        app->anim_kept_bytes = 0;
+        app->anim_cache = (uint8_t**)calloc(timed_count, sizeof(uint8_t*));
         app->animation.speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
         app->anim_page = page_index;
         app->anim_active = true;
@@ -1167,6 +1199,11 @@ static void animation_prepare(app_state_t *app) {
         return;
     }
 
+    if (!app->anim_frames) {
+        /* Kept for the session: one list, for whichever page has sub-pages. */
+        app->anim_frames = (rubraview_frame_t*)calloc(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
+        if (!app->anim_frames) { free(mem); return; }
+    }
     size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
                                                   app->anim_frames, ANIM_MAX_FRAMES);
     free(mem);

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.39.exe              the viewer, as built
-dist/rubraview-v0.0.39/                 the release bundle
-dist/rubraview-v0.0.39.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.40.exe              the viewer, as built
+dist/rubraview-v0.0.40/                 the release bundle
+dist/rubraview-v0.0.40.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -119,7 +119,7 @@ when it closes.
 
 ## Animated images
 
-An animated GIF or WebP is played as a film is. `Space` pauses it, `.`
+An animated GIF, WebP or PNG (APNG, named `.png` or `.apng`) is played as a film is. `Space` pauses it, `.`
 and `,` step a frame, `Left` and `Right` seek five seconds, `[` and `]`
 set the two ends of a repeat and `\` clears it, and `Ctrl+]` / `Ctrl+[`
 change its speed from 0.25x to 4x. The toolbox has the same on buttons,
@@ -127,7 +127,9 @@ with Stop and a seek bar to click; paused, the title says where it is.
 
 At its end an animation goes round again. Settings › Viewer › When an
 animation ends — or `Ctrl+R` while one is on screen — makes it stop
-there, or go on to the next file. (An APNG is shown as a still picture.)
+there, or go on to the next file. An animation may be as long as its
+file is; of a very long one only some pictures are kept in memory, and
+going back in it stays quick.
 
 In the toolbox, the back and forward buttons seek five seconds. Hold one
 down and five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.39** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.39/rubraview-v0.0.39.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.40** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.40/rubraview-v0.0.40.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -195,7 +195,7 @@ ships with, so it cannot drift from them.
 | Click the middle (or anywhere on a single picture) | The toolbox opens or closes |
 | Hold the left button and drag | Moves a picture zoomed past the window, and the webtoon strip |
 | Hold a toolbox back / forward button | Five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag onto one and let go (a tap seeks 5 s) |
-| Click the toolbox's seek bar | Goes there, in a film, a song or an animated GIF / WebP |
+| Click the toolbox's seek bar | Goes there, in a film, a song or an animated GIF / WebP / PNG |
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | `Ctrl` + wheel | Zoom in or out |
