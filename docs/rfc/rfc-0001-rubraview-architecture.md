@@ -429,7 +429,7 @@ the keymap does not do is listed after it.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Single page / two pages / book |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them |
 | `M` | Left-to-right / right-to-left (manga) |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |

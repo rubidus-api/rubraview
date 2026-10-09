@@ -156,6 +156,19 @@ void rubraview_pal_window_text_input(rubraview_window_t *window, bool on);
 bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list);
 bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list);
 
+/** The same for this user (HKCU) or for every user of the computer (HKLM).
+ *  For every user the process must be an administrator's; false when it is not. */
+bool rubraview_pal_shell_register_for(u8str_t extensions_semicolon_list, bool all_users);
+bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool all_users);
+
+/** Runs this program again as an administrator (Windows asks first) with
+ *  `arguments`, waits for it, and gives its exit code. False when it did
+ *  not run — the question was refused. */
+bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code);
+
+/** Windows' own Default apps page, where a type's default is chosen. */
+void rubraview_pal_shell_open_default_apps(void);
+
 /** Returns NULL if the window cannot be created (or on a host build with no windowing backend). */
 rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rubraview_window_config_t *config);
 

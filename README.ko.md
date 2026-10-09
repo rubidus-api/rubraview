@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.36** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.36/rubraview-v0.0.36.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.37** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.37/rubraview-v0.0.37.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -80,7 +80,7 @@
 | `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |
 | `Shift+Left`, `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
-| `B` | 한 장/두 장/책 |
+| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기 |
 | `M` | 왼→오 / 오→왼(만화) |
 | `Shift+B` | 펼침면 자동 인식 |
 | `Ctrl+]` | 폴더의 다음 압축 |

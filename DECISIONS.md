@@ -175,6 +175,32 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `[video] hardware_decode` = `off` (default) | `on` (hand the renderer's device to Media Foundation where the card offers decoders) | `always` (diagnostic). Frames decoded on the card are copied into the film's texture on the card (zero copy, D-11 (b)); a reader that fails with the device is reopened without it. FFmpeg stays software (its D3D11VA output needs a colour conversion of its own).
 - Consequences: the default is revisited after T065 on a real GPU. The texture path already runs on the VM (plan file, 2026-09-22), so a regression there is caught before any real card is at hand.
 
+## 2026-10-09: D-80 File types: by kind, for this user or for every user, and given back on removal
+
+- Status: Accepted (owner 2026-10-09: "확장자 연결 기능 설정 창에 넣어주세요. 현재 사용자만/관리자 전체 등 다양하게요")
+- Decision:
+  - Settings › General › File types opened with Rubraview: four kinds (`shell.pictures`, `shell.comics`, `shell.video`, `shell.music`, all on), and five rows — register for this user (HKCU), register for every user (HKLM), the two removals, and Windows' Default apps (`ms-settings:defaultapps`).
+  - For every user the viewer runs itself again as an administrator (`runas`; Windows asks) with `--register-shell` / `--unregister-shell`, `--all-users` and `--types=`; it never writes HKLM from the reader's own process. Without an administrator's rights `--all-users` fails and says so.
+  - Registering also adds the ProgID to the extension's `OpenWithProgids`, and keeps the default it replaces in a value beside it (`Rubraview.Was`). Removing puts that default back, removes only our values, and deletes the extension's key only when nothing is left in it. Before, removal deleted the whole key when it pointed at us — under HKLM that would have taken another program's entries with it (seen as a risk on the VM, where an elevated shell ran the all-users path).
+  - Windows keeps a default chosen by hand (UserChoice) whatever is registered; the page says so and opens Default apps.
+- Consequences: the kinds and their parsing are in `filemanage.c` and host-tested; registering, removing and restoring were measured on the VM for this user and, from an elevated shell, for every user (T128). Not measured: the administrator question itself (the `runas` path from the settings window).
+
+## 2026-10-09: D-79 Five layouts, one setting: single, dual, book, webtoon, comic
+
+- Status: Accepted (owner 2026-10-09: "2장보기 아이콘에서 누를 때마다 ... 순환", "아이콘만 1장-2장-북-웹툰 ... 웹툰 스타일은 그냥 세로로 길게 자연스럽게 이어지는 것 ... 폭을 똑같이", "설정의 한장 두장 책 웹툰 설정과 화면 보는 방식이 어긋나 있어요 ... 코믹 추가해서 가로로 긴 파일은 좌우로 반반 나눠서 보여주는 기존 방식 ... 보기 방식은 5종")
+- Decision:
+  - `viewer.layout` (single | dual | book | webtoon | comic) is the only place the layout lives. `toggle_layout` (`B`, the Layout tile), the menu's five items (`layout_single` ... `layout_comic`) and the settings window write it; applying the setting sets the mode. It was a "default layout" before, read once, and the key changed a copy — the mismatch the owner saw.
+  - The Layout tile shows the layout in use (Segoe MDL2 Page, TwoPage, ReadingMode, ScrollUpDown, PreviewLink) and is in the picture toolbox as well as the archive one.
+  - Webtoon is a strip: every page at one width (the width of the page it was entered on, no wider than the window, times the zoom), one under the other with no gap. The place is the page at the window's top and an offset into it (`rubraview_strip_scroll`); that page is the current one for the title, the page bar and the lists. The wheel moves it 120 px a notch, a drag or a touch pan moves it, `next_page` / `prev_page` move a window less a tenth and go on to the next archive at the end, `Home` / `End` go to the first page's top and the last page. A film, a song or an animation on the top page is shown the ordinary way.
+  - Comic is single with a wide scan (width / height >= 1.15) shown as its two halves in reading order — what "Split wide spreads" did in every layout. That setting is removed: single, dual and book show a wide scan whole. A page the reader turned on its side is still never split (D-77).
+- Consequences: host tests for the strip's scrolling and ends and for comic (T127); the strip, the cycle, the icons and the saved setting were measured on the VM. Not done in the strip: the crop overlay, the page-turn fade, the slide show's timing by page, sharper tiles for more than the page across the window's middle. A `spread_autosplit` line left in an old settings.ini is ignored.
+
+## 2026-10-09: D-78 The picker leaves the top to the title bar
+
+- Status: Accepted (owner 2026-10-09: "파일 및 폴더 열기 화면에서, 위에 창 타이틀 플로팅이 뜨지 않아 답답합니다. 여기에는 여백 또는 클릭 불가능한 정보 등이 들어가도록 하고 플로팅 타이틀바가 뜨게")
+- Decision: with the frameless window, the picker starts with a band the title bar's height that says what the screen is ("Open a file or a folder" / "Pages of this book") and takes no click; the path, the places and the tiles sit under it. The floating title bar is drawn over the picker too and its buttons answer first; its caption is the folder's path. With Windows' own title bar there is no band. The icon's eye is white on the red square (owner, same day: the black lines were hard to see).
+- Consequences: measured on the VM (the band, the bar over it, Minimise from it). The title bar's drawing and its clicks are functions of their own (`draw_titlebar`, `titlebar_click`).
+
 ## 2026-10-08: D-77 The reader's rotation with two pages; the information bar only when asked for
 
 - Status: Accepted (owner 2026-10-08: "2장보기 모드에서 rotate 시켰을 때, 90도일 때와 180도일 때 화면이 이상하게 보입니다 … 돌린 이미지 기준으로 비율을 봐서 가로로 길면 1장씩, 세로로 길면 2장", and of the translucent bar with the picture's size: "이거 없앴으면 좋겠는데요")

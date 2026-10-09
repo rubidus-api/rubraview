@@ -45,6 +45,8 @@ typedef struct rubraview_cli_result {
     bool                batch_mode; /* --batch was given */
     bool                register_shell;    /* §3.19.3 --register-shell */
     bool                unregister_shell;  /* §3.19.3 --unregister-shell */
+    bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
+    uint32_t            shell_groups;      /* --types=pictures,comics,video,music; all when not given */
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
     bool                diagnostics;       /* --diag: report what the graphics device is and stop */
     bool                show_version;      /* --version: print the version and stop */

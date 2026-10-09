@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.36.exe              the viewer, as built
-dist/rubraview-v0.0.36/                 the release bundle
-dist/rubraview-v0.0.36.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.37.exe              the viewer, as built
+dist/rubraview-v0.0.37/                 the release bundle
+dist/rubraview-v0.0.37.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -40,16 +40,38 @@ Launching it again while it is already open does not open a second
 window — the running one comes forward and shows the new file. Pass
 `--new-instance` when you do want a second window.
 
-To make Windows offer Rubraview in "Open with", run
-`rubraview.exe --register-shell` once. `--unregister-shell` removes it
-again and leaves nothing behind in the registry.
+To make Windows open files with Rubraview, use **Settings (`F10`) ›
+General › File types opened with Rubraview**: switch on the kinds you want
+(pictures, comics, video, music) and press **Register for this user**, or
+**Register for every user** — Windows then asks for an administrator. The
+two **Remove** rows take it back: only what Rubraview wrote goes, and a
+type that was another program's before is that program's again. Windows
+keeps the last word on a default it has been told by hand; **Open Windows'
+Default apps** is where to change that.
+
+The same from a command line: `rubraview.exe --register-shell` and
+`--unregister-shell`, with `--types=pictures,comics,video,music` for some
+kinds only and `--all-users` (from an administrator's prompt) for every
+user.
 
 ## Reading
 
-`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages; `B` shows two
-pages side by side, `M` reads right to left. Two pages are shown at the
-same height, so a small scan beside a large one is not drawn small (at
-actual size, `4`, each keeps its own pixels).
+`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages; `M` reads
+right to left. `B`, the toolbox's Layout button (its icon is the layout in
+use) and Menu › View › Layout choose how pages are laid out, and
+Settings › Viewer › Layout shows and keeps the same choice:
+
+- **Single** — one page at a time, a wide scan whole.
+- **Dual** — two pages side by side; a wide scan stands alone.
+- **Book** — the cover alone, then two pages side by side.
+- **Webtoon** — every page one under the other at the same width, read as
+  one long strip: the wheel, a drag, or `PageDown` / `PageUp` (a window's
+  worth) move through it, and zooming widens or narrows the strip.
+- **Comic** — one page at a time, and a wide scan as its two halves, one
+  after the other in reading order.
+
+Two pages are shown at the same height, so a small scan beside a large one
+is not drawn small (at actual size, `4`, each keeps its own pixels).
 
 Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
 they are shown one at a time, whole; standing tall, two at a time. Turned
@@ -350,9 +372,9 @@ filename code page, the memory cap). Some worth knowing:
   nothing (`blank`), reopens what you read last (`last_file`), or opens the
   picker in its folder (`last_folder`, the default). **Frameless window**
   off gives the window Windows' own title bar and borders.
-- **Viewer** — the fit and the layout a new session starts with, the gap
-  between two pages, how much one zoom step is, whether a wide scan is cut
-  in two, and whether a narrow window shows one page at a time.
+- **Viewer** — the fit a new session starts with, the layout (the one
+  `B` changes), the gap between two pages, how much one zoom step is, and
+  whether a narrow window shows one page at a time.
 - **Files** — **Remember the page** off keeps no reading history;
   **Offer to resume** off opens where you stopped without asking.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
@@ -362,6 +384,10 @@ filename code page, the memory cap). Some worth knowing:
   and kept behind; **Always strip metadata on export** starts Export with
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
+
+The file picker has a band across its top that holds nothing to press;
+pointing at the window's top edge brings the title bar down over it (the
+folder's path, and the window's buttons), as it does over a picture.
 
 In the file picker each tile shows its picture — softened and a little
 dark, so the name drawn over it stays readable — and a folder shows the
@@ -484,7 +510,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Single page / two pages / book |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them |
 | `M` | Left-to-right / right-to-left (manga) |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |

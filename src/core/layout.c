@@ -7,7 +7,7 @@ rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mo
         .direction = direction,
         .spread_ar_threshold = 1.15,
         .portrait_collapse_ar = 1.0,
-        .auto_split_wide_spreads = false,
+        .auto_split_wide_spreads = (mode == RUBRAVIEW_PAGE_LAYOUT_COMIC),
     };
 }
 
@@ -124,7 +124,7 @@ rubraview_layout_result_t rubraview_layout_compute(proven_arena_t *arena, const 
     rubraview_page_layout_t effective_mode = opts.mode;
     if (effective_mode != RUBRAVIEW_PAGE_LAYOUT_WEBTOON && win_w > 0.0 && win_h > 0.0) {
         if ((win_w / win_h) < opts.portrait_collapse_ar) {
-            effective_mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+            if (effective_mode != RUBRAVIEW_PAGE_LAYOUT_COMIC) effective_mode = RUBRAVIEW_PAGE_LAYOUT_SINGLE;
         }
     }
 
@@ -138,6 +138,7 @@ rubraview_layout_result_t rubraview_layout_compute(proven_arena_t *arena, const 
             break;
 
         case RUBRAVIEW_PAGE_LAYOUT_SINGLE:
+        case RUBRAVIEW_PAGE_LAYOUT_COMIC:   /* the caller's options carry the splitting */
             for (size_t i = 0; i < page_count; ++i) {
                 if (opts.auto_split_wide_spreads && is_wide_spread(&pages[i], opts.spread_ar_threshold)) {
                     push_split(arena, &buf, (int32_t)i, opts.direction);
@@ -164,4 +165,64 @@ rubraview_layout_result_t rubraview_layout_compute(proven_arena_t *arena, const 
     result.spreads = buf.data;
     result.count = buf.count;
     return result;
+}
+
+/* ---- the strip ---- */
+
+static double strip_height(rubraview_strip_height_fn height, void *context, size_t page) {
+    double h = height(context, page);
+    return h >= 1.0 ? h : 1.0;
+}
+
+/* Moves up by `amount` (>= 0); returns what could not be moved. */
+static double strip_up(rubraview_strip_pos_t *pos, double amount, rubraview_strip_height_fn height, void *context) {
+    pos->offset -= amount;
+    while (pos->offset < 0.0 && pos->top > 0) {
+        pos->top -= 1;
+        pos->offset += strip_height(height, context, pos->top);
+    }
+    if (pos->offset < 0.0) {
+        double left = -pos->offset;
+        pos->offset = 0.0;
+        return left;
+    }
+    return 0.0;
+}
+
+double rubraview_strip_scroll(rubraview_strip_pos_t *pos, double delta, size_t count, double view_height,
+                              rubraview_strip_height_fn height, void *context) {
+    if (!pos || !height || count == 0) return delta;
+    if (pos->top >= count) { pos->top = count - 1; pos->offset = 0.0; }
+    if (pos->offset < 0.0) pos->offset = 0.0;
+
+    double left = 0.0;
+    if (delta < 0.0) {
+        left = -strip_up(pos, -delta, height, context);
+    } else {
+        pos->offset += delta;
+    }
+    /* Past the top page's bottom: the next page is the top one. */
+    for (;;) {
+        double h = strip_height(height, context, pos->top);
+        if (pos->offset < h) break;
+        if (pos->top + 1 >= count) {
+            if (delta > 0.0) left += pos->offset - h;
+            pos->offset = h;
+            break;
+        }
+        pos->offset -= h;
+        pos->top += 1;
+    }
+    /* What is left below the window's top edge must fill the window. */
+    double below = strip_height(height, context, pos->top) - pos->offset;
+    for (size_t i = pos->top + 1; i < count && below < view_height; ++i) below += strip_height(height, context, i);
+    if (below < view_height) {
+        double back = view_height - below;
+        double stuck = strip_up(pos, back, height, context);
+        if (delta > 0.0) {
+            left += back - stuck;
+            if (left > delta) left = delta;
+        }
+    }
+    return left;
 }
