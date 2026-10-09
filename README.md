@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.37** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.37/rubraview-v0.0.37.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.38** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.38/rubraview-v0.0.38.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -150,7 +150,88 @@ ships with, so it cannot drift from them.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
+**No key of its own: in the toolbox or the menu**
+
+| Where | What it does |
+|---|---|
+| Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
+| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
+| Toolbox `A-B` | A-B repeat: from here, to here, off |
+| Toolbox `1x` | The next playback speed |
+| Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
+| Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Menu `Auto` | Read the open archive's file names in the code page that fits them |
+| Menu `UTF-8` | Read the open archive's file names as UTF-8 |
+| Menu `Korean` | Read the open archive's file names as Korean (CP949) |
+| Menu `Japanese (Shift-JIS)` | Read the open archive's file names as Japanese (Shift-JIS) |
+| Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
+| Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
+| Menu `Western` | Read the open archive's file names as Western (CP1252) |
+| Menu `Single` | Layout: one page at a time |
+| Menu `Dual` | Layout: two pages side by side |
+| Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Menu `Webtoon` | Layout: every page one under the other, one long strip |
+| Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
+| Menu `Slower` | Play slower |
+| Menu `Faster` | Play faster |
+| Menu `Choose` | Choose the subtitles from a list |
+| Menu `100%` | The floating boxes fully opaque |
+| Menu `80%` | The floating boxes 80 % opaque |
+| Menu `60%` | The floating boxes 60 % opaque |
+| Menu `40%` | The floating boxes 40 % opaque |
+| Menu `Change keys` | Settings, opened on its Keys page |
+| Menu `About` | About Rubraview: the version and the licences of what it carries |
+
 <!-- keys:end -->
+
+## Mouse and touch
+
+| Do this | And this happens |
+|---|---|
+| Click the left or right third of the window | Previous or next page, when a folder or an archive is open (the sides swap when reading right to left) |
+| Click the middle (or anywhere on a single picture) | The toolbox opens or closes |
+| Hold the left button and drag | Moves a picture zoomed past the window, and the webtoon strip |
+| Middle click | Actual size, and back to fit |
+| The mouse's back / forward buttons | Previous / next page |
+| `Ctrl` + wheel | Zoom in or out |
+| `Shift` + wheel | Ten pages back or forward |
+| Wheel | Scrolls the webtoon strip, and a page shown at Fit Width; otherwise nothing — pages turn on the keys, not the wheel |
+| `Alt` + wheel over a floating box | Makes that box more or less see-through |
+| Point at the window's top edge | The title bar: drag it to move the window, double-click it to maximise, **Size** to resize, **Pin** for always on top, **Box** to bring the floating boxes back to their corners |
+| Point near the middle of the left or right side | A button for the previous or next page |
+| Drop files or a folder on the window | Opens them |
+| Touch: drag, pinch | Moves the picture, zooms it |
+
+## Keys in the other windows
+
+These belong to their window and are not on the Keys page.
+
+| Where | Keys |
+|---|---|
+| The file picker (`O`) | Arrows move; `Enter` opens (`Shift+Enter` shows an archive's pages as tiles); `Backspace` goes up a folder; a letter or a digit jumps to the next name starting with it; `Ctrl+L` types a path; `Ctrl+D` stars the folder; `Esc` closes. Right-click an archive for its pages, a starred folder to rename it |
+| The file list window (`F3`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` choose a file and preview it; `Enter` or a click turns the viewer to it; `Esc` closes; every other key does what it does in the viewer |
+| Settings (`F10`) | `Up` / `Down` move; `Left` / `Right` change a value (`PageUp` / `PageDown` by ten steps); `Enter` or `Space` switches or presses; `Tab` / `Shift+Tab` change the page; `Esc` closes |
+| Help (`F1`), information (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` scroll; `Esc` closes |
+| The playlist (`P`) | A click goes to a file, the wheel scrolls, `Esc` closes |
+| Rename (`F2`), a typed path, a password | `Enter` accepts, `Esc` gives up |
+
+## Layouts
+
+`B`, the toolbox's Layout button and Menu > View > Layout choose one of five, and Settings > Viewer > Layout keeps it:
+**single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
+under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves).
+
+## Command line
+
+| Run | For |
+|---|---|
+| `rubraview.exe FILE` (or a folder, or an archive) | Opens it; a second launch hands the file to the window already open |
+| `--new-instance` | A second window all the same |
+| `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview, or takes that back. `--types=pictures,comics,video,music` for some kinds only; `--all-users` from an administrator's prompt for every user. The same is in Settings > General |
+| `--batch ...` | Converts many files without a window; the [manual](docs/manual/rubraview-manual.md) lists its options |
+| `--version` | The version |
 
 ## Stack & Architecture
 

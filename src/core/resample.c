@@ -1,5 +1,6 @@
 #include "rubraview/resample.h"
 #include <string.h>
+#include <stdlib.h>
 #include <math.h>
 
 #ifndef M_PI
@@ -388,4 +389,139 @@ bool rubraview_resample_try_accel(const rubraview_pixbuf_t *src, rubraview_pixbu
         return false;
     }
     return fn(g_accel_context, src, dst, filter);
+}
+
+/* ---- D-81: enlarging for the screen ---- */
+
+bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t src_stride, int32_t factor,
+                              int32_t out_x, int32_t out_y, int32_t out_w, int32_t out_h,
+                              uint8_t *dst, size_t dst_stride) {
+    if (!src || !dst || sw <= 0 || sh <= 0 || (factor != 2 && factor != 4 && factor != 8)) return false;
+    if (sw > 8192 || sh > 8192) return false;
+    int32_t dw = sw * factor, dh = sh * factor;
+    if (out_x < 0 || out_y < 0 || out_w <= 0 || out_h <= 0 || out_x + out_w > dw || out_y + out_h > dh) return false;
+
+    /* The blur's reach, in output pixels: only that much around the part
+       asked for has to be made. */
+    float sigma = 0.3f * (float)factor;
+    int32_t reach = (int32_t)ceilf(3.0f * sigma);
+    int32_t x0 = out_x - reach - 1, y0 = out_y - reach - 1;
+    int32_t x1 = out_x + out_w + reach + 1, y1 = out_y + out_h + reach + 1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > dw) x1 = dw;
+    if (y1 > dh) y1 = dh;
+    int32_t ww = x1 - x0, wh = y1 - y0;   /* the working window */
+
+    const int taps = 6;
+    int32_t *xi = (int32_t*)malloc((size_t)dw * taps * sizeof(int32_t));
+    float *xw = (float*)malloc((size_t)dw * taps * sizeof(float));
+    int32_t *yi = (int32_t*)malloc((size_t)dh * taps * sizeof(int32_t));
+    float *yw = (float*)malloc((size_t)dh * taps * sizeof(float));
+    float *rows = (float*)malloc((size_t)sh * (size_t)ww * 4u * sizeof(float));   /* source rows, enlarged across */
+    float *up = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));     /* enlarged, echoes removed */
+    float *blur = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));
+    float *tmp = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));
+    float kernel[64];
+    bool ok = xi && xw && yi && yw && rows && up && blur && tmp && reach < 32 &&
+              rubraview_resample_axis_weights(RUBRAVIEW_FILTER_LANCZOS3, sw, dw, xi, xw) &&
+              rubraview_resample_axis_weights(RUBRAVIEW_FILTER_LANCZOS3, sh, dh, yi, yw);
+    if (ok) {
+        /* 1. Lanczos-3: across, for the source rows the window's rows need... */
+        int32_t sy_lo = yi[(size_t)y0 * taps], sy_hi = yi[(size_t)(y1 - 1) * taps + (taps - 1)];
+        for (int32_t sy = sy_lo; sy <= sy_hi; ++sy) {
+            const uint8_t *row = src + (size_t)sy * src_stride;
+            float *out = rows + (size_t)sy * (size_t)ww * 4u;
+            for (int32_t x = 0; x < ww; ++x) {
+                const int32_t *index = xi + (size_t)(x0 + x) * taps;
+                const float *weight = xw + (size_t)(x0 + x) * taps;
+                float acc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                for (int j = 0; j < taps; ++j) {
+                    const uint8_t *p = row + (size_t)index[j] * 4u;
+                    for (int c = 0; c < 4; ++c) acc[c] += weight[j] * (float)p[c];
+                }
+                memcpy(out + (size_t)x * 4u, acc, sizeof(acc));
+            }
+        }
+        /* ...then down, and 2. within the four picture pixels around. */
+        for (int32_t y = 0; y < wh; ++y) {
+            const int32_t *index = yi + (size_t)(y0 + y) * taps;
+            const float *weight = yw + (size_t)(y0 + y) * taps;
+            float fy = ((float)(y0 + y) + 0.5f) / (float)factor - 0.5f;
+            int32_t ya = clamp_coord((int32_t)floorf(fy), sh), yb = clamp_coord((int32_t)floorf(fy) + 1, sh);
+            float *out = up + (size_t)y * (size_t)ww * 4u;
+            for (int32_t x = 0; x < ww; ++x) {
+                float fx = ((float)(x0 + x) + 0.5f) / (float)factor - 0.5f;
+                int32_t xa = clamp_coord((int32_t)floorf(fx), sw), xb = clamp_coord((int32_t)floorf(fx) + 1, sw);
+                const uint8_t *q[4] = {
+                    src + (size_t)ya * src_stride + (size_t)xa * 4u, src + (size_t)ya * src_stride + (size_t)xb * 4u,
+                    src + (size_t)yb * src_stride + (size_t)xa * 4u, src + (size_t)yb * src_stride + (size_t)xb * 4u,
+                };
+                for (int c = 0; c < 4; ++c) {
+                    float acc = 0.0f;
+                    for (int j = 0; j < taps; ++j) acc += weight[j] * rows[((size_t)index[j] * (size_t)ww + (size_t)x) * 4u + (size_t)c];
+                    uint8_t lo = q[0][c], hi = q[0][c];
+                    for (int k = 1; k < 4; ++k) {
+                        if (q[k][c] < lo) lo = q[k][c];
+                        if (q[k][c] > hi) hi = q[k][c];
+                    }
+                    if (acc < (float)lo) acc = (float)lo;
+                    if (acc > (float)hi) acc = (float)hi;
+                    out[(size_t)x * 4u + (size_t)c] = acc;
+                }
+            }
+        }
+        /* 3. The unsharp mask: a Gaussian across, then down... */
+        float sum = 0.0f;
+        for (int32_t i = -reach; i <= reach; ++i) {
+            kernel[i + reach] = expf(-(float)(i * i) / (2.0f * sigma * sigma));
+            sum += kernel[i + reach];
+        }
+        for (int32_t i = 0; i <= 2 * reach; ++i) kernel[i] /= sum;
+        for (int32_t y = 0; y < wh; ++y) {
+            for (int32_t x = 0; x < ww; ++x) {
+                float acc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                for (int32_t i = -reach; i <= reach; ++i) {
+                    const float *p = up + ((size_t)y * (size_t)ww + (size_t)clamp_coord(x + i, ww)) * 4u;
+                    for (int c = 0; c < 4; ++c) acc[c] += kernel[i + reach] * p[c];
+                }
+                memcpy(tmp + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
+            }
+        }
+        for (int32_t y = 0; y < wh; ++y) {
+            for (int32_t x = 0; x < ww; ++x) {
+                float acc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                for (int32_t i = -reach; i <= reach; ++i) {
+                    const float *p = tmp + ((size_t)clamp_coord(y + i, wh) * (size_t)ww + (size_t)x) * 4u;
+                    for (int c = 0; c < 4; ++c) acc[c] += kernel[i + reach] * p[c];
+                }
+                memcpy(blur + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
+            }
+        }
+        /* ...and the difference added back, within the neighbours' range. */
+        for (int32_t y = 0; y < out_h; ++y) {
+            int32_t wy = out_y + y - y0;
+            uint8_t *out = dst + (size_t)y * dst_stride;
+            for (int32_t x = 0; x < out_w; ++x) {
+                int32_t wx = out_x + x - x0;
+                for (int c = 0; c < 4; ++c) {
+                    float lo = 255.0f, hi = 0.0f;
+                    for (int32_t ny = wy - 1; ny <= wy + 1; ++ny) {
+                        for (int32_t nx = wx - 1; nx <= wx + 1; ++nx) {
+                            float v = up[((size_t)clamp_coord(ny, wh) * (size_t)ww + (size_t)clamp_coord(nx, ww)) * 4u + (size_t)c];
+                            if (v < lo) lo = v;
+                            if (v > hi) hi = v;
+                        }
+                    }
+                    size_t at = ((size_t)wy * (size_t)ww + (size_t)wx) * 4u + (size_t)c;
+                    float v = up[at] + (up[at] - blur[at]);
+                    if (v < lo) v = lo;
+                    if (v > hi) v = hi;
+                    out[(size_t)x * 4u + (size_t)c] = (uint8_t)(v + 0.5f);
+                }
+            }
+        }
+    }
+    free(xi); free(xw); free(yi); free(yw); free(rows); free(up); free(blur); free(tmp);
+    return ok;
 }
