@@ -65,7 +65,9 @@ static fulta_arc_err_t find_eocd(const fulta_arc_source_t *src, uint64_t *pos, u
     return e;
 }
 
-static char *zip_name(fulta_arc_t *arc, const uint8_t *raw, size_t n, uint16_t flags, const uint8_t *ex, size_t exlen) {
+static char *zip_name(fulta_arc_t *arc, const uint8_t *raw, size_t n, uint16_t flags, const uint8_t *ex, size_t exlen,
+                      bool *not_unicode) {
+    *not_unicode = false;
     if (flags & 0x0800) return fa_codepage_to_utf8(raw, n, FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
     /* Info-ZIP Unicode path extra field, used only when its CRC matches the header name (zip.md section 4) */
     for (size_t p = 0; p + 4 <= exlen;) {
@@ -76,7 +78,7 @@ static char *zip_name(fulta_arc_t *arc, const uint8_t *raw, size_t n, uint16_t f
             return fa_strndup((const char *)ex + p + 9, sz - 5u);
         p += 4u + sz;
     }
-    return fa_codepage_to_utf8(raw, n, arc->opt.codepage, FULTA_ARC_CP_437);
+    return fa_decode_name(arc, raw, n, false, FULTA_ARC_CP_437, not_unicode);
 }
 
 static const char *method_name(uint16_t m) {
@@ -103,8 +105,9 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         /* a stub in front (SFX) is handled through the end record; nothing more to search for here */
     }
     const fulta_arc_source_t *last = arc->volumes[0];
-    uint8_t eocd[22];
-    uint64_t epos;
+    uint8_t eocd[22] = {0};
+    uint64_t epos = 0;                        /* find_eocd fills both on success; zero-init keeps -O1 -Werror
+                                                 (-Wmaybe-uninitialized can't correlate the OK return with the writes) */
     fulta_arc_err_t e = find_eocd(last, &epos, eocd);
     if (e) return e;
     uint32_t disk = fa_le16(eocd + 4), cd_disk = fa_le16(eocd + 6);
@@ -238,7 +241,8 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         it.encrypted = it.flags & 1;
         if (dstart >= ndisks) { e = FULTA_ARC_ERR_CORRUPT; break; }
         it.local += ndisks > 1 ? disk_start[dstart] : shift;
-        char *uname = zip_name(arc, name, nlen, it.flags, ex, xlen);
+        bool name_nu = false;
+        char *uname = zip_name(arc, name, nlen, it.flags, ex, xlen, &name_nu);
         if (!uname) { e = FULTA_ARC_ERR_NOMEM; break; }
         char mname[64];
         bool strong = (it.flags & 0x40) && strong_key_len(it.strong_alg, it.strong_bits);
@@ -264,6 +268,7 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         if ((nlen && (name[nlen - 1] == '/' || name[nlen - 1] == '\\')) || ((os == 0 || os == 10 || os == 11 || os == 14) && (ext_attr & 0x10)))
             en->pub.flags |= FULTA_ARC_ENTRY_DIR;
         if (it.encrypted) en->pub.flags |= FULTA_ARC_ENTRY_ENCRYPTED;
+        if (name_nu) en->pub.flags |= FULTA_ARC_ENTRY_NAME_NOT_UNICODE;
         if (ndisks > 1) en->pub.flags |= FULTA_ARC_ENTRY_SPLIT;
         if (!method_supported(it.real_method) || ((it.flags & 0x40) && !strong) || ((it.flags & 0x2000) && (it.flags & 0x40)) || (it.method == 99 && (it.aes_strength < 1 || it.aes_strength > 3)))
             en->pub.flags |= FULTA_ARC_ENTRY_UNSUPPORTED;
@@ -273,6 +278,33 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
     fa_free(cd);
     fa_free(disk_start);
     if (e) return e;
+    return FULTA_ARC_OK;
+}
+
+/* ---- editing: copy descriptors (src/write/edit.c) ---- */
+
+fulta_arc_err_t fa_zip_copy_read(fulta_arc_t *arc, uint64_t off, void *buf, size_t n) {
+    return read_range((zip_state_t *)arc->state, off, buf, n);
+}
+
+fulta_arc_err_t fa_zip_copy_info(fulta_arc_t *arc, size_t index, fa_zip_copy_t *out) {
+    zip_state_t *z = arc->state;
+    if (index >= z->nitems || index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
+    zip_item_t *it = &z->items[index];
+    uint8_t lh[30];
+    fulta_arc_err_t e = read_range(z, it->local, lh, sizeof lh);
+    if (e) return e;
+    if (fa_le32(lh) != 0x04034b50) return FULTA_ARC_ERR_CORRUPT;
+    uint16_t lnlen = fa_le16(lh + 26), lxlen = fa_le16(lh + 28);
+    const fulta_arc_entry_t *pub = &arc->entries[index].pub;
+    *out = (fa_zip_copy_t){
+        .method = it->method, .flags = it->flags, .time = it->mtime, .date = it->mdate,
+        .made_by_host = pub->unix_mode ? 3 : 0, .crc = it->crc, .ext_attr = pub->attributes,
+        .usize = it->usize, .csize = it->csize, .data_off = it->local + 30u + lnlen + lxlen,
+        .name_raw = pub->name_raw, .name_raw_len = pub->name_raw_size,
+        .mtime = (pub->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? pub->mtime / 1000000000 : 0,
+        .is_dir = (pub->flags & FULTA_ARC_ENTRY_DIR) != 0,
+    };
     return FULTA_ARC_OK;
 }
 
@@ -413,7 +445,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
                 fa_hmac_sha1_init(&mac, k + kl, kl);
                 if ((e = fa_stream_range(&z->range, start + sl + 2, csize - sl - 2 - 10, &s))) return e;
                 if ((e = fa_stream_hmac_tap(s, &mac, &s))) return e;
-                e = fa_pump(s, csize - sl - 2 - 10, false, 0, NULL, arc);
+                e = fa_pump(s, csize - sl - 2 - 10, false, 0, NULL, arc, false);
                 fa_stream_destroy(s);
                 s = NULL;
                 if (e) return e;
@@ -455,7 +487,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
         if ((it->flags & 6) == 4 && !it->encrypted) {
             fa_stream_t *t;
             if (!(e = fa_stream_range(&z->range, start, csize, &t)) && !(e = fa_dec_explode(t, it->flags, 3, usize, &t))) {
-                e = fa_pump(t, usize, true, it->crc, NULL, arc);
+                e = fa_pump(t, usize, true, it->crc, NULL, arc, false);
                 fa_stream_destroy(t);
             }
             if (e == FULTA_ARC_ERR_CHECKSUM || e == FULTA_ARC_ERR_CORRUPT || e == FULTA_ARC_ERR_TRUNCATED) min_len = 2;
@@ -489,7 +521,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
     }
     if (e) return e;
     bool has_crc = en->pub.flags & FULTA_ARC_ENTRY_HAS_CRC32;
-    e = fa_pump(s, usize, has_crc, it->crc, sink, arc);
+    e = fa_pump(s, usize, has_crc, it->crc, sink, arc, true);
     fa_stream_destroy(s);
     return e;
 }
@@ -503,4 +535,55 @@ static void zip_close(fulta_arc_t *arc) {
     arc->state = NULL;
 }
 
-const fa_format_ops_t fa_zip_ops = {FULTA_ARC_FORMAT_ZIP, zip_probe, zip_open, zip_extract, zip_close};
+/* Cheap password check (fulta_arc_check_password): match the format's check value without decoding the data. */
+static fulta_arc_err_t zip_check_password(fulta_arc_t *arc, size_t index) {
+    zip_state_t *z = arc->state;
+    zip_item_t *it = &z->items[index];
+    if (!it->encrypted) return FULTA_ARC_OK;
+    uint8_t lh[30];
+    fulta_arc_err_t e = read_range(z, it->local, lh, 30);
+    if (e) return e;
+    if (fa_le32(lh) != 0x04034b50) return FULTA_ARC_ERR_CORRUPT;
+    uint64_t start = it->local + 30 + fa_le16(lh + 26) + fa_le16(lh + 28);
+    uint64_t csize = it->csize;
+    bool strong = (it->flags & 0x40) && strong_key_len(it->strong_alg, it->strong_bits);
+    for (uint32_t attempt = 0;; attempt++) {
+        const char *pw;
+        e = fa_password(arc, attempt, &pw);
+        if (e) return attempt ? FULTA_ARC_ERR_PASSWORD_WRONG : e;
+        if (attempt > 64) return FULTA_ARC_ERR_PASSWORD_WRONG;
+        size_t pwlen = strlen(pw);
+        if (strong) {
+            size_t kl = strong_key_len(it->strong_alg, it->strong_bits);
+            uint64_t hl;
+            uint8_t key[32], iv[16];
+            e = strong_begin(z, it, start, pw, kl, &hl, key, iv);
+            memset(key, 0, sizeof key);
+            if (e == FULTA_ARC_ERR_PASSWORD_WRONG) continue;
+            if (e) return e;
+            fa_password_ok(arc, pw);
+            return FULTA_ARC_OK;
+        }
+        if (it->method == 99) {
+            static const size_t salt_len[4] = {0, 8, 12, 16}, key_len[4] = {0, 16, 24, 32};
+            if (it->aes_strength < 1 || it->aes_strength > 3) return FULTA_ARC_ERR_UNSUPPORTED;
+            size_t sl = salt_len[it->aes_strength], kl = key_len[it->aes_strength];
+            if (csize < sl + 2) return FULTA_ARC_ERR_CORRUPT;
+            uint8_t salt[16], pv[2], k[66];
+            if ((e = read_range(z, start, salt, sl)) || (e = read_range(z, start + sl, pv, 2))) return e;
+            fa_pbkdf2_sha1((const uint8_t *)pw, pwlen, salt, sl, 1000, k, 2 * kl + 2);
+            if (k[2 * kl] == pv[0] && k[2 * kl + 1] == pv[1]) { fa_password_ok(arc, pw); return FULTA_ARC_OK; }
+            continue;
+        }
+        if (csize < 12) return FULTA_ARC_ERR_CORRUPT;
+        uint8_t hdr[12];
+        if ((e = read_range(z, start, hdr, 12))) return e;
+        fa_zipcrypto_t keys;
+        fa_zipcrypto_init(&keys, (const uint8_t *)pw, pwlen);
+        fa_zipcrypto_decrypt(&keys, hdr, 12);
+        uint8_t want = (it->flags & 8) ? (uint8_t)(it->mtime >> 8) : (uint8_t)(it->crc >> 24);
+        if (hdr[11] == want) { fa_password_ok(arc, pw); return FULTA_ARC_OK; }
+    }
+}
+
+const fa_format_ops_t fa_zip_ops = {FULTA_ARC_FORMAT_ZIP, zip_probe, zip_open, zip_extract, zip_close, zip_check_password, NULL};

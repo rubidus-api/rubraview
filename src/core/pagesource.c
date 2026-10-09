@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg"
 #define COMICINFO_NAME "ComicInfo.xml"
 
 static bool name_is_comicinfo(u8str_t name) {
@@ -448,6 +448,8 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     fulta_arc_format_t format = fulta_arc_format(source.arc);
     source.kind = format == FULTA_ARC_FORMAT_7Z ? RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z
                 : format == FULTA_ARC_FORMAT_RAR ? RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR
+                : format == FULTA_ARC_FORMAT_ALZ ? RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ
+                : format == FULTA_ARC_FORMAT_EGG ? RUBRAVIEW_PAGE_SOURCE_ARCHIVE_EGG
                 : RUBRAVIEW_PAGE_SOURCE_ARCHIVE;
 
     size_t count = fulta_arc_count(source.arc);

@@ -135,7 +135,7 @@ static double g_gutter = 8.0;
 #define GUTTER g_gutter
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
 #define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
@@ -9190,6 +9190,8 @@ static void info_gather(app_state_t *app) {
             rubraview_info_add(a, &info, "Folder", rubraview_path_dirname(app->source.archive_path));
             rubraview_info_add(a, &info, "Kind", app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z ? U8("7z (CB7)")
                                                : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR ? U8("RAR (CBR)")
+                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ ? U8("ALZ")
+                                               : app->source.kind == RUBRAVIEW_PAGE_SOURCE_ARCHIVE_EGG ? U8("EGG")
                                                      : U8("ZIP (CBZ)"));
             if (rubraview_page_source_is_solid(&app->source))
                 rubraview_info_add(a, &info, "Solid", U8("yes: a far page decodes the ones before it"));

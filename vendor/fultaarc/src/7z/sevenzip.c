@@ -368,6 +368,57 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
 
 /* ---- decoding a folder --------------------------------------------------------------------------------------- */
 
+/* 7zAES key = SHA-256 iterated 2^power times over (salt | password-UTF-16LE | counter_le64); power 0x3F is the
+ * raw salt||password form. Shared by the reader (get_key) and the writer (write_7z). */
+fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t salt_len, uint32_t power,
+                                 uint8_t key[32]) {
+    fa_buf_t u = {0};
+    const uint8_t *s = (const uint8_t *)pw;
+    size_t n = strlen(pw);
+    fulta_arc_err_t e = FULTA_ARC_OK;
+    for (size_t i = 0; i < n;) {
+        uint32_t cp = s[i];
+        size_t len = 1;
+        if (cp >= 0xF0 && i + 3 < n) { cp = ((cp & 7) << 18) | ((s[i + 1] & 63) << 12) | ((s[i + 2] & 63) << 6) | (s[i + 3] & 63); len = 4; }
+        else if (cp >= 0xE0 && i + 2 < n) { cp = ((cp & 15) << 12) | ((s[i + 1] & 63) << 6) | (s[i + 2] & 63); len = 3; }
+        else if (cp >= 0xC0 && i + 1 < n) { cp = ((cp & 31) << 6) | (s[i + 1] & 63); len = 2; }
+        i += len;
+        uint8_t t[4];
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            fa_put_le16(t, (uint16_t)(0xD800 + (cp >> 10)));
+            fa_put_le16(t + 2, (uint16_t)(0xDC00 + (cp & 0x3FF)));
+            e = fa_buf_append(&u, t, 4);
+        } else {
+            fa_put_le16(t, (uint16_t)cp);
+            e = fa_buf_append(&u, t, 2);
+        }
+        if (e) { fa_buf_free(&u); return e; }
+    }
+    if (power == 0x3F) {
+        memset(key, 0, 32);
+        size_t k = 0;
+        for (size_t i = 0; i < salt_len && k < 32; i++) key[k++] = salt[i];
+        for (size_t i = 0; i < u.size && k < 32; i++) key[k++] = u.data[i];
+    } else {
+        fa_sha256_t h;
+        fa_sha256_init(&h);
+        uint8_t *blk = fa_malloc(salt_len + u.size + 8);
+        if (!blk) { fa_buf_free(&u); return FULTA_ARC_ERR_NOMEM; }
+        if (salt_len) memcpy(blk, salt, salt_len);
+        if (u.size) memcpy(blk + salt_len, u.data, u.size);
+        size_t bl = salt_len + u.size;
+        for (uint64_t i = 0; i < (UINT64_C(1) << power); i++) {
+            fa_put_le64(blk + bl, i);
+            fa_sha256_update(&h, blk, bl + 8);
+        }
+        fa_free(blk);
+        fa_sha256_final(&h, key);
+    }
+    fa_buf_free(&u);
+    return FULTA_ARC_OK;
+}
+
 static fulta_arc_err_t get_key(fulta_arc_t *arc, const sz_coder_t *c, uint32_t attempt, uint8_t key[32], uint8_t iv[16]) {
     sz_state_t *st = arc->state;
     if (c->nprops < 1) return FULTA_ARC_ERR_CORRUPT;
@@ -406,49 +457,8 @@ static fulta_arc_err_t get_key(fulta_arc_t *arc, const sz_coder_t *c, uint32_t a
     fa_sha256_update(&h, pw, strlen(pw));
     fa_sha256_final(&h, ph);
     if (st->key_valid && memcmp(ph, st->key_props_hash, 32) == 0) { memcpy(key, st->key, 32); return FULTA_ARC_OK; }
-    /* password as UTF-16LE */
-    fa_buf_t u = {0};
-    const uint8_t *s = (const uint8_t *)pw;
-    size_t n = strlen(pw);
-    for (size_t i = 0; i < n;) {
-        uint32_t cp = s[i];
-        size_t len = 1;
-        if (cp >= 0xF0 && i + 3 < n) { cp = ((cp & 7) << 18) | ((s[i + 1] & 63) << 12) | ((s[i + 2] & 63) << 6) | (s[i + 3] & 63); len = 4; }
-        else if (cp >= 0xE0 && i + 2 < n) { cp = ((cp & 15) << 12) | ((s[i + 1] & 63) << 6) | (s[i + 2] & 63); len = 3; }
-        else if (cp >= 0xC0 && i + 1 < n) { cp = ((cp & 31) << 6) | (s[i + 1] & 63); len = 2; }
-        i += len;
-        uint8_t t[4];
-        if (cp >= 0x10000) {
-            cp -= 0x10000;
-            fa_put_le16(t, (uint16_t)(0xD800 + (cp >> 10)));
-            fa_put_le16(t + 2, (uint16_t)(0xDC00 + (cp & 0x3FF)));
-            e = fa_buf_append(&u, t, 4);
-        } else {
-            fa_put_le16(t, (uint16_t)cp);
-            e = fa_buf_append(&u, t, 2);
-        }
-        if (e) { fa_buf_free(&u); return e; }
-    }
-    if (power == 0x3F) {
-        memset(key, 0, 32);
-        size_t k = 0;
-        for (uint32_t i = 0; i < salt_len && k < 32; i++) key[k++] = salt[i];
-        for (size_t i = 0; i < u.size && k < 32; i++) key[k++] = u.data[i];
-    } else {
-        fa_sha256_init(&h);
-        uint8_t *blk = fa_malloc(salt_len + u.size + 8);
-        if (!blk) { fa_buf_free(&u); return FULTA_ARC_ERR_NOMEM; }
-        if (salt_len) memcpy(blk, salt, salt_len);
-        if (u.size) memcpy(blk + salt_len, u.data, u.size);
-        size_t bl = salt_len + u.size;
-        for (uint64_t i = 0; i < (UINT64_C(1) << power); i++) {
-            fa_put_le64(blk + bl, i);
-            fa_sha256_update(&h, blk, bl + 8);
-        }
-        fa_free(blk);
-        fa_sha256_final(&h, key);
-    }
-    fa_buf_free(&u);
+    e = fa_7z_derive_key(pw, salt, salt_len, power, key);
+    if (e) return e;
     memcpy(st->key, key, 32);
     memcpy(st->key_props_hash, ph, 32);
     st->key_valid = true;
@@ -690,6 +700,7 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         fa_free(uname);
         if (!en) { e = FULTA_ARC_ERR_NOMEM; goto done; }
         en->pub.size = sf.size;
+        if (!is_empty) en->pub.solid_group = sf.folder;   /* entries of one folder share the solid unit */
         if (is_dir) en->pub.flags |= FULTA_ARC_ENTRY_DIR;
         if (sf.has_crc) { en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32; en->pub.crc32 = sf.crc; }
         if (mt && mdef[i]) { en->pub.mtime = fa_filetime_ns(mt[i]); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
@@ -833,7 +844,9 @@ static fulta_arc_err_t sz_extract(fulta_arc_t *arc, size_t index, const fulta_ar
     if (arc->entries[index].pub.flags & FULTA_ARC_ENTRY_UNSUPPORTED) return FULTA_ARC_ERR_UNSUPPORTED;
     if (sf->folder == UINT32_MAX) return FULTA_ARC_OK;
     const sz_folder_t *f = &st->main.folders[sf->folder];
-    fulta_arc_err_t e;
+    fulta_arc_err_t e = FULTA_ARC_OK;    /* stays OK when the cached folder stream is reused (the block below is
+                                            skipped); otherwise open_folder sets it. Must be initialised: the skip
+                                            loop and the checks below read it on the reuse path. */
     if (!(st->cur && st->cur_folder == sf->folder && st->cur_pos <= sf->offset)) {
         fa_stream_destroy(st->cur);
         st->cur = NULL;
@@ -843,10 +856,15 @@ static fulta_arc_err_t sz_extract(fulta_arc_t *arc, size_t index, const fulta_ar
         st->cur_folder = sf->folder;
         st->cur_pos = 0;
     }
-    e = fa_stream_skip(st->cur, sf->offset - st->cur_pos);
+    /* skip in steps so a progress callback sees the solid prefix being decoded */
+    for (uint64_t left = sf->offset - st->cur_pos; left && !e;) {
+        uint64_t step = left < (UINT64_C(1) << 20) ? left : (UINT64_C(1) << 20);
+        e = fa_stream_skip(st->cur, step);
+        if (!e) { fa_progress(arc, step); left -= step; }
+    }
     if (!e) {
         st->cur_pos = sf->offset;
-        e = fa_pump(st->cur, sf->size, sf->has_crc, sf->crc, sink, arc);
+        e = fa_pump(st->cur, sf->size, sf->has_crc, sf->crc, sink, arc, true);
     }
     if (!e) {
         st->cur_pos += sf->size;
@@ -878,4 +896,56 @@ static void sz_close(fulta_arc_t *arc) {
     arc->state = NULL;
 }
 
-const fa_format_ops_t fa_7z_ops = {FULTA_ARC_FORMAT_7Z, sz_probe, sz_open, sz_extract, sz_close};
+/* Editable in place only when no folder is solid (every folder holds exactly one substream); otherwise removing or
+   replacing a file would mean re-encoding a shared folder, so the caller must convert. */
+static fulta_arc_editable_t sz_editable(const fulta_arc_t *arc) {
+    const sz_state_t *st = arc->state;
+    for (uint32_t f = 0; f < st->main.nfolders; f++)
+        if (st->main.nsub[f] > 1) return FULTA_ARC_EDIT_SOLID;
+    return FULTA_ARC_EDIT_OK;
+}
+
+/* ---- editing support: copy a folder verbatim (src/write/edit.c 7z copy route) ------------------------------- */
+
+fulta_arc_err_t fa_7z_copy_info(fulta_arc_t *arc, size_t index, fa_7z_copy_t *out) {
+    const sz_state_t *st = arc->state;
+    memset(out, 0, sizeof *out);
+    if (index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
+    const sz_file_t *fi = &st->files[index];
+    if (fi->folder == UINT32_MAX) { out->has_folder = false; return FULTA_ARC_OK; }
+    if (fi->folder >= st->main.nfolders) return FULTA_ARC_ERR_CORRUPT;
+    const sz_folder_t *f = &st->main.folders[fi->folder];
+    if (f->ncoders > FA_7Z_MAX_CODERS || f->npacked > FA_7Z_MAX_CODERS ||
+        f->nbinds > FA_7Z_MAX_CODERS) return FULTA_ARC_ERR_UNSUPPORTED;
+    out->has_folder = true;
+    out->ncoders = f->ncoders;
+    for (uint32_t c = 0; c < f->ncoders; c++) {
+        memcpy(out->coders[c].id, f->coders[c].id, 8);
+        out->coders[c].idlen = f->coders[c].idlen;
+        out->coders[c].nin = f->coders[c].nin;
+        out->coders[c].props = f->coders[c].props;
+        out->coders[c].nprops = f->coders[c].nprops;
+        out->unpack_sizes[c] = f->sizes[c];
+    }
+    out->nbinds = f->nbinds;
+    for (uint32_t b = 0; b < f->nbinds; b++) { out->binds[b][0] = f->binds[b][0]; out->binds[b][1] = f->binds[b][1]; }
+    out->npacked = f->npacked;
+    uint64_t off = st->base + 32 + st->main.pack_pos;
+    for (uint32_t k = 0; k < f->first_pack; k++) off += st->main.pack_sizes[k];
+    out->pack_off = off;
+    for (uint32_t k = 0; k < f->npacked; k++) {
+        out->packed[k] = f->packed[k];
+        out->pack_sizes[k] = st->main.pack_sizes[f->first_pack + k];
+    }
+    out->size = fi->size;
+    out->has_crc = fi->has_crc;
+    out->crc = fi->crc;
+    return FULTA_ARC_OK;
+}
+
+fulta_arc_err_t fa_7z_copy_read(fulta_arc_t *arc, uint64_t off, void *buf, size_t n) {
+    const sz_state_t *st = arc->state;
+    return fa_range_read_exact(&st->range, off, buf, n);
+}
+
+const fa_format_ops_t fa_7z_ops = {FULTA_ARC_FORMAT_7Z, sz_probe, sz_open, sz_extract, sz_close, NULL, sz_editable};

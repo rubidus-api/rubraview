@@ -23,7 +23,7 @@ extern "C" {
  * directly.
  *
  * Every archive is read by FultaArc (vendor/fultaarc, `fulta/arc.h`; owner,
- * 2026-10-08, D-74): ZIP, 7z and RAR 2.0-7.0, with their solid, split and
+ * 2026-10-08, D-74): ZIP, 7z, RAR 2.0-7.0, ALZ and EGG, with their solid, split and
  * password-protected forms.
  */
 
@@ -32,6 +32,8 @@ typedef enum rubraview_page_source_kind {
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE,     /* CBZ / ZIP */
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE_7Z,  /* CB7 / 7z (§3.8.2) */
     RUBRAVIEW_PAGE_SOURCE_ARCHIVE_RAR, /* CBR / RAR (owner, 2026-09-30) */
+    RUBRAVIEW_PAGE_SOURCE_ARCHIVE_ALZ, /* ALZ (D-85) */
+    RUBRAVIEW_PAGE_SOURCE_ARCHIVE_EGG, /* EGG (D-85) */
 } rubraview_page_source_kind_t;
 
 typedef struct rubraview_page_ref {

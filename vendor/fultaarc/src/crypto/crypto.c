@@ -3,6 +3,8 @@
  * AES-CBC and the CTR variants of docs/specs/crypto.md. MIT. Written from those standards. */
 #include "../core/internal.h"
 
+#include "proven/random.h"
+
 /* ---- AES ---------------------------------------------------------------------------------------------------- */
 
 static uint8_t sbox[256], inv_sbox[256];
@@ -127,6 +129,42 @@ void fa_aes_encrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]) {
     uint32_t o2 = sub_word((s2 & 255) | (s3 & 0xFF00) | (s0 & 0xFF0000) | (s1 & 0xFF000000)) ^ rk[2];
     uint32_t o3 = sub_word((s3 & 255) | (s0 & 0xFF00) | (s1 & 0xFF0000) | (s2 & 0xFF000000)) ^ rk[3];
     fa_put_le32(out, o0); fa_put_le32(out + 4, o1); fa_put_le32(out + 8, o2); fa_put_le32(out + 12, o3);
+}
+
+/* AES-CTR with a little-endian counter that starts at 0 and is incremented BEFORE each block (so the first block
+ * uses counter 1) - the WinZip-AES / FA_CTR_AES_LE1 keystream. XOR is symmetric, so this both encrypts and decrypts
+ * a buffer in place. */
+void fa_aes_ctr_le1_xor(const uint8_t *key, size_t keylen, uint8_t *buf, size_t n) {
+    fa_aes_t a;
+    fa_aes_init_enc(&a, key, keylen);
+    uint8_t ctr[16] = {0}, ks[16];
+    for (size_t off = 0; off < n; off += 16) {
+        for (int i = 0; i < 16; i++) if (++ctr[i]) break;   /* little-endian increment, before use */
+        fa_aes_encrypt(&a, ctr, ks);
+        size_t k = n - off < 16 ? n - off : 16;
+        for (size_t i = 0; i < k; i++) buf[off + i] ^= ks[i];
+    }
+    memset(&a, 0, sizeof a);
+}
+
+/* Cryptographically strong random bytes from the OS (proven's CSPRNG: getrandom/getentropy/urandom, or
+ * BCryptGenRandom on Windows). false => no entropy available; callers must then refuse to encrypt. */
+bool fa_random_bytes(void *buf, size_t n) { return proven_random_bytes(buf, n); }
+
+/* AES-CBC encrypt in place; `n` must be a multiple of 16. `iv` is advanced to the last ciphertext block (so chained
+ * calls continue the chain), matching the CBC decryptor. Serial by nature. */
+void fa_aes_cbc_encrypt(const uint8_t *key, size_t keylen, uint8_t iv[16], uint8_t *buf, size_t n) {
+    fa_aes_t a;
+    fa_aes_init_enc(&a, key, keylen);
+    uint8_t prev[16];
+    memcpy(prev, iv, 16);
+    for (size_t off = 0; off + 16 <= n; off += 16) {
+        for (int i = 0; i < 16; i++) buf[off + i] ^= prev[i];
+        fa_aes_encrypt(&a, buf + off, buf + off);
+        memcpy(prev, buf + off, 16);
+    }
+    memcpy(iv, prev, 16);
+    memset(&a, 0, sizeof a);
 }
 
 void fa_aes_decrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]) {
