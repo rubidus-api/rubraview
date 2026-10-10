@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.42** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.42/rubraview-v0.0.42.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.43** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.43/rubraview-v0.0.43.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -58,7 +58,7 @@
 | `Ctrl+Z` | 이동·복사·이름 바꾸기 되돌리기 |
 | `F2` | 이름 바꾸기 |
 | `Ctrl+Enter` | 이 파일을 선택한 탐색기 창 열기(압축 파일 안이면 압축 파일) |
-| `Ctrl+P` | 화면의 그림 인쇄: 시스템 인쇄 창, 용지에 맞춤 |
+| `Ctrl+P` | 화면의 그림 인쇄: 회전·크기·배율·위치·여백·한 면의 장수를 고르는 패널, 이어서 시스템 인쇄 창 |
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |

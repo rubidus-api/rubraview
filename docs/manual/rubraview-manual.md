@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.42.exe              the viewer, as built
-dist/rubraview-v0.0.42/                 the release bundle
-dist/rubraview-v0.0.42.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.43.exe              the viewer, as built
+dist/rubraview-v0.0.43/                 the release bundle
+dist/rubraview-v0.0.43.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -83,9 +83,22 @@ has no files to add to, so the files are opened as a list of their own. A
 film that was playing goes on from where it was.
 
 **Print** (`Ctrl+P`, or File › Print...) prints the picture on screen the
-same way: the system's dialog, the picture as large as fits the sheet with
-its proportions, turned a quarter when it then fills more of it. A page
-inside an archive is not printed yet.
+same way. A panel asks how first; its **Print...** button then opens the
+system's dialog, where the printer and the paper are chosen.
+
+| In the panel | What it sets |
+|---|---|
+| Turn | Auto (a quarter when the picture then fills more of the sheet), None, 90° right, 180°, 90° left |
+| Size | Fit the sheet (all of the picture, as large as fits), Fill the sheet (the sheet covered, the overhang cut off), Stretch (both sides to the sheet's, proportions given up), Actual size (96 pixels an inch) |
+| Scale % | 10 to 400, of the size chosen: 50 is half the fitted picture, 200 twice — what then passes the sheet is cut off |
+| Place | Centre, a side or a corner: where the picture sits, and which part is kept when it is cut |
+| Margin mm | 0 to 50, kept clear inside the printer's printable part |
+| A sheet | 1, 2, 4, 6 or 9 pictures a sheet, each in a cell of its own |
+
+A click on Turn, Size, Place or A sheet steps to the next choice; Scale and
+Margin are dragged. The choices are kept (Settings › Files › Printing) and
+offered again the next time. A click outside the panel, or `Ctrl+P` again,
+closes it without printing. A page inside an archive is not printed yet.
 
 From a command line: `rubraview.exe --register-shell` and
 `--unregister-shell`; `--types=jpg,png,comics,...` (extensions, the kind
@@ -552,7 +565,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
-| `Ctrl+P` | Print the picture on screen: the system's dialog, fitted to the sheet |
+| `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |

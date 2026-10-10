@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include "rubraview/core.h"
 #include "rubraview/keymap.h"
+#include "rubraview/shellreq.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -202,11 +203,13 @@ bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t 
 bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len);
 
 /**
- * The system's print dialog, then each picture on a sheet of its own,
- * fitted (rubraview_print_fit). False when the reader cancelled or the
- * job could not start; `out_printed` is how many pictures went out.
+ * The system's print dialog, then the pictures on their sheets as
+ * `options` says (rubraview_print_cell, rubraview_print_place; NULL for
+ * the defaults). False when the reader cancelled or the job could not
+ * start; `out_printed` is how many pictures went out.
  */
-bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count, size_t *out_printed);
+bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
+                                  const rubraview_print_options_t *options, size_t *out_printed);
 
 /** An Explorer window on the file's folder with the file picked out.
  *  False when there is no such file to show. */

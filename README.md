@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.42** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.42/rubraview-v0.0.42.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.43** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.43/rubraview-v0.0.43.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -59,7 +59,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
-| `Ctrl+P` | Print the picture on screen: the system's dialog, fitted to the sheet |
+| `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
