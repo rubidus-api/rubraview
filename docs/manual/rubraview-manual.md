@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.44.exe              the viewer, as built
-dist/rubraview-v0.0.44/                 the release bundle
-dist/rubraview-v0.0.44.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.45.exe              the viewer, as built
+dist/rubraview-v0.0.45/                 the release bundle
+dist/rubraview-v0.0.45.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -98,7 +98,8 @@ system's dialog, where the printer and the paper are chosen.
 A click on Turn, Size, Place or A sheet steps to the next choice; Scale and
 Margin are dragged. The choices are kept (Settings › Files › Printing) and
 offered again the next time. A click outside the panel, or `Ctrl+P` again,
-closes it without printing. A page inside an archive is not printed yet.
+closes it without printing. A page inside an archive is printed the same
+way.
 
 From a command line: `rubraview.exe --register-shell` and
 `--unregister-shell`; `--types=jpg,png,comics,...` (extensions, the kind
@@ -252,8 +253,8 @@ archive is written again with the change in it:
 
 - `Delete` (or `Shift+Delete`) takes the page out. It asks first — `Y`
   deletes, anything else keeps — because there is no Recycle Bin inside an
-  archive and `Ctrl+Z` does not bring the page back. The last page of a
-  book is not deleted: delete the book's file instead.
+  archive. The last page of a book is not deleted: delete the book's file
+  instead.
 - `F2` renames the page, in the folder it has inside the archive. A name
   another entry already has is refused.
 - In the adjust panel (`E`), **Save a copy** puts the edited picture into
@@ -263,9 +264,19 @@ archive is written again with the change in it:
 A ZIP / CBZ, or a 7z / CB7 whose files are packed one by one, keeps its
 format and its name, and its other entries are copied as they are. Any
 other archive — a solid 7z, a RAR / CBR, an ALZ, an EGG, a split set —
-cannot be changed as it is, so the viewer asks once which it is to become:
-`Z` for a ZIP (`name.cbz` for a comic, `name.zip` otherwise), `7` for a 7z
-(`name.cb7` / `name.7z`), `Esc` to leave it alone. The book is written
+cannot be changed as it is, so a panel asks once what it is to become:
+
+| In the panel | What it sets |
+|---|---|
+| Becomes | ZIP (`name.cbz` for a comic, `name.zip` otherwise) or 7z (`name.cb7` / `name.7z`); the keys `Z` and `7` pick them too |
+| Method | packed — Deflate in a ZIP, LZMA in a 7z — or stored as it is (Store / Copy) |
+| Level | 1 to 9 when packed: 9 is the smallest and the slowest |
+
+**Write** (or `Enter`) starts; `Esc`, a click outside the panel or doing
+anything else leaves the book alone. The three choices are kept (Settings ›
+Files › An archive written again); the method and level are also what a
+page saved into a ZIP or a 7z in place is packed with. Pictures and films
+hardly pack further, so a low level loses little. The book is written
 again in that format with the change in it and the old file — every
 volume of a split set — goes to the Recycle Bin. A file already holding
 the new name is never replaced: the book becomes `name-1.cbz`. The answer
@@ -278,6 +289,14 @@ the writing. Stopped, failed or not matching, the new file is removed and
 the book is as it was. Nothing else can be opened or changed while it is
 being written. An **encrypted archive is not changed**, with its password
 or without: its pages can be read and copied out (`F6`), no more.
+
+`Ctrl+Z` takes back the last change to a book that kept its format: the
+file it was before is kept beside it as `name.cbz.rvold` until the next
+change to an archive or until the program closes, and `Ctrl+Z` in that
+book puts it back. (If the program is ended by force the `.rvold` file
+stays; it is the book before the change and can be deleted.) A book that
+was written again in another format is not taken back this way: its old
+file is in the Recycle Bin.
 
 **`Ctrl+Z` cannot bring a file back from the recycle bin.** Windows keeps
 that undo for File Explorer. Restore it from the recycle bin instead.

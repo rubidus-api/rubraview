@@ -578,6 +578,12 @@ typedef struct app_state {
     char                      arc_choice_path[1024];   /* the archive the format was chosen for, this session */
     rubraview_arcedit_target_t arc_choice;
     bool                      rename_is_archive; /* the rename box holds an archive page's name */
+    bool                      panel_is_convert;  /* D-89: a fifth panel, what an archive becomes */
+    char                      arc_ask_path[1024];      /* the book the question is about */
+    char                      arc_undo_path[1024];     /* D-89: the book last edited in place ... */
+    char                      arc_undo_backup[1024];   /* ... and the file it was before, kept beside it */
+    char                      print_temp[1024];        /* D-89: an archive page laid out as a file to print */
+    bool                      print_going;
     u8str_t                  *print_list;        /* what the print panel's button prints */
     size_t                    print_list_count;
     /* §3.13: a crop being dragged on the picture — where it started, in image pixels. */
@@ -862,6 +868,8 @@ static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t
 static void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
 static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo);
 static void arc_job_poll(app_state_t *app, bool quitting);
+static bool arc_undo(app_state_t *app);
+static void print_archive_page(app_state_t *app);
 static void picker_open(app_state_t *app);
 static void media_toggle_pause(app_state_t *app);
 
@@ -4129,6 +4137,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         osd_say(app, U8("the archive is being written (Esc stops it)"));
         return;
     }
+    /* D-89: with the question of what the archive becomes open, doing something else is "no". */
+    if (app->arc_ask == ARC_ASK_FORMAT && !rubraview_u8_eq_lit(action, "quit")) panel_close(app);
 
     if (rubraview_u8_eq_lit(action, "quit")) {
         /* Esc closes what is open before it closes the program. */
@@ -4297,7 +4307,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* §3.18.1: a permanent delete asks first, every time. */
         app->confirm_purge = true;
     } else if (rubraview_u8_eq_lit(action, "undo")) {
-        triage_undo(app);
+        if (!arc_undo(app)) triage_undo(app);
     } else if (rubraview_u8_eq_lit(action, "rename_file")) {
         rename_begin(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_file_list")) {
@@ -4310,7 +4320,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
     } else if (rubraview_u8_eq_lit(action, "open_edit")) {
-        if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print) panel_close(app);
+        if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
         else panel_open_edit(app);
     } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
@@ -4323,7 +4333,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* D-86, D-87: the picture on screen; how is chosen first, then the system's print dialog. */
         u8str_t path = current_file_path(app);
         if (app->panel.open && app->panel_is_print) panel_close(app);
-        else if (app->source.archive_path.len > 0 && !app->list_is_set) osd_say(app, U8("a page inside an archive is not printed yet"));
+        else if (on_archive_page(app)) print_archive_page(app);
         else if (path.len == 0) osd_say(app, U8("there is no picture to print"));
         else print_paths(app, &path, 1);
     } else if (app->media && (rubraview_u8_eq_lit(action, "media_play_pause") || rubraview_u8_eq_lit(action, "anim_toggle_pause"))) {
@@ -6659,7 +6669,7 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
                                        U8("Delete this file from the disk for good?  (Y / N)"),
                                        box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    if (app->arc_ask != ARC_ASK_NONE) {
+    if (app->arc_ask == ARC_ASK_DELETE) {
         /* D-88 */
         double box_w = 760.0 * chrome_dpi, box_h = 110.0 * chrome_dpi;
         if (box_w > win_w - 16.0) box_w = win_w - 16.0;
@@ -8059,6 +8069,7 @@ enum {
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
+    PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
 };
 
 /* The panel is placed against the window, so it is placed again whenever
@@ -8074,12 +8085,22 @@ static void edit_preview_close(app_state_t *app);
 static void edit_preview_open(app_state_t *app);
 static void media_reopen_on_new_device(app_state_t *app);
 
+static void arc_ask_clear(app_state_t *app);
+static void print_temp_drop(app_state_t *app);
+
 static void panel_close(app_state_t *app) {
     edit_preview_close(app);
     app->panel.open = false;
     app->panel.row_count = 0;
     app->panel_is_export = false;
     app->panel_is_batch = false;
+    /* D-89: closed without its button, the question is answered "no". */
+    if (app->panel_is_convert && app->arc_ask == ARC_ASK_FORMAT) {
+        arc_ask_clear(app);
+        osd_say(app, U8("the archive is as it was"));
+    }
+    app->panel_is_convert = false;
+    if (app->panel_is_print && !app->print_going) print_temp_drop(app);
     app->panel_is_print = false;
 }
 
@@ -8095,6 +8116,7 @@ static void panel_open_edit(app_state_t *app) {
     app->panel_is_export = false;
     app->panel_is_batch = false;
     app->panel_is_print = false;
+    app->panel_is_convert = false;
 
     rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, U8("Exposure"), 0.0, -3.0, 3.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, U8("Brightness"), 0.0, -100.0, 100.0, 0.0);
@@ -8128,6 +8150,7 @@ static void panel_open_export(app_state_t *app) {
     app->panel_is_export = true;
     app->panel_is_batch = false;
     app->panel_is_print = false;
+    app->panel_is_convert = false;
 
     rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, U8("Format"), (int32_t)app->export_options.format, 8);
     rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, U8("Quality"),
@@ -8152,6 +8175,7 @@ static void panel_open_batch(app_state_t *app) {
     app->panel_is_export = false;
     app->panel_is_batch = true;
     app->panel_is_print = false;
+    app->panel_is_convert = false;
 
     rubraview_panel_add_slider(&app->panel, PANEL_BATCH_RESIZE, U8("Resize %"), 100.0, 10.0, 500.0, 5.0);
     rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FILTER, U8("Filter"), 3, 4);
@@ -8214,6 +8238,8 @@ static void panel_open_print(app_state_t *app) {
     panel_relayout(app);
 }
 
+static bool g_conv_is_7z;   /* D-89: which format the convert panel's method row is named for */
+
 /* What a row of the print panel shows beside its name; empty for the others. */
 static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
     int n = 0;
@@ -8224,7 +8250,12 @@ static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, si
         case PANEL_PRINT_PLACE:     n = snprintf(buffer, size, "%s", rubraview_print_place_name((rubraview_print_place_t)v)); break;
         case PANEL_PRINT_PER_SHEET: n = snprintf(buffer, size, "%d", (int)rubraview_print_per_sheet_of(v)); break;
         case PANEL_PRINT_SCALE:
-        case PANEL_PRINT_MARGIN:    n = snprintf(buffer, size, "%d", (int)v); break;
+        case PANEL_PRINT_MARGIN:
+        case PANEL_CONV_LEVEL:      n = snprintf(buffer, size, "%d", (int)v); break;
+        case PANEL_CONV_FORMAT:     n = snprintf(buffer, size, "%s", v == 1 ? "7z (CB7)" : "ZIP (CBZ)"); break;
+        /* The words follow the format on the row above: each has one way of packing. */
+        case PANEL_CONV_METHOD:     n = snprintf(buffer, size, "%s", v == 1 ? (g_conv_is_7z ? "Copy (stored)" : "Store")
+                                                                              : (g_conv_is_7z ? "LZMA" : "Deflate")); break;
         default: break;
     }
     return (u8str_t){ .ptr = buffer, .len = n > 0 ? (size_t)n : 0 };
@@ -8244,7 +8275,92 @@ static void print_now(app_state_t *app) {
     osd_say(app, cstr(line));
 }
 
+static bool arc_temp_path(char *dst, size_t cap, const char *tag, u8str_t leaf);
+
+static void print_temp_drop(app_state_t *app) {
+    if (!app->print_temp[0]) return;
+    (void)rubraview_pal_fs_delete(cstr(app->print_temp));
+    app->print_temp[0] = '\0';
+}
+
+/* D-89: a page of an archive has no file to hand the printer's reader, so
+   it is laid in the temporary folder for as long as the print takes. */
+static void print_archive_page(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    u8str_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
+    u8str_t stem = rubraview_path_stem(shown);
+    u8str_t ext = { .ptr = shown.ptr + stem.len, .len = shown.len - stem.len };
+    print_temp_drop(app);
+    bool ok = arc_temp_path(app->print_temp, sizeof(app->print_temp), "print", ext);
+    if (ok) {
+        page_job_stop(app);   /* the archive is the main thread's to read */
+        size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)page);
+        void *mem = budget > 0 ? malloc(budget) : NULL;
+        ok = false;
+        if (mem) {
+            proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+            rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &app->source, (size_t)page, MAX_PAGE_BYTES);
+            ok = bytes.ok && bytes.data.len > 0 && rubraview_pal_fs_write_file(cstr(app->print_temp), bytes.data);
+            free(mem);
+        }
+    }
+    if (!ok) {
+        app->print_temp[0] = '\0';
+        osd_say(app, U8("not printed: the page could not be read"));
+        return;
+    }
+    u8str_t path = cstr(app->print_temp);
+    char kept[sizeof(app->print_temp)];
+    memcpy(kept, app->print_temp, sizeof(kept));
+    print_paths(app, &path, 1);                       /* closes a panel that is open, which drops the file's name */
+    memcpy(app->print_temp, kept, sizeof(kept));
+}
+
 /* ---- D-88 (R149): a page inside an archive deleted, renamed, saved ---- */
+
+/* D-89: how what is packed again is packed — the settings the convert
+   panel shows. 0 stores; 1..9 packs. */
+static int arc_level(const app_state_t *app) {
+    if (lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_method"))) == 1) return 0;
+    int level = (int)lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_level")));
+    return level < 1 ? 1 : level > 9 ? 9 : level;
+}
+
+static rubraview_arcedit_target_t arc_convert_target(const app_state_t *app) {
+    return lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1
+        ? RUBRAVIEW_ARCEDIT_7Z : RUBRAVIEW_ARCEDIT_ZIP;
+}
+
+/* D-89: the question of what the archive becomes, as a panel: the format,
+   stored or packed, how hard. Its button writes; closing it leaves the book. */
+static void panel_open_convert(app_state_t *app) {
+    if (app->panel.open) panel_close(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->panel = rubraview_panel_create(U8("Write the archive again"), dpi);
+    app->panel_is_export = false;
+    app->panel_is_batch = false;
+    app->panel_is_print = false;
+    app->panel_is_convert = true;
+    rubraview_panel_add_choice(&app->panel, PANEL_CONV_FORMAT, U8("Becomes"),
+                               arc_convert_target(app) == RUBRAVIEW_ARCEDIT_7Z ? 1 : 0, 2);
+    rubraview_panel_add_choice(&app->panel, PANEL_CONV_METHOD, U8("Method"), arc_level(app) == 0 ? 1 : 0, 2);
+    rubraview_panel_add_slider(&app->panel, PANEL_CONV_LEVEL, U8("Level"),
+                               rubraview_settings_get(&app->settings, U8("archive"), U8("convert_level")), 1.0, 9.0, 1.0);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_CONV_NOW, U8("Write (Enter)"));
+    app->panel.open = true;
+    panel_relayout(app);
+    app->arc_ask = ARC_ASK_FORMAT;
+    osd_say(app, U8("this archive cannot be changed as it is: it is written again, the old file goes to the Recycle Bin"));
+}
+
+/* D-89: the file an archive was before its last edit in place is kept
+   beside it until the next edit or the end of the program. */
+static void arc_undo_drop(app_state_t *app) {
+    if (app->arc_undo_backup[0]) (void)rubraview_pal_fs_delete(cstr(app->arc_undo_backup));
+    app->arc_undo_backup[0] = '\0';
+    app->arc_undo_path[0] = '\0';
+}
 
 static bool on_archive_page(const app_state_t *app) {
     return app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.len > 0 && !app->list_is_set &&
@@ -8283,7 +8399,7 @@ static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) 
 
     arc_job_t *job = NULL;
     const char *why = "not changed: could not start";
-    if (!on_archive_page(app)) goto fail;
+    if (!on_archive_page(app) || !rubraview_path_same(cstr(app->arc_ask_path), app->source.archive_path)) goto fail;
     rubraview_arcedit_route_t route = rubraview_arcedit_route(&app->source);
     if (route != RUBRAVIEW_ARCEDIT_IN_PLACE && route != RUBRAVIEW_ARCEDIT_CONVERT) goto fail;
     if (route == RUBRAVIEW_ARCEDIT_IN_PLACE) target = RUBRAVIEW_ARCEDIT_SAME;
@@ -8337,7 +8453,9 @@ static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) 
         .archive_path = job->archive, .codepage = names, .op = op,
         .entry_index = app->arc_ask_entry, .name = job->name[0] ? job->name : NULL,
         .data = job->data, .size = size, .target = target, .out_path = job->out,
+        .level = arc_level(app),
     };
+    arc_undo_drop(app);   /* one step back, and it is this edit's from here */
     /* The choice holds for this book for the session. */
     if (job->convert && opened.len < sizeof(app->arc_choice_path)) {
         memcpy(app->arc_choice_path, opened.ptr, opened.len);
@@ -8381,11 +8499,13 @@ static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t
     if (name) memcpy(app->arc_ask_name, name, strlen(name));
     app->arc_ask_data = data;
     app->arc_ask_size = size;
+    memset(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
+    if (app->source.archive_path.len < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.len);
 
     bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
                   rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
     if (op == RUBRAVIEW_ARCEDIT_DELETE) app->arc_ask = ARC_ASK_DELETE;
-    else if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) app->arc_ask = ARC_ASK_FORMAT;
+    else if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
     else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
 }
 
@@ -8402,17 +8522,30 @@ static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
             rubraview_arcedit_route_t route = on_archive_page(app) ? rubraview_arcedit_route(&app->source) : RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE;
             bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
                           rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
-            if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) app->arc_ask = ARC_ASK_FORMAT;
+            if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
             else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
         } else {
             arc_ask_clear(app);   /* anything else is "no" */
         }
         return true;
     }
-    if (combo.modifiers == RUBRAVIEW_MOD_NONE && key_is(combo, "Z")) arc_edit_start(app, RUBRAVIEW_ARCEDIT_ZIP);
-    else if (combo.modifiers == RUBRAVIEW_MOD_NONE && key_is(combo, "7")) arc_edit_start(app, RUBRAVIEW_ARCEDIT_7Z);
-    else { arc_ask_clear(app); osd_say(app, U8("the archive is as it was")); }
-    return true;
+    /* D-89: the convert panel is open. Enter is its button; Z and 7 pick the
+       format; any other key goes its usual way, and what it does closes the panel. */
+    if (combo.modifiers != RUBRAVIEW_MOD_NONE) return false;
+    if (key_is(combo, "Enter")) {
+        rubraview_arcedit_target_t target = arc_convert_target(app);
+        app->panel_is_convert = false;
+        panel_close(app);
+        arc_edit_start(app, target);
+        return true;
+    }
+    if (key_is(combo, "Z") || key_is(combo, "7")) {
+        double v = key_is(combo, "7") ? 1.0 : 0.0;
+        rubraview_settings_set(&app->settings, U8("archive"), U8("convert_format"), v);
+        rubraview_panel_set_value(&app->panel, PANEL_CONV_FORMAT, v);
+        return true;
+    }
+    return false;
 }
 
 /* A name beside `wanted` that no file has: `book-1.cbz`, `book-2.cbz`, ... */
@@ -8458,8 +8591,24 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     unload_all_pages(app);
     source_close(app);
 
+    bool can_undo = false;
     if (!job->convert) {
+        /* D-89: the old file steps aside as `name.rvold` so that Ctrl+Z can bring it back. */
+        char backup[sizeof(app->arc_undo_backup)];
+        bool kept = first.len + 7 < sizeof(backup);
+        if (kept) {
+            memcpy(backup, first.ptr, first.len);
+            memcpy(backup + first.len, ".rvold", 7);
+            kept = rubraview_pal_fs_replace(first, cstr(backup));
+        }
         done = rubraview_pal_fs_replace(out, first);
+        if (!done && kept) (void)rubraview_pal_fs_replace(cstr(backup), first);   /* back where it was */
+        if (done && kept) {
+            memcpy(app->arc_undo_backup, backup, sizeof(backup));
+            memset(app->arc_undo_path, 0, sizeof(app->arc_undo_path));
+            memcpy(app->arc_undo_path, first.ptr, first.len);
+            can_undo = true;
+        }
         said = done ? NULL : "not changed: the archive could not be replaced (is it open elsewhere?)";
     } else {
         char name[1024];
@@ -8521,8 +8670,27 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     const char *what = op == RUBRAVIEW_ARCEDIT_DELETE ? "page deleted" : op == RUBRAVIEW_ARCEDIT_RENAME ? "page renamed"
                      : op == RUBRAVIEW_ARCEDIT_REPLACE ? "page saved over" : "copy saved in the archive";
     if (job->convert) snprintf(line, sizeof(line), "%s; the book is now %.*s", what, (int)(base.len < 160 ? base.len : 160), base.ptr);
-    else snprintf(line, sizeof(line), "%s", what);
+    else snprintf(line, sizeof(line), "%s%s", what, can_undo ? "  (Ctrl+Z takes it back)" : "");
     osd_say(app, cstr(line));
+}
+
+/* D-89: the last edit in place taken back — the book as it was before it,
+   while the reader is still in that book. */
+static bool arc_undo(app_state_t *app) {
+    if (!app->arc_undo_backup[0] || app->arc_job) return false;
+    if (!on_archive_page(app)) return false;
+    u8str_t first = rubraview_page_source_first_volume(&app->source);
+    if (!rubraview_path_same(first.len ? first : app->source.archive_path, cstr(app->arc_undo_path))) return false;
+    u8str_t opened = app_keep(app, app->source.archive_path);
+    size_t page = (size_t)current_page_index(app);
+    history_remember(app);
+    unload_all_pages(app);
+    source_close(app);
+    bool ok = rubraview_pal_fs_replace(cstr(app->arc_undo_backup), cstr(app->arc_undo_path));
+    if (ok) { app->arc_undo_backup[0] = '\0'; app->arc_undo_path[0] = '\0'; }
+    arc_reopen(app, opened, NULL, page);
+    osd_say(app, ok ? U8("the archive is as it was before the last change") : U8("could not take the change back"));
+    return true;
 }
 
 /* Each pass: how far the writing has got; a finished one is taken up.
@@ -8852,6 +9020,16 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         return;
     }
 
+    if (app->panel_is_convert) {
+        switch (row->id) {
+            case PANEL_CONV_FORMAT: rubraview_settings_set(&app->settings, U8("archive"), U8("convert_format"), v); break;
+            case PANEL_CONV_METHOD: rubraview_settings_set(&app->settings, U8("archive"), U8("convert_method"), v); break;
+            case PANEL_CONV_LEVEL:  rubraview_settings_set(&app->settings, U8("archive"), U8("convert_level"), v); break;
+            default: break;
+        }
+        return;
+    }
+
     if (app->panel_is_print) {
         switch (row->id) {
             case PANEL_PRINT_TURN:      rubraview_settings_set(&app->settings, U8("print"), U8("turn"), v); break;
@@ -8918,9 +9096,19 @@ static void panel_button(app_state_t *app, int32_t index) {
             break;
         case PANEL_PRINT_NOW:
             /* The panel goes first: the system's dialog holds the window while it is up. */
+            app->print_going = true;
             panel_close(app);
             print_now(app);
+            app->print_going = false;
+            print_temp_drop(app);
             break;
+        case PANEL_CONV_NOW: {
+            rubraview_arcedit_target_t target = arc_convert_target(app);
+            app->panel_is_convert = false;   /* answered: closing the panel is not a "no" */
+            panel_close(app);
+            arc_edit_start(app, target);
+            break;
+        }
         default: break;
     }
 }
@@ -8972,6 +9160,7 @@ static void draw_panel(app_state_t *app) {
     rubraview_pal_render_draw_text(app->renderer, panel->title, title,
                                    text_size * 1.15, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 
+    g_conv_is_7z = lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1;
     for (size_t i = 0; i < panel->row_count; ++i) {
         const rubraview_panel_row_t *row = &panel->rows[i];
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
@@ -9006,7 +9195,7 @@ static void draw_panel(app_state_t *app) {
             rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
                                             c.height * 0.4, c.height };
             rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
-            if (app->panel_is_print) {
+            if (app->panel_is_print || app->panel_is_convert) {
                 /* D-87: a scale or a margin is chosen by its number. */
                 char number[16];
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
@@ -9021,7 +9210,7 @@ static void draw_panel(app_state_t *app) {
                                               box.width * 0.5, box.height * 0.5 };
                 rubraview_pal_render_fill_rect(app->renderer, mark, COLOR_TEXT, 1.0);
             }
-        } else if (row->kind == RUBRAVIEW_ROW_CHOICE && app->panel_is_print) {
+        } else if (row->kind == RUBRAVIEW_ROW_CHOICE && (app->panel_is_print || app->panel_is_convert)) {
             /* D-87: the print panel's choices have names. */
             char words[48];
             rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
@@ -11590,7 +11779,7 @@ static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t 
 }
 
 static bool edit_panel_open(const app_state_t *app) {
-    return app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print;
+    return app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert;
 }
 
 /* ---- RV-065: the adjust panel's live preview and histogram ---- */
@@ -11806,7 +11995,7 @@ static void draw_crop_overlay(app_state_t *app) {
    line by sampling the same LUT the commit uses, so what is on screen is
    what will be applied. */
 static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
-    if (!app->panel.open || app->panel_is_export || app->panel_is_batch || app->panel_is_print) {
+    if (!app->panel.open || app->panel_is_export || app->panel_is_batch || app->panel_is_print || app->panel_is_convert) {
         return (rubraview_pal_rect_t){0};
     }
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -14914,6 +15103,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
     save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
     arc_job_poll(&app, true);    /* D-88: an archive being written again is stopped; the old one stands */
+    arc_undo_drop(&app);         /* D-89: the kept file of the last edit goes with the program */
+    print_temp_drop(&app);
     for (size_t i = 0; i < TILE_SETS; ++i) rubraview_pal_tiles_stop(app.tile_sets[i].tiles);
     rubraview_pal_gpu_resample_stop();       /* D-38 */
     app.thumbs = NULL;

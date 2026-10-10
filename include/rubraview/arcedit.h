@@ -92,6 +92,8 @@ typedef struct rubraview_arcedit_job {
     size_t size;
     rubraview_arcedit_target_t target;
     const char *out_path;              /* where the new archive is written; created or replaced */
+    int level;                         /* what is packed again: 0 stored as it is (ZIP Store, 7z Copy),
+                                          1..9 packed (ZIP Deflate, 7z LZMA), 9 the smallest and slowest */
 
     atomic_bool cancel;
     atomic_uint_fast64_t done, total;
