@@ -402,10 +402,10 @@ the keymap does not do is listed after it.
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
-| `Delete` | To the recycle bin |
+| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension |
+| `F2` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |

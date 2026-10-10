@@ -516,6 +516,21 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     return source;
 }
 
+u8str_t rubraview_page_source_first_volume(const rubraview_page_source_t *source) {
+    if (!source || !source->io || !source->io->name) return (u8str_t){ .ptr = "", .len = 0 };
+    return (u8str_t){ .ptr = source->io->name, .len = strlen(source->io->name) };
+}
+
+u8str_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
+                                         fulta_arc_format_t format, rubraview_codepage_t override_choice) {
+    if (!arena || !entry) return (u8str_t){ .ptr = "", .len = 0 };
+    return ps_display_name(arena, entry, format, override_choice);
+}
+
+fulta_arc_codepage_t rubraview_page_source_fulta_codepage(rubraview_codepage_t choice) {
+    return ps_codepage(choice);
+}
+
 void rubraview_page_source_close(rubraview_page_source_t *source) {
     if (!source) return;
     if (source->arc) fulta_arc_close(source->arc);         /* closes the volumes it asked for */

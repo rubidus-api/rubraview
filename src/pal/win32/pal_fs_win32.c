@@ -563,6 +563,24 @@ bool rubraview_pal_fs_move(u8str_t from, u8str_t to) {
     return MoveFileExW(wfrom, wto, MOVEFILE_COPY_ALLOWED) != 0;
 }
 
+bool rubraview_pal_fs_replace(u8str_t from, u8str_t to) {
+    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
+    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+    /* On one volume this is the directory's entry changed: the old file is
+       there until the new one has its name. */
+    return MoveFileExW(wfrom, wto, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+}
+
+bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes) {
+    WCHAR wide[MAX_PATH * 2];
+    if (!out_bytes || !utf8_to_wide_buf(dir, wide, sizeof(wide) / sizeof(wide[0]))) return false;
+    ULARGE_INTEGER free_for_user;
+    if (!GetDiskFreeSpaceExW(wide, &free_for_user, NULL, NULL)) return false;
+    *out_bytes = free_for_user.QuadPart;
+    return true;
+}
+
 bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) {
     WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
     if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;

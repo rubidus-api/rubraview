@@ -175,6 +175,15 @@ bool rubraview_page_source_is_solid(const rubraview_page_source_t *source);
 bool rubraview_page_source_is_encrypted(const rubraview_page_source_t *source);
 size_t rubraview_page_source_volumes(const rubraview_page_source_t *source, uint64_t *out_bytes);
 
+/* D-88, for the edit of an archive (arcedit.h): the set's first volume as
+   it was opened (the archive's own path for one file); an entry's name as
+   the viewer reads it, which for names stored in a code page is not
+   always FultaArc's reading; the reader's code page as FultaArc's. */
+u8str_t rubraview_page_source_first_volume(const rubraview_page_source_t *source);
+u8str_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
+                                         fulta_arc_format_t format, rubraview_codepage_t override_choice);
+fulta_arc_codepage_t rubraview_page_source_fulta_codepage(rubraview_codepage_t choice);
+
 /**
  * How large an arena rubraview_page_source_read needs for this page (RV-085:
  * the tile thread's copy is read into one of just that size, not into the

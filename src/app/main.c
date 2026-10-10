@@ -58,6 +58,7 @@
 #include "rubraview/encoding.h"
 #include "rubraview/glob.h"
 #include "rubraview/shellreq.h"
+#include "rubraview/arcedit.h"
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
@@ -232,7 +233,36 @@ typedef struct page_job {
 
 #define PAGE_JOB_MIN_COST (32u * 1024u * 1024u)   /* bytes to decode first before a page goes to the thread */
 
+/* D-88: an archive written again with one page deleted, renamed, replaced
+   or added, on a thread of its own; the main thread then puts the new file
+   in the old one's place and opens it. */
+typedef struct arc_job {
+    rubraview_arcedit_job_t job;
+    char archive[1024];      /* the set's first volume: what is read, and what an in-place edit replaces */
+    char opened[1024];       /* the path the viewer opened (a later volume, for a set opened by one) */
+    char out[1024];
+    char name[512];
+    char land[1024];         /* the page to be on afterwards, by its name; empty: by its number */
+    size_t page;
+    uint8_t *data;
+    bool convert;
+    rubraview_window_t *wake;
+    HANDLE thread;
+    volatile LONG done;
+    int result;
+} arc_job_t;
+
+/* What is asked before an archive is written again. */
+typedef enum { ARC_ASK_NONE = 0, ARC_ASK_DELETE, ARC_ASK_FORMAT } arc_ask_t;
+
 typedef struct save_job {
+    /* D-88: the page of an archive, edited: the copy is made between two
+       temporary files and then put into the archive. */
+    bool into_archive;
+    rubraview_arcedit_op_t arc_op;
+    size_t arc_entry;
+    char arc_path[1024];
+    char arc_name[512];
     char source[1024], out[1024];
     rubraview_edit_session_t edit;
     bool apply_edit;
@@ -537,6 +567,17 @@ typedef struct app_state {
     bool                      panel_is_export;   /* which of the three the panel currently is */
     bool                      panel_is_batch;
     bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
+    /* D-88: editing inside an archive */
+    arc_job_t                *arc_job;           /* the archive is being written again, or NULL */
+    arc_ask_t                 arc_ask;           /* a question about it is on screen */
+    rubraview_arcedit_op_t    arc_ask_op;
+    size_t                    arc_ask_entry;
+    char                      arc_ask_name[512];
+    uint8_t                  *arc_ask_data;
+    size_t                    arc_ask_size;
+    char                      arc_choice_path[1024];   /* the archive the format was chosen for, this session */
+    rubraview_arcedit_target_t arc_choice;
+    bool                      rename_is_archive; /* the rename box holds an archive page's name */
     u8str_t                  *print_list;        /* what the print panel's button prints */
     size_t                    print_list_count;
     /* §3.13: a crop being dragged on the picture — where it started, in image pixels. */
@@ -812,9 +853,15 @@ static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
+static void panel_write_archive_page(app_state_t *app, bool over);
 static void panel_run_batch(app_state_t *app);
 static void print_paths(app_state_t *app, const u8str_t *paths, size_t count);
 static u8str_t current_file_path(app_state_t *app);
+static bool on_archive_page(const app_state_t *app);
+static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size);
+static void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
+static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo);
+static void arc_job_poll(app_state_t *app, bool quitting);
 static void picker_open(app_state_t *app);
 static void media_toggle_pause(app_state_t *app);
 
@@ -4076,9 +4123,20 @@ static void layout_set(app_state_t *app, rubraview_page_layout_t mode, bool say)
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
+    /* D-88: while the archive on screen is being written again nothing is
+       opened, closed or changed; Esc stops the writing, and a quit does too. */
+    if (app->arc_job && !rubraview_u8_eq_lit(action, "quit")) {
+        osd_say(app, U8("the archive is being written (Esc stops it)"));
+        return;
+    }
 
     if (rubraview_u8_eq_lit(action, "quit")) {
         /* Esc closes what is open before it closes the program. */
+        if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
+            atomic_store(&app->arc_job->job.cancel, true);
+            osd_say(app, U8("stopping..."));
+            return;
+        }
         if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
         if (app->listwin.open) { app->listwin.open = false; return; }
@@ -4230,6 +4288,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
                      : (at >= 0 && (size_t)at < page_count(app)) ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
         if (path.len == 0) osd_say(app, U8("there is no file to show"));
         else if (!rubraview_pal_shell_reveal(path)) osd_say(app, U8("Explorer could not show the file"));
+    } else if ((rubraview_u8_eq_lit(action, "delete_file") || rubraview_u8_eq_lit(action, "purge_file")) && on_archive_page(app)) {
+        /* D-88: a page of an archive; there is no bin inside one, so either key asks. */
+        arc_edit_on_page(app, RUBRAVIEW_ARCEDIT_DELETE, NULL);
     } else if (rubraview_u8_eq_lit(action, "delete_file")) {
         triage_delete(app, false);
     } else if (rubraview_u8_eq_lit(action, "purge_file")) {
@@ -4752,6 +4813,8 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
            swallowed here, as is everything else while renaming. */
         return true;
     }
+
+    if (arc_ask_key(app, combo)) return true;
 
     /* §3.17.1's resume prompt answers Enter before paging does. Enter
        turns a page now (owner, 2026-09-09), and a prompt that the very
@@ -6596,6 +6659,25 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
                                        U8("Delete this file from the disk for good?  (Y / N)"),
                                        box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    if (app->arc_ask != ARC_ASK_NONE) {
+        /* D-88 */
+        double box_w = 760.0 * chrome_dpi, box_h = 110.0 * chrome_dpi;
+        if (box_w > win_w - 16.0) box_w = win_w - 16.0;
+        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
+        rubraview_pal_rect_t upper = { box.x, box.y + box_h * 0.12, box_w, box_h * 0.38 };
+        rubraview_pal_rect_t lower = { box.x, box.y + box_h * 0.5, box_w, box_h * 0.38 };
+        bool deleting = app->arc_ask == ARC_ASK_DELETE;
+        rubraview_pal_render_draw_text(app->renderer,
+                                       deleting ? U8("Delete this page from the archive? It cannot be undone.")
+                                                : U8("This archive cannot be changed as it is. It is written again; the old file goes to the Recycle Bin."),
+                                       upper, (deleting ? 16.0 : 13.5) * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       deleting ? U8("Y  delete        N  keep")
+                                                : U8("Z  as ZIP (CBZ)        7  as 7z (CB7)        Esc  leave it"),
+                                       lower, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
     draw_rename_box(app, win_w, win_h, chrome_dpi);
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
     draw_notice(app, win_w, win_h, chrome_dpi);
@@ -7462,6 +7544,7 @@ static void triage_undo(app_state_t *app) {
 /* The box closes: the window goes back to keys only (K5). */
 static void rename_end(app_state_t *app) {
     app->rename_active = false;
+    app->rename_is_archive = false;
     app->rename_is_extension = false;
     app->rename_is_path = false;
     if (app->rename_is_password) {                       /* nothing of it stays behind */
@@ -7533,6 +7616,14 @@ static void picker_path_commit(app_state_t *app) {
 
 static void rename_begin(app_state_t *app) {
     u8str_t path = current_file_path(app);
+    /* D-88: a page of an archive is renamed where it is, in its folder there. */
+    bool in_archive = on_archive_page(app);
+    if (in_archive) {
+        if (app->arc_job) return;
+        rubraview_arcedit_route_t route = rubraview_arcedit_route(&app->source);
+        if (route == RUBRAVIEW_ARCEDIT_ENCRYPTED) { osd_say(app, cstr(rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED))); return; }
+        path = page_display_name(app, (size_t)current_page_index(app));
+    }
     if (path.len == 0) return;
 
     /* The whole name, extension and all (owner, 2026-09-23): an
@@ -7544,6 +7635,7 @@ static void rename_begin(app_state_t *app) {
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     rubraview_textedit_set(&app->rename_edit, name);
     app->rename_active = true;
+    app->rename_is_archive = in_archive;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);   /* Hangul, capitals, symbols (K5's hole) */
 }
@@ -7623,7 +7715,23 @@ static void rename_commit(app_state_t *app) {
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
     rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    bool in_archive = app->rename_is_archive;
     rename_end(app);
+
+    if (in_archive) {
+        /* D-88: the same rules for the name; the archive is written again with it. */
+        u8str_t typed = rubraview_textedit_text(&app->rename_edit);
+        rubraview_rename_err_t bad = rubraview_rename_validate(typed);
+        char name[512];
+        if (bad != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(bad)); return; }
+        if (!on_archive_page(app) || typed.len >= sizeof(name)) return;
+        u8str_t old = rubraview_path_basename(page_display_name(app, (size_t)current_page_index(app)));
+        if (old.len == typed.len && memcmp(old.ptr, typed.ptr, old.len) == 0) return;   /* nothing changed */
+        memcpy(name, typed.ptr, typed.len);
+        name[typed.len] = '\0';
+        arc_edit_on_page(app, RUBRAVIEW_ARCEDIT_RENAME, name);
+        return;
+    }
 
     u8str_t path = current_file_path(app);
     if (path.len == 0) return;
@@ -7946,7 +8054,7 @@ static void handle_drop(app_state_t *app, const rubraview_window_event_t *event)
 enum {
     PANEL_EXPOSURE = 1, PANEL_BRIGHTNESS, PANEL_CONTRAST, PANEL_SATURATION,
     PANEL_TEMPERATURE, PANEL_TINT, PANEL_BLACK, PANEL_WHITE, PANEL_GAMMA,
-    PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY,
+    PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
@@ -8006,6 +8114,8 @@ static void panel_open_edit(app_state_t *app) {
     rubraview_panel_add_separator(&app->panel);
     rubraview_panel_add_button(&app->panel, PANEL_RESET, U8("Reset"));
     rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, U8("Save a copy"));
+    /* D-88: inside an archive the copy is a new entry beside the page, and the page itself can be saved over. */
+    if (on_archive_page(app)) rubraview_panel_add_button(&app->panel, PANEL_SAVE_OVER, U8("Save over the page"));
 
     app->panel.open = true;
     panel_relayout(app);
@@ -8134,6 +8244,331 @@ static void print_now(app_state_t *app) {
     osd_say(app, cstr(line));
 }
 
+/* ---- D-88 (R149): a page inside an archive deleted, renamed, saved ---- */
+
+static bool on_archive_page(const app_state_t *app) {
+    return app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.len > 0 && !app->list_is_set &&
+           app->source.arc != NULL && current_page_index(app) >= 0;
+}
+
+static void arc_ask_clear(app_state_t *app) {
+    free(app->arc_ask_data);
+    app->arc_ask_data = NULL;
+    app->arc_ask_size = 0;
+    app->arc_ask = ARC_ASK_NONE;
+}
+
+static DWORD WINAPI arc_job_run(LPVOID param) {
+    arc_job_t *job = (arc_job_t*)param;
+    job->result = (int)rubraview_arcedit_run(&job->job);
+    InterlockedExchange(&job->done, 1);
+    rubraview_pal_window_wake(job->wake);
+    return 0;
+}
+
+static bool arc_file_exists(u8str_t path) {
+    uint8_t mem[4096];
+    proven_arena_t probe = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = sizeof(mem) });
+    rubraview_fs_entry_t entry;
+    return rubraview_pal_fs_stat(&probe, path, &entry);
+}
+
+/* The archive is written again, the question (if there was one) answered. */
+static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
+    rubraview_arcedit_op_t op = app->arc_ask_op;
+    uint8_t *data = app->arc_ask_data;
+    size_t size = app->arc_ask_size;
+    app->arc_ask_data = NULL;          /* the job's from here */
+    arc_ask_clear(app);
+
+    arc_job_t *job = NULL;
+    const char *why = "not changed: could not start";
+    if (!on_archive_page(app)) goto fail;
+    rubraview_arcedit_route_t route = rubraview_arcedit_route(&app->source);
+    if (route != RUBRAVIEW_ARCEDIT_IN_PLACE && route != RUBRAVIEW_ARCEDIT_CONVERT) goto fail;
+    if (route == RUBRAVIEW_ARCEDIT_IN_PLACE) target = RUBRAVIEW_ARCEDIT_SAME;
+    else if (target == RUBRAVIEW_ARCEDIT_SAME) goto fail;
+
+    u8str_t first = rubraview_page_source_first_volume(&app->source);
+    u8str_t opened = app->source.archive_path;
+    if (first.len == 0) first = opened;
+    job = (arc_job_t*)calloc(1, sizeof(*job));
+    if (!job) goto fail;
+    if (first.len >= sizeof(job->archive) || opened.len >= sizeof(job->opened) || first.len + 16 >= sizeof(job->out)) goto fail;
+    memcpy(job->archive, first.ptr, first.len);
+    memcpy(job->opened, opened.ptr, opened.len);
+    memcpy(job->out, first.ptr, first.len);
+    memcpy(job->out + first.len, ".rvnew", 7);
+    memcpy(job->name, app->arc_ask_name, sizeof(job->name));
+
+    /* A 7z is packed from a copy of every file laid beside it first. */
+    if (target == RUBRAVIEW_ARCEDIT_7Z) {
+        uint64_t unpacked = 0, free_bytes = 0;
+        for (size_t i = 0; ; ++i) {
+            const fulta_arc_entry_t *en = fulta_arc_entry(app->source.arc, i);
+            if (!en) break;
+            unpacked += en->size;
+        }
+        if (rubraview_pal_fs_free_bytes(rubraview_path_dirname(first), &free_bytes) && free_bytes < unpacked * 2u + (64u << 20)) {
+            static char line[128];
+            snprintf(line, sizeof(line), "not changed: a 7z needs about %llu MB free beside the archive",
+                     (unsigned long long)((unpacked * 2u + (64u << 20)) >> 20));
+            why = line;
+            goto fail;
+        }
+    }
+
+    int32_t page = current_page_index(app);
+    job->page = (size_t)page;
+    job->convert = route == RUBRAVIEW_ARCEDIT_CONVERT;
+    job->data = data;
+    data = NULL;
+    job->wake = app->window;
+    /* Where the reader is afterwards: on the page itself under its new
+       name, or (a page deleted) on the one that takes its number. */
+    u8str_t shown = page_display_name(app, (size_t)page);
+    if (op == RUBRAVIEW_ARCEDIT_REPLACE && job->name[0] == '\0') {
+        if (shown.len < sizeof(job->land)) memcpy(job->land, shown.ptr, shown.len);
+    } else if (op != RUBRAVIEW_ARCEDIT_DELETE) {
+        rubraview_arcedit_sibling_name(shown, cstr(job->name), job->land, sizeof(job->land));
+    }
+    rubraview_codepage_t names = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
+    job->job = (rubraview_arcedit_job_t){
+        .archive_path = job->archive, .codepage = names, .op = op,
+        .entry_index = app->arc_ask_entry, .name = job->name[0] ? job->name : NULL,
+        .data = job->data, .size = size, .target = target, .out_path = job->out,
+    };
+    /* The choice holds for this book for the session. */
+    if (job->convert && opened.len < sizeof(app->arc_choice_path)) {
+        memcpy(app->arc_choice_path, opened.ptr, opened.len);
+        app->arc_choice_path[opened.len] = '\0';
+        app->arc_choice = target;
+    }
+    job->thread = CreateThread(NULL, 0, arc_job_run, job, 0, NULL);
+    if (!job->thread) goto fail;
+    app->arc_job = job;
+    if (app->panel.open) panel_close(app);
+    osd_say(app, U8("writing the archive..."));
+    return;
+
+fail:
+    if (job) free(job->data);
+    free(job);
+    free(data);
+    osd_say(app, cstr(why));
+}
+
+/* An edit of entry `entry` is asked for. `data` (malloc) becomes this
+   function's, whatever happens. */
+static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size) {
+    const char *why = NULL;
+    if (app->arc_job) why = "the archive is still being written";
+    else if (!on_archive_page(app)) why = "not changed: the page is not in an archive";
+    rubraview_arcedit_route_t route = why ? RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE : rubraview_arcedit_route(&app->source);
+    if (!why && route == RUBRAVIEW_ARCEDIT_ENCRYPTED) why = rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED);
+    if (!why && route == RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE) why = "not changed: the page is not in an archive";
+    if (!why && op == RUBRAVIEW_ARCEDIT_DELETE && page_count(app) <= 1) why = "the last page: delete the archive's file instead";
+    if (!why && name && strlen(name) >= sizeof(app->arc_ask_name)) why = "not changed: that name is too long";
+    if (why) {
+        free(data);
+        osd_say(app, cstr(why));
+        return;
+    }
+    arc_ask_clear(app);
+    app->arc_ask_op = op;
+    app->arc_ask_entry = entry;
+    memset(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
+    if (name) memcpy(app->arc_ask_name, name, strlen(name));
+    app->arc_ask_data = data;
+    app->arc_ask_size = size;
+
+    bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
+                  rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
+    if (op == RUBRAVIEW_ARCEDIT_DELETE) app->arc_ask = ARC_ASK_DELETE;
+    else if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) app->arc_ask = ARC_ASK_FORMAT;
+    else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
+}
+
+/* The same, of the page on screen. */
+static void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name) {
+    if (!on_archive_page(app)) return;
+    arc_edit_request(app, op, app->source.pages[current_page_index(app)].entry_index, name, NULL, 0);
+}
+
+static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (app->arc_ask == ARC_ASK_NONE) return false;
+    if (app->arc_ask == ARC_ASK_DELETE) {
+        if (key_is(combo, "Y") || key_is(combo, "Enter")) {
+            rubraview_arcedit_route_t route = on_archive_page(app) ? rubraview_arcedit_route(&app->source) : RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE;
+            bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
+                          rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
+            if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) app->arc_ask = ARC_ASK_FORMAT;
+            else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
+        } else {
+            arc_ask_clear(app);   /* anything else is "no" */
+        }
+        return true;
+    }
+    if (combo.modifiers == RUBRAVIEW_MOD_NONE && key_is(combo, "Z")) arc_edit_start(app, RUBRAVIEW_ARCEDIT_ZIP);
+    else if (combo.modifiers == RUBRAVIEW_MOD_NONE && key_is(combo, "7")) arc_edit_start(app, RUBRAVIEW_ARCEDIT_7Z);
+    else { arc_ask_clear(app); osd_say(app, U8("the archive is as it was")); }
+    return true;
+}
+
+/* A name beside `wanted` that no file has: `book-1.cbz`, `book-2.cbz`, ... */
+static u8str_t arc_free_name(app_state_t *app, u8str_t wanted) {
+    if (!arc_file_exists(wanted)) return wanted;
+    u8str_t dir = rubraview_path_dirname(wanted), base = rubraview_path_basename(wanted);
+    u8str_t stem = rubraview_path_stem(base);
+    u8str_t ext = { .ptr = base.ptr + stem.len, .len = base.len - stem.len };
+    for (int n = 1; n < 1000; ++n) {
+        char name[1024];
+        int len = snprintf(name, sizeof(name), "%.*s-%d%.*s", (int)stem.len, stem.ptr, n, (int)ext.len, ext.ptr);
+        if (len <= 0 || (size_t)len >= sizeof(name)) break;
+        u8str_t path = rubraview_path_join(app->arena, dir, (u8str_t){ .ptr = name, .len = (size_t)len });
+        if (path.len > 0 && !arc_file_exists(path)) return path;
+    }
+    return (u8str_t){ .ptr = "", .len = 0 };
+}
+
+/* The book again, on the page named or numbered. */
+static void arc_reopen(app_state_t *app, u8str_t path, const char *land, size_t page) {
+    if (!open_archive(app, path)) return;
+    size_t start = page < page_count(app) ? page : page_count(app) - 1;
+    if (land && land[0]) {
+        for (size_t i = 0; i < page_count(app); ++i) {
+            u8str_t name = page_display_name(app, i);
+            if (name.len == strlen(land) && memcmp(name.ptr, land, name.len) == 0) { start = i; break; }
+        }
+    }
+    finish_open(app, start);
+}
+
+/* The new archive is written and checked: it takes the old one's place.
+   The viewer lets go of the old file first — Windows replaces nothing
+   that is mapped — and opens the book again afterwards. */
+static void arc_job_finish(app_state_t *app, arc_job_t *job) {
+    u8str_t out = cstr(job->out), first = cstr(job->archive);
+    u8str_t opened = app_keep(app, cstr(job->opened));
+    u8str_t final = opened;
+    const char *said = NULL;
+    bool done = false;
+
+    history_remember(app);
+    unload_all_pages(app);
+    source_close(app);
+
+    if (!job->convert) {
+        done = rubraview_pal_fs_replace(out, first);
+        said = done ? NULL : "not changed: the archive could not be replaced (is it open elsewhere?)";
+    } else {
+        char name[1024];
+        u8str_t base = rubraview_path_basename(first);
+        size_t n = rubraview_arcedit_converted_name(base, job->job.target, name, sizeof(name));
+        u8str_t wanted = n > 0 ? rubraview_path_join(app->arena, rubraview_path_dirname(first), (u8str_t){ .ptr = name, .len = n })
+                               : (u8str_t){ .ptr = "", .len = 0 };
+        bool takes_old_name = false;
+        for (size_t i = 0; i < job->job.volume_count; ++i) {
+            if (wanted.len > 0 && rubraview_path_same(wanted, cstr(job->job.volumes[i]))) takes_old_name = true;
+        }
+        if (wanted.len == 0) {
+            said = "not changed: the new archive's name is too long";
+        } else if (takes_old_name) {
+            /* A solid 7z becoming a 7z: the old one leaves for the bin, then the new one has its name. */
+            bool binned = true;
+            for (size_t i = 0; i < job->job.volume_count; ++i) {
+                if (!rubraview_pal_fs_recycle(cstr(job->job.volumes[i]))) binned = false;
+            }
+            if (binned && rubraview_pal_fs_replace(out, wanted)) { done = true; final = wanted; }
+            else {
+                /* The old file would not go: the new one is kept beside it under a free name. */
+                u8str_t other = arc_free_name(app, wanted);
+                if (other.len > 0 && rubraview_pal_fs_move(out, other)) {
+                    done = true;
+                    final = other;
+                    said = "the old archive could not be put in the Recycle Bin: the new one is beside it";
+                } else {
+                    said = "not changed: the archive could not be replaced (is it open elsewhere?)";
+                }
+            }
+        } else {
+            /* Another name: never over a file that is already there. */
+            u8str_t target = arc_free_name(app, wanted);
+            if (target.len > 0 && rubraview_pal_fs_move(out, target)) {
+                done = true;
+                final = target;
+                for (size_t i = 0; i < job->job.volume_count; ++i) {
+                    if (!rubraview_pal_fs_recycle(cstr(job->job.volumes[i]))) said = "written; the old archive could not be put in the Recycle Bin";
+                }
+            } else {
+                said = "not changed: the new archive could not be given its name";
+            }
+        }
+    }
+    if (!done) (void)rubraview_pal_fs_delete(out);
+    final = app_keep(app, final);
+    /* The format chosen holds for the book under its new name too. */
+    if (done && job->convert && final.len < sizeof(app->arc_choice_path)) {
+        memcpy(app->arc_choice_path, final.ptr, final.len);
+        app->arc_choice_path[final.len] = '\0';
+    }
+
+    rubraview_arcedit_op_t op = job->job.op;
+    arc_reopen(app, done ? final : opened, done ? job->land : NULL, job->page);
+    if (said) { osd_say(app, cstr(said)); return; }
+    char line[256];
+    u8str_t base = rubraview_path_basename(final);
+    const char *what = op == RUBRAVIEW_ARCEDIT_DELETE ? "page deleted" : op == RUBRAVIEW_ARCEDIT_RENAME ? "page renamed"
+                     : op == RUBRAVIEW_ARCEDIT_REPLACE ? "page saved over" : "copy saved in the archive";
+    if (job->convert) snprintf(line, sizeof(line), "%s; the book is now %.*s", what, (int)(base.len < 160 ? base.len : 160), base.ptr);
+    else snprintf(line, sizeof(line), "%s", what);
+    osd_say(app, cstr(line));
+}
+
+/* Each pass: how far the writing has got; a finished one is taken up.
+   A quit stops it and waits — the old archive stands. */
+static void arc_job_poll(app_state_t *app, bool quitting) {
+    arc_job_t *job = app->arc_job;
+    if (!job) {
+        if (quitting) arc_ask_clear(app);
+        return;
+    }
+    if (quitting) atomic_store(&job->job.cancel, true);
+    if (!quitting && !InterlockedCompareExchange(&job->done, 0, 0)) {
+        uint64_t done = atomic_load(&job->job.done), total = atomic_load(&job->job.total);
+        char line[96];
+        if (atomic_load(&job->job.cancel)) snprintf(line, sizeof(line), "stopping...");
+        else if (total > 0) snprintf(line, sizeof(line), "writing the archive... %d %%  (Esc stops it)", (int)(done * 100u / total));
+        else snprintf(line, sizeof(line), "writing the archive...  (Esc stops it)");
+        osd_say(app, cstr(line));
+        return;
+    }
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    app->arc_job = NULL;               /* opening is allowed again */
+    if (!quitting) {
+        if (job->result == RUBRAVIEW_ARCEDIT_OK) arc_job_finish(app, job);
+        else osd_say(app, cstr(rubraview_arcedit_result_text((rubraview_arcedit_result_t)job->result)));
+    } else if (job->result == RUBRAVIEW_ARCEDIT_OK) {
+        (void)rubraview_pal_fs_delete(cstr(job->out));   /* written, but the reader left: the old one stands */
+    }
+    rubraview_arcedit_job_free(&job->job);
+    free(job->data);
+    free(job);
+}
+
+/* A file for a moment's use in the system's temporary folder. */
+static bool arc_temp_path(char *dst, size_t cap, const char *tag, u8str_t leaf) {
+    WCHAR wide[MAX_PATH + 1];
+    char dir[MAX_PATH * 3 + 1];
+    DWORD n = GetTempPathW(MAX_PATH + 1, wide);
+    if (n == 0 || n > MAX_PATH) return false;
+    if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, dir, (int)sizeof(dir), NULL, NULL) <= 1) return false;
+    int len = snprintf(dst, cap, "%srubraview-%s-%lu-%lu-%.*s", dir, tag, (unsigned long)GetCurrentProcessId(),
+                       (unsigned long)GetTickCount(), (int)leaf.len, leaf.ptr);
+    return len > 0 && (size_t)len < cap;
+}
+
 /* Save a copy's work, off the main thread: everything it needs copied in,
    its own memory, its own WIC factory. `result` indexes save_job_poll's lines. */
 enum { SAVE_OK = 0, SAVE_UNREADABLE, SAVE_EDIT_FAILED, SAVE_UNWRITABLE, SAVE_NO_MEMORY };
@@ -8227,12 +8662,89 @@ static DWORD WINAPI save_job_run(LPVOID param) {
 /* The workbench's Save a copy, and the export dialog's Export, are the
    same act: run the session, then write. §3.10 decides whether the write
    even needs an encoder. */
+/* D-88: the page of an archive with the workbench's edit, written into the
+   archive — over the page, or beside it as `name_edit.ext`. The page is
+   laid in a temporary file, the copy made from it into another exactly as
+   a loose file's is, and that file's bytes then go into the archive. */
+static void panel_write_archive_page(app_state_t *app, bool over) {
+    if (!on_archive_page(app)) return;
+    int32_t page = current_page_index(app);
+    if (app->arc_job) { osd_say(app, U8("the archive is still being written")); return; }
+    if (app->save_job) { osd_say(app, U8("still saving the last copy")); return; }
+    if (rubraview_arcedit_route(&app->source) == RUBRAVIEW_ARCEDIT_ENCRYPTED) {
+        osd_say(app, cstr(rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED)));
+        return;
+    }
+    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
+    if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
+    if (w <= 0 || h <= 0) { osd_say(app, U8("not saved: the page is not read yet")); return; }
+
+    u8str_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
+    rubraview_export_options_t options = app->export_options;
+    rubraview_export_format_t source_format = rubraview_export_format_for_name(shown);
+    rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
+    u8str_t stem = rubraview_path_stem(shown), ext = rubraview_export_extension(target);
+    u8str_t source_ext = { .ptr = shown.ptr + stem.len, .len = shown.len - stem.len };   /* with its dot */
+    /* Saved over in its own format the page keeps its name; in another, it takes that one's extension. */
+    u8str_t name = over ? (target == source_format ? (u8str_t){ .ptr = "", .len = 0 }
+                                                   : rubraview_batch_format_name(app->arena, U8("{name}.{ext}"), stem, ext, 0, 0, U8("")))
+                        : rubraview_batch_format_name(app->arena, U8("{name}_edit.{ext}"), stem, ext, 0, 0, U8(""));
+
+    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
+    if (!job) { osd_say(app, U8("not saved: not enough memory")); return; }
+    u8str_t out_leaf = rubraview_batch_format_name(app->arena, U8("out.{ext}"), stem, ext, 0, 0, U8(""));
+    bool ok = name.len < sizeof(job->arc_name) && app->source.archive_path.len < sizeof(job->arc_path) &&
+              arc_temp_path(job->source, sizeof(job->source), "page", source_ext) &&
+              arc_temp_path(job->out, sizeof(job->out), "edit", out_leaf);
+    /* The page's bytes, read here: the archive is the main thread's to read. */
+    if (ok) {
+        page_job_stop(app);
+        size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)page);
+        void *mem = budget > 0 ? malloc(budget) : NULL;
+        ok = false;
+        if (mem) {
+            proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
+            rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &app->source, (size_t)page, MAX_PAGE_BYTES);
+            ok = bytes.ok && bytes.data.len > 0 && rubraview_pal_fs_write_file(cstr(job->source), bytes.data);
+            free(mem);
+        }
+    }
+    if (!ok) { free(job); osd_say(app, U8("not saved: the page could not be read")); return; }
+
+    job->into_archive = true;
+    job->arc_op = over ? RUBRAVIEW_ARCEDIT_REPLACE : RUBRAVIEW_ARCEDIT_ADD;
+    job->arc_entry = app->source.pages[page].entry_index;
+    memcpy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.len);
+    if (name.len) memcpy(job->arc_name, name.ptr, name.len);
+    job->edit = app->edit;
+    job->apply_edit = true;
+    job->options = options;
+    job->source_format = source_format;
+    job->route = rubraview_export_plan(&options, source_format, true);
+    job->width = w;
+    job->height = h;
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
+    if (!job->thread) {
+        (void)rubraview_pal_fs_delete(cstr(job->source));
+        free(job);
+        osd_say(app, U8("not saved: could not start"));
+        return;
+    }
+    app->save_job = job;
+    osd_say(app, U8("making the edited page..."));
+}
+
 static void panel_write_current(app_state_t *app, bool apply_edit) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
 
     u8str_t source = app->source.pages[page].path;
-    if (source.len == 0) return;   /* an archive page has nowhere obvious to save beside */
+    if (source.len == 0) {
+        /* D-88: an archive page's copy goes into the archive, beside the page. */
+        if (apply_edit && on_archive_page(app)) panel_write_archive_page(app, false);
+        return;
+    }
 
     rubraview_export_options_t options = app->export_options;
     rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
@@ -8289,6 +8801,32 @@ static void save_job_poll(app_state_t *app, bool wait) {
         "not saved: the edit could not be applied", "not saved: the file could not be written",
         "not saved: not enough memory for this picture",
     };
+    if (job->into_archive) {
+        /* D-88: the copy was made between two temporary files; its bytes go into the archive now. */
+        void *mem = NULL;
+        u8str_t bytes = job->result == SAVE_OK ? save_read_whole(cstr(job->out), &mem) : (u8str_t){ .ptr = "", .len = 0 };
+        (void)rubraview_pal_fs_delete(cstr(job->source));
+        (void)rubraview_pal_fs_delete(cstr(job->out));
+        app->save_job = NULL;
+        if (wait) {
+            /* the reader is leaving: nothing is changed */
+        } else if (job->result != SAVE_OK || bytes.len == 0) {
+            osd_say(app, cstr(SAID[job->result != SAVE_OK ? job->result : SAVE_UNWRITABLE]));
+        } else if (!on_archive_page(app) || !rubraview_path_same(cstr(job->arc_path), app->source.archive_path)) {
+            osd_say(app, U8("not saved: another book is open now"));
+        } else {
+            uint8_t *data = (uint8_t*)malloc(bytes.len);
+            if (data) {
+                memcpy(data, bytes.ptr, bytes.len);
+                arc_edit_request(app, job->arc_op, job->arc_entry, job->arc_name[0] ? job->arc_name : NULL, data, bytes.len);
+            } else {
+                osd_say(app, cstr(SAID[SAVE_NO_MEMORY]));
+            }
+        }
+        free(mem);
+        free(job);
+        return;
+    }
     if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
     free(job);
     app->save_job = NULL;
@@ -8362,6 +8900,10 @@ static void panel_button(app_state_t *app, int32_t index) {
             break;
         case PANEL_SAVE_COPY:
             panel_write_current(app, true);
+            panel_close(app);
+            break;
+        case PANEL_SAVE_OVER:
+            panel_write_archive_page(app, true);
             panel_close(app);
             break;
         case PANEL_EXPORT_NOW:
@@ -11616,6 +12158,8 @@ static uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
     SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge);
+    SIG(&h, app->arc_job != NULL); SIG(&h, app->arc_ask);
+    if (app->arc_job) SIG(&h, atomic_load(&app->arc_job->job.done));
     SIG(&h, rubraview_pal_window_is_fullscreen(app->window));
     return h;
 }
@@ -11977,6 +12521,7 @@ static void password_commit(app_state_t *app) {
 }
 
 static bool open_archive(app_state_t *app, u8str_t archive_path) {
+    if (app->arc_job) return false;   /* D-88: the archive on screen is being written again */
     /* Leaving one archive for another gives back what the old one held;
        a CB7's decoded solid block is heap memory, not arena memory. */
     source_close(app);
@@ -12018,6 +12563,7 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
 }
 
 static bool open_folder(app_state_t *app, u8str_t dir) {
+    if (app->arc_job) return false;   /* D-88 */
     source_close(app);
 
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
@@ -12090,6 +12636,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
 }
 
 static void open_path(app_state_t *app, u8str_t path) {
+    if (app->arc_job) { osd_say(app, U8("the archive is being written (Esc stops it)")); return; }
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
@@ -14255,6 +14802,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         }
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
+        arc_job_poll(&app, false);
         page_job_poll(&app);
         arena_refill(&app);
         if (app.media_skip_pending) {
@@ -14365,6 +14913,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
     save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
+    arc_job_poll(&app, true);    /* D-88: an archive being written again is stopped; the old one stands */
     for (size_t i = 0; i < TILE_SETS; ++i) rubraview_pal_tiles_stop(app.tile_sets[i].tiles);
     rubraview_pal_gpu_resample_stop();       /* D-38 */
     app.thumbs = NULL;

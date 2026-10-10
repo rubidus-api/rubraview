@@ -240,6 +240,8 @@ bool rubraview_pal_fs_delete(u8str_t path) { (void)path; return false; }
 bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path) { (void)original_path; return false; }
 bool rubraview_pal_fs_move(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_replace(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes) { (void)dir; (void)out_bytes; return false; }
 bool rubraview_pal_fs_make_dirs(u8str_t path) { (void)path; return false; }
 
 bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {

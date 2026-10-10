@@ -1,10 +1,10 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.43** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.43/rubraview-v0.0.43.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.44** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.44/rubraview-v0.0.44.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
@@ -53,10 +53,10 @@
 | `Shift+P` | 미니 플레이어 |
 | `G` | 400% 넘으면 픽셀 격자 |
 | `Esc` | 끝내기 |
-| `Delete` | 휴지통으로 |
+| `Delete` | 휴지통으로; 압축 파일 안의 페이지는 압축 파일에서 삭제(확인함) |
 | `Shift+Delete` | 완전 삭제(확인함) |
 | `Ctrl+Z` | 이동·복사·이름 바꾸기 되돌리기 |
-| `F2` | 이름 바꾸기 |
+| `F2` | 이름 바꾸기(압축 파일 안의 페이지도 가능) |
 | `Ctrl+Enter` | 이 파일을 선택한 탐색기 창 열기(압축 파일 안이면 압축 파일) |
 | `Ctrl+P` | 화면의 그림 인쇄: 회전·크기·배율·위치·여백·한 면의 장수를 고르는 패널, 이어서 시스템 인쇄 창 |
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
