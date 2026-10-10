@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.43.exe              the viewer, as built
-dist/rubraview-v0.0.43/                 the release bundle
-dist/rubraview-v0.0.43.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.44.exe              the viewer, as built
+dist/rubraview-v0.0.44/                 the release bundle
+dist/rubraview-v0.0.44.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -242,10 +242,42 @@ set to: `F6` **copies** the file on screen to one folder and `F7` **moves**
 it to another (Settings › Files › The file on screen, to a folder; or
 `copy_dir` and `move_dir` under `[curation]`). They are in the toolbox too
 (Copy to, Move to) and in Menu › File. A page inside an archive can be
-copied out with `F6` — it is written as a file of its own — but not moved:
-the archive is left as it is. Nothing in the folder is ever replaced: when
+copied out with `F6` — it is written as a file of its own — but not moved
+(to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
 the name is taken the file goes in as `name-1.jpg`, then `name-2.jpg`, and
 so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
+
+**Inside an archive** the same keys work on the page on screen, and the
+archive is written again with the change in it:
+
+- `Delete` (or `Shift+Delete`) takes the page out. It asks first — `Y`
+  deletes, anything else keeps — because there is no Recycle Bin inside an
+  archive and `Ctrl+Z` does not bring the page back. The last page of a
+  book is not deleted: delete the book's file instead.
+- `F2` renames the page, in the folder it has inside the archive. A name
+  another entry already has is refused.
+- In the adjust panel (`E`), **Save a copy** puts the edited picture into
+  the archive beside the page as `name_edit.ext`, and **Save over the
+  page** replaces the page with it.
+
+A ZIP / CBZ, or a 7z / CB7 whose files are packed one by one, keeps its
+format and its name, and its other entries are copied as they are. Any
+other archive — a solid 7z, a RAR / CBR, an ALZ, an EGG, a split set —
+cannot be changed as it is, so the viewer asks once which it is to become:
+`Z` for a ZIP (`name.cbz` for a comic, `name.zip` otherwise), `7` for a 7z
+(`name.cb7` / `name.7z`), `Esc` to leave it alone. The book is written
+again in that format with the change in it and the old file — every
+volume of a split set — goes to the Recycle Bin. A file already holding
+the new name is never replaced: the book becomes `name-1.cbz`. The answer
+is kept for that book until the program closes. A 7z needs free space
+beside the archive of about twice its unpacked size while it is written.
+
+The new archive is written beside the old one, opened again and compared
+with what it should hold before it takes the old one's place; `Esc` stops
+the writing. Stopped, failed or not matching, the new file is removed and
+the book is as it was. Nothing else can be opened or changed while it is
+being written. An **encrypted archive is not changed**, with its password
+or without: its pages can be read and copied out (`F6`), no more.
 
 **`Ctrl+Z` cannot bring a file back from the recycle bin.** Windows keeps
 that undo for File Explorer. Restore it from the recycle bin instead.
@@ -560,10 +592,10 @@ listed under a later heading only means that while that is on screen.
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
-| `Delete` | To the recycle bin |
+| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension |
+| `F2` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |

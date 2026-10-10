@@ -168,6 +168,15 @@ bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path);
 /** Move or rename a file. Used by both §3.18.2 and §3.18.3. */
 bool rubraview_pal_fs_move(u8str_t from, u8str_t to);
 
+/**
+ * D-88: `from` takes `to`'s name, in one step, whether or not `to`
+ * exists — how an archive written again takes the old one's place.
+ */
+bool rubraview_pal_fs_replace(u8str_t from, u8str_t to);
+
+/** The bytes free for this user on the volume holding `dir`. */
+bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes);
+
 /** Copy a file (§3.18.3's copy mode). Fails rather than overwriting. */
 bool rubraview_pal_fs_copy(u8str_t from, u8str_t to);
 

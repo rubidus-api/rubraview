@@ -1,10 +1,10 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.43** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.43/rubraview-v0.0.43.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.44** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.44/rubraview-v0.0.44.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source.
+Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source. A page inside an archive can be deleted (`Delete`), renamed (`F2`) or saved after an edit: a ZIP / CBZ or a 7z / CB7 keeps its format, anything else (a solid 7z, RAR / CBR, ALZ, EGG, a split set) is written again as a ZIP or a 7z of your choice and the old file goes to the Recycle Bin. Encrypted archives are not changed.
 
 > This English README is the canonical version; the Korean one is its translation.
 
@@ -54,10 +54,10 @@ ships with, so it cannot drift from them.
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
-| `Delete` | To the recycle bin |
+| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension |
+| `F2` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
