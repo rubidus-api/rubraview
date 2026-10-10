@@ -57,6 +57,7 @@
 #include "rubraview/subtitle.h"
 #include "rubraview/encoding.h"
 #include "rubraview/glob.h"
+#include "rubraview/shellreq.h"
 #include "rubraview/ui_input.h"
 #include "rubraview/ui_box.h"
 #include "rubraview/ui_menu.h"
@@ -327,6 +328,10 @@ typedef struct app_state {
     u8str_t               *cue_scan_paths;
     size_t                 cue_scan_count;
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
+    /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
+    rubraview_shellreq_collector_t shell_requests;
+    u8str_t               *batch_list;           /* "Convert..." on chosen files: the batch panel runs on these */
+    size_t                 batch_list_count;
     /* What plays after a film or a song ends (owner, 2026-09-29): the page
        decided for `follow_for` in `follow_mode`, and the shuffle's flags. */
     int32_t                follow_page, follow_for;
@@ -805,6 +810,10 @@ static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
 static void panel_run_batch(app_state_t *app);
+static void print_paths(app_state_t *app, const u8str_t *paths, size_t count);
+static u8str_t current_file_path(app_state_t *app);
+static void picker_open(app_state_t *app);
+static void media_toggle_pause(app_state_t *app);
 
 static size_t page_count(const app_state_t *app) {
     return app->source.page_count;
@@ -4243,8 +4252,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
         else panel_open_export(app);
     } else if (rubraview_u8_eq_lit(action, "open_batch")) {
+        app->batch_list_count = 0;   /* opened by hand: on the folder being read */
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
+    } else if (rubraview_u8_eq_lit(action, "print")) {
+        /* D-86: the picture on screen, through the system's print dialog. */
+        u8str_t path = current_file_path(app);
+        if (app->source.archive_path.len > 0 && !app->list_is_set) osd_say(app, U8("a page inside an archive is not printed yet"));
+        else if (path.len == 0) osd_say(app, U8("there is no picture to print"));
+        else print_paths(app, &path, 1);
     } else if (app->media && (rubraview_u8_eq_lit(action, "media_play_pause") || rubraview_u8_eq_lit(action, "anim_toggle_pause"))) {
         media_toggle_pause(app);   /* anim_toggle_pause: the name before D-16, in keymap.ini files saved earlier */
     } else if (app->media && rubraview_u8_eq_lit(action, "media_stop")) {
@@ -7701,6 +7717,195 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     osd_say(app, said);
 }
 
+/* ---- D-86: what Explorer's menu asks ---- */
+
+/* The files named, as one set of pages. */
+static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t count, const char *what) {
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    size_t n = 0;
+    for (size_t i = 0; i < count; ++i) {
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory) continue;
+        entries[n++] = entry;
+    }
+    if (n == 0) { osd_say(app, U8("none of those files could be read")); return; }
+    char line[96];
+    snprintf(line, sizeof(line), "%zu %s", n, what);
+    open_set_from_entries(app, entries, n, cstr(line));
+}
+
+/* "Add to the list": the pages being read and the files named, as one
+   set, still on the page it was on. A folder being read becomes a set of
+   its files; a book has no files to add to, so the files are opened as a
+   set of their own. */
+static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count) {
+    bool files_open = page_count(app) > 0 && app->source.archive_path.len == 0;
+    if (!files_open) {
+        open_paths_as_set(app, paths, count, count == 1 ? "file opened as a list" : "files opened as a list");
+        return;
+    }
+
+    size_t have = page_count(app);
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, have + count, sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    size_t n = 0, added = 0;
+    for (size_t i = 0; i < have; ++i) {
+        if (rubraview_pal_fs_stat(app->arena, app->source.pages[i].path, &entries[n]) && !entries[n].is_directory) n++;
+    }
+    size_t kept = n;
+    for (size_t i = 0; i < count; ++i) {
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory) continue;
+        bool there = false;
+        for (size_t k = 0; k < n && !there; ++k) there = rubraview_path_same(entries[k].path, entry.path);
+        if (there) continue;
+        entries[n++] = entry;
+        added++;
+    }
+    if (added == 0) { osd_say(app, U8("those files are in the list already")); return; }
+
+    /* The page being read, and where a film or a song on it had got to. */
+    int32_t at = current_page_index(app);
+    u8str_t reading = at >= 0 && (size_t)at < have ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
+    bool playing = app->media != NULL && app->media_page == at;
+    double position = playing ? play_position(app) : 0.0;
+    bool paused = app->media_paused;
+
+    char line[96];
+    snprintf(line, sizeof(line), "%zu added to the list (%zu in it)", added, kept + added);
+    open_set_from_entries(app, entries, n, cstr(line));
+
+    for (size_t i = 0; reading.len > 0 && i < page_count(app); ++i) {
+        if (!rubraview_path_same(app->source.pages[i].path, reading)) continue;
+        if (i != 0) finish_open(app, i);
+        if (playing && app->media && position > 1.0) {
+            play_seek(app, position);
+            if (paused && !app->media_paused) media_toggle_pause(app);
+        }
+        break;
+    }
+    osd_say(app, cstr(line));
+}
+
+static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
+    size_t printed = 0;
+    if (!rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), paths, count, &printed)) {
+        osd_say(app, U8("not printed"));
+        return;
+    }
+    char line[96];
+    if (printed == count) snprintf(line, sizeof(line), "%zu sent to the printer", printed);
+    else snprintf(line, sizeof(line), "%zu sent to the printer, %zu could not be read", printed, count - printed);
+    osd_say(app, cstr(line));
+}
+
+static bool path_is_listed_kind(u8str_t path) {
+    return rubraview_glob_match_list(rubraview_path_basename(path), U8(IMAGE_FILTER ";" MEDIA_FILTER));
+}
+
+static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, const u8str_t *paths, size_t count) {
+    if (count == 0) return;
+    switch (verb) {
+        case RUBRAVIEW_SHELL_VERB_NONE:
+            /* A plain launch with several files is a drop of them. */
+            if (count == 1) open_path(app, paths[0]);
+            else open_paths_as_set(app, paths, count, "files opened as one set");
+            break;
+        case RUBRAVIEW_SHELL_VERB_OPEN:
+            open_path(app, paths[0]);
+            break;
+        case RUBRAVIEW_SHELL_VERB_OPEN_ONLY:
+            if (count == 1 && !path_is_listed_kind(paths[0])) open_path(app, paths[0]);   /* a book, a folder */
+            else open_paths_as_set(app, paths, count, count == 1 ? "file opened on its own" : "files opened as one set");
+            break;
+        case RUBRAVIEW_SHELL_VERB_ADD:
+            list_add_paths(app, paths, count);
+            break;
+        case RUBRAVIEW_SHELL_VERB_BROWSE:
+            open_path(app, paths[0]);
+            if (app->source.archive_path.len > 0 && rubraview_path_same(app->source.archive_path, paths[0])) {
+                app->picker_dir = (u8str_t){ .ptr = "", .len = 0 };
+                picker_open(app);
+            }
+            break;
+        case RUBRAVIEW_SHELL_VERB_CONVERT: {
+            proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(u8str_t));
+            if (!proven_is_ok(res.err)) break;
+            app->batch_list = (u8str_t*)(void*)res.value.ptr;
+            for (size_t i = 0; i < count; ++i) app->batch_list[i] = paths[i];
+            app->batch_list_count = count;
+            if (app->panel.open) panel_close(app);
+            panel_open_batch(app);
+            break;
+        }
+        case RUBRAVIEW_SHELL_VERB_PRINT:
+            print_paths(app, paths, count);
+            break;
+        default:
+            break;
+    }
+}
+
+/* What was gathered, acted on: the paths copied where they outlive it. */
+static void shell_requests_flush(app_state_t *app) {
+    rubraview_shellreq_collector_t *c = &app->shell_requests;
+    if (!c->pending) return;
+    rubraview_shell_verb_t verb = c->verb;
+    size_t count = 0;
+    u8str_t *paths = NULL;
+    proven_result_mem_mut_t list = rubraview_arena_alloc_array(app->arena, c->count ? c->count : 1, sizeof(u8str_t));
+    proven_result_mem_mut_t text = proven_arena_alloc(app->arena, c->text_len + 1);
+    if (proven_is_ok(list.err) && proven_is_ok(text.err)) {
+        paths = (u8str_t*)(void*)list.value.ptr;
+        char *copy = (char*)(void*)text.value.ptr;
+        memcpy(copy, c->text, c->text_len);
+        for (const char *p = rubraview_shellreq_next(c, NULL); p && count < c->count; p = rubraview_shellreq_next(c, p)) {
+            paths[count++] = (u8str_t){ .ptr = copy + (p - c->text), .len = strlen(p) };
+        }
+    }
+    rubraview_shellreq_clear(c);
+    if (paths) shell_request_act(app, verb, paths, count);
+}
+
+/* One request into the gathering; one with another verb waiting goes first. */
+static void shell_request_take(app_state_t *app, rubraview_shell_verb_t verb, bool whole, const u8str_t *paths, size_t count) {
+    double now = rubraview_pal_time_now_seconds();
+    if (!rubraview_shellreq_collect(&app->shell_requests, verb, whole, paths, count, now)) {
+        shell_requests_flush(app);
+        (void)rubraview_shellreq_collect(&app->shell_requests, verb, whole, paths, count, now);
+    }
+}
+
+/* Once a pass of the main loop: what other launches handed over. */
+static size_t shell_requests_pump(app_state_t *app) {
+    size_t handled = 0;
+    char *blob = NULL;
+    size_t len = 0;
+    while (rubraview_pal_instance_take_request(&blob, &len)) {
+        rubraview_shell_verb_t verb = RUBRAVIEW_SHELL_VERB_NONE;
+        bool whole = false;
+        size_t count = 0;
+        if (rubraview_shellreq_unpack(blob, len, &verb, &whole, NULL, 0, &count) && count > 0) {
+            u8str_t *paths = (u8str_t*)malloc(count * sizeof(u8str_t));
+            if (paths && rubraview_shellreq_unpack(blob, len, &verb, &whole, paths, count, &count)) {
+                /* A plain launch is one thing and is not waited on. */
+                shell_request_take(app, verb, whole || verb == RUBRAVIEW_SHELL_VERB_NONE, paths, count);
+            }
+            free(paths);
+        }
+        free(blob);
+        handled++;
+    }
+    if (rubraview_shellreq_ready(&app->shell_requests, rubraview_pal_time_now_seconds())) {
+        shell_requests_flush(app);
+        handled++;
+    }
+    return handled;
+}
+
 static void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
     rubraview_drop_item_t items[16];
     size_t count = event->drop.count < 16 ? event->drop.count : 16;
@@ -7833,7 +8038,14 @@ static void panel_open_batch(app_state_t *app) {
     rubraview_panel_add_toggle(&app->panel, PANEL_BATCH_GRAY, U8("Grayscale"), false);
     rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, U8("Privacy clean"), false);
     rubraview_panel_add_separator(&app->panel);
-    rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, U8("Run on this folder"));
+    if (app->batch_list_count > 0) {
+        /* D-86: "Convert..." from Explorer: these files, not the folder being read. */
+        static char label[64];
+        snprintf(label, sizeof(label), "Run on the %zu chosen file%s", app->batch_list_count, app->batch_list_count == 1 ? "" : "s");
+        rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, cstr(label));
+    } else {
+        rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, U8("Run on this folder"));
+    }
 
     app->panel.open = true;
     panel_relayout(app);
@@ -8593,46 +8805,142 @@ static void settings_say(app_state_t *app, const char *text) {
     snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
 }
 
-/* Settings › General › File types: the kinds switched on, for this user
-   or — through this program run again as an administrator — for every user. */
-static void shell_types_action(app_state_t *app, u8str_t name) {
-    const struct { bool on; uint32_t group; const char *word; } KINDS[] = {
-        { rubraview_settings_get(&app->settings, U8("shell"), U8("pictures")) > 0.5, RUBRAVIEW_SHELL_PICTURES, "pictures" },
-        { rubraview_settings_get(&app->settings, U8("shell"), U8("comics")) > 0.5, RUBRAVIEW_SHELL_COMICS, "comics" },
-        { rubraview_settings_get(&app->settings, U8("shell"), U8("video")) > 0.5, RUBRAVIEW_SHELL_VIDEO, "video" },
-        { rubraview_settings_get(&app->settings, U8("shell"), U8("music")) > 0.5, RUBRAVIEW_SHELL_MUSIC, "music" },
+/* Settings › Explorer (D-86): the extensions switched on, as the words
+   `--types=` takes. Each is read by its own name, so the settings check
+   can see that every switch on the page is one the program reads. */
+static size_t shell_chosen_words(app_state_t *app, char *out, size_t cap) {
+    const rubraview_settings_t *st = &app->settings;
+    const struct { const char *ext; bool on; } CHOICES[] = {
+        { "jpg",  rubraview_settings_get(st, U8("shell"), U8("ext_jpg")) > 0.5 },
+        { "jpeg", rubraview_settings_get(st, U8("shell"), U8("ext_jpeg")) > 0.5 },
+        { "png",  rubraview_settings_get(st, U8("shell"), U8("ext_png")) > 0.5 },
+        { "apng", rubraview_settings_get(st, U8("shell"), U8("ext_apng")) > 0.5 },
+        { "gif",  rubraview_settings_get(st, U8("shell"), U8("ext_gif")) > 0.5 },
+        { "bmp",  rubraview_settings_get(st, U8("shell"), U8("ext_bmp")) > 0.5 },
+        { "tif",  rubraview_settings_get(st, U8("shell"), U8("ext_tif")) > 0.5 },
+        { "tiff", rubraview_settings_get(st, U8("shell"), U8("ext_tiff")) > 0.5 },
+        { "webp", rubraview_settings_get(st, U8("shell"), U8("ext_webp")) > 0.5 },
+        { "ico",  rubraview_settings_get(st, U8("shell"), U8("ext_ico")) > 0.5 },
+        { "cbz",  rubraview_settings_get(st, U8("shell"), U8("ext_cbz")) > 0.5 },
+        { "cb7",  rubraview_settings_get(st, U8("shell"), U8("ext_cb7")) > 0.5 },
+        { "cbr",  rubraview_settings_get(st, U8("shell"), U8("ext_cbr")) > 0.5 },
+        { "mp4",  rubraview_settings_get(st, U8("shell"), U8("ext_mp4")) > 0.5 },
+        { "mkv",  rubraview_settings_get(st, U8("shell"), U8("ext_mkv")) > 0.5 },
+        { "webm", rubraview_settings_get(st, U8("shell"), U8("ext_webm")) > 0.5 },
+        { "avi",  rubraview_settings_get(st, U8("shell"), U8("ext_avi")) > 0.5 },
+        { "mov",  rubraview_settings_get(st, U8("shell"), U8("ext_mov")) > 0.5 },
+        { "mp3",  rubraview_settings_get(st, U8("shell"), U8("ext_mp3")) > 0.5 },
+        { "flac", rubraview_settings_get(st, U8("shell"), U8("ext_flac")) > 0.5 },
+        { "wav",  rubraview_settings_get(st, U8("shell"), U8("ext_wav")) > 0.5 },
+        { "ogg",  rubraview_settings_get(st, U8("shell"), U8("ext_ogg")) > 0.5 },
+        { "opus", rubraview_settings_get(st, U8("shell"), U8("ext_opus")) > 0.5 },
+        { "m4a",  rubraview_settings_get(st, U8("shell"), U8("ext_m4a")) > 0.5 },
+        { "zip",  rubraview_settings_get(st, U8("shell"), U8("ext_zip")) > 0.5 },
+        { "7z",   rubraview_settings_get(st, U8("shell"), U8("ext_7z")) > 0.5 },
+        { "rar",  rubraview_settings_get(st, U8("shell"), U8("ext_rar")) > 0.5 },
+        { "alz",  rubraview_settings_get(st, U8("shell"), U8("ext_alz")) > 0.5 },
+        { "egg",  rubraview_settings_get(st, U8("shell"), U8("ext_egg")) > 0.5 },
     };
-    uint32_t groups = 0;
-    char words[64] = "";
-    for (size_t i = 0; i < sizeof(KINDS) / sizeof(KINDS[0]); ++i) {
-        if (!KINDS[i].on) continue;
-        groups |= KINDS[i].group;
-        if (words[0]) strcat(words, ",");
-        strcat(words, KINDS[i].word);
+    size_t pos = 0;
+    out[0] = '\0';
+    for (size_t i = 0; i < sizeof(CHOICES) / sizeof(CHOICES[0]); ++i) {
+        if (!CHOICES[i].on) continue;
+        if (pos > 0) append_text(out, cap, &pos, ",");
+        append_text(out, cap, &pos, CHOICES[i].ext);
     }
-    if (groups == 0) { settings_say(app, "switch on at least one kind of file first"); return; }
+    return pos;
+}
 
+/* What a registration did, as the line the reader is shown. The same
+   numbers are the exit code of the run made as an administrator. */
+enum { SHELL_DONE = 0, SHELL_FAILED = 1, SHELL_DONE_NO_PARTS = 3, SHELL_DONE_REFUSED = 4 };
+
+/* What a registration does with one of its two parts — the file types
+   (double click) and the right-click menu. */
+typedef enum { SHELL_PART_LEAVE = 0, SHELL_PART_APPLY, SHELL_PART_REMOVE } shell_part_t;
+
+/* Makes the registry match the choice. A part applied is written for the
+   extensions of `selection` (`;` between) and ours is taken off every
+   other extension; a part removed loses everything of ours; a part left
+   is not touched. */
+static int shell_apply(proven_arena_t *arena, u8str_t selection, shell_part_t types, shell_part_t menu, bool all_users) {
+    bool ok = true;
+    int code = SHELL_DONE;
+    if (types != SHELL_PART_LEAVE) {
+        /* Ours is taken off everything first, so an extension switched
+           off since the last time loses it. */
+        if (!rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users)) ok = false;
+        u8str_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL)
+                                                 : (u8str_t){ .ptr = "", .len = 0 };
+        if (list.len > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
+    }
+    if (menu == SHELL_PART_APPLY) {
+        switch (rubraview_pal_shell_menu_register(selection, all_users)) {
+            case RUBRAVIEW_SHELL_MENU_FAILED: ok = false; break;
+            case RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS: code = SHELL_DONE_NO_PARTS; break;
+            case RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED: code = SHELL_DONE_REFUSED; break;
+            default: break;
+        }
+    } else if (menu == SHELL_PART_REMOVE && !rubraview_pal_shell_menu_unregister(all_users)) {
+        ok = false;
+    }
+    return ok ? code : SHELL_FAILED;
+}
+
+static int shell_remove(bool all_users) {
+    bool ok = rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users);
+    if (!rubraview_pal_shell_menu_unregister(all_users)) ok = false;
+    return ok ? SHELL_DONE : SHELL_FAILED;
+}
+
+/* Settings › Explorer: the extensions switched on, for this user or —
+   through this program run again as an administrator — for every user. */
+static void shell_types_action(app_state_t *app, u8str_t name) {
     bool adding = rubraview_u8_eq_lit(name, "shell.register") || rubraview_u8_eq_lit(name, "shell.register_all");
     bool all = rubraview_u8_eq_lit(name, "shell.register_all") || rubraview_u8_eq_lit(name, "shell.unregister_all");
-    bool ok = false;
+    bool types = rubraview_settings_get(&app->settings, U8("shell"), U8("open_with")) > 0.5;
+    bool menu = rubraview_settings_get(&app->settings, U8("shell"), U8("menu")) > 0.5;
+
+    char words[256];
+    size_t words_len = shell_chosen_words(app, words, sizeof(words));
+    if (adding && words_len == 0) { settings_say(app, "switch on at least one extension first"); return; }
+    if (adding && !types && !menu) { settings_say(app, "switch on the file types, the menu, or both first"); return; }
+
+    int code = SHELL_FAILED;
     if (!all) {
-        u8str_t list = rubraview_shell_extensions_for(app->arena, groups);
-        ok = adding ? rubraview_pal_shell_register_for(list, false) : rubraview_pal_shell_unregister_for(list, false);
+        /* The page's two switches: what is off is taken back. */
+        code = adding ? shell_apply(app->arena, rubraview_shell_selection_parse(app->arena, (u8str_t){ .ptr = words, .len = words_len }),
+                                    types ? SHELL_PART_APPLY : SHELL_PART_REMOVE, menu ? SHELL_PART_APPLY : SHELL_PART_REMOVE, false)
+                      : shell_remove(false);
     } else {
-        char args[160];
-        int n = snprintf(args, sizeof(args), "%s --all-users --types=%s",
-                         adding ? "--register-shell" : "--unregister-shell", words);
-        int code = 1;
-        if (n <= 0 || !rubraview_pal_shell_run_elevated((u8str_t){ .ptr = args, .len = (size_t)n }, &code)) {
+        char args[512];
+        int n = adding ? snprintf(args, sizeof(args), "--register-shell --all-users --types=%s%s%s", words,
+                                  types ? "" : " --remove-types", menu ? "" : " --remove-menu")
+                       : snprintf(args, sizeof(args), "--unregister-shell --all-users");
+        if (n <= 0 || (size_t)n >= sizeof(args) ||
+            !rubraview_pal_shell_run_elevated((u8str_t){ .ptr = args, .len = (size_t)n }, &code)) {
             settings_say(app, "not done: the administrator's permission was not given");
             return;
         }
-        ok = code == 0;
     }
-    char say[120];
-    snprintf(say, sizeof(say), ok ? "%s %s: %s" : "could not %s %s: %s",
-             ok ? (adding ? "registered" : "removed") : (adding ? "register" : "remove"),
-             all ? "for every user" : "for this user", words);
+
+    const char *who = all ? "for every user" : "for this user";
+    char say[200];
+    if (code != SHELL_DONE && code != SHELL_DONE_NO_PARTS && code != SHELL_DONE_REFUSED) {
+        snprintf(say, sizeof(say), "could not %s %s", adding ? "register" : "remove", who);
+    } else if (!adding) {
+        snprintf(say, sizeof(say), "removed %s", who);
+    } else if (!menu) {
+        snprintf(say, sizeof(say), "registered %s: file types", who);
+    } else if (!all) {
+        snprintf(say, sizeof(say), "registered %s; the menu is under \"Show more options\" (Windows 11's own menu: for every user)", who);
+    } else if (code == SHELL_DONE_NO_PARTS) {
+        snprintf(say, sizeof(say), "registered %s; Windows 11's menu needs rubraview_menu.dll and .msix beside the program (they are in the zip)", who);
+    } else if (code == SHELL_DONE_REFUSED) {
+        snprintf(say, sizeof(say), "registered %s; Windows did not take the Windows 11 menu's package", who);
+    } else {
+        snprintf(say, sizeof(say), "registered %s, with Windows 11's menu", who);
+    }
     settings_say(app, say);
 }
 
@@ -12100,8 +12408,40 @@ static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text
     append_arg(buf, cap, pos, cstr(text));
 }
 
+/* The chosen files as a list file in the user's temporary folder, which
+   the batch run reads and removes (--paths-temp). Empty when it could not
+   be written. */
+static u8str_t batch_list_file(app_state_t *app) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    WCHAR wide[MAX_PATH + 1];
+    char dir[MAX_PATH * 3 + 1];
+    DWORD n = GetTempPathW(MAX_PATH + 1, wide);
+    if (n == 0 || n > MAX_PATH) return none;
+    int written = WideCharToMultiByte(CP_UTF8, 0, wide, -1, dir, (int)sizeof(dir), NULL, NULL);
+    if (written <= 1) return none;
+
+    size_t total = 0;
+    for (size_t i = 0; i < app->batch_list_count; ++i) total += app->batch_list[i].len + 1;
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, total + (size_t)written + 64);
+    if (!proven_is_ok(res.err)) return none;
+    char *text = (char*)(void*)res.value.ptr;
+    size_t at = 0;
+    for (size_t i = 0; i < app->batch_list_count; ++i) {
+        memcpy(text + at, app->batch_list[i].ptr, app->batch_list[i].len);
+        at += app->batch_list[i].len;
+        text[at++] = '\n';
+    }
+    char *name = text + total;
+    int name_len = snprintf(name, (size_t)written + 64, "%srubraview-batch-%lu-%lu.txt", dir,
+                            (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    if (name_len <= 0) return none;
+    u8str_t path = { .ptr = name, .len = (size_t)name_len };
+    return rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = text, .len = total }) ? path : none;
+}
+
 static void panel_run_batch(app_state_t *app) {
-    if (app->source_dir.len == 0 || app->archive_bytes.len > 0) {
+    bool on_list = app->batch_list_count > 0;
+    if (!on_list && (app->source_dir.len == 0 || app->archive_bytes.len > 0)) {
         osd_say(app, U8("batch runs on a folder of pictures, not on an archive"));
         return;
     }
@@ -12124,14 +12464,16 @@ static void panel_run_batch(app_state_t *app) {
         return;
     }
 
-    u8str_t out_dir = rubraview_path_join(app->arena, app->source_dir, U8("rubraview-out"));
+    /* Chosen files: beside the first of them. */
+    u8str_t beside = on_list ? rubraview_path_dirname(app->batch_list[0]) : app->source_dir;
+    u8str_t out_dir = rubraview_path_join(app->arena, beside, U8("rubraview-out"));
     if (out_dir.len == 0 || !rubraview_pal_fs_make_dirs(out_dir)) {
         osd_say(app, U8("could not make the rubraview-out folder"));
         return;
     }
 
     static const char *const FILTER_NAMES[4] = { "nearest", "bilinear", "bicubic", "lanczos3" };
-    char line[2048];
+    char line[4096];
     size_t pos = 0;
     line[0] = '\0';
     append_arg(line, sizeof(line), &pos, exe);
@@ -12175,7 +12517,19 @@ static void panel_run_batch(app_state_t *app) {
         out_arg[op] = '\0';
         append_arg_cstr(line, sizeof(line), &pos, out_arg);
     }
-    append_arg(line, sizeof(line), &pos, app->source_dir);
+    if (on_list) {
+        u8str_t list = batch_list_file(app);
+        if (list.len == 0) {
+            osd_say(app, U8("could not write the list of files for the batch run"));
+            return;
+        }
+        char list_arg[1100];
+        int n = snprintf(list_arg, sizeof(list_arg), "--paths-from=%.*s", (int)list.len, list.ptr);
+        append_arg_cstr(line, sizeof(line), &pos, "--paths-temp");
+        if (n > 0) append_arg(line, sizeof(line), &pos, (u8str_t){ .ptr = list_arg, .len = (size_t)n });
+    } else {
+        append_arg(line, sizeof(line), &pos, app->source_dir);
+    }
 
     if (rubraview_pal_process_start_console((u8str_t){ .ptr = line, .len = pos })) {
         osd_say(app, U8("batch started in a window of its own"));
@@ -12200,6 +12554,34 @@ static rubraview_gpu_resize_mode_t batch_gpu_resize_mode(proven_arena_t *arena) 
     return (rubraview_gpu_resize_mode_t)lround(rubraview_settings_get(&settings, U8("display"), U8("gpu_resize")));
 }
 
+/* D-86: the paths this launch was given — those on the command line, then
+   the lines of --paths-from — for a batch run, a hand-over, or the first
+   thing the window does. */
+static const u8str_t *g_launch_paths;
+static size_t         g_launch_count;
+static rubraview_shell_verb_t g_launch_verb;
+static bool           g_launch_whole;
+
+static void launch_paths_gather(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
+    u8str_t text = { .ptr = "", .len = 0 };
+    size_t listed = 0;
+    if (cli->paths_from.len > 0) {
+        text = rubraview_pal_fs_read_file(arena, cli->paths_from, 16u * 1024u * 1024u);
+        listed = rubraview_shellreq_split_lines(text, NULL, 0);
+        /* A list written for this launch alone is not left behind. */
+        if (cli->paths_temp) (void)rubraview_pal_fs_delete(cli->paths_from);
+    }
+    size_t total = cli->input_count + listed;
+    if (total == 0) return;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, total, sizeof(u8str_t));
+    if (!proven_is_ok(res.err)) return;
+    u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < cli->input_count; ++i) paths[i] = cli->inputs[i];
+    if (listed > 0) (void)rubraview_shellreq_split_lines(text, paths + cli->input_count, listed);
+    g_launch_paths = paths;
+    g_launch_count = total;
+}
+
 static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, BATCH_MAX_INPUTS, sizeof(rubraview_batch_input_t));
     if (!proven_is_ok(res.err)) {
@@ -12208,7 +12590,10 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     }
     rubraview_batch_input_t *inputs = (rubraview_batch_input_t*)(void*)res.value.ptr;
 
-    size_t count = collect_inputs(arena, cli->input, cli->recursive, inputs, BATCH_MAX_INPUTS, 0);
+    size_t count = 0;
+    for (size_t i = 0; i < g_launch_count; ++i) {
+        count = collect_inputs(arena, g_launch_paths[i], cli->recursive, inputs, BATCH_MAX_INPUTS, count);
+    }
     if (count == 0) {
         console_line("rubraview: nothing to do — no files matched");
         return 1;
@@ -13067,13 +13452,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         int argc = 0;
         LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
         if (wargv) {
-            static char storage[32][2048];
-            const char *argv_utf8[32];
-            int usable = argc < 32 ? argc : 32;
-            for (int i = 0; i < usable; ++i) {
-                int written = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, storage[i],
-                                                  (int)sizeof(storage[i]), NULL, NULL);
-                argv_utf8[i] = written > 0 ? storage[i] : "";
+            /* Every argument: Explorer's menu may name many files (D-86). */
+            int usable = 0;
+            const char **argv_utf8 = NULL;
+            proven_result_mem_mut_t list = rubraview_arena_alloc_array(&arena, (size_t)(argc > 0 ? argc : 1), sizeof(char*));
+            if (proven_is_ok(list.err)) {
+                argv_utf8 = (const char**)(void*)list.value.ptr;
+                for (int i = 0; i < argc; ++i) {
+                    argv_utf8[i] = "";
+                    int need = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, NULL, 0, NULL, NULL);
+                    proven_result_mem_mut_t one = need > 0 ? proven_arena_alloc(&arena, (size_t)need)
+                                                           : (proven_result_mem_mut_t){ .err = PROVEN_ERR_OVERFLOW };
+                    if (proven_is_ok(one.err) &&
+                        WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, (char*)(void*)one.value.ptr, need, NULL, NULL) > 0) {
+                        argv_utf8[i] = (const char*)(void*)one.value.ptr;
+                    }
+                }
+                usable = argc;
             }
             LocalFree(wargv);
 
@@ -13132,6 +13527,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 return code;
             }
 
+            launch_paths_gather(&arena, &cli);
+            g_launch_verb = cli.shell_verb;
+            g_launch_whole = cli.shell_whole;
+
             if (cli.batch_mode) {
                 int code = run_batch(&arena, &cli);
                 free(memory);
@@ -13139,18 +13538,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 return code;
             }
 
-            /* §3.19.3: registering associations is a job, not a launch. */
+            /* §3.19.3, D-86: registering the file types and the menu is a job,
+               not a launch. Without --types every extension is meant. */
             if (cli.register_shell || cli.unregister_shell) {
-                u8str_t types = cli.shell_groups ? rubraview_shell_extensions_for(&arena, cli.shell_groups)
-                                                 : rubraview_shell_extensions();
-                bool ok = cli.register_shell
-                            ? rubraview_pal_shell_register_for(types, cli.shell_all_users)
-                            : rubraview_pal_shell_unregister_for(types, cli.shell_all_users);
-                console_line(ok ? "rubraview: file associations updated"
-                                : "rubraview: could not update the file associations");
+                int code = SHELL_FAILED;
+                if (cli.register_shell) {
+                    u8str_t selection = cli.shell_types.len > 0 ? cli.shell_types : rubraview_shell_extensions_all();
+                    shell_part_t types = cli.shell_no_types ? SHELL_PART_LEAVE : cli.shell_remove_types ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
+                    shell_part_t menu = cli.shell_no_menu ? SHELL_PART_LEAVE : cli.shell_remove_menu ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
+                    code = shell_apply(&arena, selection, types, menu, cli.shell_all_users);
+                } else {
+                    code = shell_remove(cli.shell_all_users);
+                }
+                console_line(code == SHELL_FAILED ? "rubraview: could not update the file types and the menu"
+                           : code == SHELL_DONE_NO_PARTS ? "rubraview: updated; Windows 11's menu needs rubraview_menu.dll and rubraview_menu.msix beside the program"
+                           : code == SHELL_DONE_REFUSED ? "rubraview: updated; Windows did not take the Windows 11 menu's package"
+                           : "rubraview: file types and menu updated");
                 free(memory);
                 CoUninitialize();
-                return ok ? 0 : 1;
+                return code;
             }
 
             /* §3.19.1: hand the file to the window that is already open,
@@ -13164,11 +13570,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     rubraview_settings_t loaded = rubraview_settings_load(&arena, settings);
                     single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
                 }
+                /* What the menu asks is for the window that is open (the
+                   classic menu starts this once a selected file). */
+                if (cli.shell_verb != RUBRAVIEW_SHELL_VERB_NONE) single_instance = true;
                 if (cli.new_instance) single_instance = false;
 
                 bool alone = rubraview_pal_instance_claim();
                 if (rubraview_instance_decide(single_instance, !alone) == RUBRAVIEW_INSTANCE_HAND_OVER) {
-                    if (rubraview_pal_instance_hand_over(cli.input)) {
+                    size_t need = rubraview_shellreq_pack(cli.shell_verb, cli.shell_whole, g_launch_paths, g_launch_count, NULL, 0);
+                    char *blob = (char*)malloc(need);
+                    bool sent = false;
+                    if (blob) {
+                        (void)rubraview_shellreq_pack(cli.shell_verb, cli.shell_whole, g_launch_paths, g_launch_count, blob, need);
+                        /* The other launch may still be making its window
+                           (several files opened at once): it is waited for. */
+                        sent = rubraview_pal_instance_send_request(blob, need, 8000);
+                        free(blob);
+                    }
+                    if (sent) {
                         free(memory);
                         CoUninitialize();
                         return 0;
@@ -13264,24 +13683,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     rubraview_pal_window_accept_drops(app.window, true);
     sync_menubox_tiles(&app);
 
-    int argc = 0;
     /* Let the freshly created window settle its own messages before the
        first file is opened. Decoding runs COM calls, and an apartment
        with an unpumped window is where those calls go to hang. */
     pump_messages();
 
-    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv) {
-        if (argc > 1) {
-            char utf8[4096];
-            int written = WideCharToMultiByte(CP_UTF8, 0, argv[1], -1, utf8, (int)sizeof(utf8), NULL, NULL);
-            if (written > 1) {
-                open_path(&app, (u8str_t){ .ptr = utf8, .len = (size_t)(written - 1) });
-            }
-        }
-        LocalFree(argv);
+    /* What this launch was given. A plain launch opens at once; what the
+       menu asked is gathered with what the other launches of the same
+       selection hand over (D-86). */
+    if (g_launch_count > 0) {
+        shell_request_take(&app, g_launch_verb, g_launch_whole || g_launch_verb == RUBRAVIEW_SHELL_VERB_NONE,
+                           g_launch_paths, g_launch_count);
+        if (rubraview_shellreq_ready(&app.shell_requests, rubraview_pal_time_now_seconds())) shell_requests_flush(&app);
     }
-    startup_without_file(&app, argc <= 1);
+    startup_without_file(&app, g_launch_count == 0);
 
     app.last_frame_seconds = rubraview_pal_time_now_seconds();
     double last_busy_seconds = app.last_frame_seconds;
@@ -13689,6 +14104,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
         /* §3.22 / D-13: the settings window's own queue. Polling the main
            window pumped the thread's messages into it. */
+        handled += shell_requests_pump(&app);
         handled += settings_pump(&app);
         handled += help_pump(&app);
         handled += info_pump(&app);

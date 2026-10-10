@@ -49,6 +49,8 @@ const char *rubraview_default_keymap(void) {
     /* Owner, 2026-10-09: an Explorer window with the file on screen picked
        out — the archive itself for a page inside one. */
     "reveal_in_explorer = \"Ctrl+Enter\"\n"
+    /* D-86: the picture on screen through the system's print dialog. */
+    "print = \"Ctrl+P\"\n"
     /* Owner, 2026-10-08: the file on screen copied to its folder, or moved
        to its own (Settings > Files); beside F5, which has nothing to do
        with files here. */

@@ -23,6 +23,7 @@
 /scripts/*
 !/scripts/package.sh
 !/scripts/gen-notices.py
+!/scripts/make-menu-package.py
 
 # Noise inside the allowed folders.
 __pycache__/

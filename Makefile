@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # FultaArc (MIT; vendor/fultaarc, D-74) reads and writes every archive: ZIP,
 # 7z and RAR 2.0-7.0, with the decoders it vendors itself (LZMA SDK, miniz,
 # bzip2, zstd). It is built once as a static library, with its own flags and
@@ -114,7 +114,8 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_audio_wasapi.c \
                  src/pal/win32/pal_media_win32.c \
                  src/pal/win32/pal_media_ffmpeg.c \
-                 src/pal/win32/pal_process_win32.c
+                 src/pal/win32/pal_process_win32.c \
+                 src/pal/win32/pal_shellmenu_win32.c
 
 SRCS_APP = src/app/main.c
 
@@ -122,7 +123,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archives build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
 .PHONY: all test check clean win64 package mfprobe
 
@@ -223,15 +224,24 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/ru
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
-win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN)
+# D-86: the COM server of Rubraview's item in Windows 11's context menu. It
+# sits beside rubraview.exe; scripts/package.sh makes the package that names it.
+MENU_DLL = dist/rubraview_menu.dll
+$(MENU_DLL): src/menu/rubraview_menu.c src/menu/rubraview_menu.def
+	@mkdir -p dist
+	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -shared -s \
+		src/menu/rubraview_menu.c src/menu/rubraview_menu.def \
+		-lole32 -lshlwapi -ladvapi32 -luser32 -luuid -o $@
+
+win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
 		$(JPEG_INCLUDE) \
-		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform $(FFMPEG_INCLUDE) \
+		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
 		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) -lbcrypt \
-		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 \
+		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lruntimeobject \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"
 

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.41** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.41/rubraview-v0.0.41.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.42** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.42/rubraview-v0.0.42.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -59,6 +59,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
+| `Ctrl+P` | Print the picture on screen: the system's dialog, fitted to the sheet |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
@@ -226,13 +227,22 @@ These belong to their window and are not on the Keys page.
 **single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
 under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves).
 
+## Explorer's right-click menu
+
+Settings > Explorer registers a **Rubraview** item on the extensions you switch on — Open, Open these only, Add to the
+list, Browse the archive, Convert..., Print... — each working on one file or on many selected together. For this user
+it is the classic menu ("Show more options" on Windows 11); "for every user" (an administrator, once) also puts it in
+Windows 11's own menu, using `rubraview_menu.dll` and `rubraview_menu.msix` from the zip. Plain archives (ZIP, 7z, RAR,
+ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
+
 ## Command line
 
 | Run | For |
 |---|---|
 | `rubraview.exe FILE` (or a folder, or an archive) | Opens it; a second launch hands the file to the window already open |
 | `--new-instance` | A second window all the same |
-| `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview, or takes that back. `--types=pictures,comics,video,music` for some kinds only; `--all-users` from an administrator's prompt for every user. The same is in Settings > General |
+| `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu). The same is in Settings > Explorer |
+| `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `FILES...` | What the right-click menu's items run: open; open only these; add to the open window's list; an archive's entries; the batch panel on these; print |
 | `--batch ...` | Converts many files without a window; the [manual](docs/manual/rubraview-manual.md) lists its options |
 | `--version` | The version |
 

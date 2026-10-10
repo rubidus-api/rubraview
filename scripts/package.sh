@@ -3,9 +3,10 @@
 # RFC-0001 §11.2 M9).
 #
 # What ships is deliberately short: one executable, the manual, the
-# licences of the three vendored libraries, and the changelog. There is
-# no installer and no runtime to place beside it — that is the point of
-# the "no DLL beside it" criterion.
+# licences of the vendored libraries, and the changelog. There is no
+# installer and no runtime to place beside it — the program imports no DLL
+# of ours. The one DLL in the folder, rubraview_menu.dll, is not loaded by
+# the program: Explorer's Windows 11 menu loads it (D-86).
 set -eu
 
 # The version comes from the header, the same place the Makefile reads
@@ -35,12 +36,22 @@ cp "dist/$exe" "$out/rubraview.exe"
 # The same executable on its own, for the release's direct download.
 cp "dist/$exe" "dist/rubraview.exe"
 
+# D-86: the Windows 11 menu's two files, beside the program. The DLL is
+# built by `make win64`; the package is made here, for this version.
+if [ ! -f dist/rubraview_menu.dll ]; then
+  printf '%s\n' "package: dist/rubraview_menu.dll is missing — run 'make win64' first" >&2
+  exit 1
+fi
+cp dist/rubraview_menu.dll "$out/rubraview_menu.dll"
+python3 scripts/make-menu-package.py "$version" "$out/rubraview_menu.msix"
+
 cp docs/manual/rubraview-manual.md "$out/manual.md"
 cp THIRD_PARTY_NOTICES.md "$out/"
 [ -f CHANGELOG.md ] && cp CHANGELOG.md "$out/" || true
 [ -f LICENSE ] && cp LICENSE "$out/" || true
 
 cp vendor/proven/LICENSE "$out/licences/proven_c_lib-LICENSE.txt"
+cp vendor/rubrapack/LICENSE "$out/licences/rubrapack-LICENSE.txt"
 cp vendor/fultaarc/LICENSE "$out/licences/fultaarc-LICENSE.txt"
 cp vendor/fultaarc/THIRD_PARTY_NOTICES.md "$out/licences/fultaarc-THIRD_PARTY_NOTICES.md"
 cp vendor/fultaarc/vendor/lzma/LICENSE.txt "$out/licences/lzma-sdk-LICENSE.txt"

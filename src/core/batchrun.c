@@ -101,9 +101,15 @@ static bool parse_resize(u8str_t value, rubraview_batch_resize_params_t *out) {
 
 void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
                          int argc, const char *const *argv) {
-    (void)arena;
     if (!out) return;
     rubraview_cli_result_t result = {0};
+    /* Every argument could be a path: room for them all. */
+    u8str_t *inputs = NULL;
+    if (arena && argc > 1) {
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)argc * sizeof(u8str_t));
+        if (proven_is_ok(res.err)) inputs = (u8str_t*)(void*)res.value.ptr;
+    }
+    result.inputs = inputs;
     result.export_options = rubraview_export_defaults();
     result.job.actions = result.actions;
     result.job.naming_pattern = U8("{name}.{ext}");
@@ -118,16 +124,29 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
            wins rather than being silently ignored. */
         if (arg.ptr[0] != '-') {
             result.input = arg;
+            if (inputs) inputs[result.input_count++] = arg;
             continue;
         }
+
+        if (rubraview_shell_verb_for_flag(arg) != RUBRAVIEW_SHELL_VERB_NONE) {
+            result.shell_verb = rubraview_shell_verb_for_flag(arg);
+            continue;
+        }
+        if (rubraview_u8_eq_lit(arg, "--whole")) { result.shell_whole = true; continue; }
+        if (starts_with(arg, "--paths-from=", &value)) { result.paths_from = value; continue; }
+        if (rubraview_u8_eq_lit(arg, "--paths-temp")) { result.paths_temp = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--no-types")) { result.shell_no_types = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--no-menu")) { result.shell_no_menu = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--remove-types")) { result.shell_remove_types = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--remove-menu")) { result.shell_remove_menu = true; continue; }
 
         if (rubraview_u8_eq_lit(arg, "--batch")) { result.batch_mode = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--register-shell")) { result.register_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--all-users")) { result.shell_all_users = true; continue; }
         if (starts_with(arg, "--types=", &value)) {
-            result.shell_groups = rubraview_shell_groups_parse(value);
-            if (result.shell_groups == 0) {
+            result.shell_types = rubraview_shell_selection_parse(arena, value);
+            if (result.shell_types.len == 0) {
                 result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
             }
             continue;
@@ -307,7 +326,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
 
     rubraview_export_clamp(&result.export_options);
 
-    if (result.batch_mode && result.input.len == 0) {
+    if (result.batch_mode && result.input.len == 0 && result.paths_from.len == 0) {
         result.err = RUBRAVIEW_CLI_ERR_NO_INPUT;
         *out = result; out->job.actions = out->actions; return;
     }

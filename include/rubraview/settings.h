@@ -28,6 +28,7 @@ extern "C" {
 
 typedef enum rubraview_settings_tab {
     RUBRAVIEW_TAB_GENERAL = 0,
+    RUBRAVIEW_TAB_EXPLORER,   /* D-86: file types and the right-click menu */
     RUBRAVIEW_TAB_VIEWER,
     RUBRAVIEW_TAB_FILES,
     RUBRAVIEW_TAB_AUDIO,
@@ -85,7 +86,7 @@ u8str_t rubraview_settings_tab_name(rubraview_settings_tab_t tab);
 
 /* ---- values ---- */
 
-#define RUBRAVIEW_SETTINGS_MAX 96
+#define RUBRAVIEW_SETTINGS_MAX 160
 
 typedef struct rubraview_settings {
     double   values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */

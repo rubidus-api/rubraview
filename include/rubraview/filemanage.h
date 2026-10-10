@@ -218,12 +218,32 @@ u8str_t rubraview_shell_extensions(void);
 #define RUBRAVIEW_SHELL_VIDEO    4u
 #define RUBRAVIEW_SHELL_MUSIC    8u
 #define RUBRAVIEW_SHELL_ALL      15u
+/* D-86: ZIP, 7z, RAR, ALZ, EGG. They get the right-click menu and are
+   never registered as a file type of ours, so this is not in ALL. */
+#define RUBRAVIEW_SHELL_ARCHIVES 16u
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
 u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);
 
 /** "pictures,comics,video,music" (any of them, any order) as a mask; 0 when a word is not one of them. */
 uint32_t rubraview_shell_groups_parse(u8str_t words);
+
+/** Every extension the right-click menu knows: the file types and the archives. */
+u8str_t rubraview_shell_extensions_all(void);
+
+/** The kind an extension belongs to ("jpg" or ".jpg"), 0 for one that is not ours. */
+uint32_t rubraview_shell_kind_of(u8str_t extension);
+
+/**
+ * D-86: a choice of extensions, written as words with commas between — an
+ * extension ("jpg"), a kind ("pictures", "comics", "video", "music",
+ * "archives") or "all" — as the `;`-separated list of the extensions it
+ * names, in the order of the kinds. Empty when a word is none of these.
+ */
+u8str_t rubraview_shell_selection_parse(proven_arena_t *arena, u8str_t words);
+
+/** Those of a `;`-separated list whose kind is in `kinds`. */
+u8str_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, u8str_t selection, uint32_t kinds);
 
 #ifdef __cplusplus
 }
