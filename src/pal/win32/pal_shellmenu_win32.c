@@ -343,17 +343,25 @@ bool rubraview_pal_shell_menu_unregister(bool all_users) {
 
 /* ---- printing ---- */
 
-/* A quarter turn clockwise of 32-bit pixels into `dst` (h x w). */
-static void turn_quarter(const uint32_t *src, int32_t w, int32_t h, uint32_t *dst) {
-    for (int32_t y = 0; y < h; ++y) {
-        for (int32_t x = 0; x < w; ++x) {
-            dst[(size_t)x * (size_t)h + (size_t)(h - 1 - y)] = src[(size_t)y * (size_t)w + (size_t)x];
+/* `turns` quarter turns clockwise of 32-bit pixels into `dst`, which is
+   h x w for an odd count. */
+static void turn_pixels(const uint32_t *src, int32_t w, int32_t h, int32_t turns, uint32_t *dst) {
+    size_t W = (size_t)w, H = (size_t)h;
+    for (size_t y = 0; y < H; ++y) {
+        const uint32_t *row = src + y * W;
+        for (size_t x = 0; x < W; ++x) {
+            size_t at = turns == 1 ? x * H + (H - 1 - y)
+                      : turns == 2 ? (H - 1 - y) * W + (W - 1 - x)
+                      :              (W - 1 - x) * H + y;
+            dst[at] = row[x];
         }
     }
 }
 
-/* One picture on a sheet of its own. A file that cannot be read takes no sheet. */
-static bool print_one(HDC dc, u8str_t path) {
+/* One picture in its cell of the sheet (D-87). A file that cannot be
+   read takes no cell: `*on_sheet` counts the pictures on the open sheet,
+   and a sheet is begun for the first of them. */
+static bool print_one(HDC dc, u8str_t path, const rubraview_print_options_t *options, int32_t *on_sheet) {
     int32_t w = 0, h = 0;
     if (!rubraview_pal_image_size(path, &w, &h) || w <= 0 || h <= 0) return false;
 
@@ -390,48 +398,57 @@ static bool print_one(HDC dc, u8str_t path) {
     }
 
     int32_t sheet_w = GetDeviceCaps(dc, HORZRES), sheet_h = GetDeviceCaps(dc, VERTRES);
-    int32_t x = 0, y = 0, out_w = 0, out_h = 0;
-    bool turn = false;
-    rubraview_print_fit(sheet_w, sheet_h, w, h, &x, &y, &out_w, &out_h, &turn);
+    int32_t dpi_x = GetDeviceCaps(dc, LOGPIXELSX), dpi_y = GetDeviceCaps(dc, LOGPIXELSY);
+    int32_t cx = 0, cy = 0, cw = 0, ch = 0;
+    rubraview_print_cell(sheet_w, sheet_h, dpi_x, dpi_y, options, *on_sheet, &cx, &cy, &cw, &ch);
+    rubraview_print_placement_t place;
+    rubraview_print_options_t chosen = *options;
+    if (!rubraview_print_place(cx, cy, cw, ch, dpi_x, dpi_y, w, h, &chosen, &place)) {
+        free(memory);
+        return false;
+    }
 
-    const void *bits = picture.pixels;
-    if (turn) {
+    const uint8_t *bits = picture.pixels;
+    if (place.quarter_turns != 0) {
         proven_result_mem_mut_t res = proven_arena_alloc(&arena, pixels * 4u);
         if (proven_is_ok(res.err)) {
-            turn_quarter((const uint32_t*)(const void*)picture.pixels, w, h, (uint32_t*)(void*)res.value.ptr);
+            turn_pixels((const uint32_t*)(const void*)picture.pixels, w, h, place.quarter_turns, (uint32_t*)(void*)res.value.ptr);
             bits = res.value.ptr;
-            int32_t t = w; w = h; h = t;
         } else {
-            /* No room to turn it: printed as it stands, smaller. */
-            out_w = sheet_w;
-            out_h = (int32_t)((int64_t)h * sheet_w / w);
-            if (out_h > sheet_h) { out_h = sheet_h; out_w = (int32_t)((int64_t)w * sheet_h / h); }
-            x = (sheet_w - out_w) / 2;
-            y = (sheet_h - out_h) / 2;
+            /* No room to turn it: printed as it stands. */
+            chosen.turn = RUBRAVIEW_PRINT_TURN_NONE;
+            rubraview_print_place(cx, cy, cw, ch, dpi_x, dpi_y, w, h, &chosen, &place);
         }
     }
 
     bool ok = false;
-    if (out_w > 0 && out_h > 0 && StartPage(dc) > 0) {
+    if (*on_sheet > 0 || StartPage(dc) > 0) {
+        /* The rows from the first one printed on: a bitmap's own row
+           numbering is then not asked about, only the column. */
         BITMAPINFO info = { 0 };
         info.bmiHeader.biSize = sizeof(info.bmiHeader);
-        info.bmiHeader.biWidth = w;
-        info.bmiHeader.biHeight = -h;   /* top row first */
+        info.bmiHeader.biWidth = place.turned_w;
+        info.bmiHeader.biHeight = -place.src_h;   /* top row first */
         info.bmiHeader.biPlanes = 1;
         info.bmiHeader.biBitCount = 32;
         info.bmiHeader.biCompression = BI_RGB;
+        const uint8_t *from = bits + (size_t)place.src_y * (size_t)place.turned_w * 4u;
         SetStretchBltMode(dc, HALFTONE);
         SetBrushOrgEx(dc, 0, 0, NULL);
-        ok = StretchDIBits(dc, x, y, out_w, out_h, 0, 0, w, h, bits, &info, DIB_RGB_COLORS, SRCCOPY) > 0;
-        if (EndPage(dc) <= 0) ok = false;
+        ok = StretchDIBits(dc, place.dst_x, place.dst_y, place.dst_w, place.dst_h,
+                           place.src_x, 0, place.src_w, place.src_h, from, &info, DIB_RGB_COLORS, SRCCOPY) > 0;
+        (*on_sheet)++;
     }
     free(memory);
     return ok;
 }
 
-bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count, size_t *out_printed) {
+bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
+                                  const rubraview_print_options_t *options, size_t *out_printed) {
     if (out_printed) *out_printed = 0;
     if (!paths || count == 0) return false;
+    rubraview_print_options_t chosen = options ? *options : rubraview_print_options_default();
+    rubraview_print_options_clamp(&chosen);
 
     PRINTDLGEXW dialog = { 0 };
     dialog.lStructSize = sizeof(dialog);
@@ -449,11 +466,17 @@ bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *pat
     HDC dc = dialog.hDC;
     DOCINFOW doc = { .cbSize = sizeof(doc), .lpszDocName = L"Rubraview" };
     size_t printed = 0;
+    int32_t on_sheet = 0;
     bool started = StartDocW(dc, &doc) > 0;
     for (size_t i = 0; started && i < count; ++i) {
-        if (print_one(dc, paths[i])) printed++;
+        if (print_one(dc, paths[i], &chosen, &on_sheet)) printed++;
+        if (on_sheet >= chosen.per_sheet) {
+            EndPage(dc);
+            on_sheet = 0;
+        }
     }
     if (started) {
+        if (on_sheet > 0) EndPage(dc);
         /* A job with nothing on it is not sent. */
         if (printed > 0) EndDoc(dc);
         else AbortDoc(dc);

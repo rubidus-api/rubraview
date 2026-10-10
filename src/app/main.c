@@ -536,6 +536,9 @@ typedef struct app_state {
     rubraview_panel_t         panel;
     bool                      panel_is_export;   /* which of the three the panel currently is */
     bool                      panel_is_batch;
+    bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
+    u8str_t                  *print_list;        /* what the print panel's button prints */
+    size_t                    print_list_count;
     /* §3.13: a crop being dragged on the picture — where it started, in image pixels. */
     bool                      crop_dragging;
     /* §3.13: the curve widget — which point is being dragged, or -1. */
@@ -4246,7 +4249,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
     } else if (rubraview_u8_eq_lit(action, "open_edit")) {
-        if (app->panel.open && !app->panel_is_export && !app->panel_is_batch) panel_close(app);
+        if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print) panel_close(app);
         else panel_open_edit(app);
     } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
@@ -4256,9 +4259,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
     } else if (rubraview_u8_eq_lit(action, "print")) {
-        /* D-86: the picture on screen, through the system's print dialog. */
+        /* D-86, D-87: the picture on screen; how is chosen first, then the system's print dialog. */
         u8str_t path = current_file_path(app);
-        if (app->source.archive_path.len > 0 && !app->list_is_set) osd_say(app, U8("a page inside an archive is not printed yet"));
+        if (app->panel.open && app->panel_is_print) panel_close(app);
+        else if (app->source.archive_path.len > 0 && !app->list_is_set) osd_say(app, U8("a page inside an archive is not printed yet"));
         else if (path.len == 0) osd_say(app, U8("there is no picture to print"));
         else print_paths(app, &path, 1);
     } else if (app->media && (rubraview_u8_eq_lit(action, "media_play_pause") || rubraview_u8_eq_lit(action, "anim_toggle_pause"))) {
@@ -7790,16 +7794,17 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count)
     osd_say(app, cstr(line));
 }
 
+static void panel_open_print(app_state_t *app);
+
+/* D-87: these pictures are to be printed: how is asked first, in the panel. */
 static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
-    size_t printed = 0;
-    if (!rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), paths, count, &printed)) {
-        osd_say(app, U8("not printed"));
-        return;
-    }
-    char line[96];
-    if (printed == count) snprintf(line, sizeof(line), "%zu sent to the printer", printed);
-    else snprintf(line, sizeof(line), "%zu sent to the printer, %zu could not be read", printed, count - printed);
-    osd_say(app, cstr(line));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(u8str_t));
+    if (!proven_is_ok(res.err) || count == 0) return;
+    app->print_list = (u8str_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < count; ++i) app->print_list[i] = paths[i];
+    app->print_list_count = count;
+    if (app->panel.open) panel_close(app);
+    panel_open_print(app);
 }
 
 static bool path_is_listed_kind(u8str_t path) {
@@ -7944,6 +7949,8 @@ enum {
     PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
+    PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
+    PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
 };
 
 /* The panel is placed against the window, so it is placed again whenever
@@ -7965,6 +7972,7 @@ static void panel_close(app_state_t *app) {
     app->panel.row_count = 0;
     app->panel_is_export = false;
     app->panel_is_batch = false;
+    app->panel_is_print = false;
 }
 
 /* §3.13's workbench. Every row's range comes from the edit session, so
@@ -7978,6 +7986,7 @@ static void panel_open_edit(app_state_t *app) {
     app->panel = rubraview_panel_create(U8("Adjust"), dpi);
     app->panel_is_export = false;
     app->panel_is_batch = false;
+    app->panel_is_print = false;
 
     rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, U8("Exposure"), 0.0, -3.0, 3.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, U8("Brightness"), 0.0, -100.0, 100.0, 0.0);
@@ -8008,6 +8017,7 @@ static void panel_open_export(app_state_t *app) {
     app->panel = rubraview_panel_create(U8("Export"), dpi);
     app->panel_is_export = true;
     app->panel_is_batch = false;
+    app->panel_is_print = false;
 
     rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, U8("Format"), (int32_t)app->export_options.format, 8);
     rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, U8("Quality"),
@@ -8031,6 +8041,7 @@ static void panel_open_batch(app_state_t *app) {
     app->panel = rubraview_panel_create(U8("Batch"), dpi);
     app->panel_is_export = false;
     app->panel_is_batch = true;
+    app->panel_is_print = false;
 
     rubraview_panel_add_slider(&app->panel, PANEL_BATCH_RESIZE, U8("Resize %"), 100.0, 10.0, 500.0, 5.0);
     rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FILTER, U8("Filter"), 3, 4);
@@ -8049,6 +8060,78 @@ static void panel_open_batch(app_state_t *app) {
 
     app->panel.open = true;
     panel_relayout(app);
+}
+
+/* D-87: how the pictures are printed, chosen when printing. The choices
+   are settings (`print.*`), so the next print starts from the last. */
+static rubraview_print_options_t print_options(const app_state_t *app) {
+    rubraview_print_options_t o = {
+        .turn = (rubraview_print_turn_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("turn"))),
+        .size = (rubraview_print_size_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("size"))),
+        .scale_percent = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("scale"))),
+        .place = (rubraview_print_place_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("place"))),
+        .margin_mm = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("margin_mm"))),
+        .per_sheet = rubraview_print_per_sheet_of((int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("per_sheet")))),
+    };
+    rubraview_print_options_clamp(&o);
+    return o;
+}
+
+static void panel_open_print(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->panel = rubraview_panel_create(U8("Print"), dpi);
+    app->panel_is_export = false;
+    app->panel_is_batch = false;
+    app->panel_is_print = true;
+
+    rubraview_print_options_t o = print_options(app);
+    rubraview_panel_add_choice(&app->panel, PANEL_PRINT_TURN, U8("Turn"), (int32_t)o.turn, RUBRAVIEW_PRINT_TURN_COUNT);
+    rubraview_panel_add_choice(&app->panel, PANEL_PRINT_SIZE, U8("Size"), (int32_t)o.size, RUBRAVIEW_PRINT_SIZE_COUNT);
+    rubraview_panel_add_slider(&app->panel, PANEL_PRINT_SCALE, U8("Scale %"), (double)o.scale_percent,
+                               (double)RUBRAVIEW_PRINT_SCALE_MIN, (double)RUBRAVIEW_PRINT_SCALE_MAX, 5.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PLACE, U8("Place"), (int32_t)o.place, RUBRAVIEW_PRINT_PLACE_COUNT);
+    rubraview_panel_add_slider(&app->panel, PANEL_PRINT_MARGIN, U8("Margin mm"), (double)o.margin_mm,
+                               0.0, (double)RUBRAVIEW_PRINT_MARGIN_MAX_MM, 1.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PER_SHEET, U8("A sheet"),
+                               rubraview_print_per_sheet_index(o.per_sheet), 5);
+    rubraview_panel_add_separator(&app->panel);
+    static char label[64];
+    if (app->print_list_count == 1) snprintf(label, sizeof(label), "Print...");
+    else snprintf(label, sizeof(label), "Print the %zu chosen files...", app->print_list_count);
+    rubraview_panel_add_button(&app->panel, PANEL_PRINT_NOW, cstr(label));
+
+    app->panel.open = true;
+    panel_relayout(app);
+}
+
+/* What a row of the print panel shows beside its name; empty for the others. */
+static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
+    int n = 0;
+    int32_t v = (int32_t)lround(row->value);
+    switch (row->id) {
+        case PANEL_PRINT_TURN:      n = snprintf(buffer, size, "%s", rubraview_print_turn_name((rubraview_print_turn_t)v)); break;
+        case PANEL_PRINT_SIZE:      n = snprintf(buffer, size, "%s", rubraview_print_size_name((rubraview_print_size_t)v)); break;
+        case PANEL_PRINT_PLACE:     n = snprintf(buffer, size, "%s", rubraview_print_place_name((rubraview_print_place_t)v)); break;
+        case PANEL_PRINT_PER_SHEET: n = snprintf(buffer, size, "%d", (int)rubraview_print_per_sheet_of(v)); break;
+        case PANEL_PRINT_SCALE:
+        case PANEL_PRINT_MARGIN:    n = snprintf(buffer, size, "%d", (int)v); break;
+        default: break;
+    }
+    return (u8str_t){ .ptr = buffer, .len = n > 0 ? (size_t)n : 0 };
+}
+
+static void print_now(app_state_t *app) {
+    rubraview_print_options_t o = print_options(app);
+    size_t count = app->print_list_count, printed = 0;
+    if (count == 0) return;
+    if (!rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), app->print_list, count, &o, &printed)) {
+        osd_say(app, U8("not printed"));
+        return;
+    }
+    char line[96];
+    if (printed == count) snprintf(line, sizeof(line), "%zu sent to the printer", printed);
+    else snprintf(line, sizeof(line), "%zu sent to the printer, %zu could not be read", printed, count - printed);
+    osd_say(app, cstr(line));
 }
 
 /* Save a copy's work, off the main thread: everything it needs copied in,
@@ -8231,6 +8314,19 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         return;
     }
 
+    if (app->panel_is_print) {
+        switch (row->id) {
+            case PANEL_PRINT_TURN:      rubraview_settings_set(&app->settings, U8("print"), U8("turn"), v); break;
+            case PANEL_PRINT_SIZE:      rubraview_settings_set(&app->settings, U8("print"), U8("size"), v); break;
+            case PANEL_PRINT_SCALE:     rubraview_settings_set(&app->settings, U8("print"), U8("scale"), v); break;
+            case PANEL_PRINT_PLACE:     rubraview_settings_set(&app->settings, U8("print"), U8("place"), v); break;
+            case PANEL_PRINT_MARGIN:    rubraview_settings_set(&app->settings, U8("print"), U8("margin_mm"), v); break;
+            case PANEL_PRINT_PER_SHEET: rubraview_settings_set(&app->settings, U8("print"), U8("per_sheet"), v); break;
+            default: break;
+        }
+        return;
+    }
+
     if (app->panel_is_batch) {
         if (row->id == PANEL_PRIVACY) app->export_options.privacy_clean = v > 0.5;
         return;
@@ -8277,6 +8373,11 @@ static void panel_button(app_state_t *app, int32_t index) {
                and hands it to the same engine (§3.11). */
             panel_run_batch(app);
             panel_close(app);
+            break;
+        case PANEL_PRINT_NOW:
+            /* The panel goes first: the system's dialog holds the window while it is up. */
+            panel_close(app);
+            print_now(app);
             break;
         default: break;
     }
@@ -8363,6 +8464,13 @@ static void draw_panel(app_state_t *app) {
             rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
                                             c.height * 0.4, c.height };
             rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
+            if (app->panel_is_print) {
+                /* D-87: a scale or a margin is chosen by its number. */
+                char number[16];
+                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
+                rubraview_pal_render_draw_text(app->renderer, print_row_text(row, number, sizeof(number)),
+                                               at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+            }
         } else if (row->kind == RUBRAVIEW_ROW_TOGGLE) {
             rubraview_pal_rect_t box = { c.x, c.y, c.height, c.height };
             rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 2.0);
@@ -8371,6 +8479,12 @@ static void draw_panel(app_state_t *app) {
                                               box.width * 0.5, box.height * 0.5 };
                 rubraview_pal_render_fill_rect(app->renderer, mark, COLOR_TEXT, 1.0);
             }
+        } else if (row->kind == RUBRAVIEW_ROW_CHOICE && app->panel_is_print) {
+            /* D-87: the print panel's choices have names. */
+            char words[48];
+            rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
+            rubraview_pal_render_draw_text(app->renderer, print_row_text(row, words, sizeof(words)),
+                                           value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
             /* The value is an index; showing it as a number beats
                inventing labels the model does not carry. */
@@ -10934,7 +11048,7 @@ static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t 
 }
 
 static bool edit_panel_open(const app_state_t *app) {
-    return app->panel.open && !app->panel_is_export && !app->panel_is_batch;
+    return app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print;
 }
 
 /* ---- RV-065: the adjust panel's live preview and histogram ---- */
@@ -11150,7 +11264,7 @@ static void draw_crop_overlay(app_state_t *app) {
    line by sampling the same LUT the commit uses, so what is on screen is
    what will be applied. */
 static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
-    if (!app->panel.open || app->panel_is_export || app->panel_is_batch) {
+    if (!app->panel.open || app->panel_is_export || app->panel_is_batch || app->panel_is_print) {
         return (rubraview_pal_rect_t){0};
     }
     double dpi = rubraview_pal_window_dpi_scale(app->window);

@@ -201,3 +201,206 @@ void rubraview_print_fit(int32_t sheet_w, int32_t sheet_h, int32_t picture_w, in
     if (out_h) *out_h = h;
     if (out_turn) *out_turn = turn;
 }
+
+/* ---- how a picture is printed (D-87) ---- */
+
+rubraview_print_options_t rubraview_print_options_default(void) {
+    return (rubraview_print_options_t){
+        .turn = RUBRAVIEW_PRINT_TURN_AUTO, .size = RUBRAVIEW_PRINT_SIZE_FIT, .scale_percent = 100,
+        .place = RUBRAVIEW_PRINT_PLACE_CENTRE, .margin_mm = 0, .per_sheet = 1,
+    };
+}
+
+static const int32_t PER_SHEET[] = { 1, 2, 4, 6, 9 };
+#define PER_SHEET_COUNT ((int32_t)(sizeof(PER_SHEET) / sizeof(PER_SHEET[0])))
+
+int32_t rubraview_print_per_sheet_index(int32_t per_sheet) {
+    int32_t index = 0;
+    for (int32_t i = 0; i < PER_SHEET_COUNT; ++i) {
+        if (PER_SHEET[i] <= per_sheet) index = i;
+    }
+    return index;
+}
+
+int32_t rubraview_print_per_sheet_of(int32_t index) {
+    if (index < 0) index = 0;
+    if (index >= PER_SHEET_COUNT) index = PER_SHEET_COUNT - 1;
+    return PER_SHEET[index];
+}
+
+void rubraview_print_options_clamp(rubraview_print_options_t *o) {
+    if (!o) return;
+    if ((int)o->turn < 0 || o->turn >= RUBRAVIEW_PRINT_TURN_COUNT) o->turn = RUBRAVIEW_PRINT_TURN_AUTO;
+    if ((int)o->size < 0 || o->size >= RUBRAVIEW_PRINT_SIZE_COUNT) o->size = RUBRAVIEW_PRINT_SIZE_FIT;
+    if ((int)o->place < 0 || o->place >= RUBRAVIEW_PRINT_PLACE_COUNT) o->place = RUBRAVIEW_PRINT_PLACE_CENTRE;
+    if (o->scale_percent < RUBRAVIEW_PRINT_SCALE_MIN) o->scale_percent = RUBRAVIEW_PRINT_SCALE_MIN;
+    if (o->scale_percent > RUBRAVIEW_PRINT_SCALE_MAX) o->scale_percent = RUBRAVIEW_PRINT_SCALE_MAX;
+    if (o->margin_mm < 0) o->margin_mm = 0;
+    if (o->margin_mm > RUBRAVIEW_PRINT_MARGIN_MAX_MM) o->margin_mm = RUBRAVIEW_PRINT_MARGIN_MAX_MM;
+    o->per_sheet = rubraview_print_per_sheet_of(rubraview_print_per_sheet_index(o->per_sheet));
+}
+
+const char *rubraview_print_turn_name(rubraview_print_turn_t turn) {
+    static const char *const NAMES[RUBRAVIEW_PRINT_TURN_COUNT] = {
+        "Auto", "None", "90\xC2\xB0 right", "180\xC2\xB0", "90\xC2\xB0 left",
+    };
+    return (int)turn >= 0 && turn < RUBRAVIEW_PRINT_TURN_COUNT ? NAMES[turn] : "";
+}
+
+const char *rubraview_print_size_name(rubraview_print_size_t size) {
+    static const char *const NAMES[RUBRAVIEW_PRINT_SIZE_COUNT] = {
+        "Fit the sheet", "Fill the sheet", "Stretch", "Actual size",
+    };
+    return (int)size >= 0 && size < RUBRAVIEW_PRINT_SIZE_COUNT ? NAMES[size] : "";
+}
+
+const char *rubraview_print_place_name(rubraview_print_place_t place) {
+    static const char *const NAMES[RUBRAVIEW_PRINT_PLACE_COUNT] = {
+        "Centre", "Top left", "Top", "Top right", "Left", "Right", "Bottom left", "Bottom", "Bottom right",
+    };
+    return (int)place >= 0 && place < RUBRAVIEW_PRINT_PLACE_COUNT ? NAMES[place] : "";
+}
+
+void rubraview_print_cell(int32_t sheet_w, int32_t sheet_h, int32_t dpi_x, int32_t dpi_y,
+                          const rubraview_print_options_t *options, int32_t index,
+                          int32_t *out_x, int32_t *out_y, int32_t *out_w, int32_t *out_h) {
+    rubraview_print_options_t o = options ? *options : rubraview_print_options_default();
+    rubraview_print_options_clamp(&o);
+    int32_t x = 0, y = 0, w = 0, h = 0;
+    if (sheet_w > 0 && sheet_h > 0) {
+        /* The margin, in dots; never so much that less than a tenth of a side is left. */
+        int32_t mx = dpi_x > 0 ? (int32_t)((int64_t)o.margin_mm * dpi_x * 10 / 254) : 0;
+        int32_t my = dpi_y > 0 ? (int32_t)((int64_t)o.margin_mm * dpi_y * 10 / 254) : 0;
+        if (mx > sheet_w * 9 / 20) mx = sheet_w * 9 / 20;
+        if (my > sheet_h * 9 / 20) my = sheet_h * 9 / 20;
+        int32_t area_w = sheet_w - 2 * mx, area_h = sheet_h - 2 * my;
+
+        /* The longer side of the sheet takes the longer row of cells. */
+        int32_t across = 1, down = 1;
+        switch (o.per_sheet) {
+            case 2: across = 1; down = 2; break;
+            case 4: across = 2; down = 2; break;
+            case 6: across = 2; down = 3; break;
+            case 9: across = 3; down = 3; break;
+            default: break;
+        }
+        if (area_w > area_h) { int32_t t = across; across = down; down = t; }
+
+        int32_t shorter = area_w < area_h ? area_w : area_h;
+        int32_t gap = o.per_sheet > 1 ? shorter / 50 : 0;
+        w = (area_w - gap * (across - 1)) / across;
+        h = (area_h - gap * (down - 1)) / down;
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
+        int32_t at = index < 0 ? 0 : index % (across * down);
+        x = mx + (at % across) * (w + gap);
+        y = my + (at / across) * (h + gap);
+    }
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+    if (out_w) *out_w = w;
+    if (out_h) *out_h = h;
+}
+
+/* The part of a length `full` laid at `at` that falls inside 0..room, and
+   the part of `pixels` it shows. */
+static void cut(int32_t at, int32_t full, int32_t room, int32_t pixels,
+                int32_t *dst_at, int32_t *dst_len, int32_t *src_at, int32_t *src_len) {
+    int32_t from = at < 0 ? 0 : at;
+    int32_t to = at + full > room ? room : at + full;
+    if (to <= from) { from = 0; to = 1; }
+    int64_t s0 = (int64_t)(from - at) * pixels / full;
+    int64_t s1 = ((int64_t)(to - at) * pixels + full - 1) / full;
+    if (s0 < 0) s0 = 0;
+    if (s1 > pixels) s1 = pixels;
+    if (s1 <= s0) { if (s0 >= pixels) s0 = pixels - 1; s1 = s0 + 1; }
+    *dst_at = from;
+    *dst_len = to - from;
+    *src_at = (int32_t)s0;
+    *src_len = (int32_t)(s1 - s0);
+}
+
+bool rubraview_print_place(int32_t cell_x, int32_t cell_y, int32_t cell_w, int32_t cell_h,
+                           int32_t dpi_x, int32_t dpi_y, int32_t picture_w, int32_t picture_h,
+                           const rubraview_print_options_t *options, rubraview_print_placement_t *out) {
+    if (!out) return false;
+    *out = (rubraview_print_placement_t){ 0 };
+    if (cell_w <= 0 || cell_h <= 0 || picture_w <= 0 || picture_h <= 0) return false;
+    rubraview_print_options_t o = options ? *options : rubraview_print_options_default();
+    rubraview_print_options_clamp(&o);
+
+    int32_t turns = 0;
+    switch (o.turn) {
+        case RUBRAVIEW_PRINT_TURN_RIGHT: turns = 1; break;
+        case RUBRAVIEW_PRINT_TURN_HALF:  turns = 2; break;
+        case RUBRAVIEW_PRINT_TURN_LEFT:  turns = 3; break;
+        case RUBRAVIEW_PRINT_TURN_AUTO: {
+            /* Turned when all of it is then larger on the sheet. */
+            int32_t w = 0, h = 0, tw = 0, th = 0;
+            fit(cell_w, cell_h, picture_w, picture_h, &w, &h);
+            fit(cell_w, cell_h, picture_h, picture_w, &tw, &th);
+            if ((int64_t)tw * th > (int64_t)w * h) turns = 1;
+            break;
+        }
+        default: break;
+    }
+    int32_t pw = (turns & 1) ? picture_h : picture_w;
+    int32_t ph = (turns & 1) ? picture_w : picture_h;
+
+    /* The whole picture's size on the sheet, 64 bits wide until it is cut. */
+    int64_t w = 0, h = 0;
+    switch (o.size) {
+        case RUBRAVIEW_PRINT_SIZE_FILL:
+            if ((int64_t)pw * cell_h >= (int64_t)ph * cell_w) { h = cell_h; w = (int64_t)pw * cell_h / ph; }
+            else { w = cell_w; h = (int64_t)ph * cell_w / pw; }
+            break;
+        case RUBRAVIEW_PRINT_SIZE_STRETCH:
+            w = cell_w;
+            h = cell_h;
+            break;
+        case RUBRAVIEW_PRINT_SIZE_ACTUAL:
+            w = (int64_t)pw * (dpi_x > 0 ? dpi_x : 96) / 96;
+            h = (int64_t)ph * (dpi_y > 0 ? dpi_y : 96) / 96;
+            break;
+        default: {
+            int32_t fw = 0, fh = 0;
+            fit(cell_w, cell_h, pw, ph, &fw, &fh);
+            w = fw;
+            h = fh;
+            break;
+        }
+    }
+    w = w * o.scale_percent / 100;
+    h = h * o.scale_percent / 100;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    /* Far past the sheet nothing more shows; kept inside 32 bits. */
+    const int64_t most = (int64_t)1 << 28;
+    if (w > most) w = most;
+    if (h > most) h = most;
+
+    int64_t x = (cell_w - w) / 2, y = (cell_h - h) / 2;
+    switch (o.place) {
+        case RUBRAVIEW_PRINT_PLACE_TOP_LEFT: case RUBRAVIEW_PRINT_PLACE_LEFT: case RUBRAVIEW_PRINT_PLACE_BOTTOM_LEFT:
+            x = 0; break;
+        case RUBRAVIEW_PRINT_PLACE_TOP_RIGHT: case RUBRAVIEW_PRINT_PLACE_RIGHT: case RUBRAVIEW_PRINT_PLACE_BOTTOM_RIGHT:
+            x = cell_w - w; break;
+        default: break;
+    }
+    switch (o.place) {
+        case RUBRAVIEW_PRINT_PLACE_TOP_LEFT: case RUBRAVIEW_PRINT_PLACE_TOP: case RUBRAVIEW_PRINT_PLACE_TOP_RIGHT:
+            y = 0; break;
+        case RUBRAVIEW_PRINT_PLACE_BOTTOM_LEFT: case RUBRAVIEW_PRINT_PLACE_BOTTOM: case RUBRAVIEW_PRINT_PLACE_BOTTOM_RIGHT:
+            y = cell_h - h; break;
+        default: break;
+    }
+
+    out->quarter_turns = turns;
+    out->turned_w = pw;
+    out->turned_h = ph;
+    cut((int32_t)x, (int32_t)w, cell_w, pw, &out->dst_x, &out->dst_w, &out->src_x, &out->src_w);
+    cut((int32_t)y, (int32_t)h, cell_h, ph, &out->dst_y, &out->dst_h, &out->src_y, &out->src_h);
+    out->dst_x += cell_x;
+    out->dst_y += cell_y;
+    return true;
+}
