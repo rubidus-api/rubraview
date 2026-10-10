@@ -1,7 +1,8 @@
 # Third-Party Notices
 
 Rubraview ships as a single executable that statically links the
-libraries below. Their licence texts travel with the binary; where each
+libraries below (one small DLL beside it serves Explorer's menu; see
+Rubrapack). Their licence texts travel with the binary; where each
 came from is in its `vendor/<name>/VENDORED.md`.
 
 ## proven_c_lib
@@ -79,6 +80,17 @@ came from is in its `vendor/<name>/VENDORED.md`.
 - Used for: rotating and flipping JPEGs by rearranging their DCT
   coefficients, and stripping metadata, without decoding any pixel. No
   encoder, no file I/O, no SIMD and no arithmetic coding is included.
+
+## Rubrapack 0.39.0 (part)
+
+- At `vendor/rubrapack/` (see `vendor/rubrapack/VENDORED.md`), and adapted
+  in `src/menu/rubraview_menu.c`
+- Licence: MIT, Copyright (c) 2026 rubidus-api — see `vendor/rubrapack/LICENSE`
+- Used for: the Windows 11 right-click menu — registering the small
+  package Windows asks for (`rp_appx.h`, as it is) and the menu's COM
+  server `rubraview_menu.dll` (Rubrapack's `rubrapack_menu.c`, changed for
+  Rubraview). The DLL is a file of its own beside the program; the rest
+  is linked in.
 
 Nothing else in the tree is third-party code. The Windows platform
 libraries (Direct2D, DirectWrite, the Windows Imaging Component, WASAPI)

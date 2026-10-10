@@ -316,11 +316,17 @@ u8str_t rubraview_shell_extensions(void) {
     return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
 }
 
+u8str_t rubraview_shell_extensions_all(void) {
+    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a;zip;7z;rar;alz;egg");
+}
+
 static const struct { uint32_t group; const char *word; const char *extensions; } SHELL_GROUPS[] = {
     { RUBRAVIEW_SHELL_PICTURES, "pictures", "jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;ico" },
     { RUBRAVIEW_SHELL_COMICS,   "comics",   "cbz;cb7;cbr" },
     { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov" },
     { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
+    /* D-86: offered the right-click menu only, never made a file type of ours. */
+    { RUBRAVIEW_SHELL_ARCHIVES, "archives", "zip;7z;rar;alz;egg" },
 };
 
 u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups) {
@@ -364,4 +370,111 @@ uint32_t rubraview_shell_groups_parse(u8str_t words) {
         mask |= found;
     }
     return mask;
+}
+
+/* Walks a list's words; false after the last. */
+static bool next_word(u8str_t list, char separator, size_t *at, u8str_t *out) {
+    while (*at <= list.len) {
+        size_t start = *at, end = start;
+        while (end < list.len && list.ptr[end] != separator) end++;
+        *at = end + 1;
+        if (end > start) { *out = (u8str_t){ .ptr = list.ptr + start, .len = end - start }; return true; }
+    }
+    return false;
+}
+
+static bool word_is(u8str_t word, const char *text, size_t n) {
+    if (word.len != n) return false;
+    for (size_t i = 0; i < n; ++i) {
+        char c = word.ptr[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != text[i]) return false;
+    }
+    return true;
+}
+
+static bool list_has(const char *list, u8str_t word) {
+    u8str_t all = { .ptr = list, .len = strlen(list) }, one;
+    for (size_t at = 0; next_word(all, ';', &at, &one);) {
+        if (word_is(word, one.ptr, one.len)) return true;
+    }
+    return false;
+}
+
+uint32_t rubraview_shell_kind_of(u8str_t extension) {
+    if (extension.len > 0 && extension.ptr[0] == '.') { extension.ptr++; extension.len--; }
+    if (extension.len == 0) return 0;
+    for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
+        if (list_has(SHELL_GROUPS[g].extensions, extension)) return SHELL_GROUPS[g].group;
+    }
+    return 0;
+}
+
+/* Is `extension` chosen by `words` — by its own name, its kind's word, or "all"? */
+static bool words_choose(u8str_t words, u8str_t extension, const char *kind_word) {
+    u8str_t word;
+    for (size_t at = 0; next_word(words, ',', &at, &word);) {
+        if (word.len > 0 && word.ptr[0] == '.') { word.ptr++; word.len--; }
+        if (word_is(word, extension.ptr, extension.len) || word_is(word, kind_word, strlen(kind_word)) ||
+            word_is(word, "all", 3)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+u8str_t rubraview_shell_selection_parse(proven_arena_t *arena, u8str_t words) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena) return empty;
+
+    /* Every word is something we know, or the whole list is refused: a
+       typo must not register less than was asked without a word. */
+    u8str_t word;
+    size_t seen = 0;
+    for (size_t at = 0; next_word(words, ',', &at, &word);) {
+        if (word.len > 0 && word.ptr[0] == '.') { word.ptr++; word.len--; }
+        bool known = word_is(word, "all", 3) || rubraview_shell_kind_of(word) != 0;
+        for (size_t g = 0; !known && g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
+            known = word_is(word, SHELL_GROUPS[g].word, strlen(SHELL_GROUPS[g].word));
+        }
+        if (!known) return empty;
+        seen++;
+    }
+    if (seen == 0) return empty;
+
+    size_t cap = 0;
+    for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) cap += strlen(SHELL_GROUPS[g].extensions) + 1;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, cap + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t len = 0;
+    for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
+        u8str_t all = { .ptr = SHELL_GROUPS[g].extensions, .len = strlen(SHELL_GROUPS[g].extensions) }, one;
+        for (size_t at = 0; next_word(all, ';', &at, &one);) {
+            if (!words_choose(words, one, SHELL_GROUPS[g].word)) continue;
+            if (len > 0) out[len++] = ';';
+            memcpy(out + len, one.ptr, one.len);
+            len += one.len;
+        }
+    }
+    out[len] = '\0';
+    return (u8str_t){ .ptr = out, .len = len };
+}
+
+u8str_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, u8str_t selection, uint32_t kinds) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || selection.len == 0) return empty;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, selection.len + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t len = 0;
+    u8str_t one;
+    for (size_t at = 0; next_word(selection, ';', &at, &one);) {
+        if (!(rubraview_shell_kind_of(one) & kinds)) continue;
+        if (len > 0) out[len++] = ';';
+        memcpy(out + len, one.ptr, one.len);
+        len += one.len;
+    }
+    out[len] = '\0';
+    return (u8str_t){ .ptr = out, .len = len };
 }

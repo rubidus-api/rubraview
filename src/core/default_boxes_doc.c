@@ -224,6 +224,7 @@ static const char *const PARTS[] = {
 "  item rename_file          \"Rename\"\n"
 "  item delete_file          \"Delete\"\n"
 "  item reveal_in_explorer   \"Show in Explorer\"\n"
+"  item print                \"Print...\"\n"
 "  item toggle_file_list     \"File list window\"\n"
 "  item copy_to_folder       \"Copy to folder\"\n"
 "  item move_to_folder       \"Move to folder\"\n"

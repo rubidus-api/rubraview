@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.41.exe              the viewer, as built
-dist/rubraview-v0.0.41/                 the release bundle
-dist/rubraview-v0.0.41.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.42.exe              the viewer, as built
+dist/rubraview-v0.0.42/                 the release bundle
+dist/rubraview-v0.0.42.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -40,19 +40,61 @@ Launching it again while it is already open does not open a second
 window — the running one comes forward and shows the new file. Pass
 `--new-instance` when you do want a second window.
 
-To make Windows open files with Rubraview, use **Settings (`F10`) ›
-General › File types opened with Rubraview**: switch on the kinds you want
-(pictures, comics, video, music) and press **Register for this user**, or
-**Register for every user** — Windows then asks for an administrator. The
-two **Remove** rows take it back: only what Rubraview wrote goes, and a
-type that was another program's before is that program's again. Windows
-keeps the last word on a default it has been told by hand; **Open Windows'
-Default apps** is where to change that.
+### In Explorer: double click and the right-click menu
 
-The same from a command line: `rubraview.exe --register-shell` and
-`--unregister-shell`, with `--types=pictures,comics,video,music` for some
-kinds only and `--all-users` (from an administrator's prompt) for every
-user.
+**Settings (`F10`) › Explorer** decides what Windows is given. Two
+switches say what — **Open by double click (file types)** and
+**Right-click menu** — and under them every extension has a switch of its
+own, by kind: pictures, comics, video, music, and the plain archives (ZIP,
+7z, RAR, ALZ, EGG), which get the menu only and are never made
+Rubraview's to open by double click.
+
+**Register for this user** makes Windows match the switches: what is on is
+written, and what Rubraview wrote earlier on an extension now switched off
+is taken back. **Register for every user** does the same for the whole
+computer — Windows asks for an administrator first. The two **Remove**
+rows take everything back: only what Rubraview wrote goes, and a type that
+was another program's before is that program's again. Windows keeps the
+last word on a default it has been told by hand; **Open Windows' Default
+apps** is where to change that.
+
+The menu is a **Rubraview** item with these under it:
+
+| Item | On | With several files selected |
+|---|---|---|
+| Open | pictures, video, music, comics, archives | the first is opened; its folder is the list, as with a double click |
+| Open these only | pictures, video, music | the selected files are the list, nothing else from the folder |
+| Add to the list | pictures, video, music | all are added to what the open window is showing; it stays on its page |
+| Browse the archive | comics, archives | offered for one file: the archive's entries in the picker |
+| Convert... | pictures | the batch panel, to run on the selected files |
+| Print... | pictures | the system's print dialog; each picture on a sheet of its own |
+
+On Windows 11 the menu registered for this user is under **Show more
+options**. Windows 11's own menu takes items only from a registered
+package, which needs an administrator once: **Register for every user**
+does it, when `rubraview_menu.dll` and `rubraview_menu.msix` are beside
+`rubraview.exe` (they are in the zip; the single-file download has the
+classic menu only). After moving the program's folder, register again.
+
+"Add to the list" keeps the list's order setting (Settings › Files › Sort
+by), so an added file takes its place among the others. Added to a folder
+being read, the folder's files and the new ones become one list; a book
+has no files to add to, so the files are opened as a list of their own. A
+film that was playing goes on from where it was.
+
+**Print** (`Ctrl+P`, or File › Print...) prints the picture on screen the
+same way: the system's dialog, the picture as large as fits the sheet with
+its proportions, turned a quarter when it then fills more of it. A page
+inside an archive is not printed yet.
+
+From a command line: `rubraview.exe --register-shell` and
+`--unregister-shell`; `--types=jpg,png,comics,...` (extensions, the kind
+words `pictures`, `comics`, `video`, `music`, `archives`, or `all`) for
+some only, `--no-types` or `--no-menu` to leave one of the two as it is
+(`--remove-types`, `--remove-menu` to take one back), and
+`--all-users` (from an administrator's prompt) for every user. The menu's
+items are `--open`, `--open-only`, `--add`, `--browse`, `--convert` and
+`--print`, each followed by the files.
 
 ## Reading
 
@@ -510,6 +552,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
+| `Ctrl+P` | Print the picture on screen: the system's dialog, fitted to the sheet |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |

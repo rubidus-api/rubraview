@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.41** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.41/rubraview-v0.0.41.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.42** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.42/rubraview-v0.0.42.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -58,6 +58,7 @@
 | `Ctrl+Z` | 이동·복사·이름 바꾸기 되돌리기 |
 | `F2` | 이름 바꾸기 |
 | `Ctrl+Enter` | 이 파일을 선택한 탐색기 창 열기(압축 파일 안이면 압축 파일) |
+| `Ctrl+P` | 화면의 그림 인쇄: 시스템 인쇄 창, 용지에 맞춤 |
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
@@ -225,13 +226,21 @@
 **single**(한 장), **dual**(두 장 나란히), **book**(표지만 한 장, 그다음부터 두 장), **webtoon**(모든 쪽을 같은 폭으로 세로로 이어
 하나의 긴 스트립으로)과 **comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서).
 
+## 탐색기 우클릭 메뉴
+
+Settings > Explorer에서 켠 확장자에 **Rubraview** 항목을 등록합니다. 열기, 이것만 열기, 재생목록에 넣기, 압축 파일 내부 보기,
+변환..., 인쇄...가 있고, 파일 하나에도 여러 개를 함께 선택한 경우에도 동작합니다. "이 사용자"로 등록하면 옛 메뉴(Windows 11에서는
+"추가 옵션 표시")에 들어가고, "모든 사용자"(관리자 권한 한 번)로 등록하면 zip에 든 `rubraview_menu.dll`과 `rubraview_menu.msix`로
+Windows 11 새 메뉴에도 들어갑니다. 일반 압축 파일(ZIP, 7z, RAR, ALZ, EGG)은 메뉴만 받고, 더블 클릭 연결은 바뀌지 않습니다.
+
 ## 명령줄
 
 | 실행 | 용도 |
 |---|---|
 | `rubraview.exe 파일` (폴더나 압축 파일도) | 열기. 이미 창이 떠 있으면 그 창에 넘김 |
 | `--new-instance` | 그래도 창을 하나 더 |
-| `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하거나 되돌림. `--types=pictures,comics,video,music`으로 종류만 골라서, 관리자 프롬프트에서 `--all-users`로 모든 사용자용으로. Settings > General에도 같은 기능이 있음 |
+| `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하고 탐색기 우클릭 메뉴에 Rubraview를 넣거나, 되돌림. `--types=jpg,png,comics,...`(확장자, 또는 `pictures`, `comics`, `video`, `music`, `archives`, `all`)로 일부만, `--no-types` / `--no-menu`로 둘 중 하나는 그대로 두고, 관리자 프롬프트에서 `--all-users`로 모든 사용자용(Windows 11 새 메뉴 포함). Settings > Explorer에도 같은 기능이 있음 |
+| `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `파일들...` | 우클릭 메뉴 항목이 실행하는 것: 열기, 이것만 열기, 열린 창의 목록에 넣기, 압축 파일 내부 보기, 이 파일들로 배치 패널, 인쇄 |
 | `--batch ...` | 창 없이 여러 파일 변환. 옵션은 [설명서](docs/manual/rubraview-manual.md)에 |
 | `--version` | 버전 |
 

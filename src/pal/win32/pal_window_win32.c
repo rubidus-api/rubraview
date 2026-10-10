@@ -10,6 +10,7 @@
 #include <imm.h>
 #include <dwmapi.h>
 #include <string.h>
+#include <stdlib.h>
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/path.h"
 
@@ -27,6 +28,15 @@
 
 typedef BOOL (WINAPI *set_process_dpi_awareness_context_fn)(HANDLE);
 typedef UINT (WINAPI *get_dpi_for_window_fn)(HWND);
+
+/* D-86: requests handed over by other launches, in the order they came.
+   One list for the process, whichever of its windows the message found;
+   the main thread writes and reads it. */
+#define IPC_REQUEST 2u
+#define IPC_REQUEST_MAX 1024
+static char  *g_requests[IPC_REQUEST_MAX];
+static size_t g_request_sizes[IPC_REQUEST_MAX];
+static size_t g_request_count;
 
 struct rubraview_window {
     HWND hwnd;
@@ -218,6 +228,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             /* §3.19.1: the second instance sent us its file and exited. */
             COPYDATASTRUCT *data = (COPYDATASTRUCT*)lparam;
             if (!data || !data->lpData || data->cbData == 0) return TRUE;
+
+            if (data->dwData == IPC_REQUEST) {
+                /* D-86: a verb and its files, kept until the viewer asks. */
+                char *copy = g_request_count < IPC_REQUEST_MAX ? (char*)malloc(data->cbData) : NULL;
+                if (copy) {
+                    memcpy(copy, data->lpData, data->cbData);
+                    g_requests[g_request_count] = copy;
+                    g_request_sizes[g_request_count++] = data->cbData;
+                }
+                return TRUE;
+            }
 
             size_t length = data->cbData;
             if (length >= sizeof(w->drop_storage[0])) length = sizeof(w->drop_storage[0]) - 1;
@@ -1220,6 +1241,37 @@ bool rubraview_pal_instance_hand_over(u8str_t path) {
     return true;
 }
 
+bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t wait_ms) {
+    if (!blob || len == 0 || len > 0x7FFFFFFFu) return false;
+    HWND target = NULL;
+    for (uint32_t waited = 0;; waited += 100) {
+        target = FindWindowW(RUBRAVIEW_WINDOW_CLASS, NULL);
+        if (target || waited >= wait_ms) break;
+        Sleep(100);   /* the first of several launches is still making its window */
+    }
+    if (!target) return false;
+
+    COPYDATASTRUCT data = { .dwData = IPC_REQUEST, .cbData = (DWORD)len, .lpData = (void*)blob };
+    DWORD_PTR answer = 0;
+    if (!SendMessageTimeoutW(target, WM_COPYDATA, 0, (LPARAM)&data, SMTO_ABORTIFHUNG, 15000, &answer)) return false;
+
+    HWND front = GetAncestor(target, GA_ROOTOWNER);
+    if (!front) front = target;
+    if (IsIconic(front)) ShowWindow(front, SW_RESTORE);
+    SetForegroundWindow(target);
+    return true;
+}
+
+bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len) {
+    if (!out_blob || !out_len || g_request_count == 0) return false;
+    *out_blob = g_requests[0];
+    *out_len = g_request_sizes[0];
+    g_request_count--;
+    memmove(g_requests, g_requests + 1, g_request_count * sizeof(g_requests[0]));
+    memmove(g_request_sizes, g_request_sizes + 1, g_request_count * sizeof(g_request_sizes[0]));
+    return true;
+}
+
 void rubraview_pal_window_text_input(rubraview_window_t *window, bool on) {
     if (!window || !window->hwnd || window->text_input == on) return;
     if (on) {
@@ -1469,8 +1521,8 @@ bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list) {
 bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
     WCHAR exe[MAX_PATH * 2];
     if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
-    WCHAR args[512];
-    int n = MultiByteToWideChar(CP_UTF8, 0, arguments.ptr, (int)arguments.len, args, 511);
+    WCHAR args[1024];
+    int n = MultiByteToWideChar(CP_UTF8, 0, arguments.ptr, (int)arguments.len, args, 1023);
     if (n <= 0) return false;
     args[n] = 0;
     SHELLEXECUTEINFOW info = { .cbSize = sizeof(info) };
@@ -1480,7 +1532,8 @@ bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
     info.lpParameters = args;
     info.nShow = SW_HIDE;
     if (!ShellExecuteExW(&info) || !info.hProcess) return false;   /* refused at the prompt */
-    WaitForSingleObject(info.hProcess, 30000);
+    /* Registering the menu's package can take a while. */
+    WaitForSingleObject(info.hProcess, 240000);
     DWORD code = 1;
     GetExitCodeProcess(info.hProcess, &code);
     CloseHandle(info.hProcess);

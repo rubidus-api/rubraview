@@ -407,6 +407,7 @@ the keymap does not do is listed after it.
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `F2` | Rename, keeping the extension |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
+| `Ctrl+P` | Print the picture on screen: the system's dialog, fitted to the sheet |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |

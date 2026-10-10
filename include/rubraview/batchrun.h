@@ -4,6 +4,7 @@
 #include "rubraview/core.h"
 #include "rubraview/batch.h"
 #include "rubraview/export.h"
+#include "rubraview/shellreq.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,7 +47,17 @@ typedef struct rubraview_cli_result {
     bool                register_shell;    /* §3.19.3 --register-shell */
     bool                unregister_shell;  /* §3.19.3 --unregister-shell */
     bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
-    uint32_t            shell_groups;      /* --types=pictures,comics,video,music; all when not given */
+    u8str_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */
+    bool                shell_no_types;    /* --no-types: leave the file types (double click) alone */
+    bool                shell_no_menu;     /* --no-menu: leave the right-click menu alone */
+    bool                shell_remove_types; /* --remove-types: take the file types back while registering the rest */
+    bool                shell_remove_menu;  /* --remove-menu: take the menu back while registering the rest */
+    rubraview_shell_verb_t shell_verb;     /* D-86: --open, --open-only, --add, --browse, --convert, --print */
+    bool                shell_whole;       /* --whole: every selected file is on this command line */
+    u8str_t             paths_from;        /* --paths-from=FILE: more inputs, one a line */
+    bool                paths_temp;        /* --paths-temp: that file was written for this launch; remove it once read */
+    const u8str_t      *inputs;            /* every input path, in order (`input` is the last) */
+    size_t              input_count;
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
     bool                diagnostics;       /* --diag: report what the graphics device is and stop */
     bool                show_version;      /* --version: print the version and stop */

@@ -27,6 +27,7 @@ SOURCES = [
     "vendor/fultaarc/vendor/zstd/LICENSE",
     "vendor/libjpeg-turbo/LICENSE.md",
     "vendor/libjpeg-turbo/README.ijg",
+    "vendor/rubrapack/LICENSE",
 ]
 
 

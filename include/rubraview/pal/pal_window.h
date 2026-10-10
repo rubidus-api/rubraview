@@ -166,6 +166,48 @@ bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool 
  *  not run — the question was refused. */
 bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code);
 
+/* ---- D-86: Explorer's right-click menu ---- */
+
+typedef enum rubraview_shell_menu_result {
+    RUBRAVIEW_SHELL_MENU_FAILED = 0,
+    RUBRAVIEW_SHELL_MENU_CLASSIC,           /* the classic menu ("Show more options") */
+    RUBRAVIEW_SHELL_MENU_BOTH,              /* and the Windows 11 menu */
+    RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS,  /* classic; rubraview_menu.dll / .msix are not beside the program */
+    RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED,   /* classic; Windows did not take the package */
+} rubraview_shell_menu_result_t;
+
+/**
+ * Put Rubraview's items on the extensions of `selection` (`;` between)
+ * and take them off every other extension it knows. For this user only
+ * the classic menu is written; for every user (an administrator's
+ * process) the Windows 11 menu is registered as well, when its two files
+ * are beside the program.
+ */
+rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selection, bool all_users);
+
+/** Take every item of ours away, and for every user the package too. */
+bool rubraview_pal_shell_menu_unregister(bool all_users);
+
+/** Are the Windows 11 menu's two files beside the program? */
+bool rubraview_pal_shell_menu_parts_present(void);
+
+/**
+ * Hand a request (rubraview_shellreq_pack) to the running window and
+ * bring it forward. The window may still be starting: it is looked for
+ * up to `wait_ms`. False when there is none, or it did not answer.
+ */
+bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t wait_ms);
+
+/** The next request that arrived, to be freed with free(); false when there is none. */
+bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len);
+
+/**
+ * The system's print dialog, then each picture on a sheet of its own,
+ * fitted (rubraview_print_fit). False when the reader cancelled or the
+ * job could not start; `out_printed` is how many pictures went out.
+ */
+bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count, size_t *out_printed);
+
 /** An Explorer window on the file's folder with the file picked out.
  *  False when there is no such file to show. */
 bool rubraview_pal_shell_reveal(u8str_t path);
