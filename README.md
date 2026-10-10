@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.44** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.44/rubraview-v0.0.44.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.45** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.45/rubraview-v0.0.45.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 

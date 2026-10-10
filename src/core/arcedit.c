@@ -399,8 +399,8 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
     }
     if (job->op == RUBRAVIEW_ARCEDIT_ADD) want[want_count++] = (expect_t){ .name = full, .size = job->size };
 
-    /* Pictures and films do not pack further: fast, not small. */
-    fulta_arc_write_options_t opts = { .level = 1, .progress = run_progress, .progress_ctx = job };
+    fulta_arc_write_options_t opts = { .level = job->level < 0 ? 0 : job->level > 9 ? 9 : job->level,
+                                       .progress = run_progress, .progress_ctx = job };
     err = fulta_arc_edit_write_file(edit, out_format, job->out_path, &opts);
     if (err != FULTA_ARC_OK) {
         job->error = err;
