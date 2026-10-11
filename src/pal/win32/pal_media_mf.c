@@ -473,7 +473,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     } else {
         /* Lets the reader convert YUV to RGB32 itself, so the caller gets
            pixels Direct2D can take as they are. */
-        IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
+        IMFAttributes_SetUINT32(attrs, &MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     }
 
     IMFSourceReader *reader = NULL;

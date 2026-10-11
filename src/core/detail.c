@@ -576,6 +576,15 @@ bool rubraview_image_is_animated(const uint8_t *b, size_t size) {
     if (memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WEBP", 4) == 0) {
         return size >= 21 && memcmp(b + 12, "VP8X", 4) == 0 && (b[20] & 0x02) != 0;
     }
+    /* RV-110: an AVIF sequence says so in its brands (`avis`). */
+    if (memcmp(b + 4, "ftyp", 4) == 0) {
+        size_t box = be32(b);
+        if (box < 16 || box > size) box = size < 4096 ? size : 4096;
+        for (size_t at = 8; at + 4 <= box; at += at == 8 ? 8 : 4) {
+            if (memcmp(b + at, "avis", 4) == 0) return true;
+        }
+        return false;
+    }
     if (memcmp(b, "GIF87a", 6) == 0 || memcmp(b, "GIF89a", 6) == 0) {
         size_t at = 13 + ((b[10] & 0x80) ? 3u * (2u << (b[10] & 7)) : 0u);
         uint32_t frames = 0;

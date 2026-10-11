@@ -29,6 +29,8 @@ SOURCES = [
     "vendor/libjpeg-turbo/README.ijg",
     "vendor/libwebp/COPYING",
     "vendor/libwebp/PATENTS",
+    "vendor/dav1d/COPYING",
+    "vendor/libavif/LICENSE",
     "vendor/rubrapack/LICENSE",
 ]
 

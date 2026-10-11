@@ -58,6 +58,8 @@ static const char *const PARTS[] = {
 "  toggle shell.ext_tif        \".tif\" = true wired\n"
 "  toggle shell.ext_tiff       \".tiff\" = true wired\n"
 "  toggle shell.ext_webp       \".webp\" = true wired\n"
+"  toggle shell.ext_avif       \".avif\" = true wired\n"
+"  toggle shell.ext_jxl        \".jxl\" = false wired\n"
 "  toggle shell.ext_ico        \".ico\" = true wired\n"
 "  section \"Comics\"\n"
 "  toggle shell.ext_cbz        \".cbz\" = true wired\n"

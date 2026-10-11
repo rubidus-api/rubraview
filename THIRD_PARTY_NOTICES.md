@@ -93,6 +93,24 @@ came from is in its `vendor/<name>/VENDORED.md`.
   reads WebP and cannot write it. The viewer still reads WebP through
   Windows.
 
+## dav1d 1.5.4
+
+- Vendored snapshot at `vendor/dav1d/` (the C code, no assembly; see
+  `vendor/dav1d/VENDORED.md`), unmodified
+- Copyright © 2018-2025, VideoLAN and dav1d authors. All rights reserved.
+- Licence: the 2-clause BSD License (`vendor/dav1d/COPYING`).
+- Used for: decoding the AV1 frames of AVIF pictures.
+
+## libavif 1.4.2
+
+- Vendored snapshot at `vendor/libavif/` (the reader; see
+  `vendor/libavif/VENDORED.md`), unmodified
+- Copyright 2019 Joe Drago. All rights reserved. The files under
+  `third_party/libyuv`: Copyright 2011 The LibYuv Project Authors.
+- Licence: the 2-clause BSD License; libyuv's files the 3-clause BSD
+  License — both in `vendor/libavif/LICENSE`.
+- Used for: reading AVIF pictures, still and animated.
+
 ## Rubrapack 0.39.0 (part)
 
 - At `vendor/rubrapack/` (see `vendor/rubrapack/VENDORED.md`), and adapted

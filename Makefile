@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/webp_write.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/webp_write.c src/core/avif_read.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # FultaArc (MIT; vendor/fultaarc, D-74) reads and writes every archive: ZIP,
 # 7z and RAR 2.0-7.0, with the decoders it vendors itself (LZMA SDK, miniz,
 # bzip2, zstd). It is built once as a static library, with its own flags and
@@ -58,6 +58,27 @@ WEBP_OBJS = $(patsubst vendor/libwebp/%.c,build/libwebp/%.o,$(WEBP_SRCS))
 WEBP_OBJS_WIN = $(patsubst vendor/libwebp/%.c,build/libwebp-win/%.o,$(WEBP_SRCS))
 WEBP_LIB = build/libwebp.a
 WEBP_LIB_WIN = build/libwebp-win.a
+# dav1d (BSD-2-Clause, R016) decodes AV1 and libavif (BSD-2-Clause, R017)
+# reads the AVIF container round it (RV-110, D-107). Both unmodified. dav1d
+# is built from its C code alone — no assembly (owner, 2026-10-12) — with
+# the flags its own meson build uses; config.h and vcs_version.h are written
+# for this build, as meson would generate them. Its *_tmpl.c files are
+# built twice, for 8-bit and for 10/12-bit pictures.
+DAV1D_INCLUDE = -Ivendor/dav1d/config -Ivendor/dav1d -Ivendor/dav1d/include -Ivendor/dav1d/include/dav1d
+DAV1D_FLAGS = -std=c99 -O2 -w -DNDEBUG -D_GNU_SOURCE -fomit-frame-pointer -ffast-math
+DAV1D_TMPL = $(wildcard vendor/dav1d/src/*_tmpl.c)
+DAV1D_PLAIN = $(filter-out $(DAV1D_TMPL),$(wildcard vendor/dav1d/src/*.c))
+DAV1D_OBJS = $(patsubst vendor/dav1d/src/%.c,build/dav1d/%.o,$(DAV1D_PLAIN)) \
+             $(patsubst vendor/dav1d/src/%.c,build/dav1d/8/%.o,$(DAV1D_TMPL)) \
+             $(patsubst vendor/dav1d/src/%.c,build/dav1d/16/%.o,$(DAV1D_TMPL))
+DAV1D_OBJS_WIN = $(patsubst build/dav1d/%,build/dav1d-win/%,$(DAV1D_OBJS)) build/dav1d-win/win32/thread.o
+AVIF_INCLUDE = -Ivendor/libavif/include
+AVIF_FLAGS = -std=gnu11 -O2 -w -DAVIF_CODEC_DAV1D=1 $(AVIF_INCLUDE) -Ivendor/libavif/third_party/libyuv/include -Ivendor/dav1d/include
+AVIF_SRCS = $(wildcard vendor/libavif/src/*.c vendor/libavif/third_party/libyuv/source/*.c)
+AVIF_OBJS = $(patsubst vendor/libavif/%.c,build/libavif/%.o,$(AVIF_SRCS))
+AVIF_OBJS_WIN = $(patsubst vendor/libavif/%.c,build/libavif-win/%.o,$(AVIF_SRCS))
+AVIF_LIB = build/libavif.a
+AVIF_LIB_WIN = build/libavif-win.a
 FFMPEG_INCLUDE = -Ivendor/ffmpeg/include
 # Five of the .c files upstream are not translation units at all: they
 # are colour-conversion bodies #included several times with different
@@ -133,7 +154,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archives build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_avif_read build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
 .PHONY: all test check clean win64 package mfprobe
 
@@ -179,9 +200,31 @@ $(WEBP_LIB): $(WEBP_OBJS)
 	@rm -f $@
 	$(AR) rcs $@ $^
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS) $(FULTA_LIB) $(PROVEN_LIB) $(WEBP_LIB)
+HOST_VENDOR_FLAGS = -g -fsanitize=address,undefined
+
+build/dav1d/8/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/host $(DAV1D_INCLUDE) -DBITDEPTH=8 $(HOST_VENDOR_FLAGS) -c $< -o $@
+
+build/dav1d/16/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/host $(DAV1D_INCLUDE) -DBITDEPTH=16 $(HOST_VENDOR_FLAGS) -c $< -o $@
+
+build/dav1d/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/host $(DAV1D_INCLUDE) $(HOST_VENDOR_FLAGS) -c $< -o $@
+
+build/libavif/%.o: vendor/libavif/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(AVIF_FLAGS) $(HOST_VENDOR_FLAGS) -c $< -o $@
+
+$(AVIF_LIB): $(AVIF_OBJS) $(DAV1D_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS) $(FULTA_LIB) $(PROVEN_LIB) $(WEBP_LIB) $(AVIF_LIB)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(JPEG_INCLUDE) $(WEBP_INCLUDE) $(FULTA_MINIZ_DEF) -I$(FULTA)/vendor/miniz $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(JPEG_INCLUDE) $(WEBP_INCLUDE) $(AVIF_INCLUDE) $(FULTA_MINIZ_DEF) -I$(FULTA)/vendor/miniz $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -243,6 +286,26 @@ $(WEBP_LIB_WIN): $(WEBP_OBJS_WIN)
 	@rm -f $@
 	$(MINGW_AR) rcs $@ $^
 
+build/dav1d-win/8/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/win $(DAV1D_INCLUDE) -DBITDEPTH=8 -c $< -o $@
+
+build/dav1d-win/16/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/win $(DAV1D_INCLUDE) -DBITDEPTH=16 -c $< -o $@
+
+build/dav1d-win/%.o: vendor/dav1d/src/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) $(DAV1D_FLAGS) -Ivendor/dav1d/config/win $(DAV1D_INCLUDE) -c $< -o $@
+
+build/libavif-win/%.o: vendor/libavif/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) $(AVIF_FLAGS) -c $< -o $@
+
+$(AVIF_LIB_WIN): $(AVIF_OBJS_WIN) $(DAV1D_OBJS_WIN)
+	@rm -f $@
+	$(MINGW_AR) rcs $@ $^
+
 # The icon and the version Explorer shows (owner, 2026-09-29).
 MINGW_WINDRES ?= x86_64-w64-mingw32-windres
 RES_WIN = build/rubraview-res.o
@@ -259,14 +322,14 @@ $(MENU_DLL): src/menu/rubraview_menu.c src/menu/rubraview_menu.def
 		src/menu/rubraview_menu.c src/menu/rubraview_menu.def \
 		-lole32 -lshlwapi -ladvapi32 -luser32 -luuid -o $@
 
-win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
+win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
-		$(JPEG_INCLUDE) $(WEBP_INCLUDE) \
+		$(JPEG_INCLUDE) $(WEBP_INCLUDE) $(AVIF_INCLUDE) \
 		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
-		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) -lbcrypt \
+		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) -lbcrypt \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lruntimeobject \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"

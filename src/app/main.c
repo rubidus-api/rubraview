@@ -114,7 +114,7 @@
 #include "rubraview/playback.h"
 
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
-#define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico"
+#define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico;*.avif;*.jxl"
 /* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
 #define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
 #define AUDIO_FILTER "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
@@ -214,6 +214,7 @@ typedef struct app_page {
     bool reduced;                      /* too large for the device: held smaller (the fall-back) */
     bool loaded;
     bool failed;
+    bool failure_said;                 /* RV-110: why it is empty was said once */
     bool animated;                     /* D-98: a picture that moves, found when it was read */
     bool skipped;                      /* D-98: left out of the layout now (rebuild_layout) */
 } app_page_t;
@@ -1107,7 +1108,8 @@ static bool page_moves(app_state_t *app, size_t index, const rubraview_page_byte
     u8str_t path = app->source.pages[index].path;
     u8str_t name = path.len > 0 ? path : app->source.pages[index].name;
     if (!rubraview_path_has_ext(name, ".gif") && !rubraview_path_has_ext(name, ".webp") &&
-        !rubraview_path_has_ext(name, ".png") && !rubraview_path_has_ext(name, ".apng")) return false;
+        !rubraview_path_has_ext(name, ".png") && !rubraview_path_has_ext(name, ".apng") &&
+        !rubraview_path_has_ext(name, ".avif")) return false;
     if (path.len > 0) {
         rubraview_fs_mapping_t map = {0};
         bool moves = rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX &&
@@ -1961,6 +1963,7 @@ static app_page_t *media_page_ready(app_state_t *app) {
         page->height = h;
         page->loaded = true;
         page->failed = false;
+        page->failure_said = false;
         /* A sound-only page's picture is already on it; a video's first
            frame is still to come. */
         app->media_has_frame = !app->media_info.has_video;
@@ -10143,6 +10146,25 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
     }
 }
 
+/* RV-110: the page on screen could not be read: it says so, once, rather
+   than staying empty without a word. JPEG XL is read by a WIC codec, when
+   one is installed. A film says its own (media_prepare). */
+static void page_failure_notice(app_state_t *app) {
+    int32_t index = current_page_index(app);
+    if (index < 0 || (size_t)index >= page_count(app) || !app->pages) return;
+    app_page_t *page = &app->pages[index];
+    if (!page->failed || page->failure_said) return;
+    page->failure_said = true;
+    u8str_t name = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
+    if (is_media_path(name)) return;
+    if (rubraview_path_has_ext(name, ".jxl")) {
+        osd_say(app, U8("JPEG XL: this Windows has no decoder for it installed"));
+    } else {
+        osd_say(app, U8("this picture could not be read"));
+    }
+    app->notice_seconds = MEDIA_NOTICE_SECONDS;
+}
+
 /* D-105: every viewer open has the same settings. A change made here —
    in the settings window, by a key, by the wheel on the volume — is in
    settings.ini a moment after the last of a run of changes, and the
@@ -10430,6 +10452,8 @@ static size_t shell_chosen_words(app_state_t *app, char *out, size_t cap) {
         { "tif",  rubraview_settings_get(st, U8("shell"), U8("ext_tif")) > 0.5 },
         { "tiff", rubraview_settings_get(st, U8("shell"), U8("ext_tiff")) > 0.5 },
         { "webp", rubraview_settings_get(st, U8("shell"), U8("ext_webp")) > 0.5 },
+        { "avif", rubraview_settings_get(st, U8("shell"), U8("ext_avif")) > 0.5 },
+        { "jxl",  rubraview_settings_get(st, U8("shell"), U8("ext_jxl")) > 0.5 },
         { "ico",  rubraview_settings_get(st, U8("shell"), U8("ext_ico")) > 0.5 },
         { "cbz",  rubraview_settings_get(st, U8("shell"), U8("ext_cbz")) > 0.5 },
         { "cb7",  rubraview_settings_get(st, U8("shell"), U8("ext_cb7")) > 0.5 },
@@ -16217,6 +16241,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 
+        page_failure_notice(&app);   /* RV-110 */
         int config_changed = rubraview_pal_instance_take_config_changed();   /* D-105 */
         if (config_changed) settings_follow(&app, config_changed);
         settings_share(&app, rubraview_pal_time_now_seconds());

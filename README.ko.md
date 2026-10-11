@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.55** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.56** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.56/rubraview-v0.0.56.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.56/rubraview-v0.0.56.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -14,6 +14,7 @@
 
 - **GPU 로 그리는 화면**: Direct2D(D2D1)와 Direct3D 11 로 60~144 FPS 의 부드러운 이동과 소수점 단위 확대.
 - **딸린 것 없는 이미지 해독**: JPEG, PNG, GIF, WebP, TIFF, BMP, ICO 를 윈도우의 WIC 로 그대로 엽니다.
+- **코덱 설치 없이 AVIF 읽기**: 내장 디코더(libavif + dav1d)가 AVIF 정지 그림과 움직이는 그림을 투명도까지 읽습니다. JPEG XL 은 Windows 에 그 코덱이 설치돼 있을 때 열립니다.
 - **코덱 설치 없이 WebP 쓰기**: 내보내기와 `--batch --format=webp` 가 내장 libwebp 로 손실·무손실 WebP 를 씁니다. 움직이는 GIF·PNG·WebP 는 움직이는 WebP 가 됩니다.
 - **동영상 재생**: 분리된 PAL 을 통한 FFmpeg(`libavcodec`/`libavformat`) 연결로 재생, 한 프레임씩 이동, 정지 화면 저장.
 - **보정과 후처리**: 노출·대비·채도·감마·언샤프 마스크·가우시안 흐림을 실시간으로, 리샘플링은 Nearest·Bilinear·Bicubic·Lanczos-3.
