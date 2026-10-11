@@ -132,6 +132,13 @@
 #define PIXEL_GRID_MIN_SCALE 4.0 /* §3.5: the grid appears from 400% zoom */
 /* Settings › Viewer › Zoom step (owner, 2026-09-30): 10 % a step unless set. */
 static double g_zoom_step = 1.1;
+/* RV-106 (RFC-0004 §1). */
+static bool g_whole_zoom = false;          /* Settings > Viewer > Enlarge by whole steps only */
+static int  g_cli_sort = -1;               /* --sort= for this run; -1: the setting */
+static int  g_cli_descending = -1;         /* --descending / --ascending; -1: the setting */
+static bool g_cli_subfolders = false;      /* --recursive, without --batch */
+static rubraview_transition_pose_t g_pose = { 0.0, 1.0, 1.0 };   /* where draw_spread puts what it draws */
+static bool g_pose_on = false;
 #define ZOOM_STEP g_zoom_step
 #define PAN_STEP 60.0
 /* Settings › Viewer › Gutter: the gap between two pages, in pixels. */
@@ -831,6 +838,10 @@ static void tiles_reset(app_state_t *app);
    the drawing they belong with; the key handler above needs to name
    them. */
 static bool open_folder(app_state_t *app, u8str_t dir);
+static void folder_relist(app_state_t *app);
+static bool path_is_listed_kind(u8str_t path);
+static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said,
+                             bool as_given, u8str_t start);
 static void source_close(app_state_t *app);
 static void triage_delete(app_state_t *app, bool permanent);
 static void triage_undo(app_state_t *app);
@@ -2824,6 +2835,13 @@ static void go_to_spread(app_state_t *app, size_t index) {
            something to fade *from* (§3.2.5). */
         app->prev_spread_index = app->spread_index;
         app->prev_spread_valid = true;
+        /* Settings > Viewer > Turning a page; a slide show quicker than half a second cuts (§3.2.5). */
+        static const rubraview_transition_kind_t KINDS[] = { RUBRAVIEW_TRANSITION_CUT, RUBRAVIEW_TRANSITION_CROSSFADE,
+                                                             RUBRAVIEW_TRANSITION_SLIDE_LEFT, RUBRAVIEW_TRANSITION_ZOOM_FADE };
+        int turn = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition")));
+        app->transition.kind = rubraview_transition_for_interval(
+            KINDS[turn >= 0 && turn < 4 ? turn : 1],
+            app->slideshow_running ? app->slideshow.interval_seconds : 1.0, 0.5);
         rubraview_transition_start(&app->transition);
     }
     app->spread_index = index;
@@ -3430,7 +3448,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
                                    : places ? rubraview_pal_fs_list_places(pa)
                                             : rubraview_pal_fs_list_dir(pa, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
-    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue"));
+    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;*.m3u8;*.m3u;*.rvlist"));
     /* A RAR set is one book (owner, 2026-10-01): its first volume stands for it. */
     if (!in_book) {
         size_t kept = 0;
@@ -7521,6 +7539,25 @@ static void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
 /* Draws one spread at a given opacity. Splitting this out is what makes
    §3.2.5's cross-fade possible: the outgoing spread is drawn first at a
    falling opacity and the incoming one over it at a rising one. */
+/* One spread placed in the window, as every caller wants it placed.
+   RV-106: with "Enlarge by whole steps only" a picture shown larger than
+   it is takes a whole number of screen pixels a pixel (2x, 3x, ...) — the
+   next one down from what the fit and the zoom ask — so no row or column
+   of a small drawing comes out wider than its neighbour. A film is left
+   as it is. */
+static rubraview_composition_t compose_view(app_state_t *app, const rubraview_spread_t *spread,
+                                            const rubraview_page_size_t *left, const rubraview_page_size_t *right,
+                                            double win_w, double win_h) {
+    rubraview_composition_t comp = rubraview_compose_spread(spread, left, right, win_w, win_h,
+                                                            app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
+    if (!g_whole_zoom || comp.count == 0 || app->media) return comp;
+    double scale = comp.commands[0].scale;
+    double whole = floor(scale + 1e-6);
+    if (scale <= 1.0 || whole < 1.0 || scale - whole < 1e-6) return comp;
+    return rubraview_compose_spread(spread, left, right, win_w, win_h,
+                                    app->fit_mode, GUTTER, app->zoom * whole / scale, app->pan_x, app->pan_y);
+}
+
 static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                         int32_t win_w, int32_t win_h) {
     if (spread_index >= app->layout.count) return;
@@ -7540,12 +7577,22 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                                              &right_size.width, &right_size.height);
         }
 
-        rubraview_composition_t comp = rubraview_compose_spread(
-            spread,
+        rubraview_composition_t comp = compose_view(
+            app, spread,
             (left && left->loaded) ? &left_size : NULL,
             (right && right->loaded) ? &right_size : NULL,
-            (double)win_w, (double)win_h,
-            app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
+            (double)win_w, (double)win_h);
+        /* RV-106: a slide or a zoom moves the whole spread about the window's middle. */
+        rubraview_mat3x2_t pose = rubraview_mat3x2_identity();
+        if (g_pose_on) {
+            pose = rubraview_mat3x2_multiply(
+                rubraview_mat3x2_multiply(rubraview_mat3x2_translate(-win_w * 0.5, -win_h * 0.5),
+                                          rubraview_mat3x2_scale(g_pose.scale, g_pose.scale)),
+                rubraview_mat3x2_translate(win_w * 0.5 + g_pose.dx, win_h * 0.5));
+            for (size_t i = 0; i < comp.count; ++i) {
+                comp.commands[i].transform = rubraview_mat3x2_multiply(comp.commands[i].transform, pose);
+            }
+        }
 
         rubraview_interpolation_t interp = page_interpolation(app);
 
@@ -7573,7 +7620,7 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                     app->video_page_h = page->height;
                 }
                 rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
-                if (opacity >= 1.0) {
+                if (opacity >= 1.0 && !g_pose_on) {
                     /* D-40, D-81: zoomed past the texture, the sharper tiles on top. */
                     draw_page_tiles(app, (int)i, cmd->page_index, page,
                                     rubraview_mat3x2_multiply(
@@ -8090,7 +8137,9 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
 /* Settings > Files > Sort by and Ascending: the order a folder's pages
    are turned in (owner, 2026-09-28). An archive keeps its natural order. */
 static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending) {
-    *out_ascending = rubraview_settings_get(&app->settings, U8("files"), U8("sort_ascending")) > 0.5;
+    *out_ascending = g_cli_descending >= 0 ? g_cli_descending == 0
+                   : rubraview_settings_get(&app->settings, U8("files"), U8("sort_ascending")) > 0.5;
+    if (g_cli_sort >= 0) return (rubraview_sort_mode_t)g_cli_sort;
     return rubraview_sort_mode_for_setting(
         (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("sort_mode"))));
 }
@@ -9900,10 +9949,24 @@ static void settings_apply_rest(app_state_t *app) {
     }
     g_gutter = rubraview_settings_get(st, U8("viewer"), U8("gutter_px")) * dpi;
     g_zoom_step = 1.0 + rubraview_settings_get(st, U8("viewer"), U8("zoom_step_percent")) / 100.0;
+    g_whole_zoom = rubraview_settings_get(st, U8("viewer"), U8("whole_zoom")) > 0.5;
     double grid = rubraview_settings_get(st, U8("viewer"), U8("pixel_grid"));
     if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
 
     /* Files */
+    {
+        /* RV-106: what a folder lists, changed while one is open: it is listed again, on the same file. */
+        static uint64_t last_listing = 0;
+        u8str_t pattern = rubraview_settings_get_text(st, U8("files"), U8("pattern"));
+        uint64_t listing = 1469598103934665603ull;
+        for (size_t i = 0; i < pattern.len; ++i) listing = (listing ^ (uint8_t)pattern.ptr[i]) * 1099511628211ull;
+        static const char *const KEYS[] = { "sort_mode", "sort_ascending", "subfolders", "show" };
+        for (size_t i = 0; i < 4; ++i) {
+            listing = (listing ^ (uint64_t)lround(rubraview_settings_get(st, U8("files"), cstr(KEYS[i])) + 1.0)) * 1099511628211ull;
+        }
+        if (listing != last_listing && !first) folder_relist(app);
+        last_listing = listing;
+    }
     int cp = (int)lround(rubraview_settings_get(st, U8("files"), U8("archive_codepage")));
     app->archive_codepage = cp >= 0 && cp <= (int)RUBRAVIEW_CODEPAGE_WESTERN ? (rubraview_codepage_t)cp : RUBRAVIEW_CODEPAGE_AUTO;
 
@@ -10209,7 +10272,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             const rubraview_setting_def_t *def = &app->settings_view.doc->defs[node->setting];
             if (event == RUBRAVIEW_SEVENT_CLEAR_TEXT) {
                 rubraview_settings_set_text(&app->settings, def->section, def->key, U8(""));
-                settings_say(app, "folder cleared");
+                settings_say(app, "cleared");
                 break;
             }
             settings_path_begin(app, def);   /* typed, pasted, copied, or browsed with Ctrl+O */
@@ -10318,13 +10381,21 @@ static void settings_path_commit(app_state_t *app) {
     /* Explorer's "Copy as path" puts quotes round it; spaces at the ends are no part of a folder. */
     while (text.len > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.len--; }
     while (text.len > 0 && (text.ptr[text.len - 1] == ' ' || text.ptr[text.len - 1] == '"')) text.len--;
+    /* RV-106: "Only names like" is typed like a folder and is not one. */
+    bool is_folder = !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern"));
     if (text.len == 0) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
         settings_path_end(app);
-        settings_say(app, "folder cleared");
+        settings_say(app, is_folder ? "folder cleared" : "cleared: every name is listed");
         return;
     }
     rubraview_fs_entry_t found;
+    if (!is_folder) {
+        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
+        settings_path_end(app);
+        settings_say(app, "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*");
+        return;
+    }
     if (!rubraview_pal_fs_stat(app->arena, text, &found) || !found.is_directory) {
         settings_say(app, "no such folder - put it right, or Esc");
         return;
@@ -12122,9 +12193,9 @@ static bool spread_composition(app_state_t *app, rubraview_composition_t *out) {
         rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
                                          &right_size.width, &right_size.height);
     }
-    *out = rubraview_compose_spread(
-        spread, (left && left->loaded) ? &left_size : NULL, (right && right->loaded) ? &right_size : NULL,
-        (double)win_w, (double)win_h, app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
+    *out = compose_view(
+        app, spread, (left && left->loaded) ? &left_size : NULL, (right && right->loaded) ? &right_size : NULL,
+        (double)win_w, (double)win_h);
     return true;
 }
 
@@ -12562,8 +12633,15 @@ static void render_frame(app_state_t *app) {
                              total > 0 ? (int)(done * 100u / total) : 0);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         } else if (fading) {
-            draw_spread(app, app->prev_spread_index, 1.0 - progress, win_w, win_h);
-            draw_spread(app, app->spread_index, progress, win_w, win_h);
+            rubraview_transition_pose_t leaving, arriving;
+            rubraview_transition_poses(app->transition.kind, progress, (double)win_w,
+                                       app->spread_index > app->prev_spread_index, &leaving, &arriving);
+            g_pose_on = true;
+            g_pose = leaving;
+            if (leaving.opacity > 0.0) draw_spread(app, app->prev_spread_index, leaving.opacity, win_w, win_h);
+            g_pose = arriving;
+            draw_spread(app, app->spread_index, arriving.opacity, win_w, win_h);
+            g_pose_on = false;
         } else if (strip_active(app)) {
             draw_strip(app, win_w, win_h);
         } else {
@@ -13187,21 +13265,158 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
     return app->source.page_count > 0;
 }
 
-static bool open_folder(app_state_t *app, u8str_t dir) {
+/* ---- RV-106: what a folder lists ---- */
+
+#define SUBFOLDER_DEPTH 8
+#define SUBFOLDER_FILES 200000
+
+typedef struct folder_files {
+    rubraview_fs_entry_t *entries;
+    size_t count, cap;
+} folder_files_t;
+
+/* Settings > Files > Show and Only names like: the kinds listed, and the names among them. */
+static bool folder_lists(const app_state_t *app, u8str_t name, bool filtered) {
+    static const char *const KINDS[] = { IMAGE_FILTER ";" MEDIA_FILTER, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER };
+    name = rubraview_path_basename(name);
+    if (!filtered) return rubraview_glob_match_list(name, cstr(KINDS[0]));
+    int show = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("show")));
+    if (!rubraview_glob_match_list(name, cstr(KINDS[show >= 0 && show < 4 ? show : 0]))) return false;
+    u8str_t pattern = rubraview_settings_get_text(&app->settings, U8("files"), U8("pattern"));
+    return pattern.len == 0 || rubraview_glob_match_list(name, pattern);
+}
+
+/* The files of `dir` (and, with subfolders, of the folders under it), each
+   named by its path from `root` so that a sort by name goes folder by folder. */
+static void folder_gather(app_state_t *app, u8str_t root, u8str_t dir, int depth, bool deep, folder_files_t *out) {
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
+    for (size_t i = 0; i < listing.count && out->count < SUBFOLDER_FILES; ++i) {
+        rubraview_fs_entry_t e = listing.entries[i];
+        if (e.is_directory) {
+            if (deep && depth < SUBFOLDER_DEPTH) folder_gather(app, root, e.path, depth + 1, true, out);
+            continue;
+        }
+        if (out->count == out->cap) {
+            size_t cap = out->cap ? out->cap * 2 : 256;
+            rubraview_fs_entry_t *grown = (rubraview_fs_entry_t*)realloc(out->entries, cap * sizeof(*grown));
+            if (!grown) return;
+            out->entries = grown;
+            out->cap = cap;
+        }
+        if (depth > 0 && e.path.len > root.len + 1) {
+            size_t skip = root.len;
+            if (e.path.ptr[skip] == '/' || e.path.ptr[skip] == '\\') skip++;
+            e.name = (u8str_t){ .ptr = e.path.ptr + skip, .len = e.path.len - skip };
+        }
+        out->entries[out->count++] = e;
+    }
+}
+
+/* Another order each time: the fixed seed of the listing's shuffle is for tests. */
+static void source_shuffle(app_state_t *app) {
+    uint64_t state = (uint64_t)(rubraview_pal_time_now_seconds() * 1000000.0) ^ ((uint64_t)GetCurrentProcessId() << 32);
+    for (size_t i = app->source.page_count; i > 1; --i) {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        size_t j = (size_t)((state >> 33) % (uint64_t)i);
+        rubraview_page_ref_t tmp = app->source.pages[i - 1];
+        app->source.pages[i - 1] = app->source.pages[j];
+        app->source.pages[j] = tmp;
+    }
+}
+
+/* `keep` is a file listed whatever the filters say: the one that was opened by name. */
+static bool open_folder_keeping(app_state_t *app, u8str_t dir, u8str_t keep) {
     if (app->arc_job) return false;   /* D-88 */
     source_close(app);
 
-    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
-    if (listing.count == 0) return false;
+    bool deep = g_cli_subfolders || rubraview_settings_get(&app->settings, U8("files"), U8("subfolders")) > 0.5;
+    folder_files_t all = {0};
+    folder_gather(app, dir, dir, 0, deep, &all);
+    if (all.count == 0) { free(all.entries); return false; }
+
+    /* The filters; when they leave nothing, the folder as it is — and a word about it. */
+    size_t kept = 0;
+    for (int pass = 0; pass < 2 && kept == 0; ++pass) {
+        for (size_t i = 0; i < all.count; ++i) {
+            const rubraview_fs_entry_t *e = &all.entries[i];
+            if (folder_lists(app, e->name, pass == 0) ||
+                (keep.len > 0 && rubraview_path_same(e->path, keep) && folder_lists(app, e->name, false))) {
+                all.entries[kept++] = *e;
+            }
+        }
+        if (kept > 0 && pass == 1) osd_say(app, U8("nothing here passes Settings > Files > Show: everything is shown"));
+    }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, kept ? kept : 1, sizeof(rubraview_fs_entry_t));
+    if (kept == 0 || !proven_is_ok(res.err)) { free(all.entries); return false; }
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    memcpy(entries, all.entries, kept * sizeof(*entries));
+    free(all.entries);
 
     app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
     bool ascending = true;
     rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
+    /* By name through folders: folder by folder, each in its own order. */
+    if (deep && (mode == RUBRAVIEW_SORT_NAME_NATURAL || mode == RUBRAVIEW_SORT_NAME_LEXICAL)) mode = RUBRAVIEW_SORT_PATH_NATURAL;
     app->list_is_set = false;
-    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8(IMAGE_FILTER ";" MEDIA_FILTER),
-                                                     mode, ascending);
+    rubraview_fs_listing_t listing = { .entries = entries, .count = kept };
+    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8("*"), mode, ascending);
+    if (mode == RUBRAVIEW_SORT_RANDOM) source_shuffle(app);
     app->source_dir = dir;
     return app->source.page_count > 0;
+}
+
+static bool open_folder(app_state_t *app, u8str_t dir) {
+    return open_folder_keeping(app, dir, (u8str_t){ .ptr = "", .len = 0 });
+}
+
+/* The folder being read, listed again — its order or its filters changed —
+   and back on the file it was on. A set of files and a book are left alone. */
+static void folder_relist(app_state_t *app) {
+    if (page_count(app) == 0 || app->list_is_set || app->source.archive_path.len > 0 ||
+        app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source_dir.len == 0 || app->arc_job) return;
+    int32_t at = current_page_index(app);
+    u8str_t reading = at >= 0 ? app_keep(app, app->source.pages[at].path) : (u8str_t){ .ptr = "", .len = 0 };
+    u8str_t dir = app_keep(app, app->source_dir);
+    if (!open_folder_keeping(app, dir, reading)) return;
+    int32_t page = reading.len > 0 ? rubraview_page_source_find(&app->source, reading) : -1;
+    finish_open(app, page > 0 ? (size_t)page : 0);
+}
+
+/* A playlist file (`.m3u8`, `.m3u`, `.rvlist`): its files, in its order.
+   A path that is not whole is from the playlist's own folder. */
+static bool path_is_playlist(u8str_t path) {
+    return rubraview_glob_match_list(rubraview_path_basename(path), U8("*.m3u8;*.m3u;*.rvlist"));
+}
+
+static void open_playlist(app_state_t *app, u8str_t path) {
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, path, 8u * 1024u * 1024u);
+    if (text.len == 0) { osd_say(app, U8("the playlist is empty or could not be read")); return; }
+    rubraview_playlist_t list = rubraview_path_has_ext(rubraview_path_basename(path), ".rvlist")
+                              ? rubraview_playlist_parse_rvlist(app->arena, text)
+                              : rubraview_playlist_parse_m3u8(app->arena, text);
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, list.count ? list.count : 1, sizeof(rubraview_fs_entry_t));
+    if (list.count == 0 || !proven_is_ok(res.err)) { osd_say(app, U8("the playlist names no file")); return; }
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    u8str_t dir = rubraview_path_dirname(path);
+    size_t n = 0, missing = 0;
+    for (size_t i = 0; i < list.count; ++i) {
+        u8str_t item = list.entries[i].path;
+        if (item.len == 0) continue;
+        bool whole = item.ptr[0] == '/' || item.ptr[0] == '\\' || (item.len > 2 && item.ptr[1] == ':');
+        if (!whole) item = rubraview_path_join(app->arena, dir, item);
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, item, &entry) || entry.is_directory || !path_is_listed_kind(entry.path)) {
+            missing++;
+            continue;
+        }
+        entry.name = rubraview_path_basename(entry.path);
+        entries[n++] = entry;
+    }
+    if (n == 0) { osd_say(app, U8("none of the playlist's files is there")); return; }
+    char line[96];
+    if (missing > 0) snprintf(line, sizeof(line), "playlist: %zu files, %zu not found", n, missing);
+    else snprintf(line, sizeof(line), "playlist: %zu files", n);
+    open_set_ordered(app, entries, n, cstr(line), true, (u8str_t){ .ptr = "", .len = 0 });
 }
 
 /* Finishes opening whichever source was just built: allocate the page
@@ -13274,6 +13489,7 @@ static void open_path(app_state_t *app, u8str_t path) {
     }
     rubraview_fs_entry_t entry;
     if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;
+    if (!entry.is_directory && path_is_playlist(entry.path)) { open_playlist(app, entry.path); return; }   /* RV-106 */
 
     /* Remember where the reader was in whatever was open before. */
     history_remember(app);
@@ -13295,7 +13511,7 @@ static void open_path(app_state_t *app, u8str_t path) {
            command was run in. */
         u8str_t folder = rubraview_path_dirname(entry.path);
         if (folder.len == 0) folder = U8(".");
-        opened = open_folder(app, folder);
+        opened = open_folder_keeping(app, folder, entry.path);
         key = folder;
     }
     if (!opened) return;
@@ -14816,6 +15032,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
             launch_paths_gather(&arena, &cli);
             g_launch_verb = cli.shell_verb;
+            /* RV-106: the order and the depth of this run's folders. */
+            if (cli.sort_given) g_cli_sort = (int)cli.sort_mode;
+            if (cli.descending_given) g_cli_descending = cli.descending ? 1 : 0;
+            g_cli_subfolders = cli.recursive && !cli.batch_mode;
             g_launch_whole = cli.shell_whole;
 
             if (cli.batch_mode) {

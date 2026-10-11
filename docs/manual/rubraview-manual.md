@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.51.exe              the viewer, as built
-dist/rubraview-v0.0.51/                 the release bundle
-dist/rubraview-v0.0.51.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.52.exe              the viewer, as built
+dist/rubraview-v0.0.52/                 the release bundle
+dist/rubraview-v0.0.52.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -46,8 +46,8 @@ rubraview.exe "D:\Photos"
 The first file a window is given brings its folder: the other pictures
 and films beside it are the list. A file opened from Explorer after that
 goes to the Rubraview window in front: it is put at the end of that
-window's list and shown. A book or a folder is opened in place of what
-was open.
+window's list and shown. A book, a folder or a playlist is opened in
+place of what was open.
 
 **Settings › General › Opening a file from Explorer** changes each part:
 
@@ -58,6 +58,14 @@ was open.
 | A file added to the list goes | `end` | `sorted`: the whole list is sorted again as Settings › Files says |
 | Show the file that was added | on | off: it joins the list and the page being read stays |
 | The first file brings its folder | on | off: the first file is alone, and later ones join it |
+
+A playlist file (`.m3u8`, `.m3u`, or `.rvlist`: one path a line) opens
+as the files it names, in its order; a path that is not whole is taken
+from the playlist's folder, and a file that is not there is left out.
+
+On the command line, `--sort=natural|lexical|modified|created|size|random`
+with `--descending` or `--ascending` orders this run's folders whatever
+the settings say, and `--recursive` reads their subfolders too.
 
 For a window of its own, use the right-click menu's **Open in a new
 window**, or `--new-instance` / `--new-window` on the command line.
@@ -597,6 +605,17 @@ filename code page, the memory cap). Some worth knowing:
 - **Viewer** — the fit a new session starts with, the layout (the one
   `B` changes), the gap between two pages, how much one zoom step is, and
   whether a narrow window shows one page at a time.
+- **Viewer** also has **Turning a page** — a cut, a fade (as it comes), a
+  slide or a zoom — and **Enlarge by whole steps only**: a small drawing
+  is then shown at twice, three times ... its size, never in between, so
+  every pixel of it is as wide as the next.
+- **Files** — **Sort by** orders a folder (by name as text, as Explorer
+  does, by date changed or made, by size, or `random`: another order each
+  time). **Include subfolders** reads the folders under a folder into the
+  same sequence, folder by folder. **Show** lists everything, or pictures,
+  films or music only; **Only names like** takes patterns such as
+  `*.png;IMG_*` and lists only those. The file you opened is listed
+  whatever these say. Changing any of them lists the open folder again.
 - **Files** — **Remember the page** off keeps no reading history;
   **Offer to resume** off opens where you stopped without asking.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
@@ -671,9 +690,6 @@ listed rather than hidden so you can see what is coming.
 - **RAR archives compressed by RAR 1.5** (made in 1994-1996). Versions
   0.0.30 and 0.0.31 read them; archives are now read by FultaArc, which
   does not have this method yet. It returns when it does.
-- **Opening a playlist file.** The picker's **Playlist** button writes an
-  `.m3u8` and opens those files as one sequence, but a playlist file
-  cannot be opened afterwards yet.
 - **Writing WebP.** Export and `--format=webp` need a WebP encoder
   installed in Windows; without one nothing is written.
 - RAR files that carry a filter program of their own

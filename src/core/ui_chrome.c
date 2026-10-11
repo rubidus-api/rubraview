@@ -222,6 +222,40 @@ double rubraview_transition_progress(const rubraview_transition_t *transition) {
     return p;
 }
 
+void rubraview_transition_poses(rubraview_transition_kind_t kind, double progress, double width, bool forward,
+                                rubraview_transition_pose_t *leaving, rubraview_transition_pose_t *arriving) {
+    double p = progress < 0.0 ? 0.0 : progress > 1.0 ? 1.0 : progress;
+    rubraview_transition_pose_t out = { .dx = 0.0, .scale = 1.0, .opacity = 0.0 };
+    rubraview_transition_pose_t in = { .dx = 0.0, .scale = 1.0, .opacity = 1.0 };
+    switch (kind) {
+        case RUBRAVIEW_TRANSITION_CROSSFADE:
+            out.opacity = 1.0 - p;
+            in.opacity = p;
+            break;
+        case RUBRAVIEW_TRANSITION_SLIDE_LEFT:
+        case RUBRAVIEW_TRANSITION_SLIDE_RIGHT: {
+            /* Eased, so it starts and lands softly. */
+            double e = p * p * (3.0 - 2.0 * p);
+            double way = (forward == (kind == RUBRAVIEW_TRANSITION_SLIDE_LEFT)) ? 1.0 : -1.0;
+            out.dx = -way * e * width;
+            in.dx = way * (1.0 - e) * width;
+            out.opacity = p < 1.0 ? 1.0 : 0.0;
+            break;
+        }
+        case RUBRAVIEW_TRANSITION_ZOOM_FADE:
+            out.scale = 1.0 + 0.08 * p;
+            out.opacity = 1.0 - p;
+            in.scale = 0.92 + 0.08 * p;
+            in.opacity = p;
+            break;
+        case RUBRAVIEW_TRANSITION_CUT:
+        default:
+            break;
+    }
+    if (leaving) *leaving = out;
+    if (arriving) *arriving = in;
+}
+
 bool rubraview_transition_active(const rubraview_transition_t *transition) {
     return transition && transition->active;
 }

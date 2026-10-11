@@ -288,6 +288,7 @@ rubraview_sort_mode_t rubraview_sort_mode_for_setting(int32_t choice) {
         case 2: return RUBRAVIEW_SORT_DATE_MODIFIED;
         case 3: return RUBRAVIEW_SORT_FILE_SIZE;
         case 4: return RUBRAVIEW_SORT_DATE_CREATED;
+        case 5: return RUBRAVIEW_SORT_RANDOM;          /* RV-106: another order each time a folder is opened */
         default: return RUBRAVIEW_SORT_NAME_NATURAL;
     }
 }

@@ -151,6 +151,21 @@ rubraview_transition_kind_t rubraview_transition_for_interval(rubraview_transiti
 void rubraview_transition_start(rubraview_transition_t *transition);
 void rubraview_transition_tick(rubraview_transition_t *transition, double delta_seconds);
 
+/**
+ * RV-106: where the page leaving and the page arriving are drawn at
+ * `progress` (0..1) of a transition — moved sideways by `dx`, grown by
+ * `scale` about the window's middle, at `opacity`. `forward` is a turn
+ * to a later page: a slide then comes in from the right.
+ */
+typedef struct rubraview_transition_pose {
+    double dx;
+    double scale;
+    double opacity;
+} rubraview_transition_pose_t;
+
+void rubraview_transition_poses(rubraview_transition_kind_t kind, double progress, double width, bool forward,
+                                rubraview_transition_pose_t *leaving, rubraview_transition_pose_t *arriving);
+
 /** 0.0 at the start, 1.0 once finished; always 1.0 for an instant cut. */
 double rubraview_transition_progress(const rubraview_transition_t *transition);
 bool rubraview_transition_active(const rubraview_transition_t *transition);

@@ -158,6 +158,22 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (rubraview_u8_eq_lit(arg, "--probe-media")) { result.probe_media = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--probe-gpu")) { result.probe_gpu = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--recursive")) { result.recursive = true; continue; }
+        if (starts_with(arg, "--sort=", &value)) {
+            static const struct { const char *word; rubraview_sort_mode_t mode; } SORTS[] = {
+                { "natural", RUBRAVIEW_SORT_NAME_NATURAL }, { "lexical", RUBRAVIEW_SORT_NAME_LEXICAL },
+                { "modified", RUBRAVIEW_SORT_DATE_MODIFIED }, { "created", RUBRAVIEW_SORT_DATE_CREATED },
+                { "size", RUBRAVIEW_SORT_FILE_SIZE }, { "random", RUBRAVIEW_SORT_RANDOM },
+            };
+            bool known = false;
+            for (size_t k = 0; k < sizeof(SORTS) / sizeof(SORTS[0]) && !known; ++k) {
+                if (rubraview_u8_eq_lit(value, SORTS[k].word)) { result.sort_mode = SORTS[k].mode; known = true; }
+            }
+            if (!known) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.sort_given = true;
+            continue;
+        }
+        if (rubraview_u8_eq_lit(arg, "--descending")) { result.descending_given = true; result.descending = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--ascending")) { result.descending_given = true; result.descending = false; continue; }
         if (rubraview_u8_eq_lit(arg, "--pause")) { result.pause_at_end = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--grayscale")) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_COLOR_ADJUST);

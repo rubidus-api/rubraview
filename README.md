@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.51** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.51/rubraview-v0.0.51.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.51/rubraview-v0.0.51.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -260,6 +260,8 @@ ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
 | Run | For |
 |---|---|
 | `rubraview.exe FILE` (or a folder, or an archive) | Opens it. With a window already open the file goes to it: added to the end of its list and shown (Settings > General > Opening a file from Explorer changes this) |
+| `--sort=natural\|lexical\|modified\|created\|size\|random`, `--descending`, `--ascending` | The order of this run's folders, over the settings |
+| `--recursive` (without `--batch`) | Subfolders are read into the same sequence |
 | `--new-instance`, `--new-window FILES...` | A window of its own whatever the settings say |
 | `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu); `--setup` is the installer's (it ends with 0 when only Windows 11's menu could not be registered). The same is in Settings > Explorer |
 | `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `FILES...` | What the right-click menu's items run: open; open in a new window; open only these; add to the open window's list; an archive's entries; the batch panel on these; print |

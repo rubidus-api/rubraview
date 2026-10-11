@@ -5,6 +5,7 @@
 #include "rubraview/batch.h"
 #include "rubraview/export.h"
 #include "rubraview/shellreq.h"
+#include "rubraview/sort.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +66,10 @@ typedef struct rubraview_cli_result {
     bool                probe_media;       /* --probe-media: open the file with each media backend and report */
     bool                probe_gpu;         /* --probe-gpu: what graphics card is here, and will Media Foundation decode on it */
     bool                recursive;  /* --recursive */
+    bool                sort_given;       /* RV-106: --sort=natural|lexical|modified|created|size|random, for the viewer */
+    rubraview_sort_mode_t sort_mode;
+    bool                descending_given; /* --descending / --ascending */
+    bool                descending;
     bool                pause_at_end; /* --pause: wait for a key before the window closes */
     u8str_t             input;      /* the file or directory to work on */
     u8str_t             output_dir; /* --out=..., empty for "beside the source" */
