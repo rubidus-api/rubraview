@@ -4,8 +4,8 @@
 #
 # What ships is deliberately short: one executable, the manual, the
 # licences of the vendored libraries, and the changelog. There is no
-# installer and no runtime to place beside it — the program imports no DLL
-# of ours. The one DLL in the folder, rubraview_menu.dll, is not loaded by
+# runtime to place beside it — the program imports no DLL of ours — and
+# the installer (D-90) is that same folder, put under Program Files. The one DLL in the folder, rubraview_menu.dll, is not loaded by
 # the program: Explorer's Windows 11 menu loads it (D-86).
 set -eu
 
@@ -74,5 +74,27 @@ printf '%s\n' "package: $out ready (version $version)"
 # The zip, made here so what is published is exactly this folder.
 ( cd dist && rm -f "rubraview-v$version.zip" && \
   python3 -c "import os,sys,zipfile; d=sys.argv[1]; z=zipfile.ZipFile(d+'.zip','w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(r,f)) for r,_,fs in os.walk(d) for f in sorted(fs)]; z.close()" "rubraview-v$version" )
-printf '%s\n' "package: dist/rubraview-v$version.zip and dist/rubraview.exe are the release"
+
+# D-90: the installer, from the same folder, with rubrapack
+# (https://github.com/rubidus-api/rubrapack/releases — one program, no
+# install). RUBRAPACK names it when it is not on the PATH. Without it the
+# zip and the executable are still made, and this says the .msi was not.
+rubrapack=${RUBRAPACK:-rubrapack}
+msi="dist/rubraview-v$version.msi"
+rm -f "$msi"
+if command -v "$rubrapack" >/dev/null 2>&1; then
+  "$rubrapack" build resources/distribution/rubraview.toml -o "$msi" \
+      -D "VERSION=$version" -D "STAGE=../../$out"
+  "$rubrapack" lint "$msi"
+  # An upgrade is checked against the newest installer already here.
+  previous=$(ls -1 dist/rubraview-v*.msi 2>/dev/null | grep -v -F "$msi" | sort -V | tail -n 1 || true)
+  if [ -n "$previous" ]; then
+    "$rubrapack" lint "$msi" --previous "$previous"
+    printf '%s\n' "package: $msi upgrades $previous"
+  fi
+  printf '%s\n' "package: dist/rubraview-v$version.zip, dist/rubraview.exe and $msi are the release"
+else
+  printf '%s\n' "package: no rubrapack (set RUBRAPACK): $msi was NOT made" >&2
+  printf '%s\n' "package: dist/rubraview-v$version.zip and dist/rubraview.exe are the release"
+fi
 ls -1 "$out"

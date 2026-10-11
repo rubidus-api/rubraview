@@ -1,0 +1,83 @@
+# The installer (D-90): rubraview-v<version>.msi, built by scripts/package.sh
+# with rubrapack (https://github.com/rubidus-api/rubrapack) from the folder
+# the zip is made of:
+#   rubrapack build resources/distribution/rubraview.toml -o dist/rubraview-v1.2.3.msi \
+#       -D VERSION=1.2.3 -D STAGE=../../dist/rubraview-v1.2.3     (paths are from this file)
+# It puts that folder under Program Files, the program in the Start menu,
+# and has the program register itself in Explorer for every user - the
+# file types and both right-click menus, Windows 11's own among them,
+# which needs the administrator an installer has. The menu is the
+# program's own (Settings > Explorer changes it afterwards), so there is
+# no [menu.*] or [assoc.*] table here: two packages would answer for one menu.
+
+format = 1
+
+[package]
+name = "Rubraview"
+manufacturer = "rubidus"
+version = "$(VERSION)"
+arch = "x64"
+upgrade-code = "{C3CBE9C7-8E3F-4E2D-9E98-A28BD69E5714}"   # never changes: it ties the upgrades together
+ui = "installdir"
+
+[define]
+VERSION = "0.0.0"
+STAGE = "../../dist/rubraview-v0.0.0"
+
+[ui]
+languages = ["ko"]
+launch = "file:App"
+
+[arp]
+icon = "rubraview.ico"
+
+[dir.INSTALLDIR]
+path = "$(ProgramFiles)/Rubraview"
+
+[dir.Licences]
+path = "$(INSTALLDIR)/licences"
+
+[file.App]
+dir = "INSTALLDIR"
+source = "$(STAGE)/rubraview.exe"
+
+# Explorer's Windows 11 menu loads these two; the program does not (D-86).
+[file.MenuDll]
+dir = "INSTALLDIR"
+source = "$(STAGE)/rubraview_menu.dll"
+
+[file.MenuPackage]
+dir = "INSTALLDIR"
+source = "$(STAGE)/rubraview_menu.msix"
+
+[file.Manual]
+dir = "INSTALLDIR"
+source = "$(STAGE)/manual.md"
+
+[file.Changelog]
+dir = "INSTALLDIR"
+source = "$(STAGE)/CHANGELOG.md"
+
+[file.License]
+dir = "INSTALLDIR"
+source = "$(STAGE)/LICENSE"
+
+[file.Notices]
+dir = "INSTALLDIR"
+source = "$(STAGE)/THIRD_PARTY_NOTICES.md"
+
+[files.LicenceFiles]
+dir = "Licences"
+glob = "$(STAGE)/licences/**"
+
+[shortcut.StartMenu]
+dir = "Programs"
+name = "Rubraview"
+target = "file:App"
+
+# --setup: a registration without Windows 11's menu (an older Windows) is
+# still an installation, and a removal that finds nothing is still a removal.
+[action.Explorer]
+run = "file:App"
+do = "--register-shell --all-users --setup"
+undo = "--unregister-shell --all-users --setup"

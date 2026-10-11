@@ -5,8 +5,9 @@
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
     "rename_file", "delete_file", "reveal_in_explorer", "print", "copy_to_folder", "move_to_folder", "toggle_file_list",
-    "layout_single", "layout_dual", "layout_book", "layout_webtoon", "layout_comic", "toggle_layout",
-    "toggle_reading_order", "toggle_spread_detect",
+    "layout_single", "layout_dual", "layout_dual_rtl", "layout_book", "layout_book_rtl", "layout_webtoon",
+    "layout_comic", "layout_comic_rtl", "toggle_layout",
+    "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
     "rotate_cw", "rotate_ccw", "flip_horizontal", "flip_vertical",
     "zoom_in", "zoom_out", "toggle_nearest", "toggle_pixel_grid",
@@ -57,24 +58,20 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         }
     }
 
-    if (rubraview_u8_eq_lit(action, "toggle_reading_order")) st.value = f->rtl ? "R>L" : "L>R";
-    if (rubraview_u8_eq_lit(action, "toggle_layout")) {
-        st.value = f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL ? "2"
-                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_BOOK ? "book"
-                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_WEBTOON ? "webtoon"
-                 : f->layout == RUBRAVIEW_PAGE_LAYOUT_COMIC ? "comic" : "1";
-    }
-
-    static const struct { const char *action; rubraview_page_layout_t layout; } LAYOUTS[] = {
-        { "layout_single", RUBRAVIEW_PAGE_LAYOUT_SINGLE },
-        { "layout_dual",   RUBRAVIEW_PAGE_LAYOUT_DUAL },
-        { "layout_book",   RUBRAVIEW_PAGE_LAYOUT_BOOK },
-        { "layout_webtoon", RUBRAVIEW_PAGE_LAYOUT_WEBTOON },
-        { "layout_comic",  RUBRAVIEW_PAGE_LAYOUT_COMIC },
+    /* The layout and the way its pages run are one choice (owner, 2026-10-11). */
+    static const struct { const char *action; const char *value; } LAYOUTS[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
+        [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { "layout_single",    "1" },
+        [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { "layout_dual",      "2" },
+        [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { "layout_dual_rtl",  "2 rtl" },
+        [RUBRAVIEW_LAYOUT_CHOICE_BOOK]      = { "layout_book",      "book" },
+        [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { "layout_book_rtl",  "book rtl" },
+        [RUBRAVIEW_LAYOUT_CHOICE_WEBTOON]   = { "layout_webtoon",   "webtoon" },
+        [RUBRAVIEW_LAYOUT_CHOICE_COMIC]     = { "layout_comic",     "comic" },
+        [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { "layout_comic_rtl", "comic rtl" },
     };
-    for (size_t i = 0; i < sizeof(LAYOUTS) / sizeof(LAYOUTS[0]); ++i) {
-        if (rubraview_u8_eq_lit(action, LAYOUTS[i].action) && f->layout == LAYOUTS[i].layout) st.mark = RUBRAVIEW_MARK_CURRENT;
-    }
+    rubraview_layout_choice_t choice = rubraview_layout_choice_of(f->layout, f->rtl ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR);
+    if (rubraview_u8_eq_lit(action, "toggle_layout")) st.value = LAYOUTS[choice].value;
+    if (rubraview_u8_eq_lit(action, LAYOUTS[choice].action)) st.mark = RUBRAVIEW_MARK_CURRENT;
     static const struct { const char *action; rubraview_fit_mode_t fit; } FITS[] = {
         { "fit_window",  RUBRAVIEW_FIT_WINDOW },
         { "fit_width",   RUBRAVIEW_FIT_WIDTH },

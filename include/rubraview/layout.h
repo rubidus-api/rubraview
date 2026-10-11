@@ -30,6 +30,25 @@ typedef enum rubraview_reading_dir {
     RUBRAVIEW_READING_RTL,
 } rubraview_reading_dir_t;
 
+/*
+ * What the reader chooses (owner, 2026-10-11): a layout and the way its
+ * pages run are one choice — two pages, a book and comic each also come
+ * right to left, for a book read from the back as a Japanese comic is.
+ * The order here is the order they are offered and cycled in, and the
+ * order of the `viewer.layout` setting's words.
+ */
+typedef enum rubraview_layout_choice {
+    RUBRAVIEW_LAYOUT_CHOICE_SINGLE = 0,
+    RUBRAVIEW_LAYOUT_CHOICE_DUAL,
+    RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL,
+    RUBRAVIEW_LAYOUT_CHOICE_BOOK,
+    RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL,
+    RUBRAVIEW_LAYOUT_CHOICE_WEBTOON,
+    RUBRAVIEW_LAYOUT_CHOICE_COMIC,
+    RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL,
+    RUBRAVIEW_LAYOUT_CHOICE_COUNT,
+} rubraview_layout_choice_t;
+
 typedef enum rubraview_spread_half {
     RUBRAVIEW_SPREAD_WHOLE = 0, /* show the full page */
     RUBRAVIEW_SPREAD_LEFT_HALF, /* §3.3.7 split: show only the left half of a wide spread */
@@ -71,6 +90,12 @@ typedef struct rubraview_layout_opts {
  * threshold is applied here.
  */
 rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mode, rubraview_reading_dir_t direction);
+
+/* The layout and the direction a choice stands for; anything out of range is one page. */
+rubraview_page_layout_t rubraview_layout_choice_mode(int choice);
+rubraview_reading_dir_t rubraview_layout_choice_direction(int choice);
+/* The choice a layout and a direction make. One page and the strip have one direction. */
+rubraview_layout_choice_t rubraview_layout_choice_of(rubraview_page_layout_t mode, rubraview_reading_dir_t direction);
 
 /**
  * The options for pages the reader has turned (their sizes given as

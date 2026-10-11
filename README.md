@@ -1,10 +1,10 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.45** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.45/rubraview-v0.0.45.zip) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.46** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.46/rubraview-v0.0.46.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.46/rubraview-v0.0.46.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: there is no installer. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source. A page inside an archive can be deleted (`Delete`), renamed (`F2`) or saved after an edit: a ZIP / CBZ or a 7z / CB7 keeps its format, anything else (a solid 7z, RAR / CBR, ALZ, EGG, a split set) is written again as a ZIP or a 7z of your choice and the old file goes to the Recycle Bin. Encrypted archives are not changed.
+Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: nothing needs installing. The MSI is for those who want it installed: Program Files, the Start menu, and Explorer's right-click menus (Windows 11's own among them) registered for every user. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source. A page inside an archive can be deleted (`Delete`), renamed (`F2`) or saved after an edit: a ZIP / CBZ or a 7z / CB7 keeps its format, anything else (a solid 7z, RAR / CBR, ALZ, EGG, a split set) is written again as a ZIP or a 7z of your choice and the old file goes to the Recycle Bin. Encrypted archives are not changed.
 
 > This English README is the canonical version; the Korean one is its translation.
 
@@ -83,8 +83,7 @@ ships with, so it cannot drift from them.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them |
-| `M` | Left-to-right / right-to-left (manga) |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |
 | `Ctrl+[` | Previous archive in the folder |
@@ -173,9 +172,12 @@ ships with, so it cannot drift from them.
 | Menu `Western` | Read the open archive's file names as Western (CP1252) |
 | Menu `Single` | Layout: one page at a time |
 | Menu `Dual` | Layout: two pages side by side |
+| Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
 | Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
 | Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
+| Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |
@@ -223,16 +225,18 @@ These belong to their window and are not on the Keys page.
 
 ## Layouts
 
-`B`, the toolbox's Layout button and Menu > View > Layout choose one of five, and Settings > Viewer > Layout keeps it:
+`B`, the toolbox's Layout button and Menu > View > Layout choose one of eight, and Settings > Viewer > Layout keeps it:
 **single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
-under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves).
+under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves) — and
+**dual-rtl**, **book-rtl** and **comic-rtl**, each right after its own, read right to left as a Japanese comic is: the
+earlier page on the right, a wide scan's right half first, clicks and swipes turning the other way.
 
 ## Explorer's right-click menu
 
 Settings > Explorer registers a **Rubraview** item on the extensions you switch on — Open, Open these only, Add to the
 list, Browse the archive, Convert..., Print... — each working on one file or on many selected together. For this user
 it is the classic menu ("Show more options" on Windows 11); "for every user" (an administrator, once) also puts it in
-Windows 11's own menu, using `rubraview_menu.dll` and `rubraview_menu.msix` from the zip. Plain archives (ZIP, 7z, RAR,
+Windows 11's own menu, using `rubraview_menu.dll` and `rubraview_menu.msix` from the zip (they must stay beside `rubraview.exe`). The MSI does that registration when it installs. Plain archives (ZIP, 7z, RAR,
 ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
 
 ## Command line
@@ -241,7 +245,7 @@ ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
 |---|---|
 | `rubraview.exe FILE` (or a folder, or an archive) | Opens it; a second launch hands the file to the window already open |
 | `--new-instance` | A second window all the same |
-| `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu). The same is in Settings > Explorer |
+| `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu); `--setup` is the installer's (it ends with 0 when only Windows 11's menu could not be registered). The same is in Settings > Explorer |
 | `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `FILES...` | What the right-click menu's items run: open; open only these; add to the open window's list; an archive's entries; the batch panel on these; print |
 | `--batch ...` | Converts many files without a window; the [manual](docs/manual/rubraview-manual.md) lists its options |
 | `--version` | The version |

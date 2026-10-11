@@ -1,10 +1,10 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.45** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.45/rubraview-v0.0.45.zip) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.46** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.46/rubraview-v0.0.46.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.46/rubraview-v0.0.46.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치 프로그램은 없습니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치는 필요 없습니다. 설치해 두고 싶다면 MSI 를 쓰세요: Program Files 와 시작 메뉴에 넣고, 탐색기 우클릭 메뉴(윈도 11 기본 메뉴 포함)를 모든 사용자용으로 등록합니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
@@ -82,8 +82,7 @@
 | `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |
 | `Shift+Left`, `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
-| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기 |
-| `M` | 왼→오 / 오→왼(만화) |
+| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 |
 | `Shift+B` | 펼침면 자동 인식 |
 | `Ctrl+]` | 폴더의 다음 압축 |
 | `Ctrl+[` | 폴더의 이전 압축 |
@@ -172,9 +171,12 @@
 | 메뉴 `Western` | 열린 압축 파일의 파일 이름을 서유럽어(CP1252)로 읽기 |
 | 메뉴 `Single` | 보기 방식: 한 장씩 |
 | 메뉴 `Dual` | 보기 방식: 두 장 나란히 |
+| 메뉴 `Dual, right to left` | 보기 방식: 두 장 나란히, 오른쪽에서 왼쪽으로 |
 | 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
+| 메뉴 `Book, right to left` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩, 오른쪽에서 왼쪽으로 |
 | 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 메뉴 `Comic` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서(코믹) |
+| 메뉴 `Comic, right to left` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서 오른쪽 절반부터 |
 | 메뉴 `Slower` | 더 느리게 재생 |
 | 메뉴 `Faster` | 더 빠르게 재생 |
 | 메뉴 `Choose` | 목록에서 자막 고르기 |
@@ -222,16 +224,18 @@
 
 ## 보기 방식
 
-`B`, 도구 상자의 Layout 버튼, Menu > View > Layout에서 다섯 가지 중 하나를 고르고, Settings > Viewer > Layout에 그대로 저장됩니다:
+`B`, 도구 상자의 Layout 버튼, Menu > View > Layout에서 여덟 가지 중 하나를 고르고, Settings > Viewer > Layout에 그대로 저장됩니다:
 **single**(한 장), **dual**(두 장 나란히), **book**(표지만 한 장, 그다음부터 두 장), **webtoon**(모든 쪽을 같은 폭으로 세로로 이어
-하나의 긴 스트립으로)과 **comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서).
+하나의 긴 스트립으로)과 **comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서). 그리고 dual, book, comic 바로 뒤에 각각
+**dual-rtl**, **book-rtl**, **comic-rtl**이 있습니다. 일본 만화책처럼 오른쪽에서 왼쪽으로 읽는 책을 위한 것으로, 앞 쪽이
+오른쪽에 놓이고, 가로로 긴 쪽은 오른쪽 절반부터 보이며, 클릭과 밀기로 넘기는 방향도 반대가 됩니다.
 
 ## 탐색기 우클릭 메뉴
 
 Settings > Explorer에서 켠 확장자에 **Rubraview** 항목을 등록합니다. 열기, 이것만 열기, 재생목록에 넣기, 압축 파일 내부 보기,
 변환..., 인쇄...가 있고, 파일 하나에도 여러 개를 함께 선택한 경우에도 동작합니다. "이 사용자"로 등록하면 옛 메뉴(Windows 11에서는
 "추가 옵션 표시")에 들어가고, "모든 사용자"(관리자 권한 한 번)로 등록하면 zip에 든 `rubraview_menu.dll`과 `rubraview_menu.msix`로
-Windows 11 새 메뉴에도 들어갑니다. 일반 압축 파일(ZIP, 7z, RAR, ALZ, EGG)은 메뉴만 받고, 더블 클릭 연결은 바뀌지 않습니다.
+Windows 11 새 메뉴에도 들어갑니다(두 파일은 `rubraview.exe` 옆에 그대로 있어야 합니다). MSI 로 설치하면 이 등록을 설치할 때 해 줍니다. 일반 압축 파일(ZIP, 7z, RAR, ALZ, EGG)은 메뉴만 받고, 더블 클릭 연결은 바뀌지 않습니다.
 
 ## 명령줄
 
@@ -239,7 +243,7 @@ Windows 11 새 메뉴에도 들어갑니다. 일반 압축 파일(ZIP, 7z, RAR, 
 |---|---|
 | `rubraview.exe 파일` (폴더나 압축 파일도) | 열기. 이미 창이 떠 있으면 그 창에 넘김 |
 | `--new-instance` | 그래도 창을 하나 더 |
-| `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하고 탐색기 우클릭 메뉴에 Rubraview를 넣거나, 되돌림. `--types=jpg,png,comics,...`(확장자, 또는 `pictures`, `comics`, `video`, `music`, `archives`, `all`)로 일부만, `--no-types` / `--no-menu`로 둘 중 하나는 그대로 두고, 관리자 프롬프트에서 `--all-users`로 모든 사용자용(Windows 11 새 메뉴 포함). Settings > Explorer에도 같은 기능이 있음 |
+| `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하고 탐색기 우클릭 메뉴에 Rubraview를 넣거나, 되돌림. `--types=jpg,png,comics,...`(확장자, 또는 `pictures`, `comics`, `video`, `music`, `archives`, `all`)로 일부만, `--no-types` / `--no-menu`로 둘 중 하나는 그대로 두고, 관리자 프롬프트에서 `--all-users`로 모든 사용자용(Windows 11 새 메뉴 포함). `--setup`은 설치 파일이 쓰는 것(Windows 11 메뉴만 등록하지 못했을 때도 0으로 끝남). Settings > Explorer에도 같은 기능이 있음 |
 | `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `파일들...` | 우클릭 메뉴 항목이 실행하는 것: 열기, 이것만 열기, 열린 창의 목록에 넣기, 압축 파일 내부 보기, 이 파일들로 배치 패널, 인쇄 |
 | `--batch ...` | 창 없이 여러 파일 변환. 옵션은 [설명서](docs/manual/rubraview-manual.md)에 |
 | `--version` | 버전 |

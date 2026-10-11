@@ -1225,6 +1225,10 @@ static void animation_prepare(app_state_t *app) {
     if (page_index < 0 || (size_t)page_index >= page_count(app)) return;
 
     u8str_t path = app->source.pages[page_index].path;
+    /* A film or a track is no picture to look for frames in. Looking read
+       the whole file, twice, before it played — minutes over a network
+       share (owner, 2026-10-11; since D-82, 0.0.39). */
+    if (is_media_path(path)) return;
     rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
     void *mem = NULL;
     if (path.len == 0) {
@@ -4107,13 +4111,13 @@ static bool cue_step(app_state_t *app, int direction) {
 /* The layout, from the tile, the menu or the key: written to the setting
    (Settings › Viewer › Layout shows the same thing and is saved with the
    rest), which is what applies it. The page on screen stays. */
-static void layout_set(app_state_t *app, rubraview_page_layout_t mode, bool say) {
+static void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool say) {
     int32_t page = current_page_index(app);
     if (page >= 0 && app->spread_index < app->layout.count) {
         int32_t other = app->layout.spreads[app->spread_index].right_index;
         if (other >= 0 && other < page) page = other;
     }
-    rubraview_settings_set(&app->settings, U8("viewer"), U8("layout"), (double)(int)mode);
+    rubraview_settings_set(&app->settings, U8("viewer"), U8("layout"), (double)(int)choice);
     settings_took_effect(app);
     rebuild_layout(app);
     if (page >= 0) app->spread_index = spread_index_for_page(app, page);
@@ -4121,10 +4125,13 @@ static void layout_set(app_state_t *app, rubraview_page_layout_t mode, bool say)
     menu_rebuild(app);
     sync_menubox_tiles(app);
     if (say) {
-        static const char *const SAY[] = { "one page", "two pages", "book: the cover alone, then two pages",
-                                           "webtoon: every page one under the other, at one width",
-                                           "comic: one page, a wide scan as its two halves" };
-        osd_say(app, cstr(SAY[(int)mode >= 0 && (int)mode < 5 ? (int)mode : 0]));
+        static const char *const SAY[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
+            "one page", "two pages", "two pages, right to left",
+            "book: the cover alone, then two pages", "book, right to left: the cover alone, then two pages",
+            "webtoon: every page one under the other, at one width",
+            "comic: one page, a wide scan as its two halves",
+            "comic, right to left: one page, a wide scan as its two halves, the right one first" };
+        osd_say(app, cstr(SAY[choice >= 0 && choice < RUBRAVIEW_LAYOUT_CHOICE_COUNT ? choice : 0]));
     }
 }
 
@@ -4271,15 +4278,21 @@ static void handle_action(app_state_t *app, u8str_t action) {
         menu_rebuild(app);
         sync_menubox_tiles(app);
     } else if (rubraview_u8_eq_lit(action, "layout_single")) {
-        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_SINGLE, false);
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_SINGLE, false);
     } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
-        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_DUAL, false);
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL, false);
+    } else if (rubraview_u8_eq_lit(action, "layout_dual_rtl")) {
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL, false);
     } else if (rubraview_u8_eq_lit(action, "layout_book")) {
-        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_BOOK, false);
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK, false);
+    } else if (rubraview_u8_eq_lit(action, "layout_book_rtl")) {
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL, false);
     } else if (rubraview_u8_eq_lit(action, "layout_webtoon")) {
-        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_WEBTOON, false);
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_WEBTOON, false);
     } else if (rubraview_u8_eq_lit(action, "layout_comic")) {
-        layout_set(app, RUBRAVIEW_PAGE_LAYOUT_COMIC, false);
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC, false);
+    } else if (rubraview_u8_eq_lit(action, "layout_comic_rtl")) {
+        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL, false);
     } else if (rubraview_u8_eq_lit(action, "toggle_toolbox")) {
         /* A toolbox that is its own window is put back, not shown twice. */
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
@@ -4642,14 +4655,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
                                             !rubraview_pal_window_is_fullscreen(app->window));
     } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
         /* One page, two pages, a book (the cover alone), the webtoon strip,
-           comic (wide scans in halves), and round again (owner, 2026-10-09). */
-        layout_set(app, (rubraview_page_layout_t)(((int)app->layout_opts.mode + 1) % (int)RUBRAVIEW_PAGE_LAYOUT_COUNT), true);
-    } else if (rubraview_u8_eq_lit(action, "toggle_reading_order")) {
-        int32_t page = current_page_index(app);
-        app->layout_opts.direction = (app->layout_opts.direction == RUBRAVIEW_READING_LTR)
-            ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR;
-        rebuild_layout(app);
-        if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+           comic (wide scans in halves) — two pages, the book and comic each
+           followed by itself read right to left — and round again (owner,
+           2026-10-09, 2026-10-11). */
+        int now = (int)rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction);
+        layout_set(app, (rubraview_layout_choice_t)((now + 1) % (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT), true);
     }
 }
 
@@ -9520,10 +9530,11 @@ static void settings_apply_rest(app_state_t *app) {
         /* The one place the layout is set from: the settings window, the
            toolbox's tile, the menu and the key all write this setting, so
            they cannot disagree (owner, 2026-10-09). The setting's order is
-           the enum's. */
+           rubraview_layout_choice_t's, and the way the pages run comes
+           with it (owner, 2026-10-11). */
         int l = (int)lround(layout);
-        app->layout_opts.mode = (l >= 0 && l < (int)RUBRAVIEW_PAGE_LAYOUT_COUNT) ? (rubraview_page_layout_t)l
-                                                                                 : RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+        app->layout_opts.mode = rubraview_layout_choice_mode(l);
+        app->layout_opts.direction = rubraview_layout_choice_direction(l);
         /* Comic is one page at a time with a wide scan as its two halves;
            every other layout shows a wide scan whole. */
         app->layout_opts.auto_split_wide_spreads = app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_COMIC;
@@ -14404,6 +14415,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                            : code == SHELL_DONE_NO_PARTS ? "rubraview: updated; Windows 11's menu needs rubraview_menu.dll and rubraview_menu.msix beside the program"
                            : code == SHELL_DONE_REFUSED ? "rubraview: updated; Windows did not take the Windows 11 menu's package"
                            : "rubraview: file types and menu updated");
+                if (cli.shell_setup) code = rubraview_shell_setup_exit(code, cli.unregister_shell && !cli.register_shell);
                 free(memory);
                 CoUninitialize();
                 return code;

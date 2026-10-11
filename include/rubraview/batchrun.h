@@ -47,6 +47,7 @@ typedef struct rubraview_cli_result {
     bool                register_shell;    /* §3.19.3 --register-shell */
     bool                unregister_shell;  /* §3.19.3 --unregister-shell */
     bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
+    bool                shell_setup;       /* --setup: run by the installer (D-90): see rubraview_shell_setup_exit */
     u8str_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */
     bool                shell_no_types;    /* --no-types: leave the file types (double click) alone */
     bool                shell_no_menu;     /* --no-menu: leave the right-click menu alone */
@@ -72,6 +73,15 @@ typedef struct rubraview_cli_result {
     rubraview_batch_action_t   actions[RUBRAVIEW_BATCH_MAX_ACTIONS];
     rubraview_export_options_t export_options;
 } rubraview_cli_result_t;
+
+/**
+ * The exit code of a registration the installer runs (`--setup`, D-90).
+ * An installer takes anything but 0 as a failure and puts the files back,
+ * so only what leaves no menu at all fails it: a registration done
+ * without Windows 11's menu (3, 4) is done, and a removal never stands
+ * in the way of taking the program off.
+ */
+int rubraview_shell_setup_exit(int code, bool removing);
 
 /**
  * Parse `--batch` and its flags. Arguments are taken as they arrive from

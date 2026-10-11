@@ -1,6 +1,35 @@
 #include "rubraview/layout.h"
 #include <string.h>
 
+static const struct { rubraview_page_layout_t mode; rubraview_reading_dir_t direction; } CHOICES[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
+    [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { RUBRAVIEW_PAGE_LAYOUT_SINGLE,  RUBRAVIEW_READING_LTR },
+    [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { RUBRAVIEW_PAGE_LAYOUT_DUAL,    RUBRAVIEW_READING_LTR },
+    [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { RUBRAVIEW_PAGE_LAYOUT_DUAL,    RUBRAVIEW_READING_RTL },
+    [RUBRAVIEW_LAYOUT_CHOICE_BOOK]      = { RUBRAVIEW_PAGE_LAYOUT_BOOK,    RUBRAVIEW_READING_LTR },
+    [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { RUBRAVIEW_PAGE_LAYOUT_BOOK,    RUBRAVIEW_READING_RTL },
+    [RUBRAVIEW_LAYOUT_CHOICE_WEBTOON]   = { RUBRAVIEW_PAGE_LAYOUT_WEBTOON, RUBRAVIEW_READING_LTR },
+    [RUBRAVIEW_LAYOUT_CHOICE_COMIC]     = { RUBRAVIEW_PAGE_LAYOUT_COMIC,   RUBRAVIEW_READING_LTR },
+    [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { RUBRAVIEW_PAGE_LAYOUT_COMIC,   RUBRAVIEW_READING_RTL },
+};
+
+rubraview_page_layout_t rubraview_layout_choice_mode(int choice) {
+    return choice >= 0 && choice < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT ? CHOICES[choice].mode : RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+}
+
+rubraview_reading_dir_t rubraview_layout_choice_direction(int choice) {
+    return choice >= 0 && choice < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT ? CHOICES[choice].direction : RUBRAVIEW_READING_LTR;
+}
+
+rubraview_layout_choice_t rubraview_layout_choice_of(rubraview_page_layout_t mode, rubraview_reading_dir_t direction) {
+    for (int i = 0; i < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT; ++i) {
+        if (CHOICES[i].mode == mode && CHOICES[i].direction == direction) return (rubraview_layout_choice_t)i;
+    }
+    for (int i = 0; i < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT; ++i) {
+        if (CHOICES[i].mode == mode) return (rubraview_layout_choice_t)i;
+    }
+    return RUBRAVIEW_LAYOUT_CHOICE_SINGLE;
+}
+
 rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mode, rubraview_reading_dir_t direction) {
     return (rubraview_layout_opts_t){
         .mode = mode,

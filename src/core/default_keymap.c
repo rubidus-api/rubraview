@@ -86,7 +86,6 @@ const char *rubraview_default_keymap(void) {
        it (D-16). Ctrl+Backspace: back, one step wider. */
     "up_to_folder = \"Ctrl+Backspace\"\n"
     "toggle_layout = \"B\"\n"
-    "toggle_reading_order = \"M\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
     /* §3.8.1 point 4. §3.7.2 also offers Ctrl+PageDown/PageUp here, but
        those are skipping's primary and skipping keeps them. */

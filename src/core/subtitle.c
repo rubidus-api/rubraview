@@ -123,7 +123,25 @@ static bool parse_clock(u8str_t s, double *out) {
 /* Strips `<i>`, `<font ...>`, SubStation's `{\pos(...)}` and SAMI's
    tags, and turns `<br>` into a line break. What is left is the words,
    which is all the renderer draws. */
+static u8str_t strip_markup_as(proven_arena_t *arena, u8str_t text, bool braces_too, bool html);
+
 static u8str_t strip_markup(proven_arena_t *arena, u8str_t text, bool braces_too) {
+    return strip_markup_as(arena, text, braces_too, false);
+}
+
+/* Is this `<p ...>` or `</p>` — and not `<pre>` or another tag that begins with p? */
+static bool is_paragraph_tag(u8str_t rest) {
+    size_t at = (rest.len > 1 && rest.ptr[1] == '/') ? 2 : 1;
+    if (rest.len <= at + 1 || (rest.ptr[at] != 'p' && rest.ptr[at] != 'P')) return false;
+    char after = rest.ptr[at + 1];
+    return after == '>' || after == ' ' || after == '\t' || after == '\r' || after == '\n' || after == '/';
+}
+
+/* `html`: SAMI is HTML, where the file's own line ends, tabs and runs of
+   spaces are one space and only `<br>` — or a new `<p>` — starts a line
+   (owner, 2026-10-11: captions stood a blank line apart, because the line
+   end after each `<br>` was kept as a second one). */
+static u8str_t strip_markup_as(proven_arena_t *arena, u8str_t text, bool braces_too, bool html) {
     u8str_t empty = { .ptr = "", .len = 0 };
     if (text.len == 0) return empty;
 
@@ -136,10 +154,20 @@ static u8str_t strip_markup(proven_arena_t *arena, u8str_t text, bool braces_too
         if (text.ptr[i] == '<') {
             /* `<br>` and `<br/>` are the one tag that means something. */
             u8str_t rest = { .ptr = text.ptr + i, .len = text.len - i };
-            if (rubraview_u8_starts_with_ci(rest, "<br")) {
+            if (html) {
+                if (rubraview_u8_starts_with_ci(rest, "<br") || is_paragraph_tag(rest)) {
+                    while (written > 0 && out[written - 1] == ' ') written--;
+                    /* No line before the first words, and one break however many tags ask. */
+                    if (written > 0 && out[written - 1] != '\n') out[written++] = '\n';
+                }
+            } else if (rubraview_u8_starts_with_ci(rest, "<br")) {
                 if (written == 0 || out[written - 1] != '\n') out[written++] = '\n';
             }
             while (i < text.len && text.ptr[i] != '>') i++;
+            continue;
+        }
+        if (html && (text.ptr[i] == '\n' || text.ptr[i] == '\r' || text.ptr[i] == '\t' || text.ptr[i] == ' ')) {
+            if (written > 0 && out[written - 1] != '\n' && out[written - 1] != ' ') out[written++] = ' ';
             continue;
         }
         if (braces_too && text.ptr[i] == '{') {
@@ -269,7 +297,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         /* Close the caption that was open. */
         if (open_at >= 0.0 && i > body_start) {
             u8str_t raw = { .ptr = text.ptr + body_start, .len = i - body_start };
-            u8str_t body = strip_markup(arena, raw, false);
+            u8str_t body = strip_markup_as(arena, raw, false, true);
             if (body.len > 0) {
                 /* SAMI marks an empty caption with `&nbsp;`, which means
                    "nothing is showing now" rather than a caption. It is
@@ -334,7 +362,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
        `&nbsp;` never said where the one before it stops. */
     if (open_at >= 0.0 && text.len > body_start) {
         u8str_t raw = { .ptr = text.ptr + body_start, .len = text.len - body_start };
-        u8str_t body = strip_markup(arena, raw, false);
+        u8str_t body = strip_markup_as(arena, raw, false, true);
         if (body.len > 0) {
             bool blank = body.len <= 6 && body.ptr[0] == '&';
             rubraview_subtitle_cue_t cue = {

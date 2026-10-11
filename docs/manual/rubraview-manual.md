@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.45.exe              the viewer, as built
-dist/rubraview-v0.0.45/                 the release bundle
-dist/rubraview-v0.0.45.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.46.exe              the viewer, as built
+dist/rubraview-v0.0.46/                 the release bundle
+dist/rubraview-v0.0.46.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -25,8 +25,15 @@ folder carry the version, so a shortcut to the program survives an update.
 `rubraview.exe --version` prints the version, and it is in the window
 title too, so a screenshot identifies the build.
 
-`rubraview.exe --version` prints the version, and it is in the window
-title too, so a screenshot identifies the build.
+There is an installer too: `rubraview-v<version>.msi` puts the same folder
+under Program Files, the program in the Start menu, and registers the file
+types and Explorer's right-click menus for every user — Windows 11's own
+menu among them, which the zip needs an administrator and a visit to
+Settings for. It asks for an administrator once. A newer installer
+replaces an older one; Installed apps removes it and its registration.
+Settings and history stay in your profile either way. After an upgrade
+every extension is registered again: if you had switched some off for
+every user, do it again in Settings › Explorer.
 
 `rubraview.exe` needs nothing installed beside it. Double-click it, or
 give it a file or a folder:
@@ -106,14 +113,15 @@ From a command line: `rubraview.exe --register-shell` and
 words `pictures`, `comics`, `video`, `music`, `archives`, or `all`) for
 some only, `--no-types` or `--no-menu` to leave one of the two as it is
 (`--remove-types`, `--remove-menu` to take one back), and
-`--all-users` (from an administrator's prompt) for every user. The menu's
+`--all-users` (from an administrator's prompt) for every user (`--setup`
+is what the installer adds: the run then ends with 0 when all but Windows
+11's menu was registered). The menu's
 items are `--open`, `--open-only`, `--add`, `--browse`, `--convert` and
 `--print`, each followed by the files.
 
 ## Reading
 
-`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages; `M` reads
-right to left. `B`, the toolbox's Layout button (its icon is the layout in
+`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages. `B`, the toolbox's Layout button (its icon is the layout in
 use) and Menu › View › Layout choose how pages are laid out, and
 Settings › Viewer › Layout shows and keeps the same choice:
 
@@ -125,6 +133,13 @@ Settings › Viewer › Layout shows and keeps the same choice:
   worth) move through it, and zooming widens or narrows the strip.
 - **Comic** — one page at a time, and a wide scan as its two halves, one
   after the other in reading order.
+
+Dual, Book and Comic each come a second time, read right to left
+(`dual-rtl`, `book-rtl`, `comic-rtl` — a book read from the back, as a
+Japanese comic is): the earlier page stands on the right, Comic shows a
+wide scan's right half first, and a click or a swipe turns the other way.
+`B` goes through all eight in that order: each of the three is followed
+by its right-to-left form. There is no separate reading-order switch.
 
 Two pages are shown at the same height, so a small scan beside a large one
 is not drawn small (at actual size, `4`, each keeps its own pixels).
@@ -435,8 +450,8 @@ have a blue edge, and a grey tile cannot do anything with what is on screen
 (`Next archive` in a plain folder, `Track` on a film with one sound track).
 The menu always opens at its top level. `Delete` in the menu asks first:
 its tile turns into `Delete?`, and a second tap within five seconds moves
-the file to the recycle bin. The reading-order tile says which way pages
-run (`Order: L>R` or `Order: R>L`). Open folder lists folders and the files
+the file to the recycle bin. The Layout tile says the layout in use and whether it
+runs right to left (`Layout: book rtl`). Open folder lists folders and the files
 the viewer can open, and says how many others it left out.
 
 Most of what the viewer does has a toolbox button: turning pages one, ten
@@ -640,8 +655,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them |
-| `M` | Left-to-right / right-to-left (manga) |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |
 | `Ctrl+[` | Previous archive in the folder |
@@ -730,9 +744,12 @@ listed under a later heading only means that while that is on screen.
 | Menu `Western` | Read the open archive's file names as Western (CP1252) |
 | Menu `Single` | Layout: one page at a time |
 | Menu `Dual` | Layout: two pages side by side |
+| Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
 | Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
 | Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
+| Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |

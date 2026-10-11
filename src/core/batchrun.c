@@ -144,6 +144,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (rubraview_u8_eq_lit(arg, "--register-shell")) { result.register_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--unregister-shell")) { result.unregister_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--all-users")) { result.shell_all_users = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--setup")) { result.shell_setup = true; continue; }
         if (starts_with(arg, "--types=", &value)) {
             result.shell_types = rubraview_shell_selection_parse(arena, value);
             if (result.shell_types.len == 0) {
@@ -415,4 +416,9 @@ size_t rubraview_batch_work_bytes(int32_t width, int32_t height, int32_t out_w, 
     if (sharpen) total += 3u * target;          /* blur's two and unsharp's result */
     total += 16u * 1024u * 1024u;               /* names, arena alignment */
     return total > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)total;
+}
+
+int rubraview_shell_setup_exit(int code, bool removing) {
+    if (removing) return 0;
+    return code == 1 ? 1 : 0;
 }

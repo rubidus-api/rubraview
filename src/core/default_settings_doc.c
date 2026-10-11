@@ -80,7 +80,7 @@ static const char *const PARTS[] = {
 "page viewer \"Viewer\"\n"
 "  section \"Pages\"\n"
 "  choice viewer.fit_mode          \"Default fit\"             window | width | height | actual | smart | stretch = window wired\n"
-"  choice viewer.layout            \"Layout\"                  single | dual | book | webtoon | comic = single wired\n"
+"  choice viewer.layout            \"Layout\"                  single | dual | dual-rtl | book | book-rtl | webtoon | comic | comic-rtl = single wired\n"
 "  int    viewer.gutter_px         \"Gutter\"                  0..32 step 1 unit \"px\" = 8 wired\n"
 "  toggle viewer.portrait_collapse \"Collapse in a portrait window\" = true wired\n"
 "  section \"Zoom\"\n"

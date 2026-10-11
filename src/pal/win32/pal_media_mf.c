@@ -102,6 +102,8 @@ typedef HRESULT (WINAPI *mf_shutdown_fn)(void);
 typedef HRESULT (WINAPI *mf_create_attributes_fn)(IMFAttributes**, UINT32);
 typedef HRESULT (WINAPI *mf_create_media_type_fn)(IMFMediaType**);
 typedef HRESULT (WINAPI *mf_create_reader_fn)(LPCWSTR, IMFAttributes*, IMFSourceReader**);
+typedef HRESULT (WINAPI *mf_create_file_fn)(int, int, int, LPCWSTR, IMFByteStream**);
+typedef HRESULT (WINAPI *mf_create_reader_stream_fn)(IMFByteStream*, IMFAttributes*, IMFSourceReader**);
 typedef HRESULT (WINAPI *mf_create_dxgi_manager_fn)(UINT*, IMFDXGIDeviceManager**);
 
 /* RV-062. Spelled out here: the import libraries do not carry all of them. */
@@ -116,6 +118,8 @@ static struct {
     mf_create_attributes_fn create_attributes;
     mf_create_media_type_fn create_media_type;
     mf_create_reader_fn create_reader;
+    mf_create_file_fn create_file;                   /* optional: see open_reader */
+    mf_create_reader_stream_fn create_reader_stream;
     mf_create_dxgi_manager_fn create_dxgi_manager;   /* optional: without it, no GPU decode */
 } g_mf;
 
@@ -132,6 +136,8 @@ static bool mf_load(void) {
     g_mf.create_attributes = (mf_create_attributes_fn)(void*)GetProcAddress(plat, "MFCreateAttributes");
     g_mf.create_media_type = (mf_create_media_type_fn)(void*)GetProcAddress(plat, "MFCreateMediaType");
     g_mf.create_reader = (mf_create_reader_fn)(void*)GetProcAddress(rw, "MFCreateSourceReaderFromURL");
+    g_mf.create_file = (mf_create_file_fn)(void*)GetProcAddress(plat, "MFCreateFile");
+    g_mf.create_reader_stream = (mf_create_reader_stream_fn)(void*)GetProcAddress(rw, "MFCreateSourceReaderFromByteStream");
     g_mf.create_dxgi_manager = (mf_create_dxgi_manager_fn)(void*)GetProcAddress(plat, "MFCreateDXGIDeviceManager");
     g_mf.ok = g_mf.startup && g_mf.shutdown && g_mf.create_attributes &&
               g_mf.create_media_type && g_mf.create_reader;
@@ -276,6 +282,22 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
 
     IMFSourceReader *reader = NULL;
     HRESULT hr = g_mf.create_reader(m->path, attrs, &reader);
+    if ((FAILED(hr) || !reader) && g_mf.create_file && g_mf.create_reader_stream) {
+        /* A path Media Foundation does not take as a URL — `\\server\share\film.avi`
+           was "cannot play this kind of file" (2026-10-11) — is opened as a
+           file and read through its byte stream, which reads as it plays. */
+        WCHAR native[sizeof(m->path) / sizeof(m->path[0])];
+        size_t n = 0;
+        for (; m->path[n] != L'\0'; ++n) native[n] = m->path[n] == L'/' ? L'\\' : m->path[n];
+        native[n] = L'\0';
+        IMFByteStream *stream = NULL;
+        /* MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST, MF_FILEFLAGS_NONE */
+        if (SUCCEEDED(g_mf.create_file(1, 0, 0, native, &stream)) && stream) {
+            reader = NULL;
+            hr = g_mf.create_reader_stream(stream, attrs, &reader);
+            IMFByteStream_Release(stream);
+        }
+    }
     IMFAttributes_Release(attrs);
     if (FAILED(hr) || !reader) {
         bool readable = GetFileAttributesW(m->path) != INVALID_FILE_ATTRIBUTES;
