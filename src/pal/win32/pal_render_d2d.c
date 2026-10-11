@@ -837,6 +837,40 @@ bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t t
     return ok;
 }
 
+bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+                                               double wrap_width, double *out_width, double *out_height) {
+    if (!renderer || !renderer->dwrite || !out_width || !out_height) return false;
+    *out_width = *out_height = 0.0;
+    if (text.len == 0) return true;
+    if (text.len > 4096) return false;
+    if (font_size <= 0.0) font_size = 14.0;
+    if (wrap_width < 1.0) wrap_width = 1.0;
+    WCHAR wide[4096];
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, (int)(sizeof(wide) / sizeof(wide[0])));
+    if (wide_len <= 0) return false;
+    /* The same face and wrapping draw_text draws with. */
+    IDWriteTextFormat *format = NULL;
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
+                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                               (FLOAT)font_size, L"", &format)) || !format) {
+        return false;
+    }
+    IDWriteTextLayout *layout = NULL;
+    bool ok = SUCCEEDED(IDWriteFactory_CreateTextLayout(renderer->dwrite, wide, (UINT32)wide_len, format,
+                                                        (FLOAT)wrap_width, 100000.0f, &layout)) && layout;
+    if (ok) {
+        DWRITE_TEXT_METRICS metrics;
+        ok = SUCCEEDED(IDWriteTextLayout_GetMetrics(layout, &metrics));
+        if (ok) {
+            *out_width = (double)metrics.width;
+            *out_height = (double)metrics.height;
+        }
+        IDWriteTextLayout_Release(layout);
+    }
+    IDWriteTextFormat_Release(format);
+    return ok;
+}
+
 /* ---- fixed-width text for the settings window (§3.22, D-13) ---- */
 
 /* Consolas ships with every Windows since Vista. A character it has no

@@ -215,6 +215,12 @@ void rubraview_pal_render_force_lost(rubraview_renderer_t *renderer);
 bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t text, double font_size,
                                        double *out_width);
 
+/* How wide and tall `text` is as draw_text lays it out in a rectangle
+   `wrap_width` wide: wrapped there, its own line ends kept (D-92: the
+   subtitle box is made to hold its text). False when it cannot tell. */
+bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+                                               double wrap_width, double *out_width, double *out_height);
+
 bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
                                     double *out_width, double *out_height);
 

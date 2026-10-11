@@ -75,6 +75,65 @@ void rubraview_subbox_drag(rubraview_subbox_t *box, rubraview_rect_t rect, doubl
 void rubraview_subbox_end_drag(rubraview_subbox_t *box);
 
 /*
+ * Where the box goes and how it holds its subtitle (D-92, owner
+ * 2026-10-11: "자막은 당연히 자막 박스 안에 다 들어가고 포함되어야").
+ *
+ * The place is a point of the window, in fractions of it, and the two
+ * alignments say which point of the box sits there: left, centre or right
+ * across; top, middle or bottom down. The text is aligned the same way
+ * inside the box. The size is fractions of the window too.
+ *
+ * A subtitle that needs more room than the box has is given it in one of
+ * two ways: the box grows (away from its anchored edge, and stays inside
+ * the window), or the box keeps its size and the font shrinks until the
+ * text fits. A font at its smallest that still does not fit grows the box
+ * after all, so the text is inside the box either way.
+ */
+typedef enum rubraview_subbox_fit {
+    RUBRAVIEW_SUBBOX_FIT_GROW = 0,
+    RUBRAVIEW_SUBBOX_FIT_SHRINK,
+} rubraview_subbox_fit_t;
+
+enum { RUBRAVIEW_SUBBOX_ALIGN_START = 0, RUBRAVIEW_SUBBOX_ALIGN_MIDDLE, RUBRAVIEW_SUBBOX_ALIGN_END };
+
+typedef struct rubraview_subbox_place {
+    double x, y;            /* the anchor point, fractions of the window */
+    double width, height;   /* the box's size, fractions of the window */
+    int    align;           /* START left, MIDDLE centre, END right */
+    int    valign;          /* START top, MIDDLE middle, END bottom */
+    rubraview_subbox_fit_t fit;
+} rubraview_subbox_place_t;
+
+/* How wide and tall `text` is at `font`, wrapped at `wrap_width`. */
+typedef bool (*rubraview_subbox_measure_fn)(void *context, double font, double wrap_width,
+                                            double *out_width, double *out_height);
+
+typedef struct rubraview_subbox_layout {
+    rubraview_rect_t box;    /* the pane */
+    rubraview_rect_t text;   /* where the text is drawn, inside the pane */
+    double font;             /* the size to draw at: `font`, or smaller when it was shrunk */
+} rubraview_subbox_layout_t;
+
+/* The padding between the pane's edge and its text, for a font size. */
+double rubraview_subbox_padding(double font);
+
+/*
+ * Lay the box out. `limit_bottom` is the lowest the box may reach (the
+ * seek bar's top; the window's height when there is none). `measure` NULL
+ * means no subtitle is showing: the box at its own size. `min_font` is as
+ * small as shrinking goes.
+ */
+rubraview_subbox_layout_t rubraview_subbox_layout(const rubraview_subbox_place_t *place,
+                                                  double win_w, double win_h, double limit_bottom,
+                                                  double font, double min_font,
+                                                  rubraview_subbox_measure_fn measure, void *context);
+
+/* The place that puts the box at `rect` — after a drag. The alignments and
+   the fit stay; the size is taken from the rectangle only when `size_too`. */
+void rubraview_subbox_place_from_rect(rubraview_subbox_place_t *place, rubraview_rect_t rect,
+                                      double win_w, double win_h, bool size_too);
+
+/*
  * The Sub tile: a tap turns the subtitles on or off, a double tap or a
  * held press opens the list of tracks. The tap is decided only when the
  * double-tap window has passed, so a double tap never flickers the

@@ -96,6 +96,73 @@ void rubraview_subbox_end_drag(rubraview_subbox_t *box) {
     if (box) box->dragging = RUBRAVIEW_SUBBOX_NONE;
 }
 
+double rubraview_subbox_padding(double font) {
+    return font * 0.25;
+}
+
+static double anchor_offset(int align, double size) {
+    return align == RUBRAVIEW_SUBBOX_ALIGN_START ? 0.0 : (align == RUBRAVIEW_SUBBOX_ALIGN_END ? size : size * 0.5);
+}
+
+rubraview_subbox_layout_t rubraview_subbox_layout(const rubraview_subbox_place_t *place,
+                                                  double win_w, double win_h, double limit_bottom,
+                                                  double font, double min_font,
+                                                  rubraview_subbox_measure_fn measure, void *context) {
+    rubraview_subbox_layout_t out = { .font = font };
+    if (!place || win_w <= 0.0 || win_h <= 0.0) return out;
+    if (limit_bottom <= 0.0 || limit_bottom > win_h) limit_bottom = win_h;
+    if (min_font <= 0.0 || min_font > font) min_font = font;
+
+    double w = clampd(place->width * win_w, 1.0, win_w);
+    double h = clampd(place->height * win_h, 1.0, limit_bottom);
+    double pad = rubraview_subbox_padding(font);
+    double text_w = 0.0, text_h = 0.0;
+    bool measured = measure && measure(context, font, w - 2.0 * pad > 1.0 ? w - 2.0 * pad : 1.0, &text_w, &text_h);
+
+    if (measured && text_h + 2.0 * pad > h) {
+        if (place->fit == RUBRAVIEW_SUBBOX_FIT_SHRINK) {
+            /* A twelfth smaller each step: the size that fits is within
+               that of the largest that would. */
+            double f = font;
+            while (f > min_font) {
+                f *= 11.0 / 12.0;
+                if (f < min_font) f = min_font;
+                double p = rubraview_subbox_padding(f), tw = 0.0, th = 0.0;
+                if (!measure(context, f, w - 2.0 * p > 1.0 ? w - 2.0 * p : 1.0, &tw, &th)) break;
+                out.font = f; pad = p; text_w = tw; text_h = th;
+                if (th + 2.0 * p <= h) break;
+            }
+        }
+        /* Growing, or a font at its smallest that still does not fit. */
+        if (text_h + 2.0 * pad > h) h = clampd(text_h + 2.0 * pad, 1.0, limit_bottom);
+    }
+
+    double x = place->x * win_w - anchor_offset(place->align, w);
+    double y = place->y * win_h - anchor_offset(place->valign, h);
+    x = clampd(x, 0.0, win_w - w);
+    y = clampd(y, 0.0, limit_bottom - h);
+    out.box = (rubraview_rect_t){ x, y, w, h };
+
+    double inner_w = w - 2.0 * pad > 1.0 ? w - 2.0 * pad : 1.0;
+    double inner_h = h - 2.0 * pad > 1.0 ? h - 2.0 * pad : 1.0;
+    if (!measured || text_h > inner_h) text_h = inner_h;
+    double ty = y + pad + anchor_offset(place->valign, inner_h - text_h);
+    out.text = (rubraview_rect_t){ x + pad, ty, inner_w, text_h };
+    (void)text_w;
+    return out;
+}
+
+void rubraview_subbox_place_from_rect(rubraview_subbox_place_t *place, rubraview_rect_t rect,
+                                      double win_w, double win_h, bool size_too) {
+    if (!place || win_w <= 0.0 || win_h <= 0.0) return;
+    place->x = clampd((rect.x + anchor_offset(place->align, rect.width)) / win_w, 0.0, 1.0);
+    place->y = clampd((rect.y + anchor_offset(place->valign, rect.height)) / win_h, 0.0, 1.0);
+    if (size_too) {
+        place->width = clampd(rect.width / win_w, 0.0, 1.0);
+        place->height = clampd(rect.height / win_h, 0.0, 1.0);
+    }
+}
+
 rubraview_tap_result_t rubraview_tap_press(rubraview_tap_t *tap, double now) {
     if (!tap) return RUBRAVIEW_TAP_NOTHING;
     if (tap->pending && now - tap->released_at <= RUBRAVIEW_TAP_DOUBLE_SECONDS) {

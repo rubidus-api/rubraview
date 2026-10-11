@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.46.exe              the viewer, as built
-dist/rubraview-v0.0.46/                 the release bundle
-dist/rubraview-v0.0.46.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.47.exe              the viewer, as built
+dist/rubraview-v0.0.47/                 the release bundle
+dist/rubraview-v0.0.47.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -411,12 +411,21 @@ While it does:
   sound is playing.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later.
-- Text subtitles sit in a shaded box. Tap it and its edge thickens and four
-  small buttons appear at its top-right corner: drag **M** to move the box,
-  drag **R** to resize it (the height is the subtitle size), **S** opens the
-  subtitle settings and **X** turns subtitles off. Tap anywhere else to let
-  it go. The box stays where you left it. A DVD's or a Blu-ray's picture
-  subtitles stay where the disc puts them.
+- Text subtitles sit in a shaded box, and the box always holds the whole
+  subtitle: one of many lines, or one long enough to wrap, makes the box
+  grow from the edge it is anchored by (it stays inside the window and
+  above the seek bar). Settings › Video › **When it does not fit** set to
+  `shrink` keeps the box its size and makes the text smaller until it fits
+  instead. The same page places the box in percents of the window: a point
+  (**Box place, across** and **down**), which part of the box sits on that
+  point and how the text is aligned in it (**left / center / right**,
+  **top / middle / bottom**), and the box's **width** and **height**.
+- Tap the box and its edge thickens and four buttons appear at its
+  top-right corner: drag **M** to move it, drag **R** to resize it (both
+  write those settings; the text's size is **Subtitle size**), **S** opens
+  the subtitle settings and **X** turns subtitles off. Tap anywhere else
+  to let go of the box. A DVD's or a Blu-ray's picture subtitles stay
+  where the disc puts them.
 - The toolbox's **CC** button turns subtitles off and on. Tap it twice
   quickly, or hold it for half a second, and a list of the film's subtitles
   opens — tap the one you want (or **Off**).

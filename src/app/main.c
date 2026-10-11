@@ -6002,6 +6002,8 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 /* §3.15.2's three tiers: breadcrumb header, virtualised tile grid,
    action bar. Tiles are large enough to hit with a thumb over Remote
    Desktop, which is the whole reason this picker exists. */
+static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+                                       double size, double outline, uint32_t argb, rubraview_text_align_t align);
 static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb);
 
@@ -6208,6 +6210,11 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
    outline is wide enough to show a gap. */
 static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb) {
+    draw_outlined_text_aligned(renderer, text, rect, size, outline, argb, RUBRAVIEW_TEXT_CENTER);
+}
+
+static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+                                       double size, double outline, uint32_t argb, rubraview_text_align_t align) {
     static const double DX[8] = { -1.0, 0.0, 1.0, -1.0, 1.0, -1.0, 0.0, 1.0 };
     static const double DY[8] = { -1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0 };
     int rings = outline > 3.0 ? 2 : 1;
@@ -6215,10 +6222,10 @@ static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rub
         double off = ring == 0 ? outline : outline * 0.5;
         for (size_t i = 0; i < 8; ++i) {
             rubraview_pal_rect_t shadow = { rect.x + DX[i] * off, rect.y + DY[i] * off, rect.width, rect.height };
-            rubraview_pal_render_draw_text(renderer, text, shadow, size, 0xFF000000u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_draw_text(renderer, text, shadow, size, 0xFF000000u, align);
         }
     }
-    rubraview_pal_render_draw_text(renderer, text, rect, size, argb, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(renderer, text, rect, size, argb, align);
 }
 
 /* §3.16.1 / R135: the line of dialogue for where the film is now, laid
@@ -6335,30 +6342,93 @@ static double subtitle_font_px(app_state_t *app, double win_h) {
     return wanted * rubraview_pal_window_dpi_scale(app->window) * subtitle_window_scale(win_h);
 }
 
-/* Two lines and a margin: the box's height for a given font (D-33). */
-#define SUBBOX_LINES_FACTOR (1.35 * 2.0 + 0.5)
-
-/* Where the subtitle box is (D-33). Unplaced, it is where subtitles
-   always were: the bottom, above the filmstrip, 90% wide. */
-static rubraview_rect_t subbox_geometry(app_state_t *app, double win_w, double win_h, double *out_font) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double font = subtitle_font_px(app, win_h);
-    double height = font * SUBBOX_LINES_FACTOR;
-    /* Unplaced, the box sits just above the seek bar, so the bar never
-       covers its last line (it did, VM 2026-09-25). */
-    rubraview_pal_rect_t bar, track;
-    timeline_geometry(app, win_w, win_h, &bar, &track);
-    double bottom = bar.y - 4.0 * dpi;
-    rubraview_rect_t def = { win_w * 0.05, bottom - height, win_w * 0.9, height };
-    if (out_font) *out_font = font;
-    return rubraview_subbox_rect(&app->subbox, win_w, win_h, height, def);
-}
-
 /* The text subtitle on screen now, or NULL. */
 static const rubraview_subtitle_cue_t *subtitle_cue_now(app_state_t *app) {
     if (!app->media || app->subtitle.count == 0) return NULL;
     const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
     return (cue && cue->text.len > 0) ? cue : NULL;
+}
+
+/* D-92: where the box is and what it does with a long subtitle, from
+   Settings > Video. A box dragged into place before 0.0.47 (layout.ini's
+   left edge, bottom edge and width) becomes these settings once. */
+static rubraview_subbox_place_t subbox_place(app_state_t *app) {
+    rubraview_settings_t *st = &app->settings;
+    if (app->subbox.placed) {
+        app->subbox.placed = false;
+        rubraview_settings_set(st, U8("video"), U8("subtitle_align"), (double)RUBRAVIEW_SUBBOX_ALIGN_MIDDLE);
+        rubraview_settings_set(st, U8("video"), U8("subtitle_valign"), (double)RUBRAVIEW_SUBBOX_ALIGN_END);
+        rubraview_settings_set(st, U8("video"), U8("subtitle_x"), floor((app->subbox.left + app->subbox.width * 0.5) * 100.0 + 0.5));
+        rubraview_settings_set(st, U8("video"), U8("subtitle_y"), floor(app->subbox.bottom * 100.0 + 0.5));
+        rubraview_settings_set(st, U8("video"), U8("subtitle_width"), floor(app->subbox.width * 100.0 + 0.5));
+        settings_took_effect(app);
+    }
+    return (rubraview_subbox_place_t){
+        .x = rubraview_settings_get(st, U8("video"), U8("subtitle_x")) / 100.0,
+        .y = rubraview_settings_get(st, U8("video"), U8("subtitle_y")) / 100.0,
+        .width = rubraview_settings_get(st, U8("video"), U8("subtitle_width")) / 100.0,
+        .height = rubraview_settings_get(st, U8("video"), U8("subtitle_height")) / 100.0,
+        .align = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_align"))),
+        .valign = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_valign"))),
+        .fit = rubraview_settings_get(st, U8("video"), U8("subtitle_fit")) > 0.5 ? RUBRAVIEW_SUBBOX_FIT_SHRINK
+                                                                                 : RUBRAVIEW_SUBBOX_FIT_GROW,
+    };
+}
+
+struct subbox_measure { rubraview_renderer_t *renderer; u8str_t text; };
+
+static bool subbox_measure_text(void *context, double font, double wrap_width, double *out_width, double *out_height) {
+    struct subbox_measure *m = (struct subbox_measure*)context;
+    return rubraview_pal_render_measure_text_wrapped(m->renderer, m->text, font, wrap_width, out_width, out_height);
+}
+
+/* The box and the text in it, for the subtitle showing now (or the box
+   alone). It stays above the seek bar, so the bar never covers its last
+   line (it did, VM 2026-09-25). Measuring text is not free and the answer
+   only changes with the subtitle, the window or a setting: the last one is kept. */
+static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, double win_h) {
+    static struct {
+        bool valid;
+        const rubraview_subtitle_cue_t *cue;
+        const char *text;
+        size_t text_len;
+        double win_w, win_h, font, limit;
+        rubraview_subbox_place_t place;
+        rubraview_subbox_layout_t layout;
+    } kept;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double font = subtitle_font_px(app, win_h);
+    rubraview_pal_rect_t bar, track;
+    timeline_geometry(app, win_w, win_h, &bar, &track);
+    double limit = bar.y - 4.0 * dpi;
+    rubraview_subbox_place_t place = subbox_place(app);
+    const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
+    if (kept.valid && kept.cue == cue && kept.text == (cue ? cue->text.ptr : NULL) &&
+        kept.text_len == (cue ? cue->text.len : 0) && kept.win_w == win_w &&
+        kept.win_h == win_h && kept.font == font && kept.limit == limit &&
+        kept.place.x == place.x && kept.place.y == place.y && kept.place.width == place.width &&
+        kept.place.height == place.height && kept.place.align == place.align &&
+        kept.place.valign == place.valign && kept.place.fit == place.fit) {
+        return kept.layout;
+    }
+    struct subbox_measure measure = { .renderer = app->renderer, .text = cue ? cue->text : U8("") };
+    /* No smaller than a size that can still be read: ten points' worth here. */
+    double min_font = 10.0 * dpi * subtitle_window_scale(win_h);
+    kept.layout = rubraview_subbox_layout(&place, win_w, win_h, limit, font, min_font,
+                                          cue ? subbox_measure_text : NULL, &measure);
+    kept.valid = true;
+    kept.cue = cue;
+    kept.text = cue ? cue->text.ptr : NULL;
+    kept.text_len = cue ? cue->text.len : 0;
+    kept.win_w = win_w; kept.win_h = win_h; kept.font = font; kept.limit = limit;
+    kept.place = place;
+    return kept.layout;
+}
+
+static rubraview_rect_t subbox_geometry(app_state_t *app, double win_w, double win_h, double *out_font) {
+    rubraview_subbox_layout_t layout = subbox_layout(app, win_w, win_h);
+    if (out_font) *out_font = layout.font;
+    return layout.box;
 }
 
 /* A subtitle box can be touched while it shows text, or once selected. */
@@ -6376,8 +6446,9 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (!cue && !app->subbox.selected) return;   /* an empty box draws nothing */
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double font = 0.0;
-    rubraview_rect_t box = subbox_geometry(app, (double)win_w, (double)win_h, &font);
+    rubraview_subbox_layout_t placed = subbox_layout(app, (double)win_w, (double)win_h);
+    double font = placed.font;
+    rubraview_rect_t box = placed.box;
     rubraview_pal_rect_t body = { box.x, box.y, box.width, box.height };
 
     /* The translucent pane: `video.subtitle_background` percent of black. */
@@ -6406,21 +6477,20 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     }
     if (!cue) return;
 
-    /* The text sits on the box's bottom; more than two lines grow it up. */
-    size_t lines = 1;
-    for (size_t i = 0; i < cue->text.len; ++i) {
-        if (cue->text.ptr[i] == '\n') ++lines;
-    }
-    double pad = font * 0.25;
-    double needed = font * 1.35 * (double)lines;
-    double room = box.height - 2.0 * pad;
-    if (needed < room) needed = room;
-    rubraview_pal_rect_t rect = { box.x + pad, box.y + box.height - pad - needed, box.width - 2.0 * pad, needed };
+    /* D-92: the box was laid out to hold this text; it is drawn where the
+       layout put it, aligned as the box is anchored. */
+    rubraview_pal_rect_t rect = { placed.text.x, placed.text.y, placed.text.width, placed.text.height };
+    int across = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_align")));
+    rubraview_text_align_t align = across == RUBRAVIEW_SUBBOX_ALIGN_START ? RUBRAVIEW_TEXT_LEFT
+                                 : across == RUBRAVIEW_SUBBOX_ALIGN_END ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_CENTER;
 
     /* R135 asks for a two-pixel outline, and §3.22.2.5 lets the reader
        change it (0 turns it off). */
     double outline = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
-    draw_outlined_text(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu);
+    /* A font shrunk to fit keeps an outline in proportion, not one that fills its letters. */
+    double asked = subtitle_font_px(app, (double)win_h);
+    if (asked > 0.0 && font < asked) outline *= font / asked;
+    draw_outlined_text_aligned(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu, align);
 }
 
 /* The list a double tap or a held press on the Sub tile opens (D-33). */
@@ -6511,24 +6581,33 @@ static bool subbox_press(app_state_t *app, double x, double y, bool buttons_only
     return false;
 }
 
-/* D-33: M or R held and dragged. R writes the subtitle size itself, so
-   the settings page and the box never disagree. */
+/* D-33, D-92: M or R held and dragged. Both write Settings > Video's
+   place and size of the box, in whole percents of the window, so the
+   settings page and the box never disagree. (R wrote the subtitle size
+   until 0.0.47; the size is its own setting now.) */
 static void subbox_drag_motion(app_state_t *app, double x, double y) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) return;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     rubraview_rect_t box = subbox_geometry(app, (double)win_w, (double)win_h, NULL);
-    double scale = dpi * subtitle_window_scale((double)win_h);
-    double min_h = 10.0 * scale * SUBBOX_LINES_FACTOR, max_h = 72.0 * scale * SUBBOX_LINES_FACTOR;
+    bool resizing = app->subbox.dragging == RUBRAVIEW_SUBBOX_RESIZE;
     double height = box.height;
     rubraview_subbox_drag(&app->subbox, box, x, y, (double)win_w, (double)win_h,
-                          160.0 * dpi, min_h, max_h, &height);
-    if (app->subbox.dragging == RUBRAVIEW_SUBBOX_RESIZE) {
-        double points = floor(height / SUBBOX_LINES_FACTOR / scale + 0.5);
-        if (points < 10.0) points = 10.0;
-        if (points > 72.0) points = 72.0;
-        rubraview_settings_set(&app->settings, U8("video"), U8("subtitle_size"), points);
+                          160.0 * dpi, 0.05 * (double)win_h, (double)win_h, &height);
+    rubraview_rect_t moved = { app->subbox.left * (double)win_w, app->subbox.bottom * (double)win_h - height,
+                               app->subbox.width * (double)win_w, height };
+    app->subbox.placed = false;   /* the drag's own record is not a place to migrate */
+    rubraview_subbox_place_t place = subbox_place(app);
+    rubraview_subbox_place_from_rect(&place, moved, (double)win_w, (double)win_h, resizing);
+    rubraview_settings_t *st = &app->settings;
+    rubraview_settings_set(st, U8("video"), U8("subtitle_x"), floor(place.x * 100.0 + 0.5));
+    rubraview_settings_set(st, U8("video"), U8("subtitle_y"), floor(place.y * 100.0 + 0.5));
+    if (resizing) {
+        rubraview_settings_set(st, U8("video"), U8("subtitle_width"), floor(place.width * 100.0 + 0.5));
+        rubraview_settings_set(st, U8("video"), U8("subtitle_height"), floor(place.height * 100.0 + 0.5));
     }
+    settings_took_effect(app);
 }
 
 /* The text box: renaming a file, or giving the picked files one
