@@ -1,6 +1,9 @@
 #include "rubraview/ui_actions.h"
 #include "rubraview/repeat.h"
+#include "rubraview/aspect.h"
 #include <string.h>
+#include <stdio.h>
+#include <math.h>
 
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
@@ -72,6 +75,20 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     rubraview_layout_choice_t choice = rubraview_layout_choice_of(f->layout, f->rtl ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR);
     if (rubraview_u8_eq_lit(action, "toggle_layout")) st.value = LAYOUTS[choice].value;
     if (rubraview_u8_eq_lit(action, LAYOUTS[choice].action)) st.mark = RUBRAVIEW_MARK_CURRENT;
+    /* The shape the picture is shown in (owner, 2026-10-11). */
+    rubraview_aspect_t aspect = rubraview_aspect_from_action(action);
+    if (aspect != RUBRAVIEW_ASPECT_COUNT) {
+        st.enabled = f->has_page;
+        if ((int32_t)aspect == f->aspect) st.mark = RUBRAVIEW_MARK_CURRENT;
+    }
+    if (rubraview_u8_eq_lit(action, "aspect_cycle")) {
+        st.enabled = f->has_page;
+        st.value = rubraview_aspect_label((rubraview_aspect_t)f->aspect);
+    }
+    if (rubraview_u8_eq_lit(action, "aspect_flip")) {
+        st.enabled = f->has_page && f->aspect != (int32_t)RUBRAVIEW_ASPECT_ORIGINAL;
+        st.mark = f->aspect_on_its_side ? RUBRAVIEW_MARK_ON : RUBRAVIEW_MARK_OFF;
+    }
     static const struct { const char *action; rubraview_fit_mode_t fit; } FITS[] = {
         { "fit_window",  RUBRAVIEW_FIT_WINDOW },
         { "fit_width",   RUBRAVIEW_FIT_WIDTH },
@@ -118,6 +135,17 @@ bool rubraview_confirm_armed(const rubraview_confirm_t *c, int64_t key, double n
 
 void rubraview_confirm_clear(rubraview_confirm_t *c) {
     if (c) *c = (rubraview_confirm_t){0};
+}
+
+u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale) {
+    u8str_t none = { .ptr = buffer, .len = 0 };
+    if (!buffer || !(scale > 0.0)) return none;
+    double percent = floor(scale * 100.0 + 0.5);
+    if (percent < 1.0) percent = 1.0;
+    if (percent > 999999.0) percent = 999999.0;
+    int n = snprintf(buffer, buffer_size, "%.0f%%", percent);
+    if (n <= 0 || (size_t)n >= buffer_size) return none;
+    return (u8str_t){ .ptr = buffer, .len = (size_t)n };
 }
 
 /* ---- toolbox icons (Segoe MDL2 Assets) ---- */

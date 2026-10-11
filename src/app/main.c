@@ -39,6 +39,7 @@
 
 #include "rubraview/number.h"
 #include "rubraview/subbox.h"
+#include "rubraview/aspect.h"
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
 #include "rubraview/pal/pal_thumbs.h"
@@ -202,10 +203,26 @@ static void page_picture_size(const app_page_t *page, int32_t *out_w, int32_t *o
 static int32_t picture_w(const app_page_t *page) { int32_t w = 0, h = 0; page_picture_size(page, &w, &h); return w; }
 static int32_t picture_h(const app_page_t *page) { int32_t w = 0, h = 0; page_picture_size(page, &w, &h); return h; }
 
-static void page_picture_size(const app_page_t *page, int32_t *out_w, int32_t *out_h) {
+/* The file's own pixels: what editing, saving and the information speak of. */
+static void page_real_size(const app_page_t *page, int32_t *out_w, int32_t *out_h) {
     bool full = page->reduced && page->full_width > 0 && page->full_height > 0;
     *out_w = full ? page->full_width : page->width;
     *out_h = full ? page->full_height : page->height;
+}
+static int32_t real_w(const app_page_t *page) { int32_t w = 0, h = 0; page_real_size(page, &w, &h); return w; }
+static int32_t real_h(const app_page_t *page) { int32_t w = 0, h = 0; page_real_size(page, &w, &h); return h; }
+
+/* D-94: the shape chosen to look at pictures in (0: their own), and
+   whether they are shown turned a quarter — set by aspect_refresh. The
+   layout size is the real one stretched to it; the texture is drawn to
+   the layout size by page_texture_prescale, as a reduced one already was. */
+static double g_view_ratio = 0.0;
+static bool g_view_turned = false;
+
+static void page_picture_size(const app_page_t *page, int32_t *out_w, int32_t *out_h) {
+    int32_t w = 0, h = 0;
+    page_real_size(page, &w, &h);
+    rubraview_aspect_apply(g_view_ratio, g_view_turned, w, h, out_w, out_h);
 }
 
 /* Texture pixels to picture pixels: identity unless the page is reduced. */
@@ -341,6 +358,10 @@ typedef struct app_state {
        turns out to be is known only when it is released. */
     rubraview_box_t       *box_drag;          /* the box a press landed on, NULL when none */
     double                 box_grab_dx, box_grab_dy;   /* where inside the anchor it was grabbed */
+    /* Where the two boxes are, as shares of the window ([0] the toolbox, [1] the menu box; x, y),
+       and where that last put them: an anchor found elsewhere was moved by hand. */
+    double                 box_share[2][2], box_put[2][2];
+    bool                   box_share_known[2];
     double                 box_press_x, box_press_y;
     bool                   box_drag_moved;
     rubraview_box_t       *box_sizing;        /* a box whose grip is being dragged (owner, 2026-09-29) */
@@ -539,6 +560,8 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    rubraview_aspect_t aspect;             /* D-94: the shape pictures are shown in, for the session */
+    bool aspect_side;                      /* that shape on its side */
     rubraview_osd_t osd;                   /* RV-039 */
     rubraview_titlebar_t titlebar;         /* RV-040 */
     rubraview_box_t toolbox;               /* RV-020 */
@@ -3078,6 +3101,7 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
                             rubraview_mat3x2_t place, double scale, int32_t win_w, int32_t win_h,
                             double opacity, rubraview_interpolation_t interp) {
     struct tile_set *ts = &app->tile_sets[which == 1 ? 1 : 0];
+    if (g_view_ratio > 0.0) return;   /* tiles are cut in the file's pixels: a stretched page keeps its one texture */
     int32_t pw = 0, ph = 0;
     page_picture_size(page, &pw, &ph);
     /* Sharper than the texture in two cases: the page is held reduced and
@@ -3791,6 +3815,8 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
                                         : anim_end_mode(app) == 1 ? (int32_t)RUBRAVIEW_REPEAT_STOP
                                                                   : (int32_t)RUBRAVIEW_REPEAT_NEXT)
                                      : (int32_t)repeat_mode(app),
+        .aspect = (int32_t)app->aspect,
+        .aspect_on_its_side = app->aspect_side,
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
         .toolbox_pinned = app->toolbox.pinned,
@@ -3809,6 +3835,35 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
     };
 }
 
+static double view_scale(app_state_t *app);
+
+/* D-94: what page_picture_size stretches to. Editing works in the file's
+   own pixels, so while the edit panel is open the shape is the file's. */
+static void aspect_refresh(app_state_t *app) {
+    double ratio = edit_panel_open(app) ? 0.0
+        : rubraview_aspect_ratio(app->aspect, rubraview_settings_get(&app->settings, U8("viewer"), U8("aspect_width")),
+                                 rubraview_settings_get(&app->settings, U8("viewer"), U8("aspect_height")), app->aspect_side);
+    double w = 0.0, h = 0.0;
+    rubraview_orientation_apply_size(app->orientation, 1.0, 2.0, &w, &h);
+    bool turned = w > h;
+    if (ratio == g_view_ratio && turned == g_view_turned) return;
+    g_view_ratio = ratio;
+    g_view_turned = turned;
+    app->strip_base_w = 0.0;   /* the strip's width is a page's */
+    app->needs_relayout = true;
+}
+
+static void aspect_set(app_state_t *app, rubraview_aspect_t aspect, bool side) {
+    app->aspect = aspect;
+    app->aspect_side = aspect == RUBRAVIEW_ASPECT_ORIGINAL ? false : side;
+    aspect_refresh(app);
+    char line[64];
+    double ratio = g_view_ratio;
+    int n = ratio > 0.0 ? snprintf(line, sizeof(line), "shape: %s%s (%.3g:1)", rubraview_aspect_label(aspect), app->aspect_side ? ", on its side" : "", ratio)
+                        : snprintf(line, sizeof(line), "shape: the file's own");
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+}
+
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
     rubraview_action_facts_t facts = action_facts(app);
     rubraview_action_state_t st = rubraview_action_state(tile->action, &facts);
@@ -3817,6 +3872,12 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         /* A setting the tile names, "Order: R>L": drawn before the next call. */
         static char named[48];
         return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
+    }
+    if (rubraview_u8_eq_lit(tile->action, "actual_size")) {
+        /* D-93: the tile says how large the picture is now; a tap makes it 100%. */
+        static char percent[16];   /* drawn before the next call */
+        u8str_t text = rubraview_scale_caption(percent, sizeof(percent), view_scale((app_state_t*)app));
+        return text.len > 0 ? text : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
@@ -3831,7 +3892,9 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) {
-        if (anim_plays(app)) return anim_end_mode(app) == 0 ? U8("Loop") : anim_end_mode(app) == 1 ? U8("Once") : U8("Next");
+        /* "To Next" on two lines (owner, 2026-10-11): "Next" alone read as the next-file button. */
+        if (anim_plays(app)) return anim_end_mode(app) == 0 ? U8("Loop") : anim_end_mode(app) == 1 ? U8("Once") : U8("To\nNext");
+        if (repeat_mode(app) == RUBRAVIEW_REPEAT_NEXT) return U8("To\nNext");
         return cstr(rubraview_repeat_caption(repeat_mode(app)));
     }
     if (rubraview_u8_eq_lit(tile->action, "media_eq_cycle")) {
@@ -4293,6 +4356,36 @@ static void handle_action(app_state_t *app, u8str_t action) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC, false);
     } else if (rubraview_u8_eq_lit(action, "layout_comic_rtl")) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL, false);
+    } else if (rubraview_u8_eq_lit(action, "aspect_original")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_ORIGINAL, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_4_3")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_4_3, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_5_4")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_5_4, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_3_2")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_3_2, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_16_10")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_16_10, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_16_9")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_16_9, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_185")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_CINEMA_FLAT, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_21_9")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_21_9, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_239")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_CINEMA_SCOPE, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_1_1")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_1_1, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_paper")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_PAPER, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_letter")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_LETTER, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_custom")) {
+        aspect_set(app, RUBRAVIEW_ASPECT_CUSTOM, app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_cycle")) {
+        aspect_set(app, rubraview_aspect_next(app->aspect), app->aspect_side);
+    } else if (rubraview_u8_eq_lit(action, "aspect_flip")) {
+        aspect_set(app, app->aspect, !app->aspect_side);
     } else if (rubraview_u8_eq_lit(action, "toggle_toolbox")) {
         /* A toolbox that is its own window is put back, not shown twice. */
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
@@ -5789,21 +5882,6 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
     return false;
 }
 
-/* Where the timeline strip along the bottom was (RFC-0002 §4.2). The strip
-   is gone — the toolbox's seek bar is the one (owner, 2026-09-29: "툴바에만
-   뜨게") — but the subtitle box still sits above where it was. */
-static void timeline_geometry(const app_state_t *app, double win_w, double win_h,
-                              rubraview_pal_rect_t *out_bar, rubraview_pal_rect_t *out_track) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double bar_h = 28.0 * dpi;
-    double info_top = win_h - bar_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
-    *out_bar = (rubraview_pal_rect_t){ 0.0, info_top - bar_h, win_w, bar_h };
-    double left = 110.0 * dpi, right = 250.0 * dpi;
-    double width = win_w - left - right;
-    if (width < 40.0 * dpi) width = 40.0 * dpi;
-    *out_track = (rubraview_pal_rect_t){ left, out_bar->y + bar_h * 0.4, width, bar_h * 0.2 };
-}
-
 /* The strip's bar for a still picture: its place in the folder or archive. */
 static bool pagebar_shown(const app_state_t *app) {
     return !app->media && !anim_plays(app) && page_count(app) > 1;
@@ -6383,9 +6461,11 @@ static bool subbox_measure_text(void *context, double font, double wrap_width, d
 }
 
 /* The box and the text in it, for the subtitle showing now (or the box
-   alone). It stays above the seek bar, so the bar never covers its last
-   line (it did, VM 2026-09-25). Measuring text is not free and the answer
-   only changes with the subtitle, the window or a setting: the last one is kept. */
+   alone). The whole window is its room, the margins above and under a
+   film too (D-93, owner 2026-10-11: "자막이 영상 바깥으로 나갈 수 있게") —
+   only the filmstrip, when it is up, is kept clear. Measuring text is not
+   free and the answer only changes with the subtitle, the window or a
+   setting: the last one is kept. */
 static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, double win_h) {
     static struct {
         bool valid;
@@ -6398,9 +6478,7 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     } kept;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double font = subtitle_font_px(app, win_h);
-    rubraview_pal_rect_t bar, track;
-    timeline_geometry(app, win_w, win_h, &bar, &track);
-    double limit = bar.y - 4.0 * dpi;
+    double limit = win_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
     rubraview_subbox_place_t place = subbox_place(app);
     const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
     if (kept.valid && kept.cue == cue && kept.text == (cue ? cue->text.ptr : NULL) &&
@@ -7072,8 +7150,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
             /* The name and the position are on the toolbox's line: here only
                what nothing else shows (owner, 2026-09-29). */
             u8str_t text = rubraview_osd_format(line, sizeof(line), U8(""),
-                                                picture_w(&app->pages[page]), picture_h(&app->pages[page]),
-                                                app->zoom * 100.0, 0, 0);
+                                                real_w(&app->pages[page]), real_h(&app->pages[page]),
+                                                view_scale(app) * 100.0, 0, 0);
             static const char REDUCED[] = "  |  shown reduced";
             if (app->pages[page].reduced && text.ptr == line && text.len + sizeof(REDUCED) <= sizeof(line)) {
                 memcpy(line + text.len, REDUCED, sizeof(REDUCED));
@@ -8200,7 +8278,7 @@ static void panel_open_edit(app_state_t *app) {
     if (page < 0) return;
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    app->edit = rubraview_edit_begin(picture_w(&app->pages[page]), picture_h(&app->pages[page]));
+    app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
     app->panel = rubraview_panel_create(U8("Adjust"), dpi);
     app->panel_is_export = false;
     app->panel_is_batch = false;
@@ -8932,7 +9010,7 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
         osd_say(app, cstr(rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED)));
         return;
     }
-    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
     if (w <= 0 || h <= 0) { osd_say(app, U8("not saved: the page is not read yet")); return; }
 
@@ -9017,7 +9095,7 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
 
     rubraview_export_route_t route = rubraview_export_plan(&options, source_format, pixels_change);
 
-    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
     if (route != RUBRAVIEW_EXPORT_STRIP_ONLY && route != RUBRAVIEW_EXPORT_COPY && (w <= 0 || h <= 0)) {
         osd_say(app, U8("not saved: the page is not read yet"));
@@ -10362,7 +10440,7 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
 
 #define INFO_ARENA_BYTES (4u * 1024u * 1024u)
 #define INFO_MAX_ROWS 512
-#define INFO_LABEL_COLS 16
+#define INFO_LABEL_COLS 20
 
 static void info_local_time(char *buf, size_t cap, int64_t unix_seconds) {
     buf[0] = '\0';
@@ -10381,6 +10459,14 @@ static void info_folder_summary(app_state_t *app, u8str_t dir);
 static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info_t *info);
 
 /* What there is to say about the page on screen, gathered into rows. */
+static void info_add_details(proven_arena_t *a, rubraview_info_t *info, const rubraview_details_t *details) {
+    for (size_t i = 0; details && i < details->count; ++i) {
+        const rubraview_detail_t *line = &details->lines[i];
+        if (line->heading) rubraview_info_heading(a, info, line->label);
+        else rubraview_info_add(a, info, line->label, (u8str_t){ line->value, strlen(line->value) });
+    }
+}
+
 static void info_gather(app_state_t *app) {
     if (!app->info_mem) {
         app->info_mem = malloc(INFO_ARENA_BYTES);
@@ -10481,6 +10567,8 @@ static void info_gather(app_state_t *app) {
             if (!kbps && file_bytes && m->duration_seconds > 0.0) kbps = (uint32_t)((double)file_bytes * 8.0 / m->duration_seconds / 1000.0);
             if (kbps) rubraview_info_addf(a, &info, "Bitrate", "%u kbit/s%s", (unsigned)kbps, m->bitrate_kbps ? "" : " (size over length)");
             rubraview_info_add(a, &info, "Opened by", m->backend == RUBRAVIEW_BACKEND_FFMPEG ? U8("FFmpeg") : U8("Media Foundation"));
+            /* What the container and the codecs say of themselves, all of it (owner, 2026-10-11). */
+            info_add_details(a, &info, rubraview_pal_media_details(app->media));
             if (app->tracks.count > 0) {
                 rubraview_info_heading(a, &info, "Tracks");
                 for (size_t t = 0; t < app->tracks.count && t < 32; ++t) {
@@ -10537,6 +10625,22 @@ static void info_gather(app_state_t *app) {
             const app_page_t *page = &app->pages[index];
             if (page->loaded && page->reduced) {
                 rubraview_info_addf(a, &info, "On screen", "reduced to %d x %d (the graphics card's limit)", page->width, page->height);
+            }
+            if (bytes) {
+                /* The file's own account of how it was made, and how much that saved. */
+                static rubraview_details_t details;
+                uint32_t raw_bits = 0;
+                memset(&details, 0, sizeof(details));
+                bool known = rubraview_image_details(bytes, size, &details, &raw_bits);
+                if (described && d.width > 0 && d.height > 0) {
+                    double pixels = (double)d.width * (double)d.height * (d.frames > 1 ? (double)d.frames : 1.0);
+                    char ratio[96];
+                    rubraview_info_addf(a, &info, "Stored at", "%.2f bits a pixel", (double)size * 8.0 / pixels);
+                    if (rubraview_detail_ratio(ratio, sizeof(ratio), (double)size, pixels * (raw_bits ? raw_bits : 24) / 8.0)) {
+                        rubraview_info_addf(a, &info, "Compression", "%s, at %u bits a pixel", ratio, (unsigned)(raw_bits ? raw_bits : 24));
+                    }
+                }
+                if (known) info_add_details(a, &info, &details);
             }
             if (bytes) {
                 rubraview_exif_info_t exif;
@@ -11806,14 +11910,10 @@ static void draw_settings_window(app_state_t *app) {
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }
 
-/* Where the page on screen sits, in client pixels, and how many client
-   pixels one of its own pixels takes. The crop overlay needs both to
-   turn a drag into image coordinates; it asks the compositor the same
-   question draw_spread asks, so the rectangle it draws is the one the
-   picture is in. Returns false when nothing is drawn. */
-static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale) {
-    int32_t page_index = current_page_index(app);
-    if (page_index < 0 || app->spread_index >= app->layout.count) return false;
+/* The spread on screen as the compositor lays it out: the question
+   draw_spread asks. False when there is no spread or no window. */
+static bool spread_composition(app_state_t *app, rubraview_composition_t *out) {
+    if (app->spread_index >= app->layout.count) return false;
 
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -11831,9 +11931,21 @@ static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, d
         rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
                                          &right_size.width, &right_size.height);
     }
-    rubraview_composition_t comp = rubraview_compose_spread(
+    *out = rubraview_compose_spread(
         spread, (left && left->loaded) ? &left_size : NULL, (right && right->loaded) ? &right_size : NULL,
         (double)win_w, (double)win_h, app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
+    return true;
+}
+
+/* Where the page on screen sits, in client pixels, and how many client
+   pixels one of its own pixels takes. The crop overlay needs both to
+   turn a drag into image coordinates; it asks the compositor the same
+   question draw_spread asks, so the rectangle it draws is the one the
+   picture is in. Returns false when nothing is drawn. */
+static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale) {
+    int32_t page_index = current_page_index(app);
+    rubraview_composition_t comp;
+    if (page_index < 0 || !spread_composition(app, &comp)) return false;
 
     for (size_t i = 0; i < comp.count; ++i) {
         const rubraview_draw_command_t *cmd = &comp.commands[i];
@@ -11847,6 +11959,24 @@ static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, d
         return true;
     }
     return false;
+}
+
+/* How large the picture is on screen against its own pixels: 1.0 is one
+   screen pixel a picture pixel. 0 when nothing is drawn. */
+static double view_scale(app_state_t *app) {
+    if (strip_active(app)) {
+        int32_t win_w = 0, win_h = 0;
+        rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+        double width = win_w > 0 ? strip_width(app, (double)win_w) : 0.0;
+        return app->strip_base_w > 0.0 ? width / app->strip_base_w : 0.0;
+    }
+    int32_t page_index = current_page_index(app);
+    rubraview_composition_t comp;
+    if (page_index < 0 || !spread_composition(app, &comp)) return 0.0;
+    for (size_t i = 0; i < comp.count; ++i) {
+        if (comp.commands[i].page_index == page_index) return comp.commands[i].scale;
+    }
+    return 0.0;
 }
 
 /* §3.13: the crop rectangle, dragged on the picture itself. The model
@@ -11893,7 +12023,7 @@ static void edit_preview_open(app_state_t *app) {
     edit_preview_close(app);
     int32_t page = current_page_index(app);
     if (page < 0 || (size_t)page >= page_count(app) || !app->pages[page].loaded) return;
-    int32_t w = picture_w(&app->pages[page]), h = picture_h(&app->pages[page]);
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (w <= 0 || h <= 0) return;
 
     int32_t win_w = 0, win_h = 0;
@@ -12621,6 +12751,34 @@ static void boxes_keep_in_reach(app_state_t *app) {
     }
 }
 
+/* Owner, 2026-10-11: the two boxes are always inside the window, and a
+   window of another size keeps each the same part of the way across. An
+   anchor that is not where this put it was moved — dragged, docked, sent
+   home — and its new place is taken, brought inside. A toolbox that is a
+   window of its own, or is being dragged (past the edge is how it becomes
+   one), is left alone. */
+static void boxes_place(app_state_t *app) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_tile_metrics_t metrics = tile_metrics(dpi);
+    double margin = 8.0 * dpi;
+    rubraview_box_t *boxes[2] = { &app->toolbox, &app->menubox };
+    for (int i = 0; i < 2; ++i) {
+        rubraview_box_t *box = boxes[i];
+        if (box->state == RUBRAVIEW_BOX_DETACHED || app->box_drag == box) continue;
+        rubraview_rect_t anchor = rubraview_box_anchor_rect(box, &metrics);
+        if (!app->box_share_known[i] || box->anchor_x != app->box_put[i][0] || box->anchor_y != app->box_put[i][1]) {
+            app->box_share[i][0] = rubraview_box_share_of(box->anchor_x, (double)win_w, anchor.width, margin);
+            app->box_share[i][1] = rubraview_box_share_of(box->anchor_y, (double)win_h, anchor.height, margin);
+            app->box_share_known[i] = true;
+        }
+        box->anchor_x = app->box_put[i][0] = floor(rubraview_box_share_place(app->box_share[i][0], (double)win_w, anchor.width, margin) + 0.5);
+        box->anchor_y = app->box_put[i][1] = floor(rubraview_box_share_place(app->box_share[i][1], (double)win_h, anchor.height, margin) + 0.5);
+    }
+}
+
 static void layout_load(app_state_t *app) {
     if (app->layout_path.len == 0) return;
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->layout_path, 8u * 1024u);
@@ -12636,6 +12794,20 @@ static void layout_load(app_state_t *app) {
         BOXES[i].box->anchor_y = ini_number(&doc, U8("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
     }
     boxes_keep_in_reach(app);
+    /* Since 0.0.48 the places are shares of the window; a file from before has pixels, which are taken once. */
+    static const char *const SHARE_KEYS[2][2] = { { "toolbox_share_x", "toolbox_share_y" }, { "menubox_share_x", "menubox_share_y" } };
+    for (int i = 0; i < 2; ++i) {
+        double sx = ini_number(&doc, U8("boxes"), cstr(SHARE_KEYS[i][0]), -1.0), sy = ini_number(&doc, U8("boxes"), cstr(SHARE_KEYS[i][1]), -1.0);
+        if (sx >= 0.0 && sx <= 1.0 && sy >= 0.0 && sy <= 1.0) {
+            app->box_share[i][0] = sx;
+            app->box_share[i][1] = sy;
+            app->box_share_known[i] = true;
+            app->box_put[i][0] = BOXES[i].box->anchor_x;   /* not "moved by hand": the share stands */
+            app->box_put[i][1] = BOXES[i].box->anchor_y;
+        } else if (rubraview_ini_get(&doc, U8("boxes"), cstr(BOXES[i].x_key))) {
+            app->box_share_known[i] = false;
+        }
+    }
     /* Where the boxes were left, not a setting: layout.ini, read like the positions. */
     if (ini_number(&doc, U8("boxes"), U8("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
 
@@ -12667,10 +12839,11 @@ static void layout_save(app_state_t *app) {
     /* Through the configuration writer, so the file is in the INI and
        TOML subset (D-13). */
     rubraview_ini_doc_t doc = {0};
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_x"), app->toolbox.anchor_x);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_y"), app->toolbox.anchor_y);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_x"), app->menubox.anchor_x);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_y"), app->menubox.anchor_y);
+    boxes_place(app);   /* a box let go a moment ago has its share taken */
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_share_x"), app->box_share[0][0]);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_share_y"), app->box_share[0][1]);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_share_x"), app->box_share[1][0]);
+    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_share_y"), app->box_share[1][1]);
     rubraview_ini_set_int(app->arena, &doc, U8("boxes"), U8("toolbox_pinned"), app->toolbox.pinned ? 1 : 0);
     if (app->subbox.placed) {
         rubraview_ini_set_int(app->arena, &doc, U8("subtitle_box"), U8("placed"), 1);
@@ -14605,6 +14778,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.fav_press = -1;
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
     app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
+    /* One in the top-left corner, one in the bottom-right (owner, 2026-10-11), until they are moved. */
+    app.box_share[0][0] = app.box_share[0][1] = 1.0;
+    app.box_share[1][0] = app.box_share[1][1] = 0.0;
+    app.box_share_known[0] = app.box_share_known[1] = true;
+    app.box_put[0][0] = app.toolbox.anchor_x; app.box_put[0][1] = app.toolbox.anchor_y;
+    app.box_put[1][0] = app.menubox.anchor_x; app.box_put[1][1] = app.menubox.anchor_y;
     layout_load(&app);   /* §3.6: back where the reader left them */
     menu_rebuild(&app);   /* §3.6.2, RFC-0002 §5: the tree from the boxes' document */
     g_caption_app = &app;
@@ -14655,6 +14834,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             rubraview_pal_window_get_size(app.window, &view_w, &view_h);
             app.toolbox.view_width = app.menubox.view_width = (double)view_w;
             app.toolbox.view_height = app.menubox.view_height = (double)view_h;
+            boxes_place(&app);
+            aspect_refresh(&app);   /* the orientation, the edit panel or the custom pair may have changed */
         }
         while (rubraview_pal_window_poll_event(app.window, &event)) {
             handled++;
@@ -14668,7 +14849,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.filmstrip.viewport_extent = (double)event.resize.width;
                     app.needs_relayout = true;
                     panel_relayout(&app);
-                    boxes_keep_in_reach(&app);
+                    boxes_place(&app);   /* D-96: the same share of the new size (the clamp alone left them where they were) */
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:

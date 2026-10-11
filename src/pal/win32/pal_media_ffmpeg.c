@@ -69,6 +69,7 @@ typedef struct ff_media {
     /* §3.16.2: the container's tracks, read once while opening. */
     rubraview_track_set_t tracks;
     char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
+    rubraview_details_t details;            /* written before `opened`, read-only afterwards */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -105,6 +106,17 @@ typedef struct ff_api {
     void (*av_channel_layout_default)(AVChannelLayout*, int);
     AVDictionaryEntry *(*av_dict_get)(const AVDictionary*, const char*, const AVDictionaryEntry*, int);
     const char *(*avcodec_get_name)(enum AVCodecID);
+    /* For the information window only; any of these may be missing. */
+    const char *(*avcodec_profile_name)(enum AVCodecID, int);
+    const AVCodecDescriptor *(*avcodec_descriptor_get)(enum AVCodecID);
+    const char *(*av_get_pix_fmt_name)(enum AVPixelFormat);
+    const char *(*av_get_sample_fmt_name)(enum AVSampleFormat);
+    const char *(*av_color_range_name)(enum AVColorRange);
+    const char *(*av_color_primaries_name)(enum AVColorPrimaries);
+    const char *(*av_color_transfer_name)(enum AVColorTransferCharacteristic);
+    const char *(*av_color_space_name)(enum AVColorSpace);
+    const char *(*av_chroma_location_name)(enum AVChromaLocation);
+    int (*av_channel_layout_describe)(const AVChannelLayout*, char*, size_t);
     /* swscale, swresample */
     unsigned (*swscale_version)(void);
     struct SwsContext *(*sws_getContext)(int, int, enum AVPixelFormat, int, int, enum AVPixelFormat,
@@ -152,6 +164,12 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND(util, avutil_version); BIND(util, av_frame_alloc); BIND(util, av_frame_free);
     BIND(util, av_frame_unref); BIND(util, av_log_set_level); BIND(util, av_channel_layout_default);
     BIND(util, av_dict_get); BIND(codec, avcodec_get_name);
+#define BIND_OPTIONAL(module, name) g_ff.name = (void*)GetProcAddress(module, #name)
+    BIND_OPTIONAL(codec, avcodec_profile_name); BIND_OPTIONAL(codec, avcodec_descriptor_get);
+    BIND_OPTIONAL(util, av_get_pix_fmt_name); BIND_OPTIONAL(util, av_get_sample_fmt_name);
+    BIND_OPTIONAL(util, av_color_range_name); BIND_OPTIONAL(util, av_color_primaries_name);
+    BIND_OPTIONAL(util, av_color_transfer_name); BIND_OPTIONAL(util, av_color_space_name);
+    BIND_OPTIONAL(util, av_chroma_location_name); BIND_OPTIONAL(util, av_channel_layout_describe);
     BIND(sws, swscale_version); BIND(sws, sws_getContext); BIND(sws, sws_scale); BIND(sws, sws_freeContext);
     BIND(swr, swresample_version); BIND(swr, swr_alloc_set_opts2); BIND(swr, swr_init);
     BIND(swr, swr_convert); BIND(swr, swr_free);
@@ -194,6 +212,7 @@ typedef struct ff_decode {
     AVCodecContext *video, *audio;
     struct SwsContext *sws;
     struct SwrContext *swr;
+    int swr_rate, swr_channels, swr_format;   /* what the resampler was told it would be given */
     AVPacket *packet;
     AVFrame *frame;
 } ff_decode_t;
@@ -236,6 +255,9 @@ static bool ff_open_audio_stream(ff_media_t *m, ff_decode_t *d, int stream_index
     if (d->swr) g_ff.swr_free(&d->swr);
     d->audio = context;
     d->swr = swr;
+    d->swr_rate = context->sample_rate;
+    d->swr_channels = context->ch_layout.nb_channels;
+    d->swr_format = (int)context->sample_fmt;
     m->audio_rate = (uint32_t)par->sample_rate;
     m->audio_channels = (uint32_t)par->ch_layout.nb_channels;
     return true;
@@ -302,6 +324,156 @@ static void ff_collect_tracks(ff_media_t *m, AVFormatContext *format) {
     }
 }
 
+/* ---- what the file says about itself, for the information window ---- */
+
+/* Every tag of a dictionary, a line each: "Tag: title". */
+static void ff_detail_tags(rubraview_details_t *d, const AVDictionary *tags) {
+    const AVDictionaryEntry *e = NULL;
+    int shown = 0;
+    while (tags && shown < 24 && (e = g_ff.av_dict_get(tags, "", e, AV_DICT_IGNORE_SUFFIX)) != NULL) {
+        if (!e->key || !e->value || !e->value[0]) continue;
+        char label[24];
+        snprintf(label, sizeof(label), "Tag: %.17s", e->key);
+        rubraview_details_add(d, label, "%s", e->value);
+        shown++;
+    }
+}
+
+static void ff_detail_stream(ff_media_t *m, AVFormatContext *format, unsigned index) {
+    rubraview_details_t *d = &m->details;
+    const AVStream *stream = format->streams[index];
+    const AVCodecParameters *par = stream->codecpar;
+    char b[136];
+    bool video = par->codec_type == AVMEDIA_TYPE_VIDEO, audio = par->codec_type == AVMEDIA_TYPE_AUDIO;
+    const char *kind = video ? "Picture" : audio ? "Sound" : par->codec_type == AVMEDIA_TYPE_SUBTITLE ? "Subtitle"
+                     : par->codec_type == AVMEDIA_TYPE_ATTACHMENT ? "Attachment" : "Data";
+    rubraview_details_heading(d, "%s stream %u", kind, index);
+    const AVCodecDescriptor *desc = g_ff.avcodec_descriptor_get ? g_ff.avcodec_descriptor_get(par->codec_id) : NULL;
+    if (desc && desc->long_name) rubraview_details_add(d, "Codec", "%s (%s)", desc->long_name, g_ff.avcodec_get_name(par->codec_id));
+    else rubraview_details_add(d, "Codec", "%s", g_ff.avcodec_get_name(par->codec_id));
+    if (par->codec_tag) {
+        uint32_t tag = par->codec_tag;
+        char four[5] = { (char)(tag & 0xFF), (char)((tag >> 8) & 0xFF), (char)((tag >> 16) & 0xFF), (char)((tag >> 24) & 0xFF), 0 };
+        bool printable = true;
+        for (int i = 0; i < 4; ++i) if (four[i] < 0x20 || four[i] > 0x7E) printable = false;
+        if (printable) rubraview_details_add(d, "Codec tag", "%s", four);
+        else rubraview_details_add(d, "Codec tag", "0x%04X", (unsigned)tag);
+    }
+    const char *profile = g_ff.avcodec_profile_name ? g_ff.avcodec_profile_name(par->codec_id, par->profile) : NULL;
+    if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_H264) rubraview_details_add(d, "Profile", "%s, level %d.%d", profile, par->level / 10, par->level % 10);
+    else if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_HEVC) rubraview_details_add(d, "Profile", "%s, level %d.%d", profile, par->level / 30, par->level % 30 / 3);
+    else if (profile && par->level > 0) rubraview_details_add(d, "Profile", "%s, level %d", profile, par->level);
+    else if (profile) rubraview_details_add(d, "Profile", "%s", profile);
+    if (desc && (video || audio)) {
+        rubraview_details_add(d, "Kind of coding", "%s%s%s", (desc->props & AV_CODEC_PROP_LOSSLESS) && (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy or lossless"
+                              : (desc->props & AV_CODEC_PROP_LOSSLESS) ? "lossless" : (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy" : "",
+                              (desc->props & AV_CODEC_PROP_INTRA_ONLY) ? ", every frame on its own" : "",
+                              (desc->props & AV_CODEC_PROP_REORDER) ? ", frames reordered (B-frames allowed)" : "");
+    }
+    double seconds = stream->duration != AV_NOPTS_VALUE ? (double)stream->duration * av_q2d(stream->time_base)
+                   : format->duration != AV_NOPTS_VALUE ? (double)format->duration / AV_TIME_BASE : 0.0;
+    double fps = 0.0;
+    if (video) {
+        rubraview_details_add(d, "Frame", "%d x %d", par->width, par->height);
+        AVRational sar = par->sample_aspect_ratio.num ? par->sample_aspect_ratio : stream->sample_aspect_ratio;
+        if (sar.num > 0 && sar.den > 0) {
+            if (sar.num == sar.den) rubraview_details_add(d, "Pixel shape", "square (1:1)");
+            else rubraview_details_add(d, "Pixel shape", "%d:%d, shown as %.0f x %d", sar.num, sar.den,
+                                       (double)par->width * sar.num / sar.den, par->height);
+        }
+        if (stream->avg_frame_rate.num > 0 && stream->avg_frame_rate.den > 0) {
+            fps = av_q2d(stream->avg_frame_rate);
+            rubraview_details_add(d, "Frame rate", "%.3f a second (%d/%d)", fps, stream->avg_frame_rate.num, stream->avg_frame_rate.den);
+        }
+        if (stream->r_frame_rate.num > 0 && stream->r_frame_rate.den > 0 && fabs(av_q2d(stream->r_frame_rate) - fps) > 0.01) {
+            rubraview_details_add(d, "Base frame rate", "%.3f a second (the rate varies)", av_q2d(stream->r_frame_rate));
+        }
+        if (stream->nb_frames > 0) rubraview_details_add(d, "Frames", "%lld", (long long)stream->nb_frames);
+        const char *pix = g_ff.av_get_pix_fmt_name ? g_ff.av_get_pix_fmt_name((enum AVPixelFormat)par->format) : NULL;
+        if (pix) rubraview_details_add(d, "Pixel format", "%s", pix);
+        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "%d bits", par->bits_per_raw_sample);
+        static const char *const FIELD[6] = { "", "progressive", "interlaced, top field first", "interlaced, bottom field first",
+                                              "interlaced, top coded first, bottom shown first", "interlaced, bottom coded first, top shown first" };
+        if (par->field_order > 0 && par->field_order < 6) rubraview_details_add(d, "Scan", "%s", FIELD[par->field_order]);
+        const char *name = NULL;
+        if (par->color_range != AVCOL_RANGE_UNSPECIFIED && g_ff.av_color_range_name && (name = g_ff.av_color_range_name(par->color_range)) != NULL) {
+            rubraview_details_add(d, "Colour range", "%s", par->color_range == AVCOL_RANGE_JPEG ? "full (0-255)" : par->color_range == AVCOL_RANGE_MPEG ? "limited (16-235)" : name);
+        }
+        if (par->color_primaries != AVCOL_PRI_UNSPECIFIED && g_ff.av_color_primaries_name && (name = g_ff.av_color_primaries_name(par->color_primaries)) != NULL) {
+            rubraview_details_add(d, "Colour primaries", "%s", name);
+        }
+        if (par->color_trc != AVCOL_TRC_UNSPECIFIED && g_ff.av_color_transfer_name && (name = g_ff.av_color_transfer_name(par->color_trc)) != NULL) {
+            rubraview_details_add(d, "Transfer", "%s%s", name, par->color_trc == AVCOL_TRC_SMPTE2084 ? " (PQ, HDR10)" : par->color_trc == AVCOL_TRC_ARIB_STD_B67 ? " (HLG)" : "");
+        }
+        if (par->color_space != AVCOL_SPC_UNSPECIFIED && g_ff.av_color_space_name && (name = g_ff.av_color_space_name(par->color_space)) != NULL) {
+            rubraview_details_add(d, "Colour matrix", "%s", name);
+        }
+        if (par->chroma_location != AVCHROMA_LOC_UNSPECIFIED && g_ff.av_chroma_location_name && (name = g_ff.av_chroma_location_name(par->chroma_location)) != NULL) {
+            rubraview_details_add(d, "Chroma siting", "%s", name);
+        }
+        if (par->video_delay > 0) rubraview_details_add(d, "Reordering", "up to %d frame%s", par->video_delay, par->video_delay == 1 ? "" : "s");
+    } else if (audio) {
+        rubraview_details_add(d, "Sample rate", "%d Hz", par->sample_rate);
+        char layout[64] = "";
+        if (g_ff.av_channel_layout_describe) g_ff.av_channel_layout_describe(&par->ch_layout, layout, sizeof(layout));
+        rubraview_details_add(d, "Channels", "%d%s%s", par->ch_layout.nb_channels, layout[0] ? ": " : "", layout);
+        const char *fmt = g_ff.av_get_sample_fmt_name ? g_ff.av_get_sample_fmt_name((enum AVSampleFormat)par->format) : NULL;
+        if (fmt) rubraview_details_add(d, "Sample format", "%s", fmt);
+        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "%d bits", par->bits_per_raw_sample);
+        else if (par->bits_per_coded_sample > 0) rubraview_details_add(d, "Bits a coded sample", "%d", par->bits_per_coded_sample);
+        if (par->frame_size > 0) rubraview_details_add(d, "Samples a frame", "%d", par->frame_size);
+        if (par->block_align > 0) rubraview_details_add(d, "Block", "%d bytes", par->block_align);
+        if (par->initial_padding > 0) rubraview_details_add(d, "Encoder delay", "%d samples", par->initial_padding);
+    }
+    if (par->bit_rate > 0) {
+        rubraview_detail_bitrate(b, sizeof(b), (double)par->bit_rate);
+        rubraview_details_add(d, "Bit rate", "%s", b);
+        if (video && par->width > 0 && par->height > 0 && fps > 0.0) {
+            double per_pixel = (double)par->bit_rate / ((double)par->width * par->height * fps);
+            rubraview_details_add(d, "Compression", "%.3f bits a pixel, 1 : %.0f of 8-bit 4:2:0", per_pixel, 12.0 / per_pixel);
+        } else if (audio && par->sample_rate > 0 && par->ch_layout.nb_channels > 0) {
+            double pcm = (double)par->sample_rate * par->ch_layout.nb_channels * 16.0;
+            rubraview_details_add(d, "Compression", "1 : %.1f of 16-bit PCM (%.0f %%)", pcm / (double)par->bit_rate, (double)par->bit_rate * 100.0 / pcm);
+        }
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)par->bit_rate / 8.0 * seconds / 1048576.0);
+    }
+    if (seconds > 0.0) rubraview_details_add(d, "Length", "%.3f s", seconds);
+    if (stream->start_time != AV_NOPTS_VALUE && stream->start_time != 0) {
+        rubraview_details_add(d, "Starts at", "%.3f s", (double)stream->start_time * av_q2d(stream->time_base));
+    }
+    if (par->extradata_size > 0) rubraview_details_add(d, "Codec setup", "%d bytes", par->extradata_size);
+    if (stream->disposition) {
+        rubraview_details_add(d, "Marked", "%s%s%s%s%s", (stream->disposition & AV_DISPOSITION_DEFAULT) ? "default " : "",
+                              (stream->disposition & AV_DISPOSITION_FORCED) ? "forced " : "",
+                              (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) ? "cover-picture " : "",
+                              (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? "for-the-hard-of-hearing " : "",
+                              (stream->disposition & AV_DISPOSITION_COMMENT) ? "commentary " : "");
+    }
+    if (video || audio) rubraview_details_add(d, "Played", "%s", (int)index == m->video_stream || (int)index == m->audio_stream ? "yes" : "no");
+    ff_detail_tags(d, stream->metadata);
+}
+
+static void ff_collect_details(ff_media_t *m, AVFormatContext *format) {
+    rubraview_details_t *d = &m->details;
+    char b[136];
+    rubraview_details_heading(d, "Container");
+    if (format->iformat) {
+        rubraview_details_add(d, "Format", "%s (%s)", format->iformat->long_name ? format->iformat->long_name : "", format->iformat->name);
+    }
+    if (format->bit_rate > 0) {
+        rubraview_detail_bitrate(b, sizeof(b), (double)format->bit_rate);
+        rubraview_details_add(d, "Bit rate", "%s (everything together)", b);
+    }
+    if (format->start_time != AV_NOPTS_VALUE && format->start_time != 0) {
+        rubraview_details_add(d, "Starts at", "%.3f s", (double)format->start_time / AV_TIME_BASE);
+    }
+    rubraview_details_add(d, "Streams", "%u", format->nb_streams);
+    if (format->nb_chapters) rubraview_details_add(d, "Chapters", "%u", format->nb_chapters);
+    if (format->nb_programs > 1) rubraview_details_add(d, "Programmes", "%u", format->nb_programs);
+    ff_detail_tags(d, format->metadata);
+    for (unsigned i = 0; i < format->nb_streams && i < 24; ++i) ff_detail_stream(m, format, i);
+}
+
 static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) {
         m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
@@ -327,6 +499,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         return false;
     }
     ff_collect_tracks(m, d->format);
+    ff_collect_details(m, d->format);
 
     if (m->video_stream >= 0) {
         AVCodecParameters *par = d->format->streams[m->video_stream]->codecpar;
@@ -430,8 +603,35 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     return true;
 }
 
+/* The decoder found out, from the sound itself, that it is not what the
+   header said (HE-AAC written as its 24 kHz core, one channel that is
+   two): the resampler is told, or the sound is heard at the wrong speed.
+   What goes to the device stays as it was opened. */
+static bool audio_matches_resampler(ff_media_t *m, ff_decode_t *d) {
+    const AVFrame *f = d->frame;
+    if (f->sample_rate <= 0 || f->ch_layout.nb_channels <= 0) return true;
+    if (f->sample_rate == d->swr_rate && f->ch_layout.nb_channels == d->swr_channels && f->format == d->swr_format) return true;
+    struct SwrContext *swr = NULL;
+    AVChannelLayout out_layout;
+    g_ff.av_channel_layout_default(&out_layout, (int)m->audio_channels);
+    if (g_ff.swr_alloc_set_opts2(&swr, &out_layout, AV_SAMPLE_FMT_FLT, (int)m->audio_rate,
+                                 &f->ch_layout, (enum AVSampleFormat)f->format, f->sample_rate, 0, NULL) < 0 ||
+        !swr || g_ff.swr_init(swr) < 0) {
+        if (swr) g_ff.swr_free(&swr);
+        return false;
+    }
+    g_ff.swr_free(&d->swr);
+    d->swr = swr;
+    d->swr_rate = f->sample_rate;
+    d->swr_channels = f->ch_layout.nb_channels;
+    d->swr_format = f->format;
+    return true;
+}
+
 static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_until, uint64_t generation) {
-    int max_out = d->frame->nb_samples + 256;
+    if (!audio_matches_resampler(m, d)) return;
+    /* Room for the frame at the device's rate, which may be the higher one. */
+    int max_out = (int)((int64_t)d->frame->nb_samples * (int64_t)m->audio_rate / (d->swr_rate > 0 ? d->swr_rate : 1)) + 256;
     float *converted = (float*)malloc((size_t)max_out * m->audio_channels * sizeof(float));
     if (!converted) return;
     uint8_t *out[1] = { (uint8_t*)(void*)converted };
@@ -809,6 +1009,11 @@ static bool ff_select_audio_track(void *handle, int32_t stream_index) {
     return true;
 }
 
+static const rubraview_details_t *ff_details(void *handle) {
+    ff_media_t *m = (ff_media_t*)handle;
+    return m ? &m->details : NULL;
+}
+
 static bool ff_tracks(void *handle, rubraview_track_set_t *out_set) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || !out_set) return false;
@@ -836,6 +1041,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .set_paused = ff_set_paused,
     .audio_position = ff_audio_position,
     .tracks = ff_tracks,
+    .details = ff_details,
     .select_audio_track = ff_select_audio_track,
     .set_gain = ff_set_gain,
     .read_subtitle_stream = ff_read_subtitle_stream,

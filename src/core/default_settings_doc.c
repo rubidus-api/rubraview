@@ -89,6 +89,9 @@ static const char *const PARTS[] = {
 "  choice viewer.enlarge           \"Enlarging a small picture\" smooth | sharp = sharp wired\n"
 "  choice viewer.animation_end     \"When an animation ends\"  loop | once | next = loop wired\n"
 "  toggle viewer.pixel_grid        \"Pixel grid past 400%\"    = false wired\n"
+"  section \"Shape\"\n"
+"  int    viewer.aspect_width      \"Custom shape, width\"     1..10000 step 1 = 235 wired\n"
+"  int    viewer.aspect_height     \"Custom shape, height\"    1..10000 step 1 = 100 wired\n"
 "\n",
 "page files \"Files\"\n"
 "  section \"Folders and archives\"\n"

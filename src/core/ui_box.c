@@ -174,6 +174,21 @@ bool rubraview_box_click(rubraview_box_t *box, const rubraview_tile_metrics_t *m
     }
 }
 
+double rubraview_box_share_place(double share, double window, double size, double margin) {
+    double room = window - size - 2.0 * margin;
+    if (room <= 0.0) return window > size ? (window - size) / 2.0 : 0.0;
+    if (!(share > 0.0)) share = 0.0;
+    if (share > 1.0) share = 1.0;
+    return margin + share * room;
+}
+
+double rubraview_box_share_of(double position, double window, double size, double margin) {
+    double room = window - size - 2.0 * margin;
+    if (room <= 0.0) return 0.5;
+    double share = (position - margin) / room;
+    return share < 0.0 ? 0.0 : share > 1.0 ? 1.0 : share;
+}
+
 void rubraview_box_snap_home(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                              double window_width, double window_height) {
     if (!box || !metrics) return;

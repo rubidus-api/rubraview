@@ -47,6 +47,8 @@ typedef struct rubraview_action_facts {
     /* choices */
     rubraview_page_layout_t layout;
     rubraview_fit_mode_t fit;
+    int32_t aspect;           /* rubraview_aspect_t: the shape the picture is shown in */
+    bool aspect_on_its_side;
 } rubraview_action_facts_t;
 
 typedef struct rubraview_action_state {
@@ -66,6 +68,14 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
  */
 u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
                                char *buffer, size_t buffer_size);
+
+/**
+ * The scale tile's caption (D-93): how large the picture is on screen
+ * against its own pixels, "43%", "100%", "1250%" — a whole percent, and
+ * never less than "1%". Empty when `scale` is not above zero or the
+ * buffer is too small.
+ */
+u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
 
 /**
  * The icon a toolbox button draws (owner, 2026-09-22): a code point in the

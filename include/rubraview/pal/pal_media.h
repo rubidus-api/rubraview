@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "rubraview/core.h"
+#include "rubraview/detail.h"
 #include "rubraview/mediaclock.h"
 #include "rubraview/playback.h"
 
@@ -157,6 +158,14 @@ bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t 
  * new track cannot be decoded (the old one keeps playing).
  */
 bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index);
+
+/*
+ * Everything the container and its codecs say about themselves, for the
+ * information window: a heading a stream, then label / value lines. It
+ * is written once, on the decode thread, while the file is being opened;
+ * the pointer stays valid until the media object is closed.
+ */
+const rubraview_details_t *rubraview_pal_media_details(rubraview_media_t *media);
 
 /**
  * §3.16.1 / D-12: a text subtitle stream carried inside the container,

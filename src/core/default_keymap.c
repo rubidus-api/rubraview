@@ -99,6 +99,7 @@ const char *rubraview_default_keymap(void) {
     "actual_size = \"4, 0, Ctrl+0\"\n"
     "smart_fit = \"5\"\n"
     "fit_stretch = \"Ctrl+1\"\n"
+    "aspect_cycle = \"Shift+A\"\n"       /* the shape the picture is shown in, round (D-94) */
     "toggle_fit_lock = \"L\"\n"
     "zoom_in = \"Plus\"\n"
     "zoom_out = \"Minus\"\n"

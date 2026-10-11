@@ -72,6 +72,8 @@ typedef struct mf_media {
     media_slot_t slots[SLOT_COUNT];
 
     _Atomic bool quit;
+    _Atomic bool audio_playing;             /* what the caller last asked of the device, for one opened later */
+    _Atomic int32_t audio_gain_millionths;  /* RV-075, likewise */
     _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;      /* written before seek_generation is bumped */
     _Atomic uint64_t seek_generation;
@@ -88,6 +90,7 @@ typedef struct mf_media {
        The strings live here so the set can be copied out by value. */
     rubraview_track_set_t tracks;
     char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
+    rubraview_details_t details;            /* written before `opened`, read-only afterwards */
 } mf_media_t;
 
 /*
@@ -215,6 +218,199 @@ static u8str_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity)
     memcpy(buffer, chars, 4);
     buffer[4] = '\0';
     return (u8str_t){ .ptr = buffer, .len = 4 };
+}
+
+/* ---- what the file says about itself, for the information window ---- */
+
+/* Presentation attributes the headers here do not name. */
+static const GUID RV_MF_PD_AUDIO_ENCODING_BITRATE = { 0x6c990d35, 0xbb8e, 0x477a, { 0x85, 0x98, 0x0d, 0x5d, 0x96, 0xfc, 0xd8, 0x8a } };
+static const GUID RV_MF_PD_VIDEO_ENCODING_BITRATE = { 0x6c990d36, 0xbb8e, 0x477a, { 0x85, 0x98, 0x0d, 0x5d, 0x96, 0xfc, 0xd8, 0x8a } };
+static const GUID RV_MF_PD_MIME_TYPE = { 0x6c990d37, 0xbb8e, 0x477a, { 0x85, 0x98, 0x0d, 0x5d, 0x96, 0xfc, 0xd8, 0x8a } };
+
+static bool mf_u32(IMFMediaType *type, const GUID *key, UINT32 *out) {
+    *out = 0;
+    return SUCCEEDED(IMFMediaType_GetUINT32(type, key, out));
+}
+
+static bool mf_pair(IMFMediaType *type, const GUID *key, UINT32 *high, UINT32 *low) {
+    UINT64 packed = 0;
+    *high = *low = 0;
+    if (FAILED(IMFMediaType_GetUINT64(type, key, &packed))) return false;
+    *high = (UINT32)(packed >> 32);
+    *low = (UINT32)packed;
+    return true;
+}
+
+static const char *mf_codec_words(const GUID *subtype) {
+    static const struct { uint32_t id; const char *words; } KNOWN[] = {
+        { 0x34363248, "H.264 / AVC" }, { 0x31435641, "H.264 / AVC (avc1)" }, { 0x43564548, "H.265 / HEVC" },
+        { 0x31435648, "H.265 / HEVC (hvc1)" }, { 0x30395056, "VP9" }, { 0x30385056, "VP8" }, { 0x31305641, "AV1" },
+        { 0x3253344D, "MPEG-4 Part 2 (M4S2)" }, { 0x5634504D, "MPEG-4 Part 2 (MP4V)" }, { 0x44495658, "MPEG-4 Part 2 (Xvid)" },
+        { 0x58564944, "MPEG-4 Part 2 (DivX)" }, { 0x30355844, "MPEG-4 Part 2 (DX50)" }, { 0x3334504D, "Microsoft MPEG-4 v3" },
+        { 0x33564D57, "Windows Media Video 9" }, { 0x32564D57, "Windows Media Video 8" }, { 0x31564D57, "Windows Media Video 7" },
+        { 0x31435657, "VC-1" }, { 0x47504A4D, "Motion JPEG" }, { 0x3147504D, "MPEG-1 video" }, { 0x64737664, "DV" },
+        { 0x33363248, "H.263" },
+        { 0x1610, "AAC" }, { 0x00FF, "AAC (raw)" }, { 0x1600, "AAC (ADTS)" }, { 0x1602, "AAC (LOAS)" }, { 0x0055, "MPEG audio layer 3 (MP3)" },
+        { 0x0050, "MPEG audio layer 1 or 2" }, { 0x0001, "PCM, integers" }, { 0x0003, "PCM, floating point" },
+        { 0x2000, "Dolby Digital (AC-3)" }, { 0x0161, "Windows Media Audio 9" }, { 0x0162, "Windows Media Audio 9 Professional" },
+        { 0x0163, "Windows Media Audio Lossless" }, { 0x0160, "Windows Media Audio 1" }, { 0x2001, "DTS" }, { 0x0008, "DTS" },
+        { 0xF1AC, "FLAC" }, { 0x704F, "Opus" }, { 0x6C61, "Apple Lossless (ALAC)" }, { 0x0002, "Microsoft ADPCM" },
+        { 0x0006, "A-law" }, { 0x0007, "mu-law" }, { 0x0011, "IMA ADPCM" }, { 0x566F, "Vorbis" }, { 0x0031, "GSM 6.10" },
+    };
+    for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); ++i) if (KNOWN[i].id == (uint32_t)subtype->Data1) return KNOWN[i].words;
+    /* Dolby Digital Plus and the others Media Foundation names by a GUID of their own. */
+    static const GUID EAC3 = { 0xa7fb87af, 0x2d02, 0x42fb, { 0xa4, 0xd4, 0x05, 0xcd, 0x93, 0x84, 0x3b, 0xdd } };
+    static const GUID AC3 = { 0xe06d802c, 0xdb46, 0x11cf, { 0xb4, 0xd1, 0x00, 0x80, 0x5f, 0x6c, 0xbb, 0xea } };
+    static const GUID MPEG2 = { 0xe06d8026, 0xdb46, 0x11cf, { 0xb4, 0xd1, 0x00, 0x80, 0x5f, 0x6c, 0xbb, 0xea } };
+    if (IsEqualGUID(subtype, &EAC3)) return "Dolby Digital Plus (E-AC-3)";
+    if (IsEqualGUID(subtype, &AC3)) return "Dolby Digital (AC-3)";
+    if (IsEqualGUID(subtype, &MPEG2)) return "MPEG-2 video";
+    return NULL;
+}
+
+static void mf_detail_codec(rubraview_details_t *d, const GUID *subtype, bool video) {
+    char code[16];
+    u8str_t four = mf_codec_name(subtype, code, sizeof(code));
+    const char *words = mf_codec_words(subtype);
+    if (words && four.len && video) rubraview_details_add(d, "Codec", "%s (%s)", words, code);
+    else if (words) rubraview_details_add(d, "Codec", "%s", words);
+    else if (four.len) rubraview_details_add(d, "Codec", "%s", code);
+    if (!video && (uint32_t)subtype->Data1 <= 0xFFFF) rubraview_details_add(d, "Format tag", "0x%04X", (unsigned)subtype->Data1);
+    if (!words && !four.len) {
+        rubraview_details_add(d, "Codec", "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}", (unsigned long)subtype->Data1,
+                              subtype->Data2, subtype->Data3, subtype->Data4[0], subtype->Data4[1], subtype->Data4[2],
+                              subtype->Data4[3], subtype->Data4[4], subtype->Data4[5], subtype->Data4[6], subtype->Data4[7]);
+    }
+}
+
+static void mf_detail_video(mf_media_t *m, IMFMediaType *type, const GUID *subtype, double seconds) {
+    rubraview_details_t *d = &m->details;
+    char b[136];
+    UINT32 a = 0, c = 0, v = 0;
+    mf_detail_codec(d, subtype, true);
+    uint32_t id = (uint32_t)subtype->Data1;
+    bool avc = id == 0x34363248 || id == 0x31435641, hevc = id == 0x43564548 || id == 0x31435648;
+    UINT32 profile = 0, level = 0;
+    mf_u32(type, &MF_MT_MPEG2_PROFILE, &profile);
+    mf_u32(type, &MF_MT_MPEG2_LEVEL, &level);
+    if (avc && rubraview_detail_h264_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "%s", b);
+    else if (hevc && rubraview_detail_hevc_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "%s", b);
+    else if (profile || level) rubraview_details_add(d, "Profile", "profile %u, level %u", (unsigned)profile, (unsigned)level);
+    UINT32 width = 0, height = 0;
+    if (mf_pair(type, &MF_MT_FRAME_SIZE, &width, &height)) rubraview_details_add(d, "Frame", "%u x %u", (unsigned)width, (unsigned)height);
+    if (mf_pair(type, &MF_MT_PIXEL_ASPECT_RATIO, &a, &c) && a && c) {
+        if (a == c) rubraview_details_add(d, "Pixel shape", "square (1:1)");
+        else rubraview_details_add(d, "Pixel shape", "%u:%u, shown as %.0f x %u", (unsigned)a, (unsigned)c,
+                                   (double)width * (double)a / (double)c, (unsigned)height);
+    }
+    UINT32 num = 0, den = 0;
+    double fps = 0.0;
+    if (mf_pair(type, &MF_MT_FRAME_RATE, &num, &den) && num && den) {
+        fps = (double)num / (double)den;
+        rubraview_details_add(d, "Frame rate", "%.3f a second (%u/%u)", fps, (unsigned)num, (unsigned)den);
+    }
+    if (mf_u32(type, &MF_MT_INTERLACE_MODE, &v) && v) {
+        static const char *const MODE[8] = { "", "", "progressive", "interlaced, upper field first", "interlaced, lower field first",
+                                             "one field a sample, upper first", "one field a sample, lower first", "mixed" };
+        if (v < 8) rubraview_details_add(d, "Scan", "%s", MODE[v]);
+    }
+    UINT32 bitrate = 0;
+    if (mf_u32(type, &MF_MT_AVG_BITRATE, &bitrate) && bitrate) {
+        rubraview_detail_bitrate(b, sizeof(b), (double)bitrate);
+        rubraview_details_add(d, "Bit rate", "%s", b);
+        if (width && height && fps > 0.0) {
+            double per_pixel = (double)bitrate / ((double)width * (double)height * fps);
+            /* Against 4:2:0 at eight bits, twelve bits a pixel: what most films are before they are packed. */
+            rubraview_details_add(d, "Compression", "%.3f bits a pixel, 1 : %.0f of 8-bit 4:2:0", per_pixel, 12.0 / per_pixel);
+        }
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)bitrate / 8.0 * seconds / 1048576.0);
+    }
+    if (mf_u32(type, &MF_MT_MAX_KEYFRAME_SPACING, &v) && v) rubraview_details_add(d, "Key frames", "at most %u frames apart", (unsigned)v);
+    if (mf_u32(type, &MF_MT_VIDEO_NOMINAL_RANGE, &v) && v) {
+        static const char *const RANGE[5] = { "", "full (0-255)", "limited (16-235)", "48-208", "64-127" };
+        if (v < 5) rubraview_details_add(d, "Colour range", "%s", RANGE[v]);
+    }
+    if (mf_u32(type, &MF_MT_VIDEO_PRIMARIES, &v) && v) {
+        static const char *const NAME[] = { "", "reserved", "BT.709", "BT.470-2 System M", "BT.470-2 System B/G", "SMPTE 170M", "SMPTE 240M",
+                                            "EBU 3213", "SMPTE C", "BT.2020", "CIE XYZ", "DCI-P3", "ACES" };
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour primaries", "%s", NAME[v]);
+        else rubraview_details_add(d, "Colour primaries", "%u", (unsigned)v);
+    }
+    if (mf_u32(type, &MF_MT_TRANSFER_FUNCTION, &v) && v) {
+        static const char *const NAME[] = { "", "linear", "gamma 1.8", "gamma 2.0", "gamma 2.2", "BT.709", "SMPTE 240M", "sRGB", "gamma 2.8",
+                                            "log 100:1", "log 316:1", "BT.709 symmetric", "BT.2020 constant luminance", "BT.2020",
+                                            "gamma 2.6", "SMPTE ST 2084 (PQ, HDR10)", "HLG (BT.2100)", "gamma 2.4 (BT.1886)" };
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Transfer", "%s", NAME[v]);
+        else rubraview_details_add(d, "Transfer", "%u", (unsigned)v);
+    }
+    if (mf_u32(type, &MF_MT_YUV_MATRIX, &v) && v) {
+        static const char *const NAME[] = { "", "BT.709", "BT.601", "SMPTE 240M", "BT.2020", "BT.2020 constant luminance" };
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour matrix", "%s", NAME[v]);
+    }
+    if (mf_u32(type, &MF_MT_VIDEO_CHROMA_SITING, &v) && v) rubraview_details_add(d, "Chroma siting", "0x%X", (unsigned)v);
+    if (mf_u32(type, &MF_MT_VIDEO_ROTATION, &v) && v) rubraview_details_add(d, "Rotation", "%u degrees", (unsigned)v);
+    UINT32 blob = 0;
+    if (SUCCEEDED(IMFMediaType_GetBlobSize(type, &MF_MT_MPEG_SEQUENCE_HEADER, &blob)) && blob) {
+        rubraview_details_add(d, "Codec setup", "%u bytes of headers (parameter sets)", (unsigned)blob);
+    }
+}
+
+static void mf_detail_audio(mf_media_t *m, IMFMediaType *type, const GUID *subtype, double seconds) {
+    rubraview_details_t *d = &m->details;
+    char b[136];
+    UINT32 v = 0, rate = 0, channels = 0, bits = 0, bytes = 0, mask = 0;
+    mf_detail_codec(d, subtype, false);
+    uint32_t id = (uint32_t)subtype->Data1;
+    if (id == 0x1610 || id == 0x00FF || id == 0x1600 || id == 0x1602) {
+        if (mf_u32(type, &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, &v) && rubraview_detail_aac_profile(b, sizeof(b), v)) {
+            rubraview_details_add(d, "Profile", "%s", b);
+        }
+        if (mf_u32(type, &MF_MT_AAC_PAYLOAD_TYPE, &v)) {
+            static const char *const PAYLOAD[4] = { "raw AAC frames", "ADTS", "ADIF", "LOAS / LATM" };
+            if (v < 4) rubraview_details_add(d, "Framing", "%s", PAYLOAD[v]);
+        }
+    }
+    mf_u32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
+    mf_u32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
+    mf_u32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits);
+    mf_u32(type, &MF_MT_AUDIO_CHANNEL_MASK, &mask);
+    if (rate) rubraview_details_add(d, "Sample rate", "%u Hz (as the header says)", (unsigned)rate);
+    if (channels && rubraview_detail_channels(b, sizeof(b), channels, mask)) rubraview_details_add(d, "Channels", "%u: %s", (unsigned)channels, b);
+    if (bits) rubraview_details_add(d, "Bits a sample", "%u", (unsigned)bits);
+    if (mf_u32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bytes) && bytes) {
+        rubraview_detail_bitrate(b, sizeof(b), (double)bytes * 8.0);
+        rubraview_details_add(d, "Bit rate", "%s", b);
+        if (rate && channels) {
+            /* Against sixteen-bit PCM at the same rate and channels. */
+            double pcm = (double)rate * (double)channels * 16.0;
+            rubraview_details_add(d, "Compression", "1 : %.1f of 16-bit PCM (%.0f %%)", pcm / ((double)bytes * 8.0), (double)bytes * 800.0 / pcm);
+        }
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)bytes * seconds / 1048576.0);
+    }
+    if (mf_u32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &v) && v > 1) rubraview_details_add(d, "Block", "%u bytes", (unsigned)v);
+    if (mf_u32(type, &MF_MT_AUDIO_SAMPLES_PER_BLOCK, &v) && v) rubraview_details_add(d, "Samples a block", "%u", (unsigned)v);
+    UINT32 blob = 0;
+    if (SUCCEEDED(IMFMediaType_GetBlobSize(type, &MF_MT_USER_DATA, &blob)) && blob) {
+        rubraview_details_add(d, "Codec setup", "%u bytes", (unsigned)blob);
+    }
+}
+
+/* One stream's heading and lines, from the type the file itself gives. */
+static void mf_detail_stream(mf_media_t *m, IMFSourceReader *reader, DWORD stream, IMFMediaType *type, bool playing, double seconds) {
+    rubraview_details_t *d = &m->details;
+    GUID major = {0}, subtype = {0};
+    IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
+    IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
+    bool video = IsEqualGUID(&major, &MFMediaType_Video), audio = IsEqualGUID(&major, &MFMediaType_Audio);
+    rubraview_details_heading(d, "%s stream %u", video ? "Picture" : audio ? "Sound" : "Other", (unsigned)stream);
+    char text[64];
+    u8str_t language = mf_stream_string(reader, stream, &MF_SD_LANGUAGE, text, sizeof(text));
+    if (language.len) rubraview_details_add(d, "Language", "%s", text);
+    u8str_t title = mf_stream_string(reader, stream, &MF_SD_STREAM_NAME, text, sizeof(text));
+    if (title.len) rubraview_details_add(d, "Name", "%s", text);
+    if (audio || video) rubraview_details_add(d, "Played", "%s", playing ? "yes" : "no");
+    if (video) mf_detail_video(m, type, &subtype, seconds);
+    else if (audio) mf_detail_audio(m, type, &subtype, seconds);
 }
 
 static void mf_track_add(mf_media_t *m, IMFSourceReader *reader, DWORD stream,
@@ -465,6 +661,56 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     m->width = width;
     m->height = height;
     m->ok = true;
+    /* What the file says about itself, a stream at a time. */
+    rubraview_details_heading(&m->details, "Container");
+    {
+        PROPVARIANT pv;
+        PropVariantInit(&pv);
+        if (SUCCEEDED(IMFSourceReader_GetPresentationAttribute(reader, (DWORD)MF_SOURCE_READER_MEDIASOURCE, &RV_MF_PD_MIME_TYPE, &pv)) &&
+            pv.vt == VT_LPWSTR && pv.pwszVal) {
+            char mime[96];
+            if (WideCharToMultiByte(CP_UTF8, 0, pv.pwszVal, -1, mime, sizeof(mime), NULL, NULL) > 0) {
+                rubraview_details_add(&m->details, "Kind", "%s", mime);
+            }
+        }
+        PropVariantClear(&pv);
+        static const struct { const GUID *key; const char *label; } RATES[] = {
+            { &RV_MF_PD_VIDEO_ENCODING_BITRATE, "Picture bit rate" }, { &RV_MF_PD_AUDIO_ENCODING_BITRATE, "Sound bit rate" },
+        };
+        for (size_t i = 0; i < sizeof(RATES) / sizeof(RATES[0]); ++i) {
+            PropVariantInit(&pv);
+            if (SUCCEEDED(IMFSourceReader_GetPresentationAttribute(reader, (DWORD)MF_SOURCE_READER_MEDIASOURCE, RATES[i].key, &pv)) &&
+                pv.vt == VT_UI4 && pv.ulVal) {
+                char rate[48];
+                rubraview_detail_bitrate(rate, sizeof(rate), (double)pv.ulVal);
+                rubraview_details_add(&m->details, RATES[i].label, "%s", rate);
+            }
+            PropVariantClear(&pv);
+        }
+        DWORD count = 0;
+        for (DWORD s = 0; ; ++s) {
+            IMFMediaType *type = NULL;
+            hr = IMFSourceReader_GetNativeMediaType(reader, s, 0, &type);
+            if (hr == (HRESULT)MF_E_INVALIDSTREAMNUMBER) break;
+            count++;
+            if (type) IMFMediaType_Release(type);
+        }
+        rubraview_details_add(&m->details, "Streams", "%u", (unsigned)count);
+        for (DWORD s = 0; s < count; ++s) {
+            IMFMediaType *type = NULL;
+            if (FAILED(IMFSourceReader_GetNativeMediaType(reader, s, 0, &type)) || !type) continue;
+            mf_detail_stream(m, reader, s, type, s == video_stream || s == m->audio_stream, duration);
+            if (s == m->audio_stream && audio_rate) {
+                rubraview_details_add(&m->details, "Decoded as", "%u Hz, %u channel%s, 32-bit float", (unsigned)audio_rate,
+                                      (unsigned)audio_channels, audio_channels == 1 ? "" : "s");
+            }
+            if (s == video_stream) {
+                rubraview_details_add(&m->details, "Decoded as", "%d x %d, 32-bit BGRA", (int)width, (int)height);
+            }
+            IMFMediaType_Release(type);
+        }
+    }
+
     m->failure = RUBRAVIEW_MEDIA_OPENED;
     m->info = (rubraview_media_info_t){
         .backend = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION,
@@ -659,6 +905,56 @@ static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *
     IMFMediaBuffer_Release(buffer);
 }
 
+/* The sound comes at another rate or in another number of channels: a
+   different device format and a different ring size. The new device is
+   put in the state the caller asked of the old one. On the decode thread. */
+static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
+    rubraview_pal_audio_close(m->audio);
+    m->audio = NULL;
+    free(m->pcm_storage);
+    size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
+    m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+    if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
+        m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
+    }
+    if (!m->audio) {
+        free(m->pcm_storage);
+        m->pcm_storage = NULL;
+        m->audio_stream = NO_STREAM;
+        return false;
+    }
+    m->audio_rate = rate;
+    m->audio_channels = channels;
+    rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
+    rubraview_pal_audio_set_playing(m->audio, atomic_load_explicit(&m->audio_playing, memory_order_acquire));
+    return true;
+}
+
+/* The decoder found out, from the sound itself, that it is not what the
+   file's header said — HE-AAC written as its 24 kHz core and decoded at
+   48 kHz, or one channel that turns out to be two. Played on at the old
+   format it is heard at the wrong speed (owner, 2026-10-11: "음성이
+   제대로 제 속도로 나오지 않는"). The device is opened again at the new
+   one, its position starting where this sample is. */
+static void mf_audio_type_changed(mf_media_t *m, IMFSourceReader *reader, bool native, double pts) {
+    UINT32 rate = 0, channels = 0;
+    bool known = false;
+    if (native) {
+        known = mf_negotiate_audio(reader, m->audio_stream, &rate, &channels);
+    } else {
+        IMFMediaType *current = NULL;
+        if (SUCCEEDED(IMFSourceReader_GetCurrentMediaType(reader, m->audio_stream, &current)) && current) {
+            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
+            IMFMediaType_GetUINT32(current, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
+            IMFMediaType_Release(current);
+        }
+        known = rate > 0 && channels > 0 && channels <= 8;
+    }
+    if (!known) { m->audio_stream = NO_STREAM; return; }   /* samples of an unknown shape are not played */
+    if (rate == m->audio_rate && channels == m->audio_channels) return;
+    if (mf_reopen_audio(m, rate, channels)) rubraview_pal_audio_flush(m->audio, pts);
+}
+
 /* §3.16.2, on the decode thread: stop reading one sound track and start
    reading another. The caller seeks straight afterwards, which is what
    empties what the old track had already handed to the device. */
@@ -678,31 +974,8 @@ static bool mf_apply_audio_switch(mf_media_t *m, IMFSourceReader *reader, DWORD 
         return false;
     }
 
-    if (rate != m->audio_rate || channels != m->audio_channels) {
-        /* A different rate or a different number of channels is a
-           different device format and a different ring size. */
-        rubraview_pal_audio_close(m->audio);
-        m->audio = NULL;
-        free(m->pcm_storage);
-        size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
-        m->pcm_storage = (float*)malloc(capacity * sizeof(float));
-        if (!m->pcm_storage || !rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
-            free(m->pcm_storage);
-            m->pcm_storage = NULL;
-            m->audio_stream = NO_STREAM;
-            return false;
-        }
-        m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
-        if (!m->audio) {
-            free(m->pcm_storage);
-            m->pcm_storage = NULL;
-            m->audio_stream = NO_STREAM;
-            return false;
-        }
-    }
     m->audio_stream = wanted;
-    m->audio_rate = rate;
-    m->audio_channels = channels;
+    if ((rate != m->audio_rate || channels != m->audio_channels) && !mf_reopen_audio(m, rate, channels)) return false;
     for (size_t i = 0; i < m->tracks.count; ++i) {
         if (m->tracks.tracks[i].kind == RUBRAVIEW_TRACK_AUDIO &&
             m->tracks.tracks[i].stream_index == (int32_t)wanted) {
@@ -775,6 +1048,11 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                 if (actual == m->video_stream) video_done = true;
                 if (actual == m->audio_stream) audio_done = true;
             }
+            if (want_audio && actual == m->audio_stream &&
+                (flags & (MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED | MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED))) {
+                mf_audio_type_changed(m, reader, (flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) != 0,
+                                      (double)timestamp / 1e7);
+            }
             if (sample) {
                 double pts = (double)timestamp / 1e7;
                 if (video_can && actual == m->video_stream) {
@@ -796,7 +1074,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                             rubraview_spsc_commit_write(&m->ring);   /* publishes the pixels above */
                         }
                     }
-                } else if (want_audio && actual == m->audio_stream) {
+                } else if (want_audio && actual == m->audio_stream && m->audio) {
                     deliver_audio(m, sample, pts, &skip_audio, generation);
                 }
                 IMFSample_Release(sample);
@@ -955,6 +1233,7 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
     atomic_init(&m->pending_audio_stream, -1);
+    atomic_init(&m->audio_gain_millionths, 1000000);
     m->consumer_generation = 0;
     m->video_stream = NO_STREAM;
     m->audio_stream = NO_STREAM;
@@ -974,6 +1253,7 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
         return NULL;
     }
     *out_info = m->info;
+    atomic_store_explicit(&m->audio_playing, true, memory_order_release);
     rubraview_pal_audio_set_playing(m->audio, true);   /* NULL-safe: no sound, nothing to start */
     return m;
 }
@@ -1037,7 +1317,9 @@ static bool mf_finished(void *handle) {
 
 static void mf_set_paused(void *handle, bool paused) {
     mf_media_t *media = (mf_media_t*)handle;
-    if (media) rubraview_pal_audio_set_playing(media->audio, !paused);
+    if (!media) return;
+    atomic_store_explicit(&media->audio_playing, !paused, memory_order_release);
+    rubraview_pal_audio_set_playing(media->audio, !paused);
 }
 
 static bool mf_audio_position(void *handle, double *out_position, double *out_wall) {
@@ -1062,6 +1344,11 @@ static bool mf_select_audio_track(void *handle, int32_t stream_index) {
     return true;
 }
 
+static const rubraview_details_t *mf_details(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
+    return media ? &media->details : NULL;
+}
+
 static bool mf_tracks(void *handle, rubraview_track_set_t *out_set) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media || !out_set) return false;
@@ -1075,7 +1362,9 @@ static bool mf_tracks(void *handle, rubraview_track_set_t *out_set) {
 /* RV-075: this player's own level, so two tracks can cross over. */
 static void mf_set_gain(void *handle, double gain) {
     mf_media_t *media = (mf_media_t*)handle;
-    if (media) rubraview_pal_audio_set_gain(media->audio, gain);
+    if (!media) return;
+    atomic_store_explicit(&media->audio_gain_millionths, (int32_t)(gain * 1e6), memory_order_release);
+    rubraview_pal_audio_set_gain(media->audio, gain);
 }
 
 static const rubraview_media_backend_api_t MF_API = {
@@ -1090,6 +1379,7 @@ static const rubraview_media_backend_api_t MF_API = {
     .set_paused = mf_set_paused,
     .audio_position = mf_audio_position,
     .tracks = mf_tracks,
+    .details = mf_details,
     .select_audio_track = mf_select_audio_track,
     .set_gain = mf_set_gain,
 };

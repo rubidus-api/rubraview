@@ -98,6 +98,11 @@ u8str_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, prove
     return media->api->read_subtitle_stream(media->impl, arena, stream_index);
 }
 
+const rubraview_details_t *rubraview_pal_media_details(rubraview_media_t *media) {
+    if (!media || !media->api->details) return NULL;
+    return media->api->details(media->impl);
+}
+
 bool rubraview_pal_media_tracks(rubraview_media_t *media, rubraview_track_set_t *out_set) {
     /* A backend that does not fill this member leaves it NULL — the
        table is written with designated initialisers, so the compiler

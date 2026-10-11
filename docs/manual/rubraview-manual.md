@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.47.exe              the viewer, as built
-dist/rubraview-v0.0.47/                 the release bundle
-dist/rubraview-v0.0.47.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.48.exe              the viewer, as built
+dist/rubraview-v0.0.48/                 the release bundle
+dist/rubraview-v0.0.48.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -413,8 +413,8 @@ While it does:
   half a second earlier or later.
 - Text subtitles sit in a shaded box, and the box always holds the whole
   subtitle: one of many lines, or one long enough to wrap, makes the box
-  grow from the edge it is anchored by (it stays inside the window and
-  above the seek bar). Settings › Video › **When it does not fit** set to
+  grow from the edge it is anchored by (it stays inside the window, and
+  may be anywhere in it — in the margin above or under the film too). Settings › Video › **When it does not fit** set to
   `shrink` keeps the box its size and makes the text smaller until it fits
   instead. The same page places the box in percents of the window: a point
   (**Box place, across** and **down**), which part of the box sits on that
@@ -463,6 +463,21 @@ the file to the recycle bin. The Layout tile says the layout in use and whether 
 runs right to left (`Layout: book rtl`). Open folder lists folders and the files
 the viewer can open, and says how many others it left out.
 
+**View › Shape** shows the picture or the film in another shape without
+touching the file: 4:3, 5:4, 3:2, 16:10, 16:9, the cinema's 1.85:1 and
+2.39:1, 21:9, 1:1, A4 / B4 and US Letter paper, or **Custom** — the two
+numbers under Settings › Viewer › Shape. **On its side** turns the chosen
+ratio over (9:16; paper lying down). `Shift+A` goes round them; **Original**
+puts the file's own shape back. The choice lasts until the viewer is closed.
+
+The two floating boxes start in opposite corners, the menu box top left and
+the toolbox bottom right. They are always whole inside the window, and when
+the window changes size each stays the same part of the way across and down.
+
+The `1:1` button shows the scale the picture or the film is at now (`43%`);
+a tap puts it at 100 %, its own pixels, in the middle of the window. Fit
+(`1`) is the way back.
+
 Most of what the viewer does has a toolbox button: turning pages one, ten
 or all the way, zoom and fit, turning and flipping, the slide show, the
 filmstrip, the playlist, the information, editing and exporting, opening,
@@ -503,6 +518,21 @@ ISO, focal length, program, metering, white balance, colour space, and where
 it was: the place in degrees and minutes, the same in decimal degrees for a
 map's search box, the altitude, the direction the camera faced and the GPS
 time. A picture without any says so. `I` again or `Esc` closes it.
+
+It also says all the file tells of how it was made. For a film or a song,
+each stream in the file has its own block: the codec in words, its profile
+and level, the frame and the shape of a pixel, the frame rate, whether it
+is interlaced, the bit rate and how much that is against the unpacked
+picture or sound, the colour range, primaries, transfer and matrix; for
+sound the sample rate, the channels and their speakers, the bits a sample,
+and what it was decoded as. For a picture: the bits a pixel it is stored
+at and the compression ratio, then what the format itself records — a
+JPEG's process, chroma sampling, restart interval and an estimate of the
+quality it was saved at; a PNG's depth, colour type, interlace, gamma,
+texts and deflate level; a GIF's palette, frames, playing time and
+repeats; a WebP's and a BMP's likewise. How much there is depends on the
+file and on what opened it (FFmpeg reads more out of a container than
+Windows does).
 
 The title bar (point at the top edge) has, after the pin, a `Size` button:
 press it and drag to size the window from its bottom-right corner. A double
@@ -679,6 +709,7 @@ listed under a later heading only means that while that is on screen.
 | `4`, `0`, `Ctrl+0` | Actual size (1:1) |
 | `5` | Smart fit (shrink only) |
 | `Ctrl+1` | Stretch to fill |
+| `Shift+A` | Shape shown in: the file's own, 4:3, 16:9, cinema, paper ... (round) |
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
@@ -759,6 +790,20 @@ listed under a later heading only means that while that is on screen.
 | Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
 | Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
+| Menu `Original` | Shape: the file's own |
+| Menu `4:3` | Shape: 4:3 |
+| Menu `5:4` | Shape: 5:4 |
+| Menu `3:2` | Shape: 3:2 |
+| Menu `16:10` | Shape: 16:10 |
+| Menu `16:9` | Shape: 16:9 |
+| Menu `1.85:1 cinema` | Shape: 1.85:1 (cinema, flat) |
+| Menu `21:9` | Shape: 21:9 |
+| Menu `2.39:1 cinema` | Shape: 2.39:1 (cinema, scope) |
+| Menu `1:1` | Shape: 1:1 |
+| Menu `A4 / B4` | Shape: A and B paper (A4, B4 ...), upright |
+| Menu `US Letter` | Shape: US Letter, upright |
+| Menu `Custom` | Shape: the two numbers in Settings > Viewer |
+| Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |

@@ -186,6 +186,16 @@ bool rubraview_box_click(rubraview_box_t *box, const rubraview_tile_metrics_t *m
                          double px, double py);
 
 /**
+ * A box's place as a share of the room it can move in (owner, 2026-10-11):
+ * 0 against the left or top `margin`, 1 against the right or bottom one.
+ * A window of another size puts the box the same part of the way across,
+ * and always inside. `size` is the anchor's along that axis.
+ */
+double rubraview_box_share_place(double share, double window, double size, double margin);
+/** The share that puts a box at `position` — brought inside when it is not. */
+double rubraview_box_share_of(double position, double window, double size, double margin);
+
+/**
  * Put the box back in its corner, fully inside the window, and dock it
  * if it had been dragged out. This is the answer to a floating box that
  * has wandered somewhere the reader cannot reach.

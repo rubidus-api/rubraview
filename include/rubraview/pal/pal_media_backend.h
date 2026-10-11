@@ -34,6 +34,9 @@ typedef struct rubraview_media_backend_api {
     /** The container's tracks, as found while opening (§3.16.2). */
     bool  (*tracks)(void *impl, rubraview_track_set_t *out_set);
 
+    /** What the file says about itself, as found while opening. May be NULL. */
+    const rubraview_details_t *(*details)(void *impl);
+
     /** Ask the decode thread to play another sound track (§3.16.2). */
     bool  (*select_audio_track)(void *impl, int32_t stream_index);
     /* RV-075: this player's own level, for a crossfade. May be NULL —

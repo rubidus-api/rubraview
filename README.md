@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.47** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.47/rubraview-v0.0.47.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.47/rubraview-v0.0.47.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.48** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -98,6 +98,7 @@ ships with, so it cannot drift from them.
 | `4`, `0`, `Ctrl+0` | Actual size (1:1) |
 | `5` | Smart fit (shrink only) |
 | `Ctrl+1` | Stretch to fill |
+| `Shift+A` | Shape shown in: the file's own, 4:3, 16:9, cinema, paper ... (round) |
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
@@ -178,6 +179,20 @@ ships with, so it cannot drift from them.
 | Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
 | Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
+| Menu `Original` | Shape: the file's own |
+| Menu `4:3` | Shape: 4:3 |
+| Menu `5:4` | Shape: 5:4 |
+| Menu `3:2` | Shape: 3:2 |
+| Menu `16:10` | Shape: 16:10 |
+| Menu `16:9` | Shape: 16:9 |
+| Menu `1.85:1 cinema` | Shape: 1.85:1 (cinema, flat) |
+| Menu `21:9` | Shape: 21:9 |
+| Menu `2.39:1 cinema` | Shape: 2.39:1 (cinema, scope) |
+| Menu `1:1` | Shape: 1:1 |
+| Menu `A4 / B4` | Shape: A and B paper (A4, B4 ...), upright |
+| Menu `US Letter` | Shape: US Letter, upright |
+| Menu `Custom` | Shape: the two numbers in Settings > Viewer |
+| Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |

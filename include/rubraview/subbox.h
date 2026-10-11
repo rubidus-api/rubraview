@@ -118,8 +118,9 @@ typedef struct rubraview_subbox_layout {
 double rubraview_subbox_padding(double font);
 
 /*
- * Lay the box out. `limit_bottom` is the lowest the box may reach (the
- * seek bar's top; the window's height when there is none). `measure` NULL
+ * Lay the box out. `limit_bottom` is the lowest the box may reach: the
+ * top of something laid along the window's bottom, or 0 for the window's
+ * own edge — the box may sit in the margin above or under a film (D-93). `measure` NULL
  * means no subtitle is showing: the box at its own size. `min_font` is as
  * small as shrinking goes.
  */

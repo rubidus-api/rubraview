@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.47** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.47/rubraview-v0.0.47.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.47/rubraview-v0.0.47.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.48** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -97,6 +97,7 @@
 | `4`, `0`, `Ctrl+0` | 실제 크기(1:1) |
 | `5` | 똑똑한 맞춤(줄이기만) |
 | `Ctrl+1` | 창 가득 늘이기 |
+| `Shift+A` | 화면 비율 바꾸기: 원본, 4:3, 16:9, 영화관, 종이 … (돌아가며) |
 | `L` | 다음 파일에도 이 맞춤 유지 |
 | `+` | 확대 |
 | `-` | 축소 |
@@ -177,6 +178,20 @@
 | 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 메뉴 `Comic` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서(코믹) |
 | 메뉴 `Comic, right to left` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서 오른쪽 절반부터 |
+| 메뉴 `Original` | 화면 비율: 원본 |
+| 메뉴 `4:3` | 화면 비율: 4:3 |
+| 메뉴 `5:4` | 화면 비율: 5:4 |
+| 메뉴 `3:2` | 화면 비율: 3:2 |
+| 메뉴 `16:10` | 화면 비율: 16:10 |
+| 메뉴 `16:9` | 화면 비율: 16:9 |
+| 메뉴 `1.85:1 cinema` | 화면 비율: 1.85:1 (영화관) |
+| 메뉴 `21:9` | 화면 비율: 21:9 |
+| 메뉴 `2.39:1 cinema` | 화면 비율: 2.39:1 (영화관 시네마스코프) |
+| 메뉴 `1:1` | 화면 비율: 1:1 |
+| 메뉴 `A4 / B4` | 화면 비율: A·B 판형 종이(A4, B4 …), 세로 |
+| 메뉴 `US Letter` | 화면 비율: US Letter, 세로 |
+| 메뉴 `Custom` | 화면 비율: 설정 › Viewer에 적은 두 숫자 |
+| 메뉴 `On its side` | 비율을 옆으로 눕히기 (16:9 → 9:16, 종이는 가로) |
 | 메뉴 `Slower` | 더 느리게 재생 |
 | 메뉴 `Faster` | 더 빠르게 재생 |
 | 메뉴 `Choose` | 목록에서 자막 고르기 |
