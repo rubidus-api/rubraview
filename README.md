@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -132,6 +132,8 @@ ships with, so it cannot drift from them.
 | `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
+| `Ctrl+Shift+Right` | 1 second on |
+| `Ctrl+Shift+Left` | 1 second back |
 | `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
@@ -225,6 +227,7 @@ ships with, so it cannot drift from them.
 | Point near the middle of the left or right side | A button for the previous or next page |
 | Drop files or a folder on the window | Opens them |
 | Touch: drag, pinch | Moves the picture, zooms it |
+| Touch: a drag sideways over a fitted page | Turns the page |
 
 ## Keys in the other windows
 

@@ -144,6 +144,8 @@ const char *rubraview_default_keymap(void) {
     /* 30 s, as the edge buttons' second step (owner, 2026-09-29). Shift +
        an arrow skips ten files elsewhere; Ctrl+PageDown/PageUp still do. */
     "media_seek_forward_long = \"Shift+Right\"\n"
+    "media_seek_forward_fine = \"Ctrl+Shift+Right\"\n"
+    "media_seek_back_fine = \"Ctrl+Shift+Left\"\n"
     "media_seek_back_long = \"Shift+Left\"\n"
     "media_volume_up = \"Up\"\n"
     "media_volume_down = \"Down\"\n"

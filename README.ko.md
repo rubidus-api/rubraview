@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.52/rubraview-v0.0.52.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -131,6 +131,8 @@
 | `Right` | 5초 뒤로; 툴바 버튼을 길게 누르면 5초·10초·30초·1분·5분이 떠서 끌어다 놓아 고름 |
 | `Left` | 5초 앞으로; 툴바 버튼을 길게 누르면 같은 방식으로 5초~5분 |
 | `Shift+Right` | 30초 뒤로 |
+| `Ctrl+Shift+Right` | 1초 뒤로 |
+| `Ctrl+Shift+Left` | 1초 앞으로 |
 | `Shift+Left` | 30초 앞으로 |
 | `Up` | 소리 5% 크게 |
 | `Down` | 소리 5% 작게 |

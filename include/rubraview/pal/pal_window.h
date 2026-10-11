@@ -40,6 +40,7 @@ typedef enum rubraview_window_event_kind {
     RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL,
     RUBRAVIEW_WINDOW_EVENT_GESTURE_ZOOM, /* §3.6.5 GID_ZOOM: two-finger pinch */
     RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN,  /* §3.6.5 GID_PAN: two-finger drag */
+    RUBRAVIEW_WINDOW_EVENT_GESTURE_END,  /* RV-107: the fingers left; a pan that went sideways was a swipe */
     RUBRAVIEW_WINDOW_EVENT_DROP,         /* §3.19.2: files dropped on the window */
     RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST, /* §3.19.1: another instance handed us a path */
     RUBRAVIEW_WINDOW_EVENT_MOVED,        /* the reader finished moving the window (RFC-0002 Q6: docking) */

@@ -896,3 +896,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - `viewer.whole_zoom` (off): a picture shown larger than it is takes a whole number of screen pixels a pixel — the next one down from what the fit and the zoom ask. A film is left alone; reducing is not changed.
 - Alternatives: menu items and keys for the filters and the subfolder switch — they are settings a reader sets once, and every action costs a tile count in two documents; a seed kept for the random order so that going back retraces it — a folder listed again (after a delete) is shuffled again.
 - Consequences: the title's count is of what is listed, so a filter changes it. With subfolders on, a folder with very many files under it takes as long to open as listing them all does (200,000 at most). The zoom button still shows the zoom asked for, not the whole step drawn. The slide and the zoom transitions were checked by their numbers, not caught on screen.
+
+## 2026-10-11: D-102 What RFC-0001 left for input and settings
+
+- Context: owner, 2026-10-11, on RFC-0004 §2: build all of it.
+- Decision:
+  - `media_seek_forward_fine` / `media_seek_back_fine` (`Ctrl+Shift+Right` / `Left`): one second, in a film, a song and an animation.
+  - A pan gesture that ends having gone sideways (twice as far across as down, 64 px or more) over a fitted page turns the page, the way reading goes (`RUBRAVIEW_WINDOW_EVENT_GESTURE_END`, `rubraview_pointer_swipe`); the page is put back where it was. Not in the strip, not zoomed in, not in the picker.
+  - `video.subtitle_font` (a family name, typed), `video.subtitle_color` (white, yellow, cyan, green, pink): `rubraview_pal_render_set_text_family` is set while a subtitle is measured and drawn and taken back after.
+  - `video.audio_language`, `video.subtitle_language` (typed: `kor`, `eng`, `ko` ...): the track `rubraview_tracks_choose` finds in that language is the one a film opens with.
+  - `viewer.background` (dark, black, grey, white): what is behind and between pages.
+  - Settings > Cache: "In use now" says megabytes of the cap; "Clear the picker's thumbnails"; "Forget every reading place" (the history here and its file, under the lock).
+  - `general.native_dialog`: `Ctrl+O` opens Windows' own dialog in place of the picker.
+- Alternatives: a font picker — the settings window is text; a typed family is what it can hold. A colour picker likewise: five colours.
+- Consequences: a setting typed in the Video and Files pages is text, not a folder (`settings_path_commit`). A family the machine lacks is drawn in DirectWrite's fallback, with no word about it. "Forget every reading place" does not reach a viewer that is open elsewhere: it writes its own places back when it closes. Whether Windows sends a one-finger sideways drag as a pan gesture (it may arrive as a mouse drag) was not seen: no touch screen.

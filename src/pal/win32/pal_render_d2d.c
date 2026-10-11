@@ -85,6 +85,7 @@ uint32_t rubraview_pal_render_last_hresult(void) {
 
 struct rubraview_renderer {
     proven_arena_t *arena;
+    WCHAR text_family[64];         /* RV-107: "" for the program's own face */
     ID2D1Factory1 *factory;
     ID2D1Device *device;
     ID2D1DeviceContext *target;    /* the render target, and the effect graph's owner */
@@ -758,6 +759,14 @@ bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t cod
     return ok;
 }
 
+void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family) {
+    if (!renderer) return;
+    renderer->text_family[0] = 0;
+    if (family.len == 0 || family.len > 120) return;
+    int n = MultiByteToWideChar(CP_UTF8, 0, family.ptr, (int)family.len, renderer->text_family, 63);
+    renderer->text_family[n > 0 && n < 64 ? n : 0] = 0;
+}
+
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     u8str_t text,
                                     rubraview_pal_rect_t rect,
@@ -775,7 +784,7 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
     if (wide_len <= 0) return false;
 
     IDWriteTextFormat *format = NULL;
-    HRESULT hr = IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe UI", NULL,
+    HRESULT hr = IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL,
                                                  DWRITE_FONT_WEIGHT_NORMAL,
                                                  DWRITE_FONT_STYLE_NORMAL,
                                                  DWRITE_FONT_STRETCH_NORMAL,
@@ -818,7 +827,7 @@ bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t t
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
                                                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
                                                (FLOAT)font_size, L"", &format)) || !format) {
         return false;
@@ -850,7 +859,7 @@ bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u
     if (wide_len <= 0) return false;
     /* The same face and wrapping draw_text draws with. */
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
                                                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
                                                (FLOAT)font_size, L"", &format)) || !format) {
         return false;

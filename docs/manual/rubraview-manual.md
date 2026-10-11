@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.52.exe              the viewer, as built
-dist/rubraview-v0.0.52/                 the release bundle
-dist/rubraview-v0.0.52.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.53.exe              the viewer, as built
+dist/rubraview-v0.0.53/                 the release bundle
+dist/rubraview-v0.0.53.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -628,6 +628,15 @@ filename code page, the memory cap). Some worth knowing:
 - **Video** — **GPU decoding** lets the graphics card decode a film (`on`, as
   it comes, falls back to the processor when the card cannot; `always`
   insists on the card; `off` never uses it).
+- **Video** also has the subtitle's **font** (type a family's name, such
+  as `Malgun Gothic`) and **colour**, and **Preferred sound** and
+  **Preferred subtitles**: a language as films name it (`kor`, `eng`,
+  `jpn`), chosen when a film has it.
+- **Viewer › Behind and between pages** — dark, black, grey or white.
+- **General › Open with Windows' own dialog** — `Ctrl+O` then opens
+  Windows' dialog, not the picker.
+- **Cache** has **In use now** (pages and megabytes of the cap),
+  **Clear the picker's thumbnails**, and **Forget every reading place**.
 - **Cache** — how much memory pages may take and how many are read ahead
   and kept behind; **Always strip metadata on export** starts Export with
   that box ticked.
@@ -810,6 +819,8 @@ listed under a later heading only means that while that is on screen.
 | `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
+| `Ctrl+Shift+Right` | 1 second on |
+| `Ctrl+Shift+Left` | 1 second back |
 | `Shift+Left` | 30 seconds back |
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |

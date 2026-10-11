@@ -183,6 +183,14 @@ typedef enum rubraview_text_align {
  * Draw UTF-8 text inside `rect`, vertically centred. Returns false when
  * no text backend is available. `text` need not be NUL-terminated.
  */
+/**
+ * RV-107: the font family draw_text and the measures use from now on —
+ * a subtitle's own font. An empty name is the program's face again, and a
+ * family the machine does not have is drawn in what DirectWrite falls
+ * back to.
+ */
+void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family);
+
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     u8str_t text,
                                     rubraview_pal_rect_t rect,

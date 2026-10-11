@@ -123,6 +123,7 @@
    thread reported, before it waits for the next report. */
 #define MEDIA_AUDIO_EXTRAPOLATION 0.2
 #define MEDIA_SEEK_STEP 5.0
+#define MEDIA_SEEK_FINE 1.0    /* RV-107: Ctrl+Shift + an arrow */
 #define MEDIA_SEEK_LONG 30.0   /* the edge buttons' second step, Shift + an arrow (owner, 2026-09-29) */
 #define MEDIA_NOTICE_SECONDS 5.0
 /* How far the picture may fall behind the clock before the clock is
@@ -139,6 +140,10 @@ static int  g_cli_descending = -1;         /* --descending / --ascending; -1: th
 static bool g_cli_subfolders = false;      /* --recursive, without --batch */
 static rubraview_transition_pose_t g_pose = { 0.0, 1.0, 1.0 };   /* where draw_spread puts what it draws */
 static bool g_pose_on = false;
+/* RV-107 (RFC-0004 §2). */
+static uint32_t g_canvas = 0xFF101010u;    /* Settings > Viewer > Behind and between pages */
+static uint32_t g_subtitle_argb = 0xFFFFFFFFu;
+static unsigned g_subtitle_style = 0;      /* stepped when the subtitle's font changes: a kept layout is measured again */
 #define ZOOM_STEP g_zoom_step
 #define PAN_STEP 60.0
 /* Settings › Viewer › Gutter: the gap between two pages, in pixels. */
@@ -161,7 +166,7 @@ static double g_gutter = 8.0;
 #define MENU_MAX_TILES 16   /* 4 x 4; the owner chose a larger grid over splitting File (2026-09-21) */
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
-#define COLOR_CANVAS      0xFF101010u
+#define COLOR_CANVAS      g_canvas
 #define COLOR_BOX_FILL    0xE01A1A1Au
 #define COLOR_BOX_BORDER  0x30FFFFFFu
 #define COLOR_TILE_FILL   0xE0242424u
@@ -575,6 +580,8 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    bool   swipe_going;                    /* RV-107: a pan gesture under way, and how far it has gone */
+    double swipe_dx, swipe_dy, swipe_pan_x, swipe_pan_y;
     double added_shown_at;                 /* D-100: when a file added from Explorer was last turned to */
     int32_t layout_exempt;                 /* D-98: the film or animation the reader asked for by name: shown in any layout; -1 none */
     rubraview_aspect_t aspect;             /* D-94: the shape pictures are shown in, for the session */
@@ -839,6 +846,7 @@ static void tiles_reset(app_state_t *app);
    them. */
 static bool open_folder(app_state_t *app, u8str_t dir);
 static void folder_relist(app_state_t *app);
+static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t count, const char *what);
 static bool path_is_listed_kind(u8str_t path);
 static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said,
                              bool as_given, u8str_t start);
@@ -1215,7 +1223,7 @@ static void anim_show(app_state_t *app, size_t frame_index) {
     {
         /* The texture has no see-through: what shows through is the
            window's own colour, as around any picture. */
-        const uint8_t back[3] = { COLOR_CANVAS & 0xFF, (COLOR_CANVAS >> 8) & 0xFF, (COLOR_CANVAS >> 16) & 0xFF };
+        const uint8_t back[3] = { (uint8_t)(COLOR_CANVAS & 0xFF), (uint8_t)((COLOR_CANVAS >> 8) & 0xFF), (uint8_t)((COLOR_CANVAS >> 16) & 0xFF) };
         uint8_t *flat = canvas->scratch;
         for (size_t i = 0; i < whole; i += 4) {
             uint32_t a = picture[i + 3];
@@ -2180,7 +2188,16 @@ static void subtitle_load(app_state_t *app, u8str_t video_path) {
     /* §3.16.2: the preferred language decides; with none set, the first
        file wins. Parsing happens now, and only for the one chosen. */
     subtitle_select(app, rubraview_tracks_choose(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
-                                                 (u8str_t){ .ptr = "", .len = 0 }));
+                                                 rubraview_settings_get_text(&app->settings, U8("video"), U8("subtitle_language"))));
+    /* RV-107: and the sound in the language asked for, when the film has one. */
+    u8str_t sound = rubraview_settings_get_text(&app->settings, U8("video"), U8("audio_language"));
+    if (sound.len > 0 && app->media) {
+        int32_t want = rubraview_tracks_choose(&app->tracks, RUBRAVIEW_TRACK_AUDIO, sound);
+        if (want >= 0 && want != app->tracks.current_audio && (size_t)want < app->tracks.count &&
+            rubraview_pal_media_select_audio_track(app->media, app->tracks.tracks[want].stream_index)) {
+            app->tracks.current_audio = want;
+        }
+    }
 }
 
 /* ---- RV-081: music that outlives its page ---- */
@@ -4525,6 +4542,19 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "open_picker")) {
         if (app->picker_open) {
             app->picker_open = false;
+        } else if (rubraview_settings_get(&app->settings, U8("general"), U8("native_dialog")) > 0.5) {
+            /* RV-107: Windows' own dialog in place of the picker. */
+            static const rubraview_file_filter_t FILTERS[] = {
+                { "Pictures, films, music, books",
+                  IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;*.m3u8;*.m3u;*.rvlist" },
+                { "All files", "*.*" } };
+            rubraview_file_dialog_opts_t opts = {
+                .title = "Open", .filters = FILTERS, .filter_count = 2, .allow_multi = true,
+                .parent_window_handle = rubraview_pal_window_native_handle(app->window),
+            };
+            rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+            if (picked.accepted && picked.count == 1) open_path(app, picked.paths[0]);
+            else if (picked.accepted && picked.count > 1) open_paths_as_set(app, picked.paths, picked.count, "files opened as one set");
         } else {
             picker_open(app);
         }
@@ -4678,6 +4708,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_LONG);
     } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_LONG);
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward_fine")) {
+        media_seek_to(app, app->media_position + MEDIA_SEEK_FINE);   /* RV-107 */
+    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back_fine")) {
+        media_seek_to(app, app->media_position - MEDIA_SEEK_FINE);
     } else if (app->media && rubraview_u8_eq_lit(action, "next_audio_track")) {
         /* §3.16.2: the next sound track of the same file, without
            stopping the picture. */
@@ -4759,6 +4793,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         play_seek(app, play_position(app) + MEDIA_SEEK_LONG);
     } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
         play_seek(app, play_position(app) - MEDIA_SEEK_LONG);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward_fine")) {
+        play_seek(app, play_position(app) + MEDIA_SEEK_FINE);
+    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back_fine")) {
+        play_seek(app, play_position(app) - MEDIA_SEEK_FINE);
     } else if (!app->media && !anim_plays(app) && app->bgm_media && rubraview_u8_eq_lit(action, "media_play_pause")) {
         /* §3.14.6: with a picture on screen and music behind it, the
            play key is the music's — and the listener's own pause
@@ -6592,6 +6630,13 @@ static bool subbox_measure_text(void *context, double font, double wrap_width, d
     return rubraview_pal_render_measure_text_wrapped(m->renderer, m->text, font, wrap_width, out_width, out_height);
 }
 
+/* RV-107: Settings > Video > Subtitle font. Set while a subtitle is
+   measured and drawn, and taken back: the rest of the program keeps its face. */
+static void subtitle_face(app_state_t *app, bool on) {
+    rubraview_pal_render_set_text_family(app->renderer,
+        on ? rubraview_settings_get_text(&app->settings, U8("video"), U8("subtitle_font")) : U8(""));
+}
+
 /* The box and the text in it, for the subtitle showing now (or the box
    alone). The whole window is its room, the margins above and under a
    film too (D-93, owner 2026-10-11: "자막이 영상 바깥으로 나갈 수 있게") —
@@ -6605,6 +6650,7 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
         const char *text;
         size_t text_len;
         double win_w, win_h, font, limit;
+        unsigned style;
         rubraview_subbox_place_t place;
         rubraview_subbox_layout_t layout;
     } kept;
@@ -6615,22 +6661,24 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
     if (kept.valid && kept.cue == cue && kept.text == (cue ? cue->text.ptr : NULL) &&
         kept.text_len == (cue ? cue->text.len : 0) && kept.win_w == win_w &&
-        kept.win_h == win_h && kept.font == font && kept.limit == limit &&
+        kept.win_h == win_h && kept.font == font && kept.limit == limit && kept.style == g_subtitle_style &&
         kept.place.x == place.x && kept.place.y == place.y && kept.place.width == place.width &&
         kept.place.height == place.height && kept.place.align == place.align &&
         kept.place.valign == place.valign && kept.place.fit == place.fit) {
         return kept.layout;
     }
     struct subbox_measure measure = { .renderer = app->renderer, .text = cue ? cue->text : U8("") };
+    subtitle_face(app, true);
     /* No smaller than a size that can still be read: ten points' worth here. */
     double min_font = 10.0 * dpi * subtitle_window_scale(win_h);
     kept.layout = rubraview_subbox_layout(&place, win_w, win_h, limit, font, min_font,
                                           cue ? subbox_measure_text : NULL, &measure);
+    subtitle_face(app, false);
     kept.valid = true;
     kept.cue = cue;
     kept.text = cue ? cue->text.ptr : NULL;
     kept.text_len = cue ? cue->text.len : 0;
-    kept.win_w = win_w; kept.win_h = win_h; kept.font = font; kept.limit = limit;
+    kept.win_w = win_w; kept.win_h = win_h; kept.font = font; kept.limit = limit; kept.style = g_subtitle_style;
     kept.place = place;
     return kept.layout;
 }
@@ -6700,7 +6748,9 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     /* A font shrunk to fit keeps an outline in proportion, not one that fills its letters. */
     double asked = subtitle_font_px(app, (double)win_h);
     if (asked > 0.0 && font < asked) outline *= font / asked;
-    draw_outlined_text_aligned(app->renderer, cue->text, rect, font, outline, 0xFFFFFFFFu, align);
+    subtitle_face(app, true);
+    draw_outlined_text_aligned(app->renderer, cue->text, rect, font, outline, g_subtitle_argb, align);
+    subtitle_face(app, false);
 }
 
 /* The list a double tap or a held press on the Sub tile opens (D-33). */
@@ -9714,8 +9764,16 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
         n = snprintf(buffer, capacity, "run rubraview --probe-gpu <video> for the details");
     } else if (rubraview_u8_eq_lit(source, "cache.used")) {
         size_t loaded = 0;
-        for (size_t i = 0; i < page_count(app); ++i) if (app->pages[i].texture) loaded++;
-        n = snprintf(buffer, capacity, "%zu page(s) decoded and kept", loaded);
+        uint64_t bytes = 0;
+        for (size_t i = 0; i < page_count(app); ++i) {
+            if (!app->pages[i].texture) continue;
+            loaded++;
+            bytes += (uint64_t)app->pages[i].width * (uint64_t)app->pages[i].height * 4u;
+        }
+        /* RV-107: and how much that is of the cap. */
+        n = snprintf(buffer, capacity, "%zu page(s), about %llu MB of %zu MB", loaded,
+                     (unsigned long long)((bytes + 524288u) / 1048576u),
+                     (app->cache_budget > 0 ? app->cache_budget : PAGE_CACHE_BUDGET) / 1048576u);
     }
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
@@ -9950,6 +10008,19 @@ static void settings_apply_rest(app_state_t *app) {
     g_gutter = rubraview_settings_get(st, U8("viewer"), U8("gutter_px")) * dpi;
     g_zoom_step = 1.0 + rubraview_settings_get(st, U8("viewer"), U8("zoom_step_percent")) / 100.0;
     g_whole_zoom = rubraview_settings_get(st, U8("viewer"), U8("whole_zoom")) > 0.5;
+    {
+        static const uint32_t BACK[] = { 0xFF101010u, 0xFF000000u, 0xFF606060u, 0xFFFFFFFFu };
+        int back = (int)lround(rubraview_settings_get(st, U8("viewer"), U8("background")));
+        g_canvas = BACK[back >= 0 && back < 4 ? back : 0];
+        static const uint32_t INK[] = { 0xFFFFFFFFu, 0xFFFFE94Du, 0xFF66E0FFu, 0xFF7CF08Au, 0xFFFF9AD0u };
+        int ink = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_color")));
+        g_subtitle_argb = INK[ink >= 0 && ink < 5 ? ink : 0];
+        static uint64_t last_face = 0;
+        u8str_t face = rubraview_settings_get_text(st, U8("video"), U8("subtitle_font"));
+        uint64_t h = 1469598103934665603ull;
+        for (size_t i = 0; i < face.len; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
+        if (h != last_face) { g_subtitle_style++; last_face = h; }
+    }
     double grid = rubraview_settings_get(st, U8("viewer"), U8("pixel_grid"));
     if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
 
@@ -10286,6 +10357,26 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 shell_types_action(app, node->name);
             } else if (rubraview_u8_eq_lit(node->name, "shell.defaults")) {
                 rubraview_pal_shell_open_default_apps();
+            } else if (rubraview_u8_eq_lit(node->name, "cache.clear_thumbs")) {
+                /* RV-107: the picker's pictures are kept in memory only; they are made again as tiles come into view. */
+                picker_thumbs_free(app);
+                app->picker_generation++;
+                if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
+                if (app->picker_open) {
+                    app->picker_thumbs = (struct picker_thumb *)calloc(app->picker_listing.count ? app->picker_listing.count : 1,
+                                                                       sizeof(*app->picker_thumbs));
+                    app->picker_thumb_count = app->picker_thumbs ? app->picker_listing.count : 0;
+                }
+                settings_say(app, "the picker's thumbnails were let go");
+            } else if (rubraview_u8_eq_lit(node->name, "cache.reset_history")) {
+                /* Every place read to, here and in the file. Another viewer that is open still has its own. */
+                app->history = (rubraview_history_t){0};
+                app->resume_offer = false;
+                bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+                bool written = app->history_path.len > 0 &&
+                               rubraview_pal_fs_write_file_atomic(app->history_path, rubraview_history_serialize(app->arena, &app->history));
+                if (locked) rubraview_pal_config_unlock();
+                settings_say(app, written ? "every reading place is forgotten" : "forgotten here; the history file could not be written");
             } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
                 keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
             }
@@ -10382,18 +10473,21 @@ static void settings_path_commit(app_state_t *app) {
     while (text.len > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.len--; }
     while (text.len > 0 && (text.ptr[text.len - 1] == ' ' || text.ptr[text.len - 1] == '"')) text.len--;
     /* RV-106: "Only names like" is typed like a folder and is not one. */
-    bool is_folder = !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern"));
+    bool is_folder = !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern")) &&
+                     !rubraview_u8_eq_lit(app->spath_section, "video");   /* RV-107: a font's name, a language */
     if (text.len == 0) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
         settings_path_end(app);
-        settings_say(app, is_folder ? "folder cleared" : "cleared: every name is listed");
+        settings_say(app, is_folder ? "folder cleared" : "cleared");
         return;
     }
     rubraview_fs_entry_t found;
     if (!is_folder) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
         settings_path_end(app);
-        settings_say(app, "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*");
+        settings_say(app, rubraview_u8_eq_lit(app->spath_section, "files")
+                              ? "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*"
+                              : "kept (Delete clears it)");
         return;
     }
     if (!rubraview_pal_fs_stat(app->arena, text, &found) || !found.is_directory) {
@@ -15621,11 +15715,38 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (app.picker_open) {
                         rubraview_picker_scroll_by(&app.picker, -event.gesture.dy);
                     } else {
+                        if (!app.swipe_going) {
+                            app.swipe_going = true;
+                            app.swipe_dx = app.swipe_dy = 0.0;
+                            app.swipe_pan_x = app.pan_x;
+                            app.swipe_pan_y = app.pan_y;
+                        }
+                        app.swipe_dx += event.gesture.dx;
+                        app.swipe_dy += event.gesture.dy;
                         app.pan_x += event.gesture.dx;
                         app.pan_y += event.gesture.dy;
                     }
                     note_activity(&app);
                     break;
+
+                case RUBRAVIEW_WINDOW_EVENT_GESTURE_END: {
+                    /* RV-107 (§3.7.4): a finger drawn sideways over a page that has nowhere
+                       to go — fitted, not the strip — turns it; the page goes back where it was. */
+                    bool was = app.swipe_going;
+                    app.swipe_going = false;
+                    if (!was || app.picker_open || app.zoom > 1.001 || strip_active(&app) || page_count(&app) < 2) break;
+                    double across = app.swipe_dx < 0.0 ? -app.swipe_dx : app.swipe_dx;
+                    double down = app.swipe_dy < 0.0 ? -app.swipe_dy : app.swipe_dy;
+                    if (across < 2.0 * down) break;
+                    rubraview_pointer_context_t ctx = { .reading_direction = app.layout_opts.direction };
+                    rubraview_pointer_intent_t intent =
+                        rubraview_pointer_swipe(&ctx, app.swipe_dx, 64.0 * rubraview_pal_window_dpi_scale(app.window));
+                    if (intent != RUBRAVIEW_INTENT_NEXT_PAGE && intent != RUBRAVIEW_INTENT_PREV_PAGE) break;
+                    app.pan_x = app.swipe_pan_x;
+                    app.pan_y = app.swipe_pan_y;
+                    handle_action(&app, intent == RUBRAVIEW_INTENT_NEXT_PAGE ? U8("next_page") : U8("prev_page"));
+                    break;
+                }
 
                 default:
                     break;

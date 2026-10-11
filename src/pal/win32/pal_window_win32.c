@@ -518,10 +518,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                     w->last_pan_point = centre;
                     break;
 
-                case GID_END:
+                case GID_END: {
                     w->gesture_in_progress = false;
                     w->last_zoom_distance = 0;
+                    rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_GESTURE_END };
+                    e.gesture.scale_ratio = 1.0;
+                    e.gesture.center_x = (double)centre.x;
+                    e.gesture.center_y = (double)centre.y;
+                    queue_push(w, e);
                     break;
+                }
 
                 case GID_ZOOM: {
                     /* ullArguments carries the distance between the two
