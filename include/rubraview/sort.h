@@ -16,6 +16,7 @@ typedef enum rubraview_sort_mode {
     RUBRAVIEW_SORT_FILE_SIZE,        /* Byte size */
     RUBRAVIEW_SORT_RANDOM,           /* Fisher-Yates shuffle */
     RUBRAVIEW_SORT_PATH_NATURAL,     /* inside an archive: folder by folder, natural, loose pages first */
+    RUBRAVIEW_SORT_AS_GIVEN,         /* no sorting: a list a file was added to the end of keeps its order */
 } rubraview_sort_mode_t;
 
 /**

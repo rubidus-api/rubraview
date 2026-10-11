@@ -26,6 +26,7 @@ typedef enum rubraview_shell_verb {
     RUBRAVIEW_SHELL_VERB_BROWSE,     /* --browse     the archive's entries, in the picker */
     RUBRAVIEW_SHELL_VERB_CONVERT,    /* --convert    the batch panel, on these files */
     RUBRAVIEW_SHELL_VERB_PRINT,      /* --print      the print dialog, one picture a sheet */
+    RUBRAVIEW_SHELL_VERB_NEW_WINDOW, /* --new-window a window of its own, whatever the settings say */
     RUBRAVIEW_SHELL_VERB_COUNT
 } rubraview_shell_verb_t;
 

@@ -568,6 +568,7 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    double added_shown_at;                 /* D-100: when a file added from Explorer was last turned to */
     int32_t layout_exempt;                 /* D-98: the film or animation the reader asked for by name: shown in any layout; -1 none */
     rubraview_aspect_t aspect;             /* D-94: the shape pictures are shown in, for the session */
     bool aspect_side;                      /* that shape on its side */
@@ -8094,7 +8095,11 @@ static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_
         (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("sort_mode"))));
 }
 
-static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said) {
+/* `as_given` keeps the entries in the order they come in (a list a file
+   was added to the end of); `start` is the file to open on, the first
+   when it is empty or not among them. */
+static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said,
+                             bool as_given, u8str_t start) {
     if (!entries || count == 0) return;
 
     history_remember(app);
@@ -8103,6 +8108,7 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     rubraview_fs_listing_t listing = { .entries = entries, .count = count };
     bool ascending = true;
     rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
+    if (as_given) mode = RUBRAVIEW_SORT_AS_GIVEN;
     app->list_is_set = true;   /* a playlist or picked files: the playlist window says so */
     app->source = rubraview_page_source_from_listing(app->arena, &listing,
                                                      U8(IMAGE_FILTER ";" MEDIA_FILTER), mode, ascending);
@@ -8115,8 +8121,13 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
     app->source_dir = rubraview_path_dirname(entries[0].path);
     app->resume_offer = false;
     app->picker_open = false;
-    finish_open(app, 0);
+    int32_t first = start.len > 0 ? rubraview_page_source_find(&app->source, start) : -1;
+    finish_open(app, first > 0 ? (size_t)first : 0);
     osd_say(app, said);
+}
+
+static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said) {
+    open_set_ordered(app, entries, count, said, false, (u8str_t){ .ptr = "", .len = 0 });
 }
 
 /* ---- D-86: what Explorer's menu asks ---- */
@@ -8138,16 +8149,25 @@ static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t cou
     open_set_from_entries(app, entries, n, cstr(line));
 }
 
+static bool path_is_listed_kind(u8str_t path) {
+    return rubraview_glob_match_list(rubraview_path_basename(path), U8(IMAGE_FILTER ";" MEDIA_FILTER));
+}
+
 /* "Add to the list": the pages being read and the files named, as one
-   set, still on the page it was on. A folder being read becomes a set of
-   its files; a book has no files to add to, so the files are opened as a
-   set of their own. */
-static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count) {
+   set. A folder being read becomes a set of its files; a book has no
+   files to add to, so the files are opened as a set of their own.
+
+   D-100: the files go to the end of the list (Settings > General > "A
+   file added to the list goes": end, or sorted with the rest). `show`
+   turns to the first of them — what a file opened from Explorer asks —
+   and without it the reader stays on the page being read. */
+static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count, bool show) {
     bool files_open = page_count(app) > 0 && app->source.archive_path.len == 0;
     if (!files_open) {
         open_paths_as_set(app, paths, count, count == 1 ? "file opened as a list" : "files opened as a list");
         return;
     }
+    bool at_end = lround(rubraview_settings_get(&app->settings, U8("general"), U8("added_order"))) == 0;
 
     size_t have = page_count(app);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, have + count, sizeof(rubraview_fs_entry_t));
@@ -8155,41 +8175,66 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count)
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0, added = 0;
     for (size_t i = 0; i < have; ++i) {
-        if (rubraview_pal_fs_stat(app->arena, app->source.pages[i].path, &entries[n]) && !entries[n].is_directory) n++;
+        if (at_end) {
+            /* Kept as they stand: nothing of a file but its name is needed, so none is asked about. */
+            entries[n++] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
+        } else if (rubraview_pal_fs_stat(app->arena, app->source.pages[i].path, &entries[n]) && !entries[n].is_directory) {
+            n++;
+        }
     }
     size_t kept = n;
+    u8str_t first_named = { .ptr = "", .len = 0 };   /* the first of them that is, or now will be, in the list */
     for (size_t i = 0; i < count; ++i) {
         rubraview_fs_entry_t entry;
         if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory) continue;
+        if (!path_is_listed_kind(entry.path)) continue;
         bool there = false;
-        for (size_t k = 0; k < n && !there; ++k) there = rubraview_path_same(entries[k].path, entry.path);
+        for (size_t k = 0; k < n && !there; ++k) {
+            there = rubraview_path_same(entries[k].path, entry.path);
+            if (there && first_named.len == 0) first_named = entries[k].path;
+        }
         if (there) continue;
+        entry.path = app_keep(app, entry.path);
+        entry.name = rubraview_path_basename(entry.path);
+        if (first_named.len == 0) first_named = entry.path;
         entries[n++] = entry;
         added++;
     }
-    if (added == 0) { osd_say(app, U8("those files are in the list already")); return; }
+
+    /* Several files opened at once in Explorer arrive one launch after
+       another: the first is turned to, the rest only join the list. */
+    double now = rubraview_pal_time_now_seconds();
+    if (show && now - app->added_shown_at < RUBRAVIEW_SHELLREQ_GATHER_SECONDS) show = false;
+    if (show) app->added_shown_at = now;
+
+    if (added == 0) {
+        int32_t page = show && first_named.len > 0 ? rubraview_page_source_find(&app->source, first_named) : -1;
+        if (page >= 0) {
+            if (page != current_page_index(app)) {
+                go_to_spread(app, spread_for_chosen_page(app, page));
+                update_precache(app);
+            }
+        } else {
+            osd_say(app, U8("those files are in the list already"));
+        }
+        return;
+    }
 
     /* The page being read, and where a film or a song on it had got to. */
     int32_t at = current_page_index(app);
     u8str_t reading = at >= 0 && (size_t)at < have ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
-    bool playing = app->media != NULL && app->media_page == at;
+    bool playing = !show && app->media != NULL && app->media_page == at;
     double position = playing ? play_position(app) : 0.0;
     bool paused = app->media_paused;
 
     char line[96];
     snprintf(line, sizeof(line), "%zu added to the list (%zu in it)", added, kept + added);
-    open_set_from_entries(app, entries, n, cstr(line));
+    open_set_ordered(app, entries, n, cstr(line), at_end, show ? first_named : reading);
 
-    for (size_t i = 0; reading.len > 0 && i < page_count(app); ++i) {
-        if (!rubraview_path_same(app->source.pages[i].path, reading)) continue;
-        if (i != 0) finish_open(app, i);
-        if (playing && app->media && position > 1.0) {
-            play_seek(app, position);
-            if (paused && !app->media_paused) media_toggle_pause(app);
-        }
-        break;
+    if (playing && app->media && position > 1.0) {
+        play_seek(app, position);
+        if (paused && !app->media_paused) media_toggle_pause(app);
     }
-    osd_say(app, cstr(line));
 }
 
 static void panel_open_print(app_state_t *app);
@@ -8205,27 +8250,54 @@ static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
     panel_open_print(app);
 }
 
-static bool path_is_listed_kind(u8str_t path) {
-    return rubraview_glob_match_list(rubraview_path_basename(path), U8(IMAGE_FILTER ";" MEDIA_FILTER));
+
+/* D-100: a file opened from Explorer — a double click, the menu's Open,
+   a launch with files named. With files already being read it joins the
+   end of their list and is turned to (owner, 2026-10-11: "현재 재생목록
+   맨끝에 이미지가 추가되면서 새 파일로 열리게"); the first file a window is
+   given brings its folder ("맨 처음 열릴때만 같은 폴더 파일들을"). Both are
+   settings: General > "A file given to the open window" and "The first
+   file brings its folder". A book, a folder or a playlist is not a file
+   of a list: it is opened in place of what was open. */
+static void explorer_open(app_state_t *app, const u8str_t *paths, size_t count) {
+    enum { GIVEN_ADD = 0, GIVEN_FOLDER, GIVEN_ONLY };
+    int given = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("explorer_open")));
+    bool files_open = page_count(app) > 0 && app->source.archive_path.len == 0;
+    bool listed = true;
+    for (size_t i = 0; i < count && listed; ++i) listed = path_is_listed_kind(paths[i]);
+
+    if (!listed) {
+        if (count == 1) open_path(app, paths[0]);
+        else open_paths_as_set(app, paths, count, "files opened as one set");
+        return;
+    }
+    if (given == GIVEN_ADD && files_open) {
+        list_add_paths(app, paths, count,
+                       rubraview_settings_get(&app->settings, U8("general"), U8("added_shows")) > 0.5);
+        return;
+    }
+    if (count > 1) { open_paths_as_set(app, paths, count, "files opened as one set"); return; }
+
+    bool with_folder = given == GIVEN_FOLDER ||
+                       (given == GIVEN_ADD && rubraview_settings_get(&app->settings, U8("general"), U8("first_with_folder")) > 0.5);
+    if (with_folder) open_path(app, paths[0]);
+    else open_paths_as_set(app, paths, count, "file opened on its own");
 }
 
 static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, const u8str_t *paths, size_t count) {
     if (count == 0) return;
     switch (verb) {
         case RUBRAVIEW_SHELL_VERB_NONE:
-            /* A plain launch with several files is a drop of them. */
-            if (count == 1) open_path(app, paths[0]);
-            else open_paths_as_set(app, paths, count, "files opened as one set");
-            break;
         case RUBRAVIEW_SHELL_VERB_OPEN:
-            open_path(app, paths[0]);
+        case RUBRAVIEW_SHELL_VERB_NEW_WINDOW:   /* its window is this one, just made */
+            explorer_open(app, paths, count);
             break;
         case RUBRAVIEW_SHELL_VERB_OPEN_ONLY:
             if (count == 1 && !path_is_listed_kind(paths[0])) open_path(app, paths[0]);   /* a book, a folder */
             else open_paths_as_set(app, paths, count, count == 1 ? "file opened on its own" : "files opened as one set");
             break;
         case RUBRAVIEW_SHELL_VERB_ADD:
-            list_add_paths(app, paths, count);
+            list_add_paths(app, paths, count, false);
             break;
         case RUBRAVIEW_SHELL_VERB_BROWSE:
             open_path(app, paths[0]);
@@ -14801,7 +14873,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 /* What the menu asks is for the window that is open (the
                    classic menu starts this once a selected file). */
                 if (cli.shell_verb != RUBRAVIEW_SHELL_VERB_NONE) single_instance = true;
-                if (cli.new_instance) single_instance = false;
+                /* D-100: but "Open in a new window" is a window of its own, always. */
+                if (cli.new_instance || cli.shell_verb == RUBRAVIEW_SHELL_VERB_NEW_WINDOW) single_instance = false;
 
                 bool alone = rubraview_pal_instance_claim();
                 if (rubraview_instance_decide(single_instance, !alone) == RUBRAVIEW_INSTANCE_HAND_OVER) {

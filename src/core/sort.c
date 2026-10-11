@@ -140,7 +140,7 @@ static void quicksort_paths(u8str_t *paths, int low, int high, rubraview_sort_mo
 }
 
 void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mode, bool ascending) {
-    if (!paths || count <= 1) return;
+    if (!paths || count <= 1 || mode == RUBRAVIEW_SORT_AS_GIVEN) return;
 
     if (mode == RUBRAVIEW_SORT_RANDOM) {
         // Fisher-Yates shuffle
@@ -253,7 +253,7 @@ static uint64_t splitmix64_next(uint64_t *state) {
 }
 
 void rubraview_sort_items(rubraview_sort_item_t *items, size_t count, rubraview_sort_mode_t mode, bool ascending, const rubraview_shuffle_state_t *shuffle) {
-    if (!items || count <= 1) return;
+    if (!items || count <= 1 || mode == RUBRAVIEW_SORT_AS_GIVEN) return;
 
     if (mode == RUBRAVIEW_SORT_RANDOM) {
         uint64_t state = shuffle ? shuffle->seed : 0;

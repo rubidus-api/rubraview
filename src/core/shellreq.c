@@ -4,7 +4,7 @@
 #include <string.h>
 
 static const char *const VERB_FLAGS[RUBRAVIEW_SHELL_VERB_COUNT] = {
-    "", "--open", "--open-only", "--add", "--browse", "--convert", "--print",
+    "", "--open", "--open-only", "--add", "--browse", "--convert", "--print", "--new-window",
 };
 
 const char *rubraview_shell_verb_flag(rubraview_shell_verb_t verb) {
@@ -22,19 +22,21 @@ rubraview_shell_verb_t rubraview_shell_verb_for_flag(u8str_t arg) {
 #define BOOKS    (RUBRAVIEW_SHELL_COMICS | RUBRAVIEW_SHELL_ARCHIVES)
 
 /* The ids sort in the menu's order: the classic menu lists a sub-menu's
-   verbs by key name. */
+   verbs by key name. The order is the menu's, not the verbs' numbers. */
 static const rubraview_shell_menu_item_t MENU_ITEMS[] = {
-    { RUBRAVIEW_SHELL_VERB_OPEN,      "1open",    "Open",                 "\xEC\x97\xB4\xEA\xB8\xB0",
+    { RUBRAVIEW_SHELL_VERB_OPEN,       "1open",    "Open",                 "\xEC\x97\xB4\xEA\xB8\xB0",
       PLAYABLE | BOOKS, false },
-    { RUBRAVIEW_SHELL_VERB_OPEN_ONLY, "2only",    "Open these only",      "\xEC\x9D\xB4\xEA\xB2\x83\xEB\xA7\x8C \xEC\x97\xB4\xEA\xB8\xB0",
+    { RUBRAVIEW_SHELL_VERB_NEW_WINDOW, "2window",  "Open in a new window", "\xEC\x83\x88 \xEC\xB0\xBD\xEC\x97\x90\xEC\x84\x9C \xEC\x97\xB4\xEA\xB8\xB0",
+      PLAYABLE | BOOKS, false },
+    { RUBRAVIEW_SHELL_VERB_OPEN_ONLY,  "3only",    "Open these only",      "\xEC\x9D\xB4\xEA\xB2\x83\xEB\xA7\x8C \xEC\x97\xB4\xEA\xB8\xB0",
       PLAYABLE, false },
-    { RUBRAVIEW_SHELL_VERB_ADD,       "3add",     "Add to the list",      "\xEC\x9E\xAC\xEC\x83\x9D\xEB\xAA\xA9\xEB\xA1\x9D\xEC\x97\x90 \xEB\x84\xA3\xEA\xB8\xB0",
+    { RUBRAVIEW_SHELL_VERB_ADD,        "4add",     "Add to the list",      "\xEC\x9E\xAC\xEC\x83\x9D\xEB\xAA\xA9\xEB\xA1\x9D\xEC\x97\x90 \xEB\x84\xA3\xEA\xB8\xB0",
       PLAYABLE, false },
-    { RUBRAVIEW_SHELL_VERB_BROWSE,    "4browse",  "Browse the archive",   "\xEC\x95\x95\xEC\xB6\x95 \xED\x8C\x8C\xEC\x9D\xBC \xEB\x82\xB4\xEB\xB6\x80 \xEB\xB3\xB4\xEA\xB8\xB0",
+    { RUBRAVIEW_SHELL_VERB_BROWSE,     "5browse",  "Browse the archive",   "\xEC\x95\x95\xEC\xB6\x95 \xED\x8C\x8C\xEC\x9D\xBC \xEB\x82\xB4\xEB\xB6\x80 \xEB\xB3\xB4\xEA\xB8\xB0",
       BOOKS, true },
-    { RUBRAVIEW_SHELL_VERB_CONVERT,   "5convert", "Convert...",           "\xEB\xB3\x80\xED\x99\x98...",
+    { RUBRAVIEW_SHELL_VERB_CONVERT,    "6convert", "Convert...",           "\xEB\xB3\x80\xED\x99\x98...",
       RUBRAVIEW_SHELL_PICTURES, false },
-    { RUBRAVIEW_SHELL_VERB_PRINT,     "6print",   "Print...",             "\xEC\x9D\xB8\xEC\x87\x84...",
+    { RUBRAVIEW_SHELL_VERB_PRINT,      "7print",   "Print...",             "\xEC\x9D\xB8\xEC\x87\x84...",
       RUBRAVIEW_SHELL_PICTURES, false },
 };
 

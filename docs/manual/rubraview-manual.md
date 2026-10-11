@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.50.exe              the viewer, as built
-dist/rubraview-v0.0.50/                 the release bundle
-dist/rubraview-v0.0.50.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.51.exe              the viewer, as built
+dist/rubraview-v0.0.51/                 the release bundle
+dist/rubraview-v0.0.51.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -43,14 +43,27 @@ rubraview.exe "D:\Comics\Vol 01.cbz"
 rubraview.exe "D:\Photos"
 ```
 
-Each launch opens a window of its own, so several can be open side by
-side. They share the settings, the reading history, the favourites and
-the boxes' places safely: a file is replaced whole, one viewer at a time,
-and a viewer that saves keeps what another changed meanwhile. To have a
-launch hand its file to the window already open instead, switch on
-Settings › General › **Reuse the open window**. Explorer's right-click
-actions always go to the open window; `--new-instance` always opens
-another.
+The first file a window is given brings its folder: the other pictures
+and films beside it are the list. A file opened from Explorer after that
+goes to the Rubraview window in front: it is put at the end of that
+window's list and shown. A book, a folder or a playlist is opened in
+place of what was open.
+
+**Settings › General › Opening a file from Explorer** changes each part:
+
+| Setting | As it comes | What it does |
+|---|---|---|
+| Reuse the open window | on | off: every file opened is a window of its own |
+| A file given to the open window | `add` | `folder`: opened in place of the list, with its folder; `only`: in place of it, alone |
+| A file added to the list goes | `end` | `sorted`: the whole list is sorted again as Settings › Files says |
+| Show the file that was added | on | off: it joins the list and the page being read stays |
+| The first file brings its folder | on | off: the first file is alone, and later ones join it |
+
+For a window of its own, use the right-click menu's **Open in a new
+window**, or `--new-instance` / `--new-window` on the command line.
+Several windows share the settings, the reading history, the favourites
+and the boxes' places safely: a file is replaced whole, one viewer at a
+time, and a viewer that saves keeps what another changed meanwhile.
 
 ### In Explorer: double click and the right-click menu
 
@@ -74,9 +87,10 @@ The menu is a **Rubraview** item with these under it:
 
 | Item | On | With several files selected |
 |---|---|---|
-| Open | pictures, video, music, comics, archives | the first is opened; its folder is the list, as with a double click |
+| Open | pictures, video, music, comics, archives | as a double click: added to the open window's list, the first of them shown |
+| Open in a new window | pictures, video, music, comics, archives | a new window with them (under Show more options: a window each) |
 | Open these only | pictures, video, music | the selected files are the list, nothing else from the folder |
-| Add to the list | pictures, video, music | all are added to what the open window is showing; it stays on its page |
+| Add to the list | pictures, video, music | all are added to the end of what the open window is showing; it stays on its page |
 | Browse the archive | comics, archives | offered for one file: the archive's entries in the picker |
 | Convert... | pictures | the batch panel, to run on the selected files |
 | Print... | pictures | the system's print dialog; each picture on a sheet of its own |
@@ -121,7 +135,7 @@ some only, `--no-types` or `--no-menu` to leave one of the two as it is
 `--all-users` (from an administrator's prompt) for every user (`--setup`
 is what the installer adds: the run then ends with 0 when all but Windows
 11's menu was registered). The menu's
-items are `--open`, `--open-only`, `--add`, `--browse`, `--convert` and
+items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert` and
 `--print`, each followed by the files.
 
 ## Reading

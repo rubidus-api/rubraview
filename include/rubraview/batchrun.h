@@ -53,7 +53,7 @@ typedef struct rubraview_cli_result {
     bool                shell_no_menu;     /* --no-menu: leave the right-click menu alone */
     bool                shell_remove_types; /* --remove-types: take the file types back while registering the rest */
     bool                shell_remove_menu;  /* --remove-menu: take the menu back while registering the rest */
-    rubraview_shell_verb_t shell_verb;     /* D-86: --open, --open-only, --add, --browse, --convert, --print */
+    rubraview_shell_verb_t shell_verb;     /* D-86: --open, --open-only, --add, --browse, --convert, --print, --new-window */
     bool                shell_whole;       /* --whole: every selected file is on this command line */
     u8str_t             paths_from;        /* --paths-from=FILE: more inputs, one a line */
     bool                paths_temp;        /* --paths-temp: that file was written for this launch; remove it once read */
