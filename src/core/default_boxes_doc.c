@@ -212,6 +212,7 @@ static const char *const PARTS[] = {
 "  item open_folder          \"Open folder\"\n"
 "  menu \"Recent\"\n"
 "    recent\n"
+"    item recent_clear       \"Clear this list\"\n"
 "  end\n"
 "  item next_archive         \"Next archive\"\n"
 "  item prev_archive         \"Prev archive\"\n"

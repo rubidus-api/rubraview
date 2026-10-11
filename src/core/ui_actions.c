@@ -177,6 +177,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_info", 0xE946 },           /* Info */
         { "open_picker", 0xE8E5 },           /* OpenFile */
         { "open_folder", 0xE838 },           /* FolderOpen */
+        { "recent_clear", 0xE74D },          /* Delete: File > Recent is emptied */
         { "open_settings", 0xE713 },         /* Settings */
         { "toggle_help", 0xE897 },           /* Help */
         { "open_edit", 0xE70F },             /* Edit */

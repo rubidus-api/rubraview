@@ -256,6 +256,17 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
 
+        /* RV-109: how a WebP is written. */
+        if (rubraview_u8_eq_lit(arg, "--lossless")) { result.export_options.webp_lossless = true; continue; }
+        if (starts_with(arg, "--effort=", &value)) {
+            int64_t effort = -1;
+            if (!rubraview_parse_i64(value, &effort) || effort < 0 || effort > 6) {
+                result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
+            }
+            result.export_options.webp_effort = (int32_t)effort;
+            continue;
+        }
+
         if (starts_with(arg, "--rotate=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_ORIENT);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }

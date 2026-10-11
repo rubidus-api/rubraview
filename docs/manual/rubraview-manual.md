@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.54.exe              the viewer, as built
-dist/rubraview-v0.0.54/                 the release bundle
-dist/rubraview-v0.0.54.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.55.exe              the viewer, as built
+dist/rubraview-v0.0.55/                 the release bundle
+dist/rubraview-v0.0.55.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -69,9 +69,18 @@ the settings say, and `--recursive` reads their subfolders too.
 
 For a window of its own, use the right-click menu's **Open in a new
 window**, or `--new-instance` / `--new-window` on the command line.
-Several windows share the settings, the reading history, the favourites
-and the boxes' places safely: a file is replaced whole, one viewer at a
-time, and a viewer that saves keeps what another changed meanwhile.
+Several windows share the settings, the reading history, the recent
+files, the favourites and the boxes' places safely: a file is replaced
+whole, one viewer at a time, and a viewer that saves keeps what another
+changed meanwhile. The settings are one set for all of them: a setting
+changed in one window — in the settings window, by a key, by the wheel on
+the volume — is written a moment later and takes effect in every other
+open window at once. Keys changed on the Keys page reach the others as
+the settings window closes.
+
+**File › Recent** lists the last ten files, books, folders and playlists
+you opened, in any window, newest first. **Clear this list** at its end
+empties it (tap it twice: it asks first).
 
 ### In Explorer: double click and the right-click menu
 
@@ -281,6 +290,14 @@ colours** writes a PNG with or without transparency, in 256 colours or in
 grey; **Progressive JPEG** writes one that a browser shows whole and
 coarse first.
 
+WebP is written by Rubraview itself, on any Windows: **Quality** decides
+how good a lossy one is, **WebP lossless** keeps every visible pixel, and **WebP
+effort** (0 to 6) trades time for a smaller file. An animated GIF, PNG or
+WebP exported as WebP stays an animation, every frame at its time — as
+long as it was not edited; an edited one is written as the one picture on
+screen. The same holds for `--batch --format=webp` without a resize, a
+turn or an adjustment.
+
 While a film or an animation is on screen, `Ctrl+C` copies the frame you
 see to the clipboard and `Ctrl+Shift+E` saves it as a PNG beside the file
 (`film_00-23-792.png`: the minute, second and thousandth).
@@ -404,6 +421,7 @@ waits for a key before it closes.
 | `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico` | What to write |
 | `--quality=1..100` | For JPEG and WebP |
 | `--progressive` | A progressive JPEG |
+| `--lossless`, `--effort=0..6` | A WebP with every pixel as it was; how hard to try for a small one (4 as it comes) |
 | `--png-depth=rgba\|rgb\|palette\|gray` | A PNG's colours |
 | `--rotate=90\|180\|270\|exif`, `--flip=h\|v` | Turn them |
 | `--grayscale`, `--exposure=`, `--contrast=`, `--sharpen=amount[,radius]` | Adjust them |
@@ -634,6 +652,12 @@ filename code page, the memory cap). Some worth knowing:
   whatever these say. Changing any of them lists the open folder again.
 - **Files** — **Remember the page** off keeps no reading history;
   **Offer to resume** off opens where you stopped without asking.
+  **Keep the list** off writes nothing more to File › Recent. Under
+  **Folders that are not written down** are eight rows: a file in a
+  folder named there, or in any folder under it, is written neither to
+  the recent list nor to the reading history. Press `Enter` on a free row
+  and type or paste the folder to add one; `Delete` on a row takes it
+  off.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
@@ -715,8 +739,6 @@ listed rather than hidden so you can see what is coming.
 - **RAR archives compressed by RAR 1.5** (made in 1994-1996). Versions
   0.0.30 and 0.0.31 read them; archives are now read by FultaArc, which
   does not have this method yet. It returns when it does.
-- **Writing WebP.** Export and `--format=webp` need a WebP encoder
-  installed in Windows; without one nothing is written.
 - RAR files that carry a filter program of their own
   (not one of RAR's six standard filters) are not read, by design.
 - **Selecting or pasting in the rename box.** It takes typing — Korean
@@ -872,6 +894,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
 | Menu `Korean` | Read the open archive's file names as Korean (CP949) |

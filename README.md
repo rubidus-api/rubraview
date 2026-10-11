@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.55** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -14,6 +14,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 
 - **GPU-Accelerated Canvas**: Butter-smooth 60–144 FPS pan and sub-pixel zoom powered by Direct2D (D2D1) and Direct3D 11.
 - **Zero-Dependency Native Image Decoding**: Decodes JPEG, PNG, GIF, WebP, TIFF, BMP, and ICO out of the box using the native Windows Imaging Component (WIC).
+- **WebP Written Without A Codec To Install**: Export and `--batch --format=webp` write lossy or lossless WebP with the built-in libwebp; an animated GIF, PNG or WebP becomes an animated WebP.
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
 - **Image Enhancement & Post-Processing**: Real-time adjustments for exposure, contrast, saturation, gamma, sharpening (unsharp mask), and gaussian blur, plus high-fidelity resampling (Nearest, Bilinear, Bicubic, Lanczos-3).
 - **Batch Processing Engine**: Multi-threaded batch converter and resizer accessible via UI dialog and headless CLI.
@@ -169,6 +170,7 @@ ships with, so it cannot drift from them.
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
 | Menu `Korean` | Read the open archive's file names as Korean (CP949) |

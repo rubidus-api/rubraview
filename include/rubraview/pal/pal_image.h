@@ -202,6 +202,18 @@ bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_export_options_t *options);
 
 /**
+ * RV-109: an animated GIF, WebP or PNG (a path, or bytes with an empty
+ * path) written as an animated WebP, every frame at its own time, going
+ * round for ever. The options' WebP fields decide lossless or not, the
+ * quality and the effort. Returns 1 when it was written, 0 when the
+ * source is not such an animation (nothing is written: save it as a
+ * picture), -1 when it is one and could not be written.
+ */
+int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
+                                            const uint8_t *data, size_t size,
+                                            const rubraview_export_options_t *options);
+
+/**
  * §3.10's multi-size ICO. The same image is written at each of the sizes
  * `rubraview_export_ico_sizes` names, into one file.
  */

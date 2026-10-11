@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.55** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.55/rubraview-v0.0.55.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -14,6 +14,7 @@
 
 - **GPU 로 그리는 화면**: Direct2D(D2D1)와 Direct3D 11 로 60~144 FPS 의 부드러운 이동과 소수점 단위 확대.
 - **딸린 것 없는 이미지 해독**: JPEG, PNG, GIF, WebP, TIFF, BMP, ICO 를 윈도우의 WIC 로 그대로 엽니다.
+- **코덱 설치 없이 WebP 쓰기**: 내보내기와 `--batch --format=webp` 가 내장 libwebp 로 손실·무손실 WebP 를 씁니다. 움직이는 GIF·PNG·WebP 는 움직이는 WebP 가 됩니다.
 - **동영상 재생**: 분리된 PAL 을 통한 FFmpeg(`libavcodec`/`libavformat`) 연결로 재생, 한 프레임씩 이동, 정지 화면 저장.
 - **보정과 후처리**: 노출·대비·채도·감마·언샤프 마스크·가우시안 흐림을 실시간으로, 리샘플링은 Nearest·Bilinear·Bicubic·Lanczos-3.
 - **일괄 처리**: 여러 스레드로 도는 변환·크기 조정기. 창에서도, 창 없이 명령줄에서도 씁니다.
@@ -168,6 +169,7 @@
 | 도구 상자 `EQ bands`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
+| 메뉴 `Clear this list` | 최근 파일 목록 비우기 |
 | 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
 | 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |
 | 메뉴 `Korean` | 열린 압축 파일의 파일 이름을 한국어(CP949)로 읽기 |

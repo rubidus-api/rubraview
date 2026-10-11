@@ -81,6 +81,18 @@ came from is in its `vendor/<name>/VENDORED.md`.
   coefficients, and stripping metadata, without decoding any pixel. No
   encoder, no file I/O, no SIMD and no arithmetic coding is included.
 
+## libwebp 1.6.0
+
+- Vendored snapshot at `vendor/libwebp/` (libwebp, libwebpmux and
+  libsharpyuv; see `vendor/libwebp/VENDORED.md`), unmodified
+- Copyright (c) 2010, Google Inc. All rights reserved.
+- Licence: the 3-clause BSD License (`vendor/libwebp/COPYING`), with
+  Google's additional patent grant (`vendor/libwebp/PATENTS`).
+  Attribution-only.
+- Used for: writing WebP — a still picture or an animation. Windows
+  reads WebP and cannot write it. The viewer still reads WebP through
+  Windows.
+
 ## Rubrapack 0.39.0 (part)
 
 - At `vendor/rubrapack/` (see `vendor/rubrapack/VENDORED.md`), and adapted

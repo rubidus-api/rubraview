@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/layout.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/webp_write.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c
 # FultaArc (MIT; vendor/fultaarc, D-74) reads and writes every archive: ZIP,
 # 7z and RAR 2.0-7.0, with the decoders it vendors itself (LZMA SDK, miniz,
 # bzip2, zstd). It is built once as a static library, with its own flags and
@@ -48,6 +48,16 @@ FULTA_VENDOR_DEF = -DZ7_ST -DBZ_NO_STDIO -DZSTD_NO_TRACE $(FULTA_MINIZ_DEF)
 # jconfigint.h are hand-written for this build — upstream generates them
 # with CMake, which this project does not use.
 JPEG_INCLUDE = -Ivendor/libjpeg-turbo
+# libwebp (BSD-3-Clause, R015) writes WebP, which Windows cannot (RV-109,
+# D-106). Unmodified and built without a config.h: C and SSE2 on x86-64,
+# no threads. As a library: the linker takes what webp_write.c refers to.
+WEBP_INCLUDE = -Ivendor/libwebp
+WEBP_SRCS = $(wildcard vendor/libwebp/src/enc/*.c vendor/libwebp/src/dec/*.c vendor/libwebp/src/dsp/*.c \
+              vendor/libwebp/src/utils/*.c vendor/libwebp/src/mux/*.c vendor/libwebp/sharpyuv/*.c)
+WEBP_OBJS = $(patsubst vendor/libwebp/%.c,build/libwebp/%.o,$(WEBP_SRCS))
+WEBP_OBJS_WIN = $(patsubst vendor/libwebp/%.c,build/libwebp-win/%.o,$(WEBP_SRCS))
+WEBP_LIB = build/libwebp.a
+WEBP_LIB_WIN = build/libwebp-win.a
 FFMPEG_INCLUDE = -Ivendor/ffmpeg/include
 # Five of the .c files upstream are not translation units at all: they
 # are colour-conversion bodies #included several times with different
@@ -123,7 +133,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_tiles build/tests/test_layout build/tests/test_archives build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
 .PHONY: all test check clean win64 package mfprobe
 
@@ -161,9 +171,17 @@ build/libjpeg16/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16
 	$(CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
 
-build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS) $(FULTA_LIB) $(PROVEN_LIB)
+build/libwebp/%.o: vendor/libwebp/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 -O2 -w $(WEBP_INCLUDE) -g -fsanitize=address,undefined -c $< -o $@
+
+$(WEBP_LIB): $(WEBP_OBJS)
+	@rm -f $@
+	$(AR) rcs $@ $^
+
+build/tests/%: tests/%.c $(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_HOST) $(JPEG_OBJS) $(JPEG12_OBJS) $(JPEG16_OBJS) $(FULTA_LIB) $(PROVEN_LIB) $(WEBP_LIB)
 	@mkdir -p build/tests
-	$(CC) $(CFLAGS) $(JPEG_INCLUDE) $(FULTA_MINIZ_DEF) -I$(FULTA)/vendor/miniz $^ $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(JPEG_INCLUDE) $(WEBP_INCLUDE) $(FULTA_MINIZ_DEF) -I$(FULTA)/vendor/miniz $^ $(LDFLAGS) -o $@
 
 test: $(TEST_BINS)
 	@echo "=== Running Rubraview Core Unit Tests ==="
@@ -217,6 +235,14 @@ build/libjpeg16-win/%.o: vendor/libjpeg-turbo/%.c
 	@mkdir -p build/libjpeg16-win
 	$(MINGW_CC) -std=gnu11 -O2 -w -DBITS_IN_JSAMPLE=16 $(JPEG_INCLUDE) -c $< -o $@
 
+build/libwebp-win/%.o: vendor/libwebp/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=gnu11 -O2 -w $(WEBP_INCLUDE) -c $< -o $@
+
+$(WEBP_LIB_WIN): $(WEBP_OBJS_WIN)
+	@rm -f $@
+	$(MINGW_AR) rcs $@ $^
+
 # The icon and the version Explorer shows (owner, 2026-09-29).
 MINGW_WINDRES ?= x86_64-w64-mingw32-windres
 RES_WIN = build/rubraview-res.o
@@ -233,14 +259,14 @@ $(MENU_DLL): src/menu/rubraview_menu.c src/menu/rubraview_menu.def
 		src/menu/rubraview_menu.c src/menu/rubraview_menu.def \
 		-lole32 -lshlwapi -ladvapi32 -luser32 -luuid -o $@
 
-win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
+win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
 	@echo "Cross-building Windows x86_64 target"
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
-		$(JPEG_INCLUDE) \
+		$(JPEG_INCLUDE) $(WEBP_INCLUDE) \
 		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
-		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) -lbcrypt \
+		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) -lbcrypt \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lruntimeobject \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"

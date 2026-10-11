@@ -113,7 +113,18 @@ static const char *const PARTS[] = {
 "  toggle files.comicinfo          \"Read ComicInfo.xml\"      = true wired\n"
 "  section \"Reading history\"\n"
 "  toggle files.reading_history    \"Remember the page\"       = true wired\n"
-"  toggle files.resume_prompt      \"Offer to resume\"         = true wired\n"
+"  toggle files.resume_prompt      \"Offer to resume\"         = true wired\n",
+"  section \"Recent files (File menu)\"\n"
+"  toggle recent.keep              \"Keep the list\"           = true wired\n"
+"  section \"Folders that are not written down (and all under them)\"\n"
+"  path   recent.skip_dir_1        \"Folder 1\"                wired\n"
+"  path   recent.skip_dir_2        \"Folder 2\"                wired\n"
+"  path   recent.skip_dir_3        \"Folder 3\"                wired\n"
+"  path   recent.skip_dir_4        \"Folder 4\"                wired\n"
+"  path   recent.skip_dir_5        \"Folder 5\"                wired\n"
+"  path   recent.skip_dir_6        \"Folder 6\"                wired\n"
+"  path   recent.skip_dir_7        \"Folder 7\"                wired\n"
+"  path   recent.skip_dir_8        \"Folder 8\"                wired\n"
 "  section \"An archive written again\"\n"
 "  choice archive.convert_format   \"Becomes\"                 zip | 7z = zip wired\n"
 "  choice archive.convert_method   \"Method\"                  compress | store = compress wired\n"
@@ -256,7 +267,7 @@ static const char *const PARTS[] = {
 "  table  keymap\n",
 };
 
-static char g_document[16384];
+static char g_document[24576];
 static size_t g_document_len;
 
 u8str_t rubraview_default_settings_document(void) {

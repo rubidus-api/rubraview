@@ -204,6 +204,17 @@ bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t 
 bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len);
 
 /**
+ * D-105: several viewers share one settings file. The one that wrote it
+ * tells every other viewer's main window; each of those finds out at its
+ * next turn of the loop (the message wakes a waiting one) and reads the
+ * file again. Nothing is carried but which file: the settings, or the
+ * keys (`keys`). What was taken is 0 for nothing, with bit 0 set for the
+ * settings and bit 1 for the keys.
+ */
+void rubraview_pal_instance_tell_config_changed(bool keys);
+int rubraview_pal_instance_take_config_changed(void);
+
+/**
  * The system's print dialog, then the pictures on their sheets as
  * `options` says (rubraview_print_cell, rubraview_print_place; NULL for
  * the defaults). False when the reader cancelled or the job could not

@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/apng.h"
+#include "rubraview/webp_write.h"
+#include "rubraview/animation.h"
+#include <math.h>
 #include "rubraview/jpegtran.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/tiles.h"
@@ -1191,7 +1194,6 @@ static const GUID *container_for_format(rubraview_export_format_t format) {
     switch (format) {
         case RUBRAVIEW_EXPORT_JPEG: return &GUID_ContainerFormatJpeg;
         case RUBRAVIEW_EXPORT_PNG:  return &GUID_ContainerFormatPng;
-        case RUBRAVIEW_EXPORT_WEBP: return &GUID_ContainerFormatWmp; /* see the note in save() */
         case RUBRAVIEW_EXPORT_GIF:  return &GUID_ContainerFormatGif;
         case RUBRAVIEW_EXPORT_BMP:  return &GUID_ContainerFormatBmp;
         case RUBRAVIEW_EXPORT_TIFF: return &GUID_ContainerFormatTiff;
@@ -1286,7 +1288,8 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
     IWICBitmap *bitmap = NULL;
     HRESULT hr = IWICImagingFactory_CreateBitmapFromMemory(
         factory, (UINT)pixels->width, (UINT)pixels->height,
-        &GUID_WICPixelFormat32bppRGBA, (UINT)pixels->stride,
+        pixels->format == RUBRAVIEW_PIXFMT_BGRA8 ? &GUID_WICPixelFormat32bppBGRA : &GUID_WICPixelFormat32bppRGBA,
+        (UINT)pixels->stride,
         (UINT)pixels->stride * (UINT)pixels->height, pixels->pixels, &bitmap);
     if (FAILED(hr) || !bitmap) {
         IWICBitmapFrameEncode_Release(frame);
@@ -1403,6 +1406,72 @@ static void jpeg_make_progressive(u8str_t path) {
     free(memory);
 }
 
+/* RV-109: Windows has no WebP encoder; the vendored libwebp writes it. */
+static rubraview_webp_options_t webp_options_from(const rubraview_export_options_t *options) {
+    return (rubraview_webp_options_t){
+        .lossless = options->webp_lossless,
+        .quality = options->webp_quality,
+        .effort = options->webp_effort,
+    };
+}
+
+static bool webp_bytes_to_file(u8str_t path, uint8_t *bytes, size_t len) {
+    bool written = rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = (const char*)bytes, .len = len });
+    rubraview_webp_free(bytes);
+    return written;
+}
+
+static bool save_webp(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
+    if (!rubraview_pixbuf_is_valid(pixels)) return false;
+    if (pixels->format != RUBRAVIEW_PIXFMT_BGRA8 && pixels->format != RUBRAVIEW_PIXFMT_RGBA8) return false;
+    rubraview_webp_options_t webp = webp_options_from(options);
+    webp.rgba = pixels->format == RUBRAVIEW_PIXFMT_RGBA8;
+    uint8_t *bytes = NULL;
+    size_t len = 0;
+    if (!rubraview_webp_write(pixels->pixels, pixels->width, pixels->height, pixels->stride, &webp, &bytes, &len)) return false;
+    return webp_bytes_to_file(path, bytes, len);
+}
+
+static bool anim_webp_read(void *ctx, size_t index, uint8_t *dst, size_t stride) {
+    rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)ctx;
+    return rubraview_pal_anim_read(reader, index, dst, stride, reader->frames[index].height);
+}
+
+int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
+                                            const uint8_t *data, size_t size,
+                                            const rubraview_export_options_t *options) {
+    if (!options) return -1;
+    const rubraview_frame_t *frames = NULL;
+    size_t count = 0;
+    int32_t width = 0, height = 0;
+    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, data, size, &frames, &count, &width, &height);
+    if (!reader) return 0;
+    if (count <= 1 || width <= 0 || height <= 0) { rubraview_pal_anim_close(reader); return 0; }
+
+    int result = -1;
+    size_t bytes = (size_t)width * (size_t)height * 4u;
+    uint8_t *buffers = (uint8_t*)calloc(3, bytes);
+    rubraview_webp_options_t webp = webp_options_from(options);
+    webp.premultiplied = true;   /* what the reader gives */
+    rubraview_webp_anim_t *anim = buffers ? rubraview_webp_anim_begin(width, height, 0, &webp) : NULL;
+    if (anim) {
+        rubraview_frame_canvas_t canvas;
+        rubraview_frame_canvas_init(&canvas, frames, count, width, height, buffers, buffers + bytes, buffers + bytes * 2u);
+        bool ok = true;
+        for (size_t i = 0; i < count && ok; ++i) {
+            ok = rubraview_frame_canvas_show(&canvas, i, anim_webp_read, reader) &&
+                 rubraview_webp_anim_add(anim, canvas.pixels, width * 4, (int32_t)lround(frames[i].delay_seconds * 1000.0));
+        }
+        uint8_t *out = NULL;
+        size_t len = 0;
+        if (!ok) rubraview_webp_anim_abort(anim);
+        else if (rubraview_webp_anim_end(anim, &out, &len) && webp_bytes_to_file(out_path, out, len)) result = 1;
+    }
+    free(buffers);
+    rubraview_pal_anim_close(reader);
+    return result;
+}
+
 bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options) {
@@ -1421,10 +1490,8 @@ bool rubraview_pal_image_save(u8str_t path,
         return save_frames(path, pixels, options, format, sizes, n);
     }
 
-    /* WebP: Windows has no built-in WebP *encoder*. WIC decodes WebP
-       through a system codec on current Windows, but writing one needs a
-       codec that may not be installed, so this simply fails rather than
-       writing a file with the wrong contents. */
+    if (format == RUBRAVIEW_EXPORT_WEBP) return save_webp(path, pixels, options);
+
     bool saved = save_frames(path, pixels, options, format, NULL, 0);
     if (saved && format == RUBRAVIEW_EXPORT_JPEG && options->jpeg_progressive) jpeg_make_progressive(path);
     return saved;

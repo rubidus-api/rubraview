@@ -204,6 +204,117 @@ u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_histo
     return rubraview_ini_serialize(arena, &doc);
 }
 
+/* ---- the files opened lately (D-104) ---- */
+
+static void drop_at(rubraview_history_t *history, size_t at) {
+    for (size_t i = at; i + 1 < history->count; ++i) history->entries[i] = history->entries[i + 1];
+    history->count--;
+}
+
+static void recent_drop_cleared(rubraview_recent_t *recent) {
+    for (size_t i = recent->list.count; i-- > 0;) {
+        if (recent->list.entries[i].timestamp <= recent->cleared) drop_at(&recent->list, i);
+    }
+}
+
+rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text) {
+    rubraview_recent_t recent = { .list = rubraview_history_parse(arena, text), .cleared = 0 };
+    if (!arena || text.len == 0) return recent;
+    rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
+    for (size_t i = 0; i < doc.count; ++i) {
+        const rubraview_ini_entry_t *e = &doc.entries[i];
+        if (rubraview_u8_eq_lit(e->section, "cleared") && rubraview_u8_eq_lit(e->key, "time")) recent.cleared = whole_number(e->value);
+    }
+    recent_drop_cleared(&recent);
+    return recent;
+}
+
+u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent) {
+    if (!arena || !recent) return (u8str_t){ .ptr = "", .len = 0 };
+    rubraview_ini_doc_t doc = {0};
+    rubraview_ini_set_int(arena, &doc, U8("cleared"), U8("time"), recent->cleared);
+    for (size_t i = 0; i < recent->list.count; ++i) {
+        char name[32];
+        int n = snprintf(name, sizeof(name), "entry-%zu", i + 1);
+        if (n <= 0) continue;
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
+        if (!proven_is_ok(res.err)) break;
+        memcpy(res.value.ptr, name, (size_t)n + 1);
+        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
+        rubraview_ini_set_string(arena, &doc, section, U8("path"), recent->list.entries[i].path);
+        rubraview_ini_set_int(arena, &doc, section, U8("time"), recent->list.entries[i].timestamp);
+    }
+    return rubraview_ini_serialize(arena, &doc);
+}
+
+void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
+                          int64_t timestamp, size_t max_entries) {
+    if (!arena || !recent || path.len == 0) return;
+    /* Opened in the very second the list was emptied, it is still new. */
+    if (timestamp <= recent->cleared) timestamp = recent->cleared + 1;
+    rubraview_history_record(arena, &recent->list, path, 0, 0, timestamp);
+    rubraview_history_prune(&recent->list, max_entries);
+}
+
+void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp) {
+    if (!recent) return;
+    if (timestamp > recent->cleared) recent->cleared = timestamp;
+    recent->list.count = 0;
+}
+
+void rubraview_recent_merge(proven_arena_t *arena, rubraview_recent_t *into, const rubraview_recent_t *from,
+                            size_t max_entries) {
+    if (!arena || !into || !from) return;
+    if (from->cleared > into->cleared) into->cleared = from->cleared;
+    rubraview_history_merge(arena, &into->list, &from->list);
+    recent_drop_cleared(into);
+    rubraview_history_prune(&into->list, max_entries);
+}
+
+size_t rubraview_recent_newest(const rubraview_recent_t *recent, size_t *out_indices, size_t capacity) {
+    if (!recent || !out_indices) return 0;
+    size_t n = 0;
+    for (; n < capacity; ++n) {
+        size_t best = recent->list.count;
+        for (size_t i = 0; i < recent->list.count; ++i) {
+            bool taken = false;
+            for (size_t k = 0; k < n && !taken; ++k) taken = out_indices[k] == i;
+            if (taken) continue;
+            if (best == recent->list.count ||
+                recent->list.entries[i].timestamp > recent->list.entries[best].timestamp) best = i;
+        }
+        if (best == recent->list.count) break;
+        out_indices[n] = best;
+    }
+    return n;
+}
+
+bool rubraview_path_is_within(u8str_t path, u8str_t folder) {
+    while (folder.len > 0 && rubraview_path_is_sep(folder.ptr[folder.len - 1])) folder.len--;
+    if (folder.len == 0 || path.len < folder.len) return false;
+    if (!rubraview_path_same((u8str_t){ .ptr = path.ptr, .len = folder.len }, folder)) return false;
+    return path.len == folder.len || rubraview_path_is_sep(path.ptr[folder.len]);
+}
+
+bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count) {
+    if (!folders) return false;
+    for (size_t i = 0; i < count; ++i) {
+        if (rubraview_path_is_within(path, folders[i])) return true;
+    }
+    return false;
+}
+
+size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count) {
+    if (!history || !history->entries) return 0;
+    size_t gone = 0;
+    for (size_t i = history->count; i-- > 0;) {
+        if (!rubraview_recent_is_kept_out(history->entries[i].path, folders, count)) continue;
+        drop_at(history, i);
+        gone++;
+    }
+    return gone;
+}
+
 bool rubraview_history_should_offer_resume(const rubraview_history_entry_t *entry) {
     if (!entry) return false;
     if (entry->page <= 0) return false;                     /* already at the start */

@@ -37,6 +37,10 @@ typedef UINT (WINAPI *get_dpi_for_window_fn)(HWND);
 static char  *g_requests[IPC_REQUEST_MAX];
 static size_t g_request_sizes[IPC_REQUEST_MAX];
 static size_t g_request_count;
+/* D-105: posted to every other viewer's main window when this one wrote
+   its settings; an application message, as only our own class is sent it. */
+#define IPC_CONFIG_CHANGED (WM_APP + 0x2C4)
+static volatile int g_config_changed;   /* bit 0: the settings, bit 1: the keys */
 
 struct rubraview_window {
     HWND hwnd;
@@ -223,6 +227,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (event.drop.count > 0) queue_push(w, event);
             return 0;
         }
+
+        case IPC_CONFIG_CHANGED:
+            /* D-105: another viewer wrote settings.ini or keymap.ini. */
+            g_config_changed |= wparam == 1 ? 2 : 1;
+            return 0;
 
         case WM_COPYDATA: {
             /* §3.19.1: the second instance sent us its file and exited. */
@@ -1275,6 +1284,27 @@ bool rubraview_pal_instance_hand_over(u8str_t path) {
     };
     SendMessageW(target, WM_COPYDATA, 0, (LPARAM)&data);
     return true;
+}
+
+static BOOL CALLBACK config_tell_one(HWND hwnd, LPARAM lparam) {
+    wchar_t name[64];
+    DWORD process = 0;
+    GetWindowThreadProcessId(hwnd, &process);
+    if (process == GetCurrentProcessId()) return TRUE;
+    if (GetClassNameW(hwnd, name, 64) > 0 && wcscmp(name, RUBRAVIEW_WINDOW_CLASS) == 0) {
+        PostMessageW(hwnd, IPC_CONFIG_CHANGED, (WPARAM)lparam, 0);
+    }
+    return TRUE;
+}
+
+void rubraview_pal_instance_tell_config_changed(bool keys) {
+    EnumWindows(config_tell_one, keys ? 1 : 0);
+}
+
+int rubraview_pal_instance_take_config_changed(void) {
+    int changed = g_config_changed;
+    g_config_changed = 0;
+    return changed;
 }
 
 bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t wait_ms) {

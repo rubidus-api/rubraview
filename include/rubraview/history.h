@@ -77,6 +77,57 @@ u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_histo
  */
 bool rubraview_history_should_offer_resume(const rubraview_history_entry_t *entry);
 
+/* ---- the files opened lately (D-104) ---- */
+
+/**
+ * What File > Recent lists: the paths the reader opened, each with the
+ * time it was last opened, kept in `recent.ini` beside the history. It is
+ * a list of its own: the reading history is keyed by the folder a picture
+ * is in, and holds a book only once a page of it was read.
+ *
+ * `cleared` is when the list was last emptied. Several viewers may be
+ * open: one that still holds older entries must not bring them back when
+ * it writes the file, so an entry no newer than `cleared` is dropped
+ * wherever two lists are put together.
+ */
+typedef struct rubraview_recent {
+    rubraview_history_t list;   /* `page` and `total` are not used */
+    int64_t cleared;            /* Unix seconds; 0: never */
+} rubraview_recent_t;
+
+rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text);
+u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent);
+
+/** `path` was opened at `timestamp`: it becomes the newest; at most `max_entries` are kept. */
+void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
+                          int64_t timestamp, size_t max_entries);
+
+/** Empty the list, at `timestamp`. */
+void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp);
+
+/** `from` is put into `into`: the later clearing counts, and what it cleared goes from both. */
+void rubraview_recent_merge(proven_arena_t *arena, rubraview_recent_t *into, const rubraview_recent_t *from,
+                            size_t max_entries);
+
+/**
+ * The entries' indices, newest first, at most `capacity` of them.
+ * Returns how many were written.
+ */
+size_t rubraview_recent_newest(const rubraview_recent_t *recent, size_t *out_indices, size_t capacity);
+
+/**
+ * Whether `path` is `folder` itself or lies anywhere under it, compared
+ * as `rubraview_path_same` compares. "C:/a" does not hold "C:/ab/x.jpg".
+ * An empty folder holds nothing.
+ */
+bool rubraview_path_is_within(u8str_t path, u8str_t folder);
+
+/** Whether `path` lies in any of `folders` (empty ones are skipped). */
+bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count);
+
+/** D-104: the entries lying in any of `folders` are taken out. Returns how many went. */
+size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count);
+
 /* ---- §3.17.2 configuration hierarchy ---- */
 
 typedef enum rubraview_config_mode {

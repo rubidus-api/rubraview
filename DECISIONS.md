@@ -924,3 +924,38 @@ Do not store credentials, private infrastructure details, personal data, private
 - Found on the way: the Export panel began at quality 0 — `export_options` was never given its defaults. It is now.
 - Alternatives: one long panel that scrolls — the panel has no scrolling and the curve box sits beside it; a cut made at once by Trim — the reader could not see what would go.
 - Consequences: a frame in an archive can be copied, not saved (it has no folder). `--out=` still wants a folder that exists. The second page was seen on the VM with its values; a blur and a Laplacian sharpening were not looked at on a photograph.
+
+## 2026-10-12: D-104 The recent files, and folders that are not written down
+
+- Context: owner, 2026-10-12: "최근에 연 파일 목록과 그것의 초기화 기능을 File 메뉴에 ... 최근에 연 파일 목록에 저장하지 않을 폴더(그 폴더의 파일과 그 하위 폴더의 파일 전부는 저장되지 아니한다)들을 추가하거나 삭제". File > Recent existed and was made from the reading history, which is keyed by the folder a picture is in and holds a book only once a page of it was read: it showed folders' names, not the files opened.
+- Decision:
+  - `recent.ini`, beside the history: the path the reader opened by name (a file, a book, a folder, a playlist) and when. Thirty are kept; File > Recent shows the newest ten (`rubraview_recent_*` in `history.c`). Of a set of files, the one it opened on is the one written.
+  - It is written at each open, under the lock every viewer takes, merged with what the file holds: every viewer's menu shows what any of them opened.
+  - File > Recent > "Clear this list" asks first, as Delete does (a second tap within five seconds). An emptied list carries the time it was emptied (`[cleared] time`); an entry no newer is dropped wherever two lists are put together, so a viewer that still holds the old entries does not bring them back.
+  - Settings > Files: "Keep the list" (`recent.keep`), and eight folders (`recent.skip_dir_1` .. `_8`) — a file in one, or anywhere under one, is not written to the recent list, and its reading place is not written to the history (`rubraview_path_is_within`: at a separator, letters' case ignored). Entries already there go at the next write. A folder is added by typing it in a free row and taken off with Delete.
+- Alternatives: a list of any length in the settings window — it has no such row; the nine curation folders are the precedent. Leaving the reading place of a kept-out folder in the history — the same file would still be named in a file on disk.
+- Consequences: the reading history no longer feeds the menu; "Forget every reading place" (Cache) and "Clear this list" are two things. With "Keep the list" off nothing new is written; what is listed stays until cleared.
+
+## 2026-10-12: D-105 Every open viewer has the same settings, at once
+
+- Context: owner, 2026-10-12: "여러 인스턴스가 떠 있을 때, 그들은 모두 동일 설정을 공유하고 하나의 루브라뷰의 설정이 변하면 다른 인스턴스에도 즉각적으로 영향이". Since D-99 the viewers shared the file safely, but one read it only when its settings window opened, and wrote it only as that window closed or the viewer quit.
+- Decision:
+  - A change is written 0.3 s after the last of a run of changes (`settings_share`), wherever it was made — the settings window, a key, the wheel on the volume — as D-99 writes: only what this viewer changed, over the file as it is, under the lock.
+  - The writer posts a message to every other viewer's main window (`rubraview_pal_instance_tell_config_changed`: the windows of our class in other processes). A viewer told so reads the file, keeps on top of it what it changed itself and has not written yet, and lets what differs take effect (`settings_follow`). What it read becomes its baseline, so it writes nothing back: no echo.
+  - Revert in the settings window goes back to the settings as they were when that window opened (`settings_opened`), with what other viewers changed since left in.
+  - keymap.ini is still written as the settings window closes; the others are told and read it then, unless their own settings window is open.
+- Alternatives: watching the folder — a message is immediate and needs no thread; a broadcast to every window on the desktop — only our own windows are sent it.
+- Consequences: two viewers that use different files (one portable, one not) tell each other and find nothing changed. The boxes' places (layout.ini) stay each window's own until it closes. A setting changed in two viewers within the same 0.3 s: the later write wins for that setting. Each write a viewer follows is read into its working memory, which is not given back (a new block is taken when one fills): a long session beside a window whose volume is turned often grows by a few kilobytes a write. The keys are read again only when the keys were written. With settings written as they change, closing the settings window seldom says "settings saved" any more.
+
+## 2026-10-12: D-106 WebP is written by the vendored libwebp, animations too
+
+- Context: RV-109; owner, 2026-10-11 ("WebP는 libwebp 포함") and 2026-10-12 ("libwebp는 벤더링 바랍니다. 움직이는 webp 쓰기와 다른 소스, 예를 들면 애니메이티드 gif나 png 등으로부터의 변환도 ... 어렵다면 ffmpeg가 있을 때만"). Windows has no WebP encoder; for WebP the save path asked WIC for its JPEG XR container (what that wrote was not looked at before it was replaced).
+- Decision:
+  - libwebp 1.6.0 (the latest release; BSD-3-Clause with Google's patent grant; ledger R015) is vendored unmodified at `vendor/libwebp/`: libwebp, libwebpmux, libsharpyuv. Built by the Makefile into a static library with no `config.h` — C and SSE2, no threads.
+  - `src/core/webp_write.c` is the one file that calls it: a still picture (`rubraview_webp_write`), or an animation a frame at a time (`rubraview_webp_anim_*`, over `WebPAnimEncoder`). Lossy with a quality, or lossless; effort 0..6. Premultiplied and RGBA buffers are taken as they are.
+  - `rubraview_pal_image_save` writes WebP through it. `rubraview_pal_image_save_animation_webp` reads an animated GIF, WebP or PNG with the viewer's own reader and canvas (so every frame is the whole picture as it is shown) and writes an animated WebP with each frame's time. Export / Save a copy use it when the picture was not edited; `--batch --format=webp` when no turn, resize or adjustment was asked for. Otherwise one picture is written, as for every other format.
+  - Export has "WebP lossless" and "WebP effort"; `--batch` has `--lossless` and `--effort=0..6`.
+  - ffmpeg is not needed for any of it, so the fallback the owner allowed is not used.
+- Found on the way: a frame saved with `Ctrl+Shift+E` (0.0.54) had red and blue exchanged — the writer took every buffer as RGBA whatever it was marked. It reads the mark now.
+- Alternatives: the encoder alone — `anim_encode.c` calls the decoder, so the animation encoder cannot be had without it; ffmpeg's libwebp wrapper — only when the reader has put FFmpeg beside the program, and built with libwebp.
+- Consequences: `rubraview.exe` grew from 4,032,676 to 4,683,005 bytes (about 650 KB; the estimate was 300 to 400 KB, made before the decoder was known to be needed). The viewer still reads WebP through Windows. A written animation loops for ever: the readers do not carry a source's loop count. An animation that is edited, resized or turned is written as one picture. A picture wider or taller than 16383 cannot be a WebP and is refused.

@@ -163,6 +163,8 @@ static double g_gutter = 8.0;
    cut off when the loop stops drawing. */
 #define IDLE_REDRAW_GRACE 3.0
 #define HISTORY_MAX_ENTRIES 512
+#define RECENT_KEPT 30          /* D-104: files in recent.ini; the menu shows the newest ten */
+#define RECENT_SKIP_DIRS 8
 #define MENU_MAX_TILES 16   /* 4 x 4; the owner chose a larger grid over splitting File (2026-09-21) */
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
@@ -341,6 +343,8 @@ typedef struct app_state {
     size_t                  pending_decode_count;
     rubraview_history_t     history;
     u8str_t                 history_path;
+    rubraview_recent_t      recent;         /* D-104: File > Recent, kept in recent.ini */
+    u8str_t                 recent_path;
     rubraview_config_mode_t config_mode;
     rubraview_page_info_t  *comic_page_flags; /* §3.8.5 cover marks, applied on every relayout */
 
@@ -710,7 +714,11 @@ typedef struct app_state {
        with a tab strip above it — one tab's settings at a time. */
     bool                     settings_open;
     rubraview_settings_t     settings;
-    rubraview_settings_t     settings_saved;   /* what the file held when the window opened — Revert goes back to it */
+    rubraview_settings_t     settings_saved;   /* what settings.ini held when it was last read or written by this viewer */
+    rubraview_settings_t     settings_opened;  /* D-105: as they were when the settings window opened — Revert goes back to it */
+    uint32_t                 share_seen_total; /* D-105: the settings' revision when they were last seen to change */
+    double                   share_changed_at;
+    bool                     share_failed;     /* the file could not be written: not tried again until something changes */
     u8str_t                  settings_path;
     u8str_t                  config_beside;   /* the executable's own folder: portable mode's home */
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
@@ -833,6 +841,9 @@ typedef struct app_state {
 } app_state_t;
 
 static void open_path(app_state_t *app, u8str_t path);
+static void recent_note(app_state_t *app, u8str_t path);
+static void recent_note_shown(app_state_t *app);
+static void recent_sync(app_state_t *app, u8str_t opened, bool clear);
 
 static void update_precache(app_state_t *app);
 
@@ -908,6 +919,7 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
 static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y, bool follow_pointer);
 static void toolbox_dock(app_state_t *app, double client_x, double client_y);
 static void settings_write_if_changed(app_state_t *app, bool say);
+static void load_keymap(app_state_t *app);
 static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
@@ -3932,22 +3944,18 @@ static void menu_rebuild(app_state_t *app) {
     enum { RECENT_MAX = 10 };
     rubraview_recent_entry_t recent[RECENT_MAX];
     size_t recent_count = 0;
-    bool taken[HISTORY_MAX_ENTRIES] = {0};
-    for (size_t r = 0; r < RECENT_MAX; ++r) {
-        size_t best = app->history.count;
-        for (size_t i = 0; i < app->history.count && i < HISTORY_MAX_ENTRIES; ++i) {
-            if (taken[i]) continue;
-            if (best == app->history.count || app->history.entries[i].timestamp > app->history.entries[best].timestamp) best = i;
-        }
-        if (best == app->history.count) break;
-        taken[best] = true;
+    /* D-104: the files opened lately, newest first; another viewer's too. */
+    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);
+    size_t newest[RECENT_MAX];
+    size_t shown = rubraview_recent_newest(&app->recent, newest, RECENT_MAX);
+    for (size_t r = 0; r < shown; ++r) {
         char action[32];
-        int n = snprintf(action, sizeof(action), "open_recent:%zu", best);
+        int n = snprintf(action, sizeof(action), "open_recent:%zu", newest[r]);
         proven_result_mem_mut_t text = proven_arena_alloc(&arena, (size_t)n + 1);
         if (n <= 0 || !proven_is_ok(text.err)) break;
         memcpy(text.value.ptr, action, (size_t)n + 1);
         recent[recent_count++] = (rubraview_recent_entry_t){
-            .label = rubraview_path_basename(app->history.entries[best].path),
+            .label = rubraview_path_basename(app->recent.list.entries[newest[r]].path),
             .action = { .ptr = (const char*)text.value.ptr, .len = (size_t)n },
         };
     }
@@ -4703,9 +4711,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* Read inside the view: an action is a slice, not a C string. */
         int64_t index = -1;
         if (rubraview_parse_i64((u8str_t){ .ptr = action.ptr + 12, .len = action.len - 12 }, &index) &&
-            index >= 0 && (size_t)index < app->history.count) {
-            open_path(app, app->history.entries[index].path);
+            index >= 0 && (size_t)index < app->recent.list.count) {
+            u8str_t path = app_keep(app, app->recent.list.entries[index].path);
+            if (rubraview_pal_fs_exists(path)) open_path(app, path);
+            else osd_say(app, U8("that file is no longer there"));
         }
+    } else if (rubraview_u8_eq_lit(action, "recent_clear")) {
+        recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, true);
+        menu_rebuild(app);
+        osd_say(app, U8("the recent list is empty"));
     } else if (rubraview_u8_eq_lit(action, "toggle_always_on_top")) {
         bool on = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
         rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
@@ -6002,10 +6016,12 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
            its tile says "Delete?"; a second tap on it within five seconds
            acts. Any other tap disarms it. */
         const rubraview_menu_item_t *item = rubraview_menu_item_at(&app->menu, tile);
-        if (item && rubraview_u8_eq_lit(item->action, "delete_file")) {
+        bool clears = item && rubraview_u8_eq_lit(item->action, "recent_clear");   /* D-104: asks first too */
+        if (item && (clears || rubraview_u8_eq_lit(item->action, "delete_file"))) {
             if (!rubraview_confirm_press(&app->menu_confirm, item - app->menu.tree->items,
                                          rubraview_pal_time_now_seconds())) {
-                osd_say(app, U8("tap Delete again to move it to the recycle bin"));
+                osd_say(app, clears ? U8("tap Clear again to empty the recent list")
+                                    : U8("tap Delete again to move it to the recycle bin"));
                 return true;
             }
         } else {
@@ -6093,7 +6109,7 @@ static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t til
     if (out_current) *out_current = st.mark == RUBRAVIEW_MARK_CURRENT;
     if (g_caption_app && rubraview_confirm_armed(&g_caption_app->menu_confirm, item - menu->tree->items,
                                                  rubraview_pal_time_now_seconds())) {
-        return U8("Delete?");
+        return rubraview_u8_eq_lit(item->action, "recent_clear") ? U8("Clear?") : U8("Delete?");
     }
     return rubraview_tile_caption(item->label, submenu, st.mark, st.value, scratch, scratch_size);
 }
@@ -8255,6 +8271,7 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
     append_number(line, sizeof(line), &pos, n);
     append_text(line, sizeof(line), &pos, " dropped files opened as one set");
     open_set_from_entries(app, entries, n, cstr(line));
+    recent_note_shown(app);
 }
 
 /* A given set of files becomes the page sequence — a drop, or what the
@@ -8321,6 +8338,7 @@ static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t cou
     char line[96];
     snprintf(line, sizeof(line), "%zu %s", n, what);
     open_set_from_entries(app, entries, n, cstr(line));
+    recent_note_shown(app);
 }
 
 static bool path_is_listed_kind(u8str_t path) {
@@ -8404,6 +8422,7 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
     char line[96];
     snprintf(line, sizeof(line), "%zu added to the list (%zu in it)", added, kept + added);
     open_set_ordered(app, entries, n, cstr(line), at_end, show ? first_named : reading);
+    if (show) recent_note_shown(app);
 
     if (playing && app->media && position > 1.0) {
         play_seek(app, position);
@@ -8593,7 +8612,7 @@ enum {
     PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
     /* RV-108: the adjust panel's second page, and two more of Export's rows. */
     PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
-    PANEL_RESIZE, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH,
+    PANEL_RESIZE, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
@@ -8741,6 +8760,10 @@ static void panel_open_export(app_state_t *app) {
     /* RV-108 (§3.10): the two choices the writer had and no row gave. */
     rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, U8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
     rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, U8("Progressive JPEG"), app->export_options.jpeg_progressive);
+    /* RV-109: WebP is written by the vendored libwebp. */
+    rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_LOSSLESS, U8("WebP lossless"), app->export_options.webp_lossless);
+    rubraview_panel_add_slider(&app->panel, PANEL_WEBP_EFFORT, U8("WebP effort"),
+                               (double)app->export_options.webp_effort, 0.0, 6.0, 1.0);
     rubraview_panel_add_separator(&app->panel);
     /* §3.10 makes this an explicit tick, and it starts unticked: quietly
        discarding a photographer's metadata would be its own surprise. */
@@ -9367,6 +9390,17 @@ static int save_job_work(save_job_t *job) {
         return result;
     }
 
+    /* RV-109: an animation written as WebP keeps moving — every frame at
+       its time. Not when it was edited: an edit is made on one picture. */
+    {
+        rubraview_export_format_t to = job->options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? job->source_format
+                                                                                              : job->options.format;
+        if (to == RUBRAVIEW_EXPORT_WEBP && !job->apply_edit) {
+            int moved = rubraview_pal_image_save_animation_webp(out_path, source, NULL, 0, &job->options);
+            if (moved != 0) return moved > 0 ? SAVE_OK : SAVE_UNWRITABLE;
+        }
+    }
+
     /* The pixels get memory of their own, sized to the picture: the app
        arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
        commit's first copy used to fail there — which wrote the page
@@ -9599,6 +9633,8 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_PNG_LEVEL: app->export_options.png_compression = (int32_t)v; break;
             case PANEL_PNG_DEPTH: app->export_options.png_depth = (rubraview_png_depth_t)(int32_t)v; break;
             case PANEL_PROGRESSIVE: app->export_options.jpeg_progressive = v > 0.5; break;
+            case PANEL_WEBP_LOSSLESS: app->export_options.webp_lossless = v > 0.5; break;
+            case PANEL_WEBP_EFFORT: app->export_options.webp_effort = (int32_t)v; break;
             case PANEL_PRIVACY:   app->export_options.privacy_clean = v > 0.5; break;
             default: break;
         }
@@ -10030,6 +10066,7 @@ static void settings_open(app_state_t *app) {
     settings_write_if_changed(app, false);
     settings_read_file(app);
     settings_took_effect(app);
+    app->settings_opened = app->settings;
     app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
     app->key_capture = 0;
 
@@ -10095,13 +10132,69 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
     if (locked) rubraview_pal_config_unlock();
     if (written) {
         app->settings_saved = app->settings;
+        rubraview_pal_instance_tell_config_changed(false);   /* D-105: the other viewers read it now */
         /* §3.18.3's folders are read from the same file, so they follow
            at once rather than at the next launch. */
         app->curation = rubraview_curation_parse(app->arena, text);
         if (say) osd_say(app, U8("settings saved"));
-    } else if (say) {
-        osd_say(app, U8("could not write settings.ini"));
+    } else {
+        app->share_failed = true;
+        if (say) osd_say(app, U8("could not write settings.ini"));
     }
+}
+
+/* D-105: every viewer open has the same settings. A change made here —
+   in the settings window, by a key, by the wheel on the volume — is in
+   settings.ini a moment after the last of a run of changes, and the
+   other viewers are told (owner, 2026-10-12: "하나의 루브라뷰의 설정이
+   변하면 다른 인스턴스에도 즉각적으로"). */
+#define SHARE_SETTLE_SECONDS 0.3
+
+static void settings_share(app_state_t *app, double now) {
+    if (app->settings.revision_total != app->share_seen_total) {
+        app->share_seen_total = app->settings.revision_total;
+        app->share_changed_at = now;
+        app->share_failed = false;
+        return;
+    }
+    if (app->share_failed || now - app->share_changed_at < SHARE_SETTLE_SECONDS) return;
+    if (app->spath_active) return;   /* a folder is being typed */
+    settings_write_if_changed(app, false);
+}
+
+/* D-105: another viewer wrote settings.ini (or keymap.ini). The file is
+   read; what this viewer changed and has not written yet stays on top of
+   it; what differs now takes effect. `settings_saved` becomes the file,
+   so this viewer does not write the same thing back. */
+static void settings_follow(app_state_t *app, int what) {
+    if (what & 1) {
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    if (locked) rubraview_pal_config_unlock();
+    if (existing.len > 0) {
+        rubraview_settings_t loaded = rubraview_settings_load(app->arena, existing);
+        rubraview_settings_t mine = rubraview_settings_merge_changed(app->arena, &app->settings, &app->settings_saved, existing);
+        bool changed = rubraview_settings_differs(&mine, &app->settings);
+        if (app->settings_open && changed) {
+            /* Revert undoes what was done in this window, not what another viewer did. */
+            u8str_t opened = rubraview_settings_save(app->arena, &app->settings_opened, existing);
+            app->settings_opened = rubraview_settings_merge_changed(app->arena, &loaded, &app->settings_saved, opened);
+        }
+        /* The counts of changes are this viewer's own: what it redraws by. */
+        memcpy(mine.revision, app->settings.revision, sizeof(mine.revision));
+        mine.revision_total = app->settings.revision_total + (changed ? 1u : 0u);
+        app->settings = mine;
+        app->settings_saved = loaded;
+        if (changed) {
+            app->share_seen_total = app->settings.revision_total;   /* nothing of this is ours to write */
+            app->curation = rubraview_curation_parse(app->arena, existing);
+            settings_took_effect(app);
+            app->settings_dirty = true;
+        }
+    }
+    }
+    /* The keys: written as a settings window closes. One being edited here is left alone. */
+    if ((what & 2) && !app->settings_open) load_keymap(app);
 }
 
 /* 1a: the file is written as the window closes, and only when something
@@ -10115,6 +10208,7 @@ static void settings_close(app_state_t *app) {
         u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
         if (text.len > 0 && rubraview_pal_fs_write_file_atomic(app->keymap_path, text)) {
             app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
+            rubraview_pal_instance_tell_config_changed(true);   /* D-105 */
             osd_say(app, U8("keys saved to keymap.ini"));
         } else {
             osd_say(app, U8("could not write keymap.ini"));
@@ -10472,13 +10566,13 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             break;
         case RUBRAVIEW_SEVENT_REVERT: {
             uint32_t total = app->settings.revision_total;
-            app->settings = app->settings_saved;
+            app->settings = app->settings_opened;
             app->settings.revision_total = total + 1;
             app->keymap = rubraview_keymap_copy(app->arena, &app->keymap_saved);
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
             app->key_capture = 0;
             settings_took_effect(app);
-            settings_say(app, "back to what settings.ini held when this window opened");
+            settings_say(app, "back to what the settings were when this window opened");
             break;
         }
         case RUBRAVIEW_SEVENT_DEFAULTS:
@@ -13242,6 +13336,9 @@ static void history_load(app_state_t *app) {
                                              app->config_beside, appdata, U8("layout.ini"));
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
+    app->recent_path = rubraview_config_path(app->arena, app->config_mode,
+                                             app->config_beside, appdata, U8("recent.ini"));
+    app->recent = rubraview_recent_parse(app->arena, rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u));
 
     /* D-43: the picker's favourites, beside the history. */
     app->favorites_path = rubraview_config_path(app->arena, app->config_mode,
@@ -13391,6 +13488,64 @@ static void layout_save(app_state_t *app) {
     if (text.len > 0) rubraview_pal_fs_write_file_atomic(app->layout_path, text);   /* D-99: the last viewer closed leaves its places */
 }
 
+/* D-104: Settings > Files > "Folders that are not written down". */
+static size_t recent_skip_dirs(const app_state_t *app, u8str_t *out) {
+    /* Each by its own name, so the settings check sees every row is read. */
+    const rubraview_settings_t *st = &app->settings;
+    out[0] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_1"));
+    out[1] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_2"));
+    out[2] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_3"));
+    out[3] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_4"));
+    out[4] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_5"));
+    out[5] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_6"));
+    out[6] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_7"));
+    out[7] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_8"));
+    return RECENT_SKIP_DIRS;
+}
+
+static bool recent_kept_out(const app_state_t *app, u8str_t path) {
+    u8str_t dirs[RECENT_SKIP_DIRS];
+    return rubraview_recent_is_kept_out(path, dirs, recent_skip_dirs(app, dirs));
+}
+
+/* D-104: recent.ini and this viewer's list are made one, under the lock
+   every viewer takes: what another opened since is taken in, `opened`
+   (if any) becomes the newest, or the list is emptied. The file is
+   written only when that changed it. */
+static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
+    if (app->recent_path.len == 0) return;
+    u8str_t dirs[RECENT_SKIP_DIRS];
+    size_t dir_count = recent_skip_dirs(app, dirs);
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    u8str_t before = rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u);
+    rubraview_recent_t all = rubraview_recent_parse(app->arena, before);
+    rubraview_recent_merge(app->arena, &all, &app->recent, RECENT_KEPT);
+    if (clear) rubraview_recent_clear(&all, (int64_t)time(NULL));
+    if (opened.len > 0) rubraview_recent_add(app->arena, &all, app_keep(app, opened), (int64_t)time(NULL), RECENT_KEPT);
+    (void)rubraview_history_drop_within(&all.list, dirs, dir_count);
+    u8str_t after = rubraview_recent_serialize(app->arena, &all);
+    bool same = after.len == before.len && (after.len == 0 || memcmp(after.ptr, before.ptr, after.len) == 0);
+    if (!same && (before.len > 0 || all.list.count > 0 || all.cleared > 0)) {
+        (void)rubraview_pal_fs_write_file_atomic(app->recent_path, after);
+    }
+    if (locked) rubraview_pal_config_unlock();
+    app->recent = all;
+}
+
+/* The reader opened `path` by name: a file, a book, a folder, a playlist. */
+static void recent_note(app_state_t *app, u8str_t path) {
+    if (path.len == 0) return;
+    if (rubraview_settings_get(&app->settings, U8("recent"), U8("keep")) < 0.5) return;
+    if (recent_kept_out(app, path)) return;
+    recent_sync(app, path, false);
+}
+
+/* Of a set of files the reader named, the one it opened on is the one opened. */
+static void recent_note_shown(app_state_t *app) {
+    int32_t at = current_page_index(app);
+    if (at >= 0 && (size_t)at < page_count(app) && app->source.archive_path.len == 0) recent_note(app, app->source.pages[at].path);
+}
+
 static void history_remember(app_state_t *app) {
     if (app->source_dir.len == 0 || page_count(app) == 0) return;
     /* Settings › Files › Remember the page: off, nothing is written down. */
@@ -13401,6 +13556,7 @@ static void history_remember(app_state_t *app) {
 
     /* An archive is remembered by its own path; a folder by the folder. */
     u8str_t key = app->source.archive_path.len > 0 ? app->source.archive_path : app->source_dir;
+    if (recent_kept_out(app, key)) return;   /* D-104: nothing of such a folder is written down */
     rubraview_history_record(app->arena, &app->history, key, current, (int32_t)page_count(app),
                              (int64_t)time(NULL));   /* a date: pal_time is a monotonic clock, which restarts with the machine */
     rubraview_history_prune(&app->history, HISTORY_MAX_ENTRIES);
@@ -13696,6 +13852,7 @@ static void open_playlist(app_state_t *app, u8str_t path) {
     if (missing > 0) snprintf(line, sizeof(line), "playlist: %zu files, %zu not found", n, missing);
     else snprintf(line, sizeof(line), "playlist: %zu files", n);
     open_set_ordered(app, entries, n, cstr(line), true, (u8str_t){ .ptr = "", .len = 0 });
+    if (page_count(app) > 0) recent_note(app, path);
 }
 
 /* Finishes opening whichever source was just built: allocate the page
@@ -13794,6 +13951,7 @@ static void open_path(app_state_t *app, u8str_t path) {
         key = folder;
     }
     if (!opened) return;
+    recent_note(app, entry.path);
 
     /* §3.17.1: reopening something read before starts where it stopped,
        rather than dropping the reader back on page one. */
@@ -14104,7 +14262,14 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             arena = &own_arena;
         }
     }
-    bool ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, options, source_format);
+    /* RV-109: an animation that is only changed to WebP keeps moving. */
+    rubraview_export_format_t to = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
+    int moved = to == RUBRAVIEW_EXPORT_WEBP && !orient && !resize && !color
+              ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options) : 0;
+    bool ok = false;
+    if (moved > 0) { ok = true; bc->written++; }
+    else if (moved < 0) batch_say(input->path, "the animation could not be written");
+    else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, options, source_format);
     free(own);
     return ok;
 }
@@ -16052,6 +16217,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 
+        int config_changed = rubraview_pal_instance_take_config_changed();   /* D-105 */
+        if (config_changed) settings_follow(&app, config_changed);
+        settings_share(&app, rubraview_pal_time_now_seconds());
+
         /* A queued decode takes the loop's idle slice. With nothing to
            get ready, a settled loop sleeps until the OS has something
            for it instead of spinning. */
@@ -16093,6 +16262,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
         rubraview_history_t all = rubraview_history_parse(&arena, rubraview_pal_fs_read_file(&arena, app.history_path, 1024u * 1024u));
         rubraview_history_merge(&arena, &all, &app.history);
+        u8str_t skip_dirs[RECENT_SKIP_DIRS];
+        (void)rubraview_history_drop_within(&all, skip_dirs, recent_skip_dirs(&app, skip_dirs));   /* D-104 */
         rubraview_history_prune(&all, HISTORY_MAX_ENTRIES);
         rubraview_pal_fs_write_file_atomic(app.history_path, rubraview_history_serialize(&arena, &all));
         if (locked) rubraview_pal_config_unlock();
