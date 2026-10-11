@@ -1030,6 +1030,36 @@ size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, s
     return n;
 }
 
+bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t *bgra,
+                                       int32_t width, int32_t height, size_t stride) {
+    if (!bgra || width <= 0 || height <= 0 || width > 32768 || height > 32768) return false;
+    /* A device-independent bitmap: 24 bits a pixel, rows from the bottom,
+       each padded to four bytes — what every program reads. */
+    size_t row = (((size_t)width * 3u) + 3u) & ~(size_t)3u;
+    size_t bytes = sizeof(BITMAPINFOHEADER) + row * (size_t)height;
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory) return false;
+    uint8_t *dib = (uint8_t*)GlobalLock(memory);
+    if (!dib) { GlobalFree(memory); return false; }
+    BITMAPINFOHEADER header = { .biSize = sizeof(BITMAPINFOHEADER), .biWidth = width, .biHeight = height,
+                                .biPlanes = 1, .biBitCount = 24, .biCompression = BI_RGB,
+                                .biSizeImage = (DWORD)(row * (size_t)height) };
+    memcpy(dib, &header, sizeof(header));
+    for (int32_t y = 0; y < height; ++y) {
+        const uint8_t *src = bgra + (size_t)(height - 1 - y) * stride;
+        uint8_t *dst = dib + sizeof(header) + (size_t)y * row;
+        for (int32_t x = 0; x < width; ++x) { dst[x * 3] = src[x * 4]; dst[x * 3 + 1] = src[x * 4 + 1]; dst[x * 3 + 2] = src[x * 4 + 2]; }
+        for (size_t pad = (size_t)width * 3u; pad < row; ++pad) dst[pad] = 0;
+    }
+    GlobalUnlock(memory);
+    if (!OpenClipboard(window ? window->hwnd : NULL)) { GlobalFree(memory); return false; }
+    EmptyClipboard();
+    bool ok = SetClipboardData(CF_DIB, memory) != NULL;
+    CloseClipboard();
+    if (!ok) GlobalFree(memory);   /* on success the clipboard owns it */
+    return ok;
+}
+
 bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text) {
     if (text.len == 0 || text.len > 65536) return false;
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, NULL, 0);

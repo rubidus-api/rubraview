@@ -910,3 +910,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - `general.native_dialog`: `Ctrl+O` opens Windows' own dialog in place of the picker.
 - Alternatives: a font picker — the settings window is text; a typed family is what it can hold. A colour picker likewise: five colours.
 - Consequences: a setting typed in the Video and Files pages is text, not a folder (`settings_path_commit`). A family the machine lacks is drawn in DirectWrite's fallback, with no word about it. "Forget every reading place" does not reach a viewer that is open elsewhere: it writes its own places back when it closes. Whether Windows sends a one-finger sideways drag as a pan gesture (it may arrive as a mouse drag) was not seen: no touch screen.
+
+## 2026-10-11: D-103 What RFC-0001 left for editing and export
+
+- Context: owner, 2026-10-11, on RFC-0004 §3: build all of it (WebP is RV-109, apart: it brings third-party code).
+- Decision:
+  - The adjust panel has two pages — the tones; sharpness, cut and size — with a button to turn between them, so that it is never taller than a small window (`panel_build_edit`; the rows are made from the session as it stands).
+  - Page two: Blur and its kind (Gaussian, box), Sharpen and its kind (unsharp mask with a radius and a threshold, or Laplacian: `rubraview_filter_laplacian_sharpen`), Crop ratio, "Trim plain margins" (`rubraview_filter_autotrim_rect` on the preview's copy: white margins, else black, marked as the cut for the reader to see before saving), Resize % (10 to 500, of what the cut leaves).
+  - The preview is drawn again when a blur or a sharpening changes, with the radius scaled to the preview's size. It had followed the tones only.
+  - Export: "PNG colours" (32, 24, 256 colours, grey) and "Progressive JPEG"; `--png-depth=rgba|rgb|palette|gray` and `--progressive` for `--batch`. Windows' JPEG writer has no progressive mode: the file it writes is rewritten by the vendored libjpeg-turbo, coefficients untouched (`rubraview_jpegtran_progressive`). The option had only changed the chroma sampling; that is gone.
+  - `copy_frame` (`Ctrl+C`) and `save_frame` (`Ctrl+Shift+E`): the picture on screen of a film or an animation, to the clipboard or to `<name>_MM-SS-mmm.png` beside the file. A frame on the graphics card is read back (`rubraview_pal_texture_read_video`).
+  - A panel's choice says its word (it showed a number in brackets).
+- Found on the way: the Export panel began at quality 0 — `export_options` was never given its defaults. It is now.
+- Alternatives: one long panel that scrolls — the panel has no scrolling and the curve box sits beside it; a cut made at once by Trim — the reader could not see what would go.
+- Consequences: a frame in an archive can be copied, not saved (it has no folder). `--out=` still wants a folder that exists. The second page was seen on the VM with its values; a blur and a Laplacian sharpening were not looked at on a photograph.

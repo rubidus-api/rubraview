@@ -93,6 +93,11 @@ typedef struct rubraview_edit_session {
     float sharpen_amount;    /* 0 = off, else 0 .. 300 (%) */
     float sharpen_radius;    /* 0.5 .. 10.0 */
     uint8_t sharpen_threshold;
+    /* RV-108 (RFC-0001 §6.4): the other blur and the other sharpening. A
+       box blur's radius is the same slider, in pixels; Laplacian
+       sharpening has no radius and no threshold. */
+    bool blur_box;
+    bool sharpen_laplacian;
 
     bool dirty;              /* something has changed since the last commit */
 } rubraview_edit_session_t;

@@ -26,6 +26,9 @@ const char *rubraview_default_keymap(void) {
     "open_edit = \"E\"\n"
     "quick_export = \"Ctrl+E\"\n"
     "save_as = \"Ctrl+Shift+S\"\n"
+    /* RV-108: the frame on screen of a film or an animation. */
+    "copy_frame = \"Ctrl+C\"\n"
+    "save_frame = \"Ctrl+Shift+E\"\n"
     "open_batch = \"Ctrl+B\"\n"
     /* §3.22.1 */
     "open_settings = \"F10, Ctrl+Comma\"\n"

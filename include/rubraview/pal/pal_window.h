@@ -247,6 +247,10 @@ void rubraview_pal_window_wake(rubraview_window_t *window);
 size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, size_t cap);
 bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text);
 
+/** RV-108: a picture on the clipboard — BGRA rows, top first — as other programs paste it. */
+bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t *bgra,
+                                       int32_t width, int32_t height, size_t stride);
+
 /** Set the window's caption (UTF-8). Frameless windows still show it in
     the taskbar and Alt+Tab. */
 void rubraview_pal_window_set_title(rubraview_window_t *window, const char *title_utf8);

@@ -96,6 +96,14 @@ rubraview_jpegtran_result_t rubraview_jpegtran_apply(proven_arena_t *arena,
 rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *arena,
                                                               const uint8_t *data, size_t size);
 
+/**
+ * RV-108 (RFC-0001 §3.10): the same JPEG as a progressive one — every
+ * coefficient and every marker kept, the scans rewritten so that a
+ * reader shows the whole picture coarsely first. Lossless.
+ */
+rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena,
+                                                           const uint8_t *data, size_t size);
+
 /** Read a JPEG's size and MCU geometry without decoding it. */
 bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
                               int32_t *out_width, int32_t *out_height,

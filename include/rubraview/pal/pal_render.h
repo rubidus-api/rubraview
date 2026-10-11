@@ -141,6 +141,13 @@ rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *re
 /** Diagnostic (--probe-gpu): the average brightness, 0-255, of a video texture. */
 bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness);
 
+/**
+ * RV-108: a film's frame that is on the graphics card, read back as BGRA
+ * rows of `stride` bytes into `dst` (height rows). False for a texture
+ * that is not a film's on the card — its pixels were the caller's.
+ */
+bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst, size_t stride);
+
 /** False when the frame was decoded on another device, or the texture is not a video one. */
 bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
                                             uint32_t subresource);

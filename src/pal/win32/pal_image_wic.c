@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/apng.h"
+#include "rubraview/jpegtran.h"
+#include "rubraview/pal/pal_fs.h"
 #include "rubraview/tiles.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/viewport.h"
@@ -1238,13 +1240,8 @@ static void apply_encoder_options(IPropertyBag2 *bag,
         value.fltVal = (float)options->jpeg_quality / 100.0f;
         IPropertyBag2_Write(bag, 1, &option, &value);
 
-        if (options->jpeg_progressive) {
-            option.pstrName = (LPOLESTR)L"JpegYCrCbSubsampling";
-            VariantInit(&value);
-            value.vt = VT_UI1;
-            value.bVal = WICJpegYCrCbSubsampling420;
-            IPropertyBag2_Write(bag, 1, &option, &value);
-        }
+        /* WIC's encoder writes baseline JPEG only; a progressive one is
+           made from its output afterwards (jpeg_make_progressive). */
     } else if (format == RUBRAVIEW_EXPORT_PNG) {
         /* WIC's PNG encoder has no compression *level*; what it exposes
            is the filter, and interlacing. Level 0 is taken as "do not
@@ -1387,6 +1384,25 @@ static bool save_frames(u8str_t path, const rubraview_pixbuf_t *pixels,
     return ok;
 }
 
+/* RV-108: the JPEG just written, rewritten as a progressive one — its
+   coefficients as they are. A file that cannot be read back or rewritten
+   is left as the baseline JPEG it is. */
+static void jpeg_make_progressive(u8str_t path) {
+    rubraview_fs_entry_t entry;
+    size_t room = 64u * 1024u * 1024u;
+    void *memory = malloc(room);
+    if (!memory) return;
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = room });
+    if (rubraview_pal_fs_stat(&arena, path, &entry) && entry.size_bytes > 0 && entry.size_bytes < room / 4u) {
+        u8str_t bytes = rubraview_pal_fs_read_file(&arena, path, (size_t)entry.size_bytes);
+        if (bytes.len > 0) {
+            rubraview_jpegtran_result_t made = rubraview_jpegtran_progressive(&arena, (const uint8_t*)bytes.ptr, bytes.len);
+            if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.len > 0) (void)rubraview_pal_fs_write_file(path, made.data);
+        }
+    }
+    free(memory);
+}
+
 bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options) {
@@ -1409,7 +1425,9 @@ bool rubraview_pal_image_save(u8str_t path,
        through a system codec on current Windows, but writing one needs a
        codec that may not be installed, so this simply fails rather than
        writing a file with the wrong contents. */
-    return save_frames(path, pixels, options, format, NULL, 0);
+    bool saved = save_frames(path, pixels, options, format, NULL, 0);
+    if (saved && format == RUBRAVIEW_EXPORT_JPEG && options->jpeg_progressive) jpeg_make_progressive(path);
+    return saved;
 }
 
 bool rubraview_pal_image_save_ico(u8str_t path,

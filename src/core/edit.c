@@ -454,11 +454,16 @@ rubraview_pixbuf_t rubraview_edit_commit(proven_arena_t *arena,
        image is a legitimate effect, blurring a sharpened one throws the
        sharpening away. */
     if (session->blur_sigma > 0.0f) {
-        rubraview_pixbuf_t blurred = rubraview_filter_gaussian_blur(arena, &work, session->blur_sigma);
+        int32_t box = (int32_t)(session->blur_sigma + 0.5f);
+        rubraview_pixbuf_t blurred = session->blur_box
+            ? rubraview_filter_box_blur(arena, &work, box < 1 ? 1 : box)
+            : rubraview_filter_gaussian_blur(arena, &work, session->blur_sigma);
         if (rubraview_pixbuf_is_valid(&blurred)) work = blurred;
     }
     if (session->sharpen_amount > 0.0f) {
-        rubraview_pixbuf_t sharp = rubraview_filter_unsharp_mask(arena, &work,
+        rubraview_pixbuf_t sharp = session->sharpen_laplacian
+            ? rubraview_filter_laplacian_sharpen(arena, &work, session->sharpen_amount / 100.0f)
+            : rubraview_filter_unsharp_mask(arena, &work,
                                                                  session->sharpen_radius,
                                                                  session->sharpen_amount / 100.0f,
                                                                  session->sharpen_threshold);

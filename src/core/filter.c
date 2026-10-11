@@ -210,11 +210,9 @@ rubraview_pixbuf_t rubraview_filter_unsharp_mask(proven_arena_t *arena,
     return dst;
 }
 
-rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
-                               const rubraview_pixbuf_t *src,
-                               uint8_t bg_threshold,
-                               bool detect_white) {
-    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+bool rubraview_filter_autotrim_rect(const rubraview_pixbuf_t *src, uint8_t bg_threshold, bool detect_white,
+                                    int32_t *out_x, int32_t *out_y, int32_t *out_width, int32_t *out_height) {
+    if (!rubraview_pixbuf_is_valid(src)) return false;
 
     int32_t bpp = rubraview_bytes_per_pixel(src->format);
     int32_t top = 0;
@@ -286,8 +284,49 @@ rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
         }
     }
 
-    int32_t crop_w = right - left + 1;
-    int32_t crop_h = bottom - top + 1;
+    if (out_x) *out_x = left;
+    if (out_y) *out_y = top;
+    if (out_width) *out_width = right - left + 1;
+    if (out_height) *out_height = bottom - top + 1;
+    return true;
+}
+
+rubraview_pixbuf_t rubraview_filter_laplacian_sharpen(proven_arena_t *arena, const rubraview_pixbuf_t *src, float amount) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+    rubraview_pixbuf_t dst = rubraview_pixbuf_clone(arena, src);
+    if (!rubraview_pixbuf_is_valid(&dst) || amount <= 0.0f) return dst;
+
+    int32_t bpp = rubraview_bytes_per_pixel(src->format);
+    int32_t colour = bpp >= 3 ? 3 : 1;   /* alpha is kept as it is */
+    for (int32_t y = 0; y < src->height; ++y) {
+        const uint8_t *row = src->pixels + (ptrdiff_t)y * src->stride;
+        const uint8_t *up = src->pixels + (ptrdiff_t)(y > 0 ? y - 1 : y) * src->stride;
+        const uint8_t *down = src->pixels + (ptrdiff_t)(y + 1 < src->height ? y + 1 : y) * src->stride;
+        uint8_t *out = dst.pixels + (ptrdiff_t)y * dst.stride;
+        for (int32_t x = 0; x < src->width; ++x) {
+            int32_t xl = x > 0 ? x - 1 : x, xr = x + 1 < src->width ? x + 1 : x;
+            for (int32_t c = 0; c < colour; ++c) {
+                float here = (float)row[x * bpp + c];
+                float around = (float)row[xl * bpp + c] + (float)row[xr * bpp + c] +
+                               (float)up[x * bpp + c] + (float)down[x * bpp + c];
+                float v = here + amount * (4.0f * here - around);
+                out[x * bpp + c] = (uint8_t)(v < 0.0f ? 0.0f : v > 255.0f ? 255.0f : v + 0.5f);
+            }
+        }
+    }
+    return dst;
+}
+
+rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
+                               const rubraview_pixbuf_t *src,
+                               uint8_t bg_threshold,
+                               bool detect_white) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+
+    int32_t left = 0, top = 0, crop_w = 0, crop_h = 0;
+    if (!rubraview_filter_autotrim_rect(src, bg_threshold, detect_white, &left, &top, &crop_w, &crop_h)) {
+        return (rubraview_pixbuf_t){0};
+    }
     if (crop_w <= 0 || crop_h <= 0) {
         return rubraview_pixbuf_clone(arena, src);
     }

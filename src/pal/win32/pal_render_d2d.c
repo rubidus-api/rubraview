@@ -1126,6 +1126,36 @@ bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const 
     return held;
 }
 
+bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst, size_t stride) {
+    if (!texture || !texture->d3d || !texture->owner || !dst || stride < (size_t)texture->width * 4u) return false;
+    ID3D11Device *device = texture->owner->d3d;
+    D3D11_TEXTURE2D_DESC desc = {
+        .Width = (UINT)texture->width, .Height = (UINT)texture->height, .MipLevels = 1, .ArraySize = 1,
+        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Usage = D3D11_USAGE_STAGING, .CPUAccessFlags = D3D11_CPU_ACCESS_READ,
+    };
+    ID3D11Texture2D *staging = NULL;
+    if (FAILED(ID3D11Device_CreateTexture2D(device, &desc, NULL, &staging)) || !staging) return false;
+    ID3D11DeviceContext *context = NULL;
+    ID3D11Device_GetImmediateContext(device, &context);
+    bool ok = false;
+    if (context) {
+        ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)staging, (ID3D11Resource*)texture->d3d);
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        if (SUCCEEDED(ID3D11DeviceContext_Map(context, (ID3D11Resource*)staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+            for (int32_t y = 0; y < texture->height; ++y) {
+                memcpy(dst + (size_t)y * stride, (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch,
+                       (size_t)texture->width * 4u);
+            }
+            ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)staging, 0);
+            ok = true;
+        }
+        ID3D11DeviceContext_Release(context);
+    }
+    ID3D11Texture2D_Release(staging);
+    return ok;
+}
+
 bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness) {
     if (!texture || !texture->d3d || !texture->owner || !out_brightness) return false;
     ID3D11Device *device = texture->owner->d3d;

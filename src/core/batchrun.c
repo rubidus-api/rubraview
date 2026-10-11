@@ -245,6 +245,17 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
 
+        /* RV-108 (§3.10): the two choices of the writers. */
+        if (rubraview_u8_eq_lit(arg, "--progressive")) { result.export_options.jpeg_progressive = true; continue; }
+        if (starts_with(arg, "--png-depth=", &value)) {
+            static const char *const DEPTHS[] = { "rgba", "rgb", "palette", "gray" };
+            int found = -1;
+            for (int k = 0; k < 4 && found < 0; ++k) if (rubraview_u8_eq_lit(value, DEPTHS[k])) found = k;
+            if (found < 0) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.export_options.png_depth = (rubraview_png_depth_t)found;
+            continue;
+        }
+
         if (starts_with(arg, "--rotate=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_ORIENT);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }

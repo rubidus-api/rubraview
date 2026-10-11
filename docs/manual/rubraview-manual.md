@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.53.exe              the viewer, as built
-dist/rubraview-v0.0.53/                 the release bundle
-dist/rubraview-v0.0.53.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.54.exe              the viewer, as built
+dist/rubraview-v0.0.54/                 the release bundle
+dist/rubraview-v0.0.54.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -264,12 +264,26 @@ Nothing is written until you press **Save a copy**, which writes
 `<name>_edit.<ext>` beside the original and leaves the original alone;
 a line at the top says whether it was saved.
 
+The panel has a second page, **Sharpness, cut and size >** (and **<
+Tones** back): **Blur** and its kind (soft, or flat); **Sharpen** and its
+kind — the unsharp mask, with a **radius** and a **threshold** under which
+it leaves grain alone, or the harsher Laplacian; **Crop ratio**; **Trim
+plain margins**, which finds a scan's white (or black) border and marks
+the cut; and **Resize %**, the size the copy is saved at.
+
 With the panel open, dragging over the picture marks a rectangle to cut
 to; **Crop ratio** keeps it free, square, 4:3, 16:9 or the picture's own
 shape. A click without a drag lets the rectangle go.
 
 `Ctrl+E` opens Export: pick a format and a quality, tick **Privacy
-clean** to strip GPS and camera details, and press Export.
+clean** to strip GPS and camera details, and press Export. **PNG
+colours** writes a PNG with or without transparency, in 256 colours or in
+grey; **Progressive JPEG** writes one that a browser shows whole and
+coarse first.
+
+While a film or an animation is on screen, `Ctrl+C` copies the frame you
+see to the clipboard and `Ctrl+Shift+E` saves it as a PNG beside the file
+(`film_00-23-792.png`: the minute, second and thousandth).
 
 Privacy clean on a JPEG that is otherwise unchanged does not re-encode
 the picture — the metadata is cut out and every pixel is left exactly as
@@ -389,6 +403,8 @@ waits for a key before it closes.
 | (Settings › Display) | Bicubic and Lanczos resizes of large pictures run on the graphics card when there is one, with the same result |
 | `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico` | What to write |
 | `--quality=1..100` | For JPEG and WebP |
+| `--progressive` | A progressive JPEG |
+| `--png-depth=rgba\|rgb\|palette\|gray` | A PNG's colours |
 | `--rotate=90\|180\|270\|exif`, `--flip=h\|v` | Turn them |
 | `--grayscale`, `--exposure=`, `--contrast=`, `--sharpen=amount[,radius]` | Adjust them |
 | `--privacy-clean` | Strip GPS and camera details |
@@ -732,6 +748,8 @@ listed under a later heading only means that while that is on screen.
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+C` | Copy the frame on screen (a film, an animation) |
+| `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |

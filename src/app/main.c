@@ -580,6 +580,7 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    int    frame_wanted;                   /* RV-108: FRAME_COPY or FRAME_SAVE, until the next frame is shown */
     bool   swipe_going;                    /* RV-107: a pan gesture under way, and how far it has gone */
     double swipe_dx, swipe_dy, swipe_pan_x, swipe_pan_y;
     double added_shown_at;                 /* D-100: when a file added from Explorer was last turned to */
@@ -1183,6 +1184,55 @@ static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride
 }
 
 /* One frame of the open animation as the whole picture, on the page. */
+/* RV-108 (RFC-0001 §5.3, §3.20.1): the picture on screen of a film or an
+   animation, copied to the clipboard or written as a PNG beside its file.
+   It is asked for (`frame_wanted`) and taken where the next frame's
+   pixels are at hand: a paused film is asked for its frame again. */
+enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE };
+static double play_position(const app_state_t *app);
+
+static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride) {
+    int wanted = app->frame_wanted;
+    app->frame_wanted = FRAME_NOT;
+    if (wanted == FRAME_NOT || !bgra || width <= 0 || height <= 0) return;
+    if (wanted == FRAME_COPY) {
+        osd_say(app, rubraview_pal_clipboard_set_image(app->window, bgra, width, height, stride)
+                         ? U8("the frame is on the clipboard") : U8("the frame could not be copied"));
+        return;
+    }
+    int32_t page = app->media ? app->media_page : app->anim_page;
+    if (page < 0 || (size_t)page >= page_count(app) || app->source.archive_path.len > 0) {
+        osd_say(app, U8("a frame is saved beside its file; this one is in an archive (Ctrl+C copies it)"));
+        return;
+    }
+    u8str_t path = app->source.pages[page].path;
+    u8str_t name = rubraview_path_basename(path);
+    size_t stem = name.len;
+    for (size_t i = name.len; i > 0; --i) if (name.ptr[i - 1] == '.') { stem = i - 1; break; }
+    double at = app->media ? app->media_position : play_position(app);
+    char file[512];
+    int n = snprintf(file, sizeof(file), "%.*s_%02d-%02d-%03d.png", (int)(stem < 400 ? stem : 400), name.ptr,
+                     (int)(at / 60.0), (int)fmod(at, 60.0), (int)(fmod(at, 1.0) * 1000.0));
+    if (n <= 0) return;
+    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), (u8str_t){ .ptr = file, .len = (size_t)n });
+    /* The frame as the writer wants it: its own rows, alpha full. */
+    uint8_t *copy = (uint8_t*)malloc((size_t)width * 4u * (size_t)height);
+    if (!copy) return;
+    for (int32_t y = 0; y < height; ++y) {
+        memcpy(copy + (size_t)y * (size_t)width * 4u, bgra + (size_t)y * stride, (size_t)width * 4u);
+        for (int32_t x = 0; x < width; ++x) copy[((size_t)y * (size_t)width + (size_t)x) * 4u + 3u] = 255;
+    }
+    rubraview_pixbuf_t pixels = { .pixels = copy, .width = width, .height = height, .stride = width * 4,
+                                  .format = RUBRAVIEW_PIXFMT_BGRA8 };
+    rubraview_export_options_t options = rubraview_export_defaults();
+    options.format = RUBRAVIEW_EXPORT_PNG;
+    bool written = rubraview_pal_image_save(target, &pixels, &options);
+    free(copy);
+    char line[600];
+    snprintf(line, sizeof(line), written ? "frame saved: %s" : "could not write %s", file);
+    osd_say(app, cstr(line));
+}
+
 static void anim_show(app_state_t *app, size_t frame_index) {
     app_page_t *page = &app->pages[app->anim_page];
     rubraview_frame_canvas_t *canvas = &app->anim_canvas;
@@ -1251,6 +1301,7 @@ static void anim_show(app_state_t *app, size_t frame_index) {
         page->loaded = true;
     }
     (void)rubraview_pal_texture_upload_bgra(page->texture, picture, (int32_t)stride);
+    if (app->frame_wanted) frame_take(app, picture, canvas->width, canvas->height, stride);
 }
 
 /* Replaces the page's texture with one frame of it. The page keeps its
@@ -2411,8 +2462,21 @@ static void media_prepare(app_state_t *app) {
 static void media_show(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame) {
     if (frame->gpu_texture) {
         rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
+        if (app->frame_wanted && frame->width > 0 && frame->height > 0) {
+            /* RV-108: a frame on the card is read back from the page's texture. */
+            size_t stride = (size_t)page->width * 4u;
+            uint8_t *back = (uint8_t*)malloc(stride * (size_t)page->height);
+            if (back && rubraview_pal_texture_read_video(page->texture, back, stride)) {
+                frame_take(app, back, page->width, page->height, stride);
+            } else {
+                app->frame_wanted = FRAME_NOT;
+                osd_say(app, U8("the frame could not be read back from the graphics card"));
+            }
+            free(back);
+        }
     } else {
         rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
+        if (app->frame_wanted) frame_take(app, frame->pixels, frame->width, frame->height, (size_t)frame->stride);
     }
     app->media_has_frame = true;
     app->media_new_picture = true;
@@ -4590,6 +4654,17 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
         else panel_open_edit(app);
+    } else if (rubraview_u8_eq_lit(action, "copy_frame") || rubraview_u8_eq_lit(action, "save_frame")) {
+        /* RV-108: of a film or an animation; a still picture has Export. */
+        bool film = app->media && app->media_info.has_video && app->media_page >= 0;
+        if (!film && !anim_plays(app)) {
+            osd_say(app, U8("that is for a film or an animation: Ctrl+E exports a picture"));
+        } else {
+            app->frame_wanted = rubraview_u8_eq_lit(action, "copy_frame") ? FRAME_COPY : FRAME_SAVE;
+            /* Playing, the next frame is taken; standing still, the frame is asked for again. */
+            if (film && app->media_paused) media_seek_to(app, app->media_position);
+            else if (!film) show_frame(app, app->animation.current);
+        }
     } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
         else panel_open_export(app);
@@ -8516,6 +8591,9 @@ enum {
     PANEL_EXPOSURE = 1, PANEL_BRIGHTNESS, PANEL_CONTRAST, PANEL_SATURATION,
     PANEL_TEMPERATURE, PANEL_TINT, PANEL_BLACK, PANEL_WHITE, PANEL_GAMMA,
     PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
+    /* RV-108: the adjust panel's second page, and two more of Export's rows. */
+    PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
+    PANEL_RESIZE, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
@@ -8557,34 +8635,50 @@ static void panel_close(app_state_t *app) {
 
 /* §3.13's workbench. Every row's range comes from the edit session, so
    the panel cannot offer a value the commit layer would refuse. */
-static void panel_open_edit(app_state_t *app) {
-    int32_t page = current_page_index(app);
-    if (page < 0) return;
+/* RV-108: the panel has two pages — the tones, and sharpness, cut and
+   size — so that it is never taller than a small window. The rows are
+   made from the session as it stands: turning the page changes nothing. */
+static bool g_edit_page_two = false;
 
+static void panel_build_edit(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
-    app->panel = rubraview_panel_create(U8("Adjust"), dpi);
+    const rubraview_edit_session_t *e = &app->edit;
+    app->panel = rubraview_panel_create(g_edit_page_two ? U8("Adjust: sharpness and size") : U8("Adjust"), dpi);
     app->panel_is_export = false;
     app->panel_is_batch = false;
     app->panel_is_print = false;
     app->panel_is_convert = false;
 
-    rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, U8("Exposure"), 0.0, -3.0, 3.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, U8("Brightness"), 0.0, -100.0, 100.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, U8("Contrast"), 0.0, -100.0, 100.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_SATURATION, U8("Saturation"), 0.0, -100.0, 100.0, 0.0);
+    if (!g_edit_page_two) {
+        rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, U8("Exposure"), e->params.exposure_ev, -3.0, 3.0, 0.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, U8("Brightness"), e->params.brightness, -100.0, 100.0, 0.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, U8("Contrast"), e->params.contrast, -100.0, 100.0, 0.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_SATURATION, U8("Saturation"), e->params.saturation, -100.0, 100.0, 0.0);
+        rubraview_panel_add_separator(&app->panel);
+        rubraview_panel_add_slider(&app->panel, PANEL_TEMPERATURE, U8("Temperature"), e->params.temperature, -100.0, 100.0, 0.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_TINT, U8("Tint"), e->params.tint, -100.0, 100.0, 0.0);
+        rubraview_panel_add_separator(&app->panel);
+        rubraview_panel_add_slider(&app->panel, PANEL_BLACK, U8("Black point"), (double)e->params.black_point, 0.0, 254.0, 1.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_WHITE, U8("White point"), (double)e->params.white_point, 1.0, 255.0, 1.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, U8("Midtone"), e->params.midtone_gamma, 0.1, 3.0, 0.0);
+    } else {
+        rubraview_panel_add_slider(&app->panel, PANEL_BLUR, U8("Blur"), e->blur_sigma, 0.0, 50.0, 0.0);
+        rubraview_panel_add_choice(&app->panel, PANEL_BLUR_KIND, U8("Blur kind"), e->blur_box ? 1 : 0, 2);
+        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, U8("Sharpen"), e->sharpen_amount, 0.0, 300.0, 0.0);
+        rubraview_panel_add_choice(&app->panel, PANEL_SHARPEN_KIND, U8("Sharpen kind"), e->sharpen_laplacian ? 1 : 0, 2);
+        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, U8("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
+        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, U8("  threshold"),
+                                   (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
+        rubraview_panel_add_separator(&app->panel);
+        rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, U8("Crop ratio"), (int32_t)e->crop_ratio, 5);
+        rubraview_panel_add_button(&app->panel, PANEL_TRIM, U8("Trim plain margins"));
+        double percent = e->resize_width > 0 && e->image_width > 0
+                       ? 100.0 * (double)e->resize_width / (double)(e->crop_active ? e->crop.width : e->image_width) : 100.0;
+        rubraview_panel_add_slider(&app->panel, PANEL_RESIZE, U8("Resize %"), percent, 10.0, 500.0, 1.0);
+    }
     rubraview_panel_add_separator(&app->panel);
-    rubraview_panel_add_slider(&app->panel, PANEL_TEMPERATURE, U8("Temperature"), 0.0, -100.0, 100.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_TINT, U8("Tint"), 0.0, -100.0, 100.0, 0.0);
-    rubraview_panel_add_separator(&app->panel);
-    rubraview_panel_add_slider(&app->panel, PANEL_BLACK, U8("Black point"), 0.0, 0.0, 254.0, 1.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_WHITE, U8("White point"), 255.0, 1.0, 255.0, 1.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, U8("Midtone"), 1.0, 0.1, 3.0, 0.0);
-    rubraview_panel_add_separator(&app->panel);
-    rubraview_panel_add_slider(&app->panel, PANEL_BLUR, U8("Blur"), 0.0, 0.0, 50.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, U8("Sharpen"), 0.0, 0.0, 300.0, 0.0);
-    rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, U8("Crop ratio"), 0, 5);
-    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_EDIT_PAGE,
+                               g_edit_page_two ? U8("< Tones") : U8("Sharpness, cut and size >"));
     rubraview_panel_add_button(&app->panel, PANEL_RESET, U8("Reset"));
     rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, U8("Save a copy"));
     /* D-88: inside an archive the copy is a new entry beside the page, and the page itself can be saved over. */
@@ -8592,7 +8686,43 @@ static void panel_open_edit(app_state_t *app) {
 
     app->panel.open = true;
     panel_relayout(app);
+}
+
+/* §3.13's workbench. Every row's range comes from the edit session, so
+   the panel cannot offer a value the commit layer would refuse. */
+static void panel_open_edit(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+
+    app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
+    g_edit_page_two = false;
+    panel_build_edit(app);
     edit_preview_open(app);
+}
+
+/* What a row's value is called: a choice's word, or a number worth reading. */
+static u8str_t adjust_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
+    static const char *const CROP[] = { "free", "1:1", "4:3", "16:9", "the picture's" };
+    static const char *const BLUR[] = { "soft (Gaussian)", "flat (box)" };
+    static const char *const SHARP[] = { "unsharp mask", "Laplacian" };
+    static const char *const FORMAT[] = { "as the file", "JPEG", "PNG", "WebP", "GIF", "BMP", "TIFF", "ICO" };
+    static const char *const DEPTH[] = { "colour + alpha (32)", "colour (24)", "256 colours", "grey (8)" };
+    int32_t i = (int32_t)row->value;
+    const char *word = NULL;
+    switch (row->id) {
+        case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
+        case PANEL_BLUR_KIND:    word = i >= 0 && i < 2 ? BLUR[i] : NULL; break;
+        case PANEL_SHARPEN_KIND: word = i >= 0 && i < 2 ? SHARP[i] : NULL; break;
+        case PANEL_FORMAT:       word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
+        case PANEL_PNG_DEPTH:    word = i >= 0 && i < 4 ? DEPTH[i] : NULL; break;
+        case PANEL_RESIZE:           snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_SHARPEN_THRESHOLD: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_SHARPEN_RADIUS:   snprintf(buffer, size, "%.1f", row->value); return cstr(buffer);
+        default: break;
+    }
+    if (word) { snprintf(buffer, size, "%s", word); return cstr(buffer); }
+    snprintf(buffer, size, "[%d]", (int)i);
+    return cstr(buffer);
 }
 
 static void panel_open_export(app_state_t *app) {
@@ -8608,6 +8738,9 @@ static void panel_open_export(app_state_t *app) {
                                (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, U8("PNG level"),
                                (double)app->export_options.png_compression, 0.0, 9.0, 1.0);
+    /* RV-108 (§3.10): the two choices the writer had and no row gave. */
+    rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, U8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
+    rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, U8("Progressive JPEG"), app->export_options.jpeg_progressive);
     rubraview_panel_add_separator(&app->panel);
     /* §3.10 makes this an explicit tick, and it starts unticked: quietly
        discarding a photographer's metadata would be its own surprise. */
@@ -9464,6 +9597,8 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_QUALITY:   app->export_options.jpeg_quality = (int32_t)v;
                                   app->export_options.webp_quality = (int32_t)v; break;
             case PANEL_PNG_LEVEL: app->export_options.png_compression = (int32_t)v; break;
+            case PANEL_PNG_DEPTH: app->export_options.png_depth = (rubraview_png_depth_t)(int32_t)v; break;
+            case PANEL_PROGRESSIVE: app->export_options.jpeg_progressive = v > 0.5; break;
             case PANEL_PRIVACY:   app->export_options.privacy_clean = v > 0.5; break;
             default: break;
         }
@@ -9516,8 +9651,25 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
                                 rubraview_panel_set_value(&app->panel, PANEL_BLACK,
                                                           (double)app->edit.params.black_point); break;
         case PANEL_CROP_RATIO:  rubraview_edit_crop_set_ratio(&app->edit, (rubraview_crop_ratio_t)(int32_t)v); break;
+        /* RV-108 */
+        case PANEL_BLUR_KIND:    app->edit.blur_box = v > 0.5; break;
+        case PANEL_SHARPEN_KIND: app->edit.sharpen_laplacian = v > 0.5; break;
+        case PANEL_SHARPEN_RADIUS: rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SHARPEN_RADIUS, (float)v); break;
+        case PANEL_SHARPEN_THRESHOLD: app->edit.sharpen_threshold = (uint8_t)(v < 0.0 ? 0.0 : v > 255.0 ? 255.0 : v); break;
+        case PANEL_RESIZE: {
+            /* A hundred is the size as it is; the size is of what the cut leaves. */
+            int32_t w = 0, h = 0;
+            if (lround(v) == 100 || !rubraview_edit_resize_percent(&app->edit, v, &w, &h)) {
+                app->edit.resize_width = app->edit.resize_height = 0;
+            } else {
+                rubraview_edit_set_resize(&app->edit, w, h, true);
+            }
+            break;
+        }
         default: break;
     }
+    /* The preview is of the tones, the blur and the sharpening: any of them changing draws it again. */
+    app->edit_shown_valid = false;
 }
 
 static void panel_button(app_state_t *app, int32_t index) {
@@ -9527,6 +9679,33 @@ static void panel_button(app_state_t *app, int32_t index) {
             rubraview_edit_reset(&app->edit);
             panel_open_edit(app);   /* rebuild the rows at their neutral values */
             break;
+        case PANEL_EDIT_PAGE:
+            g_edit_page_two = !g_edit_page_two;
+            panel_build_edit(app);
+            break;
+        case PANEL_TRIM: {
+            /* RV-108 (§3.13): the plain margin of a scan — white, or black when there is no white one —
+               found on the preview's small copy and marked as the cut, for the reader to see before saving. */
+            const rubraview_pixbuf_t *small = &app->edit_small;
+            int32_t x = 0, y = 0, w = 0, h = 0;
+            bool found = rubraview_pixbuf_is_valid(small) &&
+                         rubraview_filter_autotrim_rect(small, 245, true, &x, &y, &w, &h) &&
+                         (w < small->width || h < small->height);
+            if (!found) {
+                found = rubraview_pixbuf_is_valid(small) &&
+                        rubraview_filter_autotrim_rect(small, 15, false, &x, &y, &w, &h) &&
+                        (w < small->width || h < small->height);
+            }
+            if (!found || w < 2 || h < 2) { osd_say(app, U8("no plain margin was found")); break; }
+            double sx = (double)app->edit.image_width / (double)small->width;
+            double sy = (double)app->edit.image_height / (double)small->height;
+            rubraview_edit_crop_set_ratio(&app->edit, RUBRAVIEW_CROP_FREE);
+            rubraview_edit_crop_drag(&app->edit, (int32_t)floor(x * sx), (int32_t)floor(y * sy),
+                                     (int32_t)ceil((x + w) * sx), (int32_t)ceil((y + h) * sy));
+            panel_build_edit(app);
+            osd_say(app, U8("the margins are marked: Save a copy cuts them"));
+            break;
+        }
         case PANEL_SAVE_COPY:
             panel_write_current(app, true);
             panel_close(app);
@@ -9646,6 +9825,13 @@ static void draw_panel(app_state_t *app) {
             rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
                                             c.height * 0.4, c.height };
             rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
+            if (!app->panel_is_print && !app->panel_is_convert &&
+                (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
+                char number[16];
+                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
+                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(row, number, sizeof(number)),
+                                               at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+            }
             if (app->panel_is_print || app->panel_is_convert) {
                 /* D-87: a scale or a margin is chosen by its number. */
                 char number[16];
@@ -9668,18 +9854,10 @@ static void draw_panel(app_state_t *app) {
             rubraview_pal_render_draw_text(app->renderer, print_row_text(row, words, sizeof(words)),
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
-            /* The value is an index; showing it as a number beats
-               inventing labels the model does not carry. */
-            char digits[16];
-            int32_t index = (int32_t)row->value;
-            size_t pos = 0;
-            digits[pos++] = '[';
-            if (index >= 10) digits[pos++] = (char)('0' + index / 10);
-            digits[pos++] = (char)('0' + index % 10);
-            digits[pos++] = ']';
-            digits[pos] = '\0';
+            /* RV-108: a choice says its word. */
+            char words[48];
             rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = digits, .len = pos },
+            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(row, words, sizeof(words)),
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
     }
@@ -12445,6 +12623,13 @@ static void edit_preview_update(app_state_t *app) {
     rubraview_edit_session_t session = app->edit;
     session.crop_active = false;
     session.resize_width = session.resize_height = 0;
+    /* RV-108: a radius is in the picture's pixels; the small copy has fewer. */
+    if (session.image_width > 0) {
+        float ratio = (float)app->edit_small.width / (float)session.image_width;
+        if (session.blur_sigma > 0.0f) { session.blur_sigma *= ratio; if (session.blur_sigma < 0.3f) session.blur_sigma = 0.3f; }
+        session.sharpen_radius *= ratio;
+        if (session.sharpen_radius < 0.5f) session.sharpen_radius = 0.5f;
+    }
     rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &session, &app->edit_small);
     if (!rubraview_pixbuf_is_valid(&edited)) return;
     rubraview_histogram_compute(&edited, app->edit_hist[0], app->edit_hist[1], app->edit_hist[2], app->edit_hist[3]);
@@ -15220,6 +15405,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.fit_mode = RUBRAVIEW_FIT_WINDOW;
     app.zoom = 1.0;
     app.layout_exempt = -1;
+    /* Found with RV-108: Export began at quality 0 — the options were never given their defaults. */
+    app.export_options = rubraview_export_defaults();
     app.curve_dragging = -1;   /* no point held; 0 would mean the first one */
     app.orientation = rubraview_orientation_identity();
     app.spread_detect = true; /* §3.3.4 default */

@@ -115,7 +115,7 @@ bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
 static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
                                                  const uint8_t *data, size_t size,
                                                  JXFORM_CODE jxform, bool trim,
-                                                 bool copy_markers) {
+                                                 bool copy_markers, bool progressive) {
     rubraview_jpegtran_result_t result = {
         .err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT,
         .data = { .ptr = "", .len = 0 },
@@ -196,6 +196,8 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
 
     jpeg_copy_critical_parameters(&src, &dst);
     out_coefficients = jtransform_adjust_parameters(&src, &dst, coefficients, &info);
+    /* RV-108: the same coefficients, written in passes from coarse to fine. */
+    if (progressive) jpeg_simple_progression(&dst);
 
     jpeg_mem_dest(&dst, &out_buffer, &out_size);
     jpeg_write_coefficients(&dst, out_coefficients);
@@ -253,7 +255,7 @@ static rubraview_jpegtran_result_t transform(proven_arena_t *arena,
     }
 
     result = run_transform(arena, data, size, to_jxform(op),
-                           edge_policy == RUBRAVIEW_JPEGTRAN_TRIM, copy_markers);
+                           edge_policy == RUBRAVIEW_JPEGTRAN_TRIM, copy_markers, false);
     if (result.err == RUBRAVIEW_JPEGTRAN_OK) result.was_exact = exact;
     return result;
 }
@@ -264,6 +266,11 @@ rubraview_jpegtran_result_t rubraview_jpegtran_apply(proven_arena_t *arena,
                                                      rubraview_jpegtran_edge_t edge_policy,
                                                      bool privacy_clean) {
     return transform(arena, data, size, op, edge_policy, !privacy_clean);
+}
+
+rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena,
+                                                           const uint8_t *data, size_t size) {
+    return run_transform(arena, data, size, JXFORM_NONE, false, true, true);
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *arena,

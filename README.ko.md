@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -44,6 +44,8 @@
 | `E` | 사진 보정 |
 | `Ctrl+E` | 내보내기 |
 | `Ctrl+Shift+S` | 다른 이름으로 저장 |
+| `Ctrl+C` | 화면의 프레임 복사 (영상, 애니메이션) |
+| `Ctrl+Shift+E` | 화면의 프레임을 파일 옆에 PNG로 저장 |
 | `Ctrl+B` | 여러 파일 변환 |
 | `F10`, `Ctrl+,` | 설정 |
 | `F1` | 이 도움말(별도 창) |

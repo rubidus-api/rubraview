@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.53/rubraview-v0.0.53.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.54/rubraview-v0.0.54.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -45,6 +45,8 @@ ships with, so it cannot drift from them.
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+C` | Copy the frame on screen (a film, an animation) |
+| `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |

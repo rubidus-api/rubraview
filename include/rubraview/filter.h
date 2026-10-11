@@ -41,6 +41,23 @@ rubraview_pixbuf_t rubraview_filter_unsharp_mask(proven_arena_t *arena,
  * detect_white: true for scanned document/manga borders (Y >= threshold),
  *               false for letterboxed black borders (Y <= threshold).
  */
+/**
+ * RV-108: the rectangle rubraview_filter_autotrim would keep, without
+ * making the picture — what an editor shows before it cuts. False when
+ * the picture is not valid; a picture with no such margin gives the whole
+ * of it.
+ */
+bool rubraview_filter_autotrim_rect(const rubraview_pixbuf_t *src, uint8_t bg_threshold, bool detect_white,
+                                    int32_t *out_x, int32_t *out_y, int32_t *out_width, int32_t *out_height);
+
+/**
+ * RV-108 (RFC-0001 §6.4): Laplacian sharpening — each pixel moved away
+ * from the mean of its four neighbours by `amount` times their
+ * difference. Sharper and harsher than the unsharp mask, with no radius.
+ * amount: 0 leaves the picture as it is; 1 is the classic kernel.
+ */
+rubraview_pixbuf_t rubraview_filter_laplacian_sharpen(proven_arena_t *arena, const rubraview_pixbuf_t *src, float amount);
+
 rubraview_pixbuf_t rubraview_filter_autotrim(proven_arena_t *arena,
                                const rubraview_pixbuf_t *src,
                                uint8_t bg_threshold,
