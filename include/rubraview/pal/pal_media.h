@@ -66,6 +66,27 @@ typedef struct rubraview_media_open_result {
 bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend);
 
 /**
+ * RV-110: a JPEG XL picture, read by the FFmpeg the user put beside the
+ * program (which has libjxl in it or has not). Nothing of it is in
+ * rubraview's own build.
+ *
+ * The state: 0, no usable FFmpeg here; 1, FFmpeg, with no JPEG XL decoder
+ * in it; 2, it can read one.
+ */
+int rubraview_pal_ffmpeg_jxl_state(void);
+
+/**
+ * Decode the first frame of the JPEG XL in `data` as R, G, B, A (alpha not
+ * multiplied in), upright, top row first. `room` is asked once for
+ * width * height * 4 bytes when the size is known, and may refuse (NULL).
+ * False when it is not a JPEG XL, is damaged, is larger than `max_side`
+ * on a side, or there is no decoder. May be called from any thread.
+ */
+bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+                                     uint8_t *(*room)(void *context, int32_t width, int32_t height),
+                                     void *context, int32_t *out_width, int32_t *out_height);
+
+/**
  * Open a file with one backend and start decoding from its beginning.
  * Blocks until the backend has said yes or no. The caller tries the
  * backends in rubraview_media_backend_order and reports the last failure.

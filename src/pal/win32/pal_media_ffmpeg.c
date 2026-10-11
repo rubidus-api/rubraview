@@ -84,6 +84,14 @@ typedef struct ff_api {
     int (*av_read_frame)(AVFormatContext*, AVPacket*);
     int (*av_seek_frame)(AVFormatContext*, int, int64_t, int);
     int (*av_find_best_stream)(AVFormatContext*, enum AVMediaType, int, int, const struct AVCodec**, int);
+    /* RV-110, a picture read from memory; any may be missing, and then no picture is read. */
+    AVFormatContext *(*avformat_alloc_context)(void);
+    AVIOContext *(*avio_alloc_context)(unsigned char*, int, int, void*,
+                                       int (*)(void*, uint8_t*, int), int (*)(void*, const uint8_t*, int),
+                                       int64_t (*)(void*, int64_t, int));
+    void (*avio_context_free)(AVIOContext**);
+    void *(*av_malloc)(size_t);
+    void (*av_free)(void*);
     /* avcodec */
     unsigned (*avcodec_version)(void);
     const AVCodec *(*avcodec_find_decoder)(enum AVCodecID);
@@ -170,6 +178,8 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND_OPTIONAL(util, av_color_range_name); BIND_OPTIONAL(util, av_color_primaries_name);
     BIND_OPTIONAL(util, av_color_transfer_name); BIND_OPTIONAL(util, av_color_space_name);
     BIND_OPTIONAL(util, av_chroma_location_name); BIND_OPTIONAL(util, av_channel_layout_describe);
+    BIND_OPTIONAL(fmt, avformat_alloc_context); BIND_OPTIONAL(fmt, avio_alloc_context);
+    BIND_OPTIONAL(fmt, avio_context_free); BIND_OPTIONAL(util, av_malloc); BIND_OPTIONAL(util, av_free);
     BIND(sws, swscale_version); BIND(sws, sws_getContext); BIND(sws, sws_scale); BIND(sws, sws_freeContext);
     BIND(swr, swresample_version); BIND(swr, swr_alloc_set_opts2); BIND(swr, swr_init);
     BIND(swr, swr_convert); BIND(swr, swr_free);
@@ -187,9 +197,7 @@ static bool versions_match(void) {
            AV_VERSION_MAJOR(g_ff.swresample_version()) == LIBSWRESAMPLE_VERSION_MAJOR;
 }
 
-static bool ff_load(void) {
-    if (g_ff.tried) return g_ff.ok;
-    g_ff.tried = true;
+static bool ff_load_once(void) {
     HMODULE util = load_one("avutil-" AV_STRINGIFY(LIBAVUTIL_VERSION_MAJOR) ".dll", "avutil.dll");
     HMODULE codec = load_one("avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) ".dll", "avcodec.dll");
     HMODULE fmt = load_one("avformat-" AV_STRINGIFY(LIBAVFORMAT_VERSION_MAJOR) ".dll", "avformat.dll");
@@ -203,7 +211,148 @@ static bool ff_load(void) {
     return true;
 }
 
+/* Once, whoever asks first: the film's thread, or (RV-110) any of the
+   threads that read pictures ahead. */
+static INIT_ONCE g_ff_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK ff_load_call(PINIT_ONCE once, PVOID parameter, PVOID *context) {
+    (void)once; (void)parameter; (void)context;
+    g_ff.tried = true;
+    ff_load_once();
+    return TRUE;
+}
+
+static bool ff_load(void) {
+    InitOnceExecuteOnce(&g_ff_once, ff_load_call, NULL, NULL);
+    return g_ff.ok;
+}
+
 static bool ff_available(void) { return ff_load(); }
+
+/* ---- RV-110: one still picture, from memory ---- */
+
+typedef struct ff_bytes {
+    const uint8_t *data;
+    size_t size, at;
+} ff_bytes_t;
+
+static int ff_bytes_read(void *opaque, uint8_t *buffer, int count) {
+    ff_bytes_t *b = (ff_bytes_t*)opaque;
+    size_t left = b->size - b->at;
+    if (left == 0 || count <= 0) return AVERROR_EOF;
+    size_t n = (size_t)count < left ? (size_t)count : left;
+    memcpy(buffer, b->data + b->at, n);
+    b->at += n;
+    return (int)n;
+}
+
+static int64_t ff_bytes_seek(void *opaque, int64_t offset, int whence) {
+    ff_bytes_t *b = (ff_bytes_t*)opaque;
+    if (whence & AVSEEK_SIZE) return (int64_t)b->size;
+    int64_t to = offset;
+    whence &= ~AVSEEK_FORCE;
+    if (whence == SEEK_CUR) to += (int64_t)b->at;
+    else if (whence == SEEK_END) to += (int64_t)b->size;
+    else if (whence != SEEK_SET) return AVERROR(EINVAL);
+    if (to < 0 || (uint64_t)to > b->size) return AVERROR(EINVAL);
+    b->at = (size_t)to;
+    return to;
+}
+
+int rubraview_pal_ffmpeg_jxl_state(void) {
+    if (!ff_load() || !g_ff.avformat_alloc_context || !g_ff.avio_alloc_context || !g_ff.avio_context_free ||
+        !g_ff.av_malloc || !g_ff.av_free) return 0;
+    return g_ff.avcodec_find_decoder(AV_CODEC_ID_JPEGXL) ? 2 : 1;
+}
+
+/* Only a JPEG XL: FFmpeg guesses at whatever it is given, and a damaged
+   file of another kind is not to be handed to that guess. The first frame
+   of one that moves. libjxl turns the picture upright itself, so what
+   comes out is as it is to be seen. Everything of FFmpeg's is let go
+   before returning. */
+bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+                                     uint8_t *(*room)(void *context, int32_t width, int32_t height),
+                                     void *context, int32_t *out_width, int32_t *out_height) {
+    enum { IO_BYTES = 64 * 1024 };
+    if (!data || size == 0 || !room || rubraview_pal_ffmpeg_jxl_state() != 2) return false;
+
+    bool ok = false;
+    ff_bytes_t bytes = { .data = data, .size = size, .at = 0 };
+    AVFormatContext *format = NULL;
+    AVCodecContext *codec = NULL;
+    AVPacket *packet = NULL;
+    AVFrame *frame = NULL;
+    struct SwsContext *sws = NULL;
+    unsigned char *io_buffer = (unsigned char*)g_ff.av_malloc(IO_BYTES + AV_INPUT_BUFFER_PADDING_SIZE);
+    AVIOContext *io = io_buffer
+        ? g_ff.avio_alloc_context(io_buffer, IO_BYTES, 0, &bytes, ff_bytes_read, NULL, ff_bytes_seek) : NULL;
+    if (!io) { if (io_buffer) g_ff.av_free(io_buffer); return false; }
+
+    format = g_ff.avformat_alloc_context();
+    if (!format) goto done;
+    format->pb = io;
+    format->flags |= AVFMT_FLAG_CUSTOM_IO;
+    /* On failure the context is freed and set to NULL; the I/O is ours either way. */
+    if (g_ff.avformat_open_input(&format, NULL, NULL, NULL) < 0 || !format) { format = NULL; goto done; }
+    if (g_ff.avformat_find_stream_info(format, NULL) < 0) goto done;
+
+    int stream = g_ff.av_find_best_stream(format, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (stream < 0) goto done;
+    const AVCodecParameters *par = format->streams[stream]->codecpar;
+    if (par->codec_id != AV_CODEC_ID_JPEGXL && par->codec_id != AV_CODEC_ID_JPEGXL_ANIM) goto done;
+    const AVCodec *decoder = g_ff.avcodec_find_decoder(par->codec_id);
+    if (!decoder) decoder = g_ff.avcodec_find_decoder(AV_CODEC_ID_JPEGXL);
+    codec = decoder ? g_ff.avcodec_alloc_context3(decoder) : NULL;
+    if (!codec || g_ff.avcodec_parameters_to_context(codec, par) < 0 ||
+        g_ff.avcodec_open2(codec, decoder, NULL) < 0) goto done;
+
+    packet = g_ff.av_packet_alloc();
+    frame = g_ff.av_frame_alloc();
+    if (!packet || !frame) goto done;
+
+    bool got = false, drained = false;
+    while (!got) {
+        int received = g_ff.avcodec_receive_frame(codec, frame);
+        if (received >= 0) { got = true; break; }
+        if (received != AVERROR(EAGAIN) || drained) break;
+        int read = g_ff.av_read_frame(format, packet);
+        if (read < 0) {
+            drained = true;
+            if (g_ff.avcodec_send_packet(codec, NULL) < 0) break;
+            continue;
+        }
+        int sent = packet->stream_index == stream ? g_ff.avcodec_send_packet(codec, packet) : 0;
+        g_ff.av_packet_unref(packet);
+        if (sent < 0 && sent != AVERROR(EAGAIN)) break;
+    }
+    if (!got || frame->width <= 0 || frame->height <= 0 ||
+        frame->width > max_side || frame->height > max_side) goto done;
+
+    uint8_t *pixels = room(context, frame->width, frame->height);
+    if (!pixels) goto done;
+    sws = g_ff.sws_getContext(frame->width, frame->height, (enum AVPixelFormat)frame->format,
+                              frame->width, frame->height, AV_PIX_FMT_RGBA, SWS_POINT, NULL, NULL, NULL);
+    if (!sws) goto done;
+    uint8_t *planes[4] = { pixels, NULL, NULL, NULL };
+    int strides[4] = { frame->width * 4, 0, 0, 0 };
+    if (g_ff.sws_scale(sws, (const uint8_t *const*)frame->data, frame->linesize, 0, frame->height,
+                       planes, strides) != frame->height) goto done;
+    *out_width = frame->width;
+    *out_height = frame->height;
+    ok = true;
+
+done:
+    if (sws) g_ff.sws_freeContext(sws);
+    if (frame) g_ff.av_frame_free(&frame);
+    if (packet) g_ff.av_packet_free(&packet);
+    if (codec) g_ff.avcodec_free_context(&codec);
+    if (format) g_ff.avformat_close_input(&format);
+    /* FFmpeg may have put another buffer in the context than the one it was given. */
+    if (io->buffer) g_ff.av_free(io->buffer);
+    io->buffer = NULL;
+    g_ff.avio_context_free(&io);
+    return ok;
+}
 
 /* ---- decode thread ---- */
 

@@ -67,6 +67,13 @@ bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_detail
  */
 bool rubraview_image_is_animated(const uint8_t *bytes, size_t size);
 
+/*
+ * RV-110: the bytes begin as a JPEG XL file does — a bare codestream
+ * (FF 0A) or the box container's twelve-byte signature. By the content,
+ * not the name: this is what decides whether FFmpeg is asked for it.
+ */
+bool rubraview_image_is_jxl(const uint8_t *bytes, size_t size);
+
 #ifdef __cplusplus
 }
 #endif

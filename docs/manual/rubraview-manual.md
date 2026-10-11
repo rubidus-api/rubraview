@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.56.exe              the viewer, as built
-dist/rubraview-v0.0.56/                 the release bundle
-dist/rubraview-v0.0.56.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.57.exe              the viewer, as built
+dist/rubraview-v0.0.57/                 the release bundle
+dist/rubraview-v0.0.57.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -293,8 +293,10 @@ coarse first.
 AVIF pictures (`.avif`) are read by Rubraview itself, on any Windows —
 stills and animations, with their transparency, 10-bit ones shown as 8.
 JPEG XL (`.jxl`) is read by Windows, when a JPEG XL codec is installed
-in it; without one a `.jxl` says that it cannot be read. Neither is
-written.
+in it, or else by FFmpeg, when its DLLs are beside `rubraview.exe`
+(Settings > Video, "Adding FFmpeg") and were built with libjxl; without
+either a `.jxl` says what is missing. One that moves is shown as its
+first picture. Neither kind is written.
 
 WebP is written by Rubraview itself, on any Windows: **Quality** decides
 how good a lossy one is, **WebP lossless** keeps every visible pixel, and **WebP

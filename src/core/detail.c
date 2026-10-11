@@ -561,6 +561,12 @@ bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_detail
     return false;
 }
 
+bool rubraview_image_is_jxl(const uint8_t *b, size_t size) {
+    if (!b || size < 2) return false;
+    if (b[0] == 0xFF && b[1] == 0x0A) return true;
+    return size >= 12 && memcmp(b, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0;
+}
+
 bool rubraview_image_is_animated(const uint8_t *b, size_t size) {
     if (!b || size < 16) return false;
     if (memcmp(b, "\x89PNG\r\n\x1A\n", 8) == 0) {

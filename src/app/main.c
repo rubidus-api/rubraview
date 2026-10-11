@@ -10148,7 +10148,7 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
 
 /* RV-110: the page on screen could not be read: it says so, once, rather
    than staying empty without a word. JPEG XL is read by a WIC codec, when
-   one is installed. A film says its own (media_prepare). */
+   one is installed, or by the user's FFmpeg. A film says its own (media_prepare). */
 static void page_failure_notice(app_state_t *app) {
     int32_t index = current_page_index(app);
     if (index < 0 || (size_t)index >= page_count(app) || !app->pages) return;
@@ -10158,7 +10158,12 @@ static void page_failure_notice(app_state_t *app) {
     u8str_t name = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
     if (is_media_path(name)) return;
     if (rubraview_path_has_ext(name, ".jxl")) {
-        osd_say(app, U8("JPEG XL: this Windows has no decoder for it installed"));
+        /* What is known of why: Windows' codec was tried first and is not
+           there or refused; then the FFmpeg beside the program, if any. */
+        int ffmpeg = rubraview_pal_ffmpeg_jxl_state();
+        osd_say(app, ffmpeg == 2 ? U8("JPEG XL: this picture could not be read")
+                   : ffmpeg == 1 ? U8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)")
+                                 : U8("JPEG XL: no decoder for it in this Windows, and no FFmpeg beside the program"));
     } else {
         osd_say(app, U8("this picture could not be read"));
     }
@@ -14691,6 +14696,11 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
         : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
+    if (ffmpeg_here) {
+        console_line(rubraview_pal_ffmpeg_jxl_state() == 2
+            ? "FFmpeg: it has a JPEG XL decoder (libjxl) — .jxl pictures are read through it"
+            : "FFmpeg: it has no JPEG XL decoder — .jxl pictures need a codec in Windows");
+    }
 
     rubraview_media_backend_t preferred = preferred_backend(arena);
     console_line(preferred == RUBRAVIEW_BACKEND_FFMPEG

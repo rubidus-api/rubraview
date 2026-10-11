@@ -137,7 +137,7 @@ static const char *const LINES[] = {
     "",
     "rubraview can play media through FFmpeg when its DLLs are present beside",
     "the executable. To compile those calls, the public headers of FFmpeg",
-    "8.1.2 are kept in `vendor/ffmpeg/include/`; they are licensed",
+    "9.0.2 are kept in `vendor/ffmpeg/include/`; they are licensed",
     "LGPL-2.1-or-later (`vendor/ffmpeg/COPYING.LGPLv2.1`).",
     "",
     "No FFmpeg code is compiled into rubraview and none is distributed with",
