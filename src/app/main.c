@@ -3835,7 +3835,6 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
     };
 }
 
-static double view_scale(app_state_t *app);
 
 /* D-94: what page_picture_size stretches to. Editing works in the file's
    own pixels, so while the edit panel is open the shape is the file's. */
@@ -3873,10 +3872,12 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         static char named[48];
         return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
     }
-    if (rubraview_u8_eq_lit(tile->action, "actual_size")) {
-        /* D-93: the tile says how large the picture is now; a tap makes it 100%. */
+    if (rubraview_u8_eq_lit(tile->action, "zoom_reset")) {
+        /* D-97: the zoom now, where 100% is the size the fit option gives; a tap goes back to it. */
         static char percent[16];   /* drawn before the next call */
-        u8str_t text = rubraview_scale_caption(percent, sizeof(percent), view_scale((app_state_t*)app));
+        /* Real size is not a point on that scale: the owner's name for it is 0%. */
+        if (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005) return U8("0%");
+        u8str_t text = rubraview_scale_caption(percent, sizeof(percent), app->zoom);
         return text.len > 0 ? text : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
@@ -4298,6 +4299,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.1);
     } else if (rubraview_u8_eq_lit(action, "interval_down_fine")) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.1);
+    } else if (rubraview_u8_eq_lit(action, "zoom_reset")) {
+        reset_view(app);   /* D-97: 100% is the fitted size; the fit option stays */
     } else if (rubraview_u8_eq_lit(action, "zoom_in")) {
         app->zoom *= ZOOM_STEP;
     } else if (rubraview_u8_eq_lit(action, "zoom_out")) {
@@ -7151,7 +7154,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                what nothing else shows (owner, 2026-09-29). */
             u8str_t text = rubraview_osd_format(line, sizeof(line), U8(""),
                                                 real_w(&app->pages[page]), real_h(&app->pages[page]),
-                                                view_scale(app) * 100.0, 0, 0);
+                                                app->zoom * 100.0, 0, 0);
             static const char REDUCED[] = "  |  shown reduced";
             if (app->pages[page].reduced && text.ptr == line && text.len + sizeof(REDUCED) <= sizeof(line)) {
                 memcpy(line + text.len, REDUCED, sizeof(REDUCED));
@@ -11959,24 +11962,6 @@ static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, d
         return true;
     }
     return false;
-}
-
-/* How large the picture is on screen against its own pixels: 1.0 is one
-   screen pixel a picture pixel. 0 when nothing is drawn. */
-static double view_scale(app_state_t *app) {
-    if (strip_active(app)) {
-        int32_t win_w = 0, win_h = 0;
-        rubraview_pal_window_get_size(app->window, &win_w, &win_h);
-        double width = win_w > 0 ? strip_width(app, (double)win_w) : 0.0;
-        return app->strip_base_w > 0.0 ? width / app->strip_base_w : 0.0;
-    }
-    int32_t page_index = current_page_index(app);
-    rubraview_composition_t comp;
-    if (page_index < 0 || !spread_composition(app, &comp)) return 0.0;
-    for (size_t i = 0; i < comp.count; ++i) {
-        if (comp.commands[i].page_index == page_index) return comp.commands[i].scale;
-    }
-    return 0.0;
 }
 
 /* §3.13: the crop rectangle, dragged on the picture itself. The model

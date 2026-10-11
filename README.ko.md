@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.48** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.48/rubraview-v0.0.48.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.49** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -94,7 +94,8 @@
 | `1` | 창에 맞춤 |
 | `2` | 너비에 맞춤 |
 | `3` | 높이에 맞춤 |
-| `4`, `0`, `Ctrl+0` | 실제 크기(1:1) |
+| `4`, `0` | 실제 크기(1:1) |
+| `Ctrl+0` | 배율 100 %로: 맞춤 옵션이 정한 크기, 가운데 |
 | `5` | 똑똑한 맞춤(줄이기만) |
 | `Ctrl+1` | 창 가득 늘이기 |
 | `Shift+A` | 화면 비율 바꾸기: 원본, 4:3, 16:9, 영화관, 종이 … (돌아가며) |

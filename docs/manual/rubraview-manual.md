@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.48.exe              the viewer, as built
-dist/rubraview-v0.0.48/                 the release bundle
-dist/rubraview-v0.0.48.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.49.exe              the viewer, as built
+dist/rubraview-v0.0.49/                 the release bundle
+dist/rubraview-v0.0.49.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -474,9 +474,11 @@ The two floating boxes start in opposite corners, the menu box top left and
 the toolbox bottom right. They are always whole inside the window, and when
 the window changes size each stays the same part of the way across and down.
 
-The `1:1` button shows the scale the picture or the film is at now (`43%`);
-a tap puts it at 100 %, its own pixels, in the middle of the window. Fit
-(`1`) is the way back.
+100 % is the size the fit option gives. The zoom button shows the zoom from
+there (`100%`, `250%`), and a tap — or `Ctrl+0` — puts it back, the picture
+in the middle and the fit option as it was. Real size — one screen pixel for
+each of the picture's own — is 0 %: the `0%` button (`0` or `4`) shows it,
+and the zoom button reads `0%` while it is on screen.
 
 Most of what the viewer does has a toolbox button: turning pages one, ten
 or all the way, zoom and fit, turning and flipping, the slide show, the
@@ -706,7 +708,8 @@ listed under a later heading only means that while that is on screen.
 | `1` | Fit to the window |
 | `2` | Fit to the width |
 | `3` | Fit to the height |
-| `4`, `0`, `Ctrl+0` | Actual size (1:1) |
+| `4`, `0` | Actual size (1:1) |
+| `Ctrl+0` | Zoom back to 100%: the size the fit option gives, centred |
 | `5` | Smart fit (shrink only) |
 | `Ctrl+1` | Stretch to fill |
 | `Shift+A` | Shape shown in: the file's own, 4:3, 16:9, cinema, paper ... (round) |

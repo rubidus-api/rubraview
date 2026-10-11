@@ -836,3 +836,13 @@ Do not store credentials, private infrastructure details, personal data, private
   - The toolbox button for what the end of a file does reads "To" over "Next" when that is the next file ("Next" alone read as the next-file button). The menu's line and the on-screen message keep their words.
 - Alternatives: percents of the window's whole width for the anchor's corner — a box at 100 % would be outside; clamping only on a resize — a share is what "the same part of the way" means.
 - Consequences: a box dragged part of the way out is back inside when let go. The open grid was already shifted to stay inside (RFC-0002 §4).
+
+## 2026-10-11: D-97 100 % is the size the fit option gives; real size is 0 %
+
+- Status: Accepted (owner 2026-10-11: "피팅 옵션에 맞게 보여주는 것이 기준이 되는 크기 100% 입니다. 그리고 이와 별개로 0%는 real size를 뜻합니다. real size를 보여주는 버튼이나 기능이 있어야 합니다"; and again: "100%는 real size가 아니라 현재 fitting 옵션에 따라 현재 창에 배치한 그 크기가 기준 크기가 됩니다. real size는 0% 입니다"). Supersedes D-93's reading of the scale button.
+- Decision:
+  - The zoom is counted from the fitted picture: what the fit option in force (window, width, height, smart, stretch) shows in the window is 100 %. A new action `zoom_reset` puts the zoom back to that and the picture in the middle, the fit option kept; its toolbox tile's caption is the zoom now ("43%", "100%", "250%"). `Ctrl+0`, and View > "Zoom 100%".
+  - Real size — one screen pixel a picture pixel, centred — is named 0 %: the `actual_size` button reads "0%" (View > Fit > "0% real size"; keys `0` and `4`), and while the picture is at real size the zoom tile reads "0%" too. Every toolbox with zoom buttons has both tiles, the video one too, with Fit.
+  - The information line (`Shift+I`) gives the zoom, as it did before D-93.
+- Alternatives: showing the scale against the file's pixels (D-93), or calling real size "1:1" or "100%" — the owner's words settle both.
+- Consequences: `Ctrl+0` was a third key for real size and is now the zoom's. Zoomed from real size, the tile counts from it (110 %, 121 % ...), since real size is then what the fit option gives; only the unzoomed real size reads 0 %.

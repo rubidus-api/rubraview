@@ -70,9 +70,9 @@ u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_
                                char *buffer, size_t buffer_size);
 
 /**
- * The scale tile's caption (D-93): how large the picture is on screen
- * against its own pixels, "43%", "100%", "1250%" — a whole percent, and
- * never less than "1%". Empty when `scale` is not above zero or the
+ * The zoom tile's caption (D-97): the zoom against the size the fit
+ * option gives, which is 100% — "43%", "100%", "1250%", a whole percent
+ * and never less than "1%". Empty when `scale` is not above zero or the
  * buffer is too small.
  */
 u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
