@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.49.exe              the viewer, as built
-dist/rubraview-v0.0.49/                 the release bundle
-dist/rubraview-v0.0.49.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.50.exe              the viewer, as built
+dist/rubraview-v0.0.50/                 the release bundle
+dist/rubraview-v0.0.50.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -43,9 +43,14 @@ rubraview.exe "D:\Comics\Vol 01.cbz"
 rubraview.exe "D:\Photos"
 ```
 
-Launching it again while it is already open does not open a second
-window — the running one comes forward and shows the new file. Pass
-`--new-instance` when you do want a second window.
+Each launch opens a window of its own, so several can be open side by
+side. They share the settings, the reading history, the favourites and
+the boxes' places safely: a file is replaced whole, one viewer at a time,
+and a viewer that saves keeps what another changed meanwhile. To have a
+launch hand its file to the window already open instead, switch on
+Settings › General › **Reuse the open window**. Explorer's right-click
+actions always go to the open window; `--new-instance` always opens
+another.
 
 ### In Explorer: double click and the right-click menu
 
@@ -133,6 +138,13 @@ Settings › Viewer › Layout shows and keeps the same choice:
   worth) move through it, and zooming widens or narrows the strip.
 - **Comic** — one page at a time, and a wide scan as its two halves, one
   after the other in reading order.
+
+Every layout but Single is for looking at pictures: a film, a song and a
+picture that moves (an animated GIF, WebP or PNG) are left out there, and
+the picture after them is shown in their place. One you pick by name — in
+the file list, the playlist, on the page bar, or by opening it — is still
+shown, alone, until you turn the page. In Single everything is shown in
+its turn. A folder with nothing but films plays them in any layout.
 
 Dual, Book and Comic each come a second time, read right to left
 (`dual-rtl`, `book-rtl`, `comic-rtl` — a book read from the back, as a

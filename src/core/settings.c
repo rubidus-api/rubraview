@@ -273,6 +273,18 @@ void rubraview_settings_reset(rubraview_settings_t *settings) {
     *settings = fresh;
 }
 
+rubraview_settings_t rubraview_settings_merge_changed(proven_arena_t *arena, const rubraview_settings_t *mine,
+                                                      const rubraview_settings_t *baseline, u8str_t existing_ini_text) {
+    if (!mine) return rubraview_settings_defaults();
+    if (!arena || !baseline || existing_ini_text.len == 0) return *mine;
+    rubraview_settings_t merged = rubraview_settings_load(arena, existing_ini_text);
+    for (size_t i = 0; i < SCHEMA_COUNT; ++i) {
+        if (mine->values[i] != baseline->values[i]) merged.values[i] = mine->values[i];
+        if (!same(mine->texts[i], baseline->texts[i])) merged.texts[i] = mine->texts[i];
+    }
+    return merged;
+}
+
 bool rubraview_settings_differs(const rubraview_settings_t *a, const rubraview_settings_t *b) {
     if (!a || !b) return false;
     for (size_t i = 0; i < SCHEMA_COUNT; ++i) {

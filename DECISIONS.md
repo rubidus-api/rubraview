@@ -846,3 +846,26 @@ Do not store credentials, private infrastructure details, personal data, private
   - The information line (`Shift+I`) gives the zoom, as it did before D-93.
 - Alternatives: showing the scale against the file's pixels (D-93), or calling real size "1:1" or "100%" — the owner's words settle both.
 - Consequences: `Ctrl+0` was a third key for real size and is now the zoom's. Zoomed from real size, the tile counts from it (110 %, 121 % ...), since real size is then what the fit option gives; only the unzoomed real size reads 0 %.
+
+## 2026-10-11: D-98 A layout for looking at pictures leaves films, sounds and moving pictures out
+
+- Status: Accepted (owner 2026-10-11: "dual계열, 책 계열, comic 계열, 웹툰계열 뷰와 같이 이미지를 보는 레이아웃 일 때는 음악이나 애니메이티드 이미지, 동영상은 화면에 보여주지 말고 그 다음 이미지를 보여주는 것으로 해 주세요. 화면에 두개의 동영상을 보여주거나 할 필요는 없으니까요").
+- Decision:
+  - In every layout but Single — dual, book, comic (each also right to left) and the webtoon strip — a page that is a film, a sound (by its extension) or a picture that moves is not laid out: `rubraview_page_info_t.skip`, which `rubraview_layout_compute` leaves out of the spreads, so the picture after it takes its place and pairs with the one before. A narrow window that shows a dual layout a page at a time leaves them out too. The strip keeps a place for every page, so there the page has no height, is not drawn and is stepped over.
+  - A picture that moves is known when it is read: `rubraview_image_is_animated` looks at the bytes (a GIF's second frame, a WebP's animation flag, a PNG's `acTL` before its data), for `.gif`, `.webp`, `.png` and `.apng` only; the layout is made again when one is found.
+  - The page the reader chose by name — opened, or picked in the file list, the playlist, the picker, the mini player or on the page bar — is shown whatever the layout, alone (`layout_exempt`), until another page is turned to. Otherwise opening a film while the layout is dual would show something else.
+  - With nothing but such pages, all are shown. In Single nothing is left out.
+- Alternatives: showing a moving picture's first frame as a still — the owner asked for the next picture; reading every GIF and PNG of a folder when it is opened to know beforehand — thousands of files read for nothing.
+- Consequences: a moving picture may show for a frame before it is found and left out. The position in the title still counts every file ("3/40"). The next-file end of a film goes on to the next film as before, each being the chosen page in turn.
+
+## 2026-10-11: D-99 Several viewers at once: a window each, and state files that survive it
+
+- Status: Accepted (owner 2026-10-11: "한번에 여러개의 루브라뷰 프로그램이 뜰 수 있게 해 주시고, 설정파일 한꺼번에 접근하거나 하는 것을 방지하는 락이나 동기화 메커니즘 등을 갖춰주세요. 임시파일 같은 것도 겹치지 않게 조심해 주시고요").
+- Decision:
+  - `general.single_instance` ("Reuse the open window") is off as it comes: each launch is a window of its own. On, a launch hands its file to the open window as before. Explorer's right-click actions go to the open window either way (they act on a selection as one); `--new-instance` is a new window either way.
+  - A state file is written to a file of the process's own beside it (`<name>.<pid>-<tick>.tmp`) and exchanged for the real one in one step (`rubraview_pal_fs_write_file_atomic`: `MoveFileEx` with replace, retried for 200 ms, then written in place as before): a reader sees the old file or the new one, never half. settings.ini, keymap.ini, layout.ini, history.ini and favorites.ini are written so.
+  - One named mutex for the user (`Rubraview_Config_Mutex`, global, or local to the session where that is refused) is held while a viewer reads a state file, puts its changes in and writes it back (`rubraview_pal_config_lock`, 2 s; past that it writes anyway — the worst is one change lost).
+  - What is put in: settings — only the keys this viewer changed since it loaded or last saved, over the file as it is now (`rubraview_settings_merge_changed`); the history — the file's entries and this viewer's together, each book at its newer place (`rubraview_history_merge`); a favourite added or removed — into the list as the file has it now. keymap.ini, layout.ini, and a favourites rename or reorder are the last writer's whole.
+  - Temporary files were already named by process and moment (`rubraview-<what>-<pid>-<tick>-...` in the user's temporary folder; a drop's folder by process): nothing changed there.
+- Alternatives: keeping one window as the default and leaving the switch to the reader — the owner asked for several at once; file locks (`LockFileEx`) on each file — a mutex with an exchanged file needs no lock a crash could leave; reloading other viewers' changes live — not asked, and a viewer's open settings window would change under the reader's hand.
+- Consequences: a viewer does not see what another changed until it is started again. Several files opened together from Explorer with Enter are now a window each (the right-click "Open these only" is one window). The exchange replaces the file, so a link or special permissions on a state file are not kept. The start-up check reads the setting through the loader, so no settings file means a window each. It also reads the file the viewer itself uses (beside the executable when portable, under AppData otherwise): it had looked in the working folder, so an installed viewer was one window whatever the setting said.

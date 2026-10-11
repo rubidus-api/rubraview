@@ -560,3 +560,41 @@ bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_detail
     if (bytes[0] == 'B' && bytes[1] == 'M') return bmp_details(bytes, size, out, out_raw_bits);
     return false;
 }
+
+bool rubraview_image_is_animated(const uint8_t *b, size_t size) {
+    if (!b || size < 16) return false;
+    if (memcmp(b, "\x89PNG\r\n\x1A\n", 8) == 0) {
+        for (size_t at = 8; at + 12 <= size; ) {
+            uint32_t len = be32(b + at);
+            if (memcmp(b + at + 4, "acTL", 4) == 0) return len >= 8 && at + 16 <= size && be32(b + at + 8) > 1;
+            if (memcmp(b + at + 4, "IDAT", 4) == 0 || memcmp(b + at + 4, "IEND", 4) == 0) return false;
+            if ((uint64_t)at + 12 + len > size) return false;
+            at += 12 + (size_t)len;
+        }
+        return false;
+    }
+    if (memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WEBP", 4) == 0) {
+        return size >= 21 && memcmp(b + 12, "VP8X", 4) == 0 && (b[20] & 0x02) != 0;
+    }
+    if (memcmp(b, "GIF87a", 6) == 0 || memcmp(b, "GIF89a", 6) == 0) {
+        size_t at = 13 + ((b[10] & 0x80) ? 3u * (2u << (b[10] & 7)) : 0u);
+        uint32_t frames = 0;
+        while (at < size) {
+            uint8_t block = b[at++];
+            if (block == 0x2C) {
+                if (at + 9 > size) break;
+                if (++frames > 1) return true;
+                uint8_t f = b[at + 8];
+                at += 9 + ((f & 0x80) ? 3u * (2u << (f & 7)) : 0u) + 1;
+            } else if (block == 0x21) {
+                at++;
+            } else {
+                break;
+            }
+            while (at < size && b[at]) at += 1 + (size_t)b[at];
+            at++;
+        }
+        return false;
+    }
+    return false;
+}

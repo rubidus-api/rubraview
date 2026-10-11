@@ -62,6 +62,10 @@ typedef struct rubraview_page_info {
        detection reaches the same conclusion from the aspect ratio; this
        is the metadata saying so outright. */
     bool force_standalone;
+    /* D-98: not a still picture — a film, a sound, an animation. A layout
+       for looking at pictures (anything but SINGLE) leaves it out and the
+       picture after it takes its place. Left alone when every page is one. */
+    bool skip;
 } rubraview_page_info_t;
 
 typedef struct rubraview_spread {

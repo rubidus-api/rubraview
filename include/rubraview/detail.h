@@ -59,6 +59,14 @@ size_t rubraview_detail_ratio(char *buf, size_t cap, double stored_bytes, double
  */
 bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_details_t *out, uint32_t *out_raw_bits);
 
+/*
+ * D-98: the file is a picture that moves — a GIF with more than one
+ * frame, a WebP with the animation flag, a PNG with an animation chunk
+ * before its picture data. Read from the bytes, cheaply: no picture is
+ * decoded.
+ */
+bool rubraview_image_is_animated(const uint8_t *bytes, size_t size);
+
 #ifdef __cplusplus
 }
 #endif

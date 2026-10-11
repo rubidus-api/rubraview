@@ -153,6 +153,16 @@ void rubraview_history_record(proven_arena_t *arena, rubraview_history_t *histor
     };
 }
 
+void rubraview_history_merge(proven_arena_t *arena, rubraview_history_t *into, const rubraview_history_t *from) {
+    if (!arena || !into || !from) return;
+    for (size_t i = 0; i < from->count; ++i) {
+        const rubraview_history_entry_t *e = &from->entries[i];
+        const rubraview_history_entry_t *have = rubraview_history_find(into, e->path);
+        if (have && have->timestamp >= e->timestamp) continue;
+        rubraview_history_record(arena, into, e->path, e->page, e->total, e->timestamp);
+    }
+}
+
 void rubraview_history_prune(rubraview_history_t *history, size_t max_entries) {
     if (!history || !history->entries || history->count <= max_entries) return;
 

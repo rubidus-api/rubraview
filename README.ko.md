@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.49** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.50** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.50/rubraview-v0.0.50.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.50/rubraview-v0.0.50.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -257,8 +257,8 @@ Windows 11 새 메뉴에도 들어갑니다(두 파일은 `rubraview.exe` 옆에
 
 | 실행 | 용도 |
 |---|---|
-| `rubraview.exe 파일` (폴더나 압축 파일도) | 열기. 이미 창이 떠 있으면 그 창에 넘김 |
-| `--new-instance` | 그래도 창을 하나 더 |
+| `rubraview.exe 파일` (폴더나 압축 파일도) | 새 창으로 열기. Settings > General > Reuse the open window를 켜면 이미 떠 있는 창에 넘김 |
+| `--new-instance` | 그 설정과 상관없이 새 창 |
 | `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하고 탐색기 우클릭 메뉴에 Rubraview를 넣거나, 되돌림. `--types=jpg,png,comics,...`(확장자, 또는 `pictures`, `comics`, `video`, `music`, `archives`, `all`)로 일부만, `--no-types` / `--no-menu`로 둘 중 하나는 그대로 두고, 관리자 프롬프트에서 `--all-users`로 모든 사용자용(Windows 11 새 메뉴 포함). `--setup`은 설치 파일이 쓰는 것(Windows 11 메뉴만 등록하지 못했을 때도 0으로 끝남). Settings > Explorer에도 같은 기능이 있음 |
 | `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `파일들...` | 우클릭 메뉴 항목이 실행하는 것: 열기, 이것만 열기, 열린 창의 목록에 넣기, 압축 파일 내부 보기, 이 파일들로 배치 패널, 인쇄 |
 | `--batch ...` | 창 없이 여러 파일 변환. 옵션은 [설명서](docs/manual/rubraview-manual.md)에 |

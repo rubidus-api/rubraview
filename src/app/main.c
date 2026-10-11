@@ -40,6 +40,7 @@
 #include "rubraview/number.h"
 #include "rubraview/subbox.h"
 #include "rubraview/aspect.h"
+#include "rubraview/detail.h"
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
 #include "rubraview/pal/pal_thumbs.h"
@@ -187,6 +188,11 @@ static u8str_t cstr(const char *s) {
     return (u8str_t){ .ptr = s, .len = strlen(s) };
 }
 
+/* D-99: how long one viewer waits for another to finish with a state file
+   before writing anyway — the files are exchanged whole, so the worst is
+   one change lost, never a broken file. */
+#define CONFIG_LOCK_MS 2000u
+
 typedef struct app_page {
     rubraview_texture_t *texture;
     int32_t width, height;             /* the texture's */
@@ -194,6 +200,8 @@ typedef struct app_page {
     bool reduced;                      /* too large for the device: held smaller (the fall-back) */
     bool loaded;
     bool failed;
+    bool animated;                     /* D-98: a picture that moves, found when it was read */
+    bool skipped;                      /* D-98: left out of the layout now (rebuild_layout) */
 } app_page_t;
 
 /* The size a page is laid out, zoomed and cropped at: the picture's own,
@@ -560,6 +568,7 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    int32_t layout_exempt;                 /* D-98: the film or animation the reader asked for by name: shown in any layout; -1 none */
     rubraview_aspect_t aspect;             /* D-94: the shape pictures are shown in, for the session */
     bool aspect_side;                      /* that shape on its side */
     rubraview_osd_t osd;                   /* RV-039 */
@@ -1058,6 +1067,24 @@ static app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool 
     return page;
 }
 
+/* D-98: is this page a picture that moves? Looked for only in the kinds
+   that can, in the file's bytes (mapped, for a file of a folder); nothing
+   is decoded. `bytes` may be NULL when the caller has none in hand. */
+static bool page_moves(app_state_t *app, size_t index, const rubraview_page_bytes_t *bytes) {
+    u8str_t path = app->source.pages[index].path;
+    u8str_t name = path.len > 0 ? path : app->source.pages[index].name;
+    if (!rubraview_path_has_ext(name, ".gif") && !rubraview_path_has_ext(name, ".webp") &&
+        !rubraview_path_has_ext(name, ".png") && !rubraview_path_has_ext(name, ".apng")) return false;
+    if (path.len > 0) {
+        rubraview_fs_mapping_t map = {0};
+        bool moves = rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX &&
+                     rubraview_image_is_animated(map.data, (size_t)map.size);
+        rubraview_pal_fs_unmap(&map);
+        return moves;
+    }
+    return bytes && bytes->ok && rubraview_image_is_animated((const uint8_t*)bytes->data.ptr, bytes->data.len);
+}
+
 static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes) {
 
     /* A folder page is opened by path; an archive page is decoded from
@@ -1078,6 +1105,12 @@ static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, ru
     page->full_height = loaded.full_height;
     page->reduced = loaded.reduced;
     page->loaded = true;
+
+    /* D-98: a picture that moves is no page of a book: found, the layouts for pictures leave it out. */
+    if (page_moves(app, index, &bytes) && !page->animated) {
+        page->animated = true;
+        if (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) app->needs_relayout = true;
+    }
 }
 
 /* ---- animated images and sub-pages (§3.20) ---- */
@@ -1247,6 +1280,7 @@ static void animation_prepare(app_state_t *app) {
     int32_t page_index = current_page_index(app);
     if (page_index < 0 || (size_t)page_index >= page_count(app)) return;
 
+    if (app->pages[page_index].skipped) return;   /* D-98 */
     u8str_t path = app->source.pages[page_index].path;
     /* A film or a track is no picture to look for frames in. Looking read
        the whole file, twice, before it played — minutes over a network
@@ -1259,6 +1293,22 @@ static void animation_prepare(app_state_t *app) {
         if (page_read_cost(app, (size_t)page_index) > PAGE_JOB_MIN_COST) return;
         bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page_index, &mem);
         if (!bytes.ok) return;
+    }
+
+    /* D-98: in a layout for pictures a picture that moves is not played but
+       left out — unless it is the one the reader asked for by name. */
+    if (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE && page_index != app->layout_exempt &&
+        page_moves(app, (size_t)page_index, &bytes)) {
+        bool others = false;
+        for (size_t i = 0; i < page_count(app) && !others; ++i) {
+            others = !is_media_path(app->source.pages[i].path) && !app->pages[i].animated && (int32_t)i != page_index;
+        }
+        app->pages[page_index].animated = true;
+        if (others) {
+            free(mem);
+            app->needs_relayout = true;
+            return;
+        }
     }
 
     /* D-82, D-84: an animated GIF, WebP or PNG first — kept open, laid
@@ -1397,6 +1447,24 @@ static void rebuild_layout(app_state_t *app) {
         rubraview_orientation_apply_size(app->orientation, w, h, &infos[i].width, &infos[i].height);
         /* §3.8.5: a page the archive tagged as a cover never pairs. */
         infos[i].force_standalone = app->comic_page_flags ? app->comic_page_flags[i].force_standalone : false;
+        infos[i].skip = false;
+    }
+
+    /* D-98 (owner, 2026-10-11): in a layout for looking at pictures — two
+       pages, a book, a comic, the strip — a film, a sound and a picture that
+       moves are not shown; the picture after them is. The one the reader
+       asked for by name is, alone. With nothing but those, all are shown. */
+    bool pictures_only = app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE;
+    size_t stills = 0;
+    for (size_t i = 0; i < page_count(app); ++i) {
+        bool other = is_media_path(app->source.pages[i].path) || app->pages[i].animated;
+        infos[i].skip = pictures_only && other && (int32_t)i != app->layout_exempt;
+        if ((int32_t)i == app->layout_exempt && other) infos[i].force_standalone = true;
+        if (!other) stills++;
+    }
+    for (size_t i = 0; i < page_count(app); ++i) {
+        if (stills == 0) infos[i].skip = false;
+        app->pages[i].skipped = infos[i].skip;
     }
 
     int32_t win_w = 0, win_h = 0;
@@ -1423,7 +1491,31 @@ static size_t spread_index_for_page(const app_state_t *app, int32_t page_index) 
             return i;
         }
     }
-    return 0;
+    /* D-98: a page left out of the layout: the first spread after it, or the last before. */
+    size_t before = 0;
+    for (size_t i = 0; i < app->layout.count; ++i) {
+        if (app->layout.spreads[i].left_index > page_index || app->layout.spreads[i].right_index > page_index) return i;
+        before = i;
+    }
+    return before;
+}
+
+static void rebuild_layout(app_state_t *app);
+static bool is_media_path(u8str_t path);
+
+/* The spread for a page the reader chose by name — in a list, on the page
+   bar, by opening it. A film or an animation chosen so is shown whatever
+   the layout (D-98): it is the one exception, until another page is turned to. */
+static size_t spread_for_chosen_page(app_state_t *app, int32_t page) {
+    if (page >= 0 && (size_t)page < page_count(app) && page != app->layout_exempt &&
+        (app->pages[page].skipped ||
+         (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE &&
+          (is_media_path(app->source.pages[page].path) || app->pages[page].animated ||
+           page_moves(app, (size_t)page, NULL))))) {   /* a GIF not read yet: its bytes say */
+        app->layout_exempt = page;
+        rebuild_layout(app);
+    }
+    return spread_index_for_page(app, page);
 }
 
 static int32_t current_page_index(const app_state_t *app) {
@@ -2199,8 +2291,8 @@ static void media_prepare(app_state_t *app) {
         return;
     }
     u8str_t path = app->source.pages[index].path;
-    if (!is_media_path(path)) {
-        /* A picture or a comic makes no sound: the music has the floor. */
+    if (!is_media_path(path) || app->pages[index].skipped) {
+        /* A picture or a comic makes no sound: the music has the floor. (D-98: nor does a film the layout leaves out.) */
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
         return;
     }
@@ -2458,7 +2550,7 @@ static void media_after_end(app_state_t *app) {
         return;
     }
     app->follow_for = -1;
-    go_to_spread(app, spread_index_for_page(app, next));
+    go_to_spread(app, spread_for_chosen_page(app, next));
     update_precache(app);
 }
 
@@ -2688,6 +2780,7 @@ static double strip_page_height(void *context, size_t index) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double width = strip_width(app, (double)win_w);
+    if (index < page_count(app) && app->pages[index].skipped) return 0.0;   /* D-98: no place in the strip (the strip makes it a pixel) */
     app_page_t *page = ensure_page_loaded(app, (int32_t)index);
     if (!page || page->failed) return width * 0.1;
     if (!page->loaded) return width * 1.5;      /* on its way: a page's usual shape until it is here */
@@ -2720,6 +2813,11 @@ static void go_to_spread(app_state_t *app, size_t index) {
     if (app->layout.count == 0) return;
     app->strip_offset = 0.0;
     if (index >= app->layout.count) index = app->layout.count - 1;
+    if (app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_WEBTOON && app->layout.count == page_count(app)) {
+        /* D-98: the strip has a place for every page; one it leaves out is stepped over. */
+        while (index + 1 < app->layout.count && app->pages[index].skipped) index++;
+        while (index > 0 && app->pages[index].skipped) index--;
+    }
     if (index != app->spread_index) {
         /* Remember what is leaving the screen, so the cross-fade has
            something to fade *from* (§3.2.5). */
@@ -2735,6 +2833,10 @@ static void go_to_spread(app_state_t *app, size_t index) {
     note_activity(app);
 
     int32_t page = current_page_index(app);
+    if (app->layout_exempt >= 0 && page != app->layout_exempt) {
+        app->layout_exempt = -1;      /* D-98: turned away from: it is left out like the others */
+        app->needs_relayout = true;
+    }
     if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
     animation_prepare(app);
     media_prepare(app);
@@ -2842,21 +2944,29 @@ static void osd_say(app_state_t *app, u8str_t text);
    file written at once, so a crash later does not lose it. */
 static void picker_toggle_favorite(app_state_t *app) {
     if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0 || app->picker_in_book) return;
+    /* D-99: another viewer may have changed the list since this one read it:
+       the file as it is now is what the folder goes into or comes out of. */
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    if (app->favorites_path.len > 0) {
+        u8str_t text = rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u);
+        if (text.len > 0) app->favorites = rubraview_favorites_parse(app->arena, text);
+    }
     bool was = rubraview_favorites_contains(&app->favorites, app->picker_dir);
     bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app_keep(app, app->picker_dir));
+    bool written = (!was && !now) || app->favorites_path.len == 0 ||
+        rubraview_pal_fs_write_file_atomic(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites));
+    if (locked) rubraview_pal_config_unlock();
     if (!was && !now) { osd_say(app, U8("favourites are full")); return; }
     osd_say(app, now ? U8("added to favourites") : U8("removed from favourites"));
-    if (app->favorites_path.len > 0 &&
-        !rubraview_pal_fs_write_file(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites))) {
-        osd_say(app, U8("could not write favorites.ini"));
-    }
+    if (!written) osd_say(app, U8("could not write favorites.ini"));
 }
 
 static void favorites_save(app_state_t *app) {
-    if (app->favorites_path.len > 0 &&
-        !rubraview_pal_fs_write_file(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites))) {
-        osd_say(app, U8("could not write favorites.ini"));
-    }
+    if (app->favorites_path.len == 0) return;
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    bool written = rubraview_pal_fs_write_file_atomic(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites));
+    if (locked) rubraview_pal_config_unlock();
+    if (!written) osd_say(app, U8("could not write favorites.ini"));
 }
 
 /* Where the bar's chip `index` is, as drawn: false past the window's edge. */
@@ -3692,7 +3802,7 @@ static void picker_activate(app_state_t *app, size_t index) {
     if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
         size_t page = app->picker_page_of[index - app->picker_page_skip];
         if (page != RUBRAVIEW_PICKER_NOT_A_PAGE && page < page_count(app)) {
-            go_to_spread(app, spread_index_for_page(app, (int32_t)page));
+            go_to_spread(app, spread_for_chosen_page(app, (int32_t)page));
             update_precache(app);
             return;
         }
@@ -4079,7 +4189,7 @@ static bool listwin_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_LISTWIN_TITLE: rubraview_listwin_drag_begin(&app->listwin, x, y); return true;
         case RUBRAVIEW_LISTWIN_ROW:
             if ((int32_t)index != current_page_index(app)) {
-                go_to_spread(app, spread_index_for_page(app, (int32_t)index));
+                go_to_spread(app, spread_for_chosen_page(app, (int32_t)index));
                 update_precache(app);
             }
             note_activity(app);
@@ -5894,7 +6004,7 @@ static bool pagebar_shown(const app_state_t *app) {
 static void pagebar_click(app_state_t *app, double bar_x, double bar_width, double x) {
     size_t page = rubraview_pagebar_page(bar_x, bar_width, x, page_count(app));
     if ((int32_t)page == current_page_index(app)) return;
-    go_to_spread(app, spread_index_for_page(app, (int32_t)page));
+    go_to_spread(app, spread_for_chosen_page(app, (int32_t)page));
     update_precache(app);
 }
 
@@ -7385,7 +7495,7 @@ static void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
     for (size_t i = app->spread_index; i < page_count(app) && y < (double)win_h; ++i) {
         double h = strip_page_height(app, i);
         app_page_t *page = &app->pages[i];
-        if (page->loaded && page->texture) {
+        if (page->loaded && page->texture && !page->skipped) {
             double ow = 0.0, oh = 0.0;
             rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &ow, &oh);
             double scale = ow > 0.0 ? width / ow : 1.0;
@@ -9618,9 +9728,15 @@ static void settings_open(app_state_t *app) {
    the volume and the boxes' opacity change outside the window (D-15). */
 static void settings_write_if_changed(app_state_t *app, bool say) {
     if (!rubraview_settings_differs(&app->settings, &app->settings_saved)) return;
+    /* D-99: with several viewers open, only what this one changed goes over
+       the file as it is now; what another changed meanwhile stays in it. */
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
     u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
-    u8str_t text = rubraview_settings_save(app->arena, &app->settings, existing);
-    if (text.len > 0 && rubraview_pal_fs_write_file(app->settings_path, text)) {
+    rubraview_settings_t merged = rubraview_settings_merge_changed(app->arena, &app->settings, &app->settings_saved, existing);
+    u8str_t text = rubraview_settings_save(app->arena, &merged, existing);
+    bool written = text.len > 0 && rubraview_pal_fs_write_file_atomic(app->settings_path, text);
+    if (locked) rubraview_pal_config_unlock();
+    if (written) {
         app->settings_saved = app->settings;
         /* §3.18.3's folders are read from the same file, so they follow
            at once rather than at the next launch. */
@@ -9640,7 +9756,7 @@ static void settings_close(app_state_t *app) {
     app->key_capture = 0;
     if (!rubraview_keymap_equal(&app->keymap, &app->keymap_saved)) {
         u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
-        if (text.len > 0 && rubraview_pal_fs_write_file(app->keymap_path, text)) {
+        if (text.len > 0 && rubraview_pal_fs_write_file_atomic(app->keymap_path, text)) {
             app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
             osd_say(app, U8("keys saved to keymap.ini"));
         } else {
@@ -11226,7 +11342,7 @@ static int32_t mini_neighbour_page(const app_state_t *app, bool forward) {
 static void mini_go_to(app_state_t *app, int32_t index) {
     if (index < 0) return;
     if (!app->bgm_media) {
-        go_to_spread(app, spread_index_for_page(app, index));
+        go_to_spread(app, spread_for_chosen_page(app, index));
         update_precache(app);
         app->mini_dirty = true;
         return;
@@ -11525,7 +11641,7 @@ static int32_t files_target(const app_state_t *app) {
 static void files_go_to(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= page_count(app)) return;
     if (index != current_page_index(app)) {
-        go_to_spread(app, spread_index_for_page(app, index));
+        go_to_spread(app, spread_for_chosen_page(app, index));
         update_precache(app);
     }
     app->files_selected = -1;                    /* the keys start again from the file on screen */
@@ -12843,7 +12959,7 @@ static void layout_save(app_state_t *app) {
         rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("height"), app->settings_frame[3]);
     }
     u8str_t text = rubraview_ini_serialize(app->arena, &doc);
-    if (text.len > 0) rubraview_pal_fs_write_file(app->layout_path, text);
+    if (text.len > 0) rubraview_pal_fs_write_file_atomic(app->layout_path, text);   /* D-99: the last viewer closed leaves its places */
 }
 
 static void history_remember(app_state_t *app) {
@@ -13027,6 +13143,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     }
     app->pages = (app_page_t*)(void*)res.value.ptr;
     memset(app->pages, 0, page_count(app) * sizeof(app_page_t));
+    app->layout_exempt = -1;       /* D-98: it named a page of the old source */
     app->pending_decode_count = 0; /* those indices named the old source's pages */
 
     app->page_cache = rubraview_lru_create(app->arena, page_count(app) + 8,
@@ -13056,7 +13173,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
         }
     }
 
-    app->spread_index = spread_index_for_page(app, (int32_t)start_page);
+    app->spread_index = spread_for_chosen_page(app, (int32_t)start_page);
 
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -14661,14 +14778,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             /* §3.19.1: hand the file to the window that is already open,
                rather than opening a second one. */
             {
-                u8str_t settings = rubraview_pal_fs_read_file(&arena, U8("settings.ini"), 256u * 1024u);
-                bool single_instance = true;
-                if (settings.len > 0) {
-                    /* Through the settings loader, which knows where the key
-                       lives now ([general]) and where older files put it. */
-                    rubraview_settings_t loaded = rubraview_settings_load(&arena, settings);
-                    single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
-                }
+                /* The file the viewer itself reads (settings_read_file): beside the
+                   executable in portable mode, under AppData otherwise. It was looked
+                   for in the working folder, so an installed viewer never saw it. */
+                u8str_t exe = rubraview_pal_process_executable(&arena);
+                u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
+                if (beside.len == 0) beside = U8(".");
+                u8str_t portable_ini = rubraview_path_join(&arena, beside, U8("settings.ini"));
+                u8str_t appdata = U8(".");
+                char appdata_utf8[1024];
+                DWORD appdata_len = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
+                if (appdata_len > 0 && appdata_len < sizeof(appdata_utf8)) appdata = (u8str_t){ .ptr = appdata_utf8, .len = appdata_len };
+                u8str_t settings_file = rubraview_config_path(
+                    &arena, rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini)),
+                    beside, appdata, U8("settings.ini"));
+                u8str_t settings = rubraview_pal_fs_read_file(&arena, settings_file, 256u * 1024u);
+                /* Through the settings loader, which knows where the key
+                   lives now ([general]) and where older files put it — and
+                   what it is when no file says (D-99: a window each). */
+                rubraview_settings_t loaded = rubraview_settings_load(&arena, settings);
+                bool single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
                 /* What the menu asks is for the window that is open (the
                    classic menu starts this once a selected file). */
                 if (cli.shell_verb != RUBRAVIEW_SHELL_VERB_NONE) single_instance = true;
@@ -14703,6 +14832,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.arena = &arena;
     app.fit_mode = RUBRAVIEW_FIT_WINDOW;
     app.zoom = 1.0;
+    app.layout_exempt = -1;
     app.curve_dragging = -1;   /* no point held; 0 would mean the first one */
     app.orientation = rubraview_orientation_identity();
     app.spread_detect = true; /* §3.3.4 default */
@@ -15222,6 +15352,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             int32_t page = current_page_index(&app);
             rebuild_layout(&app);
             if (page >= 0) app.spread_index = spread_index_for_page(&app, page);
+            if (page >= 0 && current_page_index(&app) != page) {
+                /* D-98: the page that was on screen is left out now: the one in its place is prepared as a turn would. */
+                animation_prepare(&app);
+                media_prepare(&app);
+                update_window_title(&app);
+            }
         }
         if (strip_active(&app)) {
             /* Whatever panned the page up or down — a drag, a touch, a key —
@@ -15351,8 +15487,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     layout_save(&app);
     history_remember(&app);
     if (app.history_path.len > 0 && app.history.count > 0) {
-        u8str_t text = rubraview_history_serialize(&arena, &app.history);
-        rubraview_pal_fs_write_file(app.history_path, text);
+        /* D-99: other viewers wrote their places since this one read the file:
+           theirs and this one's are put together, each book at its newer place. */
+        bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+        rubraview_history_t all = rubraview_history_parse(&arena, rubraview_pal_fs_read_file(&arena, app.history_path, 1024u * 1024u));
+        rubraview_history_merge(&arena, &all, &app.history);
+        rubraview_history_prune(&all, HISTORY_MAX_ENTRIES);
+        rubraview_pal_fs_write_file_atomic(app.history_path, rubraview_history_serialize(&arena, &all));
+        if (locked) rubraview_pal_config_unlock();
     }
 
     picker_thumbs_free(&app);

@@ -123,6 +123,24 @@ u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint3
 bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents);
 
 /**
+ * D-99: the same, for a file several viewers may read and write at once.
+ * The contents go to a file of this process's own beside it, which then
+ * takes its place in one step — a reader sees the old file or the new
+ * one, never half of one. Falls back to writing in place where the
+ * exchange is refused.
+ */
+bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents);
+
+/**
+ * D-99: one viewer at a time reads a state file, puts its changes in and
+ * writes it back. `lock` waits up to `wait_ms` for the others; false when
+ * they did not let go in time (the caller then writes anyway, or not at
+ * all). `unlock` is called from the thread that locked.
+ */
+bool rubraview_pal_config_lock(uint32_t wait_ms);
+void rubraview_pal_config_unlock(void);
+
+/**
  * §3.1: "Automatically indexes sibling media files when an image is
  * opened." Filters a listing to files matching `extension_filter` (a
  * ';'-separated glob list from rubraview/glob.h; empty matches every

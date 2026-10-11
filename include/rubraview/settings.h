@@ -122,6 +122,15 @@ u8str_t rubraview_settings_get_text(const rubraview_settings_t *settings, u8str_
 
 /** Set a value, clamped and stepped to the schema's range. */
 void rubraview_settings_set(rubraview_settings_t *settings, u8str_t section, u8str_t key, double value);
+/**
+ * D-99: several viewers may be open at once. What this one writes is the
+ * file as it is now with only the settings this one changed since
+ * `baseline` (what it loaded, or last wrote) put over it — so what another
+ * viewer changed meanwhile stays. With no file yet, `mine` as it is.
+ */
+rubraview_settings_t rubraview_settings_merge_changed(proven_arena_t *arena, const rubraview_settings_t *mine,
+                                                      const rubraview_settings_t *baseline, u8str_t existing_ini_text);
+
 void rubraview_settings_set_text(rubraview_settings_t *settings, u8str_t section, u8str_t key, u8str_t text);
 
 /** §3.22.1's Reset to Defaults. */

@@ -224,6 +224,22 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     return ok;
 }
 
+bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents) {
+    if (path.len == 0 || !path.ptr || path.len >= 4000) return false;
+    char temp[4096], final[4096];
+    memcpy(final, path.ptr, path.len);
+    final[path.len] = '\0';
+    int n = snprintf(temp, sizeof(temp), "%s.%ld.tmp", final, (long)getpid());
+    if (n <= 0 || (size_t)n >= sizeof(temp)) return false;
+    if (rubraview_pal_fs_write_file((u8str_t){ .ptr = temp, .len = (size_t)n }, contents) && rename(temp, final) == 0) return true;
+    remove(temp);
+    return rubraview_pal_fs_write_file(path, contents);
+}
+
+/* The host build runs tests, one process at a time. */
+bool rubraview_pal_config_lock(uint32_t wait_ms) { (void)wait_ms; return true; }
+void rubraview_pal_config_unlock(void) {}
+
 #endif /* !_WIN32 */
 
 /* ---- file management (§3.18) ----

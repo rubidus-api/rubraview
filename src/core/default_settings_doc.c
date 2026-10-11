@@ -19,7 +19,7 @@ static const char *const PARTS[] = {
 "page general \"General\"\n"
 "  section \"Window\"\n"
 "  choice general.startup          \"On startup\"              blank | last_file | last_folder = last_folder wired\n"
-"  toggle general.single_instance  \"Reuse the open window\"   = true wired\n"
+"  toggle general.single_instance  \"Reuse the open window\"   = false wired\n"
 "  toggle general.always_on_top    \"Always on top\"           = false wired\n"
 "  toggle general.frameless        \"Frameless window\"        = true wired\n"
 "  section \"Title bar\"\n"

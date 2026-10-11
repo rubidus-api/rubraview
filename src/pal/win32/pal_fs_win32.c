@@ -362,6 +362,44 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     return ok;
 }
 
+bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents) {
+    if (path.len == 0 || !path.ptr || path.len >= 4000) return false;
+    char temp[4096], final[4096];
+    WCHAR wide_temp[4096], wide_final[4096];
+    memcpy(final, path.ptr, path.len);
+    final[path.len] = '\0';
+    /* The process and the moment: two viewers, or two writes of one, never share it. */
+    int n = snprintf(temp, sizeof(temp), "%s.%lu-%lu.tmp", final, (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    if (n <= 0 || (size_t)n >= sizeof(temp)) return false;
+    if (MultiByteToWideChar(CP_UTF8, 0, temp, -1, wide_temp, 4096) <= 0 ||
+        MultiByteToWideChar(CP_UTF8, 0, final, -1, wide_final, 4096) <= 0) return false;
+    if (rubraview_pal_fs_write_file((u8str_t){ .ptr = temp, .len = (size_t)n }, contents)) {
+        /* Another viewer may have the file open to read for a moment. */
+        for (int attempt = 0; attempt < 10; ++attempt) {
+            if (MoveFileExW(wide_temp, wide_final, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+            Sleep(20);
+        }
+    }
+    DeleteFileW(wide_temp);
+    return rubraview_pal_fs_write_file(path, contents);
+}
+
+/* One for the user, across sessions where Windows lets it be; else for this session. */
+static HANDLE g_config_mutex = NULL;
+
+bool rubraview_pal_config_lock(uint32_t wait_ms) {
+    if (!g_config_mutex) g_config_mutex = CreateMutexW(NULL, FALSE, L"Global\\Rubraview_Config_Mutex");
+    if (!g_config_mutex) g_config_mutex = CreateMutexW(NULL, FALSE, L"Local\\Rubraview_Config_Mutex");
+    if (!g_config_mutex) return false;
+    DWORD got = WaitForSingleObject(g_config_mutex, wait_ms);
+    /* Abandoned: a viewer died holding it. The file is whole all the same (it is exchanged, not written into). */
+    return got == WAIT_OBJECT_0 || got == WAIT_ABANDONED;
+}
+
+void rubraview_pal_config_unlock(void) {
+    if (g_config_mutex) ReleaseMutex(g_config_mutex);
+}
+
 /* ---- mapped files that go away (2026-09-29) ----
    A read from a view whose file has gone (a network drive dropped, a card
    pulled out) raises EXCEPTION_IN_PAGE_ERROR in whatever thread touched

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.49** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.49/rubraview-v0.0.49.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.50** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.50/rubraview-v0.0.50.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.50/rubraview-v0.0.50.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -259,8 +259,8 @@ ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
 
 | Run | For |
 |---|---|
-| `rubraview.exe FILE` (or a folder, or an archive) | Opens it; a second launch hands the file to the window already open |
-| `--new-instance` | A second window all the same |
+| `rubraview.exe FILE` (or a folder, or an archive) | Opens it in a window of its own; with Settings > General > Reuse the open window on, a second launch hands the file to the window already open |
+| `--new-instance` | A window of its own whatever that setting says |
 | `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu); `--setup` is the installer's (it ends with 0 when only Windows 11's menu could not be registered). The same is in Settings > Explorer |
 | `--open`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `FILES...` | What the right-click menu's items run: open; open only these; add to the open window's list; an archive's entries; the batch panel on these; print |
 | `--batch ...` | Converts many files without a window; the [manual](docs/manual/rubraview-manual.md) lists its options |

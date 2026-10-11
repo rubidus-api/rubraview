@@ -143,9 +143,43 @@ static bool paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubra
     return true;
 }
 
+static rubraview_layout_result_t layout_compute_all(proven_arena_t *arena, const rubraview_page_info_t *pages, size_t page_count, double win_w, double win_h, rubraview_layout_opts_t opts);
+
 rubraview_layout_result_t rubraview_layout_compute(proven_arena_t *arena, const rubraview_page_info_t *pages, size_t page_count, double win_w, double win_h, rubraview_layout_opts_t opts) {
+    rubraview_layout_result_t none = {0};
+    if (!arena || !pages || page_count == 0) return none;
+
+    /* D-98: the pages that are no still pictures are left out of every
+       layout but SINGLE (the layout chosen, not the one a narrow window
+       falls back to). The strip keeps a place for every page — it is
+       measured page by page — and its caller gives those no height. */
+    size_t kept = 0;
+    for (size_t i = 0; i < page_count; ++i) if (!pages[i].skip) kept++;
+    if (opts.mode == RUBRAVIEW_PAGE_LAYOUT_SINGLE || opts.mode == RUBRAVIEW_PAGE_LAYOUT_WEBTOON ||
+        kept == page_count || kept == 0) {
+        return layout_compute_all(arena, pages, page_count, win_w, win_h, opts);
+    }
+    proven_result_mem_mut_t pr = rubraview_arena_alloc_array(arena, kept, sizeof(rubraview_page_info_t));
+    proven_result_mem_mut_t ir = rubraview_arena_alloc_array(arena, kept, sizeof(int32_t));
+    if (!proven_is_ok(pr.err) || !proven_is_ok(ir.err)) return layout_compute_all(arena, pages, page_count, win_w, win_h, opts);
+    rubraview_page_info_t *some = (rubraview_page_info_t*)(void*)pr.value.ptr;
+    int32_t *index_of = (int32_t*)(void*)ir.value.ptr;
+    for (size_t i = 0, k = 0; i < page_count; ++i) {
+        if (pages[i].skip) continue;
+        some[k] = pages[i];
+        index_of[k++] = (int32_t)i;
+    }
+    rubraview_layout_result_t result = layout_compute_all(arena, some, kept, win_w, win_h, opts);
+    for (size_t i = 0; i < result.count; ++i) {
+        rubraview_spread_t *sp = &result.spreads[i];
+        if (sp->left_index >= 0 && (size_t)sp->left_index < kept) sp->left_index = index_of[sp->left_index];
+        if (sp->right_index >= 0 && (size_t)sp->right_index < kept) sp->right_index = index_of[sp->right_index];
+    }
+    return result;
+}
+
+static rubraview_layout_result_t layout_compute_all(proven_arena_t *arena, const rubraview_page_info_t *pages, size_t page_count, double win_w, double win_h, rubraview_layout_opts_t opts) {
     rubraview_layout_result_t result = {0};
-    if (!arena || !pages || page_count == 0) return result;
 
     /* §3.3.5 portrait auto-collapse: a narrow-tall window forces effective
        SINGLE, since side-by-side pages would be unreadably small. Webtoon

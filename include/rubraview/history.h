@@ -59,6 +59,13 @@ void rubraview_history_record(proven_arena_t *arena, rubraview_history_t *histor
  * history that has been accumulating for years stays bounded.
  */
 void rubraview_history_prune(rubraview_history_t *history, size_t max_entries);
+/**
+ * D-99: several viewers may be open at once. `from`'s entries are put into
+ * `into`: a book in both keeps the newer of its two places, a book only
+ * in `from` is added.
+ */
+void rubraview_history_merge(proven_arena_t *arena, rubraview_history_t *into, const rubraview_history_t *from);
+
 
 /** Serialize back to `history.ini` text, newest entry last. */
 u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history);
