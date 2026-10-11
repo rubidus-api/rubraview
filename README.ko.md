@@ -294,7 +294,8 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 
 ## 문서
 
-- [RFC-0001: 구조와 멀티미디어 파이프라인](docs/rfc/rfc-0001-rubraview-architecture.md)
+- [RFC-0001: 구조와 멀티미디어 파이프라인](docs/rfc/archive/rfc-0001-rubraview-architecture.md) (구현 완료, 보관)
+- [RFC-0004: RFC-0001에서 남은 것](docs/rfc/rfc-0004-what-is-left.md)
 - [RFC 목록](docs/rfc/rfc-0000-index.md)
 - [사용 설명서](docs/manual/)
 
