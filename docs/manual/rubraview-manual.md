@@ -46,8 +46,8 @@ rubraview.exe "D:\Photos"
 The first file a window is given brings its folder: the other pictures
 and films beside it are the list. A file opened from Explorer after that
 goes to the Rubraview window in front: it is put at the end of that
-window's list and shown. A book, a folder or a playlist is opened in
-place of what was open.
+window's list and shown. A book or a folder is opened in place of what
+was open.
 
 **Settings › General › Opening a file from Explorer** changes each part:
 
@@ -209,6 +209,14 @@ Western), or pick one from File › Names in archive. The page you are on
 stays on screen, and the choice is for that archive only: the next one
 opens with Settings › Files › Archive filenames again.
 
+A page turn fades the old page into the new one for a quarter of a
+second. While a slide show runs, the pointer goes away after a second and
+a half of stillness and comes back when it moves. The mouse's back and
+forward buttons turn the page, a middle click goes to real size and back,
+`Shift` and the wheel go ten pages; on a touch screen two fingers move
+the picture and a pinch zooms it. (README has the whole table, under
+Mouse and touch.)
+
 Drop files on the window to open them — several at once become one
 sequence. Pictures dragged out of a browser or a mail program work too:
 they are copied to a temporary folder of the viewer's, which is removed
@@ -247,6 +255,10 @@ next of RGB, Red, Green, Blue and Luma, right-click for the one before.
 Nothing is written until you press **Save a copy**, which writes
 `<name>_edit.<ext>` beside the original and leaves the original alone;
 a line at the top says whether it was saved.
+
+With the panel open, dragging over the picture marks a rectangle to cut
+to; **Crop ratio** keeps it free, square, 4:3, 16:9 or the picture's own
+shape. A click without a drag lets the rectangle go.
 
 `Ctrl+E` opens Export: pick a format and a quality, tick **Privacy
 clean** to strip GPS and camera details, and press Export.
@@ -590,6 +602,13 @@ filename code page, the memory cap). Some worth knowing:
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
+- **Audio** — **Gapless playback** runs one song into the next with no
+  silence between; **Crossfade** (0 to 5 seconds) fades one into the next
+  instead; **Audio latency** is how much sound is kept ready (20 to
+  100 ms).
+- **Video** — **GPU decoding** lets the graphics card decode a film (`on`, as
+  it comes, falls back to the processor when the card cannot; `always`
+  insists on the card; `off` never uses it).
 - **Cache** — how much memory pages may take and how many are read ahead
   and kept behind; **Always strip metadata on export** starts Export with
   that box ticked.
@@ -649,10 +668,14 @@ listed rather than hidden so you can see what is coming.
 
 ## What is not there yet
 
-- **ALZ and EGG archives, and RAR archives compressed by RAR 1.5** (made
-  in 1994-1996). Versions 0.0.30 and 0.0.31 read ALZ and RAR 1.5; archives
-  are now read by FultaArc, which does not have these yet. They return
-  when it does.
+- **RAR archives compressed by RAR 1.5** (made in 1994-1996). Versions
+  0.0.30 and 0.0.31 read them; archives are now read by FultaArc, which
+  does not have this method yet. It returns when it does.
+- **Opening a playlist file.** The picker's **Playlist** button writes an
+  `.m3u8` and opens those files as one sequence, but a playlist file
+  cannot be opened afterwards yet.
+- **Writing WebP.** Export and `--format=webp` need a WebP encoder
+  installed in Windows; without one nothing is written.
 - RAR files that carry a filter program of their own
   (not one of RAR's six standard filters) are not read, by design.
 - **Selecting or pasting in the rename box.** It takes typing — Korean
