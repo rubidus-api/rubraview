@@ -1,3 +1,4 @@
+#include <math.h>
 #include "rubraview/ui_input.h"
 
 rubraview_click_zone_t rubraview_click_zone_at(double x, double window_width) {
@@ -91,4 +92,20 @@ rubraview_pointer_intent_t rubraview_pointer_swipe(const rubraview_pointer_conte
     bool rtl = (ctx->reading_direction == RUBRAVIEW_READING_RTL);
     bool next = rtl ? !swipe_left : swipe_left;
     return next ? RUBRAVIEW_INTENT_NEXT_PAGE : RUBRAVIEW_INTENT_PREV_PAGE;
+}
+
+double rubraview_zoom_step_percent(double percent, double step, bool larger) {
+    if (!(step > 0.0)) step = 10.0;
+    if (!(percent > 0.0)) percent = step;
+    double at = percent / step;
+    double next = larger ? (floor(at + 1e-6) + 1.0) * step : (ceil(at - 1e-6) - 1.0) * step;
+    if (next < step) next = step;
+    if (next > 6400.0) next = 6400.0;
+    return next;
+}
+
+double rubraview_zoom_cycle_percent(double percent, bool at_real_size) {
+    if (at_real_size || !(percent > 0.0)) return 20.0;
+    double next = (floor(percent / 20.0 + 1e-6) + 1.0) * 20.0;
+    return next > 200.0 + 1e-6 ? 0.0 : next;
 }

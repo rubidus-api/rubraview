@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.57.exe              the viewer, as built
-dist/rubraview-v0.0.57/                 the release bundle
-dist/rubraview-v0.0.57.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.58.exe              the viewer, as built
+dist/rubraview-v0.0.58/                 the release bundle
+dist/rubraview-v0.0.58.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -464,6 +464,10 @@ While it does:
   follows), `Ctrl+\` goes back to normal.
 - The toolbox's seek bar shows the time; click or drag on it to go
   somewhere else.
+- A click on the picture — or on the window, for music — pauses and plays.
+  The wheel is the volume, 5 a notch (Settings > Video > **Wheel is the
+  volume while playing**; with it off the wheel zooms a film). `Ctrl` and
+  the wheel zoom, and a drag moves the picture.
 - What happens when a film or a song ends is set by the toolbox's end
   button, `Ctrl+R`, Playback › At the end, or Settings › Audio › When a
   file ends: **Once** stops there; **Next** plays the next film or song in
@@ -563,10 +567,17 @@ the toolbox bottom right. They are always whole inside the window, and when
 the window changes size each stays the same part of the way across and down.
 
 100 % is the size the fit option gives. The zoom button shows the zoom from
-there (`100%`, `250%`), and a tap — or `Ctrl+0` — puts it back, the picture
-in the middle and the fit option as it was. Real size — one screen pixel for
-each of the picture's own — is 0 %: the `0%` button (`0` or `4`) shows it,
-and the zoom button reads `0%` while it is on screen.
+there (`100%`, `250%`). Real size — one screen pixel for each of the
+picture's own — is 0 %, and the button reads `0%` while it is on screen.
+A tap on the button goes round: `0%`, then 20 % to 200 % by twenties, then
+`0%` again. The wheel turned over the button, or `Ctrl` and the wheel over
+the picture, zooms by one step — 10 % as it comes (Settings > Viewer > Zoom
+step) — to the next round figure: 100 %, 110 %, 120 %. `Ctrl+0` puts 100 %
+back with the picture in the middle; `0` or `4` shows real size.
+
+The picture follows the pointer when it is dragged, at any zoom. A click
+without a drag is what it was: a page turned at the window's sides, the
+boxes shown in its middle.
 
 Most of what the viewer does has a toolbox button: turning pages one, ten
 or all the way, zoom and fit, turning and flipping, the slide show, the
@@ -901,6 +912,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |

@@ -213,7 +213,7 @@ static const char *const PARTS[] = {
 "  preview subtitle 3\n"
 "  section \"Playing\"\n"
 "  float  video.ab_step_seconds    \"A-B step\"                0.1..1.0 step 0.1 unit \"s\" = 0.5 wired\n"
-"  toggle video.video_wheel_zoom   \"Wheel zoom during video\" = true wired\n"
+"  toggle video.wheel_volume       \"Wheel is the volume while playing\" = true wired\n"
 "  section \"Tracks\"\n"
 "  path   video.audio_language     \"Preferred sound\"         wired\n"
 "  path   video.subtitle_language  \"Preferred subtitles\"     wired\n"

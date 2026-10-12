@@ -13,7 +13,7 @@ static const char *const NEEDS_PAGE[] = {
     "toggle_spread_detect",
     "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
     "rotate_cw", "rotate_ccw", "flip_horizontal", "flip_vertical",
-    "zoom_in", "zoom_out", "zoom_reset", "toggle_nearest", "toggle_pixel_grid",
+    "zoom_in", "zoom_out", "zoom_reset", "zoom_cycle", "toggle_nearest", "toggle_pixel_grid",
 };
 
 rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_action_facts_t *f) {

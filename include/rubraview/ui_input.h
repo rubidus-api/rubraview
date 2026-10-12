@@ -77,6 +77,20 @@ rubraview_pointer_intent_t rubraview_pointer_side_button(bool is_forward_button)
  */
 rubraview_pointer_intent_t rubraview_pointer_swipe(const rubraview_pointer_context_t *ctx, double dx, double threshold);
 
+/**
+ * D-109: the zoom goes by steps of so many percent, to the next multiple
+ * of the step above or below where it is (103 % and a step of 10: 110 %
+ * up, 100 % down). Never below one step, never above 6400 %.
+ */
+double rubraview_zoom_step_percent(double percent, double step, bool larger);
+
+/**
+ * D-109: what a tap on the zoom tile goes to. From real size, 20 %; then
+ * the next multiple of 20 up to 200 %; past that, real size again, which
+ * is returned as 0 (the owner's name for it: "0%").
+ */
+double rubraview_zoom_cycle_percent(double percent, bool at_real_size);
+
 #ifdef __cplusplus
 }
 #endif

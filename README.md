@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.57** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.57/rubraview-v0.0.57.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.57/rubraview-v0.0.57.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.58** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -170,6 +170,7 @@ ships with, so it cannot drift from them.
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
@@ -224,9 +225,13 @@ ships with, so it cannot drift from them.
 | Click the toolbox's seek bar | Goes there, in a film, a song or an animated GIF / WebP / PNG |
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
-| `Ctrl` + wheel | Zoom in or out |
+| Click on a film or on music | Pause / play |
+| Drag the picture | Moves it, at any zoom |
+| `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
+| Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |
+| Wheel while a film or music plays | Volume |
 | `Shift` + wheel | Ten pages back or forward |
-| Wheel | Scrolls the webtoon strip, and a page shown at Fit Width; otherwise nothing — pages turn on the keys, not the wheel |
+| Wheel over a picture | Scrolls the webtoon strip, and a page shown at Fit Width; otherwise nothing — pages turn on the keys, not the wheel |
 | `Alt` + wheel over a floating box | Makes that box more or less see-through |
 | Point at the window's top edge | The title bar: drag it to move the window, double-click it to maximise, **Size** to resize, **Pin** for always on top, **Box** to bring the floating boxes back to their corners |
 | Point near the middle of the left or right side | A button for the previous or next page |

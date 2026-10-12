@@ -564,6 +564,9 @@ typedef struct app_state {
     rubraview_fit_mode_t fit_mode;
     double zoom;
     double pan_x, pan_y;
+    bool   view_pressed;       /* D-109: the left button went down on the picture; what it meant is known on release */
+    double view_press_x, view_press_y;
+    rubraview_fit_mode_t fit_beside_real;   /* D-109: the fit that real size was entered from, to go back to */
     bool   view_dragging;      /* the left button held on a picture larger than the window: it follows the pointer */
     double view_drag_x, view_drag_y;
     double strip_offset;       /* the strip (webtoon layout): how far into the top page the window's top edge is */
@@ -1618,6 +1621,62 @@ static void reset_view(app_state_t *app) {
 
 static void note_activity(app_state_t *app) {
     rubraview_osd_notify_activity(&app->osd);
+}
+
+/* ---- D-109: the zoom in steps of percent ----
+   100 % is the size the fit option gives (D-97). Real size is beside that
+   scale, not on it — "0%" — so a step taken from it first finds where on
+   the scale the picture is now. */
+static bool spread_composition(app_state_t *app, rubraview_composition_t *out);
+
+static bool at_real_size(const app_state_t *app) {
+    return app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005;
+}
+
+/* Out of the real-size fit, keeping the picture the size it is on screen. */
+static void zoom_leave_real_fit(app_state_t *app) {
+    if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) return;
+    rubraview_fit_mode_t fit = app->fit_beside_real != RUBRAVIEW_FIT_ACTUAL_SIZE ? app->fit_beside_real : RUBRAVIEW_FIT_WINDOW;
+    rubraview_composition_t now, fitted;
+    double zoom_was = app->zoom;
+    bool had = spread_composition(app, &now) && now.count > 0;
+    app->fit_mode = fit;
+    app->zoom = 1.0;
+    if (had && spread_composition(app, &fitted) && fitted.count > 0 && fitted.commands[0].scale > 0.0) {
+        app->zoom = now.commands[0].scale / fitted.commands[0].scale;
+    } else {
+        app->zoom = zoom_was;
+    }
+}
+
+static void zoom_say(app_state_t *app) {
+    char line[24];
+    u8str_t text = at_real_size(app) ? U8("0% (real size)") : rubraview_scale_caption(line, sizeof(line), app->zoom);
+    if (text.len > 0) osd_say(app, text);
+    note_activity(app);
+}
+
+/* One step larger or smaller: Zoom+ and Zoom-, Ctrl + wheel, the wheel on a zoom tile. */
+static void zoom_step(app_state_t *app, bool larger) {
+    zoom_leave_real_fit(app);
+    double step = (g_zoom_step - 1.0) * 100.0;
+    app->zoom = rubraview_zoom_step_percent(app->zoom * 100.0, step, larger) / 100.0;
+    zoom_say(app);
+}
+
+/* A tap on the zoom tile: real size, 20 % .. 200 %, real size. */
+static void zoom_cycle(app_state_t *app) {
+    bool real = at_real_size(app);
+    zoom_leave_real_fit(app);
+    double next = rubraview_zoom_cycle_percent(app->zoom * 100.0, real);
+    if (next == 0.0) {
+        if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) app->fit_beside_real = app->fit_mode;
+        app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE;
+        reset_view(app);
+    } else {
+        app->zoom = next / 100.0;
+    }
+    zoom_say(app);
 }
 
 /* The caption names the file on screen and where it sits in the folder
@@ -4093,8 +4152,9 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         static char named[48];
         return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
     }
-    if (rubraview_u8_eq_lit(tile->action, "zoom_reset")) {
-        /* D-97: the zoom now, where 100% is the size the fit option gives; a tap goes back to it. */
+    if (rubraview_u8_eq_lit(tile->action, "zoom_reset") || rubraview_u8_eq_lit(tile->action, "zoom_cycle")) {
+        /* D-97: the zoom now, where 100% is the size the fit option gives. D-109: the one
+           tile that says it goes its round on a tap (`zoom_cycle`). */
         static char percent[16];   /* drawn before the next call */
         /* Real size is not a point on that scale: the owner's name for it is 0%. */
         if (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005) return U8("0%");
@@ -4482,6 +4542,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "fit_height")) {
         app->fit_mode = RUBRAVIEW_FIT_HEIGHT; reset_view(app);
     } else if (rubraview_u8_eq_lit(action, "actual_size")) {
+        if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) app->fit_beside_real = app->fit_mode;
         app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE; reset_view(app);
     } else if (rubraview_u8_eq_lit(action, "smart_fit")) {
         app->fit_mode = RUBRAVIEW_FIT_SMART; reset_view(app);
@@ -4522,11 +4583,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.1);
     } else if (rubraview_u8_eq_lit(action, "zoom_reset")) {
         reset_view(app);   /* D-97: 100% is the fitted size; the fit option stays */
+    } else if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
+        zoom_cycle(app);
     } else if (rubraview_u8_eq_lit(action, "zoom_in")) {
-        app->zoom *= ZOOM_STEP;
+        zoom_step(app, true);
     } else if (rubraview_u8_eq_lit(action, "zoom_out")) {
-        app->zoom /= ZOOM_STEP;
-        if (app->zoom < 0.01) app->zoom = 0.01;
+        zoom_step(app, false);
     } else if (rubraview_u8_eq_lit(action, "rotate_cw") || rubraview_u8_eq_lit(action, "rotate_ccw") ||
                rubraview_u8_eq_lit(action, "flip_horizontal") || rubraview_u8_eq_lit(action, "flip_vertical")) {
         /* Turning changes which pages pair, so the spreads are made again
@@ -5862,17 +5924,14 @@ static void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent) {
         case RUBRAVIEW_INTENT_SKIP_BACKWARD:
             go_to_spread(app, app->spread_index > 10 ? app->spread_index - 10 : 0);
             break;
-        case RUBRAVIEW_INTENT_ZOOM_IN:        app->zoom *= ZOOM_STEP; note_activity(app); break;
-        case RUBRAVIEW_INTENT_ZOOM_OUT:
-            app->zoom /= ZOOM_STEP;
-            if (app->zoom < 0.01) app->zoom = 0.01;
-            note_activity(app);
-            break;
+        case RUBRAVIEW_INTENT_ZOOM_IN:        zoom_step(app, true); break;
+        case RUBRAVIEW_INTENT_ZOOM_OUT:       zoom_step(app, false); break;
         case RUBRAVIEW_INTENT_SCROLL_VERTICAL: app->pan_y -= PAN_STEP; note_activity(app); break;
         case RUBRAVIEW_INTENT_TOGGLE_FULLSCREEN:
             rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
             break;
         case RUBRAVIEW_INTENT_TOGGLE_ACTUAL_SIZE:
+            if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) app->fit_beside_real = app->fit_mode;
             app->fit_mode = (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE)
                 ? RUBRAVIEW_FIT_WINDOW : RUBRAVIEW_FIT_ACTUAL_SIZE;
             reset_view(app);
@@ -6144,6 +6203,21 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
         return true;
     }
     return false;
+}
+
+/* D-109: the wheel over a zoom tile (the percent, Zoom+, Zoom-) is the zoom, a step a notch. */
+static bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches) {
+    if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED || notches == 0.0) return false;
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+    int32_t tile = rubraview_box_tile_at(&app->toolbox, &metrics, x, y);
+    if (tile < 0) return false;
+    toolbox_refresh(app);
+    if (tile >= app->toolbox_tile_count) return false;
+    u8str_t action = app->toolbox_tiles[tile].action;
+    if (!rubraview_u8_eq_lit(action, "zoom_cycle") && !rubraview_u8_eq_lit(action, "zoom_reset") &&
+        !rubraview_u8_eq_lit(action, "zoom_in") && !rubraview_u8_eq_lit(action, "zoom_out")) return false;
+    zoom_step(app, notches > 0.0);
+    return true;
 }
 
 /* The strip's bar for a still picture: its place in the folder or archive. */
@@ -15762,6 +15836,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                     if (!app.seekfan_detached) seekfan_pointer(&app, event.mouse.x, event.mouse.y);
+                    if (app.view_pressed && !app.view_dragging) {
+                        double slack = 4.0 * rubraview_pal_window_dpi_scale(app.window);
+                        if (fabs(event.mouse.x - app.view_press_x) > slack || fabs(event.mouse.y - app.view_press_y) > slack) {
+                            app.view_dragging = true;
+                        }
+                    }
                     if (app.view_dragging) {
                         app.pan_x += event.mouse.x - app.view_drag_x;
                         app.pan_y += event.mouse.y - app.view_drag_y;
@@ -15985,20 +16065,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
                         intent = rubraview_pointer_right_click(&ctx);
                     } else {
-                        intent = rubraview_pointer_click(&ctx, event.mouse.x, false);
-                        if (intent == RUBRAVIEW_INTENT_PAN) {
-                            /* A picture larger than the window, or the strip: held, it
-                               follows the pointer (there was a touch pan and no mouse one). */
-                            app.view_dragging = true;
-                            app.view_drag_x = event.mouse.x;
-                            app.view_drag_y = event.mouse.y;
-                        }
+                        /* D-109: what a press on the picture means is known when it is
+                           let go — moved, it was a drag and the picture followed, at any
+                           zoom; not moved, a click. */
+                        intent = RUBRAVIEW_INTENT_NONE;
+                        app.view_pressed = true;
+                        app.view_dragging = false;
+                        app.view_press_x = app.view_drag_x = event.mouse.x;
+                        app.view_press_y = app.view_drag_y = event.mouse.y;
                     }
                     apply_intent(&app, intent);
                     break;
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                    if (app.view_pressed && !app.view_dragging && event.mouse.button == RUBRAVIEW_MOUSE_LEFT) {
+                        /* D-109: a click. Over a film or music it pauses and plays; over a
+                           picture it is what it was (a page turned at the sides, the boxes
+                           shown), and nothing on one larger than the window. */
+                        if (app.media) {
+                            handle_action(&app, U8("media_play_pause"));
+                        } else {
+                            rubraview_pointer_context_t ctx = pointer_context(&app);
+                            rubraview_pointer_intent_t intent = rubraview_pointer_click(&ctx, app.view_press_x, false);
+                            if (intent != RUBRAVIEW_INTENT_PAN) apply_intent(&app, intent);
+                        }
+                    }
+                    app.view_pressed = false;
                     app.view_dragging = false;
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
                     seekfan_let_go(&app);
@@ -16066,13 +16159,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         note_activity(&app);
                         break;
                     }
+                    if (event.mouse.modifiers == 0 &&
+                        zoom_tile_wheel(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta)) break;
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     uint32_t wheel_mods = event.mouse.modifiers;
-                    /* Settings › Video › Wheel zoom during video: over a film the plain
-                       wheel zooms, as Ctrl + wheel does, rather than changing the file. */
-                    if (app.media && app.media_info.has_video && wheel_mods == 0 &&
-                        rubraview_settings_get(&app.settings, U8("video"), U8("video_wheel_zoom")) > 0.5) {
-                        wheel_mods = RUBRAVIEW_MOD_CTRL;
+                    /* D-109: while a film or music plays the plain wheel is the volume
+                       (Settings › Video › Wheel is the volume while playing); with that
+                       off it zooms a film, as Ctrl + wheel does, as it did before. */
+                    if (app.media && wheel_mods == 0) {
+                        if (rubraview_settings_get(&app.settings, U8("video"), U8("wheel_volume")) > 0.5) {
+                            handle_action(&app, event.mouse.wheel_delta > 0.0 ? U8("media_volume_up") : U8("media_volume_down"));
+                            note_activity(&app);
+                            break;
+                        }
+                        if (app.media_info.has_video) wheel_mods = RUBRAVIEW_MOD_CTRL;
                     }
                     rubraview_pointer_intent_t wheel_intent = rubraview_pointer_wheel(&ctx, event.mouse.wheel_delta, wheel_mods);
                     if (wheel_intent == RUBRAVIEW_INTENT_SCROLL_VERTICAL) {

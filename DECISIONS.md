@@ -960,6 +960,18 @@ Do not store credentials, private infrastructure details, personal data, private
 - Alternatives: the encoder alone — `anim_encode.c` calls the decoder, so the animation encoder cannot be had without it; ffmpeg's libwebp wrapper — only when the reader has put FFmpeg beside the program, and built with libwebp.
 - Consequences: `rubraview.exe` grew from 4,032,676 to 4,683,005 bytes (about 650 KB; the estimate was 300 to 400 KB, made before the decoder was known to be needed). The viewer still reads WebP through Windows. A written animation loops for ever: the readers do not carry a source's loop count. An animation that is edited, resized or turned is written as one picture. A picture wider or taller than 16383 cannot be a WebP and is refused.
 
+## 2026-10-12: D-109 One zoom tile that goes its round; zoom by tens; a click pauses a film and the wheel is its volume; a drag at any zoom
+
+- Status: Accepted (owner, 2026-10-12: "배율 퍼센트 아이콘이 2개가 있어요. 1개로 줄여주세요. 동영상/음악 재생시에 화면 좌클릭은 일시정지/재생으로 처리해 주시고, 화면 위에서 스크롤 휠을 돌리면 소리 크기 조절하게 해 주세요. 화면100% 상태에서도 드래그로 화면 이동가능하게 해 주세요. 줌 버튼을 클릭하면 0%(realsize)->20% 40% ... 200% 다시 0%로... 순환되게 해 주세요. 줌 버튼 위에서 휠을 돌리면 10% 단위로 ... 화면 위에서 Ctrl+휠을 돌려도 그렇게")
+- Decision:
+  - The toolboxes have one percent tile, `zoom_cycle`, in place of `zoom_reset` and `actual_size`. Its caption is the zoom now ("0%" at real size); a tap goes 0 %, 20 %, .. 200 %, 0 %. From a zoom between, the next multiple of 20; past 200, real size. The actions `zoom_reset` (`Ctrl+0`, the menu) and `actual_size` (`0`, `4`, the menu) stay.
+  - A zoom step is so many percent of the fitted size, to the next multiple (`viewer.zoom_step_percent`, 10 as it comes), not a factor: `Ctrl` + wheel, Zoom+ / Zoom- (tiles and keys), and the plain wheel over a zoom tile. The least is one step, the most 6400 %. Each says the percent it reached.
+  - Real size is beside the scale (D-97), so a step taken in the real-size fit first goes back to the fit it was entered from (the window fit when that is not known), keeping the size on screen, and steps from there.
+  - A left press on the picture is decided when it is let go: moved more than 4 px (by the display's scale) it was a drag and the picture followed, at any zoom; otherwise a click. A click over a film or music pauses and plays. Over a picture it is what it was (page zones, the boxes), and nothing on a picture larger than the window.
+  - The plain wheel is the volume while a film or music plays, 5 a notch. The setting `video.video_wheel_zoom` is replaced by `video.wheel_volume` (on as it comes); off, the wheel zooms a film as it did. A new name, so that a settings file holding the old one does not keep the old behaviour.
+- Alternatives: keeping the factor step — the owner asked for tens; a click acting on the press — then a drag at 100 % would turn the page first.
+- Consequences: a click acts a moment later than it did (on release). Zoom+ / Zoom- changed with the wheel, though only the wheel was named: one kind of step. A drag can put the picture wholly outside the window (`Ctrl+0` brings it back). With "Enlarge by whole steps only" on, the steps are still rounded down to whole multiples when drawn. Seen on the VM with the pointer driven by a script (see T161); not seen: a touch screen's tap and drag, a step out of real size by the wheel, the setting turned off.
+
 ## 2026-10-12: D-108 JPEG XL is read through the user's FFmpeg; a picture in an archive takes the same road as one in a folder
 
 - Status: Accepted (inside RV-110's confirmed plan; owner, 2026-10-12: "다음 진행" to the order proposed — the FFmpeg road first, a C decoder to be assessed and asked about afterwards)

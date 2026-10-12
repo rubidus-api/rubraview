@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.57** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.57/rubraview-v0.0.57.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.57/rubraview-v0.0.57.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.58** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -169,6 +169,7 @@
 | 도구 상자 `EQ`, 메뉴 `Equaliser` | 이퀄라이저 다음 프리셋 |
 | 도구 상자 `EQ bands`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
+| 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
 | 메뉴 `Clear this list` | 최근 파일 목록 비우기 |
 | 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
@@ -223,7 +224,11 @@
 | 도구 상자의 탐색 막대를 클릭 | 그 위치로 이동 (동영상, 음악, 움직이는 GIF/WebP/PNG) |
 | 가운데 버튼 클릭 | 실제 크기 ↔ 창에 맞춤 |
 | 마우스의 뒤로/앞으로 버튼 | 이전/다음 쪽 |
-| `Ctrl` + 휠 | 확대/축소 |
+| 영상·음악 위에서 클릭 | 일시정지/재생 |
+| 그림을 드래그 | 어느 배율에서나 그림 이동 |
+| `Ctrl` + 휠, 또는 줌 버튼 위에서 휠 | 확대/축소, 한 칸에 10 % |
+| 줌 버튼 클릭 | 실제 크기(0%), 20%부터 200%까지 20%씩, 다시 실제 크기 |
+| 영상·음악 재생 중 휠 | 음량 |
 | `Shift` + 휠 | 10쪽 뒤로/앞으로 |
 | 휠 | 웹툰 스트립과 폭 맞춤으로 본 쪽을 스크롤. 그 밖에는 아무 일도 없음 (쪽 넘김은 휠이 아니라 키로) |
 | 떠 있는 상자 위에서 `Alt` + 휠 | 그 상자를 더 투명하게/덜 투명하게 |
