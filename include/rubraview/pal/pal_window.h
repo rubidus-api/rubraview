@@ -86,6 +86,10 @@ typedef struct rubraview_window_event {
         const char *paths[16];
         size_t      path_lengths[16];
         size_t      count;
+        /* D-111: where in the client area they were let go (not for an
+           OPEN_REQUEST, which comes from another program). */
+        bool        has_point;
+        double      x, y;
     } drop;
 
     struct {

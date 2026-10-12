@@ -26,6 +26,16 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_CLOSE,
     RUBRAVIEW_LISTWIN_ROW,
     RUBRAVIEW_LISTWIN_BODY,    /* inside, below the last row */
+    /* D-111, a list that can be changed (`editable`): */
+    RUBRAVIEW_LISTWIN_RESIZE,     /* left of Close: dragged, it sizes the window */
+    RUBRAVIEW_LISTWIN_DEL,        /* the bar under the title: the checked rows leave the list */
+    RUBRAVIEW_LISTWIN_SAVE,
+    RUBRAVIEW_LISTWIN_LOAD,
+    RUBRAVIEW_LISTWIN_PATHS,      /* saved with relative or whole paths */
+    RUBRAVIEW_LISTWIN_ROW_CHECK,  /* at the left of a row, in this order */
+    RUBRAVIEW_LISTWIN_ROW_REMOVE,
+    RUBRAVIEW_LISTWIN_ROW_UP,
+    RUBRAVIEW_LISTWIN_ROW_DOWN,
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {
@@ -37,6 +47,12 @@ typedef struct rubraview_listwin {
     /* a drag of the title under way */
     bool   dragging;
     double grab_dx, grab_dy;
+    /* D-111: a bar of buttons under the title and four small buttons at the
+       left of every row; without it the list is only looked at and clicked. */
+    bool   editable;
+    double bar_height;
+    bool   resizing;           /* the resize button held */
+    double resize_dx, resize_dy;
 } rubraview_listwin_t;
 
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale);
@@ -50,6 +66,41 @@ void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view
 
 rubraview_rect_t rubraview_listwin_rect(const rubraview_listwin_t *lw);
 rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw);
+
+/** The height above the first row: the title, and the bar of an editable list. */
+double rubraview_listwin_head_height(const rubraview_listwin_t *lw);
+
+/** The resize button, left of Close (empty unless editable). */
+rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw);
+
+/** One of the bar's four buttons (DEL, SAVE, LOAD, PATHS), left to right; empty unless editable. */
+rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part);
+
+/** One of a row's four buttons (ROW_CHECK, ROW_REMOVE, ROW_UP, ROW_DOWN); empty unless editable and in view. */
+rubraview_rect_t rubraview_listwin_row_part_rect(const rubraview_listwin_t *lw, size_t index, size_t count,
+                                                 rubraview_listwin_part_t part);
+
+/** Where a row's text begins: after its buttons in an editable list. */
+double rubraview_listwin_row_text_x(const rubraview_listwin_t *lw);
+
+/**
+ * The place in the list a thing let go at `py` goes to: before the row
+ * whose upper half it is over, after the one whose lower half — 0 to
+ * `count`, within the rows in view.
+ */
+size_t rubraview_listwin_insert_index(const rubraview_listwin_t *lw, double py, size_t count);
+
+/** Sizing by the resize button: the bottom and the right edge follow the pointer, kept inside the view. */
+void rubraview_listwin_resize_begin(rubraview_listwin_t *lw, double px, double py);
+void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, double view_w, double view_h);
+
+/**
+ * The order of a list after the items marked in `moving` are taken out and
+ * put, in their own order, before what was item `to` (0 to `count`; `count`
+ * is the end). `order[i]` is the old index of the item now at `i`. False
+ * when nothing moves.
+ */
+bool rubraview_list_move(size_t *order, size_t count, const bool *moving, size_t to);
 
 /** How many rows fit under the title. */
 size_t rubraview_listwin_rows_visible(const rubraview_listwin_t *lw);

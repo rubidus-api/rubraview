@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.59.exe              the viewer, as built
-dist/rubraview-v0.0.59/                 the release bundle
-dist/rubraview-v0.0.59.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.60.exe              the viewer, as built
+dist/rubraview-v0.0.60/                 the release bundle
+dist/rubraview-v0.0.60.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -608,6 +608,21 @@ floating over the picture: the playlist, or the folder's or the archive's
 files when there is none. The file on screen is marked and kept in view; a
 click goes to a file, the wheel scrolls, the title drags it, `X` or `Esc`
 closes it.
+
+For a folder's files or a playlist (not the pages of a book) the list can
+be changed there. At the left of every row are a checkbox, an `x` that
+takes the row out of the list, and arrows that move it up or down one
+place. Drag a row by its name to put it somewhere else — a line shows
+where it will go — and a checked row takes every other checked row along.
+Under the title, **Del** takes the checked rows out (the files themselves
+stay on the disk), **Save** writes the list to a file (`.m3u8`, or
+`.rvlist`), **Load** opens such a file, and **Rel** / **Abs** says how a
+saved list names its files: from the list's own folder, so that the folder
+can be moved or copied whole, or by their whole paths (Settings > Files >
+A saved list names its files). Files dragged from Explorer onto the list
+go in at the row you let them go over. **R**, beside the `X`, sizes the
+window: press it and drag. A folder whose list you change is from then on
+a playlist: it keeps your order.
 
 `F3` (the Files button, or File › File list window) opens the same list in
 **a window of its own**, with a preview. The viewer goes on showing its

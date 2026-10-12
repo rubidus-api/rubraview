@@ -210,6 +210,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (dropped > 16) dropped = 16;
 
             rubraview_window_event_t event = { .kind = RUBRAVIEW_WINDOW_EVENT_DROP };
+            POINT at;
+            if (DragQueryPoint(drop, &at)) {
+                event.drop.has_point = true;
+                event.drop.x = (double)at.x;
+                event.drop.y = (double)at.y;
+            }
             for (UINT i = 0; i < dropped; ++i) {
                 WCHAR wide[MAX_PATH * 2];
                 if (DragQueryFileW(drop, i, wide, (UINT)(sizeof(wide) / sizeof(wide[0]))) == 0) continue;
@@ -940,13 +946,19 @@ static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rub
 }
 
 static HRESULT STDMETHODCALLTYPE dt_drop(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
-    (void)keys; (void)pt;
+    (void)keys;
     rv_drop_target_t *t = (rv_drop_target_t*)self;
     DWORD chosen = drop_effect_for(data, effect ? *effect : 0);
     if (effect) *effect = chosen;
     if (chosen == DROPEFFECT_NONE || !t->window) return S_OK;
 
     rubraview_window_event_t event = { .kind = RUBRAVIEW_WINDOW_EVENT_DROP };
+    POINT at = { pt.x, pt.y };   /* the screen's; the viewer asks in its own (D-111) */
+    if (ScreenToClient(t->window->hwnd, &at)) {
+        event.drop.has_point = true;
+        event.drop.x = (double)at.x;
+        event.drop.y = (double)at.y;
+    }
     /* Real files first: a source that offers both (Explorer does) means them. */
     if (data_has(data, CF_HDROP, TYMED_HGLOBAL)) drop_take_hdrop(t->window, data, &event);
     if (event.drop.count == 0 && data_has(data, cf_file_descriptor(), TYMED_HGLOBAL)) {

@@ -85,6 +85,15 @@ u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename
  * from (a bug that cost the DVD subtitles their pictures, 2026-09-23).
  * `new_ext` carries its own dot.
  */
+/**
+ * D-111: `path` as seen from the folder `base`: "sub/a.jpg", "../b/a.jpg".
+ * Both are whole paths; names are compared as Windows compares them
+ * (either separator, letters in either case) and the result uses `/`.
+ * On another drive or share there is no way from one to the other, and
+ * `path` comes back as it is. NUL-terminated, in `arena`.
+ */
+u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t path);
+
 u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext);
 
 #ifdef __cplusplus

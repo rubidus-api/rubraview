@@ -10,7 +10,8 @@ extern "C" {
 
 /**
  * Playlist file formats (RFC-0001 §3.12 "File Formats"): native
- * `.rvlist` (plaintext, one relative path per line; blank lines and
+ * `.rvlist` (plaintext, one path per line, relative to the list's folder
+ * or whole — D-111; blank lines and
  * `;`-prefixed comments ignored) and standard Extended M3U `.m3u8`
  * (`#EXTINF:duration,title` optionally preceding each path). Mixed
  * still/animated/video media is inherent — any path is accepted, and

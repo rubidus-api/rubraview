@@ -226,3 +226,57 @@ u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name) {
     buf[at] = '\0';
     return (u8str_t){ .ptr = buf, .len = at };
 }
+
+/* The next component of `p` from `*at`: false at the end. */
+static bool path_part(u8str_t p, proven_size_t *at, u8str_t *out) {
+    while (*at < p.len && rubraview_path_is_sep(p.ptr[*at])) (*at)++;
+    if (*at >= p.len) return false;
+    proven_size_t start = *at;
+    while (*at < p.len && !rubraview_path_is_sep(p.ptr[*at])) (*at)++;
+    *out = (u8str_t){ .ptr = p.ptr + start, .len = *at - start };
+    return true;
+}
+
+/* How a whole path begins: 2 "//server", 1 "/", 0 a drive or a bare name. */
+static int path_lead(u8str_t p) {
+    if (p.len >= 2 && rubraview_path_is_sep(p.ptr[0]) && rubraview_path_is_sep(p.ptr[1])) return 2;
+    return p.len >= 1 && rubraview_path_is_sep(p.ptr[0]) ? 1 : 0;
+}
+
+#define RELATIVE_PARTS 64
+
+u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t path) {
+    if (!arena || base.len == 0 || path.len == 0) return path;
+    u8str_t bs[RELATIVE_PARTS], ps[RELATIVE_PARTS];
+    proven_size_t bn = 0, pn = 0, at = 0;
+    while (bn < RELATIVE_PARTS && path_part(base, &at, &bs[bn])) bn++;
+    if (at < base.len && bn == RELATIVE_PARTS) return path;
+    at = 0;
+    while (pn < RELATIVE_PARTS && path_part(path, &at, &ps[pn])) pn++;
+    if ((at < path.len && pn == RELATIVE_PARTS) || pn == 0) return path;
+
+    /* A drive or a share's server and name come first, and must be the same thing. */
+    int lead = path_lead(path);
+    if (path_lead(base) != lead) return path;
+    proven_size_t fixed = lead == 2 ? 2 : lead == 0 ? 1 : 0;
+    if (bn < fixed || pn <= fixed) return path;
+    for (proven_size_t i = 0; i < fixed; ++i) if (!rubraview_path_same(bs[i], ps[i])) return path;
+
+    /* The folders the two share; the last part of `path` is its file's name. */
+    proven_size_t common = fixed;
+    while (common < bn && common + 1 < pn && rubraview_path_same(bs[common], ps[common])) common++;
+    proven_size_t ups = bn - common, len = ups * 3;
+    for (proven_size_t i = common; i < pn; ++i) len += ps[i].len + 1;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
+    if (!proven_is_ok(res.err)) return path;
+    char *dst = (char*)res.value.ptr;
+    proven_size_t n = 0;
+    for (proven_size_t i = 0; i < ups; ++i) { dst[n++] = '.'; dst[n++] = '.'; dst[n++] = '/'; }
+    for (proven_size_t i = common; i < pn; ++i) {
+        memcpy(dst + n, ps[i].ptr, ps[i].len);
+        n += ps[i].len;
+        if (i + 1 < pn) dst[n++] = '/';
+    }
+    dst[n] = '\0';
+    return (u8str_t){ .ptr = dst, .len = n };
+}

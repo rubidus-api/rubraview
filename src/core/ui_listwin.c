@@ -4,6 +4,7 @@ rubraview_listwin_t rubraview_listwin_create(double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
     return (rubraview_listwin_t){
         .title_height = 30.0 * dpi_scale,
+        .bar_height = 28.0 * dpi_scale,
         .row_height = 24.0 * dpi_scale,
         .width = 360.0 * dpi_scale,
         .height = 480.0 * dpi_scale,
@@ -16,9 +17,15 @@ static double clampd(double v, double lo, double hi) {
     return v;
 }
 
+double rubraview_listwin_head_height(const rubraview_listwin_t *lw) {
+    if (!lw) return 0.0;
+    return lw->title_height + (lw->editable ? lw->bar_height : 0.0);
+}
+
 void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view_h) {
     if (!lw || view_w <= 0.0 || view_h <= 0.0) return;
-    double min_w = lw->row_height * 8.0, min_h = lw->title_height + lw->row_height * 3.0;
+    double min_w = lw->row_height * (lw->editable ? 10.0 : 8.0);
+    double min_h = rubraview_listwin_head_height(lw) + lw->row_height * 3.0;
     if (!lw->placed) {
         lw->width = clampd(view_w / 3.0, min_w, lw->row_height * 24.0);
         lw->height = view_h * 0.75;
@@ -43,15 +50,93 @@ rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw) {
     return (rubraview_rect_t){ lw->x + lw->width - s, lw->y, s, s };
 }
 
+rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
+    if (!lw || !lw->editable) return (rubraview_rect_t){0};
+    double s = lw->title_height;
+    return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
+}
+
+static const rubraview_listwin_part_t BAR[] = {
+    RUBRAVIEW_LISTWIN_DEL, RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS,
+};
+static const rubraview_listwin_part_t ROW_PARTS[] = {
+    RUBRAVIEW_LISTWIN_ROW_CHECK, RUBRAVIEW_LISTWIN_ROW_REMOVE, RUBRAVIEW_LISTWIN_ROW_UP, RUBRAVIEW_LISTWIN_ROW_DOWN,
+};
+
+rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part) {
+    if (!lw || !lw->editable) return (rubraview_rect_t){0};
+    double w = lw->width / 4.0;
+    for (size_t i = 0; i < 4; ++i) {
+        if (BAR[i] == part) return (rubraview_rect_t){ lw->x + (double)i * w, lw->y + lw->title_height, w, lw->bar_height };
+    }
+    return (rubraview_rect_t){0};
+}
+
 size_t rubraview_listwin_rows_visible(const rubraview_listwin_t *lw) {
-    if (!lw || lw->row_height <= 0.0 || lw->height <= lw->title_height) return 0;
-    return (size_t)((lw->height - lw->title_height) / lw->row_height);
+    double head = rubraview_listwin_head_height(lw);
+    if (!lw || lw->row_height <= 0.0 || lw->height <= head) return 0;
+    return (size_t)((lw->height - head) / lw->row_height);
+}
+
+double rubraview_listwin_row_text_x(const rubraview_listwin_t *lw) {
+    if (!lw) return 0.0;
+    return lw->x + (lw->editable ? lw->row_height * 4.0 : 0.0);
+}
+
+rubraview_rect_t rubraview_listwin_row_part_rect(const rubraview_listwin_t *lw, size_t index, size_t count,
+                                                 rubraview_listwin_part_t part) {
+    rubraview_rect_t row = rubraview_listwin_row_rect(lw, index, count);
+    if (!lw || !lw->editable || row.width <= 0.0) return (rubraview_rect_t){0};
+    for (size_t i = 0; i < 4; ++i) {
+        if (ROW_PARTS[i] == part) return (rubraview_rect_t){ row.x + (double)i * lw->row_height, row.y, lw->row_height, row.height };
+    }
+    return (rubraview_rect_t){0};
+}
+
+size_t rubraview_listwin_insert_index(const rubraview_listwin_t *lw, double py, size_t count) {
+    if (!lw || lw->row_height <= 0.0) return count;
+    double top = lw->y + rubraview_listwin_head_height(lw);
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    double at = (py - top) / lw->row_height + 0.5;
+    size_t row = at <= 0.0 ? 0 : (size_t)at;
+    if (row > rows) row = rows;
+    size_t index = lw->first + row;
+    return index > count ? count : index;
+}
+
+void rubraview_listwin_resize_begin(rubraview_listwin_t *lw, double px, double py) {
+    if (!lw) return;
+    lw->resizing = true;
+    lw->resize_dx = lw->x + lw->width - px;
+    lw->resize_dy = lw->y + lw->height - py;
+}
+
+void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, double view_w, double view_h) {
+    if (!lw || !lw->resizing) return;
+    double w = px + lw->resize_dx - lw->x, h = py + lw->resize_dy - lw->y;
+    /* Never past the view: the place rule would move the window instead of stopping it. */
+    if (w > view_w - lw->x) w = view_w - lw->x;
+    if (h > view_h - lw->y) h = view_h - lw->y;
+    lw->width = w > 1.0 ? w : 1.0;
+    lw->height = h > 1.0 ? h : 1.0;
+    rubraview_listwin_place(lw, view_w, view_h);
+}
+
+bool rubraview_list_move(size_t *order, size_t count, const bool *moving, size_t to) {
+    if (!order || !moving) return false;
+    if (to > count) to = count;
+    size_t n = 0;
+    for (size_t i = 0; i < to; ++i) if (!moving[i]) order[n++] = i;
+    for (size_t i = 0; i < count; ++i) if (moving[i]) order[n++] = i;
+    for (size_t i = to; i < count; ++i) if (!moving[i]) order[n++] = i;
+    for (size_t i = 0; i < count; ++i) if (order[i] != i) return true;
+    return false;
 }
 
 rubraview_rect_t rubraview_listwin_row_rect(const rubraview_listwin_t *lw, size_t index, size_t count) {
     size_t rows = rubraview_listwin_rows_visible(lw);
     if (!lw || index >= count || index < lw->first || index - lw->first >= rows) return (rubraview_rect_t){0};
-    return (rubraview_rect_t){ lw->x, lw->y + lw->title_height + (double)(index - lw->first) * lw->row_height,
+    return (rubraview_rect_t){ lw->x, lw->y + rubraview_listwin_head_height(lw) + (double)(index - lw->first) * lw->row_height,
                                lw->width, lw->row_height };
 }
 
@@ -59,11 +144,21 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
                                                size_t *out_index) {
     if (!lw || !lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_NONE;
     if (rubraview_rect_contains(rubraview_listwin_close_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_CLOSE;
+    if (lw->editable && rubraview_rect_contains(rubraview_listwin_resize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_RESIZE;
     if (py < lw->y + lw->title_height) return RUBRAVIEW_LISTWIN_TITLE;
-    size_t row = (size_t)((py - lw->y - lw->title_height) / lw->row_height);
+    double head = rubraview_listwin_head_height(lw);
+    if (py < lw->y + head) {
+        size_t b = (size_t)((px - lw->x) / (lw->width / 4.0));
+        return BAR[b < 4 ? b : 3];
+    }
+    size_t row = (size_t)((py - lw->y - head) / lw->row_height);
     size_t index = lw->first + row;
     if (row < rubraview_listwin_rows_visible(lw) && index < count) {
         if (out_index) *out_index = index;
+        if (lw->editable && px < rubraview_listwin_row_text_x(lw)) {
+            size_t b = (size_t)((px - lw->x) / lw->row_height);
+            return ROW_PARTS[b < 4 ? b : 3];
+        }
         return RUBRAVIEW_LISTWIN_ROW;
     }
     return RUBRAVIEW_LISTWIN_BODY;

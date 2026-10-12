@@ -115,6 +115,7 @@ static const char *const PARTS[] = {
 "  choice files.archive_codepage   \"Archive filenames\"       auto | utf8 | cp949 | shift_jis | gbk | big5 | cp1252 = auto wired\n"
 "  toggle files.comicinfo          \"Read ComicInfo.xml\"      = true wired\n"
 "  toggle files.picker_details     \"Open-file screen as a list with details\" = false wired\n"
+"  choice files.list_paths         \"A saved list names its files\" relative | absolute = relative wired\n"
 "  section \"Reading history\"\n"
 "  toggle files.reading_history    \"Remember the page\"       = true wired\n"
 "  toggle files.resume_prompt      \"Offer to resume\"         = true wired\n",
