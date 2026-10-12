@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.60** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.60/rubraview-v0.0.60.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.60/rubraview-v0.0.60.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.61** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.61/rubraview-v0.0.61.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.61/rubraview-v0.0.61.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -14,7 +14,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 
 - **GPU-Accelerated Canvas**: Butter-smooth 60–144 FPS pan and sub-pixel zoom powered by Direct2D (D2D1) and Direct3D 11.
 - **Zero-Dependency Native Image Decoding**: Decodes JPEG, PNG, GIF, WebP, TIFF, BMP, and ICO out of the box using the native Windows Imaging Component (WIC).
-- **AVIF Without A Codec To Install**: a built-in decoder (libavif + dav1d) reads AVIF stills and animations with their transparency; JPEG XL opens where Windows has a codec for it, or with FFmpeg's DLLs beside the program.
+- **AVIF Without A Codec To Install**: a built-in decoder (libavif + dav1d) reads AVIF stills and animations with their transparency; JPEG XL opens where Windows has a codec for it, or with FFmpeg's DLLs beside the program (a moving one plays through FFmpeg). BigTIFF under 4 GB opens as any TIFF.
 - **WebP Written Without A Codec To Install**: Export and `--batch --format=webp` write lossy or lossless WebP with the built-in libwebp; an animated GIF, PNG or WebP becomes an animated WebP.
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
 - **Image Enhancement & Post-Processing**: Real-time adjustments for exposure, contrast, saturation, gamma, sharpening (unsharp mask), and gaussian blur, plus high-fidelity resampling (Nearest, Bilinear, Bicubic, Lanczos-3).

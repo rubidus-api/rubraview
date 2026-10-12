@@ -87,6 +87,16 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
                                      void *context, int32_t *out_width, int32_t *out_height);
 
 /**
+ * Every picture of a JPEG XL that moves, in order, each whole as it is to
+ * be seen. `room` is asked for width * height * 4 bytes before each, told
+ * how long the picture stays, and ends the reading by refusing (NULL).
+ * True when at least one picture was written.
+ */
+bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+                                     uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
+                                     void *context);
+
+/**
  * Open a file with one backend and start decoding from its beginning.
  * Blocks until the backend has said yes or no. The caller tries the
  * backends in rubraview_media_backend_order and reports the last failure.

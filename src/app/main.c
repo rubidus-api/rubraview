@@ -1129,7 +1129,7 @@ static bool page_moves(app_state_t *app, size_t index, const rubraview_page_byte
     u8str_t name = path.len > 0 ? path : app->source.pages[index].name;
     if (!rubraview_path_has_ext(name, ".gif") && !rubraview_path_has_ext(name, ".webp") &&
         !rubraview_path_has_ext(name, ".png") && !rubraview_path_has_ext(name, ".apng") &&
-        !rubraview_path_has_ext(name, ".avif")) return false;
+        !rubraview_path_has_ext(name, ".avif") && !rubraview_path_has_ext(name, ".jxl")) return false;
     if (path.len > 0) {
         rubraview_fs_mapping_t map = {0};
         bool moves = rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX &&

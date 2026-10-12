@@ -567,8 +567,83 @@ bool rubraview_image_is_jxl(const uint8_t *b, size_t size) {
     return size >= 12 && memcmp(b, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0;
 }
 
+/* RV-110: a JPEG XL says in its first few bytes whether it moves. The
+   codestream's header is bits, lowest first: the picture's size, then
+   the metadata, where "have_animation" follows the orientation, the
+   intrinsic size and the preview's size when those are there. */
+typedef struct jxl_bits { const uint8_t *b; size_t size; size_t at; bool short_of; } jxl_bits_t;
+
+static uint32_t jxl_u(jxl_bits_t *r, uint32_t count) {
+    uint32_t v = 0;
+    for (uint32_t i = 0; i < count; ++i, ++r->at) {
+        if (r->at / 8 >= r->size) { r->short_of = true; return 0; }
+        v |= (uint32_t)((r->b[r->at / 8] >> (r->at % 8)) & 1u) << i;
+    }
+    return v;
+}
+
+/* One of four widths, chosen by two bits; the value itself is not wanted. */
+static void jxl_skip_u32(jxl_bits_t *r, uint32_t b0, uint32_t b1, uint32_t b2, uint32_t b3) {
+    uint32_t which = jxl_u(r, 2);
+    (void)jxl_u(r, which == 0 ? b0 : which == 1 ? b1 : which == 2 ? b2 : b3);
+}
+
+static void jxl_skip_size(jxl_bits_t *r) {
+    bool small = jxl_u(r, 1) != 0;
+    if (small) (void)jxl_u(r, 5); else jxl_skip_u32(r, 9, 13, 18, 30);
+    if (jxl_u(r, 3) == 0) {                          /* no named ratio: the width is written too */
+        if (small) (void)jxl_u(r, 5); else jxl_skip_u32(r, 9, 13, 18, 30);
+    }
+}
+
+static void jxl_skip_preview(jxl_bits_t *r) {
+    bool div8 = jxl_u(r, 1) != 0;
+    if (div8) jxl_skip_u32(r, 0, 0, 5, 9); else jxl_skip_u32(r, 6, 8, 10, 12);
+    if (jxl_u(r, 3) == 0) {
+        if (div8) jxl_skip_u32(r, 0, 0, 5, 9); else jxl_skip_u32(r, 6, 8, 10, 12);
+    }
+}
+
+static bool jxl_codestream_moves(const uint8_t *b, size_t size) {
+    if (size < 3 || b[0] != 0xFF || b[1] != 0x0A) return false;
+    jxl_bits_t r = { .b = b, .size = size < 64 ? size : 64, .at = 16 };
+    jxl_skip_size(&r);
+    if (jxl_u(&r, 1)) return false;                  /* all as it comes: a still picture */
+    if (!jxl_u(&r, 1)) return false;                 /* no extra fields */
+    (void)jxl_u(&r, 3);                              /* orientation */
+    if (jxl_u(&r, 1)) jxl_skip_size(&r);
+    if (jxl_u(&r, 1)) jxl_skip_preview(&r);
+    bool moves = jxl_u(&r, 1) != 0;
+    return moves && !r.short_of;
+}
+
+static bool jxl_moves(const uint8_t *b, size_t size) {
+    if (b[0] == 0xFF) return jxl_codestream_moves(b, size);
+    /* In boxes: the codestream is the `jxlc` box, or begins in the first `jxlp` (after its four-byte number). */
+    for (size_t at = 12; at + 8 <= size; ) {
+        uint64_t len = be32(b + at);
+        size_t head = 8;
+        if (len == 1) {
+            if (at + 16 > size) return false;
+            len = ((uint64_t)be32(b + at + 8) << 32) | be32(b + at + 12);
+            head = 16;
+        } else if (len == 0) {
+            len = size - at;
+        }
+        if (len < head) return false;
+        if (memcmp(b + at + 4, "jxlc", 4) == 0) return jxl_codestream_moves(b + at + head, size - at - head);
+        if (memcmp(b + at + 4, "jxlp", 4) == 0) {
+            return size - at - head > 4 && jxl_codestream_moves(b + at + head + 4, size - at - head - 4);
+        }
+        if (len > size - at) return false;
+        at += (size_t)len;
+    }
+    return false;
+}
+
 bool rubraview_image_is_animated(const uint8_t *b, size_t size) {
     if (!b || size < 16) return false;
+    if (rubraview_image_is_jxl(b, size)) return jxl_moves(b, size);
     if (memcmp(b, "\x89PNG\r\n\x1A\n", 8) == 0) {
         for (size_t at = 8; at + 12 <= size; ) {
             uint32_t len = be32(b + at);

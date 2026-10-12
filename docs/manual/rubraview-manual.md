@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.60.exe              the viewer, as built
-dist/rubraview-v0.0.60/                 the release bundle
-dist/rubraview-v0.0.60.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.61.exe              the viewer, as built
+dist/rubraview-v0.0.61/                 the release bundle
+dist/rubraview-v0.0.61.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -304,8 +304,19 @@ stills and animations, with their transparency, 10-bit ones shown as 8.
 JPEG XL (`.jxl`) is read by Windows, when a JPEG XL codec is installed
 in it, or else by FFmpeg, when its DLLs are beside `rubraview.exe`
 (Settings > Video, "Adding FFmpeg") and were built with libjxl; without
-either a `.jxl` says what is missing. One that moves is shown as its
-first picture. Neither kind is written.
+either a `.jxl` says what is missing. The DLLs must be FFmpeg 9.0's
+(`avcodec-63.dll` and its fellows): an older set is not loaded, and the
+program then behaves as if there were none. One that moves plays through
+FFmpeg, and is its first picture where only Windows' codec reads it.
+Neither kind is written. Both have their thumbnails — in a book too —
+whether or not Windows has a codec for them.
+
+A BigTIFF (the TIFF kind made for very large files) opens like any
+TIFF, every page of it, as long as the file is under 4 GB; its camera
+and GPS details are not shown.
+
+A film whose picture neither Windows nor FFmpeg can decode says that a
+codec is missing instead of playing its sound over a black window.
 
 WebP is written by Rubraview itself, on any Windows: **Quality** decides
 how good a lossy one is, **WebP lossless** keeps every visible pixel, and **WebP

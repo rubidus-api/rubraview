@@ -13,6 +13,7 @@
 #include "rubraview/apng.h"
 #include "rubraview/webp_write.h"
 #include "rubraview/avif_read.h"
+#include "rubraview/bigtiff.h"
 #include "rubraview/detail.h"
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/animation.h"
@@ -441,15 +442,14 @@ static uint8_t *tiff_room(int32_t width, int32_t height, HGLOBAL *out_memory) {
 }
 
 /* The pixels (R, G, B, A; alpha not multiplied in) are in the room: the
-   TIFF is written around them and WIC opens it. The memory is the
-   stream's from here, or freed. `ok` false only lets it go. */
-static IWICBitmapDecoder *tiff_decoder(HGLOBAL memory, bool ok, int32_t width, int32_t height, uint32_t orientation) {
+   TIFF is written around them. The memory comes back unlocked, or is
+   freed and NULL comes back. `ok` false only lets it go. */
+static HGLOBAL tiff_finish(HGLOBAL memory, bool ok, int32_t width, int32_t height, uint32_t orientation) {
     enum { TAGS = 12 };
-    IWICImagingFactory *factory = wic_factory();
     if (!memory) return NULL;
     uint8_t *tiff = (uint8_t*)GlobalLock(memory);   /* a second lock on the room's: the same address */
     uint64_t pixel_bytes = (uint64_t)width * (uint64_t)height * 4u;
-    ok = ok && tiff && factory;
+    ok = ok && tiff;
     if (ok) {
         uint32_t ifd = 8u + (uint32_t)pixel_bytes;
         uint32_t bits_at = ifd + 2u + TAGS * 12u + 4u;
@@ -474,8 +474,15 @@ static IWICBitmapDecoder *tiff_decoder(HGLOBAL memory, bool ok, int32_t width, i
     }
     if (tiff) GlobalUnlock(memory);
     GlobalUnlock(memory);                            /* the room's lock */
+    if (!ok) { GlobalFree(memory); return NULL; }
+    return memory;
+}
+
+/* WIC opens the finished TIFF. The memory is the stream's from here, or freed. */
+static IWICBitmapDecoder *tiff_decoder(IWICImagingFactory *factory, HGLOBAL memory) {
+    if (!memory) return NULL;
     IStream *stream = NULL;
-    if (!ok || FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream)) || !stream) {
+    if (!factory || FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream)) || !stream) {
         GlobalFree(memory);
         return NULL;
     }
@@ -485,7 +492,7 @@ static IWICBitmapDecoder *tiff_decoder(HGLOBAL memory, bool ok, int32_t width, i
     return SUCCEEDED(hr) ? decoder : NULL;
 }
 
-static IWICBitmapDecoder *decoder_from_avif(const uint8_t *data, size_t size) {
+static HGLOBAL tiff_from_avif(const uint8_t *data, size_t size) {
     int32_t width = 0, height = 0;
     size_t frames = 0;
     rubraview_avif_t *avif = rubraview_avif_open(data, size, AVIF_MAX_SIDE, &width, &height, &frames);
@@ -500,7 +507,11 @@ static IWICBitmapDecoder *decoder_from_avif(const uint8_t *data, size_t size) {
         /* B, G, R, A as it was decoded: a TIFF's samples are R, G, B, A. */
         for (uint8_t *p = pixels, *end = p + (size_t)width * (size_t)height * 4u; p < end; p += 4) { uint8_t b = p[0]; p[0] = p[2]; p[2] = b; }
     }
-    return tiff_decoder(memory, ok, width, height, orientation);
+    return tiff_finish(memory, ok, width, height, orientation);
+}
+
+static IWICBitmapDecoder *decoder_from_avif(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
+    return tiff_decoder(factory, tiff_from_avif(data, size));
 }
 
 /* RV-110: a JPEG XL that Windows has no codec for is read by the FFmpeg
@@ -513,12 +524,36 @@ static uint8_t *jxl_room(void *context, int32_t width, int32_t height) {
     return tiff_room(width, height, memory);
 }
 
-static IWICBitmapDecoder *decoder_from_jxl(const uint8_t *data, size_t size) {
+static HGLOBAL tiff_from_jxl(const uint8_t *data, size_t size) {
     if (!rubraview_image_is_jxl(data, size)) return NULL;
     HGLOBAL memory = NULL;
     int32_t width = 0, height = 0;
     bool ok = rubraview_pal_ffmpeg_jxl_decode(data, size, AVIF_MAX_SIDE, jxl_room, &memory, &width, &height);
-    return tiff_decoder(memory, ok, width, height, 1);
+    return tiff_finish(memory, ok, width, height, 1);
+}
+
+static IWICBitmapDecoder *decoder_from_jxl(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
+    return tiff_decoder(factory, tiff_from_jxl(data, size));
+}
+
+/* RV-110: Windows' TIFF codec does not read BigTIFF. One under 4 GB is
+   written out with an ordinary TIFF's directories (bigtiff.h) and read
+   by that same codec: its strips, compressed as they are, stay put. */
+static HGLOBAL tiff_from_bigtiff(const uint8_t *data, size_t size) {
+    size_t extra = rubraview_bigtiff_classic_extra(data, size);
+    if (extra == 0 || (uint64_t)size + extra > 0x7F000000u) return NULL;
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size + extra);
+    uint8_t *out = memory ? (uint8_t*)GlobalLock(memory) : NULL;
+    bool ok = out && rubraview_bigtiff_to_classic(data, size, out, size + extra);
+    if (out) GlobalUnlock(memory);
+    if (!ok) { if (memory) GlobalFree(memory); return NULL; }
+    return memory;
+}
+
+/* What Windows has no codec for and is not an AVIF: a JPEG XL, a BigTIFF. */
+static IWICBitmapDecoder *decoder_from_other(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
+    if (rubraview_bigtiff_is(data, size)) return tiff_decoder(factory, tiff_from_bigtiff(data, size));
+    return decoder_from_jxl(factory, data, size);
 }
 
 static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
@@ -575,7 +610,7 @@ static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
     const uint8_t *again = (const uint8_t*)GlobalLock(memory);
     if (again) {
         avif = rubraview_avif_is(again, size);
-        if (avif && avif_own_first()) decoder = decoder_from_avif(again, size);
+        if (avif && avif_own_first()) decoder = decoder_from_avif(factory, again, size);
         GlobalUnlock(memory);
     }
     if (!decoder &&
@@ -585,8 +620,8 @@ static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
         decoder = NULL;
         again = (const uint8_t*)GlobalLock(memory);
         if (again) {
-            decoder = avif ? (avif_own_first() ? NULL : decoder_from_avif(again, size))
-                           : decoder_from_jxl(again, size);
+            decoder = avif ? (avif_own_first() ? NULL : decoder_from_avif(factory, again, size))
+                           : decoder_from_other(factory, again, size);
             GlobalUnlock(memory);
         }
     }
@@ -597,9 +632,9 @@ static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
 /* Opens a decoder over bytes already in memory — the path an archive
    page takes, since it has no filename to give WIC. The stream must
    outlive the decoder, so the caller is handed both. */
-static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, IWICStream **out_stream) {
+IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+                                                   IWICStream **out_stream) {
     *out_stream = NULL;
-    IWICImagingFactory *factory = wic_factory();
     if (!factory || !data || size == 0 || size > UINT32_MAX) return NULL;
 
     IWICStream *stream = NULL;
@@ -612,18 +647,61 @@ static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, I
     IWICBitmapDecoder *decoder = NULL;
     bool avif = rubraview_avif_is(data, size);
     /* RV-110: as for a path. A decoder of ours owns what it reads: no stream to hand back. */
-    if (avif && avif_own_first() && (decoder = decoder_from_avif(data, size)) != NULL) {
+    if (avif && avif_own_first() && (decoder = decoder_from_avif(factory, data, size)) != NULL) {
         IWICStream_Release(stream);
         return decoder;
     }
     if (FAILED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
                                                           WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder) {
         IWICStream_Release(stream);
-        if (avif) return avif_own_first() ? NULL : decoder_from_avif(data, size);
-        return decoder_from_jxl(data, size);
+        if (avif) return avif_own_first() ? NULL : decoder_from_avif(factory, data, size);
+        return decoder_from_other(factory, data, size);
     }
     *out_stream = stream;
     return decoder;
+}
+
+static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, IWICStream **out_stream) {
+    return rubraview_wic_decoder_for_bytes(wic_factory(), data, size, out_stream);
+}
+
+/* RV-110: the tiles read a picture band by band, and a decoder of ours
+   would decode the whole of it for every band. So what ours reads is
+   turned once into the same uncompressed TIFF and the bands are read from
+   that; a BigTIFF likewise, as the ordinary TIFF it is read as. NULL when
+   the bytes are not ours to read, or Windows reads them itself (as the
+   page then did). */
+uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+                                size_t *out_size, void **out_owner) {
+    *out_size = 0;
+    *out_owner = NULL;
+    if (!factory || !data || size == 0 || size > UINT32_MAX) return NULL;
+    bool avif = rubraview_avif_is(data, size);
+    bool bigtiff = rubraview_bigtiff_is(data, size);
+    if (!avif && !bigtiff && !rubraview_image_is_jxl(data, size)) return NULL;
+    if (!(avif && avif_own_first())) {
+        IWICStream *stream = NULL;
+        IWICBitmapDecoder *windows = NULL;
+        bool reads = SUCCEEDED(IWICImagingFactory_CreateStream(factory, &stream)) && stream &&
+                     SUCCEEDED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size)) &&
+                     SUCCEEDED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
+                                                                          WICDecodeMetadataCacheOnDemand, &windows)) && windows;
+        if (windows) IWICBitmapDecoder_Release(windows);
+        if (stream) IWICStream_Release(stream);
+        if (reads) return NULL;
+    }
+    HGLOBAL memory = avif ? tiff_from_avif(data, size) : bigtiff ? tiff_from_bigtiff(data, size) : tiff_from_jxl(data, size);
+    uint8_t *tiff = memory ? (uint8_t*)GlobalLock(memory) : NULL;
+    if (!tiff) { if (memory) GlobalFree(memory); return NULL; }
+    *out_size = GlobalSize(memory);
+    *out_owner = memory;
+    return tiff;
+}
+
+void rubraview_wic_own_tiff_free(void *owner) {
+    if (!owner) return;
+    GlobalUnlock((HGLOBAL)owner);
+    GlobalFree((HGLOBAL)owner);
 }
 
 /* One entry point for both: a path when there is one, bytes otherwise. */
@@ -730,6 +808,8 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
 
 /* ---- an animation kept open (D-82) ---- */
 
+static double anim_delay(double seconds);
+
 struct rubraview_anim_reader {
     IWICBitmapDecoder *decoder;  /* a GIF or a WebP; NULL for an APNG */
     IWICStream        *stream;   /* over `owned` */
@@ -741,7 +821,38 @@ struct rubraview_anim_reader {
     size_t             png_cap;
     /* RV-110: an AVIF that moves, read by the vendored libavif (Windows shows its first picture only). */
     rubraview_avif_t  *avif;
+    /* RV-110: a JPEG XL that moves, read whole by FFmpeg when it was opened: R, G, B, A of each picture. */
+    uint8_t          **jxl;
+    size_t             jxl_count, jxl_bytes;
+    int32_t            jxl_w, jxl_h;
 };
+
+/* All of a JPEG XL's pictures are held at once: no more of it than this. */
+#define JXL_ANIM_BYTES ((size_t)768 << 20)
+#define JXL_ANIM_FRAMES 4096
+
+static uint8_t *anim_jxl_room(void *context, int32_t width, int32_t height, double seconds) {
+    rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)context;
+    size_t bytes = (size_t)width * (size_t)height * 4u;
+    if (reader->jxl_count == 0) { reader->jxl_w = width; reader->jxl_h = height; }
+    if (width != reader->jxl_w || height != reader->jxl_h || reader->jxl_count >= JXL_ANIM_FRAMES ||
+        reader->jxl_bytes + bytes > JXL_ANIM_BYTES) return NULL;
+    if ((reader->jxl_count & (reader->jxl_count + 1)) == 0) {       /* 0, 1, 3, 7: room for twice as many */
+        size_t room = (reader->jxl_count + 1) * 2;
+        uint8_t **more = (uint8_t**)realloc(reader->jxl, room * sizeof(uint8_t*));
+        rubraview_frame_t *frames = more ? (rubraview_frame_t*)realloc(reader->frames, room * sizeof(rubraview_frame_t)) : NULL;
+        if (more) reader->jxl = more;
+        if (frames) reader->frames = frames;
+        if (!more || !frames) return NULL;
+    }
+    uint8_t *pixels = (uint8_t*)malloc(bytes);
+    if (!pixels) return NULL;
+    reader->frames[reader->jxl_count] = (rubraview_frame_t){ .delay_seconds = anim_delay(seconds), .width = width, .height = height,
+                                                             .disposal = RUBRAVIEW_FRAME_KEEP, .replaces = true };
+    reader->jxl[reader->jxl_count++] = pixels;
+    reader->jxl_bytes += bytes;
+    return pixels;
+}
 
 /* The WebP codec ships apart from Windows' own; its GUID is not in every SDK's headers. */
 static const GUID ANIM_CONTAINER_WEBP = { 0xe094b0e2, 0x67f2, 0x45b3, { 0xb0, 0xea, 0x11, 0x53, 0x37, 0xca, 0x7c, 0xf3 } };
@@ -810,6 +921,8 @@ void rubraview_pal_anim_close(rubraview_anim_reader_t *reader) {
     if (reader->stream) IWICStream_Release(reader->stream);
     rubraview_apng_free(&reader->apng);
     rubraview_avif_close(reader->avif);
+    for (size_t i = 0; i < reader->jxl_count; ++i) free(reader->jxl[i]);
+    free(reader->jxl);
     free(reader->png);
     free(reader->frames);
     free(reader->owned);
@@ -877,6 +990,16 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *da
         described = count;
         canvas_w = (uint32_t)w;
         canvas_h = (uint32_t)h;
+    } else if (rubraview_image_is_jxl(reader->owned, size)) {
+        /* Windows' codec, where there is one, shows its first picture only. */
+        if (!rubraview_pal_ffmpeg_jxl_frames(reader->owned, size, AVIF_MAX_SIDE, anim_jxl_room, reader) ||
+            reader->jxl_count <= 1) {
+            rubraview_pal_anim_close(reader);
+            return NULL;
+        }
+        described = reader->jxl_count;
+        canvas_w = (uint32_t)reader->jxl_w;
+        canvas_h = (uint32_t)reader->jxl_h;
     } else if (rubraview_apng_is_png(reader->owned, size)) {
         /* Windows' PNG codec shows an APNG as its one still picture. */
         if (!anim_open_apng(reader, size, &described, &canvas_w, &canvas_h)) {
@@ -982,6 +1105,21 @@ bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint
 
     if (reader->avif) {
         return rows >= reader->frames[index].height && rubraview_avif_frame(reader->avif, index, dst, stride, true, NULL);
+    }
+    if (reader->jxl) {
+        if (index >= reader->jxl_count || rows < reader->jxl_h || stride < (size_t)reader->jxl_w * 4u) return false;
+        const uint8_t *from = reader->jxl[index];
+        for (int32_t y = 0; y < reader->jxl_h; ++y) {
+            uint8_t *to = dst + (size_t)y * stride;
+            for (int32_t x = 0; x < reader->jxl_w; ++x, from += 4, to += 4) {
+                uint32_t a = from[3];                 /* B, G, R with the alpha multiplied in */
+                to[0] = (uint8_t)((from[2] * a + 127u) / 255u);
+                to[1] = (uint8_t)((from[1] * a + 127u) / 255u);
+                to[2] = (uint8_t)((from[0] * a + 127u) / 255u);
+                to[3] = (uint8_t)a;
+            }
+        }
+        return true;
     }
     if (!reader->decoder) {
         /* An APNG's frame: as a PNG of its own, which the PNG codec reads. */
@@ -1269,13 +1407,8 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
     IWICFormatConverter *converter = NULL;
     uint8_t *piece = NULL;   /* a turned picture's tile, as stored, before it is turned */
 
-    if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream ||
-        FAILED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size)) ||
-        FAILED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
-                                                          WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder ||
-        FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) {
-        goto done;
-    }
+    decoder = rubraview_wic_decoder_for_bytes(factory, data, size, &stream);
+    if (!decoder || FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) goto done;
 
     IWICBitmapSource *source = (IWICBitmapSource*)frame;
     int32_t orientation = apply_exif_orientation ? read_orientation(frame) : 1;

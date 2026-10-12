@@ -269,10 +269,14 @@ int rubraview_pal_ffmpeg_jxl_state(void) {
    file of another kind is not to be handed to that guess. The first frame
    of one that moves. libjxl turns the picture upright itself, so what
    comes out is as it is to be seen. Everything of FFmpeg's is let go
-   before returning. */
-bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
-                                     uint8_t *(*room)(void *context, int32_t width, int32_t height),
-                                     void *context, int32_t *out_width, int32_t *out_height) {
+   before returning.
+
+   `all`: every picture of one that moves, each laid together by libjxl
+   as it is to be seen, with the time it stays; `room` returning NULL
+   ends the reading there. */
+static bool jxl_read(const uint8_t *data, size_t size, int32_t max_side, bool all,
+                     uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
+                     void *context, int32_t *out_width, int32_t *out_height) {
     enum { IO_BYTES = 64 * 1024 };
     if (!data || size == 0 || !room || rubraview_pal_ffmpeg_jxl_state() != 2) return false;
 
@@ -303,14 +307,18 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
     const AVCodec *decoder = g_ff.avcodec_find_decoder(par->codec_id);
     if (!decoder) decoder = g_ff.avcodec_find_decoder(AV_CODEC_ID_JPEGXL);
     codec = decoder ? g_ff.avcodec_alloc_context3(decoder) : NULL;
-    if (!codec || g_ff.avcodec_parameters_to_context(codec, par) < 0 ||
-        g_ff.avcodec_open2(codec, decoder, NULL) < 0) goto done;
+    if (!codec || g_ff.avcodec_parameters_to_context(codec, par) < 0) goto done;
+    codec->pkt_timebase = format->streams[stream]->time_base;   /* a frame's time is counted in it */
+    if (g_ff.avcodec_open2(codec, decoder, NULL) < 0) goto done;
 
     packet = g_ff.av_packet_alloc();
     frame = g_ff.av_frame_alloc();
     if (!packet || !frame) goto done;
 
     bool got = false, drained = false;
+    int64_t packet_duration = 0;                    /* of the packet last sent: a frame that names no time of its own */
+next:
+    got = false;
     while (!got) {
         int received = g_ff.avcodec_receive_frame(codec, frame);
         if (received >= 0) { got = true; break; }
@@ -321,6 +329,7 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
             if (g_ff.avcodec_send_packet(codec, NULL) < 0) break;
             continue;
         }
+        if (packet->stream_index == stream && packet->duration > 0) packet_duration = packet->duration;
         int sent = packet->stream_index == stream ? g_ff.avcodec_send_packet(codec, packet) : 0;
         g_ff.av_packet_unref(packet);
         if (sent < 0 && sent != AVERROR(EAGAIN)) break;
@@ -328,7 +337,9 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
     if (!got || frame->width <= 0 || frame->height <= 0 ||
         frame->width > max_side || frame->height > max_side) goto done;
 
-    uint8_t *pixels = room(context, frame->width, frame->height);
+    int64_t stays = frame->duration > 0 ? frame->duration : packet_duration;
+    double seconds = stays > 0 ? (double)stays * av_q2d(format->streams[stream]->time_base) : 0.0;
+    uint8_t *pixels = room(context, frame->width, frame->height, seconds);
     if (!pixels) goto done;
     sws = g_ff.sws_getContext(frame->width, frame->height, (enum AVPixelFormat)frame->format,
                               frame->width, frame->height, AV_PIX_FMT_RGBA, SWS_POINT, NULL, NULL, NULL);
@@ -340,6 +351,12 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
     *out_width = frame->width;
     *out_height = frame->height;
     ok = true;
+    if (all) {
+        g_ff.sws_freeContext(sws);
+        sws = NULL;
+        g_ff.av_frame_unref(frame);
+        goto next;
+    }
 
 done:
     if (sws) g_ff.sws_freeContext(sws);
@@ -352,6 +369,32 @@ done:
     io->buffer = NULL;
     g_ff.avio_context_free(&io);
     return ok;
+}
+
+typedef struct jxl_one {
+    uint8_t *(*room)(void *context, int32_t width, int32_t height);
+    void *context;
+} jxl_one_t;
+
+static uint8_t *jxl_one_room(void *context, int32_t width, int32_t height, double seconds) {
+    jxl_one_t *one = (jxl_one_t*)context;
+    (void)seconds;
+    return one->room(one->context, width, height);
+}
+
+bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+                                     uint8_t *(*room)(void *context, int32_t width, int32_t height),
+                                     void *context, int32_t *out_width, int32_t *out_height) {
+    jxl_one_t one = { .room = room, .context = context };
+    if (!room) return false;
+    return jxl_read(data, size, max_side, false, jxl_one_room, &one, out_width, out_height);
+}
+
+bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+                                     uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
+                                     void *context) {
+    int32_t width = 0, height = 0;
+    return jxl_read(data, size, max_side, true, room, context, &width, &height);
 }
 
 /* ---- decode thread ---- */

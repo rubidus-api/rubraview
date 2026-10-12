@@ -107,6 +107,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                                &IID_IWICImagingFactory, (void**)&factory);
     }
     uint8_t *bytes = NULL;
+    void *tiff_owner = NULL;   /* RV-110: `bytes` is a TIFF made of an AVIF or a JPEG XL */
     size_t byte_count = 0;
     uint32_t bytes_generation = 0;
     rubraview_tile_key_t work[TILES_WANT_MAX];
@@ -138,10 +139,20 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         ReleaseSRWLockExclusive(&t->lock);
 
         if (reload) {
-            free(bytes);
+            if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else free(bytes);
+            tiff_owner = NULL;
             byte_count = given_size;
             bytes = given ? given : read_whole(path, path_len, &byte_count);
             bytes_generation = generation;
+            size_t tiff_size = 0;
+            void *owner = NULL;
+            uint8_t *tiff = bytes ? rubraview_wic_own_tiff(factory, bytes, byte_count, &tiff_size, &owner) : NULL;
+            if (tiff) {
+                free(bytes);
+                bytes = tiff;
+                byte_count = tiff_size;
+                tiff_owner = owner;
+            }
         }
 
         /* One band per tile row: the rows above it are decoded to reach it
@@ -241,7 +252,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         ReleaseSRWLockExclusive(&t->lock);
     }
 
-    free(bytes);
+    if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else free(bytes);
     if (factory) IWICImagingFactory_Release(factory);
     if (com) CoUninitialize();
     return 0;

@@ -22,6 +22,10 @@
 #include "rubraview/pagesource.h"
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
+#include "rubraview/detail.h"
+#include "rubraview/avif_read.h"
+#include "rubraview/bigtiff.h"
+#include "rubraview/pal/pal_image_wic_internal.h"
 
 /* Defined here so the link does not depend on which MinGW carries it. */
 static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
@@ -34,6 +38,7 @@ static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F,
 #define THUMB_KEEP 0.78
 #define THUMB_DECODE_SIDE 256
 #define FOLDER_TRIES 3
+#define OWN_FILE_MAX (64u << 20)             /* an AVIF, a JPEG XL or a BigTIFF read whole for its small picture */
 
 /* Owner, 2026-09-25: an archive's first page within a time limit, given up
    when the reading looks too slow to finish in it. */
@@ -125,10 +130,9 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
     IWICBitmapScaler *scaler = NULL;
     IWICFormatConverter *converter = NULL;
     UINT w = 0, h = 0;
-    if (SUCCEEDED(IWICImagingFactory_CreateStream(factory, &stream)) && stream &&
-        SUCCEEDED(IWICStream_InitializeFromMemory(stream, (BYTE*)(uintptr_t)data, (DWORD)size)) &&
-        SUCCEEDED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
-                                                             WICDecodeMetadataCacheOnDemand, &decoder)) && decoder &&
+    /* RV-110: by the road a page takes, so an AVIF or a JPEG XL Windows has
+       no codec for gets its small picture too. Ours decode at full size. */
+    if ((decoder = rubraview_wic_decoder_for_bytes(factory, data, size, &stream)) != NULL &&
         SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame &&
         SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) && w > 0 && h > 0) {
         double scale = (double)side / (double)(w > h ? w : h);
@@ -156,6 +160,22 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
     if (frame) IWICBitmapFrameDecode_Release(frame);
     if (decoder) IWICBitmapDecoder_Release(decoder);
     if (stream) IWICStream_Release(stream);
+    return result;
+}
+
+/* RV-110: a file the shell has no picture for, when it is one the
+   viewer reads without Windows' codec (the shell needs it; an AVIF, a
+   JPEG XL) or by rewriting it first (a BigTIFF). */
+static uint8_t *own_file_small(IWICImagingFactory *factory, u8str_t path, int32_t *out_w, int32_t *out_h) {
+    uint8_t *result = NULL;
+    rubraview_fs_mapping_t map = {0};
+    if (!rubraview_pal_fs_map(path, &map)) return NULL;
+    if (map.size <= OWN_FILE_MAX &&
+        (rubraview_avif_is(map.data, (size_t)map.size) || rubraview_image_is_jxl(map.data, (size_t)map.size) ||
+         rubraview_bigtiff_is(map.data, (size_t)map.size))) {
+        result = decode_small_bgra(factory, map.data, (size_t)map.size, THUMB_DECODE_SIDE, out_w, out_h);
+    }
+    rubraview_pal_fs_unmap(&map);
     return result;
 }
 
@@ -216,12 +236,14 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
                                                                           RUBRAVIEW_SORT_NAME_NATURAL, true);
             for (size_t i = 0; i < found.count && !raw && tries < FOLDER_TRIES; ++i, ++tries) {
                 raw = rubraview_pal_shell_thumbnail_bgra(found.paths[i], 192, &w, &h);
+                if (!raw) raw = own_file_small(factory, found.paths[i], &w, &h);
             }
         }
     } else if (rubraview_glob_match_list(rubraview_path_basename(path), archives)) {
         raw = archive_first_page(scratch, factory, path, pictures, &w, &h);
     } else {
         raw = rubraview_pal_shell_thumbnail_bgra(path, 192, &w, &h);
+        if (!raw) raw = own_file_small(factory, path, &w, &h);
     }
     if (!raw) return NULL;
 

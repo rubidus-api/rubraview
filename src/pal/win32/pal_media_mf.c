@@ -1120,8 +1120,12 @@ static void undo_open(mf_media_t *m) {
     m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
 }
 
-/* Reads until the first picture comes out, then goes back to the start. */
-static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader) {
+/* Reads until the first picture comes out, then goes back to the start.
+   `refused` is set when the reader itself gave up — an error, or the
+   picture's end with none shown — and not merely when 200 samples of
+   sound came first. */
+static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader, bool *refused) {
+    *refused = true;
     for (int i = 0; i < 200; ++i) {
         DWORD actual = 0, flags = 0;
         LONGLONG timestamp = 0;
@@ -1141,6 +1145,12 @@ static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader) {
         }
         if ((flags & MF_SOURCE_READERF_ENDOFSTREAM) && actual == m->video_stream) return false;
     }
+    *refused = false;
+    PROPVARIANT start;
+    PropVariantInit(&start);
+    start.vt = VT_I8;
+    start.hVal.QuadPart = 0;
+    IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &start);
     return false;
 }
 
@@ -1158,7 +1168,8 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
        no decoders stops the decode), the film opens again without it. */
     if (mf && gpu_wanted(m) && make_manager(m)) {
         opened = open_reader(m, &reader, true);
-        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader)) {
+        bool refused = false;
+        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader, &refused)) {
             IMFSourceReader_Release(reader);
             reader = NULL;
             undo_open(m);
@@ -1173,7 +1184,21 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
             m->manager = NULL;
         }
     }
-    if (mf && !opened) opened = open_reader(m, &reader, false);
+    if (mf && !opened) {
+        opened = open_reader(m, &reader, false);
+        /* RV-110: a film whose kind Windows names but cannot decode (VP9
+           4:4:4) opened, played its sound and stayed black without a word.
+           No picture out of the reader is a codec that is missing, said so
+           — and the caller goes on to FFmpeg when it is there. */
+        bool refused = false;
+        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader, &refused) && refused) {
+            IMFSourceReader_Release(reader);
+            reader = NULL;
+            undo_open(m);
+            fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
+            opened = false;
+        }
+    }
     if (!mf) fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
     SetEvent(m->opened);
 
