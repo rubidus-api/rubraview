@@ -175,6 +175,15 @@ size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, u8str_t p
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
                                         size_t *out_count, uint64_t *out_total_bytes);
 
+/**
+ * D-110, the details view's cells. A size short enough for a column
+ * ("1.2 MB"), and what kind of thing an entry is: "Folder", or its
+ * extension in capitals ("JPG"), "File" without one. Both return the
+ * length written, NUL-terminated, 0 when `cap` is too small.
+ */
+size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes);
+size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_directory);
+
 #ifdef __cplusplus
 }
 #endif

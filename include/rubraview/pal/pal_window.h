@@ -190,6 +190,20 @@ rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selectio
 /** Take every item of ours away, and for every user the package too. */
 bool rubraview_pal_shell_menu_unregister(bool all_users);
 
+/**
+ * D-110: everything of Rubraview's in Explorer's right-click menu, an older
+ * version's or one registered from another folder too, for this user or
+ * (an administrator's process) for every user: every verb under a `shell`
+ * key that is ours (rubraview_shell_entry_is_ours) on any file type, on
+ * all files, folders and drives; the `Rubraview.*` types an older list of
+ * extensions left; the `Applications\rubraview*.exe` entries "Open with"
+ * shows; what the Windows 11 item reads; and, for every user, every
+ * package of the menu's family, not only the one remembered. What another
+ * program put there is not touched. The number of things removed, or -1
+ * when `all_users` is asked without the right to write there.
+ */
+int32_t rubraview_pal_shell_menu_wipe(bool all_users);
+
 /** Are the Windows 11 menu's two files beside the program? */
 bool rubraview_pal_shell_menu_parts_present(void);
 

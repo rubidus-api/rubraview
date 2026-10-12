@@ -788,6 +788,10 @@ typedef struct app_state {
 
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
+    bool                   chrome_hidden;           /* D-110: the title bar and the boxes are away until a click */
+    bool                   speed_pressed, speed_dragged;   /* D-110: the speed tile held; dragged, it is not a tap */
+    bool                   speed_press_detached;
+    double                 speed_press_y, speed_press_base;
     u8str_t                picker_dir;
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
     /* The picker's own memory (2026-09-29): every folder shown took a
@@ -913,6 +917,11 @@ static bool open_archive(app_state_t *app, u8str_t archive_path);
 static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
+static void chrome_hide(app_state_t *app, bool hide);
+static void speed_tile_press(app_state_t *app, double y, bool detached);
+static void speed_tile_move(app_state_t *app, double y, bool detached);
+static void speed_tile_release(app_state_t *app, bool detached);
+static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width, double size);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
@@ -3077,11 +3086,32 @@ static void toggle_slideshow(app_state_t *app) {
 #define PICKER_PLACES_HEIGHT 40.0   /* the places bar under the path (owner, 2026-09-28) */
 #define PICKER_HEADER_HEIGHT (PICKER_CRUMB_HEIGHT + PICKER_PLACES_HEIGHT)
 
+/* D-110: the picker as Explorer's details view — a row a file, with its
+   type, size and date — when Settings > Files asks for it or the picker's
+   own button does. */
+#define PICKER_DETAIL_ROW 30.0
+#define PICKER_DETAIL_HEAD 26.0   /* the line naming the columns */
+#define PICKER_TILE 160.0
+
+static bool picker_details(const app_state_t *app) {
+    return rubraview_settings_get(&app->settings, U8("files"), U8("picker_details")) > 0.5;
+}
+
+static int32_t picker_columns(const app_state_t *app) {
+    return picker_details(app) ? 1 : PICKER_COLUMNS;
+}
+
 /* A band above the path, the title bar's height, holding nothing to press:
    the floating title bar comes down over it, not over the path (owner,
    2026-10-09). With Windows' own title bar there is none. */
 static double picker_top(const app_state_t *app) {
     return app->frameless ? app->titlebar.height : 0.0;
+}
+
+/* Where the tiles or the rows begin, below the path, the places and — in
+   the details view — the columns' names. */
+static double picker_grid_top(const app_state_t *app, double dpi) {
+    return picker_top(app) + (PICKER_HEADER_HEIGHT + (picker_details(app) ? PICKER_DETAIL_HEAD : 0.0)) * dpi;
 }
 
 /* A chip in the path or the places bar, as wide as its label. */
@@ -3203,8 +3233,21 @@ static void favorite_rename_commit(app_state_t *app) {
         osd_say(app, U8("favourite renamed"));
     }
 }
-#define PICKER_ACTION_HEIGHT 96.0   /* two rows: the buttons, then what is picked */
+#define PICKER_ACTION_HEIGHT 76.0   /* two rows: the buttons, then what is picked */
 #define PICKER_BUTTON_ROW 48.0
+
+/* The view asked for and the window as it is now, put into the picker's
+   geometry: called before it is drawn, pressed or moved by a key, so a
+   window sized since, or the view changed, never leaves it stale. */
+static void picker_layout(app_state_t *app) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->picker.columns = picker_columns(app);
+    app->picker.tile_extent = (picker_details(app) ? PICKER_DETAIL_ROW : PICKER_TILE) * dpi;
+    app->picker.viewport_extent = (double)win_h - picker_grid_top(app, dpi) - PICKER_ACTION_HEIGHT * dpi;
+    rubraview_picker_scroll_by(&app->picker, 0.0);   /* inside what there is to scroll */
+}
 
 /* The buttons along the bottom of the picker (owner, 2026-09-23). The
    first three are modes and switches; the rest act on what is picked. */
@@ -3218,12 +3261,13 @@ typedef enum picker_button {
     PICKER_BTN_MOVE,
     PICKER_BTN_COPY,
     PICKER_BTN_CLEAR,
+    PICKER_BTN_VIEW,         /* D-110: tiles or details */
     PICKER_BTN_COUNT,
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
     "Individual", "Range", "Same type", "Change ext",
-    "Playlist", "Recycle", "Move to", "Copy to", "Clear",
+    "Playlist", "Recycle", "Move to", "Copy to", "Deselect all", "Details",
 };
 
 /* Where a button sits, in client coordinates. */
@@ -3255,6 +3299,7 @@ static void picker_tile_size(app_state_t *app, double *out_w, double *out_h) {
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     *out_w = (double)win_w / (double)PICKER_COLUMNS - 12.0 * dpi;
+    if (picker_details(app)) { *out_w = *out_h = (PICKER_DETAIL_ROW - 4.0) * dpi; return; }   /* a small square in the row */
     *out_h = app->picker.tile_extent - 12.0 * dpi;
 }
 
@@ -3688,7 +3733,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double tile = 160.0 * dpi;
+    double tile = PICKER_TILE * dpi;
 
     proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(pa, listing.count, sizeof(bool));
     app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
@@ -3706,6 +3751,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
                                           (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           PICKER_COLUMNS);
+    picker_layout(app);
     app->picker.selected = app->picker_selected;
     rubraview_picker_set_mode(&app->picker, mode);
     /* The focus starts on the first file: `..` and the folders are for
@@ -3863,7 +3909,7 @@ static void picker_button(app_state_t *app, picker_button_t button) {
     char line[128];
     /* A page inside a book is not a file: nothing here can pick, move,
        copy or recycle it. */
-    if (app->picker_in_book && button != PICKER_BTN_CLEAR) {
+    if (app->picker_in_book && button != PICKER_BTN_CLEAR && button != PICKER_BTN_VIEW) {
         osd_say(app, U8("inside a book: tap a page to go to it"));
         return;
     }
@@ -3913,6 +3959,21 @@ static void picker_button(app_state_t *app, picker_button_t button) {
             rubraview_picker_clear_selection(&app->picker);
             osd_say(app, U8("nothing picked"));
             break;
+        case PICKER_BTN_VIEW: {
+            bool details = !picker_details(app);
+            rubraview_settings_set(&app->settings, U8("files"), U8("picker_details"), details ? 1.0 : 0.0);
+            picker_layout(app);
+            rubraview_picker_reveal_focus(&app->picker);
+            /* The pictures are asked for again at the new shape. */
+            for (size_t i = 0; i < app->picker_thumb_count; ++i) {
+                if (app->picker_thumbs[i].texture) rubraview_pal_texture_destroy(app->picker_thumbs[i].texture);
+                app->picker_thumbs[i] = (struct picker_thumb){0};
+            }
+            app->picker_generation++;
+            if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
+            osd_say(app, details ? U8("details: a row a file") : U8("tiles"));
+            break;
+        }
         default:
             break;
     }
@@ -4065,6 +4126,26 @@ static void toolbox_refresh(app_state_t *app) {
 }
 
 /* "1x", "1.25x", "0.5x": two decimals, trailing zeros dropped. */
+static int speed_text(char *buffer, size_t size, double speed);
+
+/* The speed of what plays: a film or music, or an animation (D-82). */
+static void speed_set(app_state_t *app, double speed) {
+    if (speed < 0.25) speed = 0.25;
+    if (speed > 4.0) speed = 4.0;
+    app->media_speed = speed;
+    if (app->media) {
+        rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
+        rubraview_pal_audio_set_speed(speed);
+    } else {
+        app->animation.speed = speed;   /* D-82: the same ladder, and kept for the session as a film's is */
+    }
+    char line[32];
+    char text[16];
+    speed_text(text, sizeof(text), speed);
+    int n = snprintf(line, sizeof(line), "speed %s", text);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+}
+
 static int speed_text(char *buffer, size_t size, double speed) {
     int n = snprintf(buffer, size, "%.2f", speed);
     if (n <= 0 || (size_t)n >= size) return 0;
@@ -4790,6 +4871,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
         settings_took_effect(app);
         osd_say(app, on ? U8("no longer on top of other windows") : U8("always on top of other windows"));
+    } else if (rubraview_u8_eq_lit(action, "hide_boxes")) {
+        /* D-110: asked again (a key), they come back as a click brings them. */
+        chrome_hide(app, !app->chrome_hidden);
+        osd_say(app, app->chrome_hidden ? U8("hidden: click the picture to bring the title bar and the boxes back")
+                                        : U8("the title bar and the boxes are back"));
     } else if (rubraview_u8_eq_lit(action, "toggle_toolbox_pin")) {
         rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
         osd_say(app, app->toolbox.pinned ? U8("toolbox pinned open") : U8("toolbox unpinned"));
@@ -4988,25 +5074,13 @@ static void handle_action(app_state_t *app, u8str_t action) {
             static const double CYCLE[] = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
             size_t next = 0;
             for (size_t i = 0; i < 6; ++i) if (fabs(CYCLE[i] - speed) < 1e-6) next = (i + 1) % 6;
+            /* D-110: a speed the drag or the wheel left between the steps goes to 1x first. */
             speed = CYCLE[next];
         } else {
             bool up = rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "media_speed_up");
             speed += up ? 0.25 : -0.25;
         }
-        if (speed < 0.25) speed = 0.25;
-        if (speed > 4.0) speed = 4.0;
-        app->media_speed = speed;
-        if (app->media) {
-            rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
-            rubraview_pal_audio_set_speed(speed);
-        } else {
-            app->animation.speed = speed;   /* D-82: the same ladder, and kept for the session as a film's is */
-        }
-        char line[32];
-        char text[16];
-        speed_text(text, sizeof(text), speed);
-        int n = snprintf(line, sizeof(line), "speed %s", text);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        speed_set(app, speed);
     } else if (rubraview_u8_eq_lit(action, "media_ab_edit")) {
         ab_edit_begin(app);
     } else if ((app->media || anim_plays(app)) &&
@@ -5084,6 +5158,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
    context): letters jump, arrows move, Enter opens, Esc closes. */
 static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->picker_open) return false;
+    picker_layout(app);
+    size_t columns = (size_t)app->picker.columns;
 
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "L")) {
         picker_path_begin(app);
@@ -5131,13 +5207,13 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         return true;
     }
     if (combo.key_name.len == 4 && memcmp(combo.key_name.ptr, "Down", 4) == 0) {
-        app->picker.focus = (app->picker.focus + PICKER_COLUMNS < count)
-            ? app->picker.focus + PICKER_COLUMNS : count - 1;
+        app->picker.focus = (app->picker.focus + columns < count)
+            ? app->picker.focus + columns : count - 1;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
     if (combo.key_name.len == 2 && memcmp(combo.key_name.ptr, "Up", 2) == 0) {
-        app->picker.focus = (app->picker.focus >= PICKER_COLUMNS) ? app->picker.focus - PICKER_COLUMNS : 0;
+        app->picker.focus = (app->picker.focus >= columns) ? app->picker.focus - columns : 0;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
@@ -5793,6 +5869,7 @@ static void toolbox_window_pump(app_state_t *app) {
                 app->toolbox_window_pointer_y = event.mouse.y;
                 app->toolbox_window_drawn = 0.0;
                 if (app->seekfan_detached) seekfan_pointer(app, event.mouse.x, event.mouse.y);
+                speed_tile_move(app, event.mouse.y, true);
                 if (app->pagebar_dragging && app->pagebar_detached) pagebar_drag(app, event.mouse.x, false);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
@@ -5845,6 +5922,8 @@ static void toolbox_window_pump(app_state_t *app) {
                         app->seekfan_detached = true;
                         rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                                 toolbox_window_tile(app, &m, i));
+                    } else if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "media_speed_cycle")) {
+                        speed_tile_press(app, event.mouse.y, true);
                     } else if (enabled) {
                         handle_action(app, app->toolbox_tiles[i].action);
                     }
@@ -5861,6 +5940,7 @@ static void toolbox_window_pump(app_state_t *app) {
                 }
                 sub_tile_result(app, rubraview_tap_release(&app->sub_tap, rubraview_pal_time_now_seconds()));
                 seekfan_let_go(app);
+                speed_tile_release(app, true);
                 break;
             default:
                 break;
@@ -5980,6 +6060,19 @@ static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
     return rubraview_edgenav_hit(&nav, x, y, (double)w, (double)h);
 }
 
+/* D-110: the title bar and the floating boxes go away — the toolbox in a
+   window of its own too — until the picture is clicked. */
+static void chrome_hide(app_state_t *app, bool hide) {
+    if (app->chrome_hidden == hide) return;
+    app->chrome_hidden = hide;
+    if (hide) {
+        app->titlebar.shown = false;
+        app->titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
+    }
+    if (app->toolbox_window) rubraview_pal_window_set_visible(app->toolbox_window, !hide);
+    app->toolbox_window_drawn = 0.0;
+}
+
 /* §3.21.3: the titlebar's controls take precedence while it is shown,
    over the viewer and over the picker alike. True when it took the click. */
 static bool titlebar_click(app_state_t *app, double x, double y) {
@@ -5996,6 +6089,7 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
             rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
             return true;
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
+        case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window. */
             rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
@@ -6118,6 +6212,8 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
                 app->seekfan_detached = false;
                 rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                         rubraview_box_tile_rect(&app->toolbox, &metrics, tile));
+            } else if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "media_speed_cycle")) {
+                speed_tile_press(app, y, false);   /* D-110: a tap or a drag, known on release */
             } else if (enabled) {
                 handle_action(app, app->toolbox_tiles[tile].action);
             }
@@ -6205,6 +6301,40 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
     return false;
 }
 
+/* D-110: the speed tile. A tap goes round the usual speeds as before; held
+   and dragged up or down, or with the wheel over it, the speed moves a
+   tenth at a time. So the tap is decided when the button is let go. */
+static void speed_nudge(app_state_t *app, double base, int steps) {
+    double speed = floor((base + (double)steps * 0.1) * 10.0 + 0.5) / 10.0;
+    if (speed < 0.3) speed = 0.3;   /* whole tenths: 0.25 is the ladder's own */
+    if (fabs(speed - (app->media_speed > 0.0 ? app->media_speed : 1.0)) > 1e-6) speed_set(app, speed);
+}
+
+static void speed_tile_press(app_state_t *app, double y, bool detached) {
+    app->speed_pressed = true;
+    app->speed_dragged = false;
+    app->speed_press_detached = detached;
+    app->speed_press_y = y;
+    app->speed_press_base = app->media_speed > 0.0 ? app->media_speed : 1.0;
+}
+
+static void speed_tile_move(app_state_t *app, double y, bool detached) {
+    if (!app->speed_pressed || app->speed_press_detached != detached) return;
+    double step = 12.0 * rubraview_pal_window_dpi_scale(app->window);   /* a tenth every twelve pixels */
+    int steps = (int)((app->speed_press_y - y) / step);
+    if (steps == 0 && !app->speed_dragged) return;
+    app->speed_dragged = true;
+    speed_nudge(app, app->speed_press_base, steps);
+    app->toolbox_window_drawn = 0.0;
+}
+
+static void speed_tile_release(app_state_t *app, bool detached) {
+    if (!app->speed_pressed || app->speed_press_detached != detached) return;
+    app->speed_pressed = false;
+    if (!app->speed_dragged) handle_action(app, U8("media_speed_cycle"));
+    app->toolbox_window_drawn = 0.0;
+}
+
 /* D-109: the wheel over a zoom tile (the percent, Zoom+, Zoom-) is the zoom, a step a notch. */
 static bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches) {
     if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED || notches == 0.0) return false;
@@ -6214,6 +6344,10 @@ static bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches
     toolbox_refresh(app);
     if (tile >= app->toolbox_tile_count) return false;
     u8str_t action = app->toolbox_tiles[tile].action;
+    if (rubraview_u8_eq_lit(action, "media_speed_cycle") && (app->media || anim_plays(app))) {
+        speed_nudge(app, app->media_speed > 0.0 ? app->media_speed : 1.0, notches > 0.0 ? 1 : -1);   /* D-110 */
+        return true;
+    }
     if (!rubraview_u8_eq_lit(action, "zoom_cycle") && !rubraview_u8_eq_lit(action, "zoom_reset") &&
         !rubraview_u8_eq_lit(action, "zoom_in") && !rubraview_u8_eq_lit(action, "zoom_out")) return false;
     zoom_step(app, notches > 0.0);
@@ -6441,11 +6575,36 @@ static rubraview_interpolation_t page_interpolation(const app_state_t *app) {
 }
 
 static void draw_titlebar(app_state_t *app, double win_w);
+
+/* Where the details view's columns begin. */
+typedef struct picker_columns { double name_x, type_x, size_x, date_x; } picker_columns_t;
+
+static picker_columns_t picker_detail_columns(double win_w, double dpi) {
+    picker_columns_t c;
+    c.name_x = 10.0 * dpi;
+    c.date_x = win_w - 160.0 * dpi;
+    c.size_x = c.date_x - 110.0 * dpi;
+    c.type_x = c.size_x - 80.0 * dpi;
+    return c;
+}
+
+/* "2026-10-12 09:30", this machine's time; empty when there is none. */
+static size_t picker_date_text(char *buf, size_t cap, int64_t unix_seconds) {
+    buf[0] = '\0';
+    if (unix_seconds <= 0) return 0;
+    time_t t = (time_t)unix_seconds;
+    struct tm local;
+    if (localtime_s(&local, &t) != 0) return 0;
+    return strftime(buf, cap, "%Y-%m-%d %H:%M", &local);
+}
+
 static void draw_picker(app_state_t *app, double win_w, double win_h) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
     double top = picker_top(app);
-    double header_h = top + PICKER_HEADER_HEIGHT * dpi;
+    picker_layout(app);
+    bool details = picker_details(app);
+    double header_h = picker_grid_top(app, dpi);
     double action_h = PICKER_ACTION_HEIGHT * dpi;
 
     rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
@@ -6455,8 +6614,58 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
     double cell = app->picker.tile_extent;
     double cell_w = win_w / (double)PICKER_COLUMNS;
+    picker_columns_t cols = picker_detail_columns(win_w, dpi);
 
-    for (size_t i = 0; i < visible.count; ++i) {
+    for (size_t i = 0; details && i < visible.count; ++i) {
+        size_t index = visible.first + i;
+        if (index >= app->picker_listing.count) break;
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+        double y = header_h + (double)index * cell - app->picker.scroll_offset;
+        if (y + cell < header_h || y > win_h - action_h) continue;
+
+        rubraview_pal_rect_t row = { 4.0 * dpi, y, win_w - 8.0 * dpi, cell - 1.0 };
+        bool picked = app->picker_selected && app->picker_selected[index];
+        double font = 14.0 * dpi;
+        if (picked) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_CURRENT, 0.0);
+        else if (index % 2 == 1) rubraview_pal_render_fill_rect(app->renderer, row, 0x18FFFFFFu, 0.0);
+        if (index == app->picker.focus) rubraview_pal_render_stroke_rect(app->renderer, row, COLOR_TEXT, 1.0, 0.0);
+
+        /* A small picture where there is one, then the name. */
+        rubraview_texture_t *thumb = (app->picker_thumbs && index < app->picker_thumb_count)
+                                         ? app->picker_thumbs[index].texture : NULL;
+        double side = cell - 4.0 * dpi;
+        if (thumb) {
+            int32_t tw = 0, th = 0;
+            rubraview_pal_texture_size(thumb, &tw, &th);
+            if (tw > 0 && th > 0) {
+                rubraview_pal_render_draw_texture(app->renderer, thumb, rubraview_mat3x2_multiply(
+                    rubraview_mat3x2_scale(side / (double)tw, side / (double)th),
+                    rubraview_mat3x2_translate(cols.name_x, y + 2.0 * dpi)), RUBRAVIEW_INTERP_LINEAR);
+            }
+        }
+        char fit[512], cellbuf[48];
+        double name_x = cols.name_x + side + 8.0 * dpi;
+        rubraview_pal_rect_t name = { name_x, y, cols.type_x - name_x - 8.0 * dpi, cell };
+        rubraview_pal_render_draw_text(app->renderer, files_fit_text(fit, sizeof(fit), entry->name, name.width, font), name,
+                                       font, entry->is_directory ? 0xFFB8D8FFu : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        bool up = entry->is_directory && rubraview_u8_eq_lit(entry->name, "..");
+        size_t n = up ? 0 : rubraview_picker_type_text(cellbuf, sizeof(cellbuf), entry->name, entry->is_directory);
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
+                                       (rubraview_pal_rect_t){ cols.type_x, y, cols.size_x - cols.type_x, cell },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        /* A folder, a drive or a page of a book has no size or date to give. */
+        n = (entry->is_directory || (entry->size_bytes == 0 && entry->mtime == 0)) ? 0
+            : rubraview_picker_size_text(cellbuf, sizeof(cellbuf), entry->size_bytes);
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
+                                       (rubraview_pal_rect_t){ cols.size_x, y, cols.date_x - cols.size_x - 16.0 * dpi, cell },
+                                       font, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+        n = picker_date_text(cellbuf, sizeof(cellbuf), entry->mtime);
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
+                                       (rubraview_pal_rect_t){ cols.date_x, y, win_w - cols.date_x - 8.0 * dpi, cell },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    for (size_t i = 0; !details && i < visible.count; ++i) {
         size_t index = visible.first + i;
         if (index >= app->picker_listing.count) break;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
@@ -6511,6 +6720,20 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
        show through (seen on the VM, 2026-09-25). */
     rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, header_h };
     rubraview_pal_render_fill_rect(app->renderer, crumb_bar, 0xFF101010u, 0.0);
+    if (details) {
+        /* The columns' names, on the line the rows scroll under. */
+        double hy = header_h - PICKER_DETAIL_HEAD * dpi, hh = PICKER_DETAIL_HEAD * dpi, font = 13.0 * dpi;
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, hy, win_w, hh }, COLOR_BAR_FILL, 0.0);
+        rubraview_pal_render_draw_text(app->renderer, U8("Name"), (rubraview_pal_rect_t){ cols.name_x, hy, 200.0 * dpi, hh },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(app->renderer, U8("Type"), (rubraview_pal_rect_t){ cols.type_x, hy, cols.size_x - cols.type_x, hh },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(app->renderer, U8("Size"),
+                                       (rubraview_pal_rect_t){ cols.size_x, hy, cols.date_x - cols.size_x - 16.0 * dpi, hh },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_RIGHT);
+        rubraview_pal_render_draw_text(app->renderer, U8("Modified"), (rubraview_pal_rect_t){ cols.date_x, hy, win_w - cols.date_x, hh },
+                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+    }
     if (top > 0.0) {
         /* What this screen is, and nothing to press. */
         rubraview_pal_rect_t band = { 0.0, 0.0, win_w, top };
@@ -6591,7 +6814,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                    (b == PICKER_BTN_RANGE && app->picker.mode == RUBRAVIEW_PICK_RANGE);
         rubraview_pal_render_fill_rect(app->renderer, rect, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, rect, COLOR_BOX_BORDER, 1.0, 3.0);
-        rubraview_pal_render_draw_text(app->renderer, cstr(PICKER_BUTTON_LABEL[b]), rect,
+        const char *label = b == PICKER_BTN_VIEW && details ? "Tiles" : PICKER_BUTTON_LABEL[b];
+        rubraview_pal_render_draw_text(app->renderer, cstr(label), rect,
                                        rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     bar.y += PICKER_BUTTON_ROW * dpi;
@@ -6609,7 +6833,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
                                        (u8str_t){ .ptr = status, .len = (size_t)written },
-                                       bar, action_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+                                       bar, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* a status line's size (owner, 2026-10-12: it was 32) */
     }
 
     /* The picker covers the chrome: its text box and its messages are drawn here. */
@@ -7391,11 +7615,11 @@ static void draw_titlebar(app_state_t *app, double win_w) {
 
     /* The box rescue button was hit-tested but never drawn; now it shows. */
     static const rubraview_titlebar_button_t BUTTONS[] = {
-        RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN, RUBRAVIEW_TITLEBAR_RESIZE,
+        RUBRAVIEW_TITLEBAR_HIDE, RUBRAVIEW_TITLEBAR_SNAP_BOXES, RUBRAVIEW_TITLEBAR_PIN, RUBRAVIEW_TITLEBAR_RESIZE,
         RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE,
         RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_CLOSE,
     };
-    static const char *const GLYPHS[] = { "Box", "Pin", "Size", "_", "[]", "[ ]", "X" };
+    static const char *const GLYPHS[] = { "Hide", "Box", "Pin", "Size", "_", "[]", "[ ]", "X" };
     bool on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
     for (size_t i = 0; i < sizeof(BUTTONS) / sizeof(BUTTONS[0]); ++i) {
         rubraview_rect_t r = rubraview_titlebar_button_rect(&app->titlebar, BUTTONS[i], win_w);
@@ -7446,12 +7670,12 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     draw_edge_nav(app, win_w, win_h);
 
-    /* Floating boxes (§3.6). */
+    /* Floating boxes (§3.6); none while they are hidden (D-110). */
     toolbox_refresh(app);
-    if (app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
-    draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
+    if (!app->chrome_hidden && app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
+    if (!app->chrome_hidden) draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
 
-    if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
+    if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
         char crumb[128];
         u8str_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
         /* Beside the anchor, on its row: the grid is below or above it now. */
@@ -10606,6 +10830,27 @@ static int shell_remove(bool all_users) {
     return ok ? SHELL_DONE : SHELL_FAILED;
 }
 
+/* D-110: every entry of ours in Explorer, an older version's too: the file
+   types and the menu as Remove takes them (each extension given back), then
+   whatever is still there. The count removed by the sweep, or -1. */
+static int shell_wipe(bool all_users) {
+    (void)shell_remove(all_users);
+    return (int)rubraview_pal_shell_menu_wipe(all_users);
+}
+
+/* Settings › Explorer › Remove everything: this user's entries here, then
+   every user's through this program run again as an administrator. */
+static void shell_wipe_action(app_state_t *app) {
+    int mine = shell_wipe(false);
+    int code = SHELL_FAILED;
+    static const char ARGS[] = "--wipe-shell --all-users";
+    bool asked = rubraview_pal_shell_run_elevated((u8str_t){ .ptr = ARGS, .len = sizeof(ARGS) - 1 }, &code);
+    if (mine < 0) settings_say(app, "could not remove this user's entries");
+    else if (!asked) settings_say(app, "removed for this user; every user's entries need the administrator's permission, which was not given");
+    else if (code != SHELL_DONE) settings_say(app, "removed for this user; could not remove every user's entries");
+    else settings_say(app, "every Rubraview entry is out of Explorer's menu; register again for the ones wanted");
+}
+
 /* Settings › Explorer: the extensions switched on, for this user or —
    through this program run again as an administrator — for every user. */
 static void shell_types_action(app_state_t *app, u8str_t name) {
@@ -10730,6 +10975,8 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             if (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
                 rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all")) {
                 shell_types_action(app, node->name);
+            } else if (rubraview_u8_eq_lit(node->name, "shell.wipe")) {
+                shell_wipe_action(app);
             } else if (rubraview_u8_eq_lit(node->name, "shell.defaults")) {
                 rubraview_pal_shell_open_default_apps();
             } else if (rubraview_u8_eq_lit(node->name, "cache.clear_thumbs")) {
@@ -13206,7 +13453,7 @@ static void tick_timers(app_state_t *app, double dt) {
     /* Where the pointer is now, not where it last moved — the same reason
        as the boxes below: a pointer resting on the titlebar must keep it. */
     /* With Windows' own title bar (Settings › General › Frameless window off) ours stays away. */
-    if (app->frameless) rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
+    if (app->frameless && !app->chrome_hidden) rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
     else app->titlebar.shown = false;
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
@@ -13293,6 +13540,7 @@ static uint64_t scene_signature(const app_state_t *app) {
     }
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
+    SIG(&h, app->chrome_hidden); SIG(&h, (int64_t)app->picker.columns);
     SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge);
     SIG(&h, app->arc_job != NULL); SIG(&h, app->arc_ask);
     if (app->arc_job) SIG(&h, atomic_load(&app->arc_job->job.done));
@@ -15599,6 +15847,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
             /* §3.19.3, D-86: registering the file types and the menu is a job,
                not a launch. Without --types every extension is meant. */
+            if (cli.wipe_shell) {
+                /* D-110: this user's entries; with --all-users every user's, and the packages. */
+                int removed = shell_wipe(cli.shell_all_users);
+                console_line(removed < 0 ? "rubraview: could not remove the entries (every user's need an administrator)"
+                                         : "rubraview: every Rubraview entry is out of Explorer's menu");
+                free(memory);
+                CoUninitialize();
+                return removed < 0 ? SHELL_FAILED : SHELL_DONE;
+            }
             if (cli.register_shell || cli.unregister_shell) {
                 int code = SHELL_FAILED;
                 if (cli.register_shell) {
@@ -15836,6 +16093,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                     if (!app.seekfan_detached) seekfan_pointer(&app, event.mouse.x, event.mouse.y);
+                    speed_tile_move(&app, event.mouse.y, false);
                     if (app.view_pressed && !app.view_dragging) {
                         double slack = 4.0 * rubraview_pal_window_dpi_scale(app.window);
                         if (fabs(event.mouse.x - app.view_press_x) > slack || fabs(event.mouse.y - app.view_press_y) > slack) {
@@ -15908,7 +16166,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.pointer_inside = true;
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
-                    if (app.frameless) rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
+                    if (app.frameless && !app.chrome_hidden) rubraview_titlebar_pointer_moved(&app.titlebar, event.mouse.y);
                     if (rubraview_cursor_hide_notify_motion(&app.cursor)) {
                         rubraview_pal_window_set_cursor_visible(app.window, true);
                     }
@@ -15916,6 +16174,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                     /* §3.6: the box model decides what a pointer over
                        it means — only the hover half opens anything. */
+                    if (app.chrome_hidden) break;   /* D-110: nothing opens under the pointer */
                     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app.window));
                     rubraview_box_pointer(&app.toolbox, &metrics, event.mouse.x, event.mouse.y);
                     rubraview_box_pointer(&app.menubox, &metrics, event.mouse.x, event.mouse.y);
@@ -15924,11 +16183,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+                    if (app.chrome_hidden) {
+                        /* D-110: the click that brings the bar and the boxes back
+                           is only that — it turns no page and pauses nothing. */
+                        chrome_hide(&app, false);
+                        osd_say(&app, U8("the title bar and the boxes are back"));
+                        break;
+                    }
                     if (app.picker_open) {
                         double dpi = rubraview_pal_window_dpi_scale(app.window);
                         double top = picker_top(&app);
                         double crumb_h = top + PICKER_CRUMB_HEIGHT * dpi;
                         double header_h = top + PICKER_HEADER_HEIGHT * dpi;
+                        picker_layout(&app);
+                        double grid_top = picker_grid_top(&app, dpi);
 
                         if (titlebar_click(&app, event.mouse.x, event.mouse.y)) break;
                         if (event.mouse.y < top) break;   /* the band holds nothing to press */
@@ -15997,11 +16265,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             }
                             break;
                         }
-                        double cell_w = (double)pw / (double)PICKER_COLUMNS;
+                        if (event.mouse.y < grid_top) break;   /* the columns' names */
+                        size_t columns = (size_t)app.picker.columns;
+                        double cell_w = (double)pw / (double)columns;
                         size_t column = (size_t)(event.mouse.x / cell_w);
-                        size_t row = (size_t)((event.mouse.y - header_h + app.picker.scroll_offset) / app.picker.tile_extent);
-                        size_t index = row * PICKER_COLUMNS + column;
-                        if (column < PICKER_COLUMNS && index < app.picker_listing.count) {
+                        size_t row = (size_t)((event.mouse.y - grid_top + app.picker.scroll_offset) / app.picker.tile_extent);
+                        size_t index = row * columns + column;
+                        if (column < columns && index < app.picker_listing.count) {
                             app.picker.focus = index;
                             /* Right-click on an archive: inside it, not reading it yet. */
                             if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT && picker_enter_book(&app, index)) break;
@@ -16095,6 +16365,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     app.view_dragging = false;
                     sub_tile_result(&app, rubraview_tap_release(&app.sub_tap, rubraview_pal_time_now_seconds()));
                     seekfan_let_go(&app);
+                    speed_tile_release(&app, false);
                     app.titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
                     if (app.fav_press >= 0) {
                         size_t from = (size_t)app.fav_press;
@@ -16144,7 +16415,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
                     if (app.picker_open) {
-                        rubraview_picker_scroll_by(&app.picker, -event.mouse.wheel_delta * app.picker.tile_extent * 0.5);
+                        picker_layout(&app);
+                        rubraview_picker_scroll_by(&app.picker, -event.mouse.wheel_delta * app.picker.tile_extent *
+                                                                (picker_details(&app) ? 3.0 : 0.5));
                         break;
                     }
                     if (box_wheel_opacity(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta, event.mouse.modifiers)) break;

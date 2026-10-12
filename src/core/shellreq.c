@@ -406,3 +406,34 @@ bool rubraview_print_place(int32_t cell_x, int32_t cell_y, int32_t cell_w, int32
     out->dst_y += cell_y;
     return true;
 }
+
+static char entry_lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
+
+static bool entry_starts(u8str_t text, size_t at, const char *word) {
+    for (size_t i = 0; word[i]; ++i) {
+        if (at + i >= text.len || entry_lower(text.ptr[at + i]) != word[i]) return false;
+    }
+    return true;
+}
+
+bool rubraview_shell_entry_is_ours(u8str_t key_name, u8str_t command) {
+    if (entry_starts(key_name, 0, "rubraview")) return true;
+    /* The program: up to the closing quote, or to ".exe" when it has none. */
+    size_t start = 0, end = 0;
+    while (start < command.len && command.ptr[start] == ' ') start++;
+    if (start < command.len && command.ptr[start] == '"') {
+        start++;
+        end = start;
+        while (end < command.len && command.ptr[end] != '"') end++;
+    } else {
+        end = start;
+        while (end < command.len && !entry_starts(command, end, ".exe")) end++;
+        if (end < command.len) end += 4;
+    }
+    /* Its file name, after the last separator. */
+    size_t name = start;
+    for (size_t i = start; i < end; ++i) {
+        if (command.ptr[i] == '\\' || command.ptr[i] == '/') name = i + 1;
+    }
+    return end >= name + 13 && entry_starts(command, name, "rubraview") && entry_starts(command, end - 4, ".exe");
+}

@@ -54,6 +54,9 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
 
 typedef enum rubraview_titlebar_button {
     RUBRAVIEW_TITLEBAR_NONE = 0,
+    /* Left of the rescue button (owner, 2026-10-12): the title bar and the
+       floating boxes go away until the picture is clicked. */
+    RUBRAVIEW_TITLEBAR_HIDE,
     /* Leftmost of the icons (owner, 2026-09-10): puts both floating
        boxes back in their corners. It sits with the window controls
        because that is where a reader looks when something about the

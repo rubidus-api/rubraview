@@ -341,6 +341,234 @@ bool rubraview_pal_shell_menu_unregister(bool all_users) {
     return true;
 }
 
+/* ---- D-110: every trace, an older version's too ---- */
+
+#define WIPE_NAMES 256
+
+/* The names of the keys directly under `subkey`, as many as fit. */
+static DWORD child_names(HKEY root, const WCHAR *subkey, WCHAR names[][128], DWORD cap) {
+    HKEY key = NULL;
+    DWORD count = 0;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) return 0;
+    for (DWORD i = 0; count < cap; ++i) {
+        DWORD len = 128;
+        LONG got = RegEnumKeyExW(key, i, names[count], &len, NULL, NULL, NULL, NULL);
+        if (got == ERROR_NO_MORE_ITEMS) break;
+        if (got == ERROR_SUCCESS) count++;   /* a longer name is not one of ours */
+    }
+    RegCloseKey(key);
+    return count;
+}
+
+static bool wide_starts(const WCHAR *text, const WCHAR *lower_word) {
+    for (; *lower_word; ++text, ++lower_word) {
+        WCHAR c = *text >= L'A' && *text <= L'Z' ? (WCHAR)(*text - L'A' + L'a') : *text;
+        if (c != *lower_word) return false;
+    }
+    return true;
+}
+
+/* Is the verb `shell_key`\`verb` Rubraview's? By its name, or by what its
+   command starts. */
+static bool verb_is_ours(HKEY root, const WCHAR *shell_key, const WCHAR *verb) {
+    WCHAR sub[520], command[1024];
+    char name8[400], command8[3100];
+    if (wcslen(shell_key) + wcslen(verb) + 12 >= 520) return false;
+    wcscpy(sub, shell_key);
+    wcscat(sub, L"\\");
+    wcscat(sub, verb);
+    wcscat(sub, L"\\command");
+    command[0] = 0;
+    HKEY key = NULL;
+    if (RegOpenKeyExW(root, sub, 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        DWORD type = 0, size = sizeof(command) - sizeof(WCHAR);
+        if (RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)command, &size) == ERROR_SUCCESS &&
+            (type == REG_SZ || type == REG_EXPAND_SZ)) {
+            command[size / sizeof(WCHAR)] = 0;
+        } else {
+            command[0] = 0;
+        }
+        RegCloseKey(key);
+    }
+    int n = WideCharToMultiByte(CP_UTF8, 0, verb, -1, name8, sizeof(name8), NULL, NULL);
+    int c = WideCharToMultiByte(CP_UTF8, 0, command, -1, command8, sizeof(command8), NULL, NULL);
+    if (n <= 0) return false;
+    return rubraview_shell_entry_is_ours((u8str_t){ .ptr = name8, .len = (size_t)n - 1 },
+                                         (u8str_t){ .ptr = command8, .len = c > 0 ? (size_t)c - 1 : 0 });
+}
+
+/* An extension still pointing at a type of ours — one an older version
+   listed and this one does not, so Remove never came by: it goes back to
+   the program it had, as Remove gives one back, and we leave its "Open
+   with" list. 1 when something was ours. */
+static int32_t wipe_extension(HKEY root, const WCHAR *ext) {
+    WCHAR sub[300], value[128], was[128];
+    if (wcslen(ext) > 60) return 0;
+    wcscpy(sub, L"Software\\Classes\\");
+    wcscat(sub, ext);
+    HKEY key = NULL;
+    if (RegOpenKeyExW(root, sub, 0, KEY_READ | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return 0;
+    int32_t found = 0;
+    DWORD type = 0, size = sizeof(value) - sizeof(WCHAR);
+    value[0] = 0;
+    bool ours = RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)value, &size) == ERROR_SUCCESS && type == REG_SZ;
+    if (ours) value[size / sizeof(WCHAR)] = 0;
+    ours = ours && wide_starts(value, L"rubraview.");
+    size = sizeof(was) - sizeof(WCHAR);
+    was[0] = 0;
+    bool had = RegQueryValueExW(key, L"Rubraview.Was", NULL, &type, (BYTE*)was, &size) == ERROR_SUCCESS && type == REG_SZ;
+    if (had) was[size / sizeof(WCHAR)] = 0;
+    if (ours) {
+        if (had && was[0]) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((wcslen(was) + 1) * sizeof(WCHAR)));
+        else RegDeleteValueW(key, NULL);
+        found = 1;
+    }
+    if (had) { RegDeleteValueW(key, L"Rubraview.Was"); found = 1; }
+    RegCloseKey(key);
+
+    WCHAR with[340];
+    wcscpy(with, sub);
+    wcscat(with, L"\\OpenWithProgids");
+    HKEY open_with = NULL;
+    if (RegOpenKeyExW(root, with, 0, KEY_READ | KEY_SET_VALUE, &open_with) == ERROR_SUCCESS) {
+        for (DWORD i = 0;;) {
+            DWORD len = 128;
+            LONG got = RegEnumValueW(open_with, i, value, &len, NULL, NULL, NULL, NULL);
+            if (got == ERROR_NO_MORE_ITEMS) break;
+            if (got == ERROR_SUCCESS && wide_starts(value, L"rubraview.") && RegDeleteValueW(open_with, value) == ERROR_SUCCESS) {
+                found = 1;   /* the next value has this index now */
+            } else {
+                i++;
+            }
+        }
+        RegCloseKey(open_with);
+        if (found) delete_if_empty(root, with);
+    }
+    /* The extension's own key stays even when empty: the caller is walking the keys beside it. */
+    return found;
+}
+
+/* Our verbs under `owner`\shell go; the key itself too when `tidy` and
+   nothing is left in it. */
+static int32_t wipe_verbs(HKEY root, const WCHAR *owner, bool tidy) {
+    static WCHAR verbs[64][128];
+    WCHAR shell[400], sub[540];
+    int32_t removed = 0;
+    if (wcslen(owner) + 8 >= 400) return 0;
+    wcscpy(shell, owner);
+    wcscat(shell, L"\\shell");
+    DWORD count = child_names(root, shell, verbs, 64);
+    for (DWORD i = 0; i < count; ++i) {
+        if (!verb_is_ours(root, shell, verbs[i])) continue;
+        wcscpy(sub, shell);
+        wcscat(sub, L"\\");
+        wcscat(sub, verbs[i]);
+        if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
+    }
+    if (count > 0) delete_if_empty(root, shell);
+    if (tidy) delete_if_empty(root, owner);
+    return removed;
+}
+
+typedef LONG (WINAPI *packages_by_family_fn)(PCWSTR, UINT32*, PWSTR*, UINT32*, WCHAR*);
+
+/* Every package of the menu's family this user has, whatever its version. */
+static int32_t wipe_packages(void) {
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    packages_by_family_fn list = kernel ? (packages_by_family_fn)(void*)GetProcAddress(kernel, "GetPackagesByPackageFamily") : NULL;
+    if (!list) return 0;
+    UINT32 count = 0, chars = 0;
+    if (list(PACKAGE_FAMILY, &count, NULL, &chars, NULL) != ERROR_INSUFFICIENT_BUFFER || count == 0 || count > 32) return 0;
+    PWSTR *names = (PWSTR*)calloc(count, sizeof(PWSTR));
+    WCHAR *text = (WCHAR*)calloc(chars + 1, sizeof(WCHAR));
+    int32_t removed = 0;
+    if (names && text && list(PACKAGE_FAMILY, &count, names, &chars, text) == ERROR_SUCCESS) {
+        for (UINT32 i = 0; i < count; ++i) {
+            appx_job_t job = { .full_name = names[i], .family = PACKAGE_FAMILY, .machine = true, .remove = true };
+            if (SUCCEEDED(appx_run(&job))) removed++;
+        }
+    }
+    free(names);
+    free(text);
+    return removed;
+}
+
+int32_t rubraview_pal_shell_menu_wipe(bool all_users) {
+    static WCHAR names[WIPE_NAMES][128];
+    static const WCHAR *const EVERYWHERE[] = {
+        L"Software\\Classes\\*", L"Software\\Classes\\Directory", L"Software\\Classes\\Directory\\Background",
+        L"Software\\Classes\\Folder", L"Software\\Classes\\Drive", L"Software\\Classes\\AllFilesystemObjects",
+    };
+    WCHAR sub[400], ext[40];
+    if (all_users && !can_write_machine()) return -1;
+    HKEY root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+    int32_t removed = 0;
+
+    /* The menu on a file type, whoever opens it: any type, not only the ones this version knows. */
+    DWORD count = child_names(root, L"Software\\Classes\\SystemFileAssociations", names, WIPE_NAMES);
+    for (DWORD i = 0; i < count; ++i) {
+        wcscpy(sub, L"Software\\Classes\\SystemFileAssociations\\");
+        wcscat(sub, names[i]);
+        removed += wipe_verbs(root, sub, true);
+    }
+    for (size_t i = 0; i < sizeof(EVERYWHERE) / sizeof(EVERYWHERE[0]); ++i) removed += wipe_verbs(root, EVERYWHERE[i], false);
+    u8str_t every = rubraview_shell_extensions_all();
+    for (size_t at = 0; next_extension(every, &at, ext, NULL);) {
+        wcscpy(sub, L"Software\\Classes\\");
+        wcscat(sub, ext);
+        removed += wipe_verbs(root, sub, false);
+    }
+
+    /* A type of ours left by an older list of extensions, and the programs "Open with" lists by
+       their file's name (a download keeps its version in it). The types of this version's list
+       went with the file types, which gave each extension back first. */
+    HKEY classes = NULL;
+    if (RegOpenKeyExW(root, L"Software\\Classes", 0, KEY_READ, &classes) == ERROR_SUCCESS) {
+        count = 0;
+        for (DWORD i = 0; count < WIPE_NAMES; ++i) {
+            DWORD len = 128;
+            LONG got = RegEnumKeyExW(classes, i, names[count], &len, NULL, NULL, NULL, NULL);
+            if (got == ERROR_NO_MORE_ITEMS) break;
+            if (got != ERROR_SUCCESS) continue;
+            /* An extension this version no longer lists may still point at such a type. */
+            if (names[count][0] == L'.') removed += wipe_extension(root, names[count]);
+            else if (wide_starts(names[count], L"rubraview.")) count++;
+        }
+        RegCloseKey(classes);
+        for (DWORD i = 0; i < count; ++i) {
+            wcscpy(sub, L"Software\\Classes\\");
+            wcscat(sub, names[i]);
+            if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
+        }
+    }
+    count = child_names(root, L"Software\\Classes\\Applications", names, WIPE_NAMES);
+    for (DWORD i = 0; i < count; ++i) {
+        size_t len = wcslen(names[i]);
+        if (len < 13 || !wide_starts(names[i], L"rubraview") || !wide_starts(names[i] + len - 4, L".exe")) continue;
+        wcscpy(sub, L"Software\\Classes\\Applications\\");
+        wcscat(sub, names[i]);
+        if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
+    }
+
+    /* What the Windows 11 item reads, and the packages themselves. */
+    HKEY config = NULL;
+    if (RegOpenKeyExW(root, MENU_CONFIG, 0, KEY_READ, &config) == ERROR_SUCCESS) {
+        RegCloseKey(config);
+        if (RegDeleteTreeW(root, MENU_CONFIG) == ERROR_SUCCESS) removed++;
+    }
+    if (all_users) {
+        removed += wipe_packages();
+        HKEY key = NULL;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, MENU_ROOT, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+            RegDeleteValueW(key, PACKAGE_VALUE);
+            RegCloseKey(key);
+        }
+    }
+    delete_if_empty(root, MENU_ROOT);
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
+    return removed;
+}
+
 /* ---- printing ---- */
 
 /* `turns` quarter turns clockwise of 32-bit pixels into `dst`, which is

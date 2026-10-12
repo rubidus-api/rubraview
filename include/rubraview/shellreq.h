@@ -200,6 +200,16 @@ bool rubraview_print_place(int32_t cell_x, int32_t cell_y, int32_t cell_w, int32
                            int32_t dpi_x, int32_t dpi_y, int32_t picture_w, int32_t picture_h,
                            const rubraview_print_options_t *options, rubraview_print_placement_t *out);
 
+/**
+ * D-110: is a verb found under some `shell` key in the registry one of
+ * Rubraview's, this version's or an older one's? By its key name
+ * ("Rubraview", "Rubraview.open" and such) or by the program its command
+ * starts: a file named rubraview*.exe, whatever folder it is in. Letters in
+ * either case. A command that only passes a rubraview folder or file to
+ * another program is not ours.
+ */
+bool rubraview_shell_entry_is_ours(u8str_t key_name, u8str_t command);
+
 #ifdef __cplusplus
 }
 #endif

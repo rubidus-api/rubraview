@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.58** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.59** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.59/rubraview-v0.0.59.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.59/rubraview-v0.0.59.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -166,7 +166,7 @@ ships with, so it cannot drift from them.
 | Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
 | Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `1x` | The next playback speed |
+| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
@@ -205,6 +205,7 @@ ships with, so it cannot drift from them.
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |
+| Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |
 | Menu `80%` | The floating boxes 80 % opaque |
 | Menu `60%` | The floating boxes 60 % opaque |
@@ -277,6 +278,7 @@ ALZ, EGG) get the menu without becoming Rubraview's to open by double click.
 | `--recursive` (without `--batch`) | Subfolders are read into the same sequence |
 | `--new-instance`, `--new-window FILES...` | A window of its own whatever the settings say |
 | `--register-shell`, `--unregister-shell` | Makes Windows open files with Rubraview and puts Rubraview in Explorer's right-click menu, or takes that back. `--types=jpg,png,comics,...` (extensions, or `pictures`, `comics`, `video`, `music`, `archives`, `all`) for some only; `--no-types` / `--no-menu` leave one of the two as it is; `--all-users` from an administrator's prompt for every user (and Windows 11's own menu); `--setup` is the installer's (it ends with 0 when only Windows 11's menu could not be registered). The same is in Settings > Explorer |
+| `--wipe-shell` | Removes every Rubraview entry from Explorer's right-click menu and the file types, those an older version or another copy registered too. With `--all-users`, from an administrator's prompt, for every user. |
 | `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `FILES...` | What the right-click menu's items run: open; open in a new window; open only these; add to the open window's list; an archive's entries; the batch panel on these; print |
 | `--batch ...` | Converts many files without a window; the [manual](docs/manual/rubraview-manual.md) lists its options |
 | `--version` | The version |

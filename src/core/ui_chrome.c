@@ -118,6 +118,7 @@ bool rubraview_titlebar_tick(rubraview_titlebar_t *bar, double delta_seconds) {
    minimize, maximize/restore, fullscreen, close. */
 static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
     /* First in the order is leftmost on screen. */
+    RUBRAVIEW_TITLEBAR_HIDE,
     RUBRAVIEW_TITLEBAR_SNAP_BOXES,
     RUBRAVIEW_TITLEBAR_PIN,
     RUBRAVIEW_TITLEBAR_RESIZE,

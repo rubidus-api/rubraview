@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.58** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.58/rubraview-v0.0.58.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.59** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.59/rubraview-v0.0.59.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.59/rubraview-v0.0.59.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -165,7 +165,7 @@
 | 도구 상자 `Stop`, 메뉴 `Stop` | 정지하고 처음으로 |
 | 도구 상자 `Sub`, 메뉴 `On/off` | 자막 켜기/끄기 |
 | 도구 상자 `A-B` | A-B 반복: 여기서부터 → 여기까지 → 끄기 |
-| 도구 상자 `1x` | 다음 재생 속도 |
+| 도구 상자 `1x` | 다음 재생 속도. 위아래로 끌거나 버튼 위에서 휠을 돌리면 0.1x씩 |
 | 도구 상자 `EQ`, 메뉴 `Equaliser` | 이퀄라이저 다음 프리셋 |
 | 도구 상자 `EQ bands`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
@@ -204,6 +204,7 @@
 | 메뉴 `Slower` | 더 느리게 재생 |
 | 메뉴 `Faster` | 더 빠르게 재생 |
 | 메뉴 `Choose` | 목록에서 자막 고르기 |
+| 메뉴 `Hide all` | 화면을 클릭할 때까지 타이틀바와 플로팅 박스 숨기기 |
 | 메뉴 `100%` | 떠 있는 상자를 불투명하게 |
 | 메뉴 `80%` | 떠 있는 상자 불투명도 80% |
 | 메뉴 `60%` | 떠 있는 상자 불투명도 60% |
@@ -274,6 +275,7 @@ Windows 11 새 메뉴에도 들어갑니다(두 파일은 `rubraview.exe` 옆에
 | `--recursive` (`--batch` 없이) | 하위 폴더까지 한 목록으로 |
 | `--new-instance`, `--new-window 파일들...` | 설정과 상관없이 새 창 |
 | `--register-shell`, `--unregister-shell` | Windows가 파일을 Rubraview로 열게 하고 탐색기 우클릭 메뉴에 Rubraview를 넣거나, 되돌림. `--types=jpg,png,comics,...`(확장자, 또는 `pictures`, `comics`, `video`, `music`, `archives`, `all`)로 일부만, `--no-types` / `--no-menu`로 둘 중 하나는 그대로 두고, 관리자 프롬프트에서 `--all-users`로 모든 사용자용(Windows 11 새 메뉴 포함). `--setup`은 설치 파일이 쓰는 것(Windows 11 메뉴만 등록하지 못했을 때도 0으로 끝남). Settings > Explorer에도 같은 기능이 있음 |
+| `--wipe-shell` | 탐색기 우클릭 메뉴와 파일 형식에서 Rubraview 항목을 모두 지움. 구버전이나 다른 폴더의 사본이 등록한 것도 포함. 관리자 프롬프트에서 `--all-users`를 붙이면 모든 사용자 대상. |
 | `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert`, `--print` `파일들...` | 우클릭 메뉴 항목이 실행하는 것: 열기, 새 창에서 열기, 이것만 열기, 열린 창의 목록에 넣기, 압축 파일 내부 보기, 이 파일들로 배치 패널, 인쇄 |
 | `--batch ...` | 창 없이 여러 파일 변환. 옵션은 [설명서](docs/manual/rubraview-manual.md)에 |
 | `--version` | 버전 |

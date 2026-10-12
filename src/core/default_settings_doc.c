@@ -42,6 +42,7 @@ static const char *const PARTS[] = {
 "  action shell.register_all       \"Register for every user (administrator)\"\n"
 "  action shell.unregister         \"Remove for this user\"\n"
 "  action shell.unregister_all     \"Remove for every user (administrator)\"\n"
+"  action shell.wipe               \"Remove everything, older versions' too (administrator)\"\n"
 "  action shell.defaults           \"Open Windows' Default apps\"\n"
 "  note \"Registering makes Windows match the switches on this page.\"\n"
 "  note \"This user: the menu is under Show more options on Windows 11.\"\n"
@@ -113,6 +114,7 @@ static const char *const PARTS[] = {
 "  path   files.pattern            \"Only names like\"         wired\n"
 "  choice files.archive_codepage   \"Archive filenames\"       auto | utf8 | cp949 | shift_jis | gbk | big5 | cp1252 = auto wired\n"
 "  toggle files.comicinfo          \"Read ComicInfo.xml\"      = true wired\n"
+"  toggle files.picker_details     \"Open-file screen as a list with details\" = false wired\n"
 "  section \"Reading history\"\n"
 "  toggle files.reading_history    \"Remember the page\"       = true wired\n"
 "  toggle files.resume_prompt      \"Offer to resume\"         = true wired\n",

@@ -1,4 +1,5 @@
 #include "rubraview/picker.h"
+#include <stdio.h>
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
 #include <ctype.h>
@@ -367,4 +368,40 @@ size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, u8str_t p
     size_t hidden = listing->count - kept;
     listing->count = kept;
     return hidden;
+}
+
+size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
+    int n;
+    if (!buf || cap == 0) return 0;
+    if (bytes < 1024u) n = snprintf(buf, cap, "%u B", (unsigned)bytes);
+    else if (bytes < 1024u * 1024u) n = snprintf(buf, cap, "%.0f KB", (double)bytes / 1024.0);
+    else if (bytes < 1024ull * 1024ull * 1024ull) n = snprintf(buf, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+    else n = snprintf(buf, cap, "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    if (n <= 0 || (size_t)n >= cap) { buf[0] = '\0'; return 0; }
+    return (size_t)n;
+}
+
+size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_directory) {
+    if (!buf || cap == 0) return 0;
+    buf[0] = '\0';
+    const char *word = is_directory ? "Folder" : "File";
+    size_t dot = name.len;
+    for (size_t i = name.len; !is_directory && i-- > 1;) {
+        if (name.ptr[i] == '.') { dot = i; break; }
+        if (name.ptr[i] == '/' || name.ptr[i] == '\\') break;
+    }
+    size_t ext = dot < name.len ? name.len - dot - 1 : 0;
+    if (ext > 0 && ext <= 8 && ext < cap) {
+        for (size_t i = 0; i < ext; ++i) {
+            char c = name.ptr[dot + 1 + i];
+            buf[i] = c >= 'a' && c <= 'z' ? (char)(c - 'a' + 'A') : c;
+        }
+        buf[ext] = '\0';
+        return ext;
+    }
+    size_t n = 0;
+    while (word[n]) n++;
+    if (n >= cap) return 0;
+    for (size_t i = 0; i <= n; ++i) buf[i] = word[i];
+    return n;
 }

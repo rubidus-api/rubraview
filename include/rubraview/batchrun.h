@@ -47,6 +47,7 @@ typedef struct rubraview_cli_result {
     bool                batch_mode; /* --batch was given */
     bool                register_shell;    /* §3.19.3 --register-shell */
     bool                unregister_shell;  /* §3.19.3 --unregister-shell */
+    bool                wipe_shell;        /* D-110 --wipe-shell: every Rubraview entry of Explorer's menu, an older version's too */
     bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
     bool                shell_setup;       /* --setup: run by the installer (D-90): see rubraview_shell_setup_exit */
     u8str_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */

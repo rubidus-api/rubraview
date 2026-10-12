@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.58.exe              the viewer, as built
-dist/rubraview-v0.0.58/                 the release bundle
-dist/rubraview-v0.0.58.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.59.exe              the viewer, as built
+dist/rubraview-v0.0.59/                 the release bundle
+dist/rubraview-v0.0.59.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -143,6 +143,15 @@ Margin are dragged. The choices are kept (Settings › Files › Printing) and
 offered again the next time. A click outside the panel, or `Ctrl+P` again,
 closes it without printing. A page inside an archive is printed the same
 way.
+
+**Remove everything, older versions' too** on the same page is for a menu
+that shows Rubraview more than once: it takes out every Rubraview entry
+Explorer has — those of an older version, or of a copy in another folder,
+too — along with the file types, and asks for an administrator to do the
+same for every user. Other programs' entries stay. Press Register again
+afterwards for what you want back. From a command line it is
+`--wipe-shell` (`--wipe-shell --all-users` from an administrator's
+prompt).
 
 From a command line: `rubraview.exe --register-shell` and
 `--unregister-shell`; `--types=jpg,png,comics,...` (extensions, the kind
@@ -701,6 +710,11 @@ filename code page, the memory cap). Some worth knowing:
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
+**Hide**, the first of the title bar's buttons (also Show > Hide all in
+the menu), puts the title bar and the floating boxes away, so nothing
+comes up under the pointer. The next click anywhere in the window brings
+them back, and does nothing else. Settings is on the menu's first level.
+
 The file picker has a band across its top that holds nothing to press;
 pointing at the window's top edge brings the title bar down over it (the
 folder's path, and the window's buttons), as it does over a picture.
@@ -718,7 +732,10 @@ ext** gives all the picked files one extension you type, **Playlist**
 writes them as a playlist file beside themselves and opens them as one
 sequence, **Recycle** bins them (press it twice), **Move to** and **Copy
 to** send them to one of the numbered folders — press the number after
-the button — and **Clear** lets them all go. `Ctrl+Z` undoes any of it,
+the button — and **Deselect all** lets them all go. **Details** at the
+right end shows the files as a list — a row a file, with its type, size
+and date — and **Tiles** brings the pictures back (the same switch is in
+Settings > Files). `Ctrl+Z` undoes any of it,
 one file at a time. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
 
@@ -908,7 +925,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
 | Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `1x` | The next playback speed |
+| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
@@ -947,6 +964,7 @@ listed under a later heading only means that while that is on screen.
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |
+| Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |
 | Menu `80%` | The floating boxes 80 % opaque |
 | Menu `60%` | The floating boxes 60 % opaque |

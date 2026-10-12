@@ -223,16 +223,17 @@ static const char *const PARTS[] = {
 "  end\n"
 "  item toggle_info          \"Information\"\n"
 "  item toggle_playlist      \"Playlist\"\n"
-"  item rename_file          \"Rename\"\n"
-"  item delete_file          \"Delete\"\n"
-"  item reveal_in_explorer   \"Show in Explorer\"\n"
-"  item print                \"Print...\"\n"
 "  item toggle_file_list     \"File list window\"\n"
-"  item copy_to_folder       \"Copy to folder\"\n"
-"  item move_to_folder       \"Move to folder\"\n"
+"  menu \"This file\"\n"
+"    item rename_file        \"Rename\"\n"
+"    item delete_file        \"Delete\"\n"
+"    item reveal_in_explorer \"Show in Explorer\"\n"
+"    item copy_to_folder     \"Copy to folder\"\n"
+"    item move_to_folder     \"Move to folder\"\n"
+"  end\n"
+"  item print                \"Print...\"\n"
 "  item quick_export         \"Export\"\n"
 "  item open_batch           \"Batch\"\n"
-"  item open_settings        \"Settings\"\n"
 "  item quit                 \"Quit\"\n"
 "end\n"
 "menu \"View\"\n"
@@ -326,6 +327,7 @@ static const char *const PARTS[] = {
 "  item toggle_toolbox_pin     \"Pin toolbox\"\n"
 "  item toggle_toolbox_detach  \"Detach toolbox\"\n"
 "  item toggle_fullscreen      \"Fullscreen\"\n"
+"  item hide_boxes             \"Hide all\"\n"
 "  menu \"Opacity\"\n"
 "    item boxes_opacity_100    \"100%\"\n"
 "    item boxes_opacity_80     \"80%\"\n"
@@ -337,7 +339,8 @@ static const char *const PARTS[] = {
 "  item toggle_help            \"Shortcuts (F1)\"\n"
 "  item open_keys              \"Change keys\"\n"
 "  item about                  \"About\"\n"
-"end\n",
+"end\n"
+"item open_settings \"Settings\"\n",
 };
 
 static char g_document[16384];
