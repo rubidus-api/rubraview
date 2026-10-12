@@ -242,6 +242,17 @@ rubraview_media_failure_t rubraview_media_classify(bool readable, bool container
 u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure);
 
 /**
+ * The same, for a program with FFmpeg DLLs beside it that it could not
+ * take (`ffmpeg_refused`): "put FFmpeg beside the program" would be advice
+ * already followed, so the text names the version that is wanted.
+ */
+u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, bool ffmpeg_refused);
+
+/** What is said of a JPEG XL that could not be shown: by what is known of FFmpeg
+ * (`jxl_state` as rubraview_pal_ffmpeg_jxl_state gives it). */
+u8str_t rubraview_jxl_failure_text(int jxl_state, bool ffmpeg_refused);
+
+/**
  * When both backends fail, the more specific reason is the one worth
  * reporting: Media Foundation saying "HEVC without the extension" must
  * not be buried under FFmpeg saying it is not installed.

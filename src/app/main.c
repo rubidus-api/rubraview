@@ -2488,7 +2488,7 @@ static void media_prepare(app_state_t *app) {
         why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
     }
     if (!opened.media) {
-        osd_say(app, rubraview_media_failure_text(why));
+        osd_say(app, rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
         app->notice_seconds = MEDIA_NOTICE_SECONDS;   /* long enough to read the HEVC line */
         app->pages[index].failed = true;
         app->media_skip_pending = true;   /* D-9: say so, then move on */
@@ -10807,10 +10807,7 @@ static void page_failure_notice(app_state_t *app) {
     if (rubraview_path_has_ext(name, ".jxl")) {
         /* What is known of why: Windows' codec was tried first and is not
            there or refused; then the FFmpeg beside the program, if any. */
-        int ffmpeg = rubraview_pal_ffmpeg_jxl_state();
-        osd_say(app, ffmpeg == 2 ? U8("JPEG XL: this picture could not be read")
-                   : ffmpeg == 1 ? U8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)")
-                                 : U8("JPEG XL: no decoder for it in this Windows, and no FFmpeg beside the program"));
+        osd_say(app, rubraview_jxl_failure_text(rubraview_pal_ffmpeg_jxl_state(), rubraview_pal_ffmpeg_refused()));
     } else {
         osd_say(app, U8("this picture could not be read"));
     }
@@ -15374,7 +15371,9 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
-        : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
+        : rubraview_pal_ffmpeg_refused()
+            ? "FFmpeg: DLLs are beside the program but not 9.0 (avcodec-63): not loaded (Media Foundation alone)"
+            : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
     if (ffmpeg_here) {
         console_line(rubraview_pal_ffmpeg_jxl_state() == 2
             ? "FFmpeg: it has a JPEG XL decoder (libjxl) — .jxl pictures are read through it"

@@ -76,6 +76,13 @@ bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend);
 int rubraview_pal_ffmpeg_jxl_state(void);
 
 /**
+ * True when FFmpeg's DLLs lie beside the program and were not loaded —
+ * another version than this build takes — so a notice can say that
+ * instead of "no FFmpeg".
+ */
+bool rubraview_pal_ffmpeg_refused(void);
+
+/**
  * Decode the first frame of the JPEG XL in `data` as R, G, B, A (alpha not
  * multiplied in), upright, top row first. `room` is asked once for
  * width * height * 4 bytes when the size is known, and may refuse (NULL).

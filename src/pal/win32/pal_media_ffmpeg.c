@@ -229,6 +229,28 @@ static bool ff_load(void) {
 
 static bool ff_available(void) { return ff_load(); }
 
+/* FFmpeg's DLLs are beside the program and were not taken: another
+   version than the headers here know (the owner's VM, 2026-10-12: a set
+   of 8.x looked exactly like none at all). Looked for once. */
+bool rubraview_pal_ffmpeg_refused(void) {
+    static int state = -1;
+    if (ff_load()) return false;
+    if (state < 0) {
+        WCHAR path[MAX_PATH + 16];
+        DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
+        state = 0;
+        while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
+        if (n > 0 && n < MAX_PATH) {
+            static const WCHAR pattern[] = L"avcodec*.dll";
+            memcpy(path + n, pattern, sizeof(pattern));
+            WIN32_FIND_DATAW found;
+            HANDLE find = FindFirstFileW(path, &found);
+            if (find != INVALID_HANDLE_VALUE) { state = 1; FindClose(find); }
+        }
+    }
+    return state == 1;
+}
+
 /* ---- RV-110: one still picture, from memory ---- */
 
 typedef struct ff_bytes {

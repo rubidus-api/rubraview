@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.61.exe              the viewer, as built
-dist/rubraview-v0.0.61/                 the release bundle
-dist/rubraview-v0.0.61.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.62.exe              the viewer, as built
+dist/rubraview-v0.0.62/                 the release bundle
+dist/rubraview-v0.0.62.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -305,8 +305,9 @@ JPEG XL (`.jxl`) is read by Windows, when a JPEG XL codec is installed
 in it, or else by FFmpeg, when its DLLs are beside `rubraview.exe`
 (Settings > Video, "Adding FFmpeg") and were built with libjxl; without
 either a `.jxl` says what is missing. The DLLs must be FFmpeg 9.0's
-(`avcodec-63.dll` and its fellows): an older set is not loaded, and the
-program then behaves as if there were none. One that moves plays through
+(`avcodec-63.dll` and its fellows): an older set is not loaded, and a
+picture or a film that needed it says that the DLLs beside the program
+are another version. One that moves plays through
 FFmpeg, and is its first picture where only Windows' codec reads it.
 Neither kind is written. Both have their thumbnails — in a book too —
 whether or not Windows has a codec for them.
