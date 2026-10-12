@@ -241,16 +241,23 @@ rubraview_media_failure_t rubraview_media_classify(bool readable, bool container
  */
 u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure);
 
+/** FFmpeg DLLs beside the program that were not taken, and why. */
+typedef enum rubraview_ffmpeg_refusal {
+    RUBRAVIEW_FFMPEG_NOT_REFUSED = 0,   /* loaded, or none there */
+    RUBRAVIEW_FFMPEG_OTHER_VERSION,     /* an avcodec DLL, not this build's */
+    RUBRAVIEW_FFMPEG_NOT_WHOLE          /* this build's avcodec, and the set did not load */
+} rubraview_ffmpeg_refusal_t;
+
 /**
  * The same, for a program with FFmpeg DLLs beside it that it could not
- * take (`ffmpeg_refused`): "put FFmpeg beside the program" would be advice
- * already followed, so the text names the version that is wanted.
+ * take: "put FFmpeg beside the program" would be advice already followed,
+ * so the text names the version that is wanted, or that all five DLLs are.
  */
-u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, bool ffmpeg_refused);
+u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, rubraview_ffmpeg_refusal_t refusal);
 
 /** What is said of a JPEG XL that could not be shown: by what is known of FFmpeg
  * (`jxl_state` as rubraview_pal_ffmpeg_jxl_state gives it). */
-u8str_t rubraview_jxl_failure_text(int jxl_state, bool ffmpeg_refused);
+u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t refusal);
 
 /**
  * When both backends fail, the more specific reason is the one worth

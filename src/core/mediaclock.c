@@ -263,8 +263,21 @@ rubraview_media_failure_t rubraview_media_classify(bool readable, bool container
     return RUBRAVIEW_MEDIA_OPENED;
 }
 
-u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, bool ffmpeg_refused) {
-    if (!ffmpeg_refused) return rubraview_media_failure_text(failure);
+u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, rubraview_ffmpeg_refusal_t refusal) {
+    if (refusal == RUBRAVIEW_FFMPEG_NOT_REFUSED) return rubraview_media_failure_text(failure);
+    if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) {
+        switch (failure) {
+            case RUBRAVIEW_MEDIA_FAIL_CONTAINER:
+                return U8("cannot play this kind of file — the FFmpeg 9.0 DLLs beside rubraview could not be loaded (all five are needed)");
+            case RUBRAVIEW_MEDIA_FAIL_CODEC:
+                return U8("cannot decode this video — the FFmpeg 9.0 DLLs beside rubraview could not be loaded (all five are needed)");
+            case RUBRAVIEW_MEDIA_FAIL_HEVC:
+                return U8("HEVC video needs the \"HEVC Video Extensions\" ($0.99, Microsoft Store) "
+                          "or FFmpeg 9.0 DLLs — the ones beside rubraview could not be loaded (all five are needed)");
+            default:
+                return rubraview_media_failure_text(failure);
+        }
+    }
     switch (failure) {
         case RUBRAVIEW_MEDIA_FAIL_CONTAINER:
             return U8("cannot play this kind of file — the FFmpeg DLLs beside rubraview are not 9.0 (avcodec-63) and were not loaded");
@@ -278,10 +291,11 @@ u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, boo
     }
 }
 
-u8str_t rubraview_jxl_failure_text(int jxl_state, bool ffmpeg_refused) {
+u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t refusal) {
     if (jxl_state == 2) return U8("JPEG XL: this picture could not be read");
     if (jxl_state == 1) return U8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)");
-    if (ffmpeg_refused) return U8("JPEG XL: the FFmpeg DLLs beside the program are not 9.0 (avcodec-63) and were not loaded");
+    if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) return U8("JPEG XL: the FFmpeg 9.0 DLLs beside the program could not be loaded (all five are needed)");
+    if (refusal == RUBRAVIEW_FFMPEG_OTHER_VERSION) return U8("JPEG XL: the FFmpeg DLLs beside the program are not 9.0 (avcodec-63) and were not loaded");
     return U8("JPEG XL: no decoder for it in this Windows, and no FFmpeg beside the program");
 }
 

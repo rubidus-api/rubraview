@@ -15371,8 +15371,10 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
-        : rubraview_pal_ffmpeg_refused()
+        : rubraview_pal_ffmpeg_refused() == RUBRAVIEW_FFMPEG_OTHER_VERSION
             ? "FFmpeg: DLLs are beside the program but not 9.0 (avcodec-63): not loaded (Media Foundation alone)"
+        : rubraview_pal_ffmpeg_refused() == RUBRAVIEW_FFMPEG_NOT_WHOLE
+            ? "FFmpeg: avcodec-63.dll is beside the program but the set could not be loaded — avformat-63, avutil-61, swscale-10 and swresample-7 are needed with it (Media Foundation alone)"
             : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
     if (ffmpeg_here) {
         console_line(rubraview_pal_ffmpeg_jxl_state() == 2
@@ -15391,7 +15393,7 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
         const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) {
-            u8str_t why = rubraview_media_failure_text(opened.failure);
+            u8str_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
             snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.len, why.ptr);
             console_line(line);
             continue;

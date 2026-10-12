@@ -232,23 +232,27 @@ static bool ff_available(void) { return ff_load(); }
 /* FFmpeg's DLLs are beside the program and were not taken: another
    version than the headers here know (the owner's VM, 2026-10-12: a set
    of 8.x looked exactly like none at all). Looked for once. */
-bool rubraview_pal_ffmpeg_refused(void) {
+rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void) {
     static int state = -1;
-    if (ff_load()) return false;
+    if (ff_load()) return RUBRAVIEW_FFMPEG_NOT_REFUSED;
     if (state < 0) {
-        WCHAR path[MAX_PATH + 16];
+        WCHAR path[MAX_PATH + 32];
         DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
-        state = 0;
+        state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
         while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
         if (n > 0 && n < MAX_PATH) {
             static const WCHAR pattern[] = L"avcodec*.dll";
+            static const WCHAR ours[] = L"avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) L".dll";
             memcpy(path + n, pattern, sizeof(pattern));
             WIN32_FIND_DATAW found;
             HANDLE find = FindFirstFileW(path, &found);
-            if (find != INVALID_HANDLE_VALUE) { state = 1; FindClose(find); }
+            if (find != INVALID_HANDLE_VALUE) { state = RUBRAVIEW_FFMPEG_OTHER_VERSION; FindClose(find); }
+            memcpy(path + n, ours, sizeof(ours));
+            /* This build's own avcodec is there: one of its four fellows is not, or would not load. */
+            if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) state = RUBRAVIEW_FFMPEG_NOT_WHOLE;
         }
     }
-    return state == 1;
+    return (rubraview_ffmpeg_refusal_t)state;
 }
 
 /* ---- RV-110: one still picture, from memory ---- */
