@@ -6605,7 +6605,9 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         for (size_t i = 0; i < 7; ++i) {
             if (app->lyric_row_index[i] < 0 || !rubraview_rect_contains(app->lyric_row_rect[i], x, y)) continue;
             double t = rubraview_lyrics_time_of(&app->music_lyrics, app->lyric_row_index[i]);   /* -1 for untimed words */
-            if (t >= 0.0) { media_seek_to(app, t); app->media_position = t; }
+            if (t < 0.0) break;   /* words without times: the click is the song's, Play / Pause */
+            media_seek_to(app, t);
+            app->media_position = t;
             return true;
         }
     }
@@ -16642,7 +16644,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (!app.seekfan_detached) seekfan_pointer(&app, event.mouse.x, event.mouse.y);
                     speed_tile_move(&app, event.mouse.y, false);
                     if (app.view_pressed && !app.view_dragging) {
-                        double slack = 4.0 * rubraview_pal_window_dpi_scale(app.window);
+                        /* Owner, 2026-10-14: a click on a film or a song is Play / Pause, so a hand
+                           that moves a little while pressing is still a click — a film is dragged
+                           only past twelve pixels, and a song, which has nothing to drag, never. */
+                        double slack = (app.media ? 12.0 : 4.0) * rubraview_pal_window_dpi_scale(app.window);
+                        if (app.media && !app.media_info.has_video) slack = 1e9;
                         if (fabs(event.mouse.x - app.view_press_x) > slack || fabs(event.mouse.y - app.view_press_y) > slack) {
                             app.view_dragging = true;
                         }

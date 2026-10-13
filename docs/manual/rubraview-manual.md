@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.72.exe              the viewer, as built
-dist/rubraview-v0.0.72/                 the release bundle
-dist/rubraview-v0.0.72.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.73.exe              the viewer, as built
+dist/rubraview-v0.0.73/                 the release bundle
+dist/rubraview-v0.0.73.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -495,7 +495,10 @@ While it does:
   follows), `Ctrl+\` goes back to normal.
 - The toolbox's seek bar shows the time; click or drag on it to go
   somewhere else.
-- A click on the picture — or on the window, for music — pauses and plays.
+- A click on the picture — or on the window, for music — pauses and plays,
+  also when the hand moves a little while pressing; a film is dragged only
+  past twelve pixels. A line of timed words is the one place a click on a
+  song does something else: the song goes to that line.
   The wheel is the volume, 5 a notch (Settings > Video > **Wheel is the
   volume while playing**; with it off the wheel zooms a film). `Ctrl` and
   the wheel zoom, and a drag moves the picture.
@@ -572,6 +575,8 @@ file's name under it, then small icon buttons in groups — moving between
 files, playing, sound, size, turning and layout, files, the window — each
 group on a row of its own, and on more rows when it is longer than the
 strip is wide (the grip beside the pin sets how many buttons a row). A
+film's and a song's first row is Play / Pause, Stop, five seconds back and
+forward, then the file before and after. A
 long name takes two or three rows instead of being cut. Pointing at a
 button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
