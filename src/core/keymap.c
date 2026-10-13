@@ -105,9 +105,9 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
            had a name those bindings sat above the first section, and an
            older keymap.ini that still does that reads the same way. */
         u8str_t context = doc.entries[i].section;
-        if (context.len == 2 && memcmp(context.ptr, "ui", 2) == 0) context = (u8str_t){ .ptr = "", .len = 0 };
+        if (rubraview_u8_eq_lit(context, "ui")) context = (u8str_t){ .ptr = "", .len = 0 };
         /* D-16: [animation] became [media]; a keymap.ini saved before still loads. */
-        if (context.len == 9 && memcmp(context.ptr, "animation", 9) == 0) context = (u8str_t){ .ptr = "media", .len = 5 };
+        if (rubraview_u8_eq_lit(context, "animation")) context = (u8str_t){ .ptr = "media", .len = 5 };
         rubraview_key_binding_t binding = {
             .context = context,
             .action = doc.entries[i].key,
@@ -184,8 +184,8 @@ bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b)
 
 static bool in_base_layer(u8str_t context) {
     return context.len == 0 ||
-           (context.len == 10 && memcmp(context.ptr, "navigation", 10) == 0) ||
-           (context.len == 4 && memcmp(context.ptr, "view", 4) == 0);
+           (rubraview_u8_eq_lit(context, "navigation")) ||
+           (rubraview_u8_eq_lit(context, "view"));
 }
 
 bool rubraview_keymap_contexts_meet(u8str_t a, u8str_t b) {

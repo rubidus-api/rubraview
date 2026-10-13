@@ -91,7 +91,7 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t 
             if (GetObjectW(bitmap, sizeof(info), &info) && info.bmWidth > 0 && info.bmHeight > 0 &&
                 info.bmWidth <= 4096 && info.bmHeight <= 4096) {
                 int32_t w = info.bmWidth, h = info.bmHeight;
-                uint8_t *pixels = (uint8_t*)malloc((size_t)w * (size_t)h * 4u);
+                uint8_t *pixels = (uint8_t*)rubraview_malloc_product((size_t)w, (size_t)h, 4u);
                 BITMAPINFO bi = {0};
                 bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
                 bi.bmiHeader.biWidth = w;
@@ -145,7 +145,7 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
             SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter &&
             SUCCEEDED(IWICFormatConverter_Initialize(converter, (IWICBitmapSource*)scaler, &GUID_WICPixelFormat32bppBGRA,
                                                      WICBitmapDitherTypeNone, NULL, 0.0, WICBitmapPaletteTypeCustom))) {
-            uint8_t *pixels = (uint8_t*)malloc((size_t)sw * (size_t)sh * 4u);
+            uint8_t *pixels = (uint8_t*)rubraview_malloc_product((size_t)sw, (size_t)sh, 4u);
             if (pixels && SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, sw * 4u, sw * sh * 4u, pixels))) {
                 result = pixels;
                 pixels = NULL;

@@ -641,7 +641,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
             return false;
         }
         for (int i = 0; i < SLOT_COUNT; ++i) {
-            m->slots[i].pixels = (uint8_t*)malloc((size_t)width * (size_t)height * 4u);
+            m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)width, (size_t)height, 4u);
             if (!m->slots[i].pixels) {
                 IMFSourceReader_Release(reader);
                 fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
@@ -661,7 +661,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
         audio_channels = channels;
         size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
         if (decodable) {
-            m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+            m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
             if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
                 m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
             }
@@ -961,7 +961,7 @@ static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
     m->audio = NULL;
     free(m->pcm_storage);
     size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
-    m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+    m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
     if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
         m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
     }

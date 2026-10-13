@@ -200,7 +200,7 @@ rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, u8str_t set
     if (move_dir && move_dir->len > 0) curation.move_dir = *move_dir;
 
     const u8str_t *mode = rubraview_ini_get(&doc, U8("curation"), U8("curation_mode"));
-    if (mode && mode->len == 4 && memcmp(mode->ptr, "copy", 4) == 0) {
+    if (mode && rubraview_u8_eq_lit(*mode, "copy")) {
         curation.mode = RUBRAVIEW_CURATION_COPY;
     }
 

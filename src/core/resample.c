@@ -414,14 +414,14 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
     int32_t ww = x1 - x0, wh = y1 - y0;   /* the working window */
 
     const int taps = 6;
-    int32_t *xi = (int32_t*)malloc((size_t)dw * taps * sizeof(int32_t));
-    float *xw = (float*)malloc((size_t)dw * taps * sizeof(float));
-    int32_t *yi = (int32_t*)malloc((size_t)dh * taps * sizeof(int32_t));
-    float *yw = (float*)malloc((size_t)dh * taps * sizeof(float));
-    float *rows = (float*)malloc((size_t)sh * (size_t)ww * 4u * sizeof(float));   /* source rows, enlarged across */
-    float *up = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));     /* enlarged, echoes removed */
-    float *blur = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));
-    float *tmp = (float*)malloc((size_t)wh * (size_t)ww * 4u * sizeof(float));
+    int32_t *xi = (int32_t*)rubraview_malloc_product((size_t)dw, taps, sizeof(int32_t));
+    float *xw = (float*)rubraview_malloc_product((size_t)dw, taps, sizeof(float));
+    int32_t *yi = (int32_t*)rubraview_malloc_product((size_t)dh, taps, sizeof(int32_t));
+    float *yw = (float*)rubraview_malloc_product((size_t)dh, taps, sizeof(float));
+    float *rows = (float*)rubraview_malloc_product((size_t)sh, (size_t)ww, 4u * sizeof(float));   /* source rows, enlarged across */
+    float *up = (float*)rubraview_malloc_product((size_t)wh, (size_t)ww, 4u * sizeof(float));     /* enlarged, echoes removed */
+    float *blur = (float*)rubraview_malloc_product((size_t)wh, (size_t)ww, 4u * sizeof(float));
+    float *tmp = (float*)rubraview_malloc_product((size_t)wh, (size_t)ww, 4u * sizeof(float));
     float kernel[64];
     bool ok = xi && xw && yi && yw && rows && up && blur && tmp && reach < 32 &&
               rubraview_resample_axis_weights(RUBRAVIEW_FILTER_LANCZOS3, sw, dw, xi, xw) &&

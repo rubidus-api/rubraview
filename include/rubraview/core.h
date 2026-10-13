@@ -1,6 +1,7 @@
 #ifndef RUBRAVIEW_CORE_H
 #define RUBRAVIEW_CORE_H
 
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -84,6 +85,19 @@ static inline proven_result_mem_mut_t rubraview_arena_alloc_array(proven_arena_t
         return (proven_result_mem_mut_t){ .err = PROVEN_ERR_OVERFLOW };
     }
     return proven_arena_alloc(arena, bytes);
+}
+
+/*
+ * D-121: the same for memory from the heap — a decoder's thread, a buffer
+ * that outlives the frame. `a * b * c` bytes, or NULL when the product does
+ * not fit in a size (a picture's width and height come out of a file).
+ * Pass 1 for a factor that is not there.
+ */
+[[nodiscard]]
+static inline void *rubraview_malloc_product(proven_size_t a, proven_size_t b, proven_size_t c) {
+    proven_size_t bytes = 0;
+    if (PROVEN_CKD_MUL(&bytes, a, b) || PROVEN_CKD_MUL(&bytes, bytes, c)) return NULL;
+    return malloc(bytes);
 }
 
 typedef enum rubraview_pixel_format {

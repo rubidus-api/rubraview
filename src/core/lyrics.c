@@ -49,19 +49,19 @@ static bool lyric_push(proven_arena_t *arena, lyric_buf_t *b, rubraview_lyric_li
 /* `[mm:ss.xx]` — and the fraction may be two digits (hundredths) or
    three (milliseconds), which different tools write differently. */
 static bool parse_lrc_stamp(u8str_t s, double *out) {
-    long minutes = 0, seconds = 0;
+    int64_t minutes = 0, seconds = 0;
     double fraction = 0.0;
     size_t i = 0;
 
     while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
-        minutes = minutes * 10 + (s.ptr[i++] - '0');
+        minutes = rubraview_digit_append(minutes, s.ptr[i++]);
     }
     if (i == 0 || i >= s.len || s.ptr[i] != ':') return false;
     i++;
 
     size_t seconds_start = i;
     while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
-        seconds = seconds * 10 + (s.ptr[i++] - '0');
+        seconds = rubraview_digit_append(seconds, s.ptr[i++]);
     }
     if (i == seconds_start) return false;
 
@@ -230,14 +230,14 @@ static u8str_t quoted_or_rest(u8str_t s) {
  */
 static bool parse_cue_time(u8str_t s, double *out) {
     s = trim(s);
-    long parts[3] = {0, 0, 0};
+    int64_t parts[3] = {0, 0, 0};
     size_t part = 0;
-    long value = 0;
+    int64_t value = 0;
     bool any = false;
 
     for (size_t i = 0; i <= s.len; ++i) {
         char c = i < s.len ? s.ptr[i] : ':';
-        if (c >= '0' && c <= '9') { value = value * 10 + (c - '0'); any = true; continue; }
+        if (c >= '0' && c <= '9') { value = rubraview_digit_append(value, c); any = true; continue; }
         if (c != ':') return false;
         if (!any || part >= 3) return false;
         parts[part++] = value;
@@ -296,11 +296,11 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
             if (current >= track_count) break;
 
             u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
-            long number = 0;
+            int32_t number = 0;
             for (size_t i = 0; i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9'; ++i) {
-                number = number * 10 + (rest.ptr[i] - '0');
+                number = rubraview_digit_append_i32(number, rest.ptr[i]);
             }
-            tracks[current].number = (int32_t)number;
+            tracks[current].number = number;
             tracks[current].start_seconds = -1.0;
             current++;
             continue;
@@ -324,10 +324,10 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         if (rubraview_u8_starts_with_ci(line, "index ") && in_track && current > 0) {
             u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
 
-            long index_number = 0;
+            int64_t index_number = 0;
             size_t i = 0;
             while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') {
-                index_number = index_number * 10 + (rest.ptr[i++] - '0');
+                index_number = rubraview_digit_append(index_number, rest.ptr[i++]);
             }
 
             /* INDEX 00 is the pre-gap — the silence before the song.

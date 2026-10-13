@@ -172,8 +172,8 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                     int32_t sx0 = x - m < 0 ? 0 : x - m, sy0 = y - m < 0 ? 0 : y - m;
                     int32_t sx1 = x + w + m > pw ? pw : x + w + m, sy1 = y + h + m > ph ? ph : y + h + m;
                     int32_t sw = sx1 - sx0, sh = sy1 - sy0;
-                    uint8_t *part = (uint8_t*)malloc((size_t)sw * (size_t)sh * 4u);
-                    result.bgra = (uint8_t*)malloc((size_t)ow * (size_t)oh * 4u);
+                    uint8_t *part = (uint8_t*)rubraview_malloc_product((size_t)sw, (size_t)sh, 4u);
+                    result.bgra = (uint8_t*)rubraview_malloc_product((size_t)ow, (size_t)oh, 4u);
                     if (part && result.bgra &&
                         rubraview_wic_region_pbgra(factory, bytes, byte_count, exif, sx0, sy0, sw, sh, sw, sh,
                                                    part, (uint32_t)sw * 4u) &&
@@ -213,7 +213,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                 /* Full tiles are exactly TILE_SIDE out; only the last one
                    in the row may be narrower. */
                 band_w = (tx1 - tx0) * RUBRAVIEW_TILE_SIDE + bow;
-                band = (uint8_t*)malloc((size_t)band_w * (size_t)band_h * 4u);
+                band = (uint8_t*)rubraview_malloc_product((size_t)band_w, (size_t)band_h, 4u);
                 if (band && !rubraview_wic_region_pbgra(factory, bytes, byte_count, exif,
                                                         ax, ay, bx + bw - ax, ah, band_w, band_h,
                                                         band, (uint32_t)band_w * 4u)) {
@@ -226,7 +226,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                 rubraview_tile_result_t result = { .generation = generation, .key = work[j] };
                 int32_t x, y, w, h, ow, oh;
                 if (band && rubraview_tile_geometry(work[j], pw, ph, &x, &y, &w, &h, &ow, &oh)) {
-                    result.bgra = (uint8_t*)malloc((size_t)ow * (size_t)oh * 4u);
+                    result.bgra = (uint8_t*)rubraview_malloc_product((size_t)ow, (size_t)oh, 4u);
                     if (result.bgra) {
                         size_t left = (size_t)(work[j].tx - tx0) * RUBRAVIEW_TILE_SIDE * 4u;
                         for (int32_t r = 0; r < oh; ++r) {

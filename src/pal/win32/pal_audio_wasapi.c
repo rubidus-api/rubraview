@@ -273,7 +273,7 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
     /* Speed reads up to 4 file frames per device frame; one buffer's worth, read ahead. */
     rubraview_speed_resampler_t resampler = rubraview_speed_resampler_create(out->channels);
     size_t scratch_frames = (size_t)buffer_frames * 4u + 2u;
-    float *scratch = (float*)malloc(scratch_frames * out->channels * sizeof(float));
+    float *scratch = (float*)rubraview_malloc_product(scratch_frames, out->channels, sizeof(float));
     if (!scratch) return false;
     /* The equaliser, the gain and night mode, owned by this thread. */
     rubraview_audio_chain_t *chain = (rubraview_audio_chain_t*)malloc(sizeof(*chain));

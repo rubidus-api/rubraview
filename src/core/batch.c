@@ -81,9 +81,9 @@ u8str_t rubraview_batch_format_name(proven_arena_t *arena, u8str_t pattern, u8st
         const char *tok = pattern.ptr + i + 1;
         size_t tok_len = close - i - 1;
 
-        if (tok_len == 4 && memcmp(tok, "name", 4) == 0) {
+        if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "name")) {
             byte_buf_append_str(arena, &buf, name_stem);
-        } else if (tok_len == 3 && memcmp(tok, "ext", 3) == 0) {
+        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "ext")) {
             byte_buf_append_str(arena, &buf, ext_no_dot);
         } else if (tok_len == 1 && tok[0] == 'w') {
             char num[16];
@@ -93,7 +93,7 @@ u8str_t rubraview_batch_format_name(proven_arena_t *arena, u8str_t pattern, u8st
             char num[16];
             int n = snprintf(num, sizeof(num), "%d", height);
             if (n > 0) byte_buf_append(arena, &buf, num, (size_t)n);
-        } else if (tok_len == 4 && memcmp(tok, "date", 4) == 0) {
+        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "date")) {
             byte_buf_append_str(arena, &buf, date_str);
         } else {
             /* Unrecognized token: copy the whole "{...}" through unchanged. */

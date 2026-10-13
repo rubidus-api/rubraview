@@ -1,4 +1,5 @@
 #include "rubraview/comicinfo.h"
+#include "rubraview/number.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -19,7 +20,7 @@ static int32_t parse_int_or(u8str_t s, int32_t default_value) {
     int32_t result = 0;
     for (; i < s.len; ++i) {
         if (s.ptr[i] < '0' || s.ptr[i] > '9') return default_value;
-        result = result * 10 + (s.ptr[i] - '0');
+        result = rubraview_digit_append_i32(result, s.ptr[i]);
     }
     return neg ? -result : result;
 }
@@ -153,9 +154,9 @@ rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, u8str_t x
 
     u8str_t manga_raw;
     if (find_scalar_element(xml, "Manga", &manga_raw)) {
-        if (manga_raw.len == 17 && memcmp(manga_raw.ptr, "YesAndRightToLeft", 17) == 0) {
+        if (rubraview_u8_eq_lit(manga_raw, "YesAndRightToLeft")) {
             out.manga = RUBRAVIEW_MANGA_YES_RTL;
-        } else if (manga_raw.len == 3 && memcmp(manga_raw.ptr, "Yes", 3) == 0) {
+        } else if (rubraview_u8_eq_lit(manga_raw, "Yes")) {
             out.manga = RUBRAVIEW_MANGA_YES;
         } else {
             out.manga = RUBRAVIEW_MANGA_NO;

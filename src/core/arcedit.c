@@ -1,8 +1,10 @@
 #include "rubraview/arcedit.h"
 #include "rubraview/path.h"
 #include "fulta/arc.h"
+#include "proven/algorithm.h"
 #include "rubraview/pal/pal_fs.h"
 #include <stdio.h>
+#include <stdalign.h>
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,8 +234,13 @@ static bool verify(rubraview_arcedit_job_t *job, expect_t *want, size_t want_cou
     }
     if (ok && files != want_count) ok = false;
     if (ok) {
-        qsort(got, files, sizeof(expect_t), expect_cmp);
-        qsort(want, want_count, sizeof(expect_t), expect_cmp);
+        /* proven's introsort (D-32), the arrays only borrowed. */
+        proven_array_t got_view = { .data = (proven_byte_t *)got, .len = files, .cap = files,
+                                    .elem_size = sizeof(expect_t), .align = alignof(expect_t) };
+        proven_array_t want_view = { .data = (proven_byte_t *)want, .len = want_count, .cap = want_count,
+                                     .elem_size = sizeof(expect_t), .align = alignof(expect_t) };
+        proven_array_sort(&got_view, expect_cmp);
+        proven_array_sort(&want_view, expect_cmp);
         for (size_t i = 0; ok && i < files; ++i) {
             if (strcmp(got[i].name, want[i].name) != 0 || got[i].size != want[i].size) ok = false;
             else if (got[i].has_crc && want[i].has_crc && got[i].crc != want[i].crc) ok = false;

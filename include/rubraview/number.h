@@ -28,6 +28,24 @@ extern "C" {
 /* The whole view is one decimal integer that fits in int64_t. */
 [[nodiscard]] bool rubraview_parse_i64(u8str_t text, int64_t *out);
 
+/*
+ * One more decimal digit onto a number being read by hand (a time stamp's
+ * fields, a cue sheet's track number), through proven's checked arithmetic:
+ * a run of digits too long for the type stays at the type's largest value
+ * instead of overflowing, which for a signed type is undefined.
+ */
+static inline int64_t rubraview_digit_append(int64_t value, char digit) {
+    int64_t next = 0;
+    if (PROVEN_CKD_MUL(&next, value, (int64_t)10) || PROVEN_CKD_ADD(&next, next, (int64_t)(digit - '0'))) return INT64_MAX;
+    return next;
+}
+
+static inline int32_t rubraview_digit_append_i32(int32_t value, char digit) {
+    int32_t next = 0;
+    if (PROVEN_CKD_MUL(&next, value, (int32_t)10) || PROVEN_CKD_ADD(&next, next, (int32_t)(digit - '0'))) return INT32_MAX;
+    return next;
+}
+
 #ifdef __cplusplus
 }
 #endif

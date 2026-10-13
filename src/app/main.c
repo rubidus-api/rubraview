@@ -1253,7 +1253,7 @@ static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int
     if (n <= 0) return;
     u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), (u8str_t){ .ptr = file, .len = (size_t)n });
     /* The frame as the writer wants it: its own rows, alpha full. */
-    uint8_t *copy = (uint8_t*)malloc((size_t)width * 4u * (size_t)height);
+    uint8_t *copy = (uint8_t*)rubraview_malloc_product((size_t)width, 4u, (size_t)height);
     if (!copy) return;
     for (int32_t y = 0; y < height; ++y) {
         memcpy(copy + (size_t)y * (size_t)width * 4u, bgra + (size_t)y * stride, (size_t)width * 4u);
@@ -1429,7 +1429,7 @@ static void animation_prepare(app_state_t *app) {
     if (app->anim_reader) {
         free(mem);
         size_t whole = (size_t)canvas_w * (size_t)canvas_h * 4;
-        app->anim_buffers = (uint8_t*)malloc(whole * 3);
+        app->anim_buffers = (uint8_t*)rubraview_malloc_product(whole, 3, 1);
         if (!app->anim_buffers) { anim_close(app); return; }
         rubraview_frame_canvas_init(&app->anim_canvas, timed_frames, timed_count, canvas_w, canvas_h,
                                     app->anim_buffers, app->anim_buffers + whole, app->anim_buffers + whole * 2);
@@ -2018,7 +2018,7 @@ static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, i
     }
     if (!texture) {
         enum { SIDE = 512 };
-        uint32_t *pixels = (uint32_t*)malloc((size_t)SIDE * SIDE * 4u);
+        uint32_t *pixels = (uint32_t*)rubraview_malloc_product((size_t)SIDE, SIDE, 4u);
         if (pixels) {
             for (size_t k = 0; k < (size_t)SIDE * SIDE; ++k) pixels[k] = 0xFF262626u;
             texture = rubraview_pal_texture_create_bgra(app->renderer, SIDE, SIDE);
@@ -2203,10 +2203,6 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     }
 }
 
-static bool same_text(u8str_t a, u8str_t b) {
-    return a.len == b.len && (a.len == 0 || memcmp(a.ptr, b.ptr, a.len) == 0);
-}
-
 /* Shows one subtitle track, or none when `index` is -1. */
 /* The picture subtitles go with the film they belong to. */
 static void vobsub_clear(app_state_t *app) {
@@ -2272,7 +2268,7 @@ static void pgs_load(app_state_t *app, u8str_t sup_path) {
    track and for a picture one alike, since one offset moves them all. */
 static void subtitle_restore_offset(app_state_t *app) {
     if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
-        same_text(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
+        rubraview_u8_eq(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
         app->subtitle.offset_seconds = app->subtitle_offset_seconds;
     }
 }
@@ -2572,7 +2568,7 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
         if (app->frame_wanted && frame->width > 0 && frame->height > 0) {
             /* RV-108: a frame on the card is read back from the page's texture. */
             size_t stride = (size_t)page->width * 4u;
-            uint8_t *back = (uint8_t*)malloc(stride * (size_t)page->height);
+            uint8_t *back = (uint8_t*)rubraview_malloc_product(stride, (size_t)page->height, 1);
             if (back && rubraview_pal_texture_read_video(page->texture, back, stride)) {
                 frame_take(app, back, page->width, page->height, stride);
             } else {
@@ -4576,7 +4572,7 @@ static void list_apply(app_state_t *app, const size_t *order, size_t n, const ru
 /* The rows marked in `gone` leave the list; the files stay on the disk. */
 static void list_remove(app_state_t *app, const bool *gone) {
     size_t count = page_count(app), n = 0;
-    size_t *order = (size_t*)malloc((count ? count : 1) * sizeof(size_t));
+    size_t *order = (size_t*)rubraview_malloc_product((count ? count : 1), sizeof(size_t), 1);
     if (!order) return;
     for (size_t i = 0; i < count; ++i) if (!gone[i]) order[n++] = i;
     if (n == count) {
@@ -4594,7 +4590,7 @@ static void list_remove(app_state_t *app, const bool *gone) {
 /* The rows marked in `moving` go, together, before what is row `to`. */
 static void list_move(app_state_t *app, const bool *moving, size_t to) {
     size_t count = page_count(app);
-    size_t *order = (size_t*)malloc((count ? count : 1) * sizeof(size_t));
+    size_t *order = (size_t*)rubraview_malloc_product((count ? count : 1), sizeof(size_t), 1);
     if (!order) return;
     if (rubraview_list_move(order, count, moving, to)) list_apply(app, order, count, NULL, "the list's order changed");
     free(order);
@@ -4606,7 +4602,7 @@ static void list_insert_paths(app_state_t *app, const u8str_t *paths, size_t cou
     size_t have = page_count(app);
     if (to > have) to = have;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(rubraview_fs_entry_t));
-    size_t *order = (size_t*)malloc((have + count + 1) * sizeof(size_t));
+    size_t *order = (size_t*)rubraview_malloc_product((have + count + 1), sizeof(size_t), 1);
     if (!proven_is_ok(res.err) || !order) { free(order); return; }
     rubraview_fs_entry_t *added = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0, skipped = 0;
@@ -5537,37 +5533,37 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     size_t count = app->picker_listing.count;
     if (count == 0) { app->picker_open = false; return true; }
 
-    if (combo.key_name.len == 5 && memcmp(combo.key_name.ptr, "Right", 5) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Right")) {
         if (app->picker.focus + 1 < count) app->picker.focus++;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (combo.key_name.len == 4 && memcmp(combo.key_name.ptr, "Left", 4) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Left")) {
         if (app->picker.focus > 0) app->picker.focus--;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (combo.key_name.len == 4 && memcmp(combo.key_name.ptr, "Down", 4) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Down")) {
         app->picker.focus = (app->picker.focus + columns < count)
             ? app->picker.focus + columns : count - 1;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (combo.key_name.len == 2 && memcmp(combo.key_name.ptr, "Up", 2) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Up")) {
         app->picker.focus = (app->picker.focus >= columns) ? app->picker.focus - columns : 0;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (combo.key_name.len == 5 && memcmp(combo.key_name.ptr, "Enter", 5) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Enter")) {
         if ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && picker_enter_book(app, app->picker.focus)) return true;
         picker_activate(app, app->picker.focus);
         return true;
     }
-    if (combo.key_name.len == 6 && memcmp(combo.key_name.ptr, "Escape", 6) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Escape")) {
         app->picker_open = false;
         return true;
     }
-    if (combo.key_name.len == 9 && memcmp(combo.key_name.ptr, "Backspace", 9) == 0) {
+    if (rubraview_u8_eq_lit(combo.key_name, "Backspace")) {
         u8str_t parent = rubraview_picker_parent(app->picker_dir);
         if (parent.len > 0) {
             picker_navigate(app, parent);
@@ -9253,7 +9249,7 @@ static size_t shell_requests_pump(app_state_t *app) {
         bool whole = false;
         size_t count = 0;
         if (rubraview_shellreq_unpack(blob, len, &verb, &whole, NULL, 0, &count) && count > 0) {
-            u8str_t *paths = (u8str_t*)malloc(count * sizeof(u8str_t));
+            u8str_t *paths = (u8str_t*)rubraview_malloc_product(count, sizeof(u8str_t), 1);
             if (paths && rubraview_shellreq_unpack(blob, len, &verb, &whole, paths, count, &count)) {
                 /* A plain launch is one thing and is not waited on. */
                 shell_request_take(app, verb, whole || verb == RUBRAVIEW_SHELL_VERB_NONE, paths, count);
@@ -15418,7 +15414,7 @@ static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
     if (text.len == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
     const u8str_t *decoder = rubraview_ini_get(&doc, U8("video"), U8("decoder"));
-    return (decoder && decoder->len == 6 && memcmp(decoder->ptr, "ffmpeg", 6) == 0)
+    return (decoder && rubraview_u8_eq_lit(*decoder, "ffmpeg"))
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
 }
 

@@ -19,6 +19,7 @@
 #include <d3dcommon.h>
 #include <dxgi.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rubraview/pal/pal_gpu_resample.h"
@@ -144,8 +145,8 @@ static bool resize_locked(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst
     size_t dw = (size_t)dst->width, dh = (size_t)dst->height, sw = (size_t)src->width, sh = (size_t)src->height;
 
     bool ok = false;
-    int32_t *xi = malloc(sizeof(int32_t) * dw * (size_t)taps), *yi = malloc(sizeof(int32_t) * dh * (size_t)taps);
-    float *xw = malloc(sizeof(float) * dw * (size_t)taps), *yw = malloc(sizeof(float) * dh * (size_t)taps);
+    int32_t *xi = rubraview_malloc_product(sizeof(int32_t), dw, (size_t)taps), *yi = rubraview_malloc_product(sizeof(int32_t), dh, (size_t)taps);
+    float *xw = rubraview_malloc_product(sizeof(float), dw, (size_t)taps), *yw = rubraview_malloc_product(sizeof(float), dh, (size_t)taps);
     uint32_t *packed = malloc((size_t)src_bytes);
     ID3D11Buffer *b_src = NULL, *b_xi = NULL, *b_xw = NULL, *b_yi = NULL, *b_yw = NULL, *b_inter = NULL, *b_out = NULL, *b_read = NULL;
     ID3D11ShaderResourceView *v_src = NULL, *v_xi = NULL, *v_xw = NULL, *v_yi = NULL, *v_yw = NULL, *v_inter_in = NULL;
@@ -257,7 +258,7 @@ done:
     free(xi); free(yi); free(xw); free(yw); free(packed);
     if (!ok && g_device && ID3D11Device_GetDeviceRemovedReason(g_device) != S_OK) {
         release_all();   /* a lost card: no more tries this run */
-        strcpy(g_describe, "lost (the CPU resizes)");
+        snprintf(g_describe, sizeof(g_describe), "%s", "lost (the CPU resizes)");
         rubraview_resample_set_accel(NULL, NULL, 0);
     }
     return ok;
@@ -279,12 +280,12 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
     release_all();
     bool started = false;
     if (mode == RUBRAVIEW_GPU_RESIZE_OFF) {
-        strcpy(g_describe, "off");
+        snprintf(g_describe, sizeof(g_describe), "%s", "off");
         goto out;
     }
     HMODULE compiler = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     d3dcompile_fn compile_fn = compiler ? (d3dcompile_fn)(void*)GetProcAddress(compiler, "D3DCompile") : NULL;
-    if (!compile_fn) { strcpy(g_describe, "no shader compiler (d3dcompiler_47.dll)"); goto out; }
+    if (!compile_fn) { snprintf(g_describe, sizeof(g_describe), "%s", "no shader compiler (d3dcompiler_47.dll)"); goto out; }
 
     D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
     const char *kind = "hardware";
@@ -296,7 +297,7 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
                                &g_device, NULL, &g_context);
         kind = "WARP (software)";
     }
-    if (FAILED(hr) || !g_device) { g_device = NULL; g_context = NULL; strcpy(g_describe, "no card with compute shaders"); goto out; }
+    if (FAILED(hr) || !g_device) { g_device = NULL; g_context = NULL; snprintf(g_describe, sizeof(g_describe), "%s", "no card with compute shaders"); goto out; }
     /* Without a card, Windows still offers a "hardware" device: the Basic
        Render Driver, which runs on the CPU and is slower than resizing
        there directly (VM, 2026-09-25). `on` leaves it alone. */
@@ -315,7 +316,7 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
         if (basic) {
             if (mode != RUBRAVIEW_GPU_RESIZE_ALWAYS) {
                 release_all();
-                strcpy(g_describe, "no graphics card (Basic Render Driver): the CPU resizes");
+                snprintf(g_describe, sizeof(g_describe), "%s", "no graphics card (Basic Render Driver): the CPU resizes");
                 goto out;
             }
             kind = "Basic Render Driver (software)";
@@ -324,9 +325,9 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
     g_hpass = compile(compile_fn, "hpass");
     g_vpass = compile(compile_fn, "vpass");
     g_params = make_buffer(sizeof(params_t), D3D11_BIND_CONSTANT_BUFFER, 0, 0, D3D11_USAGE_DEFAULT, 0, NULL);
-    if (!g_hpass || !g_vpass || !g_params) { release_all(); strcpy(g_describe, "the shaders would not build"); goto out; }
+    if (!g_hpass || !g_vpass || !g_params) { release_all(); snprintf(g_describe, sizeof(g_describe), "%s", "the shaders would not build"); goto out; }
     rubraview_resample_set_accel(accel, NULL, mode == RUBRAVIEW_GPU_RESIZE_ALWAYS ? 0 : GPU_MIN_PIXELS_ON);
-    strcpy(g_describe, kind);
+    snprintf(g_describe, sizeof(g_describe), "%s", kind);
     started = true;
 out:
     LeaveCriticalSection(&g_lock);
@@ -338,7 +339,7 @@ void rubraview_pal_gpu_resample_stop(void) {
     EnterCriticalSection(&g_lock);
     rubraview_resample_set_accel(NULL, NULL, 0);
     release_all();
-    strcpy(g_describe, "stopped");
+    snprintf(g_describe, sizeof(g_describe), "%s", "stopped");
     LeaveCriticalSection(&g_lock);
 }
 

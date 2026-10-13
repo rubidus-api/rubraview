@@ -1468,7 +1468,7 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
     rubraview_exif_rect_to_stored(orientation, (int32_t)stored_w, (int32_t)stored_h, x, y, w, h, &rx, &ry, &rw, &rh);
     uint32_t piece_stride = (uint32_t)read_w * 4u;
     if (orientation != 1) {
-        piece = (uint8_t*)malloc((size_t)piece_stride * (size_t)read_h);
+        piece = (uint8_t*)rubraview_malloc_product((size_t)piece_stride, (size_t)read_h, 1);
         if (!piece) goto done;
     }
     x = rx; y = ry; w = rw; h = rh;

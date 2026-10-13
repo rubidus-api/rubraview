@@ -24,8 +24,8 @@ static bool all_digits(const char *p, size_t n) {
    TOML refuses a leading zero (`010`), so that stays a string — which is
    also what an INI reader saw. */
 static rubraview_ini_kind_t kind_of_bare(u8str_t v) {
-    if (v.len == 4 && memcmp(v.ptr, "true", 4) == 0) return RUBRAVIEW_INI_BOOL;
-    if (v.len == 5 && memcmp(v.ptr, "false", 5) == 0) return RUBRAVIEW_INI_BOOL;
+    if (rubraview_u8_eq_lit(v, "true")) return RUBRAVIEW_INI_BOOL;
+    if (rubraview_u8_eq_lit(v, "false")) return RUBRAVIEW_INI_BOOL;
 
     size_t i = 0;
     if (v.len > 0 && (v.ptr[0] == '-' || v.ptr[0] == '+')) i = 1;

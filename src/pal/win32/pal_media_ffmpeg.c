@@ -776,7 +776,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         m->width = par->width;
         m->height = par->height;
         for (int i = 0; i < SLOT_COUNT; ++i) {
-            m->slots[i].pixels = (uint8_t*)malloc((size_t)m->width * (size_t)m->height * 4u);
+            m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)m->width, (size_t)m->height, 4u);
             if (!m->slots[i].pixels) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
         }
     }
@@ -785,7 +785,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         bool ready = ff_open_audio_stream(m, d, m->audio_stream);
         if (ready) {
             size_t capacity = (size_t)m->audio_rate * m->audio_channels * PCM_RING_SECONDS;
-            m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+            m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
             if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
                 m->audio = rubraview_pal_audio_open(m->audio_rate, m->audio_channels, &m->pcm);
             }
@@ -892,7 +892,7 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
     if (!audio_matches_resampler(m, d)) return;
     /* Room for the frame at the device's rate, which may be the higher one. */
     int max_out = (int)((int64_t)d->frame->nb_samples * (int64_t)m->audio_rate / (d->swr_rate > 0 ? d->swr_rate : 1)) + 256;
-    float *converted = (float*)malloc((size_t)max_out * m->audio_channels * sizeof(float));
+    float *converted = (float*)rubraview_malloc_product((size_t)max_out, m->audio_channels, sizeof(float));
     if (!converted) return;
     uint8_t *out[1] = { (uint8_t*)(void*)converted };
     int frames = g_ff.swr_convert(d->swr, out, max_out, (const uint8_t *const*)d->frame->extended_data,
@@ -997,7 +997,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                     m->audio = NULL;
                     free(m->pcm_storage);
                     size_t capacity = (size_t)m->audio_rate * m->audio_channels * PCM_RING_SECONDS;
-                    m->pcm_storage = (float*)malloc(capacity * sizeof(float));
+                    m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
                     if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
                         m->audio = rubraview_pal_audio_open(m->audio_rate, m->audio_channels, &m->pcm);
                     }

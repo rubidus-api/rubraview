@@ -1,4 +1,5 @@
 #include "rubraview/vobsub.h"
+#include "rubraview/number.h"
 #include <string.h>
 
 /* ---- the index file ---- */
@@ -46,7 +47,7 @@ static bool parse_stamp(u8str_t text, double *out_seconds) {
     bool digits = false;
     for (; i <= text.len && found < 4; ++i) {
         char c = i < text.len ? text.ptr[i] : ':';
-        if (c >= '0' && c <= '9') { value = value * 10 + (c - '0'); digits = true; continue; }
+        if (c >= '0' && c <= '9') { value = rubraview_digit_append_i32(value, c); digits = true; continue; }
         if (c == ':' || c == '.' || c == ',') {
             if (!digits) return false;
             part[found++] = value;
@@ -305,9 +306,9 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
         if (line_starts(line, "size:", &rest)) {
             int32_t w = 0, h = 0;
             size_t i = 0;
-            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') w = w * 10 + (rest.ptr[i++] - '0');
+            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') w = rubraview_digit_append_i32(w, rest.ptr[i++]);
             while (i < rest.len && (rest.ptr[i] == 'x' || rest.ptr[i] == 'X' || rest.ptr[i] == ' ')) i++;
-            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') h = h * 10 + (rest.ptr[i++] - '0');
+            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') h = rubraview_digit_append_i32(h, rest.ptr[i++]);
             if (w > 0 && h > 0) { track.frame_width = w; track.frame_height = h; }
             continue;
         }

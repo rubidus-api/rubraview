@@ -1,4 +1,5 @@
 #include "rubraview/path.h"
+#include "rubraview/number.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -286,11 +287,11 @@ bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid) {
     if (memcmp(name.ptr, base.ptr, base.len) != 0 || name.ptr[base.len] != '.') return false;
     if (memcmp(name.ptr + name.len - 4, ".tmp", 4) != 0) return false;
     size_t at = base.len + 1, end = name.len - 4;
-    uint64_t pid = 0;
+    int64_t pid = 0;
     size_t digits = 0;
     for (; at < end && name.ptr[at] >= '0' && name.ptr[at] <= '9'; ++at, ++digits) {
-        pid = pid * 10 + (uint64_t)(name.ptr[at] - '0');
-        if (pid > 0xFFFFFFFFu) return false;
+        pid = rubraview_digit_append(pid, name.ptr[at]);
+        if (pid > 0xFFFFFFFFll) return false;
     }
     if (digits == 0 || at >= end || name.ptr[at] != '-') return false;
     size_t ticks = 0;

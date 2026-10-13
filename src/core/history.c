@@ -1,4 +1,5 @@
 #include "rubraview/history.h"
+#include "rubraview/number.h"
 #include "rubraview/path.h"
 #include <stdio.h>
 #include <string.h>
@@ -46,18 +47,18 @@ static void parse_position(u8str_t value, int32_t *out_page, int32_t *out_total,
         int64_t number = 0;
         bool any_digit = false;
         while (i < value.len && value.ptr[i] >= '0' && value.ptr[i] <= '9') {
-            number = number * 10 + (value.ptr[i] - '0');
+            number = rubraview_digit_append(number, value.ptr[i]);
             any_digit = true;
             i++;
         }
         if (!any_digit) continue;
         if (negative) number = -number;
 
-        if (key_len == 4 && memcmp(value.ptr + key_start, "page", 4) == 0) {
+        if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "page")) {
             *out_page = (int32_t)number;
-        } else if (key_len == 5 && memcmp(value.ptr + key_start, "total", 5) == 0) {
+        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "total")) {
             *out_total = (int32_t)number;
-        } else if (key_len == 4 && memcmp(value.ptr + key_start, "time", 4) == 0) {
+        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "time")) {
             *out_time = number;
         }
     }
@@ -68,7 +69,7 @@ static int64_t whole_number(u8str_t v) {
     size_t i = 0;
     bool negative = false;
     if (v.len > 0 && v.ptr[0] == '-') { negative = true; i = 1; }
-    for (; i < v.len && v.ptr[i] >= '0' && v.ptr[i] <= '9'; ++i) n = n * 10 + (v.ptr[i] - '0');
+    for (; i < v.len && v.ptr[i] >= '0' && v.ptr[i] <= '9'; ++i) n = rubraview_digit_append(n, v.ptr[i]);
     return negative ? -n : n;
 }
 
