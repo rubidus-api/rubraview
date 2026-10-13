@@ -63,6 +63,11 @@ typedef struct ff_media {
     rubraview_audio_out_t *audio;
 
     _Atomic bool quit, paused;
+    _Atomic int32_t audio_gain_millionths;  /* what the caller last asked of the device, for one opened later */
+    /* D-119: held exclusively by the decode thread while it exchanges the
+       device for one of another format (a track switch), shared by the
+       caller's thread around every use of `audio`. */
+    SRWLOCK audio_lock;
     _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;
     _Atomic uint64_t seek_generation, end_generation;
@@ -970,6 +975,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                 if (m->audio_rate != old_rate || m->audio_channels != old_channels) {
                     /* A different format is a different device and a
                        different ring; the old sound is dropped, not mixed. */
+                    AcquireSRWLockExclusive(&m->audio_lock);
                     rubraview_pal_audio_close(m->audio);
                     m->audio = NULL;
                     free(m->pcm_storage);
@@ -982,7 +988,14 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                         free(m->pcm_storage);
                         m->pcm_storage = NULL;
                         m->audio_stream = -1;
+                    } else {
+                        /* The new device is as the old one was left: it was
+                           opened silent and at full level, so a track of
+                           another format was not heard and its clock stood. */
+                        rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
+                        rubraview_pal_audio_set_playing(m->audio, !atomic_load_explicit(&m->paused, memory_order_acquire));
                     }
+                    ReleaseSRWLockExclusive(&m->audio_lock);
                 }
             }
         }
@@ -1086,6 +1099,10 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     if (!ff_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 
     ff_media_t *m = (ff_media_t*)calloc(1, sizeof(*m));
+    if (m) {
+        InitializeSRWLock(&m->audio_lock);
+        atomic_store_explicit(&m->audio_gain_millionths, 1000000, memory_order_release);
+    }
     if (!m) return NULL;
     memcpy(m->path, path.ptr, path.len);   /* FFmpeg takes UTF-8 paths on Windows */
     m->path[path.len] = '\0';
@@ -1159,20 +1176,29 @@ static bool ff_finished(void *handle) {
     if (!m) return true;
     rubraview_video_frame_t frame;
     if (ff_peek_frame(m, &frame)) return false;
-    return atomic_load_explicit(&m->end_generation, memory_order_acquire) == m->consumer_generation &&
-           rubraview_pal_audio_drained(m->audio);
+    if (atomic_load_explicit(&m->end_generation, memory_order_acquire) != m->consumer_generation) return false;
+    AcquireSRWLockShared(&m->audio_lock);
+    bool drained = rubraview_pal_audio_drained(m->audio);
+    ReleaseSRWLockShared(&m->audio_lock);
+    return drained;
 }
 
 static void ff_set_paused(void *handle, bool paused) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m) return;
+    AcquireSRWLockShared(&m->audio_lock);
     atomic_store_explicit(&m->paused, paused, memory_order_release);
     rubraview_pal_audio_set_playing(m->audio, !paused);
+    ReleaseSRWLockShared(&m->audio_lock);
 }
 
 static bool ff_audio_position(void *handle, double *out_position, double *out_wall) {
     ff_media_t *m = (ff_media_t*)handle;
-    return m && m->audio && rubraview_pal_audio_position(m->audio, out_position, out_wall);
+    if (!m) return false;
+    AcquireSRWLockShared(&m->audio_lock);
+    bool known = m->audio && rubraview_pal_audio_position(m->audio, out_position, out_wall);
+    ReleaseSRWLockShared(&m->audio_lock);
+    return known;
 }
 
 /* §3.16.1 / D-12: read one text subtitle stream out of the file and
@@ -1300,7 +1326,10 @@ static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int3
 static bool ff_select_audio_track(void *handle, int32_t stream_index) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || stream_index < 0) return false;
-    if (!m->audio || m->audio_stream < 0) return false;   /* nothing is being played */
+    AcquireSRWLockShared(&m->audio_lock);
+    bool silent = !m->audio || m->audio_stream < 0;
+    ReleaseSRWLockShared(&m->audio_lock);
+    if (silent) return false;   /* nothing is being played */
     if (stream_index == m->audio_stream) return true;
     bool known = false;
     for (size_t i = 0; i < m->tracks.count; ++i) {
@@ -1329,7 +1358,11 @@ static bool ff_tracks(void *handle, rubraview_track_set_t *out_set) {
 /* RV-075: this player's own level, so two tracks can cross over. */
 static void ff_set_gain(void *handle, double gain) {
     ff_media_t *m = (ff_media_t*)handle;
-    if (m) rubraview_pal_audio_set_gain(m->audio, gain);
+    if (!m) return;
+    AcquireSRWLockShared(&m->audio_lock);
+    atomic_store_explicit(&m->audio_gain_millionths, (int32_t)(gain * 1e6), memory_order_release);
+    rubraview_pal_audio_set_gain(m->audio, gain);
+    ReleaseSRWLockShared(&m->audio_lock);
 }
 
 static const rubraview_media_backend_api_t FFMPEG_API = {

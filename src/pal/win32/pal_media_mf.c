@@ -65,6 +65,12 @@ typedef struct mf_media {
     rubraview_pcm_ring_t pcm;
     float *pcm_storage;
     rubraview_audio_out_t *audio;           /* NULL: no sound (no device, or no audio stream) */
+    /* D-119: the decode thread closes the device and opens another when
+       the sound's format changes or another track is chosen. It holds this
+       exclusively for the whole exchange; the caller's thread holds it
+       shared around every use of `audio`. The device's own thread takes
+       neither, so nothing waits in a circle. */
+    SRWLOCK audio_lock;
     int32_t width, height;
     LONG default_stride;                    /* the negotiated type's stride; negative = bottom-up */
 
@@ -920,6 +926,7 @@ static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *
    different device format and a different ring size. The new device is
    put in the state the caller asked of the old one. On the decode thread. */
 static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
+    AcquireSRWLockExclusive(&m->audio_lock);
     rubraview_pal_audio_close(m->audio);
     m->audio = NULL;
     free(m->pcm_storage);
@@ -932,12 +939,14 @@ static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
         free(m->pcm_storage);
         m->pcm_storage = NULL;
         m->audio_stream = NO_STREAM;
+        ReleaseSRWLockExclusive(&m->audio_lock);
         return false;
     }
     m->audio_rate = rate;
     m->audio_channels = channels;
     rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
     rubraview_pal_audio_set_playing(m->audio, atomic_load_explicit(&m->audio_playing, memory_order_acquire));
+    ReleaseSRWLockExclusive(&m->audio_lock);
     return true;
 }
 
@@ -1271,6 +1280,7 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     if (!mf_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 
     mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
+    if (m) InitializeSRWLock(&m->audio_lock);
     if (!m) return NULL;
     if (gpu) m->gpu = *gpu;
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
@@ -1366,20 +1376,30 @@ static bool mf_finished(void *handle) {
     if (!media) return true;
     rubraview_video_frame_t frame;
     if (mf_peek_frame(media, &frame)) return false;
-    return atomic_load_explicit(&media->end_generation, memory_order_acquire) == media->consumer_generation &&
-           rubraview_pal_audio_drained(media->audio);
+    if (atomic_load_explicit(&media->end_generation, memory_order_acquire) != media->consumer_generation) return false;
+    AcquireSRWLockShared(&media->audio_lock);
+    bool drained = rubraview_pal_audio_drained(media->audio);
+    ReleaseSRWLockShared(&media->audio_lock);
+    return drained;
 }
 
 static void mf_set_paused(void *handle, bool paused) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
+    /* The wish is written inside the lock: a device opened meanwhile reads it after. */
+    AcquireSRWLockShared(&media->audio_lock);
     atomic_store_explicit(&media->audio_playing, !paused, memory_order_release);
     rubraview_pal_audio_set_playing(media->audio, !paused);
+    ReleaseSRWLockShared(&media->audio_lock);
 }
 
 static bool mf_audio_position(void *handle, double *out_position, double *out_wall) {
     mf_media_t *media = (mf_media_t*)handle;
-    return media && media->audio && rubraview_pal_audio_position(media->audio, out_position, out_wall);
+    if (!media) return false;
+    AcquireSRWLockShared(&media->audio_lock);
+    bool known = media->audio && rubraview_pal_audio_position(media->audio, out_position, out_wall);
+    ReleaseSRWLockShared(&media->audio_lock);
+    return known;
 }
 
 static bool mf_select_audio_track(void *handle, int32_t stream_index) {
@@ -1387,7 +1407,10 @@ static bool mf_select_audio_track(void *handle, int32_t stream_index) {
     if (!m || stream_index < 0) return false;
     /* Nothing is being played: there is no sound to switch (the VM has
        no audio device, and the stream was never even selected). */
-    if (!m->audio || m->audio_stream == NO_STREAM) return false;
+    AcquireSRWLockShared(&m->audio_lock);
+    bool silent = !m->audio || m->audio_stream == NO_STREAM;
+    ReleaseSRWLockShared(&m->audio_lock);
+    if (silent) return false;
     if ((DWORD)stream_index == m->audio_stream) return true;
     bool known = false;
     for (size_t i = 0; i < m->tracks.count; ++i) {
@@ -1418,8 +1441,10 @@ static bool mf_tracks(void *handle, rubraview_track_set_t *out_set) {
 static void mf_set_gain(void *handle, double gain) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
+    AcquireSRWLockShared(&media->audio_lock);
     atomic_store_explicit(&media->audio_gain_millionths, (int32_t)(gain * 1e6), memory_order_release);
     rubraview_pal_audio_set_gain(media->audio, gain);
+    ReleaseSRWLockShared(&media->audio_lock);
 }
 
 static const rubraview_media_backend_api_t MF_API = {
