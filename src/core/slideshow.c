@@ -1,5 +1,8 @@
 #include "rubraview/slideshow.h"
 
+#include <math.h>
+#include <stdio.h>
+
 static double dmax(double a, double b) { return a > b ? a : b; }
 
 static double clamp_interval(double seconds) {
@@ -22,6 +25,33 @@ rubraview_slideshow_t rubraview_slideshow_create(size_t item_count, double inter
 void rubraview_slideshow_set_interval(rubraview_slideshow_t *s, double seconds) {
     if (!s) return;
     s->interval_seconds = clamp_interval(seconds);
+}
+
+double rubraview_slideshow_interval_cycle(double seconds) {
+    static const double CYCLE[] = { 3.0, 5.0, 10.0, 1.0, 2.0 };
+    size_t count = sizeof(CYCLE) / sizeof(CYCLE[0]);
+    for (size_t i = 0; i < count; ++i) {
+        if (fabs(CYCLE[i] - seconds) < 1e-6) return CYCLE[(i + 1) % count];
+    }
+    return CYCLE[0];
+}
+
+double rubraview_slideshow_interval_nudge(double base_seconds, int steps) {
+    double seconds = floor((base_seconds + (double)steps * 0.5) * 2.0 + 0.5) / 2.0;
+    if (seconds < 0.5) seconds = 0.5;
+    return clamp_interval(seconds);
+}
+
+int rubraview_slideshow_interval_text(char *buffer, size_t size, double seconds) {
+    if (!buffer || size == 0) return 0;
+    int n = snprintf(buffer, size, "%.1f", seconds);
+    if (n <= 0 || (size_t)n >= size) return 0;
+    if (n >= 2 && buffer[n - 1] == '0' && buffer[n - 2] == '.') { n -= 2; buffer[n] = '\0'; }
+    if ((size_t)n + 2 >= size) return 0;
+    buffer[n++] = ' ';
+    buffer[n++] = 's';
+    buffer[n] = '\0';
+    return n;
 }
 
 void rubraview_slideshow_pause(rubraview_slideshow_t *s) {

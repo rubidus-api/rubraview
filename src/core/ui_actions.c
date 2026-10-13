@@ -190,6 +190,8 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
     };
     if (!f) return 0;
+    /* D-123: while the slide show runs its tile is the way to stop it. */
+    if (rubraview_u8_eq_lit(action, "toggle_slideshow") && f->slideshow) return 0xE71A;   /* Stop */
     if (rubraview_u8_eq_lit(action, "media_play_pause")) return f->playing ? 0xE769 : 0xE768;   /* Pause / Play */
     if (rubraview_u8_eq_lit(action, "media_mute")) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
     if (rubraview_u8_eq_lit(action, "toggle_fullscreen")) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */

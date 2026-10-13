@@ -29,7 +29,8 @@ extern "C" {
  *     end
  *
  * `toolbox <profile>` starts a profile; its `tile` lines follow, each an
- * action id and a caption. `menu "<label>"` opens a submenu, `end` closes
+ * action id and a caption; a `group` line between them starts a new group
+ * of tiles, drawn on rows of its own (D-124). `menu "<label>"` opens a submenu, `end` closes
  * it; menus nest. `item` is a leaf — at the top level too, for what must
  * be one tap away (Always on top). `recent` stands for the reading
  * history's entries, filled in when the menu is built. `when media` shows
@@ -42,6 +43,7 @@ extern "C" {
 typedef struct rubraview_box_tile {
     u8str_t action;
     u8str_t caption;
+    int32_t group;        /* D-124: which group of its profile, from 0; a `group` line starts the next */
 } rubraview_box_tile_t;
 
 typedef struct rubraview_toolbox_profile {

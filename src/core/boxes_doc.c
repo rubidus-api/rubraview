@@ -10,6 +10,7 @@ typedef struct box_parser {
     rubraview_boxes_doc_t *doc;
     uint32_t line;
     int32_t profile;       /* the toolbox profile tiles go to, or -1 */
+    int32_t group;         /* the group the profile's next tile goes to (D-124) */
     int32_t open_menu;     /* the innermost open menu node, or -1 */
 } box_parser_t;
 
@@ -77,9 +78,17 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
             }
         }
         p->profile = (int32_t)p->doc->profile_count;
+        p->group = 0;
         p->doc->profiles[p->doc->profile_count++] = (rubraview_toolbox_profile_t){
             .name = second, .first_tile = (int32_t)p->doc->tile_count, .tile_count = 0,
         };
+        return true;
+    }
+    if (rubraview_u8_eq_lit(word, "group")) {
+        if (p->profile < 0) return box_fail(p, "a `group` before any `toolbox`");
+        /* A group with no tile yet is not counted: two `group` lines are one. */
+        const rubraview_toolbox_profile_t *profile = &p->doc->profiles[p->profile];
+        if (profile->tile_count > 0 && p->doc->tiles[p->doc->tile_count - 1].group == p->group) p->group++;
         return true;
     }
     if (rubraview_u8_eq_lit(word, "tile")) {
@@ -89,7 +98,7 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         rubraview_toolbox_profile_t *profile = &p->doc->profiles[p->profile];
         if (profile->tile_count >= RUBRAVIEW_TOOLBOX_MAX_TILES) return box_fail(p, "too many tiles in one toolbox profile");
         if (p->doc->tile_count >= RUBRAVIEW_BOXES_MAX_TILES) return box_fail(p, "too many tiles");
-        p->doc->tiles[p->doc->tile_count++] = (rubraview_box_tile_t){ .action = second, .caption = third };
+        p->doc->tiles[p->doc->tile_count++] = (rubraview_box_tile_t){ .action = second, .caption = third, .group = p->group };
         profile->tile_count++;
     } else if (rubraview_u8_eq_lit(word, "menu")) {
         p->profile = -1;

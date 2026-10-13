@@ -1130,3 +1130,23 @@ Do not store credentials, private infrastructure details, personal data, private
   - The file types are in the package's manifest because a packaged program's own registration (`--register-shell`) is written to the package's private registry, which Explorer does not read. `scripts/check-store.py` (in `project-check.sh`) fails when the source's list and `rubraview_shell_extensions()` differ.
 - Not in this package (RV-113): Windows 11's own right-click menu (the menu DLL reads its items, with the program's full path, from a registry key the registration writes; a package needs them some other way, and a class id of its own beside the installed viewer's); the program does not know it is packaged, so Settings > Explorer still offers a registration that has no effect there; FFmpeg's DLLs.
 - Consequences: three ways to get the viewer (zip or exe, MSI, Store). Whether Partner Center accepts the package is known only after an upload.
+
+## D-123: The Slide Show's Stop And Delay In The Toolbox (2026-10-14)
+
+- Context: the owner asked for a stop button while a slide show runs, and for the delay between slides to be set where a film's speed is, with the wheel over the button. The slide show's own tile was there ("Stop slides") but drew the slide-show sign, which does not say "stop"; the delay had keys only (`[`, `]`).
+- Decision:
+  - While the slide show runs its tile draws the stop sign (`rubraview_action_icon`).
+  - A second tile in the `slideshow` profile, `interval_cycle`, whose face is the delay ("3 s", "2.5 s"). The wheel over it, or a drag up or down, moves the delay half a second a step, from half a second up; a tap goes round 1, 2, 3, 5 and 10 seconds (a delay that is none of them goes to 3 first). It is handled as the speed tile is (D-110): the tap is decided on release.
+  - The profile's speed tile (`media_speed_cycle`) is left out while the slide show runs: the delay stands for it. A film's speed keys still work.
+  - Every change of the delay, by key too, is said on screen ("slide delay 3.5 s").
+- Consequences: the delay is still the session's (3 s at start), not a setting.
+
+## D-124: The Toolbox Strip In Groups, The Name On Several Rows (2026-10-14)
+
+- Context: the owner: the strip is to show its parts in order — the bar, the file's name on one row or several, then the icons a group a row, wrapped onto more rows where the strip is narrow. It was one run of up to forty buttons, eight a row, and a long name was cut.
+- Decision:
+  - A `group` line in the boxes document starts a new group in a toolbox profile; a tile carries its group. The built-in profiles are grouped: moving between files; playing; sound; size (zoom and fit); turning, layout and the slide show; files; the window. The slide show's two tiles are a group in front.
+  - `rubraview_toolbox_layout_shaped`: each group starts a row and goes on to more rows when it is longer than the strip's columns (the grip's setting), with half a gutter more between two groups. The old `rubraview_toolbox_layout` is the same with one group.
+  - The name takes one to three rows, measured as it is drawn (`strip_title_plan`, kept until the name, the width or the place's length changes). The place or the time stays at the right of the name's row when both fit; otherwise it has the last row to itself.
+- Consequences: the strip is taller (a film's: six rows of buttons where it had four) and its buttons moved; within a group the order is the old one, but for the file group, which starts with Open and Info. A tile whose caption shows while pointed at keeps the name's rows, so the box does not jump.
+- Not run: the detached toolbox window with a name of several rows (it uses the same layout and follows its size).

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.70.exe              the viewer, as built
-dist/rubraview-v0.0.70/                 the release bundle
-dist/rubraview-v0.0.70.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.71.exe              the viewer, as built
+dist/rubraview-v0.0.71/                 the release bundle
+dist/rubraview-v0.0.71.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -240,7 +240,11 @@ opens with Settings › Files › Archive filenames again.
 
 A page turn fades the old page into the new one for a quarter of a
 second. While a slide show runs, the pointer goes away after a second and
-a half of stillness and comes back when it moves. The mouse's back and
+a half of stillness and comes back when it moves. The toolbox then starts
+with a stop button and the delay between slides ("3 s") where a film's
+speed button would be: turn the wheel over it, or hold it and drag up or
+down, and the delay moves half a second; a tap goes round 1, 2, 3, 5 and
+10 seconds. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 `Shift` and the wheel go ten pages; on a touch screen two fingers move
 the picture and a pinch zooms it. (README has the whole table, under
@@ -564,12 +568,16 @@ edge. While a box is open, a pin appears beside its anchor: it says
 whether the box stays open when the pointer leaves — click it to switch.
 
 The toolbox is a strip: the seek bar (click or drag to go there) with the
-file's name under it, then small icon buttons — previous and next file,
-back and forward 5 s, play or pause, stop, volume, and so on. Pointing at a
+file's name under it, then small icon buttons in groups — moving between
+files, playing, sound, size, turning and layout, files, the window — each
+group on a row of its own, and on more rows when it is longer than the
+strip is wide (the grip beside the pin sets how many buttons a row). A
+long name takes two or three rows instead of being cut. Pointing at a
 button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
 for a picture, with its place in the folder or archive (`4 / 6`), and the
-bar is a page bar. The seek bar is only in the toolbox; the information
+bar is a page bar; where the name needs the whole width, that goes on a
+row of its own under it. The seek bar is only in the toolbox; the information
 bar (`Shift+I`, off until asked for) keeps the picture's size and the zoom.
 
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
@@ -956,14 +964,15 @@ listed under a later heading only means that while that is on screen.
 | Where | What it does |
 |---|---|
 | Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
-| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
+| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |

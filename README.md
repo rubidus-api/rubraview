@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.70** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.70/rubraview-v0.0.70.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.70/rubraview-v0.0.70.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.71** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.71/rubraview-v0.0.71.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.71/rubraview-v0.0.71.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -164,14 +164,15 @@ ships with, so it cannot drift from them.
 | Where | What it does |
 |---|---|
 | Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
-| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
+| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
 | Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |

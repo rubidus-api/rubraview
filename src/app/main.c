@@ -798,6 +798,11 @@ typedef struct app_state {
     /* In-app Metro file picker (§3.15.2), RV-043 */
     bool                   picker_open;
     bool                   chrome_hidden;           /* D-110: the title bar and the boxes are away until a click */
+    /* D-124: the strip's name on several rows. What was measured last, and what it gave. */
+    uint64_t               strip_title_key;
+    int32_t                strip_title_lines;
+    bool                   strip_place_below;              /* the place or the time on a row of its own, under the name */
+    bool                   speed_press_interval;           /* D-123: it is the slide show's Delay tile that is held */
     bool                   speed_pressed, speed_dragged;   /* D-110: the speed tile held; dragged, it is not a tap */
     bool                   speed_press_detached;
     double                 speed_press_y, speed_press_base;
@@ -929,7 +934,7 @@ static void osd_say(app_state_t *app, u8str_t text);
 static void chrome_hide(app_state_t *app, bool hide);
 static void open_playlist(app_state_t *app, u8str_t path);
 static bool path_is_playlist(u8str_t path);
-static void speed_tile_press(app_state_t *app, double y, bool detached);
+static void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);
 static void speed_tile_move(app_state_t *app, double y, bool detached);
 static void speed_tile_release(app_state_t *app, bool detached);
 static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width, double size);
@@ -4159,6 +4164,8 @@ static const char *toolbox_profile_name(const app_state_t *app) {
     return "image";
 }
 
+static void strip_title_plan(app_state_t *app);
+
 static void toolbox_refresh(app_state_t *app) {
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     int32_t count = 0;
@@ -4166,20 +4173,31 @@ static void toolbox_refresh(app_state_t *app) {
         app->slideshow_running ? rubraview_boxes_profile(doc, U8("slideshow")) : NULL,
         rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app))),
     };
+    /* D-124: the groups, in order: the slide show's own first, then the profile's. */
+    int32_t groups = 0, last_part = -1, last_group = -1;
+    memset(app->toolbox.group_sizes, 0, sizeof(app->toolbox.group_sizes));
     for (size_t p = 0; p < 2; ++p) {
         if (!parts[p]) continue;
         for (int32_t i = 0; i < parts[p]->tile_count && count < RUBRAVIEW_TOOLBOX_MAX_TILES; ++i) {
             const rubraview_box_tile_t *tile = &doc->tiles[parts[p]->first_tile + i];
             /* The slide show's own Stop tile stands in for the profile's Slides tile. */
             if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "toggle_slideshow")) continue;
+            /* D-123: and its Delay tile for the speed tile, while it runs. */
+            if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "media_speed_cycle")) continue;
+            if (((int32_t)p != last_part || tile->group != last_group) && groups < RUBRAVIEW_TOOLBOX_MAX_GROUPS) groups++;
+            last_part = (int32_t)p;
+            last_group = tile->group;
+            app->toolbox.group_sizes[groups - 1]++;
             app->toolbox_tiles[count++] = *tile;
         }
     }
     app->toolbox_tile_count = count;
     app->toolbox.tile_count = count;
+    app->toolbox.group_count = groups;
     /* The strip's seek bar, for a film or music; for a still picture with
        others around it, where it is among them (owner, 2026-09-28). */
     app->toolbox.timeline = app->media != NULL || anim_plays(app) || page_count(app) > 1 || app->pagebar_dragging;
+    strip_title_plan(app);
     /* The menu follows what is on screen too, but only while it is at its
        root: a reader halfway down a submenu is not pulled back. */
     if (app->menu_when != boxes_when(app) && app->menu.depth == 0) menu_rebuild(app);
@@ -4213,6 +4231,16 @@ static int speed_text(char *buffer, size_t size, double speed) {
     if (n > 0 && buffer[n - 1] == '.') buffer[--n] = '\0';
     if ((size_t)n + 1 < size) { buffer[n++] = 'x'; buffer[n] = '\0'; }
     return n;
+}
+
+/* D-123: the slide show's delay, said as it changes. */
+static void interval_set(app_state_t *app, double seconds) {
+    rubraview_slideshow_set_interval(&app->slideshow, seconds);
+    char text[16];
+    char line[40];
+    if (rubraview_slideshow_interval_text(text, sizeof(text), app->slideshow.interval_seconds) <= 0) return;
+    int n = snprintf(line, sizeof(line), "slide delay %s", text);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
 }
 
 /* A toggle tile says what a tap will do; a tile that can do nothing now is dimmed. */
@@ -4313,6 +4341,11 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         static char speed[16];   /* drawn before the next call */
         int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
         return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
+    }
+    if (rubraview_u8_eq_lit(tile->action, "interval_cycle")) {
+        static char delay[16];   /* drawn before the next call */
+        int n = rubraview_slideshow_interval_text(delay, sizeof(delay), app->slideshow.interval_seconds);
+        return n > 0 ? (u8str_t){ .ptr = delay, .len = (size_t)n } : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) {
         /* "To Next" on two lines (owner, 2026-10-11): "Next" alone read as the next-file button. */
@@ -4992,13 +5025,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
         app->needs_relayout = true;
     } else if (rubraview_u8_eq_lit(action, "interval_up")) {
-        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.5);
+        interval_set(app, app->slideshow.interval_seconds + 0.5);
     } else if (rubraview_u8_eq_lit(action, "interval_down")) {
-        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.5);
+        interval_set(app, app->slideshow.interval_seconds - 0.5);
     } else if (rubraview_u8_eq_lit(action, "interval_up_fine")) {
-        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds + 0.1);
+        interval_set(app, app->slideshow.interval_seconds + 0.1);
     } else if (rubraview_u8_eq_lit(action, "interval_down_fine")) {
-        rubraview_slideshow_set_interval(&app->slideshow, app->slideshow.interval_seconds - 0.1);
+        interval_set(app, app->slideshow.interval_seconds - 0.1);
+    } else if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+        interval_set(app, rubraview_slideshow_interval_cycle(app->slideshow.interval_seconds));
     } else if (rubraview_u8_eq_lit(action, "zoom_reset")) {
         reset_view(app);   /* D-97: 100% is the fitted size; the fit option stays */
     } else if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
@@ -6009,7 +6044,10 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
 /* Detached, the strip sits under the window's own anchor bar. */
 static rubraview_toolbox_layout_t toolbox_window_layout(const app_state_t *app, const rubraview_tile_metrics_t *m) {
     rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, m);   /* the size its grip set */
-    return rubraview_toolbox_layout(&sized, app->toolbox_tile_count, app->media != NULL);
+    rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(&app->toolbox);
+    shape.count = app->toolbox_tile_count;
+    shape.timeline = app->media != NULL;
+    return rubraview_toolbox_layout_shaped(&sized, &shape);
 }
 
 static void toolbox_window_size(const app_state_t *app, const rubraview_tile_metrics_t *m, int32_t *out_w, int32_t *out_h) {
@@ -6259,8 +6297,9 @@ static void toolbox_window_pump(app_state_t *app) {
                         app->seekfan_detached = true;
                         rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                                 toolbox_window_tile(app, &m, i));
-                    } else if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "media_speed_cycle")) {
-                        speed_tile_press(app, event.mouse.y, true);
+                    } else if (enabled && (rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "media_speed_cycle") ||
+                                           rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "interval_cycle"))) {
+                        speed_tile_press(app, event.mouse.y, true, rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "interval_cycle"));
                     } else if (enabled) {
                         handle_action(app, app->toolbox_tiles[i].action);
                     }
@@ -6549,8 +6588,10 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
                 app->seekfan_detached = false;
                 rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                         rubraview_box_tile_rect(&app->toolbox, &metrics, tile));
-            } else if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "media_speed_cycle")) {
-                speed_tile_press(app, y, false);   /* D-110: a tap or a drag, known on release */
+            } else if (enabled && (rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "media_speed_cycle") ||
+                                   rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "interval_cycle"))) {
+                /* D-110: a tap or a drag, known on release. D-123: the Delay tile the same way. */
+                speed_tile_press(app, y, false, rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "interval_cycle"));
             } else if (enabled) {
                 handle_action(app, app->toolbox_tiles[tile].action);
             }
@@ -6647,12 +6688,18 @@ static void speed_nudge(app_state_t *app, double base, int steps) {
     if (fabs(speed - (app->media_speed > 0.0 ? app->media_speed : 1.0)) > 1e-6) speed_set(app, speed);
 }
 
-static void speed_tile_press(app_state_t *app, double y, bool detached) {
+static void speed_tile_press(app_state_t *app, double y, bool detached, bool interval) {
     app->speed_pressed = true;
     app->speed_dragged = false;
     app->speed_press_detached = detached;
+    app->speed_press_interval = interval;   /* D-123: the slide show's Delay tile, half a second a step */
     app->speed_press_y = y;
-    app->speed_press_base = app->media_speed > 0.0 ? app->media_speed : 1.0;
+    app->speed_press_base = interval ? app->slideshow.interval_seconds : app->media_speed > 0.0 ? app->media_speed : 1.0;
+}
+
+static void interval_nudge(app_state_t *app, double base, int steps) {
+    double seconds = rubraview_slideshow_interval_nudge(base, steps);
+    if (fabs(seconds - app->slideshow.interval_seconds) > 1e-6) interval_set(app, seconds);
 }
 
 static void speed_tile_move(app_state_t *app, double y, bool detached) {
@@ -6661,14 +6708,15 @@ static void speed_tile_move(app_state_t *app, double y, bool detached) {
     int steps = (int)((app->speed_press_y - y) / step);
     if (steps == 0 && !app->speed_dragged) return;
     app->speed_dragged = true;
-    speed_nudge(app, app->speed_press_base, steps);
+    if (app->speed_press_interval) interval_nudge(app, app->speed_press_base, steps);
+    else speed_nudge(app, app->speed_press_base, steps);
     app->toolbox_window_drawn = 0.0;
 }
 
 static void speed_tile_release(app_state_t *app, bool detached) {
     if (!app->speed_pressed || app->speed_press_detached != detached) return;
     app->speed_pressed = false;
-    if (!app->speed_dragged) handle_action(app, U8("media_speed_cycle"));
+    if (!app->speed_dragged) handle_action(app, app->speed_press_interval ? U8("interval_cycle") : U8("media_speed_cycle"));
     app->toolbox_window_drawn = 0.0;
 }
 
@@ -6683,6 +6731,10 @@ static bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches
     u8str_t action = app->toolbox_tiles[tile].action;
     if (rubraview_u8_eq_lit(action, "media_speed_cycle") && (app->media || anim_plays(app))) {
         speed_nudge(app, app->media_speed > 0.0 ? app->media_speed : 1.0, notches > 0.0 ? 1 : -1);   /* D-110 */
+        return true;
+    }
+    if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+        interval_nudge(app, app->slideshow.interval_seconds, notches > 0.0 ? 1 : -1);   /* D-123 */
         return true;
     }
     if (!rubraview_u8_eq_lit(action, "zoom_cycle") && !rubraview_u8_eq_lit(action, "zoom_reset") &&
@@ -6730,6 +6782,76 @@ static void pagebar_drag(app_state_t *app, double x, bool released) {
 
 /* The strip's seek bar and the line under it: the file's name or, under
    the pointer, what the button does. Offsets put the layout on screen. */
+/* What stands at the right of the strip's name: the place among the pages, or a film's or an
+   animation's time. Nothing while a button is pointed at (the name row says its caption). */
+static int strip_place_text(const app_state_t *app, int32_t hovered, char *place, size_t size) {
+    int n = (pagebar_shown(app) || app->pagebar_dragging) && hovered < 0
+        ? snprintf(place, size, "%d / %zu", current_page_index(app) + 1, page_count(app)) : 0;
+    if (app->media && !app->pagebar_dragging && hovered < 0 && app->media_info.duration_seconds > 0.0) {
+        /* The film's time, its volume, speed and repeat: once on the bottom
+           strip, which is gone (owner, 2026-09-29). */
+        int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
+        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+        n = (int)rubraview_media_status(place, size, app->media_position, app->media_info.duration_seconds,
+                                        volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
+    }
+    if (anim_plays(app) && !app->pagebar_dragging && hovered < 0) {
+        /* D-82: an animation's time, and its speed when that is not 1x. */
+        char at[32], total[32], speed[16] = "";
+        u8str_t a = rubraview_format_timecode(at, sizeof(at), play_position(app), false);
+        u8str_t t = rubraview_format_timecode(total, sizeof(total), play_duration(app), false);
+        if (fabs(app->animation.speed - 1.0) > 1e-6) speed_text(speed, sizeof(speed), app->animation.speed);
+        n = snprintf(place, size, "%.*s / %.*s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr,
+                     speed[0] ? "  " : "", speed, app->ab_a < 0.0 ? "" : app->ab_b < 0.0 ? "  A-" : "  A-B");
+        if (n < 0 || (size_t)n >= size) n = 0;
+    }
+    return n > 0 && (size_t)n < size ? n : 0;
+}
+
+static double strip_place_width(int n, double line_height) {
+    return (double)n * line_height * 0.45;
+}
+
+/* D-124: how many rows the name takes in the strip, one to three, and whether the place goes
+   under it. Measured when the name, the width or the place's length changes. */
+static void strip_title_plan(app_state_t *app) {
+    rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+    rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, &base);
+    rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&sized, 0, false);
+    double width = l.title.width, line = sized.title_height, font = line * 0.72;
+    u8str_t name = page_count(app) > 0 ? page_display_name(app, (size_t)current_page_index(app)) : (u8str_t){ .ptr = "", .len = 0 };
+    char place[96];
+    int n = strip_place_text(app, -1, place, sizeof(place));
+
+    uint64_t key = 1469598103934665603ull;
+    for (size_t i = 0; i < name.len; ++i) key = (key ^ (uint8_t)name.ptr[i]) * 1099511628211ull;
+    key = (key ^ (uint64_t)(width * 16.0)) * 1099511628211ull;
+    key = (key ^ (uint64_t)(line * 16.0)) * 1099511628211ull;
+    key = (key ^ (uint64_t)n) * 1099511628211ull;
+    if (key != app->strip_title_key || app->strip_title_lines < 1) {
+        app->strip_title_key = key;
+        int32_t lines = 1;
+        bool below = false;
+        double one_w = 0.0, w = 0.0, h = 0.0, row = 0.0;
+        double place_w = n > 0 ? strip_place_width(n, line) + line * 0.5 : 0.0;
+        bool measured = name.len > 0 && width > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &one_w);
+        if (measured && one_w + place_w > width) {
+            /* The name does not fit beside the place: it gets the whole width, and rows. */
+            below = n > 0;
+            if (rubraview_pal_render_measure_text_wrapped(app->renderer, U8("Ag"), font, width, &w, &row) && row > 0.0 &&
+                rubraview_pal_render_measure_text_wrapped(app->renderer, name, font, width, &w, &h)) {
+                lines = (int32_t)floor(h / row + 0.5);
+            }
+            if (lines < 1) lines = 1;
+            if (below) lines++;
+            if (lines > RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES) lines = RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES;
+        }
+        app->strip_title_lines = lines;
+        app->strip_place_below = below;
+    }
+    app->toolbox.title_lines = app->strip_title_lines;
+}
+
 static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
                             double ox, double oy, int32_t hovered) {
     if (l->timeline.width > 0.0) {
@@ -6749,35 +6871,20 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
     char place[96];
-    int n = (pagebar_shown(app) || app->pagebar_dragging) && hovered < 0
-        ? snprintf(place, sizeof(place), "%d / %zu", current_page_index(app) + 1, page_count(app)) : 0;
-    if (app->media && !app->pagebar_dragging && hovered < 0 && app->media_info.duration_seconds > 0.0) {
-        /* The film's time, its volume, speed and repeat: once on the bottom
-           strip, which is gone (owner, 2026-09-29). */
-        int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
-        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
-        n = (int)rubraview_media_status(place, sizeof(place), app->media_position, app->media_info.duration_seconds,
-                                        volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
-    }
-    if (anim_plays(app) && !app->pagebar_dragging && hovered < 0) {
-        /* D-82: an animation's time, and its speed when that is not 1x. */
-        char at[32], total[32], speed[16] = "";
-        u8str_t a = rubraview_format_timecode(at, sizeof(at), play_position(app), false);
-        u8str_t t = rubraview_format_timecode(total, sizeof(total), play_duration(app), false);
-        if (fabs(app->animation.speed - 1.0) > 1e-6) speed_text(speed, sizeof(speed), app->animation.speed);
-        n = snprintf(place, sizeof(place), "%.*s / %.*s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr,
-                     speed[0] ? "  " : "", speed, app->ab_a < 0.0 ? "" : app->ab_b < 0.0 ? "  A-" : "  A-B");
-        if (n < 0 || (size_t)n >= sizeof(place)) n = 0;
-    }
+    int n = strip_place_text(app, hovered, place, sizeof(place));
+    double line = l->title_line_height > 0.0 ? l->title_line_height : l->title.height;
     if (n > 0) {
-        /* The place at the right end of the line, the name in what is left. */
-        double w = (double)n * l->title.height * 0.45;
-        rubraview_pal_rect_t right = { name.x + name.width - w, name.y, w, name.height };
+        /* The place at the right end of the line, the name in what is left; or, where the
+           name needs the width, on the last row by itself (D-124). */
+        double w = strip_place_width(n, line);
+        bool below = app->strip_place_below && l->title_lines > 1;
+        rubraview_pal_rect_t right = { name.x + name.width - w, below ? name.y + name.height - line : name.y, w, line };
         rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = place, .len = (size_t)n }, right,
-                                       l->title.height * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
-        name.width -= w + l->title.height * 0.5;
+                                       line * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+        if (below) name.height -= line;
+        else name.width -= w + line * 0.5;
     }
-    rubraview_pal_render_draw_text(r, label, name, l->title.height * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(r, label, name, line * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 }
 
 /* A strip button's face: its icon, or a short caption where the icon font is missing. */
@@ -6855,7 +6962,8 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     int32_t hovered = rubraview_box_tile_at(box, metrics, app->pointer_x, app->pointer_y);
     if (strip) {
         rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
-        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&sized, box->tile_count, box->timeline);
+        rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(box);
+        rubraview_toolbox_layout_t l = rubraview_toolbox_layout_shaped(&sized, &shape);
         draw_strip_head(app, app->renderer, &l, bounds.x, bounds.y, hovered);
     }
 

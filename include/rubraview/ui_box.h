@@ -88,6 +88,9 @@ typedef struct rubraview_tile_metrics {
 
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale);
 
+#define RUBRAVIEW_TOOLBOX_MAX_GROUPS 12
+#define RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES 3
+
 typedef struct rubraview_box {
     rubraview_box_kind_t kind;
     rubraview_box_state_t state;
@@ -102,6 +105,11 @@ typedef struct rubraview_box {
        shifted to stay inside (RFC-0002 §4: ten tiles by a corner). */
     double view_width, view_height;
     bool timeline;               /* toolbox: a seek bar in the header row (a film or music) */
+    /* D-124: the strip in groups. The name's rows (0 is 1), and how many
+       buttons each group holds, in order (group_count 0: all in one). */
+    int32_t title_lines;
+    int32_t group_count;
+    int32_t group_sizes[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
     /* The box's own size, set with its grip (owner, 2026-09-29): tiles or
        buttons a row (0: the metrics' own) and their size (1.0 as designed). */
     int32_t columns;
@@ -125,7 +133,30 @@ typedef struct rubraview_toolbox_layout {
     rubraview_rect_t timeline, title;
     double buttons_y;
     int32_t columns, rows;
+    /* D-124: the name's rows and one row's height; the groups, each
+       starting a row of its own and going on to more when it is longer
+       than `columns`, with `group_gap` more between two groups. */
+    int32_t title_lines;
+    double title_line_height;
+    double group_gap;
+    int32_t group_count;
+    int32_t group_sizes[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
 } rubraview_toolbox_layout_t;
+
+/* What the strip holds (D-124): `count` buttons in `group_count` groups
+   (0: one group of them all; buttons the groups do not cover make a last
+   group), under a name of `title_lines` rows (under 1 is 1). */
+typedef struct rubraview_toolbox_shape {
+    int32_t count;
+    bool timeline;
+    int32_t title_lines;
+    int32_t group_count;
+    int32_t group_sizes[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
+} rubraview_toolbox_shape_t;
+
+rubraview_toolbox_shape_t rubraview_box_toolbox_shape(const rubraview_box_t *box);
+rubraview_toolbox_layout_t rubraview_toolbox_layout_shaped(const rubraview_tile_metrics_t *metrics,
+                                                          const rubraview_toolbox_shape_t *shape);
 
 /* ---- A box's own size (owner, 2026-09-29) ---- */
 #define RUBRAVIEW_BOX_SCALE_MIN 0.75

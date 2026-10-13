@@ -57,6 +57,13 @@ rubraview_slideshow_t rubraview_slideshow_create(size_t item_count, double inter
 /** Re-clamped to [0.1, 300.0] (used by the `[`/`]`/Shift+`[`/`]` step hotkeys, §3.2.1, §3.7.2). */
 void rubraview_slideshow_set_interval(rubraview_slideshow_t *s, double seconds);
 
+/* The Delay tile (D-123). A tap goes round 1, 2, 3, 5 and 10 seconds, and a
+   delay that is none of them goes to 3 first; the wheel or a drag moves it
+   by half seconds, from half a second up. The text is "3 s", "2.5 s". */
+double rubraview_slideshow_interval_cycle(double seconds);
+double rubraview_slideshow_interval_nudge(double base_seconds, int steps);
+int rubraview_slideshow_interval_text(char *buffer, size_t size, double seconds);
+
 void rubraview_slideshow_pause(rubraview_slideshow_t *s);
 void rubraview_slideshow_resume(rubraview_slideshow_t *s);
 

@@ -233,32 +233,87 @@ static void grid_origin(const rubraview_box_t *box, const rubraview_tile_metrics
     if (*out_y < 0.0) *out_y = 0.0;
 }
 
-rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics_t *m, int32_t count, bool timeline) {
+rubraview_toolbox_shape_t rubraview_box_toolbox_shape(const rubraview_box_t *box) {
+    rubraview_toolbox_shape_t s = {0};
+    if (!box) return s;
+    s.count = box->tile_count;
+    s.timeline = box->timeline;
+    s.title_lines = box->title_lines;
+    s.group_count = box->group_count;
+    if (s.group_count > RUBRAVIEW_TOOLBOX_MAX_GROUPS) s.group_count = RUBRAVIEW_TOOLBOX_MAX_GROUPS;
+    for (int32_t i = 0; i < s.group_count; ++i) s.group_sizes[i] = box->group_sizes[i];
+    return s;
+}
+
+rubraview_toolbox_layout_t rubraview_toolbox_layout_shaped(const rubraview_tile_metrics_t *m,
+                                                          const rubraview_toolbox_shape_t *shape) {
     rubraview_toolbox_layout_t l = {0};
-    if (!m) return l;
+    if (!m || !shape) return l;
     double pad = m->padding, g = m->gutter / 2.0, b = m->button_size, head = m->header_height;
     l.columns = m->strip_columns > 0 ? m->strip_columns : 8;
-    l.rows = count > 0 ? (count + l.columns - 1) / l.columns : 0;
     l.width = pad * 2.0 + l.columns * b + (l.columns - 1) * g;
+    l.group_gap = g;
+
+    /* The groups as given, without the empty ones and never more buttons
+       than there are; what they leave over is one more group. */
+    int32_t left = shape->count > 0 ? shape->count : 0;
+    for (int32_t i = 0; i < shape->group_count && i < RUBRAVIEW_TOOLBOX_MAX_GROUPS && left > 0; ++i) {
+        int32_t n = shape->group_sizes[i] < left ? shape->group_sizes[i] : left;
+        if (n <= 0) continue;
+        l.group_sizes[l.group_count++] = n;
+        left -= n;
+    }
+    if (left > 0) {
+        if (l.group_count < RUBRAVIEW_TOOLBOX_MAX_GROUPS) l.group_sizes[l.group_count++] = left;
+        else l.group_sizes[l.group_count - 1] += left;
+    }
+    for (int32_t i = 0; i < l.group_count; ++i) l.rows += (l.group_sizes[i] + l.columns - 1) / l.columns;
+
     /* The pin sits beside the anchor, not in here (owner, 2026-09-22):
        the top row is the seek bar's alone, and without one the name
        comes first. */
     double top = pad;
-    if (timeline) {
+    if (shape->timeline) {
         l.timeline = (rubraview_rect_t){ pad, pad + head * 0.25, l.width - pad * 2.0, head * 0.5 };
         top = pad + head + g;
     }
-    l.title = (rubraview_rect_t){ pad, top, l.width - pad * 2.0, m->title_height };
+    l.title_lines = shape->title_lines < 1 ? 1
+                  : shape->title_lines > RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES ? RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES : shape->title_lines;
+    l.title_line_height = m->title_height;
+    l.title = (rubraview_rect_t){ pad, top, l.width - pad * 2.0, m->title_height * l.title_lines };
     l.buttons_y = l.title.y + l.title.height + g;
-    l.height = l.rows > 0 ? l.buttons_y + l.rows * b + (l.rows - 1) * g + pad : l.title.y + l.title.height + pad;
+    l.height = l.rows > 0
+        ? l.buttons_y + l.rows * b + (l.rows - 1) * g + (l.group_count - 1) * l.group_gap + pad
+        : l.title.y + l.title.height + pad;
     return l;
+}
+
+rubraview_toolbox_layout_t rubraview_toolbox_layout(const rubraview_tile_metrics_t *m, int32_t count, bool timeline) {
+    return rubraview_toolbox_layout_shaped(m, &(rubraview_toolbox_shape_t){ .count = count, .timeline = timeline });
 }
 
 rubraview_rect_t rubraview_toolbox_button_rect(const rubraview_toolbox_layout_t *l,
                                                const rubraview_tile_metrics_t *m, int32_t i) {
     if (!l || !m || i < 0 || l->columns <= 0) return (rubraview_rect_t){0};
     double g = m->gutter / 2.0, b = m->button_size;
-    return (rubraview_rect_t){ m->padding + (i % l->columns) * (b + g), l->buttons_y + (i / l->columns) * (b + g), b, b };
+    int32_t row = 0, first = 0;
+    for (int32_t k = 0; k < l->group_count; ++k) {
+        int32_t n = l->group_sizes[k];
+        if (i < first + n) {
+            int32_t at = i - first;
+            return (rubraview_rect_t){ m->padding + (at % l->columns) * (b + g),
+                                       l->buttons_y + (row + at / l->columns) * (b + g) + k * l->group_gap, b, b };
+        }
+        first += n;
+        row += (n + l->columns - 1) / l->columns;
+    }
+    return (rubraview_rect_t){0};
+}
+
+/* The strip of this box, with its groups and its name's rows. */
+static rubraview_toolbox_layout_t box_layout(const rubraview_box_t *box, const rubraview_tile_metrics_t *sized) {
+    rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(box);
+    return rubraview_toolbox_layout_shaped(sized, &shape);
 }
 
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
@@ -276,7 +331,7 @@ rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubravie
 
     double width = 0.0, height = 0.0;
     if (box->kind == RUBRAVIEW_BOX_TOOLBOX) {
-        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        rubraview_toolbox_layout_t l = box_layout(box, metrics);
         width = l.width;
         height = l.height;
     } else {
@@ -300,7 +355,7 @@ rubraview_rect_t rubraview_box_tile_rect(const rubraview_box_t *box, const rubra
 
     rubraview_rect_t body = rubraview_box_bounds(box, metrics);
     if (box->kind == RUBRAVIEW_BOX_TOOLBOX) {
-        rubraview_toolbox_layout_t l = rubraview_toolbox_layout(metrics, box->tile_count, box->timeline);
+        rubraview_toolbox_layout_t l = box_layout(box, metrics);
         rubraview_rect_t b = rubraview_toolbox_button_rect(&l, metrics, tile_index);
         return (rubraview_rect_t){ body.x + b.x, body.y + b.y, b.width, b.height };
     }
@@ -536,13 +591,13 @@ void rubraview_box_grip_end(rubraview_box_t *box) {
 rubraview_rect_t rubraview_box_timeline_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
     if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
     rubraview_tile_metrics_t sized = rubraview_box_metrics(box, m);
-    return body_relative(box, &sized, rubraview_toolbox_layout(&sized, box->tile_count, box->timeline).timeline);
+    return body_relative(box, &sized, box_layout(box, &sized).timeline);
 }
 
 rubraview_rect_t rubraview_box_title_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
     if (!box || !m || box->kind != RUBRAVIEW_BOX_TOOLBOX) return (rubraview_rect_t){0};
     rubraview_tile_metrics_t sized = rubraview_box_metrics(box, m);
-    return body_relative(box, &sized, rubraview_toolbox_layout(&sized, box->tile_count, box->timeline).title);
+    return body_relative(box, &sized, box_layout(box, &sized).title);
 }
 
 bool rubraview_box_pin_shown_on(const rubraview_box_t *box) {

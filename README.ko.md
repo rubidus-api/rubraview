@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.70** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.70/rubraview-v0.0.70.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.70/rubraview-v0.0.70.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.71** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.71/rubraview-v0.0.71.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.71/rubraview-v0.0.71.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -163,14 +163,15 @@
 | 있는 곳 | 하는 일 |
 |---|---|
 | 도구 상자 `Stop`, 메뉴 `Stop` | 정지하고 처음으로 |
-| 도구 상자 `Sub`, 메뉴 `On/off` | 자막 켜기/끄기 |
 | 도구 상자 `A-B` | A-B 반복: 여기서부터 → 여기까지 → 끄기 |
 | 도구 상자 `1x` | 다음 재생 속도. 위아래로 끌거나 버튼 위에서 휠을 돌리면 0.1x씩 |
+| 도구 상자 `Sub`, 메뉴 `On/off` | 자막 켜기/끄기 |
 | 도구 상자 `EQ`, 메뉴 `Equaliser` | 이퀄라이저 다음 프리셋 |
 | 도구 상자 `EQ bands`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
 | 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
+| 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
 | 메뉴 `Clear this list` | 최근 파일 목록 비우기 |
 | 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
 | 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |
