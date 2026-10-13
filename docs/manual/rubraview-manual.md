@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.64.exe              the viewer, as built
-dist/rubraview-v0.0.64/                 the release bundle
-dist/rubraview-v0.0.64.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.65.exe              the viewer, as built
+dist/rubraview-v0.0.65/                 the release bundle
+dist/rubraview-v0.0.65.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -117,7 +117,10 @@ options**. Windows 11's own menu takes items only from a registered
 package, which needs an administrator once: **Register for every user**
 does it, when `rubraview_menu.dll` and `rubraview_menu.msix` are beside
 `rubraview.exe` (they are in the zip; the single-file download has the
-classic menu only). After moving the program's folder, register again.
+classic menu only). Windows 11 lists a package's items under **Show more
+options** too, so with the package registered Rubraview's entry there is
+the package's and the registry's is not written. After moving the
+program's folder, register again.
 
 "Add to the list" keeps the list's order setting (Settings › Files › Sort
 by), so an added file takes its place among the others. Added to a folder

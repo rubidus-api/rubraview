@@ -298,6 +298,18 @@ static bool package_add(void) {
 
 /* ---- both, from the viewer ---- */
 
+/* Windows 11 shows a package's items under "Show more options" as well as
+   in its own menu (seen on build 26200), so the registry's verb beside a
+   registered package is Rubraview twice there. Windows 10 is asked nothing
+   of the kind: its one menu keeps the registry's verb. */
+static bool package_shows_in_classic_menu(void) {
+    typedef LONG (WINAPI *rtl_get_version_t)(OSVERSIONINFOW*);
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    rtl_get_version_t get = ntdll ? (rtl_get_version_t)(void*)GetProcAddress(ntdll, "RtlGetVersion") : NULL;
+    OSVERSIONINFOW v = { .dwOSVersionInfoSize = sizeof(v) };
+    return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
+}
+
 rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selection, bool all_users) {
     WCHAR exe[MAX_PATH * 2], ext[40];
     u8str_t narrow;
@@ -321,6 +333,14 @@ rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selectio
             result = RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS;
         } else if (config_write(root, selection, exe) && package_add()) {
             result = RUBRAVIEW_SHELL_MENU_BOTH;
+            /* D-116: the package carries both menus there; ours comes off
+               the registry for every user, and for this one. */
+            if (package_shows_in_classic_menu()) {
+                for (size_t at = 0; next_extension(every, &at, ext, NULL);) {
+                    classic_remove(HKEY_LOCAL_MACHINE, ext);
+                    classic_remove(HKEY_CURRENT_USER, ext);
+                }
+            }
         } else {
             result = RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED;
         }

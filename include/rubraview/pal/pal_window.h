@@ -177,7 +177,7 @@ bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code);
 typedef enum rubraview_shell_menu_result {
     RUBRAVIEW_SHELL_MENU_FAILED = 0,
     RUBRAVIEW_SHELL_MENU_CLASSIC,           /* the classic menu ("Show more options") */
-    RUBRAVIEW_SHELL_MENU_BOTH,              /* and the Windows 11 menu */
+    RUBRAVIEW_SHELL_MENU_BOTH,              /* and the Windows 11 menu (whose package then carries both: D-116) */
     RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS,  /* classic; rubraview_menu.dll / .msix are not beside the program */
     RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED,   /* classic; Windows did not take the package */
 } rubraview_shell_menu_result_t;
