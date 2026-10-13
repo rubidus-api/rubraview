@@ -86,6 +86,15 @@ bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_po
     return media && media->api->audio_position(media->impl, out_position, out_wall);
 }
 
+bool rubraview_pal_media_audio_format(rubraview_media_t *media, uint32_t *out_rate, uint32_t *out_channels) {
+    return media && media->api->audio_format && out_rate && out_channels &&
+           media->api->audio_format(media->impl, out_rate, out_channels);
+}
+
+bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate) {
+    return media && media->api->picture_rate && out_rate && media->api->picture_rate(media->impl, out_rate);
+}
+
 bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index) {
     if (!media || !media->api->select_audio_track) return false;
     return media->api->select_audio_track(media->impl, stream_index);

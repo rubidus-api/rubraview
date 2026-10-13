@@ -550,6 +550,292 @@ static bool bmp_details(const uint8_t *b, size_t size, rubraview_details_t *out,
     return true;
 }
 
+/* ---- TIFF, and the camera files built on it (D-120) ---- */
+
+typedef struct tiff_view { const uint8_t *b; size_t size; bool big_endian, big; } tiff_view_t;
+
+static uint64_t tiff_n(const tiff_view_t *t, size_t at, uint32_t bytes) {
+    if (at > t->size || t->size - at < bytes) return 0;
+    uint64_t v = 0;
+    for (uint32_t i = 0; i < bytes; ++i) {
+        uint64_t byte = t->b[at + (t->big_endian ? i : bytes - 1 - i)];
+        v = (v << 8) | byte;
+    }
+    return v;
+}
+
+/* Where an entry's values are: in the entry when they fit, else where it points. */
+static size_t tiff_values(const tiff_view_t *t, size_t entry, uint32_t type, uint64_t count) {
+    static const uint8_t WIDTH[19] = { 0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4, 0, 0, 8, 8, 8 };
+    uint64_t width = type < 19 ? WIDTH[type] : 0;
+    size_t field = entry + (t->big ? 12u : 8u);
+    uint32_t room = t->big ? 8u : 4u;
+    if (width == 0 || count == 0 || count > t->size) return 0;
+    if (width * count <= room) return field;
+    uint64_t at = tiff_n(t, field, room);
+    return at < t->size && t->size - at >= width * count ? (size_t)at : 0;
+}
+
+static uint64_t tiff_value(const tiff_view_t *t, size_t entry, uint32_t type, uint64_t count, uint64_t index) {
+    size_t at = tiff_values(t, entry, type, count);
+    if (!at || index >= count) return 0;
+    uint32_t width = type == 3 || type == 8 ? 2u : type == 4 || type == 9 || type == 13 ? 4u : type == 16 || type == 17 || type == 18 ? 8u : 1u;
+    return tiff_n(t, at + (size_t)index * width, width);
+}
+
+static bool tiff_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
+    tiff_view_t t = { .b = b, .size = size, .big_endian = b[0] == 'M' };
+    uint32_t magic = (uint32_t)tiff_n(&t, 2, 2);
+    if (magic != 42 && magic != 43) return false;
+    t.big = magic == 43;
+    if (t.big && (size < 16 || tiff_n(&t, 4, 2) != 8)) return false;
+    uint64_t first = t.big ? tiff_n(&t, 8, 8) : tiff_n(&t, 4, 4);
+    uint32_t count_bytes = t.big ? 8u : 2u, entry_bytes = t.big ? 20u : 12u, next_bytes = t.big ? 8u : 4u;
+    if (first < 8 || first >= size || size - first < count_bytes) return false;
+
+    rubraview_details_heading(out, "TIFF");
+    rubraview_details_add(out, "Kind", "%s, %s", t.big ? "BigTIFF (64-bit offsets)" : "classic", t.big_endian ? "big-endian (MM)" : "little-endian (II)");
+
+    uint64_t compression = 1, photometric = 99, samples = 1, rows = 0, strips = 0, tile_w = 0, tile_h = 0, tiles = 0;
+    uint64_t planar = 1, predictor = 1, format = 1, extra = 0, subs = 0, bits_count = 0, bits = 1, cfa_w = 0, cfa_h = 0;
+    char make[48] = "", model[48] = "", software[64] = "", dng[16] = "";
+    bool exif = false, icc = false, xmp = false, gps = false, mixed_bits = false;
+    uint64_t entries = tiff_n(&t, (size_t)first, count_bytes);
+    size_t at = (size_t)first + count_bytes;
+    for (uint64_t i = 0; i < entries && i < 4096 && at <= size && size - at >= entry_bytes; ++i, at += entry_bytes) {
+        uint32_t tag = (uint32_t)tiff_n(&t, at, 2), type = (uint32_t)tiff_n(&t, at + 2, 2);
+        uint64_t count = t.big ? tiff_n(&t, at + 4, 8) : tiff_n(&t, at + 4, 4);
+        uint64_t v = tiff_value(&t, at, type, count, 0);
+        size_t text = type == 2 ? tiff_values(&t, at, type, count) : 0;
+        switch (tag) {
+            case 258:
+                bits = v; bits_count = count;
+                for (uint64_t k = 1; k < count && k < 8; ++k) if (tiff_value(&t, at, type, count, k) != v) mixed_bits = true;
+                break;
+            case 259: compression = v; break;
+            case 262: photometric = v; break;
+            case 271: if (text) plain(make, sizeof(make), b + text, (size_t)count); break;
+            case 272: if (text) plain(model, sizeof(model), b + text, (size_t)count); break;
+            case 273: strips = count; break;
+            case 277: samples = v; break;
+            case 278: rows = v; break;
+            case 284: planar = v; break;
+            case 305: if (text) plain(software, sizeof(software), b + text, (size_t)count); break;
+            case 317: predictor = v; break;
+            case 322: tile_w = v; break;
+            case 323: tile_h = v; break;
+            case 324: tiles = count; break;
+            case 330: subs = count; break;
+            case 338: extra = count; break;
+            case 339: format = v; break;
+            case 700: xmp = true; break;
+            case 33421: cfa_w = v; cfa_h = tiff_value(&t, at, type, count, 1); break;
+            case 34665: exif = true; break;
+            case 34675: icc = true; break;
+            case 34853: gps = true; break;
+            case 50706:
+                if (count == 4) snprintf(dng, sizeof(dng), "%u.%u.%u.%u", (unsigned)tiff_value(&t, at, type, count, 0), (unsigned)tiff_value(&t, at, type, count, 1),
+                                         (unsigned)tiff_value(&t, at, type, count, 2), (unsigned)tiff_value(&t, at, type, count, 3));
+                break;
+            default: break;
+        }
+    }
+    /* The pages: each directory names the next. */
+    uint32_t pages = 1;
+    for (uint64_t dir = first; pages < 10000; ) {
+        uint64_t n = tiff_n(&t, (size_t)dir, count_bytes);
+        uint64_t link = dir + count_bytes + n * entry_bytes;
+        if (n == 0 || link >= size || size - link < next_bytes) break;
+        uint64_t next = tiff_n(&t, (size_t)link, next_bytes);
+        if (next < 8 || next >= size || size - next < count_bytes || next == dir) break;
+        dir = next;
+        ++pages;
+    }
+    if (pages > 1) rubraview_details_add(out, "Directories", "%u (pages, or sizes of one picture)", (unsigned)pages);
+
+    static const struct { uint32_t code; const char *name; } METHOD[] = {
+        { 1, "none" }, { 2, "CCITT Huffman (fax)" }, { 3, "CCITT Group 3 (fax)" }, { 4, "CCITT Group 4 (fax)" }, { 5, "LZW" },
+        { 6, "JPEG (the old way)" }, { 7, "JPEG" }, { 8, "Deflate" }, { 32773, "PackBits" }, { 32946, "Deflate" },
+        { 34712, "JPEG 2000" }, { 34892, "lossy JPEG (DNG)" }, { 34925, "LZMA" }, { 50000, "Zstandard" }, { 50001, "WebP" },
+        { 50002, "JPEG XL" }, { 52546, "JPEG XL (DNG)" }, { 32767, "Sony ARW" }, { 34713, "Nikon NEF" }, { 65000, "Kodak DCR" },
+    };
+    const char *method = NULL;
+    for (size_t i = 0; i < sizeof(METHOD) / sizeof(METHOD[0]); ++i) if (METHOD[i].code == compression) method = METHOD[i].name;
+    if (method) rubraview_details_add(out, "Compression", "%s", method);
+    else rubraview_details_add(out, "Compression", "method %u", (unsigned)compression);
+    if ((compression == 5 || compression == 8 || compression == 32946 || compression == 50000) && predictor > 1) {
+        rubraview_details_add(out, "Predictor", "%s", predictor == 2 ? "horizontal differences" : predictor == 3 ? "floating-point" : "unknown");
+    }
+    static const char *const COLOUR[11] = { "white is zero", "black is zero", "RGB", "palette", "transparency mask", "CMYK", "YCbCr",
+                                            NULL, "CIE L*a*b*", "ICC L*a*b*", "ITU L*a*b*" };
+    if (photometric < 11 && COLOUR[photometric]) rubraview_details_add(out, "Colour", "%s", COLOUR[photometric]);
+    else if (photometric == 32803) rubraview_details_add(out, "Colour", "colour filter array (the sensor's mosaic)");
+    else if (photometric == 34892) rubraview_details_add(out, "Colour", "linear raw");
+    if (samples == 0 || samples > 64) samples = 1;
+    if (bits_count) {
+        const char *kind = format == 3 ? " floating-point" : format == 2 ? " signed" : "";
+        if (mixed_bits) rubraview_details_add(out, "Samples", "%u a pixel, of differing depths", (unsigned)samples);
+        else rubraview_details_add(out, "Samples", "%u a pixel, %u%s bits each", (unsigned)samples, (unsigned)bits, kind);
+    }
+    if (extra) rubraview_details_add(out, "Extra samples", "%u (transparency or more)", (unsigned)extra);
+    if (samples > 1) rubraview_details_add(out, "Planes", "%s", planar == 2 ? "each sample in its own plane" : "samples together, pixel by pixel");
+    if (tile_w && tile_h) rubraview_details_add(out, "Layout", "%u tiles of %u x %u", (unsigned)tiles, (unsigned)tile_w, (unsigned)tile_h);
+    else if (strips) rubraview_details_add(out, "Layout", "%u strip%s of %u row%s", (unsigned)strips, strips == 1 ? "" : "s", (unsigned)rows, rows == 1 ? "" : "s");
+    if (cfa_w && cfa_h) rubraview_details_add(out, "Mosaic", "%u x %u", (unsigned)cfa_w, (unsigned)cfa_h);
+    if (subs) rubraview_details_add(out, "Sub-pictures", "%u (the full picture of a camera file is one of them)", (unsigned)subs);
+    if (make[0] || model[0]) rubraview_details_add(out, "Camera", "%s%s%s", make, make[0] && model[0] ? " " : "", model);
+    if (dng[0]) rubraview_details_add(out, "DNG version", "%s", dng);
+    if (software[0]) rubraview_details_add(out, "Written by", "%s", software);
+    if (exif || icc || xmp || gps) {
+        rubraview_details_add(out, "Carries", "%s%s%s%s", exif ? "EXIF " : "", gps ? "GPS " : "", icc ? "ICC-profile " : "", xmp ? "XMP " : "");
+    }
+    if (raw_bits && bits_count && !mixed_bits && bits * samples <= 512) *raw_bits = (uint32_t)(bits * samples);
+    return true;
+}
+
+/* ---- AVIF, HEIF and what else is boxes after `ftyp` (D-120) ---- */
+
+typedef struct bmff_facts {
+    uint32_t width, height, channels, bits, items, tracks;
+    bool av1, hevc, alpha, icc, nclx, mirrored, sequence;
+    uint32_t av1_profile, av1_level, av1_bits, av1_mono, av1_sub_x, av1_sub_y;
+    uint32_t hevc_profile, hevc_level, hevc_bits, hevc_chroma;
+    uint32_t primaries, transfer, matrix, full_range, turns;
+} bmff_facts_t;
+
+/* One box at `at`: its kind, where its body is and how long. False when it does not fit. */
+static bool bmff_box(const uint8_t *b, size_t size, size_t at, const uint8_t **kind, size_t *body, size_t *length) {
+    if (at > size || size - at < 8) return false;
+    uint64_t len = be32(b + at);
+    size_t head = 8;
+    if (len == 1) {
+        if (size - at < 16) return false;
+        len = ((uint64_t)be32(b + at + 8) << 32) | be32(b + at + 12);
+        head = 16;
+    } else if (len == 0) {
+        len = size - at;
+    }
+    if (len < head || len > size - at) return false;
+    *kind = b + at + 4;
+    *body = at + head;
+    *length = (size_t)len - head;
+    return true;
+}
+
+static void bmff_walk(const uint8_t *b, size_t size, size_t from, size_t to, int depth, bmff_facts_t *f) {
+    const uint8_t *kind;
+    size_t body, len;
+    for (size_t at = from; at < to && bmff_box(b, to, at, &kind, &body, &len); at = body + len) {
+        const uint8_t *p = b + body;
+        (void)size;
+        if (!memcmp(kind, "meta", 4) && len >= 4 && depth < 6) bmff_walk(b, size, body + 4, body + len, depth + 1, f);
+        else if ((!memcmp(kind, "iprp", 4) || !memcmp(kind, "ipco", 4) || !memcmp(kind, "moov", 4)) && depth < 6) {
+            if (!memcmp(kind, "moov", 4)) f->sequence = true;
+            bmff_walk(b, size, body, body + len, depth + 1, f);
+        }
+        else if (!memcmp(kind, "trak", 4)) f->tracks++;
+        else if (!memcmp(kind, "iinf", 4) && len >= 6) f->items = p[0] == 0 ? be16(p + 4) : len >= 8 ? be32(p + 4) : 0;
+        else if (!memcmp(kind, "ispe", 4) && len >= 12) {
+            uint32_t w = be32(p + 4), h = be32(p + 8);
+            if ((uint64_t)w * h > (uint64_t)f->width * f->height) { f->width = w; f->height = h; }
+        }
+        else if (!memcmp(kind, "pixi", 4) && len >= 6 && !f->channels) { f->channels = p[4]; f->bits = p[5]; }
+        else if (!memcmp(kind, "av1C", 4) && len >= 4 && !f->av1) {
+            f->av1 = true;
+            f->av1_profile = p[1] >> 5; f->av1_level = p[1] & 31;
+            f->av1_bits = (p[2] & 0x40) ? ((p[2] & 0x20) ? 12 : 10) : 8;
+            f->av1_mono = (p[2] >> 4) & 1; f->av1_sub_x = (p[2] >> 3) & 1; f->av1_sub_y = (p[2] >> 2) & 1;
+        }
+        else if (!memcmp(kind, "hvcC", 4) && len >= 19 && !f->hevc) {
+            f->hevc = true;
+            f->hevc_profile = p[1] & 31; f->hevc_level = p[12]; f->hevc_chroma = p[16] & 3; f->hevc_bits = 8u + (p[17] & 7u);
+        }
+        else if (!memcmp(kind, "colr", 4) && len >= 4) {
+            if (!memcmp(p, "nclx", 4) && len >= 11) {
+                f->nclx = true; f->primaries = be16(p + 4); f->transfer = be16(p + 6); f->matrix = be16(p + 8); f->full_range = p[10] >> 7;
+            } else if (!memcmp(p, "prof", 4) || !memcmp(p, "rICC", 4)) f->icc = true;
+        }
+        else if (!memcmp(kind, "auxC", 4) && len > 8) {
+            for (size_t i = 4; i + 5 <= len; ++i) if (!memcmp(p + i, "alpha", 5)) f->alpha = true;
+        }
+        else if (!memcmp(kind, "irot", 4) && len >= 1) f->turns = p[0] & 3;
+        else if (!memcmp(kind, "imir", 4)) f->mirrored = true;
+    }
+}
+
+static const char *cicp_primaries(uint32_t v) {
+    return v == 1 ? "BT.709 / sRGB" : v == 9 ? "BT.2020" : v == 12 ? "Display P3" : v == 11 ? "DCI-P3" : v == 5 || v == 6 ? "BT.601" : NULL;
+}
+
+static const char *cicp_transfer(uint32_t v) {
+    return v == 13 ? "sRGB" : v == 1 || v == 6 || v == 14 || v == 15 ? "BT.709" : v == 16 ? "PQ (HDR)" : v == 18 ? "HLG (HDR)" : v == 8 ? "linear" : NULL;
+}
+
+static bool bmff_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
+    const uint8_t *kind;
+    size_t body, len;
+    if (!bmff_box(b, size, 0, &kind, &body, &len) || memcmp(kind, "ftyp", 4) != 0 || len < 8) return false;
+    char major[5] = "", also[72] = "";
+    plain(major, sizeof(major), b + body, 4);
+    bool avif = false, heif = false, canon = !memcmp(b + body, "crx ", 4);
+    size_t used = 0;
+    for (size_t at = body; at + 4 <= body + len; at += at == body ? 8 : 4) {
+        const uint8_t *brand = b + at;
+        if (!memcmp(brand, "avif", 4) || !memcmp(brand, "avis", 4)) avif = true;
+        if (!memcmp(brand, "heic", 4) || !memcmp(brand, "heix", 4) || !memcmp(brand, "hevc", 4) || !memcmp(brand, "heim", 4) ||
+            !memcmp(brand, "heis", 4) || !memcmp(brand, "mif1", 4) || !memcmp(brand, "msf1", 4)) heif = true;
+        if (at != body && used + 6 < sizeof(also)) {
+            char one[5];
+            plain(one, sizeof(one), brand, 4);
+            used += (size_t)snprintf(also + used, sizeof(also) - used, "%s%s", used ? " " : "", one);
+        }
+    }
+    if (!avif && !heif && !canon) return false;
+
+    bmff_facts_t f = {0};
+    bmff_walk(b, size, 0, size, 0, &f);
+    rubraview_details_heading(out, "%s", avif ? "AVIF" : canon ? "Canon CR3" : "HEIF");
+    rubraview_details_add(out, "Brand", "%s", major);
+    rubraview_details_add(out, "Also reads as", "%s", also);
+    if (f.items) rubraview_details_add(out, "Items", "%u (pictures, their parts and what is said of them)", (unsigned)f.items);
+    if (f.sequence) rubraview_details_add(out, "Sequence", "yes, %u track%s", (unsigned)f.tracks, f.tracks == 1 ? "" : "s");
+    if (f.width && f.height) rubraview_details_add(out, "Largest picture", "%u x %u", (unsigned)f.width, (unsigned)f.height);
+    if (f.av1) {
+        static const char *const PROFILE[3] = { "Main", "High", "Professional" };
+        const char *chroma = f.av1_mono ? "grey" : f.av1_sub_x && f.av1_sub_y ? "4:2:0" : f.av1_sub_x ? "4:2:2" : "4:4:4";
+        rubraview_details_add(out, "Codec", "AV1, %s profile, level %u.%u", f.av1_profile < 3 ? PROFILE[f.av1_profile] : "unknown",
+                              (unsigned)(2 + (f.av1_level >> 2)), (unsigned)(f.av1_level & 3));
+        rubraview_details_add(out, "Coded as", "%u bits a sample, %s", (unsigned)f.av1_bits, chroma);
+    } else if (f.hevc) {
+        char profile[64];
+        static const char *const CHROMA[4] = { "grey", "4:2:0", "4:2:2", "4:4:4" };
+        rubraview_detail_hevc_profile(profile, sizeof(profile), f.hevc_profile, f.hevc_level);
+        rubraview_details_add(out, "Codec", "HEVC, %s", profile);
+        rubraview_details_add(out, "Coded as", "%u bits a sample, %s", (unsigned)f.hevc_bits, CHROMA[f.hevc_chroma]);
+    }
+    if (f.channels) rubraview_details_add(out, "Pixels", "%u channel%s of %u bits", (unsigned)f.channels, f.channels == 1 ? "" : "s", (unsigned)f.bits);
+    rubraview_details_add(out, "Transparency", "%s", f.alpha ? "yes, a picture of its own" : "");
+    if (f.nclx) {
+        const char *primaries = cicp_primaries(f.primaries), *transfer = cicp_transfer(f.transfer);
+        char a[24], c[24];
+        snprintf(a, sizeof(a), "primaries %u", (unsigned)f.primaries);
+        snprintf(c, sizeof(c), "transfer %u", (unsigned)f.transfer);
+        rubraview_details_add(out, "Colour", "%s, %s, matrix %u, %s range", primaries ? primaries : a, transfer ? transfer : c,
+                              (unsigned)f.matrix, f.full_range ? "full" : "limited");
+    }
+    if (f.icc) rubraview_details_add(out, "Colour profile", "ICC, in the file");
+    if (f.turns || f.mirrored) {
+        rubraview_details_add(out, "Shown", "%s%s%s", f.turns == 1 ? "turned a quarter to the left" : f.turns == 2 ? "upside down"
+                              : f.turns == 3 ? "turned a quarter to the right" : "", f.turns && f.mirrored ? ", " : "", f.mirrored ? "mirrored" : "");
+    }
+    uint32_t depth = f.av1 ? f.av1_bits : f.hevc ? f.hevc_bits : f.bits;
+    uint32_t channels = f.channels ? f.channels : (f.av1 && f.av1_mono) ? 1u : 3u;
+    if (raw_bits && depth && depth <= 16) *raw_bits = depth * (channels + (f.alpha && channels < 4 ? 1u : 0u));
+    return true;
+}
+
+static bool jxl_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits);
+
 bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_details_t *out, uint32_t *out_raw_bits) {
     if (out_raw_bits) *out_raw_bits = 0;
     if (!bytes || !out || size < 12) return false;
@@ -558,6 +844,9 @@ bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_detail
     if (memcmp(bytes, "GIF87a", 6) == 0 || memcmp(bytes, "GIF89a", 6) == 0) return gif_details(bytes, size, out, out_raw_bits);
     if (memcmp(bytes, "RIFF", 4) == 0 && memcmp(bytes + 8, "WEBP", 4) == 0) return webp_details(bytes, size, out, out_raw_bits);
     if (bytes[0] == 'B' && bytes[1] == 'M') return bmp_details(bytes, size, out, out_raw_bits);
+    if ((bytes[0] == 'I' && bytes[1] == 'I') || (bytes[0] == 'M' && bytes[1] == 'M')) return tiff_details(bytes, size, out, out_raw_bits);
+    if (rubraview_image_is_jxl(bytes, size)) return jxl_details(bytes, size, out, out_raw_bits);
+    if (memcmp(bytes + 4, "ftyp", 4) == 0) return bmff_details(bytes, size, out, out_raw_bits);
     return false;
 }
 
@@ -602,6 +891,101 @@ static void jxl_skip_preview(jxl_bits_t *r) {
     if (jxl_u(r, 3) == 0) {
         if (div8) jxl_skip_u32(r, 0, 0, 5, 9); else jxl_skip_u32(r, 6, 8, 10, 12);
     }
+}
+
+/* D-120: what a JPEG XL says before its pixels. A value of one of four
+   kinds, chosen by two bits: a fixed number, or a base and some bits. */
+static uint32_t jxl_u32(jxl_bits_t *r, const uint32_t base[4], const uint32_t bits[4]) {
+    uint32_t which = jxl_u(r, 2);
+    return base[which] + (bits[which] ? jxl_u(r, bits[which]) : 0);
+}
+
+static void jxl_size(jxl_bits_t *r, uint32_t *width, uint32_t *height) {
+    static const uint32_t ONE[4] = { 1, 1, 1, 1 }, WIDE[4] = { 9, 13, 18, 30 };
+    static const uint32_t NUM[8] = { 0, 1, 12, 4, 3, 16, 5, 2 }, DEN[8] = { 1, 1, 10, 3, 2, 9, 4, 1 };
+    bool small = jxl_u(r, 1) != 0;
+    *height = small ? (jxl_u(r, 5) + 1) * 8 : jxl_u32(r, ONE, WIDE);
+    uint32_t ratio = jxl_u(r, 3);
+    if (ratio == 0) *width = small ? (jxl_u(r, 5) + 1) * 8 : jxl_u32(r, ONE, WIDE);
+    else *width = (uint32_t)((uint64_t)*height * NUM[ratio] / DEN[ratio]);
+}
+
+static void jxl_codestream_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
+    if (size < 3 || b[0] != 0xFF || b[1] != 0x0A) return;
+    jxl_bits_t r = { .b = b, .size = size < 96 ? size : 96, .at = 16 };
+    uint32_t width = 0, height = 0, bits = 8, extra = 0;
+    bool floating = false;
+    jxl_size(&r, &width, &height);
+    if (r.short_of) return;
+    rubraview_details_add(out, "Picture", "%u x %u", (unsigned)width, (unsigned)height);
+    if (!jxl_u(&r, 1)) {                              /* not all as it comes */
+        if (jxl_u(&r, 1)) {                           /* extra fields */
+            uint32_t orientation = jxl_u(&r, 3) + 1;
+            if (jxl_u(&r, 1)) { uint32_t w, h; jxl_size(&r, &w, &h); }
+            if (jxl_u(&r, 1)) jxl_skip_preview(&r);
+            if (jxl_u(&r, 1)) {
+                static const uint32_t TB[4] = { 100, 1000, 1, 1 }, TN[4] = { 0, 0, 10, 30 };
+                static const uint32_t DB[4] = { 1, 1001, 1, 1 }, DN[4] = { 0, 0, 8, 10 };
+                static const uint32_t LB[4] = { 0, 0, 0, 0 }, LN[4] = { 0, 3, 16, 32 };
+                uint32_t ticks = jxl_u32(&r, TB, TN), per = jxl_u32(&r, DB, DN), loops = jxl_u32(&r, LB, LN);
+                (void)jxl_u(&r, 1);                   /* time codes */
+                if (!r.short_of && per) {
+                    if (loops) rubraview_details_add(out, "Animation", "%.4g ticks a second, played %u time%s", (double)ticks / per, (unsigned)loops, loops == 1 ? "" : "s");
+                    else rubraview_details_add(out, "Animation", "%.4g ticks a second, played without end", (double)ticks / per);
+                }
+            }
+            if (!r.short_of && orientation > 1) rubraview_details_add(out, "Orientation", "%u (as EXIF counts)", (unsigned)orientation);
+        }
+        static const uint32_t INT_BASE[4] = { 8, 10, 12, 1 }, INT_BITS[4] = { 0, 0, 0, 6 };
+        static const uint32_t FB[4] = { 32, 16, 24, 1 }, FN[4] = { 0, 0, 0, 6 };
+        static const uint32_t EB[4] = { 0, 1, 2, 1 }, EN[4] = { 0, 0, 4, 12 };
+        floating = jxl_u(&r, 1) != 0;
+        bits = floating ? jxl_u32(&r, FB, FN) : jxl_u32(&r, INT_BASE, INT_BITS);
+        if (floating) (void)jxl_u(&r, 4);
+        (void)jxl_u(&r, 1);                           /* 16-bit buffers are enough */
+        extra = jxl_u32(&r, EB, EN);
+        if (r.short_of) return;
+    }
+    rubraview_details_add(out, "Samples", "%u bits%s", (unsigned)bits, floating ? ", floating-point" : "");
+    if (extra) rubraview_details_add(out, "Extra channels", "%u (transparency or more)", (unsigned)extra);
+    if (raw_bits && bits <= 64) *raw_bits = bits * (3 + (extra ? 1u : 0u));
+}
+
+static bool jxl_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
+    rubraview_details_heading(out, "JPEG XL");
+    if (b[0] == 0xFF) {
+        rubraview_details_add(out, "Kind", "a bare codestream");
+        jxl_codestream_details(b, size, out, raw_bits);
+        return true;
+    }
+    rubraview_details_add(out, "Kind", "in boxes (ISO container)");
+    uint32_t parts = 0, level = 0;
+    bool repacked = false, exif = false, xml = false, squeezed = false, provenance = false, seen = false;
+    const uint8_t *kind;
+    size_t body, len;
+    for (size_t at = 12; bmff_box(b, size, at, &kind, &body, &len); at = body + len) {
+        if (!memcmp(kind, "jxll", 4) && len >= 1) level = b[body];
+        else if (!memcmp(kind, "jbrd", 4)) repacked = true;
+        else if (!memcmp(kind, "Exif", 4)) exif = true;
+        else if (!memcmp(kind, "xml ", 4)) xml = true;
+        else if (!memcmp(kind, "brob", 4)) squeezed = true;
+        else if (!memcmp(kind, "jumb", 4)) provenance = true;
+        else if (!memcmp(kind, "jxlc", 4)) {
+            if (!seen) jxl_codestream_details(b + body, len, out, raw_bits);
+            seen = true;
+        } else if (!memcmp(kind, "jxlp", 4)) {
+            if (!seen && len > 4) jxl_codestream_details(b + body + 4, len - 4, out, raw_bits);
+            seen = true;
+            ++parts;
+        }
+    }
+    if (level) rubraview_details_add(out, "Level", "%u", (unsigned)level);
+    if (parts > 1) rubraview_details_add(out, "Codestream", "in %u parts", (unsigned)parts);
+    rubraview_details_add(out, "From a JPEG", "%s", repacked ? "yes: the JPEG can be had back, bit for bit" : "");
+    if (exif || xml || squeezed || provenance) {
+        rubraview_details_add(out, "Carries", "%s%s%s%s", exif ? "EXIF " : "", xml ? "XMP " : "", squeezed ? "compressed-metadata " : "", provenance ? "provenance (JUMBF) " : "");
+    }
+    return true;
 }
 
 static bool jxl_codestream_moves(const uint8_t *b, size_t size) {

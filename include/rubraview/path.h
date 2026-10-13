@@ -96,6 +96,14 @@ u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t pat
 
 u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext);
 
+/*
+ * D-120: `name` is what a viewer writes a state file through before it
+ * exchanges it for `base` — "<base>.<pid>-<tick>.tmp" (D-99). True with
+ * the process's number, so a file left by a viewer that died can be told
+ * from one being written now. Names, not paths; no case folding.
+ */
+bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid);
+
 #ifdef __cplusplus
 }
 #endif

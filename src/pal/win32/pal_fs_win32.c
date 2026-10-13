@@ -362,12 +362,54 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     return ok;
 }
 
+/* D-120: a viewer that died between writing "<name>.<pid>-<tick>.tmp" and
+   exchanging it left that file beside the state file for good. Before a
+   state file is written, those of processes that are gone are removed —
+   never one whose process still runs (it may be mid-write), and never
+   this process's own. */
+static void sweep_state_temps(const char *final) {
+    WCHAR pattern[4096], found_path[4096];
+    char pattern_utf8[4096];
+    int n = snprintf(pattern_utf8, sizeof(pattern_utf8), "%s.*.tmp", final);
+    if (n <= 0 || (size_t)n >= sizeof(pattern_utf8)) return;
+    if (MultiByteToWideChar(CP_UTF8, 0, pattern_utf8, -1, pattern, 4096) <= 0) return;
+    const char *slash = strrchr(final, '\\'), *other = strrchr(final, '/');
+    if (other && (!slash || other > slash)) slash = other;
+    const char *base = slash ? slash + 1 : final;
+    size_t dir_len = (size_t)(base - final);
+
+    WIN32_FIND_DATAW data;
+    HANDLE find = FindFirstFileW(pattern, &data);
+    if (find == INVALID_HANDLE_VALUE) return;
+    do {
+        char name[1024];
+        if (WideCharToMultiByte(CP_UTF8, 0, data.cFileName, -1, name, sizeof(name), NULL, NULL) <= 0) continue;
+        uint32_t pid = 0;
+        if (!rubraview_path_state_temp((u8str_t){ .ptr = name, .len = strlen(name) }, (u8str_t){ .ptr = base, .len = strlen(base) }, &pid)) continue;
+        if (pid == GetCurrentProcessId()) continue;
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (process) {
+            DWORD code = 0;
+            bool runs = GetExitCodeProcess(process, &code) && code == STILL_ACTIVE;
+            CloseHandle(process);
+            if (runs) continue;
+        } else if (GetLastError() == ERROR_ACCESS_DENIED) {
+            continue;   /* someone's process, alive */
+        }
+        char whole[4096];
+        int m = snprintf(whole, sizeof(whole), "%.*s%s", (int)dir_len, final, name);
+        if (m > 0 && (size_t)m < sizeof(whole) && MultiByteToWideChar(CP_UTF8, 0, whole, -1, found_path, 4096) > 0) DeleteFileW(found_path);
+    } while (FindNextFileW(find, &data));
+    FindClose(find);
+}
+
 bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents) {
     if (path.len == 0 || !path.ptr || path.len >= 4000) return false;
     char temp[4096], final[4096];
     WCHAR wide_temp[4096], wide_final[4096];
     memcpy(final, path.ptr, path.len);
     final[path.len] = '\0';
+    sweep_state_temps(final);
     /* The process and the moment: two viewers, or two writes of one, never share it. */
     int n = snprintf(temp, sizeof(temp), "%s.%lu-%lu.tmp", final, (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
     if (n <= 0 || (size_t)n >= sizeof(temp)) return false;

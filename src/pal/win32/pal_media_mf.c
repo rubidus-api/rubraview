@@ -71,6 +71,8 @@ typedef struct mf_media {
        shared around every use of `audio`. The device's own thread takes
        neither, so nothing waits in a circle. */
     SRWLOCK audio_lock;
+    _Atomic uint32_t measured_millihertz;            /* D-120: the pictures' rate from their own times; 0 until known */
+    _Atomic uint32_t played_rate, played_channels;   /* D-120: what `audio` plays at now, for the caller */
     int32_t width, height;
     LONG default_stride;                    /* the negotiated type's stride; negative = bottom-up */
 
@@ -465,6 +467,31 @@ static bool mf_negotiate_audio(IMFSourceReader *reader, DWORD stream,
     return *out_rate > 0 && *out_channels > 0 && *out_channels <= 8;
 }
 
+/* D-120: the reader's video processor makes the pictures come at the rate
+   the stream's type names, and Windows' Matroska source names half the
+   real one (12 for a film of 24): every second picture was thrown away,
+   since 0.0.56 in software and always on the card. The processor is told
+   to leave the rate alone; the pictures keep their own times. */
+static void video_processor_keeps_every_picture(IMFSourceReader *reader, DWORD stream) {
+    static const GUID DISABLE_FRC = { 0x2c0afa19, 0x7a97, 0x4d5a, { 0x9e, 0xe8, 0x16, 0xd4, 0xfc, 0x51, 0x8d, 0x8c } };   /* MF_XVP_DISABLE_FRC */
+    IMFSourceReaderEx *ex = NULL;
+    if (FAILED(IMFSourceReader_QueryInterface(reader, &IID_IMFSourceReaderEx, (void**)&ex)) || !ex) return;
+    for (DWORD i = 0; i < 8; ++i) {
+        GUID category = {0};
+        IMFTransform *transform = NULL;
+        if (FAILED(IMFSourceReaderEx_GetTransformForStream(ex, stream, i, &category, &transform)) || !transform) break;
+        if (IsEqualGUID(&category, &MFT_CATEGORY_VIDEO_PROCESSOR)) {
+            IMFAttributes *attributes = NULL;
+            if (SUCCEEDED(IMFTransform_GetAttributes(transform, &attributes)) && attributes) {
+                IMFAttributes_SetUINT32(attributes, &DISABLE_FRC, TRUE);
+                IMFAttributes_Release(attributes);
+            }
+        }
+        IMFTransform_Release(transform);
+    }
+    IMFSourceReaderEx_Release(ex);
+}
+
 static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu) {
     *out_reader = NULL;
 
@@ -595,6 +622,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
             fail(m, rubraview_media_classify(true, true, false, fourcc));
             return false;
         }
+        video_processor_keeps_every_picture(reader, video_stream);
 
         IMFMediaType *current = NULL;
         UINT64 frame_size = 0;
@@ -642,6 +670,8 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
             m->audio_stream = audio_stream;
             m->audio_rate = rate;
             m->audio_channels = channels;
+            atomic_store_explicit(&m->played_rate, rate, memory_order_release);
+            atomic_store_explicit(&m->played_channels, channels, memory_order_release);
         } else {
             /* No device, or a sound we cannot decode: the picture plays
                alone. A file that is only sound still "plays" — on the
@@ -944,6 +974,8 @@ static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
     }
     m->audio_rate = rate;
     m->audio_channels = channels;
+    atomic_store_explicit(&m->played_rate, rate, memory_order_release);
+    atomic_store_explicit(&m->played_channels, channels, memory_order_release);
     rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
     rubraview_pal_audio_set_playing(m->audio, atomic_load_explicit(&m->audio_playing, memory_order_acquire));
     ReleaseSRWLockExclusive(&m->audio_lock);
@@ -1008,6 +1040,7 @@ static bool mf_apply_audio_switch(mf_media_t *m, IMFSourceReader *reader, DWORD 
 static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
+    rubraview_rate_meter_t rate_meter = {0};
     double audio_base = 0.0;      /* where the heard position was told to start */
     bool audio_begun = false;     /* its first sound has come */
     const bool want_video = m->video_stream != NO_STREAM;
@@ -1091,6 +1124,10 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                         pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_video + 1e-4;
                     if (!before) {
                         skip_video = -1.0;
+                        double measured = 0.0;
+                        if (rubraview_rate_meter_add(&rate_meter, pts, &measured) && measured > 0.5 && measured < 1000.0) {
+                            atomic_store_explicit(&m->measured_millihertz, (uint32_t)(measured * 1000.0 + 0.5), memory_order_release);
+                        }
                         if (store_picture(m, sample, &m->slots[slot])) {
                             m->slots[slot].pts = pts;
                             m->slots[slot].duration = frame_duration;
@@ -1402,6 +1439,22 @@ static bool mf_audio_position(void *handle, double *out_position, double *out_wa
     return known;
 }
 
+static bool mf_picture_rate(void *handle, double *out_rate) {
+    mf_media_t *media = (mf_media_t*)handle;
+    uint32_t milli = media ? atomic_load_explicit(&media->measured_millihertz, memory_order_acquire) : 0;
+    if (milli == 0) return false;
+    *out_rate = (double)milli / 1000.0;
+    return true;
+}
+
+static bool mf_audio_format(void *handle, uint32_t *out_rate, uint32_t *out_channels) {
+    mf_media_t *media = (mf_media_t*)handle;
+    if (!media) return false;
+    *out_rate = atomic_load_explicit(&media->played_rate, memory_order_acquire);
+    *out_channels = atomic_load_explicit(&media->played_channels, memory_order_acquire);
+    return *out_rate > 0 && *out_channels > 0;
+}
+
 static bool mf_select_audio_track(void *handle, int32_t stream_index) {
     mf_media_t *m = (mf_media_t*)handle;
     if (!m || stream_index < 0) return false;
@@ -1458,6 +1511,8 @@ static const rubraview_media_backend_api_t MF_API = {
     .finished = mf_finished,
     .set_paused = mf_set_paused,
     .audio_position = mf_audio_position,
+    .audio_format = mf_audio_format,
+    .picture_rate = mf_picture_rate,
     .tracks = mf_tracks,
     .details = mf_details,
     .select_audio_track = mf_select_audio_track,

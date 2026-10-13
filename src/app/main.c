@@ -2607,6 +2607,22 @@ static void media_tick(app_state_t *app) {
     rubraview_media_t *m = app->media;
     double now = rubraview_pal_time_now_seconds();
 
+    /* D-120: the sound may be played at another rate than the file was
+       opened with (another track, a format that changed while decoding);
+       the information window and the analyser go by what is played. */
+    uint32_t played_rate = 0, played_channels = 0;
+    if (app->media_info.audio_output && rubraview_pal_media_audio_format(m, &played_rate, &played_channels)) {
+        app->media_info.audio_sample_rate = played_rate;
+        app->media_info.audio_channels = played_channels;
+    }
+    /* And the pictures' rate is what their times say: Windows' Matroska
+       source names half of it, and a frame step went two pictures. */
+    double measured_rate = 0.0;
+    if (rubraview_pal_media_picture_rate(m, &measured_rate) &&
+        rubraview_media_rate_differs(app->media_info.frame_rate, measured_rate)) {
+        app->media_info.frame_rate = measured_rate;
+    }
+
     /* §5.3: with the sound as master, the clock follows what is heard. */
     if (app->media_master == RUBRAVIEW_CLOCK_AUDIO) {
         double heard = 0.0, at = 0.0;
@@ -11974,12 +11990,22 @@ static void info_gather(app_state_t *app) {
             rubraview_image_desc_t d;
             bool described = bytes && rubraview_pal_image_describe(in_archive ? U8("") : path, bytes, size, &d);
             if (!described && !in_archive) described = rubraview_pal_image_describe(path, NULL, 0, &d);
+            /* The file's own account of how it was made (read below too, for the ratio). */
+            static rubraview_details_t details;
+            uint32_t raw_bits = 0;
+            memset(&details, 0, sizeof(details));
+            bool known = bytes && rubraview_image_details(bytes, size, &details, &raw_bits);
+            /* D-120: an AVIF or a JPEG XL decoded by our own readers reaches
+               Windows as a TIFF made in memory; that carrier's name and
+               pixel format are not the file's. */
+            const char *own = known && details.count > 0 && details.lines[0].heading ? details.lines[0].label : "";
+            bool carried = described && strcmp(d.format, "TIFF") == 0 && own[0] && strcmp(own, "TIFF") != 0;
             rubraview_info_heading(a, &info, "Picture");
             if (described) {
-                rubraview_info_add(a, &info, "Format", (u8str_t){ d.format, strlen(d.format) });
+                rubraview_info_add(a, &info, "Format", carried ? cstr(own) : (u8str_t){ d.format, strlen(d.format) });
                 rubraview_info_addf(a, &info, "Pixels", "%d x %d (%.1f megapixels)", d.width, d.height,
                                     (double)d.width * (double)d.height / 1e6);
-                rubraview_info_add(a, &info, "Pixel format", (u8str_t){ d.pixels, strlen(d.pixels) });
+                if (!carried) rubraview_info_add(a, &info, "Pixel format", (u8str_t){ d.pixels, strlen(d.pixels) });
                 if (d.dpi_x > 0.0) rubraview_info_addf(a, &info, "Resolution", "%.0f x %.0f dpi", d.dpi_x, d.dpi_y);
                 if (d.frames > 1) rubraview_info_addf(a, &info, "Frames", "%u", (unsigned)d.frames);
                 rubraview_info_add(a, &info, "Colour profile", d.color_profile ? U8("embedded") : U8("none"));
@@ -11991,11 +12017,7 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_addf(a, &info, "On screen", "reduced to %d x %d (the graphics card's limit)", page->width, page->height);
             }
             if (bytes) {
-                /* The file's own account of how it was made, and how much that saved. */
-                static rubraview_details_t details;
-                uint32_t raw_bits = 0;
-                memset(&details, 0, sizeof(details));
-                bool known = rubraview_image_details(bytes, size, &details, &raw_bits);
+                /* How much the file's way of storing saved. */
                 if (described && d.width > 0 && d.height > 0) {
                     double pixels = (double)d.width * (double)d.height * (d.frames > 1 ? (double)d.frames : 1.0);
                     char ratio[96];

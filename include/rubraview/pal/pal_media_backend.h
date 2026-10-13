@@ -30,6 +30,12 @@ typedef struct rubraview_media_backend_api {
     bool  (*finished)(void *impl);
     void  (*set_paused)(void *impl, bool paused);
     bool  (*audio_position)(void *impl, double *out_position, double *out_wall);
+    /** D-120: the rate and channels the sound is played at now — not always
+        what it was opened as. May be NULL; false when no sound is played. */
+    bool  (*audio_format)(void *impl, uint32_t *out_rate, uint32_t *out_channels);
+    /** D-120: the pictures' rate as measured from their times, when it is
+        not what the file was opened as. May be NULL; false until known. */
+    bool  (*picture_rate)(void *impl, double *out_rate);
 
     /** The container's tracks, as found while opening (§3.16.2). */
     bool  (*tracks)(void *impl, rubraview_track_set_t *out_set);

@@ -95,6 +95,24 @@ rubraview_media_clock_t rubraview_media_clock_create(rubraview_clock_master_t ma
 double rubraview_media_position_running(double shown_pts, double shown_duration, double clock_seconds,
                                         double file_seconds);
 
+/*
+ * D-120: how many pictures a second really come, from their own times.
+ * A container may name another rate than its pictures have (Windows'
+ * Matroska source names half). Fed each picture's time in order; after
+ * sixteen steps forward of under half a second it gives the rate, once,
+ * and starts again. A step back or a jump (a seek) starts it again too.
+ */
+typedef struct rubraview_rate_meter {
+    double last;
+    double sum;
+    uint32_t steps;
+    bool primed;
+} rubraview_rate_meter_t;
+
+bool rubraview_rate_meter_add(rubraview_rate_meter_t *meter, double pts, double *out_rate);
+/* The measured rate is to be believed over the named one: more than a twentieth apart. */
+bool rubraview_media_rate_differs(double named, double measured);
+
 /** File time now. A wall clock that steps backwards counts as no time passing. */
 double rubraview_media_clock_now(const rubraview_media_clock_t *clock, double wall_now);
 

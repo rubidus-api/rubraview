@@ -63,6 +63,7 @@ typedef struct ff_media {
     rubraview_audio_out_t *audio;
 
     _Atomic bool quit, paused;
+    _Atomic uint32_t played_rate, played_channels;   /* D-120: what `audio` plays at now, for the caller */
     _Atomic int32_t audio_gain_millionths;  /* what the caller last asked of the device, for one opened later */
     /* D-119: held exclusively by the decode thread while it exchanges the
        device for one of another format (a track switch), shared by the
@@ -440,6 +441,10 @@ typedef struct ff_decode {
     int swr_rate, swr_channels, swr_format;   /* what the resampler was told it would be given */
     AVPacket *packet;
     AVFrame *frame;
+    /* D-120: where the heard position was told to start (0, or a seek's
+       target), and whether its first sound has come since. */
+    double audio_base;
+    bool audio_begun;
 } ff_decode_t;
 
 static double stream_seconds(AVFormatContext *format, int index, int64_t pts) {
@@ -501,6 +506,8 @@ static bool ff_open_audio_stream(ff_media_t *m, ff_decode_t *d, int stream_index
     d->swr_format = (int)context->sample_fmt;
     m->audio_rate = (uint32_t)par->sample_rate;
     m->audio_channels = (uint32_t)par->ch_layout.nb_channels;
+    atomic_store_explicit(&m->played_rate, m->audio_rate, memory_order_release);
+    atomic_store_explicit(&m->played_channels, m->audio_channels, memory_order_release);
     return true;
 }
 
@@ -900,6 +907,16 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
                 *skip_until = -1.0;
             }
         }
+        if ((size_t)frames > skip && !d->audio_begun) {
+            /* The first sound is not always where the film's time begins
+               or where a seek asked: a sound track that starts half a
+               second after the pictures was heard half a second early,
+               the device counting from the time asked for. As Media
+               Foundation's reader does since D-115. */
+            double starts = pts + (double)skip / (double)m->audio_rate;
+            d->audio_begun = true;
+            if (m->audio && (starts - d->audio_base > 0.05 || d->audio_base - starts > 0.05)) rubraview_pal_audio_flush(m->audio, starts);
+        }
         const float *data = converted + skip * m->audio_channels;
         size_t count = ((size_t)frames > skip ? (size_t)frames - skip : 0) * m->audio_channels;
         while (count > 0) {
@@ -994,6 +1011,9 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                            another format was not heard and its clock stood. */
                         rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
                         rubraview_pal_audio_set_playing(m->audio, !atomic_load_explicit(&m->paused, memory_order_acquire));
+                        /* A new device counts from 0: its first sound says where the film is. */
+                        d->audio_begun = false;
+                        d->audio_base = -1.0e9;
                     }
                     ReleaseSRWLockExclusive(&m->audio_lock);
                 }
@@ -1010,6 +1030,8 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
             if (d->video) g_ff.avcodec_flush_buffers(d->video);
             if (d->audio) g_ff.avcodec_flush_buffers(d->audio);
             skip_video = skip_audio = seconds;
+            d->audio_base = seconds;
+            d->audio_begun = false;
             ended = false;
             while (waiting > 0) {
                 g_ff.av_packet_unref(pending[first]);
@@ -1190,6 +1212,14 @@ static void ff_set_paused(void *handle, bool paused) {
     atomic_store_explicit(&m->paused, paused, memory_order_release);
     rubraview_pal_audio_set_playing(m->audio, !paused);
     ReleaseSRWLockShared(&m->audio_lock);
+}
+
+static bool ff_audio_format(void *handle, uint32_t *out_rate, uint32_t *out_channels) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m) return false;
+    *out_rate = atomic_load_explicit(&m->played_rate, memory_order_acquire);
+    *out_channels = atomic_load_explicit(&m->played_channels, memory_order_acquire);
+    return *out_rate > 0 && *out_channels > 0;
 }
 
 static bool ff_audio_position(void *handle, double *out_position, double *out_wall) {
@@ -1376,6 +1406,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .finished = ff_finished,
     .set_paused = ff_set_paused,
     .audio_position = ff_audio_position,
+    .audio_format = ff_audio_format,
     .tracks = ff_tracks,
     .details = ff_details,
     .select_audio_track = ff_select_audio_track,

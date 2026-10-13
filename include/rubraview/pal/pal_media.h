@@ -172,6 +172,21 @@ void rubraview_pal_media_set_gain(rubraview_media_t *media, double gain);
 bool rubraview_pal_media_audio_position(rubraview_media_t *media, double *out_position, double *out_wall);
 
 /**
+ * D-120: the rate and channels the sound is played at now. A track of
+ * another format chosen, or a format that changed while decoding, makes
+ * these differ from what `rubraview_media_info_t` said at opening. False
+ * when no sound is played.
+ */
+bool rubraview_pal_media_audio_format(rubraview_media_t *media, uint32_t *out_rate, uint32_t *out_channels);
+
+/**
+ * D-120: how many pictures a second the film really has, measured from the
+ * pictures' own times once a few have come. False until then, and for a
+ * backend whose opening figure is to be trusted.
+ */
+bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate);
+
+/**
  * §3.16.2 / R135: the tracks the container holds. The set is worked out
  * once, on the decode thread, while the file is being opened; this call
  * copies it. The strings in it belong to the media object and stay

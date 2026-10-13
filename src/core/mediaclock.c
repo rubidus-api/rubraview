@@ -363,3 +363,32 @@ bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_
     if (!has_device) return false;
     return mode == 2 || (mode == 1 && decoder_profiles > 0);
 }
+
+bool rubraview_rate_meter_add(rubraview_rate_meter_t *meter, double pts, double *out_rate) {
+    if (!meter) return false;
+    if (!meter->primed) {
+        *meter = (rubraview_rate_meter_t){ .last = pts, .primed = true };
+        return false;
+    }
+    double step = pts - meter->last;
+    meter->last = pts;
+    if (step <= 0.0 || step >= 0.5) {
+        meter->sum = 0.0;
+        meter->steps = 0;
+        return false;
+    }
+    meter->sum += step;
+    if (++meter->steps < 16) return false;
+    double rate = (double)meter->steps / meter->sum;
+    meter->sum = 0.0;
+    meter->steps = 0;
+    if (out_rate) *out_rate = rate;
+    return true;
+}
+
+bool rubraview_media_rate_differs(double named, double measured) {
+    if (measured <= 0.0) return false;
+    if (named <= 0.0) return true;
+    double ratio = measured / named;
+    return ratio < 0.95 || ratio > 1.05;
+}
