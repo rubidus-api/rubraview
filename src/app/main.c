@@ -801,6 +801,7 @@ typedef struct app_state {
     /* D-124: the strip's name on several rows. What was measured last, and what it gave. */
     uint64_t               strip_title_key;
     int32_t                strip_title_lines;
+    char                   strip_name[768];                /* the name cut to its three rows, "..." at its end; empty when it fits */
     bool                   strip_place_below;              /* the place or the time on a row of its own, under the name */
     bool                   speed_press_interval;           /* D-123: it is the slide show's Delay tile that is held */
     bool                   speed_pressed, speed_dragged;   /* D-110: the speed tile held; dragged, it is not a tap */
@@ -6813,7 +6814,7 @@ static double strip_place_width(int n, double line_height) {
 }
 
 /* D-124: how many rows the name takes in the strip, one to three, and whether the place goes
-   under it. Measured when the name, the width or the place's length changes. */
+   under it on one more. Measured when the name, the width or the place's length changes. */
 static void strip_title_plan(app_state_t *app) {
     rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, &base);
@@ -6831,7 +6832,7 @@ static void strip_title_plan(app_state_t *app) {
     if (key != app->strip_title_key || app->strip_title_lines < 1) {
         app->strip_title_key = key;
         int32_t lines = 1;
-        bool below = false;
+        bool below = false, cut_name = false;
         double one_w = 0.0, w = 0.0, h = 0.0, row = 0.0;
         double place_w = n > 0 ? strip_place_width(n, line) + line * 0.5 : 0.0;
         bool measured = name.len > 0 && width > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &one_w);
@@ -6843,9 +6844,30 @@ static void strip_title_plan(app_state_t *app) {
                 lines = (int32_t)floor(h / row + 0.5);
             }
             if (lines < 1) lines = 1;
-            if (below) lines++;
-            if (lines > RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES) lines = RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES;
+            if (lines > RUBRAVIEW_TOOLBOX_MAX_NAME_LINES) {
+                /* Longer than its three rows: the longest beginning that fits, and an ellipsis. */
+                lines = RUBRAVIEW_TOOLBOX_MAX_NAME_LINES;
+                static const char DOTS[] = "\xE2\x80\xA6";
+                size_t cap = sizeof(app->strip_name) - sizeof(DOTS);
+                size_t low = 0, high = name.len < cap ? name.len : cap;
+                while (low < high) {
+                    size_t mid = (low + high + 1) / 2, cut = mid;
+                    while (cut > 0 && cut < name.len && ((uint8_t)name.ptr[cut] & 0xC0) == 0x80) cut--;   /* not inside a character */
+                    memcpy(app->strip_name, name.ptr, cut);
+                    memcpy(app->strip_name + cut, DOTS, sizeof(DOTS));
+                    bool fits = rubraview_pal_render_measure_text_wrapped(app->renderer, (u8str_t){ app->strip_name, cut + sizeof(DOTS) - 1 },
+                                                                          font, width, &w, &h) && h <= row * ((double)lines + 0.5);
+                    if (fits) low = mid;
+                    else high = cut > 0 ? cut - 1 : 0;
+                }
+                while (low > 0 && low < name.len && ((uint8_t)name.ptr[low] & 0xC0) == 0x80) low--;
+                memcpy(app->strip_name, name.ptr, low);
+                memcpy(app->strip_name + low, DOTS, sizeof(DOTS));
+                cut_name = true;
+            }
+            if (below) lines++;   /* the place's own row never takes one of the name's */
         }
+        if (!cut_name) app->strip_name[0] = '\0';
         app->strip_title_lines = lines;
         app->strip_place_below = below;
     }
@@ -6870,6 +6892,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
+    if (hovered < 0 && app->strip_name[0]) label = cstr(app->strip_name);   /* D-124: cut to its rows */
     char place[96];
     int n = strip_place_text(app, hovered, place, sizeof(place));
     double line = l->title_line_height > 0.0 ? l->title_line_height : l->title.height;

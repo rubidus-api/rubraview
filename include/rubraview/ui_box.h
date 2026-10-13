@@ -89,7 +89,8 @@ typedef struct rubraview_tile_metrics {
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale);
 
 #define RUBRAVIEW_TOOLBOX_MAX_GROUPS 12
-#define RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES 3
+#define RUBRAVIEW_TOOLBOX_MAX_NAME_LINES 3    /* the file's name */
+#define RUBRAVIEW_TOOLBOX_MAX_TITLE_LINES 4   /* and the place or the time on a row of its own under it */
 
 typedef struct rubraview_box {
     rubraview_box_kind_t kind;
