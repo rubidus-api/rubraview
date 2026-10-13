@@ -12,6 +12,7 @@
 #include <libswresample/swresample.h>
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/pal/pal_audio.h"
+#include "rubraview/fileinfo.h"
 
 /*
  * The FFmpeg backend (D-8, RV-016). The DLLs are loaded at run time and
@@ -668,6 +669,14 @@ static void ff_detail_stream(ff_media_t *m, AVFormatContext *format, unsigned in
                               (stream->disposition & AV_DISPOSITION_COMMENT) ? "commentary " : "");
     }
     if (video || audio) rubraview_details_add(d, "Played", "%s", (int)index == m->video_stream || (int)index == m->audio_stream ? "yes" : "no");
+    /* D-95 says what a played stream is decoded as; this backend did not (D-117). */
+    if (video && (int)index == m->video_stream) {
+        rubraview_details_add(d, "Decoded as", "%d x %d, 32-bit BGRA", par->width, par->height);
+    }
+    if (audio && (int)index == m->audio_stream && par->sample_rate > 0) {
+        rubraview_details_add(d, "Decoded as", "%d Hz, %d channel%s, 32-bit float", par->sample_rate,
+                              par->ch_layout.nb_channels, par->ch_layout.nb_channels == 1 ? "" : "s");
+    }
     ff_detail_tags(d, stream->metadata);
 }
 
@@ -773,7 +782,11 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         .has_video = m->video_stream >= 0,
         .has_audio = m->audio_stream >= 0 || g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0,
         .audio_output = m->audio != NULL,
-        .video_fourcc = m->video_stream >= 0 ? (uint32_t)d->format->streams[m->video_stream]->codecpar->codec_tag : 0,
+        /* D-117: Matroska gives no code; the codec's name stands in for it. */
+        .video_fourcc = m->video_stream >= 0
+            ? rubraview_info_fourcc_or_name((uint32_t)d->format->streams[m->video_stream]->codecpar->codec_tag,
+                                            g_ff.avcodec_get_name(d->format->streams[m->video_stream]->codecpar->codec_id))
+            : 0,
         .audio_sample_rate = m->audio_rate,
         .audio_channels = m->audio_channels,
         .bitrate_kbps = d->format->bit_rate > 0 ? (uint32_t)(d->format->bit_rate / 1000) : 0,

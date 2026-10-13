@@ -107,7 +107,28 @@ size_t rubraview_info_fourcc(char *buf, size_t cap, uint32_t fourcc) {
     bool printable = true;
     for (int i = 0; i < 4; ++i) printable = printable && c[i] >= 0x20 && c[i] < 0x7F;
     if (!printable) return done(buf, cap, snprintf(buf, cap, "0x%08X", (unsigned)fourcc));
-    return done(buf, cap, snprintf(buf, cap, "%c%c%c%c", c[0], c[1], c[2], c[3]));
+    int len = 4;
+    while (len > 1 && c[len - 1] == ' ') --len;   /* 'VP9 ' reads "VP9" */
+    return done(buf, cap, snprintf(buf, cap, "%.*s", len, c));
+}
+
+uint32_t rubraview_info_fourcc_or_name(uint32_t fourcc, const char *name) {
+    bool printable = true;
+    for (int i = 0; i < 4; ++i) {
+        uint32_t c = (fourcc >> (8 * i)) & 0xFF;
+        printable = printable && c >= 0x20 && c < 0x7F;
+    }
+    if (printable || !name || !name[0]) return fourcc;
+    uint32_t made = 0;
+    bool ended = false;
+    for (int i = 0; i < 4; ++i) {
+        char c = ended ? ' ' : name[i];
+        if (c == '\0') { ended = true; c = ' '; }
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c < 0x20 || c >= 0x7F) c = '?';
+        made |= (uint32_t)(unsigned char)c << (8 * i);
+    }
+    return made;
 }
 
 static const char *orientation_words(int32_t o) {

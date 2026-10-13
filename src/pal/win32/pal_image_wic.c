@@ -1316,6 +1316,31 @@ static const char *container_name(const GUID *g) {
     return "an image";
 }
 
+/* D-117: a colour context is not always a profile. A codec may hand over
+   only the name of a colour space (the WebP codec does, for a file with
+   no profile in it), and that is not "embedded". */
+static bool frame_has_profile(IWICImagingFactory *factory, IWICBitmapFrameDecode *frame, UINT count) {
+    enum { MOST = 4 };
+    if (count == 0) return false;
+    if (count > MOST) count = MOST;
+    IWICColorContext *contexts[MOST] = {0};
+    for (UINT i = 0; i < count; ++i) {
+        if (FAILED(IWICImagingFactory_CreateColorContext(factory, &contexts[i])) || !contexts[i]) count = i;
+    }
+    bool found = false;
+    UINT got = 0;
+    if (count > 0 && SUCCEEDED(IWICBitmapFrameDecode_GetColorContexts(frame, count, contexts, &got))) {
+        for (UINT i = 0; i < count && i < got; ++i) {
+            WICColorContextType type = WICColorContextUninitialized;
+            UINT bytes = 0;
+            if (SUCCEEDED(IWICColorContext_GetType(contexts[i], &type)) && type == WICColorContextProfile &&
+                SUCCEEDED(IWICColorContext_GetProfileBytes(contexts[i], 0, NULL, &bytes)) && bytes > 0) found = true;
+        }
+    }
+    for (UINT i = 0; i < MOST; ++i) if (contexts[i]) IWICColorContext_Release(contexts[i]);
+    return found;
+}
+
 bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
@@ -1339,7 +1364,7 @@ bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size
         if (SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h))) { out->width = (int32_t)w; out->height = (int32_t)h; }
         (void)IWICBitmapFrameDecode_GetResolution(frame, &out->dpi_x, &out->dpi_y);
         UINT profiles = 0;
-        if (SUCCEEDED(IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &profiles))) out->color_profile = profiles > 0;
+        if (SUCCEEDED(IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &profiles))) out->color_profile = frame_has_profile(factory, frame, profiles);
         WICPixelFormatGUID format;
         IWICComponentInfo *component = NULL;
         IWICPixelFormatInfo *info = NULL;
@@ -1353,7 +1378,10 @@ bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size
             out->channels = channels;
             const char *kind = channels == 1 ? "grey" : channels == 2 ? "grey with transparency"
                              : channels == 4 ? "colour with transparency" : "colour";
-            if (bpp > 0 && bpp <= 8 && channels != 1) snprintf(out->pixels, sizeof(out->pixels), "%u-bit indexed colour", bpp);
+            /* D-117: a palette picture has one channel too (a GIF read "8-bit grey"). */
+            bool indexed = IsEqualGUID(&format, &GUID_WICPixelFormat8bppIndexed) || IsEqualGUID(&format, &GUID_WICPixelFormat4bppIndexed) ||
+                           IsEqualGUID(&format, &GUID_WICPixelFormat2bppIndexed) || IsEqualGUID(&format, &GUID_WICPixelFormat1bppIndexed);
+            if (bpp > 0 && (indexed || (bpp <= 8 && channels != 1))) snprintf(out->pixels, sizeof(out->pixels), "%u-bit indexed colour", bpp);
             else if (bpp > 0) snprintf(out->pixels, sizeof(out->pixels), "%u-bit %s", bpp, kind);
         }
         if (info) IWICPixelFormatInfo_Release(info);

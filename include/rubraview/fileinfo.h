@@ -47,6 +47,12 @@ size_t rubraview_info_gps(char *buf, size_t cap, double latitude, double longitu
 size_t rubraview_info_duration(char *buf, size_t cap, double seconds);              /* "1:23:45.678", "0:10.000" */
 size_t rubraview_info_fourcc(char *buf, size_t cap, uint32_t fourcc);               /* "H264", or "0x00000055" */
 
+/* A container that gives no four-letter code for a stream (Matroska gives
+   0), or one that is not letters: the code is made of the codec's name,
+   its first four letters in capitals, blanks after a shorter one ("h264"
+   is 'H264', "vp9" 'VP9 '). A code of four printable letters is kept. */
+uint32_t rubraview_info_fourcc_or_name(uint32_t fourcc, const char *name);
+
 #ifdef __cplusplus
 }
 #endif
