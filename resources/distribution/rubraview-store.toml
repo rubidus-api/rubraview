@@ -1,0 +1,247 @@
+# The Microsoft Store's package (D-122): rubraview-v<version>-store.msix, built
+# by scripts/package-store.sh with rubrapack from the folder the zip is made of:
+#   rubrapack build resources/distribution/rubraview-store.toml -o dist/rubraview-v1.2.3-store.msix \
+#       -D VERSION=2.2.3 -D STAGE=../../dist/rubraview-v1.2.3 \
+#       -D STORE_NAME=... -D STORE_PUBLISHER=... -D STORE_PUBLISHER_NAME=...
+# The three STORE_ values are the ones Partner Center gives the product
+# (Product identity). They are not kept in this repository: the script reads
+# them from the file RUBRAVIEW_STORE_IDENTITY names.
+#
+# A packaged program's own registration (--register-shell) would land in the
+# package's private registry, where Explorer never looks, so the file types
+# are declared here instead: one [assoc.*] for each extension of
+# rubraview_shell_extensions() in src/core/filemanage.c, in its four groups
+# (scripts/check-store.py compares the two lists). The archives (zip, 7z,
+# rar, alz, egg) are not made file types of ours, as everywhere else (D-86).
+# Windows 11's own right-click menu is not in this package yet (RV-113).
+# The package is not signed: the Store signs what it accepts.
+
+format = 1
+
+[package]
+name = "Rubraview"
+manufacturer = "rubidus"
+version = "$(VERSION)"
+arch = "x64"
+upgrade-code = "{C3CBE9C7-8E3F-4E2D-9E98-A28BD69E5714}"   # the MSI's; an MSIX does not use it
+
+[define]
+VERSION = "1.0.0"
+STAGE = "../../dist/rubraview-v0.0.0"
+STORE_NAME = "Rubraview.Unset"
+STORE_PUBLISHER = "CN=Unset"
+STORE_PUBLISHER_NAME = "Unset"
+
+[msix]
+identity-name = "$(STORE_NAME)"
+publisher = "$(STORE_PUBLISHER)"
+publisher-display-name = "$(STORE_PUBLISHER_NAME)"
+display-name = "Rubraview"
+min-version = "10.0.19041.0"
+
+[msix-app.Rubraview]
+executable = "App"
+display-name = "Rubraview"
+description = "A fast viewer for pictures, comic archives, video and music."
+logo-150 = "menu/Square150x150Logo.png"
+logo-44 = "menu/Square44x44Logo.png"
+store-logo = "menu/StoreLogo.png"
+
+[dir.INSTALLDIR]
+path = "$(ProgramFiles)/Rubraview"
+
+[dir.Licences]
+path = "$(INSTALLDIR)/licences"
+
+[file.App]
+dir = "INSTALLDIR"
+source = "$(STAGE)/rubraview.exe"
+
+[file.Manual]
+dir = "INSTALLDIR"
+source = "$(STAGE)/manual.md"
+
+[file.Changelog]
+dir = "INSTALLDIR"
+source = "$(STAGE)/CHANGELOG.md"
+
+[file.License]
+dir = "INSTALLDIR"
+source = "$(STAGE)/LICENSE"
+
+[file.Notices]
+dir = "INSTALLDIR"
+source = "$(STAGE)/THIRD_PARTY_NOTICES.md"
+
+[files.LicenceFiles]
+dir = "Licences"
+glob = "$(STAGE)/licences/**"
+
+[shortcut.StartMenu]
+dir = "Programs"
+name = "Rubraview"
+target = "file:App"
+
+# picture
+
+[assoc.Picture_jpg]
+extension = ".jpg"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_jpeg]
+extension = ".jpeg"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_png]
+extension = ".png"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_apng]
+extension = ".apng"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_gif]
+extension = ".gif"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_bmp]
+extension = ".bmp"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_tif]
+extension = ".tif"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_tiff]
+extension = ".tiff"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_webp]
+extension = ".webp"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_avif]
+extension = ".avif"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_jxl]
+extension = ".jxl"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+[assoc.Picture_ico]
+extension = ".ico"
+prog-id = "Rubraview.Picture"
+description = "Picture"
+target = "file:App"
+
+# comic book
+
+[assoc.Comic_cbz]
+extension = ".cbz"
+prog-id = "Rubraview.Comic"
+description = "Comic book"
+target = "file:App"
+
+[assoc.Comic_cb7]
+extension = ".cb7"
+prog-id = "Rubraview.Comic"
+description = "Comic book"
+target = "file:App"
+
+[assoc.Comic_cbr]
+extension = ".cbr"
+prog-id = "Rubraview.Comic"
+description = "Comic book"
+target = "file:App"
+
+# video
+
+[assoc.Video_mp4]
+extension = ".mp4"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_mkv]
+extension = ".mkv"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_webm]
+extension = ".webm"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_avi]
+extension = ".avi"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_mov]
+extension = ".mov"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+# music
+
+[assoc.Music_mp3]
+extension = ".mp3"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"
+
+[assoc.Music_flac]
+extension = ".flac"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"
+
+[assoc.Music_wav]
+extension = ".wav"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"
+
+[assoc.Music_ogg]
+extension = ".ogg"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"
+
+[assoc.Music_opus]
+extension = ".opus"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"
+
+[assoc.Music_m4a]
+extension = ".m4a"
+prog-id = "Rubraview.Music"
+description = "Music"
+target = "file:App"

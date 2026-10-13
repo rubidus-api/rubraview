@@ -156,7 +156,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
             build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_avif_read build/tests/test_bigtiff build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock
 
-.PHONY: all test check clean win64 package mfprobe
+.PHONY: all test check clean win64 package store mfprobe
 
 all: test
 
@@ -350,6 +350,10 @@ mfprobe:
 # now, `make mfprobe`, and is not packaged.)
 package: win64
 	@sh scripts/package.sh $(VERSION)
+
+# D-122: the Microsoft Store's package, from the folder `make package` made.
+store:
+	@sh scripts/package-store.sh $(VERSION)
 
 
 clean:

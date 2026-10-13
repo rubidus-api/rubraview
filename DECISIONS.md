@@ -1118,3 +1118,15 @@ Do not store credentials, private infrastructure details, personal data, private
   - `proven_array_sort` in `arcedit.c`; `rubraview_u8_eq` and `rubraview_u8_eq_lit` for the comparisons; `snprintf` with the buffer's size for the eight copies.
 - Kept, and why: seven arrays grown by hand with `realloc` (APNG frames, a job's volumes, a shell request's text, a folder listing, a moving JPEG XL's frames and one PNG buffer) — each lives on the heap across threads or past the frame, grows by doubling a count that memory bounds long before a size overflows, and a `proven_array` would want an allocator handed through code that has none; `strcmp` on C strings from the archive library; `memcpy`.
 - Consequences: no behaviour changes for a well-formed file. A file with an absurd number in it reads as the type's largest value where it read as whatever the overflow left. Nothing was seen to fail before: the old loops were not run against such input.
+
+## D-122: The Microsoft Store's Package, Built By Rubrapack (2026-10-14)
+
+- Context: the owner registers as a publisher in the Microsoft Store and wants the viewer there; the package is to be built with rubrapack. Partner Center gives the product three values (identity name, publisher, publisher display name) which a package must carry exactly.
+- Decision:
+  - `resources/distribution/rubraview-store.toml`: one more rubrapack source, for an MSIX of the same folder the zip and the MSI are made of — the program, the manual, the notices and licences; a Start menu entry; the viewer's 26 file types as four kinds (picture, comic book, video, music). `scripts/package-store.sh` (`make store`, after `make package`) builds `dist/rubraview-v<version>-store.msix` and lints it.
+  - The three values are not kept in the repository: the script reads them from the file `RUBRAVIEW_STORE_IDENTITY` names and passes them to rubrapack as definitions. They are not printed.
+  - The Store refuses a version whose first part is 0 and keeps the fourth: the package's version is the program's with the first part one higher (0.0.70 is 1.0.70.0). The program's own version is not changed by this.
+  - The package is not signed: the Store signs what it accepts. It is not uploaded to the GitHub release.
+  - The file types are in the package's manifest because a packaged program's own registration (`--register-shell`) is written to the package's private registry, which Explorer does not read. `scripts/check-store.py` (in `project-check.sh`) fails when the source's list and `rubraview_shell_extensions()` differ.
+- Not in this package (RV-113): Windows 11's own right-click menu (the menu DLL reads its items, with the program's full path, from a registry key the registration writes; a package needs them some other way, and a class id of its own beside the installed viewer's); the program does not know it is packaged, so Settings > Explorer still offers a registration that has no effect there; FFmpeg's DLLs.
+- Consequences: three ways to get the viewer (zip or exe, MSI, Store). Whether Partner Center accepts the package is known only after an upload.
