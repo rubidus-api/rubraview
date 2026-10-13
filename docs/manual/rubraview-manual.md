@@ -105,7 +105,7 @@ The menu is a **Rubraview** item with these under it:
 | Item | On | With several files selected |
 |---|---|---|
 | Open | pictures, video, music, comics, archives | as a double click: added to the open window's list, the first of them shown |
-| Open in a new window | pictures, video, music, comics, archives | a new window with them (under Show more options: a window each) |
+| Open in a new window | pictures, video, music, comics, archives | a new window with them (a window each where the menu is the registry's alone: registered for this user, or Windows 10) |
 | Open these only | pictures, video, music | the selected files are the list, nothing else from the folder |
 | Add to the list | pictures, video, music | all are added to the end of what the open window is showing; it stays on its page |
 | Browse the archive | comics, archives | offered for one file: the archive's entries in the picker |
