@@ -374,7 +374,10 @@ typedef struct app_state {
     bool                   media_has_frame;   /* false until the first picture after opening or seeking */
     bool                   media_new_picture; /* a picture went up since the last redraw */
     bool                   media_skip_pending;/* D-9: a file nothing could open; move past it */
-    double                 media_position;    /* pts of the picture on screen */
+    double                 media_position;    /* pts of the picture on screen; the clock where there is none for now */
+    double                 media_shown_pts;   /* the picture on screen: its time and length */
+    double                 media_shown_duration;
+    bool                   media_sought;      /* the picture awaited is a seek's, not the film's first */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
     rubraview_media_backend_t media_preferred; /* §3.22 [video] decoder — the one tried first (D-9) */
@@ -1445,6 +1448,15 @@ static void animation_prepare(app_state_t *app) {
         /* The first frame as the whole picture: the page's own decode is
            the container's first frame alone, which may be a part of it. */
         show_frame(app, 0);
+        if (rubraview_pal_anim_cut(app->anim_reader)) {
+            char line[128];
+            int n = snprintf(line, sizeof(line), "showing the first %zu pictures — the rest does not fit in memory",
+                             timed_count);
+            if (n > 0) {
+                osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+                app->notice_seconds = MEDIA_NOTICE_SECONDS;
+            }
+        }
         return;
     }
 
@@ -1780,6 +1792,7 @@ static void media_close(app_state_t *app) {
     app->media_page = -1;
     app->media_paused = false;
     app->media_has_frame = false;
+    app->media_sought = false;
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_ended = false;
@@ -2391,6 +2404,7 @@ static bool bgm_adopt(app_state_t *app) {
     app->media_page = -1;
     app->media_ended = false;
     app->media_has_frame = false;
+    app->media_sought = false;
 
     /* The page it came from is gone, so nothing is sounding on screen —
        otherwise the arbiter would see the track's own page as a rival
@@ -2411,6 +2425,7 @@ static bool bgm_release_to_page(app_state_t *app, int32_t index) {
     app->media_position = app->bgm_position;
     app->media_ended = false;
     app->media_has_frame = false;
+    app->media_sought = false;
     app->media_title_tenth = -1;
     app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, app->bgm_position,
@@ -2500,6 +2515,7 @@ static void media_prepare(app_state_t *app) {
     app->media_page = index;
     app->media_paused = false;
     app->media_has_frame = false;
+    app->media_sought = false;
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_ended = false;
@@ -2572,6 +2588,9 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
     app->media_has_frame = true;
     app->media_new_picture = true;
     app->media_position = frame->pts;
+    app->media_shown_pts = frame->pts;
+    app->media_shown_duration = frame->duration;
+    app->media_sought = false;
     int64_t tenth = (int64_t)(frame->pts * 10.0);
     if (app->media_paused || tenth != app->media_title_tenth) {
         app->media_title_tenth = tenth;
@@ -2630,6 +2649,25 @@ static void media_tick(app_state_t *app) {
                 rubraview_media_clock_seek(&app->media_clock, frame.pts, now);
             }
             break;
+        }
+        /* RV-111: sound before the first picture or after the last — the
+           film is where its clock is, not where its picture stands. With
+           no picture yet since opening, that is where the sound is heard
+           to be (after a seek the place asked for stands until it lands). */
+        bool heard_first = !app->media_has_frame && !app->media_sought && app->media_master == RUBRAVIEW_CLOCK_AUDIO;
+        if (!app->media_paused && (app->media_has_frame || heard_first)) {
+            double at = rubraview_media_position_running(app->media_has_frame ? app->media_shown_pts : -1e9,
+                                                         app->media_shown_duration,
+                                                         rubraview_media_clock_now(&app->media_clock, now),
+                                                         app->media_info.duration_seconds);
+            if (at != app->media_position) {
+                app->media_position = at;
+                int64_t tenth = (int64_t)(at * 10.0);
+                if (tenth != app->media_title_tenth) {
+                    app->media_title_tenth = tenth;
+                    update_window_title(app);
+                }
+            }
         }
     }
 
@@ -2789,6 +2827,7 @@ static void music_promote_next(app_state_t *app) {
     app->media_paused = false;
     app->media_ended = false;
     app->media_has_frame = false;
+    app->media_sought = false;
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
@@ -2882,6 +2921,7 @@ static void media_seek_to(app_state_t *app, double seconds) {
     /* The landing frame shows at once, even while paused; a sound-only
        page keeps its picture. */
     app->media_has_frame = !app->media_info.has_video;
+    app->media_sought = true;
     app->media_ended = false;
 }
 

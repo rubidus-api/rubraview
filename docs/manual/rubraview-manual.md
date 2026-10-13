@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.63.exe              the viewer, as built
-dist/rubraview-v0.0.63/                 the release bundle
-dist/rubraview-v0.0.63.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.64.exe              the viewer, as built
+dist/rubraview-v0.0.64/                 the release bundle
+dist/rubraview-v0.0.64.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -309,7 +309,9 @@ either a `.jxl` says what is missing. The DLLs must be FFmpeg 9.0's
 picture or a film that needed it says that the DLLs beside the program
 are another version. All five are needed: with one missing, the notice
 says the FFmpeg 9.0 DLLs could not be loaded. One that moves plays through
-FFmpeg, and is its first picture where only Windows' codec reads it.
+FFmpeg, and is its first picture where only Windows' codec reads it; a
+very large one plays as many of its pictures as fit in memory and says
+how many.
 Neither kind is written. Both have their thumbnails — in a book too —
 whether or not Windows has a codec for them.
 

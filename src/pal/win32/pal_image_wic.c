@@ -825,6 +825,7 @@ struct rubraview_anim_reader {
     uint8_t          **jxl;
     size_t             jxl_count, jxl_bytes;
     int32_t            jxl_w, jxl_h;
+    bool               jxl_cut;         /* more pictures than the limits let in */
 };
 
 /* All of a JPEG XL's pictures are held at once: no more of it than this. */
@@ -835,8 +836,11 @@ static uint8_t *anim_jxl_room(void *context, int32_t width, int32_t height, doub
     rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)context;
     size_t bytes = (size_t)width * (size_t)height * 4u;
     if (reader->jxl_count == 0) { reader->jxl_w = width; reader->jxl_h = height; }
-    if (width != reader->jxl_w || height != reader->jxl_h || reader->jxl_count >= JXL_ANIM_FRAMES ||
-        reader->jxl_bytes + bytes > JXL_ANIM_BYTES) return NULL;
+    if (width != reader->jxl_w || height != reader->jxl_h) return NULL;
+    if (reader->jxl_count >= JXL_ANIM_FRAMES || reader->jxl_bytes + bytes > JXL_ANIM_BYTES) {
+        reader->jxl_cut = true;
+        return NULL;
+    }
     if ((reader->jxl_count & (reader->jxl_count + 1)) == 0) {       /* 0, 1, 3, 7: room for twice as many */
         size_t room = (reader->jxl_count + 1) * 2;
         uint8_t **more = (uint8_t**)realloc(reader->jxl, room * sizeof(uint8_t*));
@@ -913,6 +917,10 @@ static uint8_t *file_read_whole(u8str_t path, size_t *out_size) {
     if (!bytes || total != size) { free(bytes); return NULL; }
     *out_size = size;
     return bytes;
+}
+
+bool rubraview_pal_anim_cut(const rubraview_anim_reader_t *reader) {
+    return reader && reader->jxl_cut;
 }
 
 void rubraview_pal_anim_close(rubraview_anim_reader_t *reader) {

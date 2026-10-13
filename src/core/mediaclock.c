@@ -18,6 +18,19 @@ rubraview_frame_decision_t rubraview_media_schedule(double frame_pts, double fra
     return RUBRAVIEW_FRAME_WAIT;
 }
 
+/* How far the clock may be from the picture and the picture still be
+   "where the film is": a late frame or two, not a stretch without any. */
+#define POSITION_SLACK_SECONDS 0.5
+
+double rubraview_media_position_running(double shown_pts, double shown_duration, double clock_seconds,
+                                        double file_seconds) {
+    if (!(shown_duration > 0.0)) shown_duration = FALLBACK_FRAME_SECONDS;
+    if (clock_seconds >= shown_pts - POSITION_SLACK_SECONDS &&
+        clock_seconds <= shown_pts + shown_duration + POSITION_SLACK_SECONDS) return shown_pts;
+    if (file_seconds > 0.0 && clock_seconds > file_seconds) clock_seconds = file_seconds;
+    return clock_seconds < 0.0 ? 0.0 : clock_seconds;
+}
+
 rubraview_clock_master_t rubraview_media_master_for(bool file_has_audio, bool audio_device_ready) {
     return (file_has_audio && audio_device_ready) ? RUBRAVIEW_CLOCK_AUDIO : RUBRAVIEW_CLOCK_WALL;
 }

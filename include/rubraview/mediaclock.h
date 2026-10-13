@@ -85,6 +85,16 @@ typedef struct rubraview_media_clock {
 rubraview_media_clock_t rubraview_media_clock_create(rubraview_clock_master_t master,
                                                      double media_seconds, double wall_now);
 
+/**
+ * Where a running film is: the time of the picture on screen while the
+ * clock is in it or near it, and the clock where no picture belongs to
+ * now — sound before the first picture (shown ahead of its time) or after
+ * the last (RV-111: the title and the seek bar stood still there). The
+ * clock is kept inside the file's length when that is known.
+ */
+double rubraview_media_position_running(double shown_pts, double shown_duration, double clock_seconds,
+                                        double file_seconds);
+
 /** File time now. A wall clock that steps backwards counts as no time passing. */
 double rubraview_media_clock_now(const rubraview_media_clock_t *clock, double wall_now);
 

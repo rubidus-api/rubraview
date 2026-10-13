@@ -105,6 +105,10 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *da
 /** One frame as premultiplied BGRA into `dst`: `stride` bytes a row, `rows` rows of room. */
 bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint8_t *dst, size_t stride, int32_t rows);
 
+/** True when the file has more pictures than the reader holds (a moving
+ * JPEG XL is read whole, up to a limit): what plays is its beginning. */
+bool rubraview_pal_anim_cut(const rubraview_anim_reader_t *reader);
+
 void rubraview_pal_anim_close(rubraview_anim_reader_t *reader);
 
 /**

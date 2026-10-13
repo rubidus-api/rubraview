@@ -879,7 +879,7 @@ static void push_audio(mf_media_t *m, const float *data, size_t count, uint64_t 
    before the target are dropped and the one that straddles it is cut, so
    the sound starts where the picture does. */
 static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *skip_until,
-                          uint64_t generation) {
+                          uint64_t generation, double base, bool *begun) {
     IMFMediaBuffer *buffer = NULL;
     if (FAILED(IMFSample_ConvertToContiguousBuffer(sample, &buffer)) || !buffer) return;
     BYTE *data = NULL;
@@ -895,6 +895,17 @@ static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *
                 if (pts < *skip_until) skip = (size_t)((*skip_until - pts) * (double)m->audio_rate);
                 *skip_until = -1.0;
             }
+        }
+        if (skip < frames && !*begun) {
+            /* RV-111: the first sound after opening or a seek is not
+               always where it was asked for — a rewind of an MKV lands on
+               its first picture, 30 s in for one with that much sound
+               before it. The heard position counted from where it was
+               asked for, the pictures waited for a time the clock never
+               reached, and the film stood still. */
+            double starts = pts + (double)skip / (double)m->audio_rate;
+            *begun = true;
+            if (starts - base > 0.05 || base - starts > 0.05) rubraview_pal_audio_flush(m->audio, starts);
         }
         if (skip < frames) {
             push_audio(m, (const float*)(const void*)data + skip * m->audio_channels,
@@ -988,6 +999,8 @@ static bool mf_apply_audio_switch(mf_media_t *m, IMFSourceReader *reader, DWORD 
 static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
+    double audio_base = 0.0;      /* where the heard position was told to start */
+    bool audio_begun = false;     /* its first sound has come */
     const bool want_video = m->video_stream != NO_STREAM;
     bool video_done = false, audio_done = false, ended = false;
 
@@ -1015,6 +1028,8 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                between is decoded and skipped below. */
             IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &position);
             skip_video = skip_audio = (double)target / 1e7;
+            audio_base = (double)target / 1e7;
+            audio_begun = false;
             video_done = audio_done = ended = false;
         }
         if (ended || (!want_video && !want_audio)) { Sleep(5); continue; }
@@ -1075,7 +1090,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                         }
                     }
                 } else if (want_audio && actual == m->audio_stream && m->audio) {
-                    deliver_audio(m, sample, pts, &skip_audio, generation);
+                    deliver_audio(m, sample, pts, &skip_audio, generation, audio_base, &audio_begun);
                 }
                 IMFSample_Release(sample);
             }
@@ -1123,9 +1138,14 @@ static void undo_open(mf_media_t *m) {
 /* Reads until the first picture comes out, then goes back to the start.
    `refused` is set when the reader itself gave up — an error, or the
    picture's end with none shown — and not merely when 200 samples of
-   sound came first. */
-static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader, bool *refused) {
+   sound came first. `rewound` is set when the reader is back at the
+   start: not when the first picture lies later than a second in, or was
+   not reached — a rewind lands on the first picture (an MKV's), and the
+   sound before it would be lost (RV-111). The caller opens it again. */
+#define FIRST_PICTURE_NEAR_100NS 10000000
+static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader, bool *refused, bool *rewound) {
     *refused = true;
+    *rewound = false;
     for (int i = 0; i < 200; ++i) {
         DWORD actual = 0, flags = 0;
         LONGLONG timestamp = 0;
@@ -1136,21 +1156,18 @@ static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader, bool *
         if (sample) IMFSample_Release(sample);
         if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return false;
         if (picture) {
-            PROPVARIANT start;
-            PropVariantInit(&start);
-            start.vt = VT_I8;
-            start.hVal.QuadPart = 0;
-            IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &start);
+            if (timestamp <= FIRST_PICTURE_NEAR_100NS) {
+                PROPVARIANT start;
+                PropVariantInit(&start);
+                start.vt = VT_I8;
+                start.hVal.QuadPart = 0;
+                *rewound = SUCCEEDED(IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &start));
+            }
             return true;
         }
         if ((flags & MF_SOURCE_READERF_ENDOFSTREAM) && actual == m->video_stream) return false;
     }
     *refused = false;
-    PROPVARIANT start;
-    PropVariantInit(&start);
-    start.vt = VT_I8;
-    start.hVal.QuadPart = 0;
-    IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &start);
     return false;
 }
 
@@ -1168,12 +1185,15 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
        no decoders stops the decode), the film opens again without it. */
     if (mf && gpu_wanted(m) && make_manager(m)) {
         opened = open_reader(m, &reader, true);
-        bool refused = false;
-        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader, &refused)) {
-            IMFSourceReader_Release(reader);
-            reader = NULL;
-            undo_open(m);
-            opened = false;
+        bool refused = false, rewound = false;
+        if (opened && m->video_stream != NO_STREAM) {
+            bool arrives = first_picture_arrives(m, reader, &refused, &rewound);
+            if (!arrives || !rewound) {
+                IMFSourceReader_Release(reader);
+                reader = NULL;
+                undo_open(m);
+                opened = arrives && open_reader(m, &reader, true);   /* a late first picture: from the start again */
+            }
         }
         if (opened) {
             m->gpu_active = m->video_stream != NO_STREAM;
@@ -1190,13 +1210,23 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
            4:4:4) opened, played its sound and stayed black without a word.
            No picture out of the reader is a codec that is missing, said so
            — and the caller goes on to FFmpeg when it is there. */
-        bool refused = false;
-        if (opened && m->video_stream != NO_STREAM && !first_picture_arrives(m, reader, &refused) && refused) {
-            IMFSourceReader_Release(reader);
-            reader = NULL;
-            undo_open(m);
-            fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
-            opened = false;
+        bool refused = false, rewound = false;
+        if (opened && m->video_stream != NO_STREAM) {
+            bool arrives = first_picture_arrives(m, reader, &refused, &rewound);
+            if (!arrives && refused) {
+                IMFSourceReader_Release(reader);
+                reader = NULL;
+                undo_open(m);
+                fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
+                opened = false;
+            } else if (!rewound) {
+                /* Sound for a long while first, or a first picture far in:
+                   read from the start by a reader that has read nothing. */
+                IMFSourceReader_Release(reader);
+                reader = NULL;
+                undo_open(m);
+                opened = open_reader(m, &reader, false);
+            }
         }
     }
     if (!mf) fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
