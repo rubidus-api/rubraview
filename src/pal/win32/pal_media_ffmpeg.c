@@ -35,6 +35,7 @@
 #define OPEN_TIMEOUT_MS 15000
 #define NO_GENERATION UINT64_MAX
 #define PCM_RING_SECONDS 2
+#define PENDING_PICTURES 64    /* pictures read ahead of their decoding while the sound is fed (D-118) */
 #define VIDEO_ROOM_WAIT_MS 300   /* then the frame is dropped, so the sound never waits on the picture */
 
 typedef struct ff_slot {
@@ -439,6 +440,22 @@ typedef struct ff_decode {
 static double stream_seconds(AVFormatContext *format, int index, int64_t pts) {
     if (pts == AV_NOPTS_VALUE || index < 0) return 0.0;
     return (double)pts * av_q2d(format->streams[index]->time_base);
+}
+
+/* D-118: where the file's own time begins. A transport stream starts at
+   whatever its clock read when it was cut (1.4 s as FFmpeg writes one,
+   hours in a recording); a film's time here is counted from that, so the
+   first picture and the first sound are at 0, where the sound device's
+   clock starts. Without it the first picture waited for a clock that the
+   waiting itself had stopped. */
+static double file_start_seconds(const AVFormatContext *format) {
+    return format->start_time != AV_NOPTS_VALUE ? (double)format->start_time / AV_TIME_BASE : 0.0;
+}
+
+/* A stream's time stamp as the film's time: never before 0. */
+static double stream_time(AVFormatContext *format, int index, int64_t pts) {
+    double seconds = stream_seconds(format, index, pts) - file_start_seconds(format);
+    return seconds > 0.0 ? seconds : 0.0;
 }
 
 /* Opens one audio stream's decoder and the resampler that turns it into
@@ -893,10 +910,50 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
     free(converted);
 }
 
+/* One packet through its decoder, and what comes out to the slots or the ring. */
+static void decode_packet(ff_media_t *m, ff_decode_t *d, AVPacket *packet, double *skip_video, double *skip_audio,
+                          uint64_t generation) {
+    bool is_video = packet->stream_index == m->video_stream && d->video;
+    bool is_audio = packet->stream_index == m->audio_stream && d->audio;
+    AVCodecContext *decoder = is_video ? d->video : is_audio ? d->audio : NULL;
+    if (!decoder || g_ff.avcodec_send_packet(decoder, packet) < 0) return;
+    while (g_ff.avcodec_receive_frame(decoder, d->frame) >= 0) {
+        double pts = stream_time(d->format, packet->stream_index, d->frame->best_effort_timestamp);
+        if (is_video) {
+            double duration = d->frame->duration > 0
+                ? stream_seconds(d->format, m->video_stream, d->frame->duration)
+                : (m->info.frame_rate > 0.0 ? 1.0 / m->info.frame_rate : 1.0 / 30.0);
+            bool before = *skip_video >= 0.0 && pts + duration <= *skip_video + 1e-4;
+            if (!before) {
+                *skip_video = -1.0;
+                if (!store_video(m, d, pts, duration, generation)) { g_ff.av_frame_unref(d->frame); break; }
+            }
+        } else {
+            store_audio(m, d, pts, skip_audio, generation);
+        }
+        g_ff.av_frame_unref(d->frame);
+    }
+}
+
+/* The sound waiting for the device is under a quarter of a second, and
+   there is a sound to feed: reading on matters more than the pictures. */
+static bool sound_runs_low(ff_media_t *m, const ff_decode_t *d) {
+    if (!m->audio || !d->audio || m->audio_stream < 0) return false;
+    if (atomic_load_explicit(&m->paused, memory_order_acquire)) return false;
+    return rubraview_pcm_ring_count(&m->pcm) < (size_t)m->audio_rate * m->audio_channels / 4u;
+}
+
 static void decode_loop(ff_media_t *m, ff_decode_t *d) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
-    bool ended = false;
+    bool ended = false, read_out = false;
+    AVPacket *pending[PENDING_PICTURES] = {0};
+    size_t first = 0, waiting = 0;
+    bool pending_ready = true;
+    for (size_t i = 0; i < PENDING_PICTURES; ++i) {
+        pending[i] = g_ff.av_packet_alloc();
+        if (!pending[i]) pending_ready = false;
+    }
 
     while (!atomic_load_explicit(&m->quit, memory_order_acquire)) {
         /* §3.16.2: another sound track was asked for. Only this thread
@@ -936,44 +993,59 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
             int64_t target = atomic_load_explicit(&m->seek_target_100ns, memory_order_relaxed);
             double seconds = (double)target / 1e7;
             if (m->audio) rubraview_pal_audio_flush(m->audio, seconds);
-            g_ff.av_seek_frame(d->format, -1, (int64_t)(seconds * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
+            g_ff.av_seek_frame(d->format, -1, (int64_t)((seconds + file_start_seconds(d->format)) * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
             if (d->video) g_ff.avcodec_flush_buffers(d->video);
             if (d->audio) g_ff.avcodec_flush_buffers(d->audio);
             skip_video = skip_audio = seconds;
             ended = false;
+            while (waiting > 0) {
+                g_ff.av_packet_unref(pending[first]);
+                first = (first + 1) % PENDING_PICTURES;
+                --waiting;
+            }
+            read_out = false;
         }
         if (ended) { Sleep(5); continue; }
 
-        int read = g_ff.av_read_frame(d->format, d->packet);
-        if (read < 0) {
+        /* D-118: pictures read but not yet decoded. A transport stream
+           holds a third of a second of pictures, then the sound for them;
+           decoding each picture as it was read, the four slots filled and
+           the thread waited on them while the sound it had not reached ran
+           out (and with the sound, the clock the pictures waited for). */
+        if (waiting > 0) {
+            bool room = rubraview_spsc_count(&m->ring) < SLOT_COUNT;
+            if (room || waiting == PENDING_PICTURES || read_out) {
+                decode_packet(m, d, pending[first], &skip_video, &skip_audio, generation);
+                g_ff.av_packet_unref(pending[first]);
+                first = (first + 1) % PENDING_PICTURES;
+                --waiting;
+                continue;
+            }
+            if (!sound_runs_low(m, d)) { Sleep(2); continue; }
+        }
+        if (read_out) {
             atomic_store_explicit(&m->end_generation, generation, memory_order_release);
             ended = true;
             continue;
         }
 
-        bool is_video = d->packet->stream_index == m->video_stream && d->video;
-        bool is_audio = d->packet->stream_index == m->audio_stream && d->audio;
-        AVCodecContext *decoder = is_video ? d->video : is_audio ? d->audio : NULL;
-        if (decoder && g_ff.avcodec_send_packet(decoder, d->packet) >= 0) {
-            while (g_ff.avcodec_receive_frame(decoder, d->frame) >= 0) {
-                double pts = stream_seconds(d->format, d->packet->stream_index, d->frame->best_effort_timestamp);
-                if (is_video) {
-                    double duration = d->frame->duration > 0
-                        ? stream_seconds(d->format, m->video_stream, d->frame->duration)
-                        : (m->info.frame_rate > 0.0 ? 1.0 / m->info.frame_rate : 1.0 / 30.0);
-                    bool before = skip_video >= 0.0 && pts + duration <= skip_video + 1e-4;
-                    if (!before) {
-                        skip_video = -1.0;
-                        if (!store_video(m, d, pts, duration, generation)) { g_ff.av_frame_unref(d->frame); break; }
-                    }
-                } else {
-                    store_audio(m, d, pts, &skip_audio, generation);
-                }
-                g_ff.av_frame_unref(d->frame);
-            }
+        if (g_ff.av_read_frame(d->format, d->packet) < 0) {
+            read_out = true;
+            continue;
         }
+        if (d->packet->stream_index == m->video_stream && d->video && pending_ready) {
+            /* Kept as it is, in the order it came: the two change places. */
+            size_t last = (first + waiting) % PENDING_PICTURES;
+            AVPacket *free_one = pending[last];
+            pending[last] = d->packet;
+            d->packet = free_one;
+            ++waiting;
+            continue;
+        }
+        decode_packet(m, d, d->packet, &skip_video, &skip_audio, generation);
         g_ff.av_packet_unref(d->packet);
     }
+    for (size_t i = 0; i < PENDING_PICTURES; ++i) if (pending[i]) g_ff.av_packet_free(&pending[i]);
 }
 
 static DWORD WINAPI decode_thread(LPVOID arg) {
@@ -1190,7 +1262,7 @@ static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int3
             g_ff.av_packet_unref(packet);
             continue;
         }
-        double start = stream_seconds(format, stream_index, packet->pts);
+        double start = stream_time(format, stream_index, packet->pts);
         double length = packet->duration > 0
             ? (double)packet->duration * av_q2d(stream->time_base) : SUBTITLE_MAX_CUE_SECONDS;
         const uint8_t *text = NULL;
