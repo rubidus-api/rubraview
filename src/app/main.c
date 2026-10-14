@@ -563,6 +563,10 @@ typedef struct app_state {
         rubraview_mkv_t        mkv;
         rubraview_mkv_put_t    put;
         rubraview_mkv_check_t  check;
+        bool                   is_mp4;         /* D-130: an MP4 film, by `mp4.c` */
+        rubraview_mp4_t        mp4;
+        rubraview_mp4_put_t    mp4_put;
+        rubraview_mp4_check_t  mp4_check;
         rubraview_fs_writer_t  writer;
         char                   film[1024], temp[1100];
         int                    percent;
@@ -13792,6 +13796,7 @@ static void putin_end(app_state_t *app, bool swapped) {
     app->putin.made_map = app->putin.map = (rubraview_fs_mapping_t){0};
     if (!swapped && app->putin.temp[0] && rubraview_pal_fs_exists(putin_temp(app))) (void)rubraview_pal_fs_delete(putin_temp(app));
     rubraview_mkv_put_free(&app->putin.put);
+    rubraview_mp4_put_free(&app->putin.mp4_put);
     app->putin.phase = 0;
     app->subs_dirty = true;
 }
@@ -13809,7 +13814,6 @@ static const char *putin_refusal(app_state_t *app) {
         app->source.archive_path.len > 0) return "no film file is open";
     if (subs_kind(app) != SUBS_TEXT) return "no text subtitle is on";
     if (app->subtitle.source_path.len == 0) return "the subtitle on is already inside the film";
-    if (app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAVIEW_SUBTITLE_ASS) return "only SubRip and SubStation subtitles are put in";
     if (rubraview_subtitle_changed(&app->subtitle)) return "save the subtitle's changes first";
     if (app->takeout.running) return "subtitles are being taken out";
     return NULL;
@@ -13829,19 +13833,38 @@ static void putin_begin(app_state_t *app) {
     int tn = snprintf(app->putin.temp, sizeof(app->putin.temp), "%s.rubraview-part", app->putin.film);
     if (tn <= 0 || (size_t)tn >= sizeof(app->putin.temp)) { putin_fail(app, "the film's name is too long"); return; }
     if (!rubraview_pal_fs_map(film, &app->putin.map)) { putin_fail(app, "the film could not be read"); return; }
+    u8str_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
+    u8str_t name = rubraview_path_basename(app->subtitle.source_path);
+    uint64_t total = 0;
+    app->putin.is_mp4 = false;
     if (!rubraview_mkv_open(&app->putin.mkv, app->putin.map.data, app->putin.map.size, &why)) {
-        putin_fail(app, "subtitles are put into Matroska films (.mkv) only, for now");
+        /* D-130: an MP4 — the subtitle's words, any format, as 3GPP text after the film's own bytes */
+        if (!rubraview_mp4_open(&app->putin.mp4, app->putin.map.data, app->putin.map.size, &why)) {
+            putin_fail(app, "subtitles are put into Matroska and MP4 films only");
+            return;
+        }
+        if (!rubraview_mp4_put_plan(&app->putin.mp4_put, &app->putin.mp4, &app->subtitle, tag.len == 3 ? tag : (u8str_t){ .ptr = "", .len = 0 },
+                                    name, &why)) {
+            putin_fail(app, why);
+            return;
+        }
+        app->putin.is_mp4 = true;
+        total = app->putin.mp4_put.total;
+    } else if (app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAVIEW_SUBTITLE_ASS) {
+        putin_fail(app, "only SubRip and SubStation subtitles are put into a Matroska film");
         return;
     }
+    if (!app->putin.is_mp4) {
     rubraview_mkv_put_track_t track;
     if (!rubraview_mkv_put_track_from_subtitle(app->arena, &app->subtitle, &track, &why)) { putin_fail(app, why); return; }
-    u8str_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
     if (tag.len == 3) track.language = tag;                   /* `film.kor.srt`: a three-letter code is Matroska's own */
-    track.name = rubraview_path_basename(app->subtitle.source_path);
+    track.name = name;
     uint64_t uid = (uint64_t)(rubraview_pal_time_now_seconds() * 1000003.0) ^ 0x5DEECE66Du;
     if (!rubraview_mkv_put_plan(&app->putin.put, &app->putin.mkv, &track, uid, &why)) { putin_fail(app, why); return; }
+    total = app->putin.put.total;
+    }
     uint64_t free_bytes = 0;
-    if (rubraview_pal_fs_free_bytes(rubraview_path_dirname(film), &free_bytes) && free_bytes < app->putin.put.total + (64u << 20)) {
+    if (rubraview_pal_fs_free_bytes(rubraview_path_dirname(film), &free_bytes) && free_bytes < total + (64u << 20)) {
         putin_fail(app, "there is not room on the disk for the film written again");
         return;
     }
@@ -13894,14 +13917,19 @@ static void putin_step(app_state_t *app) {
     if (app->putin.phase == 1) {
         int r = 1;
         while (r == 1 && rubraview_pal_time_now_seconds() - began < 0.008) {
-            r = rubraview_mkv_put_step(&app->putin.put, putin_emit, &app->putin.writer, 4u << 20);
+            r = app->putin.is_mp4 ? rubraview_mp4_put_step(&app->putin.mp4_put, putin_emit, &app->putin.writer, 4u << 20)
+                                  : rubraview_mkv_put_step(&app->putin.put, putin_emit, &app->putin.writer, 4u << 20);
         }
         if (r < 0) { putin_fail(app, "the new film could not be written (is the disk full?)"); return; }
         if (r == 0) {
             if (!rubraview_pal_fs_writer_close(&app->putin.writer)) { putin_fail(app, "the new film could not be written whole"); return; }
-            if (!rubraview_pal_fs_map(putin_temp(app), &app->putin.made_map) ||
-                !rubraview_mkv_check_begin(&app->putin.check, &app->putin.put, app->putin.made_map.data, app->putin.made_map.size)) {
-                putin_fail(app, app->putin.check.why ? app->putin.check.why : "the new film could not be read back");
+            bool mapped = rubraview_pal_fs_map(putin_temp(app), &app->putin.made_map);
+            bool begun = mapped && (app->putin.is_mp4
+                ? rubraview_mp4_check_begin(&app->putin.mp4_check, &app->putin.mp4_put, app->putin.made_map.data, app->putin.made_map.size)
+                : rubraview_mkv_check_begin(&app->putin.check, &app->putin.put, app->putin.made_map.data, app->putin.made_map.size));
+            if (!begun) {
+                const char *why = app->putin.is_mp4 ? app->putin.mp4_check.why : app->putin.check.why;
+                putin_fail(app, why ? why : "the new film could not be read back");
                 return;
             }
             app->putin.phase = 2;
@@ -13909,13 +13937,16 @@ static void putin_step(app_state_t *app) {
     } else {
         int r = 1;
         while (r == 1 && rubraview_pal_time_now_seconds() - began < 0.008) {
-            r = rubraview_mkv_check_step(&app->putin.check, &app->putin.put, 2000);
+            r = app->putin.is_mp4 ? rubraview_mp4_check_step(&app->putin.mp4_check, &app->putin.mp4_put, app->putin.made_map.data, 8u << 20)
+                                  : rubraview_mkv_check_step(&app->putin.check, &app->putin.put, 2000);
         }
-        if (r < 0) { putin_fail(app, app->putin.check.why); return; }
+        if (r < 0) { putin_fail(app, app->putin.is_mp4 ? app->putin.mp4_check.why : app->putin.check.why); return; }
         if (r == 0) { putin_swap(app); return; }
     }
-    double share = app->putin.phase == 1 ? (app->putin.put.total ? (double)app->putin.writer.written / (double)app->putin.put.total : 0.0) * 0.5
-                                         : 0.5 + rubraview_mkv_walk_share(&app->putin.mkv, &app->putin.check.old_walk) * 0.5;
+    uint64_t total = app->putin.is_mp4 ? app->putin.mp4_put.total : app->putin.put.total;
+    double share = app->putin.phase == 1 ? (total ? (double)app->putin.writer.written / (double)total : 0.0) * 0.5
+                 : app->putin.is_mp4 ? 0.5 + (app->putin.mp4.size ? (double)app->putin.mp4_check.at / (double)app->putin.mp4.size : 0.0) * 0.5
+                 : 0.5 + rubraview_mkv_walk_share(&app->putin.mkv, &app->putin.check.old_walk) * 0.5;
     int percent = (int)(share * 100.0);
     if (percent != app->putin.percent && began - app->putin.said_at > 0.5) {
         app->putin.percent = percent;

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.78.exe              the viewer, as built
-dist/rubraview-v0.0.78/                 the release bundle
-dist/rubraview-v0.0.78.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.79.exe              the viewer, as built
+dist/rubraview-v0.0.79/                 the release bundle
+dist/rubraview-v0.0.79.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -586,9 +586,12 @@ While it does:
   says how far it is, and a press stops it. Picture subtitles and
   compressed tracks are not taken out; a file of that name already there
   is kept under a numbered name unless it is the same. **Put in film**,
-  beside it, does the other way round with the subtitle on screen (a
-  SubRip or SubStation file, its changes saved): the film is written again
-  with the subtitle as one more track. It asks first — the first press says
+  beside it, does the other way round with the subtitle on screen (its
+  changes saved): the film is written again with the subtitle as one more
+  track — into a Matroska film a SubRip or SubStation file as it is, into
+  an MP4 any subtitle's words as 3GPP text (an MP4 subtitle has no tags,
+  so italics and colours do not go in). An MP4 keeps every byte where it
+  was and grows by its own head written again at the end. It asks first — the first press says
   what will happen, a second press within six seconds goes on. The new film
   is written beside the old one as a temporary file and checked against it
   (every picture and sound block the same, the subtitle as it was put in,

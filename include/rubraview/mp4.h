@@ -2,6 +2,7 @@
 #define RUBRAVIEW_MP4_H
 
 #include "rubraview/core.h"
+#include "rubraview/subtitle.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -89,6 +90,63 @@ bool rubraview_mp4_sample_next(const rubraview_mp4_t *mp4, const rubraview_mp4_t
  */
 size_t rubraview_mp4_subtitle_cue(const rubraview_mp4_t *mp4, const rubraview_mp4_track_t *track, unsigned counter,
                                   const rubraview_mp4_sample_t *sample, char *out, size_t cap);
+
+/* ---- a subtitle put into an MP4 film (RV-115, D-130) ----
+ *
+ * Nothing of the film moves: its `moov` becomes a `free` box of the same
+ * size where it stands (four bytes change), every other byte stays at its
+ * offset, and after the film's end come an `mdat` with the subtitle's
+ * samples and a new `moov` — the old one's boxes as they were (`mvhd`'s
+ * next track id raised), and one more track: 3GPP timed text (`tx3g`), as
+ * FFmpeg writes it, its gaps filled with empty samples. The text is the
+ * subtitle's words, its markup gone (an MP4 subtitle carries no tags).
+ */
+
+typedef struct rubraview_mp4_put_sample { uint32_t at, size; uint64_t start, duration; } rubraview_mp4_put_sample_t;
+
+typedef struct rubraview_mp4_put {
+    const rubraview_mp4_t       *mp4;
+    uint64_t                     type_at;      /* where the old moov's four letters are */
+    uint8_t                     *tail;         /* the mdat and the new moov */
+    size_t                       tail_size;
+    rubraview_mp4_put_sample_t  *samples;      /* the new track's, `at` inside `tail` */
+    size_t                       sample_count;
+    uint32_t                     track_id;
+    uint64_t                     total;
+    size_t                       index;        /* where `rubraview_mp4_put_step` stands */
+    uint64_t                     offset;
+} rubraview_mp4_put_t;
+
+/**
+ * Lay the new film out from a subtitle track read by `subtitle.h` (its
+ * words, any format; a SAMI's language on screen only). `language` is three
+ * letters or empty. False, with a reason, for a film this does not write:
+ * fragmented, or one whose last box runs "to the end of the file".
+ */
+bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4, const rubraview_subtitle_track_t *subtitle,
+                            u8str_t language, u8str_t name, const char **out_why);
+void rubraview_mp4_put_free(rubraview_mp4_put_t *put);
+
+typedef bool (*rubraview_mp4_emit_fn)(void *ctx, const void *bytes, size_t size);
+/** The next part of the new file, about `budget` bytes: 1 more, 0 written, -1 `emit` failed. */
+int rubraview_mp4_put_step(rubraview_mp4_put_t *put, rubraview_mp4_emit_fn emit, void *ctx, size_t budget);
+
+/**
+ * The new film against the old (the owner's rule before a film is replaced):
+ * every byte of the film the same but the four letters of `free`; the new
+ * file's tracks the film's and one more; each old track's tables and
+ * samples the same; the new track's samples the subtitle's; the size the
+ * plan said. A slice at a time: 1 more, 0 sound, -1 not (`why`).
+ */
+typedef struct rubraview_mp4_check {
+    rubraview_mp4_t made;
+    uint64_t        at;
+    int             phase;
+    const char     *why;
+} rubraview_mp4_check_t;
+
+bool rubraview_mp4_check_begin(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, const uint8_t *made, uint64_t made_size);
+int rubraview_mp4_check_step(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, const uint8_t *made, size_t budget);
 
 #ifdef __cplusplus
 }
