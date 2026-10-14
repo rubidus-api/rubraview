@@ -1255,6 +1255,10 @@ void rubraview_pal_window_request_close(rubraview_window_t *window) {
     if (window) window->should_close = true;
 }
 
+void rubraview_pal_window_keep_open(rubraview_window_t *window) {
+    if (window && window->hwnd && IsWindow(window->hwnd)) window->should_close = false;
+}
+
 
 /* ---- §3.19 lifecycle and shell integration ---- */
 

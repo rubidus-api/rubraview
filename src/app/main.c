@@ -524,6 +524,7 @@ typedef struct app_state {
     rubraview_window_t        *subs_window;
     rubraview_renderer_t      *subs_renderer;
     bool                       subs_open, subs_dirty;
+    rubraview_confirm_t        subs_leave;         /* leaving with changes not saved: the second try goes on */
     int32_t                    subs_frame[4];
     rubraview_listwin_t        subs_list;
     uint32_t                  *subs_rows;          /* the cue of each row (text subtitles) */
@@ -977,6 +978,7 @@ static void mini_close(app_state_t *app);
 static void files_show(app_state_t *app);
 static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
+static bool subs_may_leave(app_state_t *app);
 static void takeout_begin(app_state_t *app);
 static void reopen_after_removal(app_state_t *app, size_t removed_index);
 static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback);
@@ -3135,6 +3137,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
         while (index + 1 < app->layout.count && app->pages[index].skipped) index++;
         while (index > 0 && app->pages[index].skipped) index--;
     }
+    if (index != app->spread_index && !subs_may_leave(app)) return;
     if (index != app->spread_index) {
         /* Remember what is leaving the screen, so the cross-fade has
            something to fade *from* (§3.2.5). */
@@ -4516,6 +4519,7 @@ static void subtitles_toggle(app_state_t *app) {
         osd_say(app, U8("this video has no subtitles, in it or beside it"));
         return;
     }
+    if (!subs_may_leave(app)) return;
     if (app->tracks.current_subtitle >= 0) {
         app->subtitle_last = app->tracks.current_subtitle;
         subtitle_select(app, -1);
@@ -4562,6 +4566,7 @@ static void sub_list_choose(app_state_t *app, int32_t row) {
     int32_t tracks[SUB_LIST_MAX];
     size_t n = subtitle_track_indices(app, tracks, SUB_LIST_MAX);
     app->sub_list_open = false;
+    if (!subs_may_leave(app)) return;
     if (row == 0) {
         if (app->tracks.current_subtitle >= 0) app->subtitle_last = app->tracks.current_subtitle;
         subtitle_select(app, -1);
@@ -5030,6 +5035,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->panel.open) { panel_close(app); return; }
         if (app->listwin.open) { app->listwin.open = false; return; }
         if (app->eqwin.open) { app->eqwin.open = false; return; }
+        if (!subs_may_leave(app)) return;
         rubraview_pal_window_request_close(app->window);
     } else if (rubraview_u8_eq_lit(action, "next_page") && cue_step(app, +1)) {
         /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
@@ -5443,7 +5449,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* §3.16.2: the subtitle files beside the film, and off. */
         if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
             osd_say(app, U8("this video has no subtitles, in it or beside it"));
-        } else {
+        } else if (subs_may_leave(app)) {
             int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
                                                  app->tracks.current_subtitle);
             subtitle_select(app, next);
@@ -5463,6 +5469,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             osd_say(app, U8("no subtitles are showing"));
         } else {
             rubraview_subtitle_nudge(&app->subtitle, rubraview_u8_eq_lit(action, "subtitle_later"));
+            app->subs_dirty = true;   /* the list's Save lights: the offset can be written in */
             if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
                 app->subtitle_offset_for = app->source.pages[app->media_page].path;
                 app->subtitle_offset_seconds = app->subtitle.offset_seconds;
@@ -6538,7 +6545,7 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
 
     rubraview_titlebar_button_t button = rubraview_titlebar_hit(&app->titlebar, x, y, (double)win_w);
     switch (button) {
-        case RUBRAVIEW_TITLEBAR_CLOSE:      rubraview_pal_window_request_close(app->window); return true;
+        case RUBRAVIEW_TITLEBAR_CLOSE:      if (subs_may_leave(app)) rubraview_pal_window_request_close(app->window); return true;
         case RUBRAVIEW_TITLEBAR_MINIMIZE:   rubraview_pal_window_minimize(app->window); return true;
         case RUBRAVIEW_TITLEBAR_MAXIMIZE:   rubraview_pal_window_toggle_maximize(app->window); return true;
         case RUBRAVIEW_TITLEBAR_FULLSCREEN:
@@ -7773,6 +7780,7 @@ static bool subbox_press(app_state_t *app, double x, double y, bool buttons_only
             (void)rubraview_subbox_begin_drag(&app->subbox, part, box, x, y);
             return true;
         case RUBRAVIEW_SUBBOX_CLOSE:
+            if (!subs_may_leave(app)) return true;
             app->subtitle_last = app->tracks.current_subtitle;
             subtitle_select(app, -1);
             app->subbox.selected = false;
@@ -9247,6 +9255,7 @@ static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entrie
 
 /* The files named, as one set of pages. */
 static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t count, const char *what) {
+    if (!subs_may_leave(app)) return;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
@@ -13700,6 +13709,18 @@ static int subs_kind(const app_state_t *app) {
 }
 
 /* When a row's subtitle comes, on the film's clock (the track's offset counted). */
+/* RV-115: the subtitle on screen was moved or edited and not saved. Going
+   where it is lost (another file, another subtitle, closing) is held once
+   and said; the same within a few seconds goes on and drops the changes. */
+static bool subs_may_leave(app_state_t *app) {
+    if (!rubraview_subtitle_changed(&app->subtitle)) return true;
+    double now = rubraview_pal_time_now_seconds();
+    if (rubraview_confirm_press(&app->subs_leave, 1, now)) { rubraview_confirm_clear(&app->subs_leave); return true; }
+    osd_say(app, U8("subtitle changes not saved: Save keeps them, again leaves them"));
+    app->notice_seconds = RUBRAVIEW_CONFIRM_SECONDS;   /* said for as long as the second try counts */
+    return false;
+}
+
 static double subs_row_start(const app_state_t *app, size_t row, double *out_end) {
     double start = 0.0, end = -1.0;
     switch (subs_kind(app)) {
@@ -13816,6 +13837,12 @@ static const char *putin_refusal(app_state_t *app) {
     if (app->subtitle.source_path.len == 0) return "the subtitle on is already inside the film";
     if (rubraview_subtitle_changed(&app->subtitle)) return "save the subtitle's changes first";
     if (app->takeout.running) return "subtitles are being taken out";
+    /* said before the first press arms it; the film's own bytes decide again in `putin_begin` */
+    u8str_t film = rubraview_path_basename(app->source.pages[app->media_page].path);
+    if (rubraview_path_has_ext(film, ".webm")) return "a WebM film holds no SubRip";
+    if ((rubraview_path_has_ext(film, ".mkv") || rubraview_path_has_ext(film, ".mk3d")) &&
+app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAVIEW_SUBTITLE_ASS)
+        return "only SubRip and SubStation subtitles are put into a Matroska film";
     return NULL;
 }
 
@@ -14162,13 +14189,16 @@ static void subs_edit_begin(app_state_t *app, size_t row) {
    before is kept beside it as `name.old1.ext`, the first number free. */
 static void subs_save(app_state_t *app) {
     subs_edit_end(app, true);
-    rubraview_subtitle_track_t *track = &app->subtitle;
     if (subs_kind(app) != SUBS_TEXT) { osd_say(app, U8("only text subtitles can be saved")); return; }
-    if (!rubraview_subtitle_changed(track)) { osd_say(app, U8("nothing was changed")); return; }
-    if (track->source_path.len == 0) {
+    if (!rubraview_subtitle_changed(&app->subtitle) && app->subtitle.offset_seconds == 0.0) { osd_say(app, U8("nothing was changed")); return; }
+    if (app->subtitle.source_path.len == 0) {
         osd_say(app, U8("this subtitle is inside the film: it cannot be saved yet"));
         return;
     }
+    /* Z / X's offset goes into the times written, and is 0 after (RV-115). */
+    rubraview_subtitle_track_t folded = rubraview_subtitle_offset_folded(app->arena, &app->subtitle);
+    if (folded.count == 0) { osd_say(app, U8("not saved: no memory")); return; }
+    const rubraview_subtitle_track_t *track = &folded;
     const char *why = NULL;
     u8str_t next = rubraview_subtitle_patched(app->arena, track, &why);
     if (next.len == 0) {
@@ -14212,12 +14242,16 @@ static void subs_save(app_state_t *app) {
     /* Read as saved: the places are the new file's, and nothing is changed. */
     rubraview_subtitle_track_t fresh = rubraview_subtitle_parse(app->arena, next, track->format);
     if (fresh.count > 0) {
-        fresh.offset_seconds = track->offset_seconds;
+        fresh.offset_seconds = 0.0;
         fresh.shown_language = track->shown_language;
         fresh.source_path = track->source_path;
         fresh.source_transcoded = track->source_transcoded;
         app->subtitle = fresh;
+    } else {
+        app->subtitle = folded;   /* its times are the file's now */
+        for (size_t i = 0; i < folded.count; ++i) folded.cues[i].time_changed = folded.cues[i].text_changed = false;
     }
+    app->subtitle_offset_seconds = 0.0;   /* written in: this film's remembered offset is spent */
     char line[400];
     u8str_t kept_name = rubraview_path_basename(kept);
     int n = snprintf(line, sizeof(line), "saved; the file before is %.*s", (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
@@ -14321,7 +14355,7 @@ static void draw_subs_window(app_state_t *app) {
         rubraview_pal_render_draw_text(r, U8("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         rubraview_pal_rect_t save = subs_part_rect(app, SUBS_PART_SAVE);
         if (save.x > later.x + later.width + pad) {          /* room for it beside Later */
-            bool changed = rubraview_subtitle_changed(&app->subtitle);
+            bool changed = rubraview_subtitle_changed(&app->subtitle) || app->subtitle.offset_seconds != 0.0;   /* Z / X is saved too */
             rubraview_pal_render_fill_rect(r, save, changed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
             rubraview_pal_render_stroke_rect(r, save, COLOR_BOX_BORDER, 1.0, 3.0);
             rubraview_pal_render_draw_text(r, U8("Save"), save, font, changed ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
@@ -16064,6 +16098,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
 
 static void open_path(app_state_t *app, u8str_t path) {
     if (app->arc_job) { osd_say(app, U8("the archive is being written (Esc stops it)")); return; }
+    if (!subs_may_leave(app)) return;
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
@@ -16134,6 +16169,7 @@ static void open_path(app_state_t *app, u8str_t path) {
    archive in the same directory. */
 static void open_sibling_archive(app_state_t *app, bool forward) {
     if (app->source.archive_path.len == 0 || app->source_dir.len == 0) return;
+    if (!subs_may_leave(app)) return;
 
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, app->source_dir);
     u8str_t next = rubraview_page_source_sibling_archive(app->arena, &listing,
@@ -17863,7 +17899,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             handled++;
             switch (event.kind) {
                 case RUBRAVIEW_WINDOW_EVENT_CLOSE:
-                    rubraview_pal_window_request_close(app.window);
+                    /* RV-115: the X or Alt+F4 with a subtitle's changes not saved is held once */
+                    if (subs_may_leave(&app)) rubraview_pal_window_request_close(app.window);
+                    else rubraview_pal_window_keep_open(app.window);
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_RESIZE:

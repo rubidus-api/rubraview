@@ -337,6 +337,8 @@ void rubraview_pal_window_toggle_maximize(rubraview_window_t *window);
 
 bool rubraview_pal_window_should_close(const rubraview_window_t *window);
 void rubraview_pal_window_request_close(rubraview_window_t *window);
+/* A close asked for (the title bar's X, Alt+F4) is taken back: the window stays. */
+void rubraview_pal_window_keep_open(rubraview_window_t *window);
 
 #ifdef __cplusplus
 }

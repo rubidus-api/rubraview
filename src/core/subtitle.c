@@ -780,6 +780,27 @@ bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_tra
     return true;
 }
 
+rubraview_subtitle_track_t rubraview_subtitle_offset_folded(proven_arena_t *arena, const rubraview_subtitle_track_t *track) {
+    rubraview_subtitle_track_t out = track ? *track : (rubraview_subtitle_track_t){0};
+    if (!track || track->offset_seconds == 0.0 || !(track->offset_seconds == track->offset_seconds) || track->count == 0) return out;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count, sizeof(rubraview_subtitle_cue_t));
+    if (!proven_is_ok(res.err)) return (rubraview_subtitle_track_t){0};
+    rubraview_subtitle_cue_t *cues = (rubraview_subtitle_cue_t *)res.value.ptr;
+    double by = track->offset_seconds;
+    for (size_t i = 0; i < track->count; ++i) {
+        cues[i] = track->cues[i];
+        double start = cues[i].start_seconds + by, end = cues[i].end_seconds + by;
+        if (start < 0.0) start = 0.0;   /* not before the beginning; one that ends before it ends there */
+        if (end < start) end = start;
+        cues[i].start_seconds = start;
+        cues[i].end_seconds = end;
+        cues[i].time_changed = true;
+    }
+    out.cues = cues;
+    out.offset_seconds = 0.0;
+    return out;
+}
+
 bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track) {
     if (!track) return false;
     for (size_t i = 0; i < track->count; ++i) {

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.79.exe              the viewer, as built
-dist/rubraview-v0.0.79/                 the release bundle
-dist/rubraview-v0.0.79.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.80.exe              the viewer, as built
+dist/rubraview-v0.0.80/                 the release bundle
+dist/rubraview-v0.0.80.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -573,8 +573,12 @@ While it does:
   `name.old1.smi`, then `.old2`, and so on, and is not offered as one of
   the film's subtitles. Nothing is saved when the file was changed by
   something else meanwhile, or a typed character cannot be written in its
-  encoding; it says which. Changes not saved are lost when you turn to
-  another film or another subtitle (it says so). A SAMI caption has no end
+  encoding; it says which. The half-seconds `Z` and `X` moved the whole
+  subtitle by are saved too (Save lights when there are any): they go
+  into every time, and the subtitle is no longer moved after. With changes
+  not saved, turning to another film, another subtitle or closing the
+  viewer is held once and it says so; doing it again within five seconds
+  goes on and leaves them. A SAMI caption has no end
   of its own: moved, it takes along the empty line that closes it, and one
   closed by the next caption only begins elsewhere. **Take out**, at the
   window's top right (or Subtitles › Take out of film), writes the text
@@ -587,7 +591,8 @@ While it does:
   compressed tracks are not taken out; a file of that name already there
   is kept under a numbered name unless it is the same. **Put in film**,
   beside it, does the other way round with the subtitle on screen (its
-  changes saved): the film is written again with the subtitle as one more
+  changes saved; a Matroska film takes SubRip and SubStation only, and
+  says so at the first press): the film is written again with the subtitle as one more
   track — into a Matroska film a SubRip or SubStation file as it is, into
   an MP4 any subtitle's words as 3GPP text (an MP4 subtitle has no tags,
   so italics and colours do not go in). An MP4 keeps every byte where it

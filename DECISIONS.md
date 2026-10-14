@@ -1227,3 +1227,13 @@ Do not store credentials, private infrastructure details, personal data, private
   - In the viewer, Put in film tries Matroska and then MP4; the rest (two presses, the temporary file, the check, the swap) is D-128's.
 - Consequences: the new MP4 is larger than the film by the old `moov` it keeps as `free` plus the new one (here 4.58 MB → 4.71 MB), and its head is at its end, so it does not start playing before it is all downloaded — the film's format is kept, its layout for streaming is not. Typing styles in SubRip (`<i>`) are lost in an MP4.
 - Not run: an MP4 over 4 GB (`co64`), one with its `moov` at the start (moved there for streaming), one from another muxer, QuickTime `.mov`.
+
+## D-131: The Subtitle Window's Leftovers — Changes Not Lost Unasked, Z / X Saved (2026-10-14)
+
+- Context: RV-115's stage-2 leftovers. Changes not saved were dropped with a word on screen when the reader turned to another film or subtitle; the Z / X offset was kept for the film but never reached the file; a Matroska film with a SAMI or WebVTT on armed Put in film at the first press and refused only at the second.
+- Decision:
+  - `subs_may_leave`: with a cue moved or edited and not saved, whatever would drop it — `go_to_spread` to another page (so the keys, the tiles, the page bar and the next film after one ends), `open_path`, a set opened, a sibling archive, another subtitle (the list, the next-track key, CC, the subtitle box's X), Quit, the title bar's X and the system's close — is held once and said; the same within `RUBRAVIEW_CONFIRM_SECONDS` goes on. The idiom is the menu's two presses (`rubraview_confirm_t`), not a modal. The system's close is taken back by `rubraview_pal_window_keep_open`. The folder opened again after a delete or a swap is not held (the file is gone or changed already).
+  - Save writes the offset in: `rubraview_subtitle_offset_folded` copies the cues moved by it (none before 0; a cue that would end before 0 ends at 0), marks them moved, and the patch writes every time; the offset is 0 after, the film's remembered one too. Save lights for an offset alone.
+  - `putin_refusal` reads the film's name: `.webm` is refused, and `.mkv` / `.mk3d` with a subtitle that is not SubRip or SubStation is refused at the first press. The film's bytes still decide in `putin_begin`.
+- Consequences: a film that ends with changes not saved stays on its last picture, saying so, instead of going on to the next. Shutting Windows down is not held.
+- Not run: the window closed by Windows itself (log off), drag and drop of a file onto the viewer with changes not saved.

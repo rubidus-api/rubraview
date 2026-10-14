@@ -112,6 +112,14 @@ u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subt
  */
 bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, u8str_t typed);
 
+/**
+ * The track with its Z / X offset written into its times, for a save
+ * (RV-115): a copy of the cues, each moved by `offset_seconds` (none before
+ * the film's beginning) and marked moved, the offset 0. The track itself
+ * is left as it is. With no offset, the track as it is.
+ */
+rubraview_subtitle_track_t rubraview_subtitle_offset_folded(proven_arena_t *arena, const rubraview_subtitle_track_t *track);
+
 /** Has any cue been moved or edited since the track was read? */
 bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track);
 
