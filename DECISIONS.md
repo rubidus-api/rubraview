@@ -1278,3 +1278,9 @@ Do not store credentials, private infrastructure details, personal data, private
   - SAMI is read in the order of its SYNCs: a caption whose new time puts it out of order with the captions that did not change is taken out where it was and written again; every SAMI piece written in (a caption, its closing empty SYNC, apart) goes before the first SYNC still in the file that starts later (a caption) or not earlier (a closing SYNC), so the SYNCs stay in order of time. Two captions made to overlap cannot both show in SAMI: the earlier one's closing SYNC ends the later one there.
   - A save whose file is in a code page that cannot hold a character typed is not refused outright: it says so and a second Save within six seconds writes the file as UTF-8 with its mark (`EF BB BF`); the file before is kept as always.
 - Not run: SAMI with several languages added to on the VM; a WebVTT or SubStation file on the VM (unit tests only).
+
+## D-135: The Arrow Keys Move A Zoomed Picture (2026-10-14)
+
+- Context: the owner asked for the arrows to move the picture when it is zoomed. They had nothing on a picture since 2026-09-09 (taken off page turning on request); a film uses them for seeking and the volume.
+- Decision: `[view]` binds Left, Right, Up and Down to `pan_left` / `pan_right` / `pan_up` / `pan_down`. A press shows what lies past the window's edge the arrow points to, a seventh of the window, never more than is hidden (`rubraview_pan_key_delta`); along an axis where the picture fits nothing moves, and nothing else happens (the arrows still turn no page). The picture's place is the spread's bounding box, turned as shown. In the webtoon strip Up and Down scroll it. A film's and an animation's arrows (`[media]`) are as they were.
+- Not run: the webtoon strip and a two-page spread on the VM.

@@ -109,3 +109,12 @@ double rubraview_zoom_cycle_percent(double percent, bool at_real_size) {
     double next = (floor(percent / 20.0 + 1e-6) + 1.0) * 20.0;
     return next > 200.0 + 1e-6 ? 0.0 : next;
 }
+
+double rubraview_pan_key_delta(double view_extent, double start, double extent, int direction, double step) {
+    if (!(extent > view_extent) || !(step > 0.0) || direction == 0) return 0.0;
+    double room = direction > 0 ? start + extent - view_extent   /* hidden past the far edge */
+                                : -start;                         /* hidden before the near one */
+    if (!(room > 0.0)) return 0.0;
+    double by = room < step ? room : step;
+    return direction > 0 ? -by : by;
+}

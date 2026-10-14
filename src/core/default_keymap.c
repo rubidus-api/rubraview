@@ -107,6 +107,11 @@ const char *rubraview_default_keymap(void) {
     "toggle_fit_lock = \"L\"\n"
     "zoom_in = \"Plus\"\n"
     "zoom_out = \"Minus\"\n"
+    /* The arrows move a picture larger than the window (owner, 2026-10-14); a film's are its own (seek, volume). */
+    "pan_left = \"Left\"\n"
+    "pan_right = \"Right\"\n"
+    "pan_up = \"Up\"\n"
+    "pan_down = \"Down\"\n"
     "rotate_cw = \"R\"\n"
     "rotate_ccw = \"Shift+R\"\n"
     "flip_horizontal = \"H\"\n"

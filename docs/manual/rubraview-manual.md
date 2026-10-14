@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.84.exe              the viewer, as built
-dist/rubraview-v0.0.84/                 the release bundle
-dist/rubraview-v0.0.84.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.85.exe              the viewer, as built
+dist/rubraview-v0.0.85/                 the release bundle
+dist/rubraview-v0.0.85.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -704,7 +704,11 @@ the picture, zooms by one step — 10 % as it comes (Settings > Viewer > Zoom
 step) — to the next round figure: 100 %, 110 %, 120 %. `Ctrl+0` puts 100 %
 back with the picture in the middle; `0` or `4` shows real size.
 
-The picture follows the pointer when it is dragged, at any zoom. A click
+The picture follows the pointer when it is dragged, at any zoom. When it
+is larger than the window the arrow keys move it too: a seventh of the
+window a press toward the side the arrow points to, stopping at the
+picture's edge (a picture that fits stays; a film keeps its arrows for
+seeking and the volume; in the webtoon strip Up and Down scroll). A click
 without a drag is what it was: a page turned at the window's sides, the
 boxes shown in its middle.
 
@@ -1025,6 +1029,10 @@ listed under a later heading only means that while that is on screen.
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
+| `Left` | A zoomed picture: see further left |
+| `Right` | A zoomed picture: see further right |
+| `Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
+| `Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
 | `R` | Rotate clockwise |
 | `Shift+R` | Rotate anticlockwise |
 | `H` | Flip left-right |

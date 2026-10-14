@@ -5167,6 +5167,42 @@ static void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool 
     }
 }
 
+/* The arrow keys over a picture larger than the window (owner, 2026-10-14): what lies past the
+   edge they point to comes in, a seventh of the window a press, never past the picture's edge;
+   a picture that fits does not move. The webtoon strip scrolls with Up and Down. */
+static void pan_key(app_state_t *app, int dx, int dy) {
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double step_x = (double)win_w / 7.0, step_y = (double)win_h / 7.0;
+    if (dy != 0 && strip_active(app)) {
+        strip_scroll_by(app, (double)dy * step_y);
+        note_activity(app);
+        return;
+    }
+    rubraview_composition_t comp;
+    if (!spread_composition(app, &comp) || comp.count == 0) return;
+    double x0 = 1e18, y0 = 1e18, x1 = -1e18, y1 = -1e18;   /* every page of the spread, turned as it is shown */
+    for (size_t i = 0; i < comp.count; ++i) {
+        const rubraview_draw_command_t *cmd = &comp.commands[i];
+        double w = cmd->src_right - cmd->src_left, h = cmd->src_bottom - cmd->src_top;
+        const double cx[4] = { 0.0, w, 0.0, w }, cy[4] = { 0.0, 0.0, h, h };
+        for (int k = 0; k < 4; ++k) {
+            double px = 0.0, py = 0.0;
+            rubraview_mat3x2_apply(cmd->transform, cx[k], cy[k], &px, &py);
+            if (px < x0) x0 = px;
+            if (px > x1) x1 = px;
+            if (py < y0) y0 = py;
+            if (py > y1) y1 = py;
+        }
+    }
+    double mx = dx ? rubraview_pan_key_delta((double)win_w, x0, x1 - x0, dx, step_x) : 0.0;
+    double my = dy ? rubraview_pan_key_delta((double)win_h, y0, y1 - y0, dy, step_y) : 0.0;
+    if (mx == 0.0 && my == 0.0) return;
+    app->pan_x += mx;
+    app->pan_y += my;
+    note_activity(app);
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (action.len == 0) return;
     note_activity(app);
@@ -5288,6 +5324,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         reset_view(app);   /* D-97: 100% is the fitted size; the fit option stays */
     } else if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
         zoom_cycle(app);
+    } else if (rubraview_u8_eq_lit(action, "pan_left") || rubraview_u8_eq_lit(action, "pan_right") ||
+               rubraview_u8_eq_lit(action, "pan_up") || rubraview_u8_eq_lit(action, "pan_down")) {
+        pan_key(app, rubraview_u8_eq_lit(action, "pan_left") ? -1 : rubraview_u8_eq_lit(action, "pan_right") ? 1 : 0,
+                rubraview_u8_eq_lit(action, "pan_up") ? -1 : rubraview_u8_eq_lit(action, "pan_down") ? 1 : 0);
     } else if (rubraview_u8_eq_lit(action, "zoom_in")) {
         zoom_step(app, true);
     } else if (rubraview_u8_eq_lit(action, "zoom_out")) {

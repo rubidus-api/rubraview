@@ -91,6 +91,16 @@ double rubraview_zoom_step_percent(double percent, double step, bool larger);
  */
 double rubraview_zoom_cycle_percent(double percent, bool at_real_size);
 
+/**
+ * The arrow keys over a picture larger than the window (owner, 2026-10-14):
+ * how far the picture moves along one axis for a key that looks further
+ * `direction` (+1 right or down, -1 left or up) — the picture goes the
+ * other way — at most `step`, and never so far that its edge leaves the
+ * window's. 0 when the picture fits that way, or is at its edge already.
+ * `start` and `extent` are the picture's place on screen along the axis.
+ */
+double rubraview_pan_key_delta(double view_extent, double start, double extent, int direction, double step);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.84** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.85** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -106,6 +106,10 @@
 | `L` | 다음 파일에도 이 맞춤 유지 |
 | `+` | 확대 |
 | `-` | 축소 |
+| `Left` | 확대한 그림: 왼쪽 보기 |
+| `Right` | 확대한 그림: 오른쪽 보기 |
+| `Up` | 확대한 그림: 위쪽 보기 (웹툰은 스크롤) |
+| `Down` | 확대한 그림: 아래쪽 보기 (웹툰은 스크롤) |
 | `R` | 시계 방향 회전 |
 | `Shift+R` | 반시계 방향 회전 |
 | `H` | 좌우 뒤집기 |

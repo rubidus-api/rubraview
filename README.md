@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.84** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.85** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -107,6 +107,10 @@ ships with, so it cannot drift from them.
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
+| `Left` | A zoomed picture: see further left |
+| `Right` | A zoomed picture: see further right |
+| `Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
+| `Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
 | `R` | Rotate clockwise |
 | `Shift+R` | Rotate anticlockwise |
 | `H` | Flip left-right |
