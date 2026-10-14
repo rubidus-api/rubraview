@@ -1204,3 +1204,14 @@ Do not store credentials, private infrastructure details, personal data, private
   - WebM is refused (it holds only WebVTT subtitles); so are SAMI and WebVTT files for now.
 - Consequences: the folder holds two films afterwards, and lists, players and the viewer's own page list show `film.old1.mkv` too — as the owner asked. Playing the embedded track in this viewer still needs FFmpeg (D-127); Take out or another player shows it without.
 - Not run: a film of gigabytes (the slices, Stop and the progress on the button), a film made by mkvmerge, a film whose clusters carry CRC-32 (ffmpeg's default output had none here), a rename refused because the film is playing, a full disk.
+
+## D-129: An MP4 Film's Subtitles Taken Out, By Our Own Code (2026-10-14)
+
+- Context: RV-115, the MP4 half of taking out (the owner: MP4 by our own code as well, MIT, from the specifications).
+- Decision:
+  - `mp4.c` / `mp4.h`, written from ISO/IEC 14496-12 (boxes) and 3GPP TS 26.245 (timed text) alone. Boxes of 32-bit size, a 64-bit one (size 1) and "to the end" (size 0); only `moov/trak/mdia/minf/stbl` is descended. A track: `tkhd`'s id, `mdhd`'s timescale and language (both versions), `hdlr`'s handler, the first sample entry's format, and the tables `stts`, `stsc`, `stsz`, `stco` / `co64`, each count checked against its box. A `moof` or an `mvex` refuses the file (fragmented).
+  - The samples of a track are walked through its chunks (`stsc` for how many a chunk holds, `stco` / `co64` for where, `stsz` for how long, `stts` for when). A `tx3g` sample is a 16-bit length, UTF-8 text and boxes of style: the text is written as a SubRip cue, its line ends as one; a sample of no text is a gap between subtitles and is passed over; UTF-16 text is not written. WebVTT, TTML, CEA-608 and QuickTime text are found and not taken out, and it says so.
+  - Take out tries Matroska first, then MP4. An MP4's subtitle samples are few and their places known, so they are read at once rather than walked a slice a frame; the files are named and written as for Matroska (`film.kor.srt`), the same rule for a name already taken.
+  - D-128's swap now opens the folder again on the film by its path, not its old place in the list (in date order the new film is the newest and the old one keeps its date). The Put in and Take out buttons answer whatever is on screen, so a press that cannot do anything says why (one of three VM runs of 0.0.77 started nothing, with no word: the film was likely not up yet).
+- Consequences: the extracted SubRip equals FFmpeg's extraction from the same file. An edit list (`elst`) is not applied: FFmpeg's output starts its subtitle at zero and needs none; a file whose subtitle track is shifted by one would come out shifted.
+- Not run: an MP4 made by another muxer than FFmpeg, one with an edit list on the subtitle, a QuickTime `.mov`.

@@ -74,6 +74,7 @@
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_subwin.h"
 #include "rubraview/matroska.h"
+#include "rubraview/mp4.h"
 #include "rubraview/ui_listwin.h"
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/repeat.h"
@@ -545,6 +546,7 @@ typedef struct app_state {
         rubraview_fs_mapping_t map;
         rubraview_mkv_t        mkv;
         rubraview_mkv_walk_t   walk;
+        rubraview_mp4_t        mp4;            /* an MP4 film's tracks (D-129) */
         char                   film[1024];
         struct { char *data; size_t len, cap; unsigned cues; } out[RUBRAVIEW_MKV_MAX_TRACKS];
         double                 said_at;
@@ -973,6 +975,7 @@ static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
 static void takeout_begin(app_state_t *app);
 static void reopen_after_removal(app_state_t *app, size_t removed_index);
+static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback);
 static void files_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_eqwin(app_state_t *app, double win_w, double win_h);
@@ -8727,6 +8730,24 @@ static void reopen_after_removal(app_state_t *app, size_t removed_index) {
     finish_open(app, target);
 }
 
+/* D-128: the folder again, on a file by its path — a file was added beside it,
+   so its place in the order (by date, say) may not be what it was. */
+static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback) {
+    u8str_t dir = app->source_dir;
+    if (dir.len == 0) return;
+    char kept[1024];
+    if (path.len >= sizeof(kept)) { reopen_after_removal(app, fallback); return; }
+    memcpy(kept, path.ptr, path.len);                 /* the list it may point into is about to be made again */
+    u8str_t want = { .ptr = kept, .len = path.len };
+    open_folder(app, dir);
+    if (page_count(app) == 0) return;
+    size_t target = fallback < page_count(app) ? fallback : page_count(app) - 1;
+    for (size_t i = 0; i < page_count(app); ++i) {
+        if (rubraview_u8_eq(app->source.pages[i].path, want)) { target = i; break; }
+    }
+    finish_open(app, target);
+}
+
 static void osd_say(app_state_t *app, u8str_t text) {
     size_t n = text.len < sizeof(app->notice) - 1 ? text.len : sizeof(app->notice) - 1;
     memcpy(app->notice, text.ptr, n);
@@ -13438,6 +13459,56 @@ static bool takeout_wanted(const rubraview_mkv_track_t *track) {
     return !track->encoded && (track->subtitle == RUBRAVIEW_MKV_SUB_SRT || track->subtitle == RUBRAVIEW_MKV_SUB_ASS);
 }
 
+/* D-129: an MP4's subtitles. Their samples are few and the tables say where
+   each is, so they are read at once, not walked; each 3GPP text track is
+   written as SubRip under the name a Matroska track of its language would
+   have (its tracks are described in `takeout.mkv`'s place for that). */
+static void takeout_write(app_state_t *app);
+
+static void takeout_mp4(app_state_t *app, u8str_t film) {
+    const char *why = NULL;
+    if (!rubraview_mp4_open(&app->takeout.mp4, app->takeout.map.data, app->takeout.map.size, &why)) {
+        takeout_end(app);
+        char line[200];
+        int n = snprintf(line, sizeof(line), "subtitles are taken out of Matroska and MP4 films only (%s)", why ? why : "not one of them");
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+        return;
+    }
+    app->takeout.mkv = (rubraview_mkv_t){0};
+    size_t wanted = 0, other = 0;
+    for (size_t i = 0; i < app->takeout.mp4.track_count && i < RUBRAVIEW_MKV_MAX_TRACKS; ++i) {
+        const rubraview_mp4_track_t *t = &app->takeout.mp4.tracks[i];
+        rubraview_mkv_track_t *as = &app->takeout.mkv.tracks[app->takeout.mkv.track_count++];
+        *as = (rubraview_mkv_track_t){ .number = t->id, .type = t->subtitle ? 0x11 : 0,
+                                       .language = { .ptr = t->language, .len = strlen(t->language) },
+                                       .subtitle = t->subtitle == RUBRAVIEW_MP4_SUB_TX3G ? RUBRAVIEW_MKV_SUB_SRT
+                                                 : t->subtitle == RUBRAVIEW_MP4_SUB_OTHER ? RUBRAVIEW_MKV_SUB_OTHER : RUBRAVIEW_MKV_SUB_NONE };
+        if (t->subtitle == RUBRAVIEW_MP4_SUB_OTHER) other++;
+        if (t->subtitle != RUBRAVIEW_MP4_SUB_TX3G) continue;
+        wanted++;
+        rubraview_mp4_walk_t walk = {0};
+        rubraview_mp4_sample_t sample;
+        while (rubraview_mp4_sample_next(&app->takeout.mp4, t, &walk, &sample)) {
+            size_t need = rubraview_mp4_subtitle_cue(&app->takeout.mp4, t, app->takeout.out[i].cues + 1, &sample, NULL, 0);
+            if (need == 0) continue;
+            if (!takeout_room(app, i, need + 1)) { takeout_end(app); osd_say(app, U8("the film's subtitles are too long to take out")); return; }
+            app->takeout.out[i].len += rubraview_mp4_subtitle_cue(&app->takeout.mp4, t, app->takeout.out[i].cues + 1, &sample,
+                                                                  app->takeout.out[i].data + app->takeout.out[i].len,
+                                                                  app->takeout.out[i].cap - app->takeout.out[i].len);
+            app->takeout.out[i].cues++;
+        }
+    }
+    if (wanted == 0) {
+        takeout_end(app);
+        osd_say(app, other > 0 ? U8("the film's subtitles are of a kind not taken out yet (only 3GPP text is)")
+                               : U8("the film holds no subtitles"));
+        return;
+    }
+    memcpy(app->takeout.film, film.ptr, film.len);
+    app->takeout.film[film.len] = '\0';
+    takeout_write(app);
+}
+
 static void takeout_begin(app_state_t *app) {
     if (app->takeout.running) {                       /* the same action stops it */
         takeout_end(app);
@@ -13456,8 +13527,7 @@ static void takeout_begin(app_state_t *app) {
     }
     const char *why = NULL;
     if (!rubraview_mkv_open(&app->takeout.mkv, app->takeout.map.data, app->takeout.map.size, &why)) {
-        takeout_end(app);
-        osd_say(app, U8("subtitles are taken out of Matroska films (.mkv) only, for now"));
+        takeout_mp4(app, film);
         return;
     }
     size_t wanted = 0, pictures = 0, packed = 0;
@@ -13540,6 +13610,7 @@ static void takeout_write(app_state_t *app) {
     else if (same > 0) n = snprintf(line, sizeof(line), "the film's subtitles are beside it already");
     else if (failed > 0) n = snprintf(line, sizeof(line), "the subtitles could not be written beside the film");
     else n = snprintf(line, sizeof(line), "%s", empty ? "the film's subtitle tracks are empty" : "nothing was taken out");
+    app->takeout.mp4 = (rubraview_mp4_t){0};
     takeout_end(app);
     if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 
@@ -13813,7 +13884,7 @@ static void putin_swap(app_state_t *app) {
     u8str_t kept_name = rubraview_path_basename(kept);
     int n = snprintf(line, sizeof(line), "the subtitle is in the film now; the film as it was is %.*s", (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
     if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
-    if (on_screen) reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
+    if (on_screen) reopen_on_path(app, film, page >= 0 ? (size_t)page : 0);
 }
 
 static void putin_step(app_state_t *app) {
@@ -14307,12 +14378,13 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     subs_edit_end(app, true);                    /* a press anywhere keeps what was typed */
     subs_focus_amount(app, on_amount);
     if (on_amount) return;
-    if (app->media && app->media_info.has_video && kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_PUTIN), x, y)) {
+    /* The two buttons answer whatever is on: a press that does nothing says why (a film not up yet). */
+    if (subs_in(subs_part_rect(app, SUBS_PART_PUTIN), x, y) && y < app->subs_list.title_height * 0.5) {
         putin_press(app);
         app->subs_dirty = true;
         return;
     }
-    if (app->media && app->media_info.has_video && subs_in(subs_part_rect(app, SUBS_PART_TAKEOUT), x, y)) {
+    if (subs_in(subs_part_rect(app, SUBS_PART_TAKEOUT), x, y)) {
         takeout_begin(app);
         app->subs_dirty = true;
         return;

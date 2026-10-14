@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.77.exe              the viewer, as built
-dist/rubraview-v0.0.77/                 the release bundle
-dist/rubraview-v0.0.77.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.78.exe              the viewer, as built
+dist/rubraview-v0.0.78/                 the release bundle
+dist/rubraview-v0.0.78.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -578,7 +578,8 @@ While it does:
   of its own: moved, it takes along the empty line that closes it, and one
   closed by the next caption only begins elsewhere. **Take out**, at the
   window's top right (or Subtitles › Take out of film), writes the text
-  subtitles a Matroska film (`.mkv`) holds inside as files beside it —
+  subtitles a Matroska film (`.mkv`) or an MP4 (its 3GPP text subtitles,
+  as SubRip) holds inside as files beside it —
   `film.kor.srt`, `film.eng.ass`, named by their language, a SubStation
   track with its own styles — and shows the first; the film itself is not
   changed, and no FFmpeg is needed. A long film takes a while: the button
