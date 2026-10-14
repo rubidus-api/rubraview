@@ -1153,3 +1153,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Not run: the detached toolbox window with a name of several rows (it uses the same layout and follows its size).
 - 0.0.72: the place's row is one more than the name's three, never one of them — in 0.0.71 a name of three rows and a place shared the third row. A name longer than three rows is cut to the longest beginning that fits, with an ellipsis (the renderer has no clipping; the cut is found by measuring).
 - 0.0.73 (owner, 2026-10-14): a film's and a song's first group is Play / Pause, Stop, five seconds back and forward, the file before and the file after, in that order; A-B, the speed and the repeat are the second group. The other profiles keep moving between files first.
+
+## D-125: The Subtitle Window (2026-10-14)
+
+- Context: the owner: a window that lists the subtitles one a row and goes to the one clicked, outside the viewer's window; several chosen and moved earlier or later by 0.1 s or by an amount typed; each edited; an embedded subtitle taken out as a file or one put into the film. Then: a check box before each row and one above for all or none; the buttons and the field for the seconds above the list. Planned as RV-115 in four stages; this is the first.
+- Decision:
+  - `toggle_subtitle_window` (`Shift+C`, a tile in the film's toolbox, Subtitles > List window): a window of its own owned by the viewer, as the file list window is. Rows are `ui_listwin`'s; what they hold and what a click does is `ui_subwin` (tested without a window).
+  - A plain click on a row goes to the subtitle and leaves the boxes alone; the box, or `Ctrl` + click, switches one; `Shift` + click chooses a run; the box in the header, all or none. The row of the moment playing is the last subtitle begun, so the mark does not vanish between two.
+  - Earlier / Later move the ticked cues by the seconds in the field (digits and one point; 0.1 as it comes), start and end together, not before the film's beginning; the track is kept in order of start, so a cue moved past its neighbour changes place and its tick goes with it. This is apart from `Z` / `X`, which move the whole track's offset.
+  - The moved times are in memory only in this stage; the header says so. The owner's answers for the rest: saving patches the file in its own format with the styling kept and takes the subtitle's name, the file before renamed with a number beside it; a subtitle put into a film makes a new file of the film's own format; Matroska read and written by our own code.
+- Consequences: a third list window in `main.c`. Picture subtitles (VobSub, PGS) are listed by time and can only be gone to. With a SAMI of several languages only the language on screen is listed and moved.
+- Not run: touch; a list longer than the window scrolled by the wheel and left to follow again (the wheel in the VM test fell outside the window); picture subtitles in the list; a SAMI of two languages.

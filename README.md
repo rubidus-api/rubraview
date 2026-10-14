@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.73** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.73/rubraview-v0.0.73.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.73/rubraview-v0.0.73.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.74** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.74/rubraview-v0.0.74.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.74/rubraview-v0.0.74.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -151,6 +151,7 @@ ships with, so it cannot drift from them.
 | `X` | Subtitles half a second later |
 | `A` | Next sound track |
 | `C` | Next subtitles |
+| `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
 
 **A multi-page TIFF or ICO**
 

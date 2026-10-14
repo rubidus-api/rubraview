@@ -169,6 +169,8 @@ const char *rubraview_default_keymap(void) {
     /* §3.16.2 / R135: the next sound track, and the next subtitle. */
     "next_audio_track = \"A\"\n"
     "next_subtitle_track = \"C\"\n"
+    /* RV-115: the subtitles as a list in a window of its own. */
+    "toggle_subtitle_window = \"Shift+C\"\n"
     "\n"
 
     /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,

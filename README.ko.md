@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.73** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.73/rubraview-v0.0.73.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.73/rubraview-v0.0.73.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.74** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.74/rubraview-v0.0.74.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.74/rubraview-v0.0.74.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -150,6 +150,7 @@
 | `X` | 자막 0.5초 늦게 |
 | `A` | 다음 소리 트랙 |
 | `C` | 다음 자막 |
+| `Shift+C` | 영상의 자막을 별도 창의 목록으로 — 클릭하면 그 자막으로 이동, 체크박스로 선택, 앞으로/뒤로 버튼으로 선택한 자막 이동 |
 
 **여러 쪽이 든 TIFF·ICO**
 

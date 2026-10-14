@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.73.exe              the viewer, as built
-dist/rubraview-v0.0.73/                 the release bundle
-dist/rubraview-v0.0.73.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.74.exe              the viewer, as built
+dist/rubraview-v0.0.74/                 the release bundle
+dist/rubraview-v0.0.74.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -552,6 +552,20 @@ While it does:
   the subtitle settings and **X** turns subtitles off. Tap anywhere else
   to let go of the box. A DVD's or a Blu-ray's picture subtitles stay
   where the disc puts them.
+- `Shift+C` (the speech-bubble button, or Subtitles › List window) opens
+  the film's subtitles as a list in **a window of its own**: a row each,
+  with when it comes, when it goes and what it says; the one playing is
+  marked and the list follows the film. A click on a row goes to that
+  subtitle. Each row has a box at its left to tick, and the box at the top
+  ticks all of them or none (`Ctrl+A` all; `Shift` + click a run, `Ctrl` +
+  click one). **< Earlier** and **Later >** above the list move the ticked
+  subtitles by the seconds written between them — click the number to
+  type another (`0.1` as it comes), `Enter` to finish. The moved times
+  hold while the film is open; the header says "moved, not saved", and
+  writing them to the subtitle's file comes in a later version. The wheel
+  and the arrow keys move the list; other keys do what they do in the
+  viewer, so `Space` pauses and `Shift+C` or `Esc` closes it. A DVD's or a
+  Blu-ray's picture subtitles are listed by their times only.
 - The toolbox's **CC** button turns subtitles off and on. Tap it twice
   quickly, or hold it for half a second, and a list of the film's subtitles
   opens — tap the one you want (or **Off**).
@@ -956,6 +970,7 @@ listed under a later heading only means that while that is on screen.
 | `X` | Subtitles half a second later |
 | `A` | Next sound track |
 | `C` | Next subtitles |
+| `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
 
 **A multi-page TIFF or ICO**
 

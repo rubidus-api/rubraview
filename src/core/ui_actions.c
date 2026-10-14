@@ -37,6 +37,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     if (rubraview_u8_eq_lit(action, "toggle_subtitles") || rubraview_u8_eq_lit(action, "choose_subtitle_track")) {
         st.enabled = f->has_subtitles;
     }
+    if (rubraview_u8_eq_lit(action, "toggle_subtitle_window")) st.enabled = f->media;
     if (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later")) st.enabled = f->subtitle_shown;
 
     static const struct { const char *action; size_t offset; } TOGGLES[] = {
@@ -186,6 +187,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_always_on_top", 0xE718 },  /* Pin */
         { "rename_file", 0xE8AC },           /* Rename */
         { "toggle_file_list", 0xE8A9 },      /* ViewAll: the files in the archive, with a preview */
+        { "toggle_subtitle_window", 0xE8BD },  /* Message: the subtitles as a list (RV-115) */
         { "copy_to_folder", 0xE8C8 },        /* Copy */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
     };

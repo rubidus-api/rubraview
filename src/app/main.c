@@ -72,6 +72,7 @@
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
+#include "rubraview/ui_subwin.h"
 #include "rubraview/ui_listwin.h"
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/repeat.h"
@@ -515,6 +516,28 @@ typedef struct app_state {
     /* The file list window (owner, 2026-10-08): a window of its own beside
        the viewer — the archive's (or the folder's) files on the left, a
        preview on the right; a row clicked or Enter turns the viewer to it. */
+    /* The subtitle window (owner, 2026-10-14, RV-115): the film's subtitles
+       a row each in a window of its own; a click goes there, the boxes
+       choose rows, and the bar above moves the chosen ones in time. */
+    rubraview_window_t        *subs_window;
+    rubraview_renderer_t      *subs_renderer;
+    bool                       subs_open, subs_dirty;
+    int32_t                    subs_frame[4];
+    rubraview_listwin_t        subs_list;
+    uint32_t                  *subs_rows;          /* the cue of each row (text subtitles) */
+    bool                      *subs_chosen;        /* a row's box */
+    bool                      *subs_marks;         /* room for moving: a flag a cue */
+    size_t                     subs_count, subs_room, subs_marks_room;
+    const void                *subs_for;           /* the track the rows were made for */
+    size_t                     subs_for_count;
+    const char                *subs_for_language;
+    size_t                     subs_anchor;        /* the row last clicked */
+    int32_t                    subs_hover, subs_now;
+    double                     subs_scrolled_at;   /* the reader moved the list: it does not follow for a while */
+    char                       subs_amount[16];    /* the seconds a press of Earlier / Later moves */
+    size_t                     subs_amount_len;
+    bool                       subs_amount_focus;
+    bool                       subs_changed;       /* cues moved and not saved */
     rubraview_window_t        *files_window;
     rubraview_renderer_t      *files_renderer;
     bool                       files_open, files_dirty;
@@ -911,6 +934,8 @@ static void mini_show(app_state_t *app);
 static bool mini_paused(const app_state_t *app);
 static void mini_close(app_state_t *app);
 static void files_show(app_state_t *app);
+static void subs_show(app_state_t *app);
+static void subs_close(app_state_t *app);
 static void files_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_eqwin(app_state_t *app, double win_w, double win_h);
@@ -5171,6 +5196,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rename_begin(app);
     } else if (rubraview_u8_eq_lit(action, "toggle_file_list")) {
         files_show(app);
+    } else if (rubraview_u8_eq_lit(action, "toggle_subtitle_window")) {
+        subs_show(app);
     } else if (rubraview_u8_eq_lit(action, "copy_to_folder")) {
         filing_put(app, false);
     } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
@@ -13326,6 +13353,470 @@ static size_t files_pump(app_state_t *app) {
     return handled;
 }
 
+/* ---- The subtitle window (owner, 2026-10-14, RV-115) ----
+   "자막을 한 줄에 한 항목씩 보여주면서 목록에서 특정 자막을 클릭하면 그 위치로
+   이동. 창 외부에 새창으로 … 개별 자막 선택하는 체크박스를 각 항목 맨 앞에
+   두고 위에 전체선택 해제 박스도 … 뒤로 앞으로 버튼과 이동할 시간을 적는 칸을
+   목록 위쪽에". A window of its own, owned by the viewer: the header with
+   the box for all, a bar with Earlier, the seconds and Later, then a row a
+   subtitle — its box, when it comes and goes, what it says. The model is
+   `ui_subwin`; a DVD's or a Blu-ray's pictures are listed by their times
+   only. Moving changes the cues in memory; writing them to the file is
+   the next stage of RV-115. */
+
+enum { SUBS_NONE = 0, SUBS_TEXT, SUBS_VOBSUB, SUBS_PGS };
+
+static int subs_kind(const app_state_t *app) {
+    if (!app->media) return SUBS_NONE;
+    if (app->subtitle.count > 0) return SUBS_TEXT;
+    if (app->vobsub.count > 0) return SUBS_VOBSUB;
+    if (app->pgs.count > 0) return SUBS_PGS;
+    return SUBS_NONE;
+}
+
+/* When a row's subtitle comes, on the film's clock (the track's offset counted). */
+static double subs_row_start(const app_state_t *app, size_t row, double *out_end) {
+    double start = 0.0, end = -1.0;
+    switch (subs_kind(app)) {
+        case SUBS_TEXT:
+            if (row < app->subs_count && app->subs_rows[row] < app->subtitle.count) {
+                start = app->subtitle.cues[app->subs_rows[row]].start_seconds;
+                end = app->subtitle.cues[app->subs_rows[row]].end_seconds;
+            }
+            break;
+        case SUBS_VOBSUB:
+            if (row < app->vobsub.count) start = app->vobsub.entries[row].start_seconds;   /* its end is in the picture */
+            break;
+        case SUBS_PGS:
+            if (row < app->pgs.count) { start = app->pgs.entries[row].start_seconds; end = app->pgs.entries[row].end_seconds; }
+            break;
+        default: break;
+    }
+    if (out_end) *out_end = end < 0.0 ? -1.0 : end + app->subtitle.offset_seconds;
+    return start + app->subtitle.offset_seconds;
+}
+
+/* The rows for the track on screen now; made again when it is another one. */
+static void subs_sync(app_state_t *app) {
+    int kind = subs_kind(app);
+    const void *of = kind == SUBS_TEXT ? (const void*)app->subtitle.cues
+                   : kind == SUBS_VOBSUB ? (const void*)app->vobsub.entries
+                   : kind == SUBS_PGS ? (const void*)app->pgs.entries : NULL;
+    size_t of_count = kind == SUBS_TEXT ? app->subtitle.count : kind == SUBS_VOBSUB ? app->vobsub.count
+                    : kind == SUBS_PGS ? app->pgs.count : 0;
+    const char *language = kind == SUBS_TEXT ? app->subtitle.shown_language.ptr : NULL;
+    if (of == app->subs_for && of_count == app->subs_for_count && language == app->subs_for_language) return;
+    app->subs_for = of;
+    app->subs_for_count = of_count;
+    app->subs_for_language = language;
+    app->subs_count = 0;
+    app->subs_anchor = SIZE_MAX;
+    app->subs_hover = app->subs_now = -1;
+    app->subs_changed = false;
+    app->subs_list.first = 0;
+    app->subs_scrolled_at = 0.0;
+    app->subs_dirty = true;
+    if (of_count == 0) return;
+    if (of_count > app->subs_room) {
+        uint32_t *rows = realloc(app->subs_rows, of_count * sizeof(rows[0]));
+        if (rows) app->subs_rows = rows;
+        bool *chosen = realloc(app->subs_chosen, of_count * sizeof(chosen[0]));
+        if (chosen) app->subs_chosen = chosen;
+        bool *marks = realloc(app->subs_marks, of_count * sizeof(marks[0]));
+        if (marks) app->subs_marks = marks;
+        if (!rows || !chosen || !marks) return;      /* no room: an empty list, and the old room is kept */
+        app->subs_room = of_count;
+    }
+    app->subs_count = kind == SUBS_TEXT ? rubraview_subwin_rows(&app->subtitle, app->subs_rows, of_count) : of_count;
+    rubraview_subwin_choose_all(app->subs_chosen, app->subs_room, false);
+}
+
+/* The row of the moment playing: the last that has begun. */
+static int32_t subs_row_now(const app_state_t *app) {
+    if (app->subs_count == 0) return -1;
+    if (subs_kind(app) == SUBS_TEXT) {
+        return rubraview_subwin_row_at(&app->subtitle, app->subs_rows, app->subs_count, app->media_position);
+    }
+    size_t low = 0, high = app->subs_count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (subs_row_start(app, mid, NULL) <= app->media_position) low = mid + 1; else high = mid;
+    }
+    return (int32_t)low - 1;
+}
+
+static void subs_focus_amount(app_state_t *app, bool on) {
+    if (app->subs_amount_focus == on) return;
+    app->subs_amount_focus = on;
+    if (app->subs_window) rubraview_pal_window_text_input(app->subs_window, on);
+    if (!on && app->subs_amount_len == 0) {           /* left empty: the tenth it came with */
+        memcpy(app->subs_amount, "0.1", 3);
+        app->subs_amount_len = 3;
+    }
+    app->subs_dirty = true;
+}
+
+static void subs_close(app_state_t *app) {
+    if (!app->subs_open) return;
+    rubraview_pal_window_get_frame(app->subs_window, &app->subs_frame[0], &app->subs_frame[1],
+                                   &app->subs_frame[2], &app->subs_frame[3]);
+    if (app->subs_renderer) rubraview_pal_render_destroy(app->subs_renderer);
+    if (app->subs_window) rubraview_pal_window_destroy(app->subs_window);
+    app->subs_renderer = NULL;
+    app->subs_window = NULL;
+    app->subs_open = false;
+    app->subs_amount_focus = false;
+}
+
+/* The header and the bar are the list's title; the rows fill the rest. */
+static void subs_layout(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->subs_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->subs_window);
+    rubraview_listwin_t *lw = &app->subs_list;
+    lw->open = lw->placed = true;
+    lw->x = lw->y = 0.0;
+    lw->width = (double)w;
+    lw->height = (double)h;
+    lw->row_height = 24.0 * dpi;
+    lw->title_height = 60.0 * dpi;
+    app->subs_dirty = true;
+}
+
+static void subs_show(app_state_t *app) {
+    if (app->subs_open) { subs_close(app); return; }   /* the same key puts it away */
+    if (!app->media) {
+        osd_say(app, U8("no film is open to list subtitles of"));
+        return;
+    }
+    rubraview_window_config_t config = { .title = "Rubraview subtitles", .width = 620, .height = 560, .owner = app->window };
+    app->subs_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->subs_window) {
+        osd_say(app, U8("the subtitle list could not be opened"));
+        return;
+    }
+    if (app->subs_frame[2] > 0 && app->subs_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->subs_window, app->subs_frame[0], app->subs_frame[1],
+                                       app->subs_frame[2], app->subs_frame[3]);
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->subs_window, &w, &h);
+    app->subs_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->subs_window), w, h);
+    if (!app->subs_renderer) {
+        rubraview_pal_window_destroy(app->subs_window);
+        app->subs_window = NULL;
+        osd_say(app, U8("the subtitle list could not be drawn"));
+        return;
+    }
+    app->subs_open = true;
+    app->subs_list = (rubraview_listwin_t){0};
+    app->subs_for = NULL;                        /* the first frame takes the track as new */
+    app->subs_for_count = 0;
+    app->subs_amount_focus = false;
+    if (app->subs_amount_len == 0) { memcpy(app->subs_amount, "0.1", 3); app->subs_amount_len = 3; }
+    subs_layout(app);
+}
+
+/* Where the parts above the rows are, in the window's own pixels. */
+typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER } subs_part_t;
+
+static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t part) {
+    const rubraview_listwin_t *lw = &app->subs_list;
+    double band = lw->title_height * 0.5, rh = lw->row_height;
+    double box = rh * 0.6, pad = rh * 0.3, button = rh * 3.6, field = rh * 3.0;
+    double y = band + (band - rh * 0.9) * 0.5;
+    switch (part) {
+        case SUBS_PART_ALL:     return (rubraview_pal_rect_t){ pad, (band - box) * 0.5, box, box };
+        case SUBS_PART_EARLIER: return (rubraview_pal_rect_t){ pad, y, button, rh * 0.9 };
+        case SUBS_PART_AMOUNT:  return (rubraview_pal_rect_t){ pad * 2.0 + button, y, field, rh * 0.9 };
+        default:                return (rubraview_pal_rect_t){ pad * 4.0 + button + field + rh * 0.6, y, button, rh * 0.9 };
+    }
+}
+
+static bool subs_in(rubraview_pal_rect_t r, double x, double y) {
+    return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+}
+
+/* A row's box: at its left, as tall as the text. */
+static rubraview_pal_rect_t subs_row_box(const app_state_t *app, rubraview_rect_t row) {
+    double box = app->subs_list.row_height * 0.6;
+    return (rubraview_pal_rect_t){ row.x + app->subs_list.row_height * 0.3, row.y + (row.height - box) * 0.5, box, box };
+}
+
+static void subs_go_to(app_state_t *app, size_t row) {
+    if (row >= app->subs_count) return;
+    /* a hair inside, so the subtitle itself is on screen */
+    play_seek(app, subs_row_start(app, row, NULL) + 0.01);
+    app->subs_scrolled_at = 0.0;
+    app->subs_dirty = true;
+}
+
+/* Earlier (-1) or Later (+1): the rows with their boxes ticked, by the seconds in the field. */
+static void subs_move(app_state_t *app, int sign) {
+    double amount = 0.0;
+    if (subs_kind(app) != SUBS_TEXT) {
+        osd_say(app, U8("only text subtitles can be moved"));
+        return;
+    }
+    if (!rubraview_subwin_amount((u8str_t){ app->subs_amount, app->subs_amount_len }, &amount)) {
+        osd_say(app, U8("the seconds to move by are not a number above 0"));
+        return;
+    }
+    size_t picked = rubraview_subwin_chosen_count(app->subs_chosen, app->subs_count);
+    if (picked == 0) {
+        osd_say(app, U8("tick the subtitles to move"));
+        return;
+    }
+    if (app->subtitle.count > app->subs_room) return;
+    size_t moved = rubraview_subwin_shift(&app->subtitle, app->subs_rows, app->subs_chosen, app->subs_count,
+                                          sign < 0 ? -amount : amount, app->subs_marks);
+    if (moved > 0) app->subs_changed = true;
+    char line[96];
+    int n = snprintf(line, sizeof(line), "%zu subtitle%s %.*s s %s", moved, moved == 1 ? "" : "s",
+                     (int)app->subs_amount_len, app->subs_amount, sign < 0 ? "earlier" : "later");
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    app->subs_dirty = true;
+}
+
+static void subs_draw_box(rubraview_renderer_t *r, rubraview_pal_rect_t box, bool on, bool some) {
+    rubraview_pal_render_stroke_rect(r, box, 0xB0F0F0F0u, 1.0, 2.0);
+    double inset = on ? box.width * 0.22 : box.width * 0.34;
+    rubraview_pal_rect_t in = { box.x + inset, box.y + inset, box.width - 2.0 * inset, box.height - 2.0 * inset };
+    if (on) rubraview_pal_render_fill_rect(r, in, COLOR_TILE_CURRENT, 1.0);
+    else if (some) rubraview_pal_render_fill_rect(r, in, 0x90F0F0F0u, 1.0);
+}
+
+static void draw_subs_window(app_state_t *app) {
+    if (!app->subs_open) return;
+    subs_sync(app);
+    int kind = subs_kind(app);
+    size_t count = app->subs_count;
+    int32_t now_row = subs_row_now(app);
+    if (now_row != app->subs_now) {
+        app->subs_now = now_row;
+        /* follow the film, unless the reader has just moved the list */
+        if (now_row >= 0 && rubraview_pal_time_now_seconds() - app->subs_scrolled_at > 4.0) {
+            rubraview_listwin_reveal(&app->subs_list, (size_t)now_row, count);
+        }
+        app->subs_dirty = true;
+    }
+    if (!app->subs_dirty) return;
+    app->subs_dirty = false;
+
+    rubraview_renderer_t *r = app->subs_renderer;
+    const rubraview_listwin_t *lw = &app->subs_list;
+    double font = lw->row_height * 0.5, band = lw->title_height * 0.5, pad = lw->row_height * 0.3;
+    rubraview_pal_render_begin(r, FILES_BACKGROUND);
+    rubraview_pal_rect_t head_box = { 0.0, 0.0, lw->width, lw->title_height };
+    rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
+
+    /* The header: the box for all, how many there are and how many are ticked, whose they are. */
+    size_t picked = kind == SUBS_TEXT ? rubraview_subwin_chosen_count(app->subs_chosen, count) : 0;
+    char head[400], cut[640];
+    int hn;
+    if (kind == SUBS_NONE) {
+        hn = snprintf(head, sizeof(head), "%s", app->media ? "no subtitle is on" : "no film is open");
+    } else {
+        u8str_t name = app->subtitle_name;
+        hn = snprintf(head, sizeof(head), "%zu subtitle%s   %zu ticked   %.*s%s", count, count == 1 ? "" : "s", picked,
+                      (int)(name.len < 200 ? name.len : 200), name.ptr, app->subs_changed ? "   (moved, not saved)" : "");
+    }
+    rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
+    double head_x = pad;
+    if (kind == SUBS_TEXT) {
+        subs_draw_box(r, all, count > 0 && picked == count, picked > 0);
+        head_x = all.x + all.width + pad;
+    }
+    rubraview_pal_rect_t head_text = { head_x, 0.0, lw->width - head_x - pad, band };
+    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
+                                                                 head_text.width, font), head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+
+    /* The bar: Earlier, the seconds, Later. */
+    if (kind == SUBS_TEXT) {
+        rubraview_pal_rect_t earlier = subs_part_rect(app, SUBS_PART_EARLIER), amount = subs_part_rect(app, SUBS_PART_AMOUNT),
+                             later = subs_part_rect(app, SUBS_PART_LATER);
+        rubraview_pal_render_fill_rect(r, earlier, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(r, earlier, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(r, U8("< Earlier"), earlier, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_fill_rect(r, later, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(r, later, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(r, U8("Later >"), later, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_fill_rect(r, amount, 0xFF101010u, 2.0);
+        rubraview_pal_render_stroke_rect(r, amount, app->subs_amount_focus ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0, 2.0);
+        char typed[24];
+        int tn = snprintf(typed, sizeof(typed), "%.*s%s", (int)app->subs_amount_len, app->subs_amount, app->subs_amount_focus ? "|" : "");
+        if (tn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_rect_t unit = { amount.x + amount.width + pad * 0.5, amount.y, lw->row_height * 0.8, amount.height };
+        rubraview_pal_render_draw_text(r, U8("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    } else if (kind != SUBS_NONE) {
+        rubraview_pal_rect_t note = { pad, band, lw->width - 2.0 * pad, band };
+        rubraview_pal_render_draw_text(r, U8("picture subtitles: a click goes there; they cannot be moved or edited"), note,
+                                       font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    /* The rows: the box, when it comes and when it goes, what it says. */
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    double time_w = font * 0.56 * 11.0;
+    for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
+        rubraview_rect_t rr = rubraview_listwin_row_rect(lw, i, count);
+        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 8.0, rr.height };
+        if ((int32_t)i == app->subs_now) rubraview_pal_render_fill_rect(r, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
+        else if ((int32_t)i == app->subs_hover) rubraview_pal_render_fill_rect(r, row, COLOR_TILE_FILL, 2.0);
+        double x = row.x + pad;
+        if (kind == SUBS_TEXT) {
+            rubraview_pal_rect_t box = subs_row_box(app, rr);
+            subs_draw_box(r, box, app->subs_chosen[i], false);
+            x = box.x + box.width + pad;
+        }
+        char clock[32], line[1024];
+        double end = -1.0, start = subs_row_start(app, i, &end);
+        rubraview_pal_rect_t start_box = { x, row.y, time_w, row.height };
+        rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        x += time_w;
+        if (end >= 0.0) {
+            rubraview_pal_rect_t end_box = { x, row.y, time_w, row.height };
+            rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        }
+        x += time_w;
+        u8str_t said = kind == SUBS_TEXT ? rubraview_subwin_line(line, sizeof(line), app->subtitle.cues[app->subs_rows[i]].text)
+                                         : U8("(picture)");
+        rubraview_pal_rect_t text = { x, row.y, row.x + row.width - x - pad, row.height };
+        if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
+                                                             kind == SUBS_TEXT ? COLOR_TEXT : 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    }
+    if (count > rows && rows > 0) {              /* where in a long list the rows are */
+        double track = lw->height - lw->title_height;
+        double bh = track * (double)rows / (double)count;
+        if (bh < lw->row_height * 0.5) bh = lw->row_height * 0.5;
+        double by = lw->y + lw->title_height + (track - bh) * (double)lw->first / (double)(count - rows);
+        rubraview_pal_rect_t bar = { lw->x + lw->width - 5.0, by, 3.0, bh };
+        rubraview_pal_render_fill_rect(r, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
+    }
+    if (!rubraview_pal_render_end(r)) subs_close(app);   /* its device went: the key opens it again */
+}
+
+static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers) {
+    int kind = subs_kind(app);
+    size_t count = app->subs_count, index = 0;
+    bool on_amount = kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_AMOUNT), x, y);
+    subs_focus_amount(app, on_amount);
+    if (on_amount) return;
+    if (kind == SUBS_TEXT && y < app->subs_list.title_height) {
+        rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
+        /* the box for all, and a little around it: it is small */
+        rubraview_pal_rect_t all_zone = { 0.0, 0.0, all.x + all.width + app->subs_list.row_height * 0.3, app->subs_list.title_height * 0.5 };
+        if (subs_in(all_zone, x, y)) {
+            bool every = count > 0 && rubraview_subwin_chosen_count(app->subs_chosen, count) == count;
+            rubraview_subwin_choose_all(app->subs_chosen, count, !every);
+        } else if (subs_in(subs_part_rect(app, SUBS_PART_EARLIER), x, y)) {
+            subs_move(app, -1);
+        } else if (subs_in(subs_part_rect(app, SUBS_PART_LATER), x, y)) {
+            subs_move(app, +1);
+        }
+        app->subs_dirty = true;
+        return;
+    }
+    if (rubraview_listwin_hit(&app->subs_list, x, y, count, &index) != RUBRAVIEW_LISTWIN_ROW) return;
+    if (kind != SUBS_TEXT) { subs_go_to(app, index); return; }
+    rubraview_rect_t rr = rubraview_listwin_row_rect(&app->subs_list, index, count);
+    rubraview_pal_rect_t box = subs_row_box(app, rr);
+    bool on_box = x < box.x + box.width + app->subs_list.row_height * 0.3;
+    bool ctrl = on_box || (modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+    if (rubraview_subwin_click(app->subs_chosen, count, &app->subs_anchor, index, ctrl, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0)) {
+        subs_go_to(app, index);
+    }
+    app->subs_dirty = true;
+}
+
+static size_t subs_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->subs_open && rubraview_pal_window_poll_event(app->subs_window, &event)) {
+        handled++;
+        size_t count = app->subs_count, index = 0;
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                subs_close(app);
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->subs_renderer, event.resize.width, event.resize.height);
+                subs_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT:
+            case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
+                subs_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                int32_t was = app->subs_hover;
+                app->subs_hover = rubraview_listwin_hit(&app->subs_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                                    ? (int32_t)index : -1;
+                if (app->subs_hover != was) app->subs_dirty = true;
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE:
+                if (app->subs_hover != -1) { app->subs_hover = -1; app->subs_dirty = true; }
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) subs_press(app, event.mouse.x, event.mouse.y, event.mouse.modifiers);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                rubraview_listwin_scroll(&app->subs_list, event.mouse.wheel_delta > 0 ? -3 : 3, count);
+                app->subs_scrolled_at = rubraview_pal_time_now_seconds();
+                app->subs_hover = rubraview_listwin_hit(&app->subs_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                                    ? (int32_t)index : -1;
+                app->subs_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_TEXT:
+                if (!app->subs_amount_focus) break;
+                for (size_t i = 0; i < event.text.length; ++i) {     /* digits and one point; nothing else is a time */
+                    char c = event.text.utf8[i];
+                    bool point = (c == '.' || c == ',') && !memchr(app->subs_amount, '.', app->subs_amount_len);
+                    if (!((c >= '0' && c <= '9') || point) || app->subs_amount_len + 1 >= 8) continue;
+                    app->subs_amount[app->subs_amount_len++] = point ? '.' : c;
+                }
+                app->subs_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
+                rubraview_key_combo_t combo = event.key.combo;
+                long rows = (long)rubraview_listwin_rows_visible(&app->subs_list);
+                long step = 0;
+                if (app->subs_amount_focus) {
+                    /* the field has the keys: Backspace takes a character, Enter or Esc leaves it */
+                    if (key_is(combo, "Backspace")) { if (app->subs_amount_len > 0) app->subs_amount_len--; }
+                    else if (key_is(combo, "Enter") || key_is(combo, "Escape") || key_is(combo, "Tab")) subs_focus_amount(app, false);
+                    app->subs_dirty = true;
+                    break;
+                }
+                if (key_is(combo, "Escape")) { subs_close(app); return handled; }
+                if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) {
+                    if (subs_kind(app) == SUBS_TEXT) rubraview_subwin_choose_all(app->subs_chosen, count, true);
+                    app->subs_dirty = true;
+                    break;
+                }
+                if (key_is(combo, "Up")) step = -1;
+                else if (key_is(combo, "Down")) step = +1;
+                else if (key_is(combo, "PageUp")) step = -(rows > 1 ? rows - 1 : 1);
+                else if (key_is(combo, "PageDown")) step = rows > 1 ? rows - 1 : 1;
+                else if (key_is(combo, "Home")) step = -(long)count;
+                else if (key_is(combo, "End")) step = (long)count;
+                if (step != 0) {                 /* the list moves; the film stays */
+                    rubraview_listwin_scroll(&app->subs_list, step, count);
+                    app->subs_scrolled_at = rubraview_pal_time_now_seconds();
+                    app->subs_dirty = true;
+                    break;
+                }
+                /* Any other key is the viewer's: Space pauses, its own key closes this window. */
+                dispatch_key(app, combo);
+                app->subs_dirty = true;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    return handled;
+}
+
 static void settings_grid_keep(app_state_t *app, int32_t row, u8str_t text) {
     if (row < 0 || row >= (int32_t)(sizeof(app->settings_grid_len) / sizeof(app->settings_grid_len[0]))) return;
     size_t n = text.len < sizeof(app->settings_grid_text[0]) ? text.len : sizeof(app->settings_grid_text[0]) - 1;
@@ -17069,6 +17560,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         handled += info_pump(&app);
         handled += mini_pump(&app);
         handled += files_pump(&app);
+        handled += subs_pump(&app);
 
         if (app.needs_relayout) {
             int32_t page = current_page_index(&app);
@@ -17170,6 +17662,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         draw_mini_window(&app);
         files_preview_step(&app, now);
         draw_files_window(&app);
+        draw_subs_window(&app);
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
 
@@ -17199,6 +17692,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        writes what was changed in it. */
     settings_close(&app);
     files_close(&app);
+    subs_close(&app);
     settings_write_if_changed(&app, false);   /* a volume or opacity changed with the window shut */
     if (app.toolbox_window) {
         rubraview_pal_render_destroy(app.toolbox_renderer);
