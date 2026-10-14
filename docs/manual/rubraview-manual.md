@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.83.exe              the viewer, as built
-dist/rubraview-v0.0.83/                 the release bundle
-dist/rubraview-v0.0.83.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.84.exe              the viewer, as built
+dist/rubraview-v0.0.84/                 the release bundle
+dist/rubraview-v0.0.84.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -589,7 +589,14 @@ While it does:
   row soon after the first (or `F2`, or `Enter`, for the row last clicked)
   lets you type its text over: it is shown as the file holds it, its tags
   and all, with `\N` where a line breaks; `Enter` keeps it, `Esc` gives it
-  up. A changed row has a yellow mark and the header says "changed, not
+  up. `Insert` puts a new subtitle where the film is, two seconds long,
+  and lets you type its words at once; `Delete` takes out the ticked rows,
+  or the one last clicked. A second click on a row's two times (or
+  `Ctrl+T`) lets you type them over, as `0:01:02.50 --> 0:01:04.00`; the
+  row moves to its place in time. A new subtitle is written like the one
+  before it in the file — its number, style, class and settings — and a
+  SubRip file's numbers are not counted again. A SAMI caption moved past
+  others is moved in the file too, so its SYNCs stay in order of time. A changed row has a yellow mark and the header says "changed, not
   saved". **Save** (`Ctrl+S`) writes the subtitle's file again in its own
   format — SubRip, WebVTT, SubStation or SAMI — changing only the times
   and texts you changed: the styles, the other lines, the line ends and
@@ -597,8 +604,9 @@ While it does:
   new file has the subtitle's name; the one before is kept beside it as
   `name.old1.smi`, then `.old2`, and so on, and is not offered as one of
   the film's subtitles. Nothing is saved when the file was changed by
-  something else meanwhile, or a typed character cannot be written in its
-  encoding; it says which. The half-seconds `Z` and `X` moved the whole
+  something else meanwhile; it says which. When a character typed is not in
+  the file's encoding (a Korean SAMI in CP949, say), a second **Save** within
+  six seconds writes the file as UTF-8 instead. The half-seconds `Z` and `X` moved the whole
   subtitle by are saved too (Save lights when there are any): they go
   into every time, and the subtitle is no longer moved after. With changes
   not saved, turning to another film, another subtitle or closing the

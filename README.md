@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.83** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.84** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.84/rubraview-v0.0.84.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 

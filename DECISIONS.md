@@ -1264,3 +1264,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - `context listrow` in the boxes document: Open, Copy the whole path, Show in Explorer, Take out of the list, Delete the file... — for a folder's files or a playlist (not a book's pages). Delete asks in a Windows warning over the window it was asked from, No the default; yes moves the file to the recycle bin (a film playing from it is closed first) and the row leaves the list.
 - Consequences: a folder's list changed by Add, Del, a take-out or a delete is from then on a playlist (D-111's rule). A delete from the list is not on `Ctrl+Z` (the file is in the recycle bin).
 - Not run: a drop from Explorer onto the file window (no drag could be made on the VM); a delete of the film playing.
+
+## D-134: Subtitles Added, Removed And Timed By Hand, Still Saved In Place (2026-10-14)
+
+- Context: RV-115's leftovers the owner took as recommended: a cue added or taken out, and a time typed, in the subtitle window, saved by D-126's rule (the file copied, only what changed written).
+- Decision:
+  - The readers note each cue's whole block: a SubRip or WebVTT block through the blank line after it, a `Dialogue:` line with its line end, a SAMI caption from its SYNC to the next (the last one to `</BODY>`), and a SAMI caption's closing empty SYNC.
+  - Removed: the cue is kept, unseen, marked; the save takes its block out (and a SAMI caption's closing SYNC). Added: a new cue, marked; the save writes it after the block of the nearest earlier cue of the file's own (or before the first), made from that block with its times and words in their places — its SubRip number, SubStation style, SAMI class, WebVTT settings come along; a last block with no blank line or no line end is set apart first. SubRip numbers are not counted again (only what changed is written; players do not read them). A SAMI caption made after one with a closing SYNC gets its own; one made before the first ends where the next caption starts.
+  - A time typed: `start --> end`, read as the files write times (`1:02:03.45`, `02:03,5`, seconds); the end after the start; the cue moves to its place in order.
+  - The window: `Insert` (a new subtitle at the film's moment, two seconds, its words typed at once), `Delete` (the ticked rows, or the row last clicked — the viewer's Delete, which deletes the film, does not reach it from here), `Ctrl+T` or a second click on the times.
+  - Found on the way: a SAMI file's last caption had its words run on through `</BODY></SAMI>`, so editing that caption since 0.0.75 wrote over the file's closing tags. Its words and its block stop at `</BODY>` now.
+- Later the same day, the last two leftovers:
+  - SAMI is read in the order of its SYNCs: a caption whose new time puts it out of order with the captions that did not change is taken out where it was and written again; every SAMI piece written in (a caption, its closing empty SYNC, apart) goes before the first SYNC still in the file that starts later (a caption) or not earlier (a closing SYNC), so the SYNCs stay in order of time. Two captions made to overlap cannot both show in SAMI: the earlier one's closing SYNC ends the later one there.
+  - A save whose file is in a code page that cannot hold a character typed is not refused outright: it says so and a second Save within six seconds writes the file as UTF-8 with its mark (`EF BB BF`); the file before is kept as always.
+- Not run: SAMI with several languages added to on the VM; a WebVTT or SubStation file on the VM (unit tests only).

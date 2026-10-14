@@ -204,6 +204,7 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
     scanner_t s = { .ptr = text.ptr, .len = text.len, .pos = 0 };
 
     while (!at_end(&s)) {
+        size_t line_pos = s.pos;   /* RV-115: where the cue's block begins, its identifier or its timing */
         u8str_t line = trim(next_line(&s));
         if (line.len == 0) continue;
 
@@ -277,6 +278,8 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
             place.text_at = (size_t)(body_first - text.ptr);
             place.text_len = (size_t)(body_end - body_first);
         }
+        place.block_at = line_pos;
+        place.block_len = s.pos - line_pos;   /* through the blank line after it */
 
         if (!timed || used == 0) continue;
 
@@ -321,6 +324,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
     double open_at = -1.0;
     size_t body_start = 0;
     size_t open_digits = 0, open_digits_len = 0;   /* the number of the SYNC that is open */
+    size_t open_sync = 0;                          /* RV-115: where that SYNC's tag begins */
     u8str_t language = { .ptr = "", .len = 0 };
 
     while (i < text.len) {
@@ -348,6 +352,8 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
                     .language = language,
                     .place = smi_place(text, body_start, i, open_digits, open_digits_len),
                 };
+                cue.place.block_at = open_sync;
+                cue.place.block_len = i - open_sync;
                 cue_push(arena, cues, cue);
             }
         }
@@ -391,6 +397,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         }
 
         open_at = start_ms >= 0.0 ? start_ms / 1000.0 : -1.0;
+        open_sync = i;
         body_start = tag_end < text.len ? tag_end + 1 : text.len;
         i = body_start;
     }
@@ -399,6 +406,11 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
        without this the file's final caption was dropped, and a final
        `&nbsp;` never said where the one before it stops. */
     if (open_at >= 0.0 && text.len > body_start) {
+        /* the last caption stops where the body does: its words and its block are not the file's closing tags */
+        size_t stop = text.len;
+        for (size_t k = body_start; k + 6 <= text.len; ++k) {
+            if (text.ptr[k] == '<' && rubraview_u8_starts_with_ci((u8str_t){ .ptr = text.ptr + k, .len = text.len - k }, "</body")) { stop = k; break; }
+        }
         u8str_t raw = { .ptr = text.ptr + body_start, .len = text.len - body_start };
         u8str_t body = strip_markup_as(arena, raw, false, true);
         if (body.len > 0) {
@@ -408,8 +420,10 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
                 .end_seconds = open_at + 0.001,
                 .text = blank ? (u8str_t){ .ptr = body.ptr, .len = 0 } : body,
                 .language = language,
-                .place = smi_place(text, body_start, text.len, open_digits, open_digits_len),
+                .place = smi_place(text, body_start, stop, open_digits, open_digits_len),
             };
+            cue.place.block_at = open_sync;
+            cue.place.block_len = stop > open_sync ? stop - open_sync : 0;
             cue_push(arena, cues, cue);
         }
     }
@@ -436,6 +450,8 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             if (later->text.len == 0) {
                 cue->place.end_at = later->place.start_at;
                 cue->place.end_len = later->place.start_len;
+                cue->place.close_at = later->place.block_at;   /* RV-115: it goes with this one */
+                cue->place.close_len = later->place.block_len;
             }
             break;
         }
@@ -460,6 +476,7 @@ static void parse_ass(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
     scanner_t s = { .ptr = text.ptr, .len = text.len, .pos = 0 };
 
     while (!at_end(&s)) {
+        size_t line_pos = s.pos;
         u8str_t line = next_line(&s);
         if (!rubraview_u8_starts_with_ci(trim(line), "dialogue:")) continue;
 
@@ -492,6 +509,7 @@ static void parse_ass(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
                 .start_at = (size_t)(trim(fields[1]).ptr - text.ptr), .start_len = trim(fields[1]).len,
                 .end_at = (size_t)(trim(fields[2]).ptr - text.ptr), .end_len = trim(fields[2]).len,
                 .text_at = (size_t)(body.ptr - text.ptr), .text_len = body.len,
+                .block_at = line_pos, .block_len = s.pos - line_pos,   /* the line and its line end */
             },
         };
         if (cue.text.len > 0) cue_push(arena, cues, cue);
@@ -587,6 +605,7 @@ size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, u8s
 }
 
 static bool cue_is_shown(const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *cue) {
+    if (cue->removed) return false;   /* RV-115: taken out, kept only for the save */
     if (track->shown_language.len == 0) return true;
     return cue->language.len == track->shown_language.len &&
            memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.len) == 0;
@@ -700,7 +719,7 @@ u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subt
     if (!arena || !track || index >= track->count) return empty;
     const rubraview_subtitle_cue_t *cue = &track->cues[index];
     u8str_t raw;
-    if (cue->text_changed) raw = cue->written;
+    if (cue->text_changed || cue->added) raw = cue->written;
     else if (place_in(track, cue->place.text_at, cue->place.text_len)) raw = (u8str_t){ track->source.ptr + cue->place.text_at, cue->place.text_len };
     else return empty;
 
@@ -724,10 +743,17 @@ u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subt
     return (u8str_t){ .ptr = out, .len = n };
 }
 
+static bool retype_cue(proven_arena_t *arena, const rubraview_subtitle_track_t *track, rubraview_subtitle_cue_t *cue, u8str_t typed);
+
 bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, u8str_t typed) {
     if (!arena || !track || index >= track->count) return false;
     rubraview_subtitle_cue_t *cue = &track->cues[index];
-    if (!place_in(track, cue->place.text_at, cue->place.text_len)) return false;
+    if (!cue->added && !place_in(track, cue->place.text_at, cue->place.text_len)) return false;
+    return retype_cue(arena, track, cue, typed);
+}
+
+/* The typed line written as the file writes a cue's words, and shown as they read. */
+static bool retype_cue(proven_arena_t *arena, const rubraview_subtitle_track_t *track, rubraview_subtitle_cue_t *cue, u8str_t typed) {
     typed = trim(typed);
     if (typed.len == 0) return false;
 
@@ -804,9 +830,153 @@ rubraview_subtitle_track_t rubraview_subtitle_offset_folded(proven_arena_t *aren
 bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track) {
     if (!track) return false;
     for (size_t i = 0; i < track->count; ++i) {
-        if (track->cues[i].time_changed || track->cues[i].text_changed) return true;
+        const rubraview_subtitle_cue_t *c = &track->cues[i];
+        if (c->added && c->removed) continue;   /* made and taken out again: nothing */
+        if (c->time_changed || c->text_changed || c->removed || c->added) return true;
     }
     return false;
+}
+
+bool rubraview_subtitle_parse_time(u8str_t text, double *out_seconds) {
+    double t = 0.0;
+    if (!out_seconds || !parse_clock(text, &t) || !(t >= 0.0) || t > 359999.0) return false;
+    *out_seconds = t;
+    return true;
+}
+
+/* In order of start again after one cue moved; returns where `index` went. */
+static size_t resort_one(rubraview_subtitle_track_t *track, size_t index) {
+    rubraview_subtitle_cue_t cue = track->cues[index];
+    size_t at = index;
+    while (at > 0 && track->cues[at - 1].start_seconds > cue.start_seconds) { track->cues[at] = track->cues[at - 1]; at--; }
+    if (at == index) {
+        while (at + 1 < track->count && track->cues[at + 1].start_seconds < cue.start_seconds) { track->cues[at] = track->cues[at + 1]; at++; }
+    }
+    track->cues[at] = cue;
+    return at;
+}
+
+int32_t rubraview_subtitle_cue_set_time(rubraview_subtitle_track_t *track, size_t index, double start, double end) {
+    if (!track || index >= track->count || track->cues[index].removed) return -1;
+    if (!(start >= 0.0) || !(end > start) || end > 359999.0) return -1;
+    rubraview_subtitle_cue_t *cue = &track->cues[index];
+    if (cue->start_seconds == start && cue->end_seconds == end) return (int32_t)index;
+    cue->start_seconds = start;
+    cue->end_seconds = end;
+    if (!cue->added) cue->time_changed = true;
+    return (int32_t)resort_one(track, index);
+}
+
+bool rubraview_subtitle_cue_remove(rubraview_subtitle_track_t *track, size_t index) {
+    if (!track || index >= track->count || track->cues[index].removed) return false;
+    rubraview_subtitle_cue_t *cue = &track->cues[index];
+    if (!cue->added && !place_in(track, cue->place.block_at, cue->place.block_len)) return false;   /* no block to take out */
+    cue->removed = true;
+    return true;
+}
+
+int32_t rubraview_subtitle_cue_add(proven_arena_t *arena, rubraview_subtitle_track_t *track, double start, double end, u8str_t typed) {
+    if (!arena || !track || !(start >= 0.0) || !(end > start)) return -1;
+    bool some = false;   /* a cue of the file's own to make it from */
+    for (size_t i = 0; i < track->count && !some; ++i) {
+        some = !track->cues[i].added && place_in(track, track->cues[i].place.block_at, track->cues[i].place.block_len);
+    }
+    if (!some) return -1;
+    rubraview_subtitle_cue_t made = { .start_seconds = start, .end_seconds = end, .added = true,
+                                      .language = track->shown_language.len ? track->shown_language
+                                                : track->count ? track->cues[0].language : (u8str_t){ .ptr = "", .len = 0 } };
+    if (!retype_cue(arena, track, &made, typed)) return -1;
+    made.text_changed = false;   /* its words go in with its block */
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count + 1, sizeof(rubraview_subtitle_cue_t));
+    if (!proven_is_ok(res.err)) return -1;
+    rubraview_subtitle_cue_t *cues = (rubraview_subtitle_cue_t*)(void*)res.value.ptr;
+    size_t at = 0;
+    while (at < track->count && track->cues[at].start_seconds <= start) at++;
+    memcpy(cues, track->cues, at * sizeof(cues[0]));
+    cues[at] = made;
+    memcpy(cues + at + 1, track->cues + at, (track->count - at) * sizeof(cues[0]));
+    track->cues = cues;
+    track->count++;
+    return (int32_t)at;
+}
+
+static u8str_t write_time(proven_arena_t *arena, rubraview_subtitle_format_t format, double seconds);
+
+/* The file's own line end. */
+static const char *source_eol(const rubraview_subtitle_track_t *track) {
+    for (size_t i = 0; i + 1 < track->source.len && i < 65536; ++i) {
+        if (track->source.ptr[i] == '\n') break;
+        if (track->source.ptr[i] == '\r' && track->source.ptr[i + 1] == '\n') return "\r\n";
+    }
+    return "\n";
+}
+
+typedef struct swap { size_t at, len; u8str_t with; } swap_t;
+
+/* A piece of the file with some of its places written over. */
+static bool copy_swapped(char *out, size_t *n, size_t cap, u8str_t source, size_t from, size_t len, swap_t *swaps, size_t count) {
+    for (size_t i = 1; i < count; ++i) {   /* in order of place */
+        swap_t key = swaps[i];
+        size_t k = i;
+        while (k > 0 && swaps[k - 1].at > key.at) { swaps[k] = swaps[k - 1]; k--; }
+        swaps[k] = key;
+    }
+    size_t at = from;
+    for (size_t i = 0; i < count; ++i) {
+        if (swaps[i].len == 0 || swaps[i].at < at || swaps[i].at + swaps[i].len > from + len) continue;   /* not in this piece */
+        size_t plain = swaps[i].at - at;
+        if (*n + plain + swaps[i].with.len > cap) return false;
+        memcpy(out + *n, source.ptr + at, plain); *n += plain;
+        memcpy(out + *n, swaps[i].with.ptr, swaps[i].with.len); *n += swaps[i].with.len;
+        at = swaps[i].at + swaps[i].len;
+    }
+    if (*n + (from + len - at) > cap) return false;
+    memcpy(out + *n, source.ptr + at, from + len - at);
+    *n += from + len - at;
+    return true;
+}
+
+static bool ends_blank(const char *p, size_t n) {   /* a blank line at the end: "\n\n" or "\n\r\n" */
+    return (n >= 2 && p[n - 1] == '\n' && p[n - 2] == '\n') || (n >= 3 && p[n - 1] == '\n' && p[n - 2] == '\r' && p[n - 3] == '\n');
+}
+
+/* RV-115: an added cue's block, made from the neighbour `tpl` (the cue before it when `after`, else the one after):
+   its times and its words in their places, set apart from the blocks around it as the format wants. */
+static u8str_t added_block(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *tpl,
+                           const rubraview_subtitle_cue_t *cue, bool after, u8str_t words) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    const char *eol = source_eol(track);
+    size_t eol_len = strlen(eol);
+    u8str_t start = write_time(arena, track->format, cue->start_seconds);
+    u8str_t end = write_time(arena, track->format, cue->end_seconds);
+    const rubraview_subtitle_place_t *pl = &tpl->place;
+    size_t cap = pl->block_len + pl->close_len + start.len + end.len + words.len + eol_len * 4 + 16;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, cap);
+    if (!proven_is_ok(res.err) || start.len == 0 || end.len == 0) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t n = 0;
+    bool lines = track->format == RUBRAVIEW_SUBTITLE_SRT || track->format == RUBRAVIEW_SUBTITLE_VTT;
+    if (after && (lines || track->format == RUBRAVIEW_SUBTITLE_ASS)) {
+        /* the block before may be the file's last, with no line end or no blank line after it */
+        const char *b = track->source.ptr + pl->block_at;
+        size_t bl = pl->block_len;
+        bool line_ended = bl > 0 && b[bl - 1] == '\n';
+        if (!line_ended) { memcpy(out + n, eol, eol_len); n += eol_len; }
+        if (lines && !ends_blank(b, bl)) { memcpy(out + n, eol, eol_len); n += eol_len; }
+    }
+    swap_t swaps[3] = { { pl->start_at, pl->start_len, start }, { pl->end_at, pl->end_len, end },
+                        { pl->text_at, words.len ? pl->text_len : 0, words } };   /* no words given: its own stay */
+    if (!copy_swapped(out, &n, cap, track->source, pl->block_at, pl->block_len, swaps, 3)) return empty;
+    /* (a SAMI caption's closing SYNC is `added_close`: it goes where its own time does) */
+    if ((lines || track->format == RUBRAVIEW_SUBTITLE_ASS) && (n == 0 || out[n - 1] != '\n')) {
+        if (n + eol_len > cap) return empty;
+        memcpy(out + n, eol, eol_len); n += eol_len;
+    }
+    if (lines && !ends_blank(out, n)) {
+        if (n + eol_len > cap) return empty;
+        memcpy(out + n, eol, eol_len); n += eol_len;
+    }
+    return (u8str_t){ .ptr = out, .len = n };
 }
 
 static u8str_t write_time(proven_arena_t *arena, rubraview_subtitle_format_t format, double seconds) {
@@ -827,11 +997,67 @@ static u8str_t write_time(proven_arena_t *arena, rubraview_subtitle_format_t for
     return n > 0 ? arena_copy(arena, buf, (size_t)n) : (u8str_t){ .ptr = "", .len = 0 };
 }
 
-typedef struct patch { size_t at, len; u8str_t with; } patch_t;
+/* RV-115: the empty SYNC that closes a SAMI caption made from `tpl`, at `cue`'s end; empty when `tpl` has none. */
+static u8str_t added_close(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *tpl,
+                           const rubraview_subtitle_cue_t *cue) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    const rubraview_subtitle_place_t *pl = &tpl->place;
+    if (!place_in(track, pl->close_at, pl->close_len)) return empty;
+    u8str_t end = write_time(arena, track->format, cue->end_seconds);
+    size_t cap = pl->close_len + end.len + 8;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, cap);
+    if (!proven_is_ok(res.err) || end.len == 0) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t n = 0;
+    swap_t close[1] = { { pl->end_at, pl->end_len, end } };
+    if (!copy_swapped(out, &n, cap, track->source, pl->close_at, pl->close_len, close, 1)) return empty;
+    return (u8str_t){ .ptr = out, .len = n };
+}
+
+typedef struct patch {
+    size_t at, len; u8str_t with; size_t seq; bool cut;
+    double when; int smi;   /* RV-115: a SAMI insertion — 1 a caption, 2 its closing SYNC — placed by its time */
+} patch_t;
+
+/* RV-115: where a SAMI piece of time `when` goes so the SYNCs stay in order of time: before the first SYNC
+   that is not being taken out and starts later (a caption) or not earlier (a closing SYNC); else before `</BODY>`. */
+static size_t smi_insert_at(const rubraview_subtitle_track_t *track, const patch_t *patches, size_t count, double when, int smi) {
+    u8str_t t = track->source;
+    for (size_t i = 0; i + 5 < t.len; ++i) {
+        if (t.ptr[i] != '<') continue;
+        u8str_t rest = { .ptr = t.ptr + i, .len = t.len - i };
+        if (rubraview_u8_starts_with_ci(rest, "</body")) return i;
+        if (!rubraview_u8_starts_with_ci(rest, "<sync")) continue;
+        bool cut = false;
+        for (size_t k = 0; k < count && !cut; ++k) cut = patches[k].cut && i >= patches[k].at && i < patches[k].at + patches[k].len;
+        if (cut) continue;
+        size_t v = i + 5, stop = i;
+        while (stop < t.len && t.ptr[stop] != '>') stop++;
+        double ms = -1.0;
+        for (; v + 5 < stop; ++v) {
+            if (!rubraview_u8_starts_with_ci((u8str_t){ .ptr = t.ptr + v, .len = stop - v }, "start")) continue;
+            size_t d = v + 5;
+            while (d < stop && (t.ptr[d] == ' ' || t.ptr[d] == '=' || t.ptr[d] == '"')) d++;
+            ms = 0.0;
+            while (d < stop && t.ptr[d] >= '0' && t.ptr[d] <= '9') { ms = ms * 10.0 + (t.ptr[d] - '0'); d++; }
+            break;
+        }
+        double at = ms / 1000.0;
+        long long a = (long long)(at * 1000.0 + 0.5), w = (long long)(when * 1000.0 + 0.5);
+        if (ms >= 0.0 && (smi == 2 ? a >= w : a > w)) return i;
+    }
+    return t.len;
+}
 
 static int patch_order(const void *a, const void *b) {
     const patch_t *x = a, *y = b;
-    return x->at < y->at ? -1 : x->at > y->at ? 1 : 0;
+    if (x->at != y->at) return x->at < y->at ? -1 : 1;
+    if ((x->len == 0) != (y->len == 0)) return x->len == 0 ? -1 : 1;   /* an insertion before what is written over there */
+    if (x->smi && y->smi) {                                             /* SAMI pieces at one place: by time, a closing SYNC first */
+        if (x->when != y->when) return x->when < y->when ? -1 : 1;
+        if (x->smi != y->smi) return x->smi == 2 ? -1 : 1;
+    }
+    return x->seq < y->seq ? -1 : x->seq > y->seq ? 1 : 0;              /* insertions at one place in the order of their cues */
 }
 
 u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const char **out_why) {
@@ -843,24 +1069,127 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
     if (!rubraview_subtitle_changed(track)) return track->source;
 
     /* Three places a cue at most. */
-    if (track->count > SIZE_MAX / 3 / sizeof(patch_t)) { *out_why = "too many subtitles"; return empty; }
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count * 3, sizeof(patch_t));
+    if (track->count > SIZE_MAX / 4 / sizeof(patch_t)) { *out_why = "too many subtitles"; return empty; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count * 4 + 1, sizeof(patch_t));
     if (!proven_is_ok(res.err)) { *out_why = "no memory"; return empty; }
     patch_t *patches = (patch_t*)(void*)res.value.ptr;
     size_t count = 0;
+
+    /* RV-115: a SAMI caption moved past others in time is moved in the file too — taken out where it was and
+       written again after the unchanged caption before it — since a SAMI file is read in the order of its SYNCs. */
+    bool *moved = NULL;
+    if (track->format == RUBRAVIEW_SUBTITLE_SMI) {
+        proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, track->count ? track->count : 1, sizeof(bool));
+        if (!proven_is_ok(mres.err)) { *out_why = "no memory"; return empty; }
+        moved = (bool*)(void*)mres.value.ptr;
+        memset(moved, 0, track->count * sizeof(bool));
+        size_t gap_from = 0;
+        size_t before = 0;            /* the block of the unchanged caption before the gap */
+        bool have_before = false;
+        for (size_t i = 0; i <= track->count; ++i) {
+            const rubraview_subtitle_cue_t *c = i < track->count ? &track->cues[i] : NULL;
+            bool fixed = c && !c->added && !c->removed && !c->time_changed;
+            if (c && !fixed) continue;
+            /* the changed captions between two unchanged ones: in place only if they stand between them, in order */
+            size_t after = c ? c->place.block_at : SIZE_MAX;
+            size_t last = before;
+            bool in_order = true;
+            for (size_t k = gap_from; k < i; ++k) {
+                const rubraview_subtitle_cue_t *g = &track->cues[k];
+                if (g->added || g->removed || !g->time_changed) continue;
+                size_t at = g->place.block_at;
+                if ((have_before && at < last) || at > after || (!have_before && k > gap_from && at < last)) in_order = false;
+                last = at;
+            }
+            for (size_t k = gap_from; k < i && !in_order; ++k) {
+                const rubraview_subtitle_cue_t *g = &track->cues[k];
+                if (!g->added && !g->removed && g->time_changed && place_in(track, g->place.block_at, g->place.block_len)) moved[k] = true;
+            }
+            if (c) { before = c->place.block_at; have_before = true; gap_from = i + 1; }
+        }
+    }
+
     for (size_t i = 0; i < track->count; ++i) {
         const rubraview_subtitle_cue_t *cue = &track->cues[i];
+        if (cue->added && cue->removed) continue;
+        if (moved && moved[i]) {
+            patches[count++] = (patch_t){ cue->place.block_at, cue->place.block_len, empty, i, true, 0.0, 0 };
+            if (place_in(track, cue->place.close_at, cue->place.close_len)) {
+                patches[count++] = (patch_t){ cue->place.close_at, cue->place.close_len, empty, i, true, 0.0, 0 };
+            }
+            /* written again after the nearest caption before it that stays, or before the first that does */
+            const rubraview_subtitle_cue_t *tpl = NULL;
+            bool after = true;
+            for (size_t k = i; k > 0 && !tpl; --k) {
+                const rubraview_subtitle_cue_t *c = &track->cues[k - 1];
+                if (!c->added && !c->removed && !moved[k - 1] && place_in(track, c->place.block_at, c->place.block_len)) tpl = c;
+            }
+            for (size_t k = i + 1; k < track->count && !tpl; ++k) {
+                const rubraview_subtitle_cue_t *c = &track->cues[k];
+                if (!c->added && !c->removed && !moved[k] && place_in(track, c->place.block_at, c->place.block_len)) { tpl = c; after = false; }
+            }
+            size_t at = tpl ? tpl->place.block_at : track->source.len;
+            if (tpl && after) {
+                at = tpl->place.block_at + tpl->place.block_len;
+                if (place_in(track, tpl->place.close_at, tpl->place.close_len) && tpl->place.close_at + tpl->place.close_len > at) {
+                    at = tpl->place.close_at + tpl->place.close_len;
+                }
+            }
+            u8str_t block = added_block(arena, track, cue, cue, false, cue->text_changed ? cue->written : empty);
+            if (block.len == 0) { *out_why = "a moved caption could not be written"; return empty; }
+            patches[count++] = (patch_t){ at, 0, block, i, false, cue->start_seconds, 1 };
+            u8str_t close = added_close(arena, track, cue, cue);
+            if (close.len > 0) patches[count++] = (patch_t){ at, 0, close, i, false, cue->end_seconds, 2 };
+            continue;
+        }
+        if (cue->removed) {   /* RV-115: its block out, and a SAMI caption's closing SYNC with it */
+            patches[count++] = (patch_t){ cue->place.block_at, cue->place.block_len, empty, i, true, 0.0, 0 };
+            if (place_in(track, cue->place.close_at, cue->place.close_len)) {
+                patches[count++] = (patch_t){ cue->place.close_at, cue->place.close_len, empty, i, true, 0.0, 0 };
+            }
+            continue;
+        }
+        if (cue->added) {     /* RV-115: written in as the nearest cue of the file's own, after it or before it */
+            const rubraview_subtitle_cue_t *tpl = NULL;
+            bool after = true;
+            for (size_t k = i; k > 0 && !tpl; --k) {
+                const rubraview_subtitle_cue_t *c = &track->cues[k - 1];
+                if (!c->added && !c->removed && place_in(track, c->place.block_at, c->place.block_len)) tpl = c;
+            }
+            for (size_t k = i + 1; k < track->count && !tpl; ++k) {
+                const rubraview_subtitle_cue_t *c = &track->cues[k];
+                if (!c->added && !c->removed && place_in(track, c->place.block_at, c->place.block_len)) { tpl = c; after = false; }
+            }
+            if (!tpl) { *out_why = "a new subtitle has no other in the file to be written as"; return empty; }
+            size_t at = tpl->place.block_at;
+            if (after) {
+                at = tpl->place.block_at + tpl->place.block_len;
+                if (place_in(track, tpl->place.close_at, tpl->place.close_len) && tpl->place.close_at + tpl->place.close_len > at) {
+                    at = tpl->place.close_at + tpl->place.close_len;
+                }
+            }
+            u8str_t block = added_block(arena, track, tpl, cue, after, cue->written);
+            if (block.len == 0) { *out_why = "a new subtitle could not be written"; return empty; }
+            bool smi = track->format == RUBRAVIEW_SUBTITLE_SMI;
+            patches[count++] = (patch_t){ at, 0, block, i, false, cue->start_seconds, smi ? 1 : 0 };
+            u8str_t close = smi ? added_close(arena, track, tpl, cue) : empty;
+            if (close.len > 0) patches[count++] = (patch_t){ at, 0, close, i, false, cue->end_seconds, 2 };
+            continue;
+        }
         if (cue->time_changed) {
             if (!place_in(track, cue->place.start_at, cue->place.start_len)) { *out_why = "a moved subtitle has no place in the file"; return empty; }
-            patches[count++] = (patch_t){ cue->place.start_at, cue->place.start_len, write_time(arena, track->format, cue->start_seconds) };
+            patches[count++] = (patch_t){ cue->place.start_at, cue->place.start_len, write_time(arena, track->format, cue->start_seconds), i, false, 0.0, 0 };
             if (place_in(track, cue->place.end_at, cue->place.end_len)) {
-                patches[count++] = (patch_t){ cue->place.end_at, cue->place.end_len, write_time(arena, track->format, cue->end_seconds) };
+                patches[count++] = (patch_t){ cue->place.end_at, cue->place.end_len, write_time(arena, track->format, cue->end_seconds), i, false, 0.0, 0 };
             }
         }
         if (cue->text_changed) {
             if (!place_in(track, cue->place.text_at, cue->place.text_len)) { *out_why = "an edited subtitle has no place in the file"; return empty; }
-            patches[count++] = (patch_t){ cue->place.text_at, cue->place.text_len, cue->written };
+            patches[count++] = (patch_t){ cue->place.text_at, cue->place.text_len, cue->written, i, false, 0.0, 0 };
         }
+    }
+    for (size_t i = 0; i < count; ++i) {   /* SAMI insertions by their time */
+        if (patches[i].smi) patches[i].at = smi_insert_at(track, patches, count, patches[i].when, patches[i].smi);
     }
     qsort(patches, count, sizeof(patches[0]), patch_order);
 
@@ -869,8 +1198,8 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
        a file this cannot save. */
     size_t kept = 0, grow = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (patches[i].with.len == 0) { *out_why = "a time or a text could not be written"; return empty; }
-        if (kept > 0 && patches[i].at == patches[kept - 1].at && patches[i].len == patches[kept - 1].len) continue;
+        if (patches[i].with.len == 0 && !patches[i].cut) { *out_why = "a time or a text could not be written"; return empty; }
+        if (kept > 0 && patches[i].len > 0 && patches[i].at == patches[kept - 1].at && patches[i].len == patches[kept - 1].len) continue;
         if (kept > 0 && patches[i].at < patches[kept - 1].at + patches[kept - 1].len) { *out_why = "two changes touch the same place in the file"; return empty; }
         patches[kept++] = patches[i];
         if (patches[i].with.len > SIZE_MAX / 2 - grow) { *out_why = "too long"; return empty; }

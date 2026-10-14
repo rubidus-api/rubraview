@@ -5,7 +5,7 @@
 #include <string.h>
 
 static bool cue_listed(const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *cue) {
-    if (cue->text.len == 0) return false;
+    if (cue->text.len == 0 || cue->removed) return false;   /* RV-115: a removed cue waits, unseen, for the save */
     if (track->shown_language.len == 0) return true;
     return cue->language.len == track->shown_language.len &&
            memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.len) == 0;

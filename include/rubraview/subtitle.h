@@ -49,6 +49,13 @@ typedef struct rubraview_subtitle_place {
     size_t start_at, start_len;
     size_t end_at, end_len;
     size_t text_at, text_len;
+    /* RV-115: the whole cue — a SubRip or WebVTT block with the blank line
+       after it, a `Dialogue:` line with its line end, a SAMI caption from
+       its SYNC to the next — and, for SAMI, the empty SYNC that closes it
+       when there is one. Taken out whole when the cue is removed; a cue
+       added is made from a neighbour's. */
+    size_t block_at, block_len;
+    size_t close_at, close_len;
 } rubraview_subtitle_place_t;
 
 typedef struct rubraview_subtitle_cue {
@@ -58,6 +65,8 @@ typedef struct rubraview_subtitle_cue {
     u8str_t language;    /* SAMI carries one per class; empty otherwise */
     rubraview_subtitle_place_t place;
     bool    time_changed;   /* moved since it was read */
+    bool    removed;        /* RV-115: taken out; kept, unseen, for the save to take out its block */
+    bool    added;          /* RV-115: new; the save writes it in, made from a neighbour's block */
     bool    text_changed;   /* edited: `written` is what goes into the file */
     u8str_t written;
 } rubraview_subtitle_cue_t;
@@ -119,6 +128,29 @@ bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_tra
  * is left as it is. With no offset, the track as it is.
  */
 rubraview_subtitle_track_t rubraview_subtitle_offset_folded(proven_arena_t *arena, const rubraview_subtitle_track_t *track);
+
+/** A time as typed: `1:02:03.45`, `02:03,5`, `63.5` (seconds). */
+bool rubraview_subtitle_parse_time(u8str_t text, double *out_seconds);
+
+/**
+ * RV-115: a cue's times typed. `end` after `start`, neither below 0. The
+ * cues stay in order of start, so the cue may change place: its new index
+ * is returned, -1 when refused. (A SAMI caption's end is where the next
+ * caption starts unless an empty SYNC closes it; only then is it written.)
+ */
+int32_t rubraview_subtitle_cue_set_time(rubraview_subtitle_track_t *track, size_t index, double start, double end);
+
+/** RV-115: a cue taken out (unseen at once, its block out of the file when saved). False for none. */
+bool rubraview_subtitle_cue_remove(rubraview_subtitle_track_t *track, size_t index);
+
+/**
+ * RV-115: a new cue, its text typed as `rubraview_subtitle_cue_retype`
+ * takes it, in the language shown. Written, when saved, as a neighbour's
+ * block is (its number, style, class and settings), after the cue before
+ * it or before the first. Its index, or -1: no cue in the file to make it
+ * from, nothing to show, or no room.
+ */
+int32_t rubraview_subtitle_cue_add(proven_arena_t *arena, rubraview_subtitle_track_t *track, double start, double end, u8str_t typed);
 
 /** Has any cue been moved or edited since the track was read? */
 bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track);
