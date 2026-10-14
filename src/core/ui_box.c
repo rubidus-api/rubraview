@@ -679,3 +679,33 @@ double rubraview_seekfan_release(rubraview_seekfan_t *fan) {
     *fan = (rubraview_seekfan_t){ .hover = -1 };
     return seconds * sign;
 }
+
+static bool hint_in(rubraview_rect_t r, double x, double y) {
+    return r.width > 0.0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+}
+
+u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
+    static const char *const NONE = "";
+    const char *text = NONE;
+    if (!box || !m || box->state == RUBRAVIEW_BOX_DETACHED) return (u8str_t){ .ptr = NONE, .len = 0 };
+    bool menu = box->kind == RUBRAVIEW_BOX_MENU;
+    /* the anchor's words while it is folded only: open, they would lie over the box's own tiles */
+    rubraview_anchor_half_t half = box->state == RUBRAVIEW_BOX_COLLAPSED ? rubraview_box_anchor_half_at(box, m, px, py)
+                                                                         : RUBRAVIEW_ANCHOR_NONE;
+    if (half == RUBRAVIEW_ANCHOR_CLICK) {
+        text = menu ? "Click: open the menu and keep it open (again: close). Drag: move it"
+                    : "Click: open the toolbox and keep it open (again: close). Drag: move it";
+    } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
+        text = menu ? "Rest the pointer here: the menu opens, and folds when the pointer leaves"
+                    : "Rest the pointer here: the toolbox opens, and folds when the pointer leaves";
+    } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
+        text = "Pin: on, the box stays open; off, it folds when the pointer leaves";
+    } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {
+        text = "Drag sideways: more or fewer buttons a row. Drag away or back: bigger or smaller";
+    } else if (!menu && hint_in(rubraview_box_timeline_rect(box, m), px, py)) {
+        text = "Click or drag: go to that moment (or page)";
+    }
+    size_t n = 0;
+    while (text[n]) n++;
+    return (u8str_t){ .ptr = text, .len = n };
+}

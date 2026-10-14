@@ -69,7 +69,7 @@ rubraview_titlebar_t rubraview_titlebar_create(double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
     return (rubraview_titlebar_t){
         .height = 36.0 * dpi_scale,      /* §3.21.2 */
-        .trigger_zone = 12.0 * dpi_scale,
+        .trigger_zone = 36.0 * dpi_scale,   /* the bar's own height: where it will be, it comes (owner, 2026-10-14) */
         .hide_delay = 0.5,
         .shown = false,
         .idle_seconds = 0.0,

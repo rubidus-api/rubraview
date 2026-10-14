@@ -32,6 +32,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_SAVE,
     RUBRAVIEW_LISTWIN_LOAD,
     RUBRAVIEW_LISTWIN_PATHS,      /* saved with relative or whole paths */
+    RUBRAVIEW_LISTWIN_ALL,        /* the bar's box at its left, over the rows' boxes: every row checked, or none */
     RUBRAVIEW_LISTWIN_ROW_CHECK,  /* at the left of a row, in this order */
     RUBRAVIEW_LISTWIN_ROW_REMOVE,
     RUBRAVIEW_LISTWIN_ROW_UP,
@@ -53,6 +54,7 @@ typedef struct rubraview_listwin {
     double bar_height;
     bool   resizing;           /* the resize button held */
     double resize_dx, resize_dy;
+    double resize_bottom;      /* the bottom edge, which stays while the top follows */
 } rubraview_listwin_t;
 
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale);
@@ -90,7 +92,11 @@ double rubraview_listwin_row_text_x(const rubraview_listwin_t *lw);
  */
 size_t rubraview_listwin_insert_index(const rubraview_listwin_t *lw, double py, size_t count);
 
-/** Sizing by the resize button: the bottom and the right edge follow the pointer, kept inside the view. */
+/**
+ * Sizing by the resize button, at the top right: the button stays under
+ * the pointer — the top and the right edge follow it, the bottom and the
+ * left stay (owner, 2026-10-14) — inside the view, never too small.
+ */
 void rubraview_listwin_resize_begin(rubraview_listwin_t *lw, double px, double py);
 void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, double view_w, double view_h);
 

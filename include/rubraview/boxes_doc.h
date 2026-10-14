@@ -34,7 +34,12 @@ extern "C" {
  * it; menus nest. `item` is a leaf — at the top level too, for what must
  * be one tap away (Always on top). `recent` stands for the reading
  * history's entries, filled in when the menu is built. `when media` shows
- * a menu only while a video or music page is on screen.
+ * a menu only while a video or music page is on screen; `when plays` while
+ * a film, a song or an animation is (RV-116).
+ *
+ * `context <profile>` ... `end` is what a right click on the picture lists
+ * for that kind of page (RV-116): `item` lines, and `group` between them
+ * where a line is drawn. The profiles are the toolbox's names.
  *
  * Every action id is checked against what the viewer handles by
  * scripts/check-actions.py.
@@ -59,6 +64,7 @@ typedef enum rubraview_box_node_kind {
 } rubraview_box_node_kind_t;
 
 #define RUBRAVIEW_BOXES_WHEN_MEDIA 1u   /* a video or music page is on screen */
+#define RUBRAVIEW_BOXES_WHEN_PLAYS 2u   /* a film, a song or an animation is on screen */
 
 typedef struct rubraview_box_node {
     rubraview_box_node_kind_t kind;
@@ -71,7 +77,9 @@ typedef struct rubraview_box_node {
 
 #define RUBRAVIEW_BOXES_MAX_TILES 320
 #define RUBRAVIEW_BOXES_MAX_PROFILES 16
-#define RUBRAVIEW_BOXES_MAX_NODES 160
+#define RUBRAVIEW_BOXES_MAX_NODES 256
+#define RUBRAVIEW_BOXES_MAX_CONTEXT_ITEMS 160
+#define RUBRAVIEW_CONTEXT_MAX_ITEMS 20    /* in one right-click list */
 #define RUBRAVIEW_TOOLBOX_MAX_TILES 40    /* in one profile: five rows of the strip as designed (owner, 2026-09-29: most of what the viewer does) */
 
 typedef struct rubraview_boxes_doc {
@@ -81,6 +89,11 @@ typedef struct rubraview_boxes_doc {
     size_t                      profile_count;
     rubraview_box_node_t        nodes[RUBRAVIEW_BOXES_MAX_NODES];
     size_t                      node_count;
+    /* RV-116: the right-click lists; an item's `group` is its section, a line drawn between two */
+    rubraview_box_tile_t        context_items[RUBRAVIEW_BOXES_MAX_CONTEXT_ITEMS];
+    size_t                      context_item_count;
+    rubraview_toolbox_profile_t contexts[RUBRAVIEW_BOXES_MAX_PROFILES];
+    size_t                      context_count;
     const char                 *error;       /* NULL when it parsed */
     uint32_t                    error_line;
 } rubraview_boxes_doc_t;
@@ -96,6 +109,9 @@ const rubraview_boxes_doc_t *rubraview_boxes_document(void);
 
 /** A profile by name, or NULL. */
 const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes_doc_t *doc, u8str_t name);
+
+/** RV-116: a right-click list by profile name (its items in `context_items`), or NULL. */
+const rubraview_toolbox_profile_t *rubraview_boxes_context(const rubraview_boxes_doc_t *doc, u8str_t name);
 
 /** One reading-history entry, as a `recent` line turns it into an item. */
 typedef struct rubraview_recent_entry {

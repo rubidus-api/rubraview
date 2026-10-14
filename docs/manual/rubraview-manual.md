@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.81.exe              the viewer, as built
-dist/rubraview-v0.0.81/                 the release bundle
-dist/rubraview-v0.0.81.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.82.exe              the viewer, as built
+dist/rubraview-v0.0.82/                 the release bundle
+dist/rubraview-v0.0.82.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -240,11 +240,33 @@ opens with Settings › Files › Archive filenames again.
 
 A page turn fades the old page into the new one for a quarter of a
 second. While a slide show runs, the pointer goes away after a second and
-a half of stillness and comes back when it moves. The toolbox then starts
+a half of stillness and comes back when it moves. It runs in the window as
+it is — full screen only if the window already was (the slide show's
+settings have a button for it). The toolbox then starts
 with a stop button and the delay between slides ("3 s") where a film's
 speed button would be: turn the wheel over it, or hold it and drag up or
 down, and the delay moves half a second; a tap goes round 1, 2, 3, 5 and
-10 seconds. The mouse's back and
+10 seconds. A right click on the picture while it runs opens **the slide
+show's settings**: the delay — type it in the field (`Enter` keeps it) or
+press **-** and **+** for half a second less or more — how one slide
+changes to the next (**Cut**, **Fade**, **Slide**, **Zoom**, the same as
+Settings › Viewer › Turning a page), whether it goes round again after the
+last or stops there, and **Pause**/**Play**, **Stop**, **Full screen** and
+**Close**. A slide's time counts from when it is drawn, so a large picture
+still being read is not passed over; turning a page yourself, it goes on
+from there.
+
+A right click on the picture otherwise opens **a short list** where you
+clicked, for what is on screen. For a picture: Copy picture, Adjust
+picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
+Information; Rename, Copy to folder, Move to folder, Show in Explorer,
+Delete (click it twice: it goes to the recycle bin); and Menu... for the
+menu box. A book or an archive has the next and previous archive and
+the layouts; a film has play and stop, the subtitles, the sound track,
+normal speed, copying and saving the frame and full screen; a song has
+the previous and next file, what the end does, the equaliser and the
+mini player. A row that cannot act now is grey. The arrow keys and
+`Enter` choose, `Esc` or a click elsewhere closes it. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 `Shift` and the wheel go ten pages; on a touch screen two fingers move
 the picture and a pinch zooms it. (README has the whole table, under
@@ -339,7 +361,10 @@ turn or an adjustment.
 
 While a film or an animation is on screen, `Ctrl+C` copies the frame you
 see to the clipboard and `Ctrl+Shift+E` saves it as a PNG beside the file
-(`film_00-23-792.png`: the minute, second and thousandth).
+(`film_00-23-792.png`: the minute, second and thousandth). On a still
+picture `Ctrl+C` (or Copy picture in the right-click list, or Edit › Copy
+picture) copies the picture itself, whole and as its file holds it — not
+turned or adjusted as it is shown.
 
 Privacy clean on a JPEG that is otherwise unchanged does not re-encode
 the picture — the metadata is cut out and every pixel is left exactly as
@@ -679,7 +704,15 @@ Most of what the viewer does has a toolbox button: turning pages one, ten
 or all the way, zoom and fit, turning and flipping, the slide show, the
 filmstrip, the playlist, the information, editing and exporting, opening,
 always on top, the settings and full screen; for a film, 5 s back and on
-as well (held, those two offer steps up to 5 min). While a box is open, a second square beside its pin, with
+as well (held, those two offer steps up to 5 min). Its buttons come in the
+same order of groups for every kind of page: going and playing, how it
+plays, sound, subtitles, view, turning, the file, the window. The menu box
+holds everything the viewer does, by what it is about: File, Edit (copy,
+adjust, save the frame, undo), Go (every way of turning pages), View,
+Playback (a film, a song or an animation), Sound and Subtitles (a film or
+a song), Show and Help. Resting the pointer on a box's anchor, pin, grip
+or seek bar says what a click or a drag does there, and `Esc` folds an
+open box before it closes anything else. While a box is open, a second square beside its pin, with
 three dots, sizes it: drag it sideways for more or fewer buttons (or menu
 tiles) a row, and away from the box or back for bigger or smaller ones; the
 size is kept, and Settings › Display has the same four numbers.
@@ -707,8 +740,10 @@ stay on the disk), **Save** writes the list to a file (`.m3u8`, or
 saved list names its files: from the list's own folder, so that the folder
 can be moved or copied whole, or by their whole paths (Settings > Files >
 A saved list names its files). Files dragged from Explorer onto the list
-go in at the row you let them go over. **R**, beside the `X`, sizes the
-window: press it and drag. A folder whose list you change is from then on
+go in at the row you let them go over. The box at the left of the bar
+checks every row, or, when they all are, none. **R**, beside the `X`,
+sizes the window: press it and drag, and it stays under the pointer — the
+top and the right edge follow it, the bottom and the left stay. A folder whose list you change is from then on
 a playlist: it keeps your order.
 
 `F3` (the Files button, or File › File list window) opens the same list in
@@ -908,7 +943,7 @@ listed under a later heading only means that while that is on screen.
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
-| `Ctrl+C` | Copy the frame on screen (a film, an animation) |
+| `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
@@ -1021,20 +1056,25 @@ listed under a later heading only means that while that is on screen.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox or the menu**
+**No key of its own: in the toolbox, the menu or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
-| Toolbox `A-B` | A-B repeat: from here, to here, off |
+| Toolbox `Stop`, Right click `Stop`, Menu `Stop` | Stop, and back to the beginning |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
-| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
+| Toolbox `A-B` | A-B repeat: from here, to here, off |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
-| Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `One page`, Menu `Single` | Layout: one page at a time |
+| Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
+| Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
+| Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
@@ -1043,12 +1083,8 @@ listed under a later heading only means that while that is on screen.
 | Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
 | Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
 | Menu `Western` | Read the open archive's file names as Western (CP1252) |
-| Menu `Single` | Layout: one page at a time |
-| Menu `Dual` | Layout: two pages side by side |
 | Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
-| Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
-| Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
 | Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
 | Menu `Original` | Shape: the file's own |
@@ -1067,7 +1103,6 @@ listed under a later heading only means that while that is on screen.
 | Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
-| Menu `Choose` | Choose the subtitles from a list |
 | Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |

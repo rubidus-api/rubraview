@@ -29,7 +29,7 @@ static const char *const PARTS[] = {
 "  toggle general.first_with_folder \"The first file brings its folder\" = true wired\n"
 "  toggle general.native_dialog    \"Open with Windows' own dialog\" = false wired\n"
 "  section \"Title bar\"\n"
-"  int    general.titlebar_trigger_px \"Titlebar trigger height\" 4..40 step 1 unit \"px\" = 12 wired\n"
+"  int    general.titlebar_trigger_px \"Titlebar trigger height\" 36..80 step 1 unit \"px\" = 36 wired\n"
 "  int    general.titlebar_hide_ms    \"Titlebar hide delay\"     100..3000 step 50 unit \"ms\" = 500 wired\n"
 "  section \"Where this is kept\"\n"
 "  info   \"Settings file\"           {config.path}\n"

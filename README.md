@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.81** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.81/rubraview-v0.0.81.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.81/rubraview-v0.0.81.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.82** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -47,7 +47,7 @@ ships with, so it cannot drift from them.
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
-| `Ctrl+C` | Copy the frame on screen (a film, an animation) |
+| `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
 | `F10`, `Ctrl+,` | Settings |
@@ -160,20 +160,25 @@ ships with, so it cannot drift from them.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox or the menu**
+**No key of its own: in the toolbox, the menu or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Menu `Stop` | Stop, and back to the beginning |
-| Toolbox `A-B` | A-B repeat: from here, to here, off |
+| Toolbox `Stop`, Right click `Stop`, Menu `Stop` | Stop, and back to the beginning |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
-| Toolbox `Sub`, Menu `On/off` | Subtitles on or off |
+| Toolbox `A-B` | A-B repeat: from here, to here, off |
 | Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
-| Toolbox `EQ bands`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
+| Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `One page`, Menu `Single` | Layout: one page at a time |
+| Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
+| Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
+| Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
@@ -182,12 +187,8 @@ ships with, so it cannot drift from them.
 | Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
 | Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
 | Menu `Western` | Read the open archive's file names as Western (CP1252) |
-| Menu `Single` | Layout: one page at a time |
-| Menu `Dual` | Layout: two pages side by side |
 | Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
-| Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
-| Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
 | Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
 | Menu `Original` | Shape: the file's own |
@@ -206,7 +207,6 @@ ships with, so it cannot drift from them.
 | Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
-| Menu `Choose` | Choose the subtitles from a list |
 | Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |

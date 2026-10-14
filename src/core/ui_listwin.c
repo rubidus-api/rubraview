@@ -65,9 +65,11 @@ static const rubraview_listwin_part_t ROW_PARTS[] = {
 
 rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part) {
     if (!lw || !lw->editable) return (rubraview_rect_t){0};
-    double w = lw->width / 4.0;
+    /* the box for all, in the rows' check column; the four buttons share the rest */
+    if (part == RUBRAVIEW_LISTWIN_ALL) return (rubraview_rect_t){ lw->x, lw->y + lw->title_height, lw->row_height, lw->bar_height };
+    double w = (lw->width - lw->row_height) / 4.0;
     for (size_t i = 0; i < 4; ++i) {
-        if (BAR[i] == part) return (rubraview_rect_t){ lw->x + (double)i * w, lw->y + lw->title_height, w, lw->bar_height };
+        if (BAR[i] == part) return (rubraview_rect_t){ lw->x + lw->row_height + (double)i * w, lw->y + lw->title_height, w, lw->bar_height };
     }
     return (rubraview_rect_t){0};
 }
@@ -107,18 +109,23 @@ size_t rubraview_listwin_insert_index(const rubraview_listwin_t *lw, double py, 
 void rubraview_listwin_resize_begin(rubraview_listwin_t *lw, double px, double py) {
     if (!lw) return;
     lw->resizing = true;
-    lw->resize_dx = lw->x + lw->width - px;
-    lw->resize_dy = lw->y + lw->height - py;
+    lw->resize_dx = lw->x + lw->width - px;   /* the right edge from the pointer */
+    lw->resize_dy = lw->y - py;               /* the top edge from the pointer */
+    lw->resize_bottom = lw->y + lw->height;
 }
 
 void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, double view_w, double view_h) {
     if (!lw || !lw->resizing) return;
-    double w = px + lw->resize_dx - lw->x, h = py + lw->resize_dy - lw->y;
+    double min_w = lw->row_height * (lw->editable ? 10.0 : 8.0);
+    double min_h = rubraview_listwin_head_height(lw) + lw->row_height * 3.0;
+    double bottom = lw->resize_bottom;
+    if (bottom > view_h) bottom = view_h;
     /* Never past the view: the place rule would move the window instead of stopping it. */
-    if (w > view_w - lw->x) w = view_w - lw->x;
-    if (h > view_h - lw->y) h = view_h - lw->y;
-    lw->width = w > 1.0 ? w : 1.0;
-    lw->height = h > 1.0 ? h : 1.0;
+    double right = clampd(px + lw->resize_dx, lw->x + (min_w < view_w - lw->x ? min_w : view_w - lw->x), view_w);
+    double top = clampd(py + lw->resize_dy, 0.0, bottom - (min_h < bottom ? min_h : bottom));
+    lw->width = right - lw->x > 1.0 ? right - lw->x : 1.0;
+    lw->y = top;
+    lw->height = bottom - top > 1.0 ? bottom - top : 1.0;
     rubraview_listwin_place(lw, view_w, view_h);
 }
 
@@ -148,7 +155,8 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
     if (py < lw->y + lw->title_height) return RUBRAVIEW_LISTWIN_TITLE;
     double head = rubraview_listwin_head_height(lw);
     if (py < lw->y + head) {
-        size_t b = (size_t)((px - lw->x) / (lw->width / 4.0));
+        if (px < lw->x + lw->row_height) return RUBRAVIEW_LISTWIN_ALL;
+        size_t b = (size_t)((px - lw->x - lw->row_height) / ((lw->width - lw->row_height) / 4.0));
         return BAR[b < 4 ? b : 3];
     }
     size_t row = (size_t)((py - lw->y - head) / lw->row_height);

@@ -73,6 +73,8 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_subwin.h"
+#include "rubraview/ui_ctxmenu.h"
+#include "rubraview/ui_slidepop.h"
 #include "rubraview/matroska.h"
 #include "rubraview/mp4.h"
 #include "rubraview/ui_listwin.h"
@@ -527,6 +529,19 @@ typedef struct app_state {
     rubraview_confirm_t        subs_leave;         /* leaving with changes not saved: the second try goes on */
     double                     subs_leave_through; /* until then the rest of a going let through goes on */
     bool                       subs_leave_unasked; /* the going is the film's end or the slide show: held, never armed */
+    /* RV-116: a right click on the picture — the list for what is on screen,
+       or, while the slide show runs, its settings */
+    bool                       ctx_open;
+    double                     ctx_x, ctx_y;
+    const rubraview_toolbox_profile_t *ctx_list;
+    int32_t                    ctx_focus;          /* the row the arrow keys are on, -1 */
+    rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
+    bool                       slidepop_open, slidepop_typing;
+    u8str_t                    hint;               /* RV-116: what the box part under the pointer does */
+    double                     hint_since;         /* when the pointer came to rest on it */
+    double                     slidepop_x, slidepop_y;
+    char                       slidepop_text[16];
+    size_t                     slidepop_len;
     int32_t                    subs_frame[4];
     rubraview_listwin_t        subs_list;
     uint32_t                  *subs_rows;          /* the cue of each row (text subtitles) */
@@ -981,6 +996,10 @@ static void files_show(app_state_t *app);
 static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
 static bool subs_may_leave(app_state_t *app);
+static void slides_follow_screen(app_state_t *app);
+static bool popups_key(app_state_t *app, rubraview_key_combo_t combo);
+static bool hint_shown(const app_state_t *app);
+static bool slide_ready(const app_state_t *app);
 static void takeout_begin(app_state_t *app);
 static void reopen_after_removal(app_state_t *app, size_t removed_index);
 static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback);
@@ -1306,6 +1325,46 @@ static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride
    pixels are at hand: a paused film is asked for its frame again. */
 enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE };
 static double play_position(const app_state_t *app);
+
+/* RV-116 (owner, 2026-10-14): Ctrl+C, or Copy picture, on a still picture — the
+   picture as its file holds it, at its own size (not turned or adjusted as it is
+   shown), read again into memory of its own that is given back at once. */
+static void picture_copy(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    if (page < 0 || (size_t)page >= page_count(app) || !app->pages[page].loaded) {
+        osd_say(app, U8("there is no picture to copy"));
+        return;
+    }
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
+    if (w <= 0 || h <= 0 || (uint64_t)w * (uint64_t)h > (uint64_t)200000000u) {
+        osd_say(app, U8("this picture is too large to copy"));
+        return;
+    }
+    size_t big = (size_t)w * (size_t)h * 4u * 3u + (16u << 20);
+    void *memory = malloc(big);
+    if (!memory) { osd_say(app, U8("there is not memory enough to copy this picture")); return; }
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
+    rubraview_pixbuf_t full = {0};
+    u8str_t path = app->source.pages[page].path;
+    if (path.len > 0) {
+        full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, 0, 0);
+    } else {
+        rubraview_page_bytes_t bytes = { .ok = false };
+        AcquireSRWLockExclusive(&app->source_lock);
+        bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+        ReleaseSRWLockExclusive(&app->source_lock);
+        if (bytes.ok && bytes.data.len > 0) {
+            full = rubraview_pal_image_read_pixels_within(&scratch, (u8str_t){ .ptr = "", .len = 0 },
+                                                          (const uint8_t*)bytes.data.ptr, bytes.data.len, true, 0, 0);
+        }
+    }
+    rubraview_pixbuf_t bgra = !rubraview_pixbuf_is_valid(&full) || full.format == RUBRAVIEW_PIXFMT_BGRA8
+        ? full : rubraview_pixbuf_convert(&scratch, &full, RUBRAVIEW_PIXFMT_BGRA8);
+    bool copied = rubraview_pixbuf_is_valid(&bgra) &&
+                  rubraview_pal_clipboard_set_image(app->window, bgra.pixels, bgra.width, bgra.height, (size_t)bgra.stride);
+    free(memory);
+    osd_say(app, copied ? U8("the picture is on the clipboard") : U8("the picture could not be copied"));
+}
 
 static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride) {
     int wanted = app->frame_wanted;
@@ -3220,7 +3279,7 @@ static void toggle_slideshow(app_state_t *app) {
     if (app->slideshow_running) {
         app->slideshow.current_index = app->spread_index;
         rubraview_slideshow_resume(&app->slideshow);
-        rubraview_pal_window_set_fullscreen(app->window, true); /* §3.2.5 */
+        /* in the window as it is, full screen or not (owner, 2026-10-14, RV-116; §3.2.5 went full screen) */
     } else {
         rubraview_slideshow_pause(&app->slideshow);
         rubraview_pal_window_set_cursor_visible(app->window, true);
@@ -4202,7 +4261,8 @@ static void sync_menubox_tiles(app_state_t *app) {
 }
 
 static uint32_t boxes_when(const app_state_t *app) {
-    return app->media ? RUBRAVIEW_BOXES_WHEN_MEDIA : 0u;
+    /* RV-116: Playback for an animation too; Sound and Subtitles for a film or a song only */
+    return app->media ? RUBRAVIEW_BOXES_WHEN_MEDIA | RUBRAVIEW_BOXES_WHEN_PLAYS : anim_plays(app) ? RUBRAVIEW_BOXES_WHEN_PLAYS : 0u;
 }
 
 /* RFC-0002 §5: the menu tree, built again from the document — with the
@@ -4847,6 +4907,11 @@ static bool listwin_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_LISTWIN_DEL:
             if (app->list_checked && app->list_checked_count == count) list_remove(app, app->list_checked);
             break;
+        case RUBRAVIEW_LISTWIN_ALL: {   /* every row checked, or, when they all are, none (owner, 2026-10-14) */
+            bool all = app->list_checked_count > 0 && list_checked_total(app) == app->list_checked_count;
+            for (size_t i = 0; i < app->list_checked_count; ++i) app->list_checked[i] = !all;
+            break;
+        }
         case RUBRAVIEW_LISTWIN_SAVE: list_save(app); break;
         case RUBRAVIEW_LISTWIN_LOAD: list_load(app); break;
         case RUBRAVIEW_LISTWIN_PATHS: {
@@ -5039,6 +5104,19 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->panel.open) { panel_close(app); return; }
         if (app->listwin.open) { app->listwin.open = false; return; }
         if (app->eqwin.open) { app->eqwin.open = false; return; }
+        /* RV-116: an open menu box or toolbox (not pinned) folds first; it used to close the program */
+        {
+            rubraview_box_t *boxes[2] = { &app->menubox, &app->toolbox };
+            bool folded = false;
+            for (int i = 0; i < 2; ++i) {
+                rubraview_box_state_t st = boxes[i]->state;
+                if ((st == RUBRAVIEW_BOX_EXPANDED || st == RUBRAVIEW_BOX_LOCKED_OPEN) && !boxes[i]->pinned) {
+                    rubraview_box_dismiss(boxes[i]);
+                    folded = true;
+                }
+            }
+            if (folded) { rubraview_menu_reset(&app->menu); sync_menubox_tiles(app); return; }
+        }
         if (!subs_may_leave(app)) return;
         rubraview_pal_window_request_close(app->window);
     } else if (rubraview_u8_eq_lit(action, "next_page") && cue_step(app, +1)) {
@@ -5273,7 +5351,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "copy_frame") || rubraview_u8_eq_lit(action, "save_frame")) {
         /* RV-108: of a film or an animation; a still picture has Export. */
         bool film = app->media && app->media_info.has_video && app->media_page >= 0;
-        if (!film && !anim_plays(app)) {
+        if (!film && !anim_plays(app) && rubraview_u8_eq_lit(action, "copy_frame")) {
+            picture_copy(app);   /* RV-116: a still picture, whole, as its file holds it */
+        } else if (!film && !anim_plays(app)) {
             osd_say(app, U8("that is for a film or an animation: Ctrl+E exports a picture"));
         } else {
             app->frame_wanted = rubraview_u8_eq_lit(action, "copy_frame") ? FRAME_COPY : FRAME_SAVE;
@@ -6417,6 +6497,7 @@ static void toolbox_window_pump(app_state_t *app) {
 
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (ab_edit_handle_key(app, combo)) return;
+    if (popups_key(app, combo)) return;   /* RV-116 */
     /* D-33: Escape closes the list of subtitle tracks, and only that. */
     if (app->sub_list_open && rubraview_u8_eq_lit(combo.key_name, "Escape") && combo.modifiers == 0) {
         app->sub_list_open = false;
@@ -7739,6 +7820,323 @@ static void draw_sub_list(app_state_t *app) {
     }
 }
 
+/* ---- RV-116: the right-click list, and the slide show's settings ---- */
+
+#define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
+
+static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    return (rubraview_ctxmenu_metrics_t){ .row_height = 30.0 * dpi, .gap = 9.0 * dpi, .pad = 6.0 * dpi, .width = 250.0 * dpi };
+}
+
+/* The open list's rows: their groups, and whether each can act now. */
+static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
+    if (!app->ctx_list) return 0;
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    rubraview_action_facts_t facts = action_facts(app);
+    size_t n = (size_t)app->ctx_list->tile_count;
+    if (n > CTX_MAX) n = CTX_MAX;
+    for (size_t i = 0; i < n; ++i) {
+        const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + (int32_t)i];
+        groups[i] = item->group;
+        if (enabled) enabled[i] = rubraview_action_state(item->action, &facts).enabled;
+    }
+    return n;
+}
+
+static rubraview_rect_t ctx_frame(const app_state_t *app, const int32_t *groups, size_t n) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
+    return rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &m, groups, n);
+}
+
+static rubraview_rect_t slidepop_frame(const app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    return rubraview_slidepop_frame((double)w, (double)h, app->slidepop_x, app->slidepop_y,
+                                    rubraview_pal_window_dpi_scale(app->window));
+}
+
+static void ctx_close(app_state_t *app) {
+    app->ctx_open = false;
+    app->ctx_list = NULL;
+    app->ctx_focus = -1;
+    rubraview_confirm_clear(&app->ctx_confirm);
+}
+
+static void slidepop_close(app_state_t *app) {
+    app->slidepop_open = false;
+    app->slidepop_typing = false;
+}
+
+/* A right click on the picture: while the slide show runs, its settings; otherwise
+   the list for what is on screen (the toolbox's profiles name them). */
+static void ctx_open_at(app_state_t *app, double x, double y) {
+    ctx_close(app);
+    slidepop_close(app);
+    app->sub_list_open = false;
+    if (app->slideshow_running) {
+        app->slidepop_open = true;
+        app->slidepop_x = x;
+        app->slidepop_y = y;
+        return;
+    }
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), cstr(toolbox_profile_name(app)));
+    if (!list || list->tile_count <= 0) return;
+    app->ctx_open = true;
+    app->ctx_list = list;
+    app->ctx_x = x;
+    app->ctx_y = y;
+}
+
+/* A row chosen, by a click or Enter. Delete asks a second time, as the menu's does. */
+static void ctx_choose(app_state_t *app, int32_t row) {
+    int32_t groups[CTX_MAX];
+    bool enabled[CTX_MAX];
+    size_t n = ctx_rows(app, groups, enabled);
+    if (row < 0 || (size_t)row >= n || !enabled[row]) return;
+    const rubraview_box_tile_t *item = &rubraview_boxes_document()->context_items[app->ctx_list->first_tile + row];
+    if (rubraview_u8_eq_lit(item->action, "delete_file") &&
+        !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
+        osd_say(app, U8("click Delete again to move it to the recycle bin"));
+        return;
+    }
+    u8str_t action = item->action;
+    ctx_close(app);
+    handle_action(app, action);
+}
+
+static void draw_ctxmenu(app_state_t *app) {
+    if (!app->ctx_open) return;
+    int32_t groups[CTX_MAX];
+    bool enabled[CTX_MAX];
+    size_t n = ctx_rows(app, groups, enabled);
+    if (n == 0) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
+    rubraview_rect_t f = ctx_frame(app, groups, n);
+    rubraview_renderer_t *r = app->renderer;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
+    rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
+    int32_t hover = rubraview_ctxmenu_row_at(f, &m, groups, n, app->pointer_x, app->pointer_y);
+    if (hover < 0) hover = app->ctx_focus;
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    rubraview_action_facts_t facts = action_facts(app);
+    double now = rubraview_pal_time_now_seconds();
+    for (size_t i = 0; i < n; ++i) {
+        rubraview_rect_t row = rubraview_ctxmenu_row(f, &m, groups, i);
+        if (i > 0 && groups[i] != groups[i - 1]) {   /* the line between two groups */
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x + 8.0 * dpi, row.y - m.gap * 0.5 - 0.5 * dpi,
+                                                                      f.width - 16.0 * dpi, 1.0 * dpi }, 0x40FFFFFFu, 0.0);
+        }
+        rubraview_pal_rect_t cell = { row.x + 4.0 * dpi, row.y + 1.0 * dpi, row.width - 8.0 * dpi, row.height - 2.0 * dpi };
+        if ((int32_t)i == hover && enabled[i]) rubraview_pal_render_fill_rect(r, cell, 0x40FFFFFFu, 3.0 * dpi);
+        const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + (int32_t)i];
+        rubraview_action_state_t st = rubraview_action_state(item->action, &facts);
+        char scratch[96];
+        u8str_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now) ? U8("Delete?")
+                     : rubraview_tile_caption(item->caption, false, st.mark, st.value, scratch, sizeof(scratch));
+        rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
+        rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi, enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    }
+}
+
+/* What the field says when it is not being typed in: the delay, "3.5". */
+static u8str_t slidepop_delay_text(const app_state_t *app, char *buffer, size_t size) {
+    if (app->slidepop_typing) return (u8str_t){ .ptr = app->slidepop_text, .len = app->slidepop_len };
+    int n = snprintf(buffer, size, "%.1f s", app->slideshow.interval_seconds);
+    return (u8str_t){ .ptr = buffer, .len = n > 0 ? (size_t)n : 0 };
+}
+
+static void slidepop_type_end(app_state_t *app, bool keep) {
+    if (!app->slidepop_typing) return;
+    app->slidepop_typing = false;
+    double seconds = 0.0;
+    if (!keep) return;
+    if (rubraview_subwin_amount((u8str_t){ .ptr = app->slidepop_text, .len = app->slidepop_len }, &seconds)) {
+        interval_set(app, seconds);
+    } else {
+        osd_say(app, U8("the delay is a number of seconds, 0.1 to 300"));
+    }
+}
+
+static int slidepop_transition(const app_state_t *app) {
+    int turn = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition")));
+    return turn >= 0 && turn < 4 ? turn : 1;
+}
+
+static void draw_slidepop(app_state_t *app) {
+    if (!app->slidepop_open) return;
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_rect_t f = slidepop_frame(app);
+    rubraview_renderer_t *r = app->renderer;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 5.0 * s);
+    rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_TILE_CURRENT, 1.5 * s, 5.0 * s);
+    rubraview_rect_t t = rubraview_slidepop_title(f, s);
+    rubraview_pal_render_draw_text(r, app->slideshow.paused ? U8("Slide show - paused") : U8("Slide show"),
+                                   (rubraview_pal_rect_t){ t.x, t.y, t.width, t.height }, 15.0 * s, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    static const char *const LABELS[3] = { "Delay", "Change", "At the end" };
+    for (int l = 0; l < 3; ++l) {
+        rubraview_rect_t lr = rubraview_slidepop_label(f, s, (rubraview_slidepop_label_t)l);
+        rubraview_pal_render_draw_text(r, cstr(LABELS[l]), (rubraview_pal_rect_t){ lr.x, lr.y, lr.width, lr.height },
+                                       13.0 * s, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    }
+    int fx = slidepop_transition(app);
+    bool full = rubraview_pal_window_is_fullscreen(app->window);
+    for (int p = 0; p < RUBRAVIEW_SLIDEPOP_PART_COUNT; ++p) {
+        rubraview_rect_t pr = rubraview_slidepop_part(f, s, (rubraview_slidepop_part_t)p);
+        rubraview_pal_rect_t box = { pr.x, pr.y, pr.width, pr.height };
+        bool current = false;
+        char buffer[24];
+        u8str_t text = U8("");
+        switch ((rubraview_slidepop_part_t)p) {
+            case RUBRAVIEW_SLIDEPOP_DELAY_DOWN:  text = U8("-"); break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_UP:    text = U8("+"); break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, buffer, sizeof(buffer)); current = app->slidepop_typing; break;
+            case RUBRAVIEW_SLIDEPOP_FX_CUT:      text = U8("Cut");   current = fx == 0; break;
+            case RUBRAVIEW_SLIDEPOP_FX_FADE:     text = U8("Fade");  current = fx == 1; break;
+            case RUBRAVIEW_SLIDEPOP_FX_SLIDE:    text = U8("Slide"); current = fx == 2; break;
+            case RUBRAVIEW_SLIDEPOP_FX_ZOOM:     text = U8("Zoom");  current = fx == 3; break;
+            case RUBRAVIEW_SLIDEPOP_LOOP:        text = U8("Go round");    current = app->slideshow.loop == RUBRAVIEW_LOOP_ALL; break;
+            case RUBRAVIEW_SLIDEPOP_ONCE:        text = U8("Stop on last"); current = app->slideshow.loop == RUBRAVIEW_LOOP_PLAY_ONCE; break;
+            case RUBRAVIEW_SLIDEPOP_PAUSE:       text = app->slideshow.paused ? U8("Play") : U8("Pause"); break;
+            case RUBRAVIEW_SLIDEPOP_STOP:        text = U8("Stop"); break;
+            case RUBRAVIEW_SLIDEPOP_FULL:        text = full ? U8("Window") : U8("Full screen"); break;
+            case RUBRAVIEW_SLIDEPOP_CLOSE:       text = U8("Close"); break;
+            default: break;
+        }
+        bool hover = app->pointer_x >= pr.x && app->pointer_x < pr.x + pr.width && app->pointer_y >= pr.y && app->pointer_y < pr.y + pr.height;
+        bool field = p == RUBRAVIEW_SLIDEPOP_DELAY_FIELD;
+        rubraview_pal_render_fill_rect(r, box, field ? 0xFF101010u : current ? COLOR_TILE_CURRENT : hover ? 0x50FFFFFFu : 0x28FFFFFFu, 3.0 * s);
+        rubraview_pal_render_stroke_rect(r, box, field && current ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0 * s, 3.0 * s);
+        rubraview_pal_render_draw_text(r, text, box, (p <= RUBRAVIEW_SLIDEPOP_DELAY_UP && !field ? 18.0 : 13.0) * s, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
+static void slidepop_press(app_state_t *app, double x, double y) {
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_rect_t f = slidepop_frame(app);
+    rubraview_slidepop_part_t part = rubraview_slidepop_part_at(f, s, x, y);
+    if (part != RUBRAVIEW_SLIDEPOP_DELAY_FIELD) slidepop_type_end(app, true);
+    if (part == RUBRAVIEW_SLIDEPOP_NONE) {
+        if (!rubraview_rect_contains(f, x, y)) slidepop_close(app);   /* a click away closes it */
+        return;
+    }
+    switch (part) {
+        case RUBRAVIEW_SLIDEPOP_DELAY_DOWN: interval_set(app, rubraview_slidepop_step(app->slideshow.interval_seconds, -1)); break;
+        case RUBRAVIEW_SLIDEPOP_DELAY_UP:   interval_set(app, rubraview_slidepop_step(app->slideshow.interval_seconds, +1)); break;
+        case RUBRAVIEW_SLIDEPOP_DELAY_FIELD:
+            if (!app->slidepop_typing) {
+                int n = snprintf(app->slidepop_text, sizeof(app->slidepop_text), "%.1f", app->slideshow.interval_seconds);
+                app->slidepop_len = n > 0 ? (size_t)n : 0;
+                app->slidepop_typing = true;
+            }
+            break;
+        case RUBRAVIEW_SLIDEPOP_FX_CUT: case RUBRAVIEW_SLIDEPOP_FX_FADE:
+        case RUBRAVIEW_SLIDEPOP_FX_SLIDE: case RUBRAVIEW_SLIDEPOP_FX_ZOOM: {
+            static const char *const SAY[4] = { "slides change at once", "slides fade into the next",
+                                                "slides slide in", "slides zoom and fade" };
+            int fx = (int)(part - RUBRAVIEW_SLIDEPOP_FX_CUT);
+            rubraview_settings_set(&app->settings, U8("viewer"), U8("transition"), (double)fx);   /* Settings › Viewer › Turning a page */
+            settings_took_effect(app);
+            osd_say(app, cstr(SAY[fx]));
+            break;
+        }
+        case RUBRAVIEW_SLIDEPOP_LOOP: app->slideshow.loop = RUBRAVIEW_LOOP_ALL; break;
+        case RUBRAVIEW_SLIDEPOP_ONCE: app->slideshow.loop = RUBRAVIEW_LOOP_PLAY_ONCE; break;
+        case RUBRAVIEW_SLIDEPOP_PAUSE:
+            if (app->slideshow.paused) rubraview_slideshow_resume(&app->slideshow);
+            else rubraview_slideshow_pause(&app->slideshow);
+            break;
+        case RUBRAVIEW_SLIDEPOP_STOP:
+            slidepop_close(app);
+            if (app->slideshow_running) toggle_slideshow(app);
+            break;
+        case RUBRAVIEW_SLIDEPOP_FULL:  handle_action(app, U8("toggle_fullscreen")); break;
+        case RUBRAVIEW_SLIDEPOP_CLOSE: slidepop_close(app); break;
+        default: break;
+    }
+}
+
+/* A press while either is open: true when it was theirs (a click away closes and is spent). */
+static bool popups_press(app_state_t *app, double x, double y, bool right) {
+    if (app->slidepop_open) {
+        if (right) { slidepop_close(app); return false; }   /* a right click elsewhere opens it there again */
+        slidepop_press(app, x, y);
+        return true;
+    }
+    if (!app->ctx_open) return false;
+    int32_t groups[CTX_MAX];
+    size_t n = ctx_rows(app, groups, NULL);
+    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
+    rubraview_rect_t f = ctx_frame(app, groups, n);
+    if (right) { ctx_close(app); return false; }
+    if (rubraview_rect_contains(f, x, y)) {
+        int32_t row = rubraview_ctxmenu_row_at(f, &m, groups, n, x, y);
+        if (row >= 0) ctx_choose(app, row);
+        return true;
+    }
+    ctx_close(app);
+    return true;
+}
+
+/* Keys while either is open: the arrows and Enter in the list, typing in the delay, Esc. */
+static bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (app->slidepop_open) {
+        if (app->slidepop_typing) {
+            if (key_is(combo, "Escape")) { slidepop_type_end(app, false); return true; }
+            if (key_is(combo, "Enter")) { slidepop_type_end(app, true); return true; }
+            if (key_is(combo, "Backspace")) { if (app->slidepop_len > 0) app->slidepop_len--; return true; }
+            if (combo.key_name.len == 1 || key_is(combo, "Period") || key_is(combo, "Comma")) {
+                char c = key_is(combo, "Period") ? '.' : key_is(combo, "Comma") ? ',' : combo.key_name.ptr[0];
+                if (((c >= '0' && c <= '9') || c == '.' || c == ',') && app->slidepop_len + 1 < sizeof(app->slidepop_text)) {
+                    app->slidepop_text[app->slidepop_len++] = c;
+                }
+                return true;
+            }
+            return true;   /* while typing, the slide show's keys wait */
+        }
+        if (key_is(combo, "Escape")) { slidepop_close(app); return true; }
+        return false;
+    }
+    if (!app->ctx_open) return false;
+    int32_t groups[CTX_MAX];
+    bool enabled[CTX_MAX];
+    size_t n = ctx_rows(app, groups, enabled);
+    if (key_is(combo, "Escape")) { ctx_close(app); return true; }
+    if (key_is(combo, "Down")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, +1); return true; }
+    if (key_is(combo, "Up")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, -1); return true; }
+    if (key_is(combo, "Enter")) { if (app->ctx_focus >= 0) ctx_choose(app, app->ctx_focus); return true; }
+    ctx_close(app);   /* any other key: it closes, and the key does what it does */
+    return false;
+}
+
+#define HINT_DELAY 0.6
+
+static bool hint_shown(const app_state_t *app) {
+    return app->hint.len > 0 && rubraview_pal_time_now_seconds() - app->hint_since >= HINT_DELAY;
+}
+
+/* RV-116: the hint, below and right of the pointer, turned to stay in the window. */
+static void draw_hint(app_state_t *app, double win_w, double win_h) {
+    if (!hint_shown(app)) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double font = 13.0 * dpi;
+    double w = (double)app->hint.len * font * 0.52 + 20.0 * dpi;
+    if (w > win_w - 8.0 * dpi) w = win_w - 8.0 * dpi;
+    double h = 28.0 * dpi;
+    double x = app->pointer_x + 14.0 * dpi, y = app->pointer_y + 22.0 * dpi;
+    if (x + w > win_w) x = win_w - w - 4.0 * dpi;
+    if (y + h > win_h) y = app->pointer_y - h - 8.0 * dpi;
+    if (x < 0.0) x = 0.0;
+    if (y < 0.0) y = 0.0;
+    rubraview_pal_rect_t box = { x, y, w, h };
+    rubraview_pal_render_fill_rect(app->renderer, box, 0xF0303030u, 3.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0 * dpi, 3.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, app->hint, box, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+}
+
 static bool sub_tile_anchor(app_state_t *app, double *x, double *y) {
     if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) return false;
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
@@ -8090,6 +8488,18 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
         char del[40];
         size_t checked = list_checked_total(app);
         if (checked > 0) snprintf(del, sizeof(del), "Del (%zu)", checked); else snprintf(del, sizeof(del), "Del");
+        {   /* the box for all: filled when every row is checked, a bar when some are */
+            rubraview_rect_t c = rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL);
+            double side = c.width < c.height ? c.width : c.height;
+            double inset = side * 0.25;
+            rubraview_pal_rect_t mark = { c.x + (c.width - side) * 0.5 + inset, c.y + (c.height - side) * 0.5 + inset,
+                                          side - inset * 2.0, side - inset * 2.0 };
+            bool every = app->list_checked_count > 0 && checked == app->list_checked_count;
+            if (every) rubraview_pal_render_fill_rect(app->renderer, mark, 0xFF5B9BD5u, 2.0);
+            else if (checked > 0) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ mark.x + mark.width * 0.2,
+                     mark.y + mark.height * 0.4, mark.width * 0.6, mark.height * 0.2 }, 0xFF5B9BD5u, 1.0);
+            rubraview_pal_render_stroke_rect(app->renderer, mark, COLOR_TEXT, 1.0, 2.0);
+        }
         listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
         listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), "Save", small, false, COLOR_TEXT);
         listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), "Load", small, false, COLOR_TEXT);
@@ -11208,7 +11618,7 @@ static void settings_apply_rest(app_state_t *app) {
     /* General */
     app->frameless = rubraview_settings_get(st, U8("general"), U8("frameless")) > 0.5;
     rubraview_pal_window_set_frameless(app->window, app->frameless);
-    app->titlebar.trigger_zone = rubraview_settings_get(st, U8("general"), U8("titlebar_trigger_px")) * dpi;
+    app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(st, U8("general"), U8("titlebar_trigger_px"))) * dpi;   /* never less than the bar (owner, 2026-10-14) */
     app->titlebar.hide_delay = rubraview_settings_get(st, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
 
     /* Viewer */
@@ -15223,6 +15633,9 @@ static void render_frame(app_state_t *app) {
         draw_crop_overlay(app);
         draw_chrome(app, (double)win_w, (double)win_h);
         draw_sub_list(app);   /* D-33: on top of every box */
+        draw_ctxmenu(app);    /* RV-116 */
+        draw_slidepop(app);
+        draw_hint(app, (double)win_w, (double)win_h);
         draw_seekfan(app, app->renderer, false);
         draw_chrome_answers(app, (double)win_w, (double)win_h);
         draw_panel(app);
@@ -15315,6 +15728,18 @@ static void tick_timers(app_state_t *app, double dt) {
         tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_pointer(&app->toolbox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_pointer(&app->menubox, &box_metrics, app->pointer_x, app->pointer_y);
+    {
+        /* RV-116: resting on a box's anchor, pin, grip or seek bar says what they do */
+        rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+        u8str_t hint = app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open
+            ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
+        if (hint.len == 0 && app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open)
+            hint = rubraview_box_hint(&app->toolbox, &base, app->pointer_x, app->pointer_y);
+        if (hint.ptr != app->hint.ptr) {
+            app->hint = hint;
+            app->hint_since = rubraview_pal_time_now_seconds();
+        }
+    }
     rubraview_box_tick(&app->toolbox, dt, grace);
     rubraview_box_tick(&app->menubox, dt, grace);
     /* However it was opened, the menu opens at its root, Recent as it is now. */
@@ -15324,7 +15749,11 @@ static void tick_timers(app_state_t *app, double dt) {
         if (rubraview_cursor_hide_tick(&app->cursor, dt)) {
             rubraview_pal_window_set_cursor_visible(app->window, false); /* §3.2.5 */
         }
-        rubraview_slideshow_event_t event = rubraview_slideshow_tick(&app->slideshow, app->slides, dt);
+        /* What the slide show steps through is what is on screen (owner, 2026-10-14: it skipped files):
+           the spreads as they are now, from the one shown, timed from when it is drawn. */
+        slides_follow_screen(app);
+        rubraview_slideshow_event_t event = slide_ready(app) ? rubraview_slideshow_tick(&app->slideshow, app->slides, dt)
+                                                             : RUBRAVIEW_SLIDESHOW_NONE;
         if (event == RUBRAVIEW_SLIDESHOW_ADVANCED) {
             app->subs_leave_unasked = true;
             go_to_spread(app, app->slideshow.current_index);
@@ -15388,6 +15817,15 @@ static uint64_t scene_signature(const app_state_t *app) {
         for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) SIG(&h, (int64_t)lround(eq_band_db(app, b) * 2.0));
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
     }
+    SIG(&h, hint_shown(app)); SIG(&h, (uintptr_t)app->hint.ptr);
+    SIG(&h, app->ctx_open); SIG(&h, app->ctx_focus); SIG(&h, app->slidepop_open); SIG(&h, app->slidepop_typing);
+    if (app->ctx_open || app->slidepop_open) {   /* RV-116: a row or a button lights under the pointer */
+        SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
+        SIG(&h, app->slidepop_len); SIG(&h, (int64_t)lround(app->slideshow.interval_seconds * 10.0));
+        SIG(&h, app->slideshow.paused); SIG(&h, (int)app->slideshow.loop);
+        SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition"))));
+        SIG(&h, app->ctx_confirm.until);
+    }
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
     SIG(&h, app->chrome_hidden); SIG(&h, (int64_t)app->picker.columns);
@@ -15442,6 +15880,10 @@ static void load_keymap(app_state_t *app) {
 
 static void build_slides(app_state_t *app) {
     if (app->layout.count == 0) return;
+    /* the delay and the end chosen stay; a new list is not a new slide show */
+    double interval = app->slideshow.interval_seconds > 0.0 ? app->slideshow.interval_seconds : 3.0;
+    rubraview_loop_policy_t loop = app->slideshow.item_count > 0 ? app->slideshow.loop : RUBRAVIEW_LOOP_ALL;
+    bool paused = app->slideshow.item_count == 0 || app->slideshow.paused;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, app->layout.count, sizeof(rubraview_slideshow_item_t));
     if (!proven_is_ok(res.err)) return;
 
@@ -15453,8 +15895,36 @@ static void build_slides(app_state_t *app) {
            (RV-061). */
         app->slides[i] = (rubraview_slideshow_item_t){ .kind = RUBRAVIEW_MEDIA_STILL, .duration_seconds = 0.0 };
     }
-    app->slideshow = rubraview_slideshow_create(app->layout.count, 3.0, RUBRAVIEW_LOOP_ALL);
-    rubraview_slideshow_pause(&app->slideshow);
+    app->slideshow = rubraview_slideshow_create(app->layout.count, interval, loop);
+    app->slideshow.current_index = app->spread_index < app->layout.count ? app->spread_index : 0;
+    if (paused || !app->slideshow_running) rubraview_slideshow_pause(&app->slideshow);
+}
+
+/* The spreads were made again (a wide page found, the layout changed, a page
+   left out) or the reader turned a page while it ran: the slide show goes on
+   from the spread on screen, its time from nothing. Before, its own count and
+   place stayed as they were when the file was opened, and it went on from
+   there — past spreads, or to the wrong ones. */
+static void slides_follow_screen(app_state_t *app) {
+    if (app->slideshow.item_count != app->layout.count) build_slides(app);
+    if (app->slideshow.current_index != app->spread_index && app->spread_index < app->layout.count) {
+        app->slideshow.current_index = app->spread_index;
+        app->slideshow.elapsed_in_item = 0.0;
+    }
+}
+
+/* The spread on screen has been drawn — its pages read, or found unreadable,
+   or a film or a song: the delay counts from then, so a large picture still
+   being read is not passed over before it was seen. */
+static bool slide_ready(const app_state_t *app) {
+    if (app->spread_index >= app->layout.count) return true;
+    int32_t pages[2] = { app->layout.spreads[app->spread_index].left_index, app->layout.spreads[app->spread_index].right_index };
+    for (int i = 0; i < 2; ++i) {
+        if (pages[i] < 0 || (size_t)pages[i] >= page_count(app)) continue;
+        const app_page_t *page = &app->pages[pages[i]];
+        if (!page->loaded && !page->failed && !is_media_path(app->source.pages[pages[i]].path)) return false;
+    }
+    return true;
 }
 
 /* The ring names pages it wants ready before the reader reaches them.
@@ -17842,7 +18312,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
-    app.titlebar.trigger_zone = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px")) * dpi;
+    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px"))) * dpi;
     app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
     app.listwin = rubraview_listwin_create(dpi);
     app.listwin_shown_page = -1;
@@ -17931,7 +18401,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
                     app.titlebar = rubraview_titlebar_create(event.dpi.scale);
-                    app.titlebar.trigger_zone = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px")) * event.dpi.scale;
+                    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px"))) * event.dpi.scale;
                     app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
                     app.needs_relayout = true;
                     break;
@@ -18140,6 +18610,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    /* RV-116: the right-click list and the slide show's settings take the next press */
+                    if ((app.ctx_open || app.slidepop_open) &&
+                        popups_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
+
                     /* D-33: the list of subtitle tracks takes the next tap —
                        a row chooses it, anywhere else closes the list. */
                     if (app.sub_list_open) {
@@ -18192,6 +18666,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;   /* a point taken off the curve */
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
                         intent = rubraview_pointer_right_click(&ctx);
+                        if (intent == RUBRAVIEW_INTENT_CONTEXT_MENU) {   /* RV-116: the list, at the pointer */
+                            ctx_open_at(&app, event.mouse.x, event.mouse.y);
+                            break;
+                        }
                     } else {
                         /* D-109: what a press on the picture means is known when it is
                            let go — moved, it was a drag and the picture followed, at any

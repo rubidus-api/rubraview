@@ -12,6 +12,8 @@ typedef struct box_parser {
     int32_t profile;       /* the toolbox profile tiles go to, or -1 */
     int32_t group;         /* the group the profile's next tile goes to (D-124) */
     int32_t open_menu;     /* the innermost open menu node, or -1 */
+    int32_t context;       /* RV-116: the right-click list `item` lines go to, or -1 */
+    uint32_t context_line; /* where it began */
 } box_parser_t;
 
 static bool box_fail(box_parser_t *p, const char *message) {
@@ -68,6 +70,46 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
     if (!next_token(p, &rest, &word, &q1)) return p->doc->error == NULL;
     if (q1) return box_fail(p, "a line starts with a keyword, not with quoted text");
 
+    if (p->context >= 0) {
+        /* RV-116: inside `context`: items, groups and its `end` only */
+        rubraview_toolbox_profile_t *list = &p->doc->contexts[p->context];
+        if (rubraview_u8_eq_lit(word, "end")) {
+            p->context = -1;
+        } else if (rubraview_u8_eq_lit(word, "group")) {
+            if (list->tile_count > 0 && p->doc->context_items[p->doc->context_item_count - 1].group == p->group) p->group++;
+        } else if (rubraview_u8_eq_lit(word, "item")) {
+            if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`item` needs an action id");
+            if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`item` needs a \"label\"");
+            if (list->tile_count >= RUBRAVIEW_CONTEXT_MAX_ITEMS) return box_fail(p, "too many items in one right-click list");
+            if (p->doc->context_item_count >= RUBRAVIEW_BOXES_MAX_CONTEXT_ITEMS) return box_fail(p, "too many right-click items");
+            p->doc->context_items[p->doc->context_item_count++] = (rubraview_box_tile_t){ .action = second, .caption = third, .group = p->group };
+            list->tile_count++;
+        } else {
+            return box_fail(p, "inside `context` only `item`, `group` and `end`");
+        }
+        if (p->doc->error) return false;
+        u8str_t extra = {0};
+        bool qe = false;
+        if (next_token(p, &rest, &extra, &qe)) return box_fail(p, "more on the line than the keyword takes");
+        return p->doc->error == NULL;
+    }
+    if (rubraview_u8_eq_lit(word, "context")) {
+        if (p->open_menu >= 0) return box_fail(p, "a `context` inside a menu — close the menu with `end` first");
+        if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`context` needs a profile name");
+        if (p->doc->context_count >= RUBRAVIEW_BOXES_MAX_PROFILES) return box_fail(p, "too many right-click lists");
+        if (rubraview_boxes_context(p->doc, second)) return box_fail(p, "this right-click list is already defined");
+        p->profile = -1;
+        p->group = 0;
+        p->context = (int32_t)p->doc->context_count;
+        p->context_line = p->line;
+        p->doc->contexts[p->doc->context_count++] = (rubraview_toolbox_profile_t){
+            .name = second, .first_tile = (int32_t)p->doc->context_item_count, .tile_count = 0,
+        };
+        u8str_t extra = {0};
+        bool qe = false;
+        if (next_token(p, &rest, &extra, &qe)) return box_fail(p, "more on the line than the keyword takes");
+        return p->doc->error == NULL;
+    }
     if (rubraview_u8_eq_lit(word, "toolbox")) {
         if (p->open_menu >= 0) return box_fail(p, "a toolbox inside a menu — close the menu with `end` first");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`toolbox` needs a profile name");
@@ -110,8 +152,9 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
             if (q3 || !rubraview_u8_eq_lit(third, "when") || !next_token(p, &rest, &condition, &qc) || qc) {
                 return box_fail(p, "after a menu's label only `when <condition>` may follow");
             }
-            if (!rubraview_u8_eq_lit(condition, "media")) return box_fail(p, "the only condition is `when media`");
-            node.when = RUBRAVIEW_BOXES_WHEN_MEDIA;
+            if (rubraview_u8_eq_lit(condition, "media")) node.when = RUBRAVIEW_BOXES_WHEN_MEDIA;
+            else if (rubraview_u8_eq_lit(condition, "plays")) node.when = RUBRAVIEW_BOXES_WHEN_PLAYS;
+            else return box_fail(p, "the conditions are `when media` and `when plays`");
         }
         if (p->doc->error) return false;
         if (!add_box_node(p, node)) return false;
@@ -128,7 +171,7 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         if (p->open_menu < 0) return box_fail(p, "an `end` with no open `menu`");
         p->open_menu = p->doc->nodes[p->open_menu].parent;
     } else {
-        return box_fail(p, "unknown keyword (toolbox, tile, menu, item, recent, end)");
+        return box_fail(p, "unknown keyword (toolbox, tile, context, menu, item, recent, end)");
     }
     if (p->doc->error) return false;
     u8str_t extra = {0};
@@ -140,7 +183,7 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
 bool rubraview_boxes_doc_parse(u8str_t text, rubraview_boxes_doc_t *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
-    box_parser_t p = { .doc = out, .line = 0, .profile = -1, .open_menu = -1 };
+    box_parser_t p = { .doc = out, .line = 0, .profile = -1, .open_menu = -1, .context = -1 };
     size_t start = 0;
     for (size_t i = 0; i <= text.len; ++i) {
         if (i < text.len && text.ptr[i] != '\n') continue;
@@ -151,6 +194,10 @@ bool rubraview_boxes_doc_parse(u8str_t text, rubraview_boxes_doc_t *out) {
     if (p.open_menu >= 0) {
         p.line = out->nodes[p.open_menu].line;
         return box_fail(&p, "this `menu` is never closed with `end`");
+    }
+    if (p.context >= 0) {
+        p.line = p.context_line;
+        return box_fail(&p, "a `context` is never closed with `end`");
     }
     return true;
 }
@@ -171,6 +218,16 @@ const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes
     for (size_t i = 0; i < doc->profile_count; ++i) {
         if (doc->profiles[i].name.len == name.len && memcmp(doc->profiles[i].name.ptr, name.ptr, name.len) == 0) {
             return &doc->profiles[i];
+        }
+    }
+    return NULL;
+}
+
+const rubraview_toolbox_profile_t *rubraview_boxes_context(const rubraview_boxes_doc_t *doc, u8str_t name) {
+    if (!doc) return NULL;
+    for (size_t i = 0; i < doc->context_count; ++i) {
+        if (doc->contexts[i].name.len == name.len && memcmp(doc->contexts[i].name.ptr, name.ptr, name.len) == 0) {
+            return &doc->contexts[i];
         }
     }
     return NULL;
