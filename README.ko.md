@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.75** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.75/rubraview-v0.0.75.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.75/rubraview-v0.0.75.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.76** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.76/rubraview-v0.0.76.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.76/rubraview-v0.0.76.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -206,6 +206,7 @@
 | 메뉴 `Slower` | 더 느리게 재생 |
 | 메뉴 `Faster` | 더 빠르게 재생 |
 | 메뉴 `Choose` | 목록에서 자막 고르기 |
+| 메뉴 `Take out of film` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
 | 메뉴 `Hide all` | 화면을 클릭할 때까지 타이틀바와 플로팅 박스 숨기기 |
 | 메뉴 `100%` | 떠 있는 상자를 불투명하게 |
 | 메뉴 `80%` | 떠 있는 상자 불투명도 80% |

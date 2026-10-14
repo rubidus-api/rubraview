@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.75.exe              the viewer, as built
-dist/rubraview-v0.0.75/                 the release bundle
-dist/rubraview-v0.0.75.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.76.exe              the viewer, as built
+dist/rubraview-v0.0.76/                 the release bundle
+dist/rubraview-v0.0.76.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -576,8 +576,16 @@ While it does:
   encoding; it says which. Changes not saved are lost when you turn to
   another film or another subtitle (it says so). A SAMI caption has no end
   of its own: moved, it takes along the empty line that closes it, and one
-  closed by the next caption only begins elsewhere. A subtitle held inside
-  a film cannot be saved yet. The wheel and the arrow keys move the list;
+  closed by the next caption only begins elsewhere. **Take out**, at the
+  window's top right (or Subtitles › Take out of film), writes the text
+  subtitles a Matroska film (`.mkv`) holds inside as files beside it —
+  `film.kor.srt`, `film.eng.ass`, named by their language, a SubStation
+  track with its own styles — and shows the first; the film itself is not
+  changed, and no FFmpeg is needed. A long film takes a while: the button
+  says how far it is, and a press stops it. Picture subtitles and
+  compressed tracks are not taken out; a file of that name already there
+  is kept under a numbered name unless it is the same. The wheel and the
+  arrow keys move the list;
   other keys do what they do in the viewer, so `Space` pauses and
   `Shift+C` or `Esc` closes it. A DVD's or a Blu-ray's picture subtitles
   are listed by their times only.
@@ -1041,6 +1049,7 @@ listed under a later heading only means that while that is on screen.
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |
+| Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |
 | Menu `80%` | The floating boxes 80 % opaque |

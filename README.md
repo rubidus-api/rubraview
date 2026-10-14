@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.75** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.75/rubraview-v0.0.75.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.75/rubraview-v0.0.75.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.76** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.76/rubraview-v0.0.76.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.76/rubraview-v0.0.76.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -207,6 +207,7 @@ ships with, so it cannot drift from them.
 | Menu `Slower` | Play slower |
 | Menu `Faster` | Play faster |
 | Menu `Choose` | Choose the subtitles from a list |
+| Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |
 | Menu `80%` | The floating boxes 80 % opaque |

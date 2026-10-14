@@ -347,6 +347,7 @@ static const char *const PARTS[] = {
 "    item choose_subtitle_track \"Choose\"\n"
 "    item next_subtitle_track  \"Next\"\n"
 "    item toggle_subtitle_window \"List window\"\n"
+"    item extract_subtitles    \"Take out of film\"\n"
 "    item subtitle_earlier     \"Earlier\"\n"
 "    item subtitle_later       \"Later\"\n"
 "  end\n"
