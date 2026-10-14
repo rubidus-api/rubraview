@@ -525,6 +525,8 @@ typedef struct app_state {
     rubraview_renderer_t      *subs_renderer;
     bool                       subs_open, subs_dirty;
     rubraview_confirm_t        subs_leave;         /* leaving with changes not saved: the second try goes on */
+    double                     subs_leave_through; /* until then the rest of a going let through goes on */
+    bool                       subs_leave_unasked; /* the going is the film's end or the slide show: held, never armed */
     int32_t                    subs_frame[4];
     rubraview_listwin_t        subs_list;
     uint32_t                  *subs_rows;          /* the cue of each row (text subtitles) */
@@ -2867,7 +2869,9 @@ static void media_after_end(app_state_t *app) {
         return;
     }
     app->follow_for = -1;
+    app->subs_leave_unasked = true;
     go_to_spread(app, spread_for_chosen_page(app, next));
+    app->subs_leave_unasked = false;
     update_precache(app);
 }
 
@@ -6848,6 +6852,9 @@ static void pagebar_click(app_state_t *app, double bar_x, double bar_width, doub
 /* The press also takes hold of the bar: moving the pointer turns the
    pages under it, as the film's seek bar does. */
 static void pagebar_press(app_state_t *app, double bar_x, double bar_width, double x, bool detached) {
+    /* RV-115: held here, or every step of the drag after would count as the second try */
+    size_t page = rubraview_pagebar_page(bar_x, bar_width, x, page_count(app));
+    if ((int32_t)page != current_page_index(app) && !subs_may_leave(app)) return;
     pagebar_click(app, bar_x, bar_width, x);
     app->pagebar_dragging = true;
     app->pagebar_detached = detached;
@@ -13715,8 +13722,16 @@ static int subs_kind(const app_state_t *app) {
 static bool subs_may_leave(app_state_t *app) {
     if (!rubraview_subtitle_changed(&app->subtitle)) return true;
     double now = rubraview_pal_time_now_seconds();
-    if (rubraview_confirm_press(&app->subs_leave, 1, now)) { rubraview_confirm_clear(&app->subs_leave); return true; }
-    osd_say(app, U8("subtitle changes not saved: Save keeps them, again leaves them"));
+    if (now < app->subs_leave_through) return true;   /* one going passes through here more than once */
+    if (app->subs_leave_unasked) {                     /* nobody pressed, so there is no second press to wait for */
+        osd_say(app, app->subtitle.source_path.len ? U8("subtitle changes not saved: stopped here; Save keeps them")
+                                                   : U8("subtitle changes not saved: stopped here"));
+        return false;
+    }
+    if (rubraview_confirm_press(&app->subs_leave, 1, now)) { app->subs_leave_through = now + 1.0; return true; }
+    /* a subtitle inside the film cannot be saved (yet): only the way on is said */
+    osd_say(app, app->subtitle.source_path.len ? U8("subtitle changes not saved: Save keeps them, again leaves them")
+                                               : U8("subtitle changes not saved: again leaves them"));
     app->notice_seconds = RUBRAVIEW_CONFIRM_SECONDS;   /* said for as long as the second try counts */
     return false;
 }
@@ -15311,7 +15326,9 @@ static void tick_timers(app_state_t *app, double dt) {
         }
         rubraview_slideshow_event_t event = rubraview_slideshow_tick(&app->slideshow, app->slides, dt);
         if (event == RUBRAVIEW_SLIDESHOW_ADVANCED) {
+            app->subs_leave_unasked = true;
             go_to_spread(app, app->slideshow.current_index);
+            app->subs_leave_unasked = false;
         } else if (event == RUBRAVIEW_SLIDESHOW_ENDED) {
             app->slideshow_running = false;
             rubraview_pal_window_set_cursor_visible(app->window, true);
