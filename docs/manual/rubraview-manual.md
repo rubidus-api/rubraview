@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.74.exe              the viewer, as built
-dist/rubraview-v0.0.74/                 the release bundle
-dist/rubraview-v0.0.74.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.75.exe              the viewer, as built
+dist/rubraview-v0.0.75/                 the release bundle
+dist/rubraview-v0.0.75.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -560,12 +560,27 @@ While it does:
   ticks all of them or none (`Ctrl+A` all; `Shift` + click a run, `Ctrl` +
   click one). **< Earlier** and **Later >** above the list move the ticked
   subtitles by the seconds written between them — click the number to
-  type another (`0.1` as it comes), `Enter` to finish. The moved times
-  hold while the film is open; the header says "moved, not saved", and
-  writing them to the subtitle's file comes in a later version. The wheel
-  and the arrow keys move the list; other keys do what they do in the
-  viewer, so `Space` pauses and `Shift+C` or `Esc` closes it. A DVD's or a
-  Blu-ray's picture subtitles are listed by their times only.
+  type another (`0.1` as it comes), `Enter` to finish. A second click on a
+  row soon after the first (or `F2`, or `Enter`, for the row last clicked)
+  lets you type its text over: it is shown as the file holds it, its tags
+  and all, with `\N` where a line breaks; `Enter` keeps it, `Esc` gives it
+  up. A changed row has a yellow mark and the header says "changed, not
+  saved". **Save** (`Ctrl+S`) writes the subtitle's file again in its own
+  format — SubRip, WebVTT, SubStation or SAMI — changing only the times
+  and texts you changed: the styles, the other lines, the line ends and
+  the encoding (a Korean SAMI in CP949 stays CP949) are as they were. The
+  new file has the subtitle's name; the one before is kept beside it as
+  `name.old1.smi`, then `.old2`, and so on, and is not offered as one of
+  the film's subtitles. Nothing is saved when the file was changed by
+  something else meanwhile, or a typed character cannot be written in its
+  encoding; it says which. Changes not saved are lost when you turn to
+  another film or another subtitle (it says so). A SAMI caption has no end
+  of its own: moved, it takes along the empty line that closes it, and one
+  closed by the next caption only begins elsewhere. A subtitle held inside
+  a film cannot be saved yet. The wheel and the arrow keys move the list;
+  other keys do what they do in the viewer, so `Space` pauses and
+  `Shift+C` or `Esc` closes it. A DVD's or a Blu-ray's picture subtitles
+  are listed by their times only.
 - The toolbox's **CC** button turns subtitles off and on. Tap it twice
   quickly, or hold it for half a second, and a list of the film's subtitles
   opens — tap the one you want (or **Off**).

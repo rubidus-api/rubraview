@@ -36,11 +36,30 @@ typedef enum rubraview_subtitle_format {
     RUBRAVIEW_SUBTITLE_PGS,
 } rubraview_subtitle_format_t;
 
+/**
+ * Where a cue stands in the file's text as it was read (RV-115, D-126):
+ * the start time as written, the end time, and the text with its markup.
+ * Saving copies the file and writes only these places of the cues that
+ * changed, so everything else is the original's, byte for byte. A length
+ * of 0 means that part cannot be written: SAMI has no end of its own — a
+ * caption ends at the next SYNC, and `end` is that SYNC's number only
+ * when it is an empty one that does nothing but close this caption.
+ */
+typedef struct rubraview_subtitle_place {
+    size_t start_at, start_len;
+    size_t end_at, end_len;
+    size_t text_at, text_len;
+} rubraview_subtitle_place_t;
+
 typedef struct rubraview_subtitle_cue {
     double  start_seconds;
     double  end_seconds;
     u8str_t text;        /* markup removed; a line break is '\n' */
     u8str_t language;    /* SAMI carries one per class; empty otherwise */
+    rubraview_subtitle_place_t place;
+    bool    time_changed;   /* moved since it was read */
+    bool    text_changed;   /* edited: `written` is what goes into the file */
+    u8str_t written;
 } rubraview_subtitle_cue_t;
 
 typedef struct rubraview_subtitle_track {
@@ -53,6 +72,13 @@ typedef struct rubraview_subtitle_track {
        language are shown; empty means every cue, as before. */
     u8str_t                     shown_language;
     double                      offset_seconds;  /* §3.16.1's Z/X adjustment */
+    /* RV-115: the text the cues' places point into, kept for saving; the
+       file it came from (empty for a subtitle held in a film) and whether
+       it was not UTF-8 and was read in the machine's code page — both set
+       by whoever read the file. */
+    u8str_t                     source;
+    u8str_t                     source_path;
+    bool                        source_transcoded;
 } rubraview_subtitle_track_t;
 
 /** Guess the format from the filename, before reading anything. */
@@ -69,6 +95,42 @@ rubraview_subtitle_format_t rubraview_subtitle_format_for_name(u8str_t filename)
  */
 rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str_t text,
                                                     rubraview_subtitle_format_t format);
+
+/**
+ * A cue's text as it is edited: what the file holds for it, markup and
+ * all, on one line. A line break of a SubRip or WebVTT cue is shown as
+ * SubStation writes one, `\N`; SAMI's own line ends are spaces (they mean
+ * nothing there; `<br>` breaks a line). Empty when the cue has no place.
+ */
+u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subtitle_track_t *track, size_t index);
+
+/**
+ * Put an edited line in a cue's place: the cue shows it at once (markup
+ * removed, as when read) and remembers what to write. `\N` typed is a
+ * line break in every format. False when the cue has no place, or nothing
+ * would be left to show.
+ */
+bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, u8str_t typed);
+
+/** Has any cue been moved or edited since the track was read? */
+bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track);
+
+/**
+ * The file's text with the changed cues written in (see
+ * `rubraview_subtitle_place_t`): times in the format's own way — SubRip
+ * `00:01:02,500`, WebVTT `00:01:02.500`, SubStation `0:01:02.50`, SAMI
+ * milliseconds — and edited texts with the file's own line ends. With
+ * nothing changed it is the source itself. Empty, and `out_why` says
+ * why, when it cannot be done.
+ */
+u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const char **out_why);
+
+/**
+ * The name the file before is kept under when a subtitle is saved:
+ * `film.smi` with 2 is `film.old2.smi`. The caller takes the first
+ * number whose name is free.
+ */
+u8str_t rubraview_subtitle_backup_path(proven_arena_t *arena, u8str_t path, unsigned number);
 
 /**
  * The cue to show at a given moment, or NULL. The track's own offset is

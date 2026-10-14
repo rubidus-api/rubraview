@@ -66,6 +66,7 @@ size_t rubraview_subwin_shift(rubraview_subtitle_track_t *track, uint32_t *rows,
         if (by == 0.0) continue;
         cue->start_seconds += by;
         cue->end_seconds += by;
+        cue->time_changed = true;
         moved++;
     }
     /* In order of start again. Nearly in order already, so each cue is

@@ -2,6 +2,7 @@
 #include "rubraview/number.h"
 #include "rubraview/path.h"
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 /* ---- shared scanning ---- */
@@ -238,6 +239,13 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
         }
 
         bool timed = parse_clock(left, &start) && parse_clock(right, &end);
+        left = trim(left);
+        rubraview_subtitle_place_t place = {
+            .start_at = (size_t)(left.ptr - text.ptr), .start_len = left.len,
+            .end_at = (size_t)(right.ptr - text.ptr), .end_len = right.len,
+        };
+        const char *body_first = NULL, *body_end = NULL;
+        bool body_whole = true;
 
         /* The text runs to the next blank line whether the timing
            parsed or not — otherwise a bad cue would swallow the one
@@ -259,7 +267,15 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
                 if (used > 0) buffer[used++] = '\n';
                 memcpy(buffer + used, body.ptr, body.len);
                 used += body.len;
+                if (!body_first) body_first = body.ptr;
+                body_end = body.ptr + body.len;
+            } else {
+                body_whole = false;   /* longer than is read: shown cut, and not to be written back */
             }
+        }
+        if (body_first && body_whole) {
+            place.text_at = (size_t)(body_first - text.ptr);
+            place.text_len = (size_t)(body_end - body_first);
         }
 
         if (!timed || used == 0) continue;
@@ -270,6 +286,7 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
             .end_seconds = end,
             .text = strip_markup(arena, raw, false),
             .language = { .ptr = "", .len = 0 },
+            .place = place,
         };
         cue_push(arena, cues, cue);
     }
@@ -282,10 +299,28 @@ static void parse_srt_like(proven_arena_t *arena, u8str_t text, cue_buf_t *cues)
    the class is the only place the language is written. */
 static void sort_cues(rubraview_subtitle_cue_t *cues, size_t count);
 
+/* Where a caption's words stand between its SYNC and the next: after the
+   `<P ...>` that opens it, to the last thing that is not white space. */
+static rubraview_subtitle_place_t smi_place(u8str_t text, size_t from, size_t to, size_t digits, size_t digits_len) {
+    rubraview_subtitle_place_t place = { .start_at = digits, .start_len = digits_len };
+    size_t at = from;
+    while (at < to && (text.ptr[at] == ' ' || text.ptr[at] == '\t' || text.ptr[at] == '\r' || text.ptr[at] == '\n')) at++;
+    if (at < to && text.ptr[at] == '<' && is_paragraph_tag((u8str_t){ .ptr = text.ptr + at, .len = to - at })) {
+        while (at < to && text.ptr[at] != '>') at++;
+        if (at < to) at++;
+    }
+    size_t end = to;
+    while (end > at && (text.ptr[end - 1] == ' ' || text.ptr[end - 1] == '\t' || text.ptr[end - 1] == '\r' || text.ptr[end - 1] == '\n')) end--;
+    place.text_at = at;
+    place.text_len = end - at;
+    return place;
+}
+
 static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
     size_t i = 0;
     double open_at = -1.0;
     size_t body_start = 0;
+    size_t open_digits = 0, open_digits_len = 0;   /* the number of the SYNC that is open */
     u8str_t language = { .ptr = "", .len = 0 };
 
     while (i < text.len) {
@@ -311,6 +346,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
                     .end_seconds = open_at + 0.001,
                     .text = blank ? (u8str_t){ .ptr = body.ptr, .len = 0 } : body,
                     .language = language,
+                    .place = smi_place(text, body_start, i, open_digits, open_digits_len),
                 };
                 cue_push(arena, cues, cue);
             }
@@ -331,6 +367,8 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             double ms = 0.0;
             if (v > digits && rubraview_parse_double((u8str_t){ .ptr = text.ptr + digits, .len = v - digits }, &ms)) {
                 start_ms = ms;
+                open_digits = digits;
+                open_digits_len = v - digits;
             }
             break;
         }
@@ -370,6 +408,7 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
                 .end_seconds = open_at + 0.001,
                 .text = blank ? (u8str_t){ .ptr = body.ptr, .len = 0 } : body,
                 .language = language,
+                .place = smi_place(text, body_start, text.len, open_digits, open_digits_len),
             };
             cue_push(arena, cues, cue);
         }
@@ -393,6 +432,11 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             if (later->language.len != cue->language.len) continue;
             if (later->language.len > 0 && memcmp(later->language.ptr, cue->language.ptr, cue->language.len) != 0) continue;
             end = later->start_seconds;
+            /* An empty caption does nothing but close this one: its number is this one's end. */
+            if (later->text.len == 0) {
+                cue->place.end_at = later->place.start_at;
+                cue->place.end_len = later->place.start_len;
+            }
             break;
         }
         cue->end_seconds = end > cue->start_seconds ? end : cue->start_seconds + 3.0;
@@ -444,6 +488,11 @@ static void parse_ass(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
             .end_seconds = finish,
             .text = strip_markup(arena, body, true),
             .language = { .ptr = "", .len = 0 },
+            .place = {
+                .start_at = (size_t)(trim(fields[1]).ptr - text.ptr), .start_len = trim(fields[1]).len,
+                .end_at = (size_t)(trim(fields[2]).ptr - text.ptr), .end_len = trim(fields[2]).len,
+                .text_at = (size_t)(body.ptr - text.ptr), .text_len = body.len,
+            },
         };
         if (cue.text.len > 0) cue_push(arena, cues, cue);
     }
@@ -517,6 +566,7 @@ rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str
     sort_cues(cues.data, cues.count);
     track.cues = cues.data;
     track.count = cues.count;
+    track.source = text;
     if (cues.count > 0) track.language = cues.data[0].language;
     return track;
 }
@@ -591,6 +641,15 @@ u8str_t rubraview_subtitle_language_tag(u8str_t video_path, u8str_t subtitle_pat
     return none;
 }
 
+/* `film.old3.smi`: the file a save kept (RV-115). It is the subtitle as
+   it was, not one to offer beside the one that took its name. */
+static bool is_kept_copy(u8str_t name) {
+    u8str_t ext = rubraview_path_ext(name);
+    size_t end = name.len - ext.len, at = end;
+    while (at > 0 && name.ptr[at - 1] >= '0' && name.ptr[at - 1] <= '9') at--;
+    return at < end && at >= 4 && memcmp(name.ptr + at - 4, ".old", 4) == 0;
+}
+
 size_t rubraview_subtitle_discover(u8str_t video_path,
                                    const u8str_t *sibling_paths, size_t sibling_count,
                                    rubraview_subtitle_candidate_t *out, size_t capacity) {
@@ -611,6 +670,7 @@ size_t rubraview_subtitle_discover(u8str_t video_path,
         if (name.len < stem.len) continue;
         if (memcmp(name.ptr, stem.ptr, stem.len) != 0) continue;
         if (name.len > stem.len && name.ptr[stem.len] != '.') continue;
+        if (is_kept_copy(name)) continue;
 
         if (out && found < capacity) {
             out[found] = (rubraview_subtitle_candidate_t){ .path = sibling_paths[i], .format = format };
@@ -618,4 +678,215 @@ size_t rubraview_subtitle_discover(u8str_t video_path,
         found++;
     }
     return found;
+}
+
+/* ---- writing back (RV-115, D-126) ---- */
+
+static u8str_t arena_copy(proven_arena_t *arena, const char *ptr, size_t len) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    if (len > 0) memcpy(res.value.ptr, ptr, len);
+    res.value.ptr[len] = '\0';
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = len };
+}
+
+static bool place_in(const rubraview_subtitle_track_t *track, size_t at, size_t len) {
+    return len > 0 && at <= track->source.len && len <= track->source.len - at;
+}
+
+u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subtitle_track_t *track, size_t index) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || !track || index >= track->count) return empty;
+    const rubraview_subtitle_cue_t *cue = &track->cues[index];
+    u8str_t raw;
+    if (cue->text_changed) raw = cue->written;
+    else if (place_in(track, cue->place.text_at, cue->place.text_len)) raw = (u8str_t){ track->source.ptr + cue->place.text_at, cue->place.text_len };
+    else return empty;
+
+    /* Twice the room: a line end becomes the two characters of `\N`. */
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, raw.len * 2 + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t n = 0;
+    bool lines = track->format == RUBRAVIEW_SUBTITLE_SRT || track->format == RUBRAVIEW_SUBTITLE_VTT;
+    for (size_t i = 0; i < raw.len; ++i) {
+        char c = raw.ptr[i];
+        if (c == '\r') continue;
+        if (c == '\n' || c == '\t') {
+            if (lines && c == '\n') { out[n++] = '\\'; out[n++] = 'N'; }
+            else if (n > 0 && out[n - 1] != ' ') out[n++] = ' ';
+            continue;
+        }
+        out[n++] = c;
+    }
+    out[n] = '\0';
+    return (u8str_t){ .ptr = out, .len = n };
+}
+
+bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, u8str_t typed) {
+    if (!arena || !track || index >= track->count) return false;
+    rubraview_subtitle_cue_t *cue = &track->cues[index];
+    if (!place_in(track, cue->place.text_at, cue->place.text_len)) return false;
+    typed = trim(typed);
+    if (typed.len == 0) return false;
+
+    /* The file's own line end, for the formats whose text has lines. */
+    const char *eol = "\n";
+    for (size_t i = 0; i + 1 < track->source.len && i < 65536; ++i) {
+        if (track->source.ptr[i] == '\n') break;
+        if (track->source.ptr[i] == '\r' && track->source.ptr[i + 1] == '\n') { eol = "\r\n"; break; }
+    }
+    const char *brk = track->format == RUBRAVIEW_SUBTITLE_SMI ? "<br>"
+                    : track->format == RUBRAVIEW_SUBTITLE_ASS ? "\\N" : eol;
+    size_t brk_len = strlen(brk);
+
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, typed.len * 2 + 1);   /* a break is four bytes at most for two typed */
+    if (!proven_is_ok(res.err)) return false;
+    char *out = (char*)(void*)res.value.ptr;
+    size_t n = 0;
+    for (size_t i = 0; i < typed.len; ++i) {
+        char c = typed.ptr[i];
+        if (c == '\r' || c == '\n') continue;                 /* one line is typed */
+        if (c == '\\' && i + 1 < typed.len && typed.ptr[i + 1] == 'N') {
+            /* no blank line inside a SubRip cue: it would end it */
+            if (n > 0) { memcpy(out + n, brk, brk_len); n += brk_len; }
+            i++;
+            while (i + 1 < typed.len && typed.ptr[i + 1] == ' ') i++;
+            continue;
+        }
+        out[n++] = c;
+    }
+    out[n] = '\0';
+    u8str_t written = { .ptr = out, .len = n };
+
+    /* What is shown is read as the reader reads it: a SubRip cue's lines joined by a plain line end. */
+    u8str_t plain = written;
+    if (brk[0] == '\r') {
+        proven_result_mem_mut_t plain_res = proven_arena_alloc(arena, n + 1);
+        if (!proven_is_ok(plain_res.err)) return false;
+        char *to = (char*)(void*)plain_res.value.ptr;
+        size_t m = 0;
+        for (size_t i = 0; i < n; ++i) if (out[i] != '\r') to[m++] = out[i];
+        to[m] = '\0';
+        plain = (u8str_t){ .ptr = to, .len = m };
+    }
+    u8str_t shown = track->format == RUBRAVIEW_SUBTITLE_SMI ? strip_markup_as(arena, plain, false, true)
+                  : strip_markup(arena, plain, track->format == RUBRAVIEW_SUBTITLE_ASS);
+    if (shown.len == 0) return false;
+    cue->written = written;
+    cue->text = shown;
+    cue->text_changed = true;
+    return true;
+}
+
+bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track) {
+    if (!track) return false;
+    for (size_t i = 0; i < track->count; ++i) {
+        if (track->cues[i].time_changed || track->cues[i].text_changed) return true;
+    }
+    return false;
+}
+
+static u8str_t write_time(proven_arena_t *arena, rubraview_subtitle_format_t format, double seconds) {
+    char buf[40];
+    if (!(seconds > 0.0)) seconds = 0.0;
+    if (seconds > 359999.0) seconds = 359999.0;
+    long long ms = (long long)(seconds * 1000.0 + 0.5);
+    int n;
+    if (format == RUBRAVIEW_SUBTITLE_SMI) {
+        n = snprintf(buf, sizeof(buf), "%lld", ms);
+    } else if (format == RUBRAVIEW_SUBTITLE_ASS) {
+        long long cs = (long long)(seconds * 100.0 + 0.5);
+        n = snprintf(buf, sizeof(buf), "%lld:%02lld:%02lld.%02lld", cs / 360000, cs / 6000 % 60, cs / 100 % 60, cs % 100);
+    } else {
+        n = snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld%c%03lld", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60,
+                     format == RUBRAVIEW_SUBTITLE_VTT ? '.' : ',', ms % 1000);
+    }
+    return n > 0 ? arena_copy(arena, buf, (size_t)n) : (u8str_t){ .ptr = "", .len = 0 };
+}
+
+typedef struct patch { size_t at, len; u8str_t with; } patch_t;
+
+static int patch_order(const void *a, const void *b) {
+    const patch_t *x = a, *y = b;
+    return x->at < y->at ? -1 : x->at > y->at ? 1 : 0;
+}
+
+u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const char **out_why) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    const char *why_sink = NULL;
+    if (!out_why) out_why = &why_sink;
+    *out_why = NULL;
+    if (!arena || !track || track->source.len == 0) { *out_why = "the subtitle's file was not kept"; return empty; }
+    if (!rubraview_subtitle_changed(track)) return track->source;
+
+    /* Three places a cue at most. */
+    if (track->count > SIZE_MAX / 3 / sizeof(patch_t)) { *out_why = "too many subtitles"; return empty; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count * 3, sizeof(patch_t));
+    if (!proven_is_ok(res.err)) { *out_why = "no memory"; return empty; }
+    patch_t *patches = (patch_t*)(void*)res.value.ptr;
+    size_t count = 0;
+    for (size_t i = 0; i < track->count; ++i) {
+        const rubraview_subtitle_cue_t *cue = &track->cues[i];
+        if (cue->time_changed) {
+            if (!place_in(track, cue->place.start_at, cue->place.start_len)) { *out_why = "a moved subtitle has no place in the file"; return empty; }
+            patches[count++] = (patch_t){ cue->place.start_at, cue->place.start_len, write_time(arena, track->format, cue->start_seconds) };
+            if (place_in(track, cue->place.end_at, cue->place.end_len)) {
+                patches[count++] = (patch_t){ cue->place.end_at, cue->place.end_len, write_time(arena, track->format, cue->end_seconds) };
+            }
+        }
+        if (cue->text_changed) {
+            if (!place_in(track, cue->place.text_at, cue->place.text_len)) { *out_why = "an edited subtitle has no place in the file"; return empty; }
+            patches[count++] = (patch_t){ cue->place.text_at, cue->place.text_len, cue->written };
+        }
+    }
+    qsort(patches, count, sizeof(patches[0]), patch_order);
+
+    /* Two captions of a SAMI may share one SYNC (a class each): the same
+       place written twice is written once; places that only overlap are
+       a file this cannot save. */
+    size_t kept = 0, grow = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (patches[i].with.len == 0) { *out_why = "a time or a text could not be written"; return empty; }
+        if (kept > 0 && patches[i].at == patches[kept - 1].at && patches[i].len == patches[kept - 1].len) continue;
+        if (kept > 0 && patches[i].at < patches[kept - 1].at + patches[kept - 1].len) { *out_why = "two changes touch the same place in the file"; return empty; }
+        patches[kept++] = patches[i];
+        if (patches[i].with.len > SIZE_MAX / 2 - grow) { *out_why = "too long"; return empty; }
+        grow += patches[i].with.len;
+    }
+    if (track->source.len > SIZE_MAX / 2 - grow) { *out_why = "too long"; return empty; }
+    proven_result_mem_mut_t out_res = proven_arena_alloc(arena, track->source.len + grow + 1);
+    if (!proven_is_ok(out_res.err)) { *out_why = "no memory"; return empty; }
+    char *out = (char*)(void*)out_res.value.ptr;
+    size_t n = 0, from = 0;
+    for (size_t i = 0; i < kept; ++i) {
+        memcpy(out + n, track->source.ptr + from, patches[i].at - from);
+        n += patches[i].at - from;
+        memcpy(out + n, patches[i].with.ptr, patches[i].with.len);
+        n += patches[i].with.len;
+        from = patches[i].at + patches[i].len;
+    }
+    memcpy(out + n, track->source.ptr + from, track->source.len - from);
+    n += track->source.len - from;
+    out[n] = '\0';
+    return (u8str_t){ .ptr = out, .len = n };
+}
+
+u8str_t rubraview_subtitle_backup_path(proven_arena_t *arena, u8str_t path, unsigned number) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || path.len == 0 || path.len > 32000) return empty;
+    u8str_t ext = rubraview_path_ext(path);
+    size_t stem = path.len - ext.len;
+    char mark[32];
+    int m = snprintf(mark, sizeof(mark), ".old%u", number);
+    if (m <= 0) return empty;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, path.len + (size_t)m + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *out = (char*)(void*)res.value.ptr;
+    memcpy(out, path.ptr, stem);
+    memcpy(out + stem, mark, (size_t)m);
+    memcpy(out + stem + (size_t)m, path.ptr + stem, ext.len);
+    out[path.len + (size_t)m] = '\0';
+    return (u8str_t){ .ptr = out, .len = path.len + (size_t)m };
 }

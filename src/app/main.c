@@ -537,7 +537,13 @@ typedef struct app_state {
     char                       subs_amount[16];    /* the seconds a press of Earlier / Later moves */
     size_t                     subs_amount_len;
     bool                       subs_amount_focus;
-    bool                       subs_changed;       /* cues moved and not saved */
+    int32_t                    subs_edit_row;      /* the row whose text is being typed; -1 */
+    rubraview_textedit_t       subs_edit;
+    char                       subs_edit_buffer[1024];
+    char                       subs_edit_composing[64];   /* the IME's unfinished part */
+    size_t                     subs_edit_composing_len;
+    int32_t                    subs_click_row;     /* for a double click */
+    double                     subs_click_at;
     rubraview_window_t        *files_window;
     rubraview_renderer_t      *files_renderer;
     bool                       files_open, files_dirty;
@@ -2143,11 +2149,15 @@ static rubraview_subtitle_track_t subtitle_read(proven_arena_t *arena,
        The archive-name check is a UTF-8 validator, so it answers this
        question too; bytes that are not UTF-8 are read in the machine's
        own code page (0). */
+    bool transcoded = false;
     if (rubraview_archive_filename_detect(text, false) == RUBRAVIEW_ENCODING_NEEDS_FALLBACK) {
         u8str_t converted = rubraview_pal_transcode_codepage(arena, text, 0);
-        if (converted.len > 0) text = converted;
+        if (converted.len > 0) { text = converted; transcoded = true; }
     }
     rubraview_subtitle_track_t track = rubraview_subtitle_parse(arena, text, candidate.format);
+    /* RV-115: where it came from and how it was read, for saving it again. */
+    track.source_path = candidate.path;
+    track.source_transcoded = transcoded;
     if (track.count == 0) { if (out_why) *out_why = "the subtitle file held no usable lines"; return empty; }
     if (out_why) *out_why = NULL;
     return track;
@@ -2305,6 +2315,8 @@ static void subtitle_restore_offset(app_state_t *app) {
 }
 
 static void subtitle_select(app_state_t *app, int32_t index) {
+    /* RV-115: moved or edited and not saved — said, since it cannot be asked here. */
+    if (rubraview_subtitle_changed(&app->subtitle)) osd_say(app, U8("the subtitle's changes were not saved"));
     vobsub_clear(app);
     pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
@@ -13412,7 +13424,9 @@ static void subs_sync(app_state_t *app) {
     app->subs_count = 0;
     app->subs_anchor = SIZE_MAX;
     app->subs_hover = app->subs_now = -1;
-    app->subs_changed = false;
+    app->subs_edit_row = -1;
+    app->subs_edit_composing_len = 0;
+    app->subs_click_row = -1;
     app->subs_list.first = 0;
     app->subs_scrolled_at = 0.0;
     app->subs_dirty = true;
@@ -13448,7 +13462,7 @@ static int32_t subs_row_now(const app_state_t *app) {
 static void subs_focus_amount(app_state_t *app, bool on) {
     if (app->subs_amount_focus == on) return;
     app->subs_amount_focus = on;
-    if (app->subs_window) rubraview_pal_window_text_input(app->subs_window, on);
+    if (app->subs_window) rubraview_pal_window_text_input(app->subs_window, on || app->subs_edit_row >= 0);
     if (!on && app->subs_amount_len == 0) {           /* left empty: the tenth it came with */
         memcpy(app->subs_amount, "0.1", 3);
         app->subs_amount_len = 3;
@@ -13466,6 +13480,7 @@ static void subs_close(app_state_t *app) {
     app->subs_window = NULL;
     app->subs_open = false;
     app->subs_amount_focus = false;
+    app->subs_edit_row = -1;                     /* a text half typed is given up with the window */
 }
 
 /* The header and the bar are the list's title; the rows fill the rest. */
@@ -13513,12 +13528,13 @@ static void subs_show(app_state_t *app) {
     app->subs_for = NULL;                        /* the first frame takes the track as new */
     app->subs_for_count = 0;
     app->subs_amount_focus = false;
+    app->subs_edit_row = app->subs_click_row = -1;
     if (app->subs_amount_len == 0) { memcpy(app->subs_amount, "0.1", 3); app->subs_amount_len = 3; }
     subs_layout(app);
 }
 
 /* Where the parts above the rows are, in the window's own pixels. */
-typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER } subs_part_t;
+typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER, SUBS_PART_SAVE } subs_part_t;
 
 static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t part) {
     const rubraview_listwin_t *lw = &app->subs_list;
@@ -13529,7 +13545,8 @@ static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t p
         case SUBS_PART_ALL:     return (rubraview_pal_rect_t){ pad, (band - box) * 0.5, box, box };
         case SUBS_PART_EARLIER: return (rubraview_pal_rect_t){ pad, y, button, rh * 0.9 };
         case SUBS_PART_AMOUNT:  return (rubraview_pal_rect_t){ pad * 2.0 + button, y, field, rh * 0.9 };
-        default:                return (rubraview_pal_rect_t){ pad * 4.0 + button + field + rh * 0.6, y, button, rh * 0.9 };
+        case SUBS_PART_LATER:   return (rubraview_pal_rect_t){ pad * 4.0 + button + field + rh * 0.6, y, button, rh * 0.9 };
+        default:                return (rubraview_pal_rect_t){ lw->width - pad - button, y, button, rh * 0.9 };   /* Save, at the right */
     }
 }
 
@@ -13570,10 +13587,119 @@ static void subs_move(app_state_t *app, int sign) {
     if (app->subtitle.count > app->subs_room) return;
     size_t moved = rubraview_subwin_shift(&app->subtitle, app->subs_rows, app->subs_chosen, app->subs_count,
                                           sign < 0 ? -amount : amount, app->subs_marks);
-    if (moved > 0) app->subs_changed = true;
     char line[96];
     int n = snprintf(line, sizeof(line), "%zu subtitle%s %.*s s %s", moved, moved == 1 ? "" : "s",
                      (int)app->subs_amount_len, app->subs_amount, sign < 0 ? "earlier" : "later");
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    app->subs_dirty = true;
+}
+
+/* A row's text typed over (RV-115 stage 2): what the file holds for it,
+   markup and all, on one line — `\N` is a line break. Enter keeps it, Esc
+   gives it up; a press elsewhere keeps it too. */
+static void subs_edit_end(app_state_t *app, bool keep) {
+    if (app->subs_edit_row < 0) return;
+    size_t row = (size_t)app->subs_edit_row;
+    app->subs_edit_row = -1;
+    app->subs_edit_composing_len = 0;
+    if (app->subs_window && !app->subs_amount_focus) rubraview_pal_window_text_input(app->subs_window, false);
+    app->subs_dirty = true;
+    if (!keep || subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
+    size_t cue = app->subs_rows[row];
+    u8str_t typed = rubraview_textedit_text(&app->subs_edit);
+    u8str_t was = rubraview_subtitle_cue_typed(app->arena, &app->subtitle, cue);
+    if (typed.len == was.len && memcmp(typed.ptr, was.ptr, typed.len) == 0) return;
+    if (!rubraview_subtitle_cue_retype(app->arena, &app->subtitle, cue, typed)) {
+        osd_say(app, U8("a subtitle cannot be left with nothing to show"));
+    }
+}
+
+static void subs_edit_begin(app_state_t *app, size_t row) {
+    if (subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
+    subs_edit_end(app, true);
+    u8str_t typed = rubraview_subtitle_cue_typed(app->arena, &app->subtitle, app->subs_rows[row]);
+    if (typed.len == 0) {
+        osd_say(app, U8("this subtitle's text has no place in a file to edit"));
+        return;
+    }
+    if (typed.len + 1 >= sizeof(app->subs_edit_buffer)) {
+        osd_say(app, U8("this subtitle is too long to edit here"));
+        return;
+    }
+    subs_focus_amount(app, false);
+    app->subs_edit = rubraview_textedit_make(app->subs_edit_buffer, sizeof(app->subs_edit_buffer));
+    rubraview_textedit_set(&app->subs_edit, typed);
+    rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_END, false);
+    app->subs_edit_row = (int32_t)row;
+    app->subs_edit_composing_len = 0;
+    rubraview_pal_window_text_input(app->subs_window, true);
+    app->subs_dirty = true;
+}
+
+/* Save: the file written again in its own format with only the changed
+   places new (D-126). The new file takes the subtitle's name; the one
+   before is kept beside it as `name.old1.ext`, the first number free. */
+static void subs_save(app_state_t *app) {
+    subs_edit_end(app, true);
+    rubraview_subtitle_track_t *track = &app->subtitle;
+    if (subs_kind(app) != SUBS_TEXT) { osd_say(app, U8("only text subtitles can be saved")); return; }
+    if (!rubraview_subtitle_changed(track)) { osd_say(app, U8("nothing was changed")); return; }
+    if (track->source_path.len == 0) {
+        osd_say(app, U8("this subtitle is inside the film: it cannot be saved yet"));
+        return;
+    }
+    const char *why = NULL;
+    u8str_t next = rubraview_subtitle_patched(app->arena, track, &why);
+    if (next.len == 0) {
+        char line[160];
+        int n = snprintf(line, sizeof(line), "not saved: %s", why ? why : "the file could not be written again");
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        return;
+    }
+    /* The file must still be what was read, and read back the same in its own encoding. */
+    u8str_t disk = rubraview_pal_fs_read_file(app->arena, track->source_path, SUBTITLE_MAX_BYTES);
+    u8str_t was = track->source_transcoded ? rubraview_pal_encode_codepage(app->arena, track->source, 0) : track->source;
+    if (disk.len == 0 || was.len != disk.len || memcmp(was.ptr, disk.ptr, disk.len) != 0) {
+        osd_say(app, track->source_transcoded && was.len == 0
+                         ? U8("not saved: the file does not read back the same in its encoding")
+                         : U8("not saved: the file was changed on disk since it was read"));
+        return;
+    }
+    u8str_t bytes = next;
+    if (track->source_transcoded) {
+        bytes = rubraview_pal_encode_codepage(app->arena, next, 0);
+        if (bytes.len == 0) {
+            osd_say(app, U8("not saved: a character typed cannot be written in the file's encoding"));
+            return;
+        }
+    }
+    u8str_t kept = { .ptr = "", .len = 0 };
+    for (unsigned number = 1; number < 10000; ++number) {
+        u8str_t name = rubraview_subtitle_backup_path(app->arena, track->source_path, number);
+        if (name.len == 0) break;
+        if (!rubraview_pal_fs_exists(name)) { kept = name; break; }
+    }
+    if (kept.len == 0 || !rubraview_pal_fs_move(track->source_path, kept)) {
+        osd_say(app, U8("not saved: the file before could not be renamed"));
+        return;
+    }
+    if (!rubraview_pal_fs_write_file(track->source_path, bytes)) {
+        (void)rubraview_pal_fs_move(kept, track->source_path);   /* put it back */
+        osd_say(app, U8("not saved: the new file could not be written"));
+        return;
+    }
+    /* Read as saved: the places are the new file's, and nothing is changed. */
+    rubraview_subtitle_track_t fresh = rubraview_subtitle_parse(app->arena, next, track->format);
+    if (fresh.count > 0) {
+        fresh.offset_seconds = track->offset_seconds;
+        fresh.shown_language = track->shown_language;
+        fresh.source_path = track->source_path;
+        fresh.source_transcoded = track->source_transcoded;
+        app->subtitle = fresh;
+    }
+    char line[400];
+    u8str_t kept_name = rubraview_path_basename(kept);
+    int n = snprintf(line, sizeof(line), "saved; the file before is %.*s", (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
     if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
     app->subs_dirty = true;
 }
@@ -13619,7 +13745,7 @@ static void draw_subs_window(app_state_t *app) {
     } else {
         u8str_t name = app->subtitle_name;
         hn = snprintf(head, sizeof(head), "%zu subtitle%s   %zu ticked   %.*s%s", count, count == 1 ? "" : "s", picked,
-                      (int)(name.len < 200 ? name.len : 200), name.ptr, app->subs_changed ? "   (moved, not saved)" : "");
+                      (int)(name.len < 200 ? name.len : 200), name.ptr, kind == SUBS_TEXT && rubraview_subtitle_changed(&app->subtitle) ? "   (changed, not saved)" : "");
     }
     rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
     double head_x = pad;
@@ -13648,6 +13774,13 @@ static void draw_subs_window(app_state_t *app) {
         if (tn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t unit = { amount.x + amount.width + pad * 0.5, amount.y, lw->row_height * 0.8, amount.height };
         rubraview_pal_render_draw_text(r, U8("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_rect_t save = subs_part_rect(app, SUBS_PART_SAVE);
+        if (save.x > later.x + later.width + pad) {          /* room for it beside Later */
+            bool changed = rubraview_subtitle_changed(&app->subtitle);
+            rubraview_pal_render_fill_rect(r, save, changed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(r, save, COLOR_BOX_BORDER, 1.0, 3.0);
+            rubraview_pal_render_draw_text(r, U8("Save"), save, font, changed ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
     } else if (kind != SUBS_NONE) {
         rubraview_pal_rect_t note = { pad, band, lw->width - 2.0 * pad, band };
         rubraview_pal_render_draw_text(r, U8("picture subtitles: a click goes there; they cannot be moved or edited"), note,
@@ -13668,7 +13801,7 @@ static void draw_subs_window(app_state_t *app) {
             subs_draw_box(r, box, app->subs_chosen[i], false);
             x = box.x + box.width + pad;
         }
-        char clock[32], line[1024];
+        char clock[32], line[1200];   /* a text being typed, the IME's part and the caret fit */
         double end = -1.0, start = subs_row_start(app, i, &end);
         rubraview_pal_rect_t start_box = { x, row.y, time_w, row.height };
         rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -13681,6 +13814,35 @@ static void draw_subs_window(app_state_t *app) {
         u8str_t said = kind == SUBS_TEXT ? rubraview_subwin_line(line, sizeof(line), app->subtitle.cues[app->subs_rows[i]].text)
                                          : U8("(picture)");
         rubraview_pal_rect_t text = { x, row.y, row.x + row.width - x - pad, row.height };
+        if (kind == SUBS_TEXT && (app->subtitle.cues[app->subs_rows[i]].time_changed || app->subtitle.cues[app->subs_rows[i]].text_changed)) {
+            rubraview_pal_rect_t mark = { row.x, row.y + 3.0, 3.0, row.height - 6.0 };   /* changed, not saved */
+            rubraview_pal_render_fill_rect(r, mark, 0xFFF0C040u, 1.0);
+        }
+        if ((int32_t)i == app->subs_edit_row && text.width > 0.0) {
+            /* The text being typed: the file's own words with the caret, the IME's part before it. */
+            rubraview_pal_rect_t field = { text.x - pad * 0.5, row.y + 2.0, text.width + pad * 0.5, row.height - 4.0 };
+            rubraview_pal_render_fill_rect(r, field, 0xFF101010u, 2.0);
+            rubraview_pal_render_stroke_rect(r, field, COLOR_TILE_CURRENT, 1.0, 2.0);
+            const rubraview_textedit_t *te = &app->subs_edit;
+            size_t caret = te->caret <= te->len ? te->caret : te->len, comp = app->subs_edit_composing_len;
+            /* Begin far enough on that the caret is in the field. */
+            size_t room = font > 0.0 ? (size_t)(text.width / (font * 0.56)) : 0, from = caret, used = comp + 2;
+            while (from > 0) {
+                size_t prev = from - 1;
+                while (prev > 0 && ((unsigned char)te->buf[prev] & 0xC0) == 0x80) prev--;
+                size_t wide = (unsigned char)te->buf[prev] >= 0xE0 ? 2 : 1;
+                if (used + wide > room) break;
+                used += wide;
+                from = prev;
+            }
+            size_t n = 0;
+            memcpy(line + n, te->buf + from, caret - from); n += caret - from;
+            memcpy(line + n, app->subs_edit_composing, comp); n += comp;
+            line[n++] = '|';
+            memcpy(line + n, te->buf + caret, te->len - caret); n += te->len - caret;
+            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ line, n }, text.width, font), text, font,
+                                           COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        } else
         if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
                                                              kind == SUBS_TEXT ? COLOR_TEXT : 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
@@ -13699,6 +13861,7 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     int kind = subs_kind(app);
     size_t count = app->subs_count, index = 0;
     bool on_amount = kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_AMOUNT), x, y);
+    subs_edit_end(app, true);                    /* a press anywhere keeps what was typed */
     subs_focus_amount(app, on_amount);
     if (on_amount) return;
     if (kind == SUBS_TEXT && y < app->subs_list.title_height) {
@@ -13712,6 +13875,8 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
             subs_move(app, -1);
         } else if (subs_in(subs_part_rect(app, SUBS_PART_LATER), x, y)) {
             subs_move(app, +1);
+        } else if (subs_in(subs_part_rect(app, SUBS_PART_SAVE), x, y)) {
+            subs_save(app);
         }
         app->subs_dirty = true;
         return;
@@ -13723,7 +13888,16 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     bool on_box = x < box.x + box.width + app->subs_list.row_height * 0.3;
     bool ctrl = on_box || (modifiers & RUBRAVIEW_MOD_CTRL) != 0;
     if (rubraview_subwin_click(app->subs_chosen, count, &app->subs_anchor, index, ctrl, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0)) {
-        subs_go_to(app, index);
+        /* The first click goes there; a second one soon after edits the text. */
+        double now = rubraview_pal_time_now_seconds();
+        if (app->subs_click_row == (int32_t)index && now - app->subs_click_at < 0.45) {
+            app->subs_click_row = -1;
+            subs_edit_begin(app, index);
+        } else {
+            app->subs_click_row = (int32_t)index;
+            app->subs_click_at = now;
+            subs_go_to(app, index);
+        }
     }
     app->subs_dirty = true;
 }
@@ -13766,7 +13940,19 @@ static size_t subs_pump(app_state_t *app) {
                                     ? (int32_t)index : -1;
                 app->subs_dirty = true;
                 break;
+            case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+                if (app->subs_edit_row < 0) break;
+                app->subs_edit_composing_len = event.text.length < sizeof(app->subs_edit_composing) ? event.text.length : 0;
+                memcpy(app->subs_edit_composing, event.text.utf8, app->subs_edit_composing_len);
+                app->subs_dirty = true;
+                break;
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
+                if (app->subs_edit_row >= 0) {
+                    app->subs_edit_composing_len = 0;
+                    (void)rubraview_textedit_insert(&app->subs_edit, (u8str_t){ .ptr = event.text.utf8, .len = event.text.length });
+                    app->subs_dirty = true;
+                    break;
+                }
                 if (!app->subs_amount_focus) break;
                 for (size_t i = 0; i < event.text.length; ++i) {     /* digits and one point; nothing else is a time */
                     char c = event.text.utf8[i];
@@ -13787,7 +13973,28 @@ static size_t subs_pump(app_state_t *app) {
                     app->subs_dirty = true;
                     break;
                 }
+                if (app->subs_edit_row >= 0) {
+                    /* the text being typed has the keys */
+                    bool extend = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
+                    if (key_is(combo, "Enter")) subs_edit_end(app, true);
+                    else if (key_is(combo, "Escape")) subs_edit_end(app, false);
+                    else if (key_is(combo, "Backspace")) rubraview_textedit_backspace(&app->subs_edit);
+                    else if (key_is(combo, "Delete")) rubraview_textedit_delete(&app->subs_edit);
+                    else if (key_is(combo, "Left")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_LEFT, extend);
+                    else if (key_is(combo, "Right")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_RIGHT, extend);
+                    else if (key_is(combo, "Home")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_HOME, extend);
+                    else if (key_is(combo, "End")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_END, extend);
+                    app->subs_dirty = true;
+                    break;
+                }
                 if (key_is(combo, "Escape")) { subs_close(app); return handled; }
+                if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "S")) { subs_save(app); break; }
+                /* F2 or Enter: the text of the row last clicked. (Enter is not the viewer's
+                   here: there it turns to the next file, and what was changed would be gone.) */
+                if (key_is(combo, "F2") || key_is(combo, "Enter")) {
+                    if (app->subs_anchor < count) subs_edit_begin(app, app->subs_anchor);
+                    break;
+                }
                 if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) {
                     if (subs_kind(app) == SUBS_TEXT) rubraview_subwin_choose_all(app->subs_chosen, count, true);
                     app->subs_dirty = true;
