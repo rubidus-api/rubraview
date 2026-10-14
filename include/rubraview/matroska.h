@@ -2,6 +2,7 @@
 #define RUBRAVIEW_MATROSKA_H
 
 #include "rubraview/core.h"
+#include "rubraview/subtitle.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -51,6 +52,8 @@ typedef struct rubraview_mkv {
     uint64_t              size;
     uint64_t              body_at, body_end;   /* the Segment's children */
     uint64_t              timestamp_scale;     /* nanoseconds a tick */
+    uint64_t              segment_at;          /* where the Segment element itself begins */
+    bool                  webm;                /* DocType "webm": it holds only what WebM allows */
     rubraview_mkv_track_t tracks[RUBRAVIEW_MKV_MAX_TRACKS];
     size_t                track_count;
 } rubraview_mkv_t;
@@ -125,6 +128,106 @@ size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, u8str_t f
 
 /** ".srt" or ".ass" for a track that can be taken out; "" otherwise. */
 const char *rubraview_mkv_subtitle_ext(const rubraview_mkv_track_t *track);
+
+/* ---- a subtitle put into a film (RV-115 stage 4, D-128) ----
+ *
+ * The film is written again as a new file: its EBML head, its info, its
+ * chapters, attachments and tags as they are; its tracks with one more;
+ * every block of every cluster as it was, in its order; and each subtitle
+ * as a block inside the cluster its time falls in, before the first block
+ * not earlier than it (a cluster of its own where none can carry it). A new SeekHead and Cues are written
+ * (the cues' cluster positions moved by what was put in before them, and a
+ * point for each subtitle, with its duration, so a player that seeks into
+ * one finds it); the old ones, and Void, are left out. Everything is laid out first, so the
+ * new file's size is known before a byte is written, and it is written in
+ * slices. Then the new file is checked against the old: `rubraview_mkv_check`.
+ */
+
+typedef struct rubraview_mkv_put_cue {
+    int64_t        start_ns, duration_ns;
+    const uint8_t *payload;
+    size_t         size;
+} rubraview_mkv_put_cue_t;
+
+/* The subtitle to put in: its cues in order of start, how the track is described. */
+typedef struct rubraview_mkv_put_track {
+    const rubraview_mkv_put_cue_t *cues;
+    size_t                         count;
+    const char                    *codec;          /* "S_TEXT/UTF8" or "S_TEXT/ASS" */
+    u8str_t                        language;       /* three letters; empty is "und" */
+    u8str_t                        name;
+    u8str_t                        private_data;   /* SubStation's header, through its `Format:` line */
+} rubraview_mkv_put_track_t;
+
+/**
+ * A subtitle file read by `subtitle.h` (with its `source`) turned into what
+ * goes into a film: SubRip's cues as written, markup and all, line ends as
+ * '\n'; SubStation's `Dialogue:` lines as Matroska carries them
+ * (`ReadOrder,Layer,Style,...,Text`) under the file's own header. Other
+ * formats are refused (`out_why`). Allocated in `arena`.
+ */
+bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubraview_subtitle_track_t *subtitle,
+                                           rubraview_mkv_put_track_t *out, const char **out_why);
+
+typedef struct rubraview_mkv_piece { uint64_t from, to; bool own; } rubraview_mkv_piece_t;   /* own: in `bytes`; else the film's */
+
+typedef struct rubraview_mkv_put {
+    const rubraview_mkv_t     *mkv;
+    rubraview_mkv_put_track_t  track;
+    uint64_t                   number, uid;      /* the new track's */
+    /* laid out by `rubraview_mkv_put_plan`: the new file is these pieces, in order */
+    rubraview_mkv_piece_t     *pieces;
+    size_t                     piece_count;
+    uint8_t                   *bytes;            /* what was made here: the head, cluster headers, subtitles, the cues */
+    size_t                     bytes_size;
+    struct rubraview_mkv_put_cluster {
+        uint64_t at, data_at, end, time;           /* in the film */
+        uint64_t new_at, new_data_at;              /* in the new file */
+        size_t   piece_lo, piece_hi;
+        bool     rebuilt;                          /* a subtitle was put in it: a new header, no CRC-32 */
+    }                         *clusters;
+    size_t                     cluster_count;
+    uint64_t                  *sub_cluster, *sub_rel;   /* each subtitle's cluster in the new file, its block's place in it */
+    uint64_t                   total;            /* the new file's size */
+    /* where `rubraview_mkv_put_step` stands */
+    size_t                     index;
+    uint64_t                   offset;
+} rubraview_mkv_put_t;
+
+/**
+ * Lay the new file out. False, with a reason, for a film this does not
+ * write (WebM, which holds no SubRip; a film whose clusters cannot all
+ * be found). The memory is the heap's: `rubraview_mkv_put_free`.
+ */
+bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv, const rubraview_mkv_put_track_t *track,
+                            uint64_t uid, const char **out_why);
+void rubraview_mkv_put_free(rubraview_mkv_put_t *put);
+
+/**
+ * Write the next part of the new file, about `budget` bytes, through
+ * `emit`. 1: more to come; 0: all written; -1: `emit` failed.
+ */
+typedef bool (*rubraview_mkv_emit_fn)(void *ctx, const void *bytes, size_t size);
+int rubraview_mkv_put_step(rubraview_mkv_put_t *put, rubraview_mkv_emit_fn emit, void *ctx, size_t budget);
+
+/**
+ * The new file against the old, as the owner asked before a film is
+ * replaced: the old tracks and one more; every block of the old tracks
+ * there, in the same order, with the same time, length and bytes; the new
+ * track's blocks the subtitles put in; the file read to its end; every cue
+ * point on a cluster; the size the plan said. A slice at a time, like the
+ * writing: 1 more, 0 sound, -1 not (`why`).
+ */
+typedef struct rubraview_mkv_check {
+    rubraview_mkv_t      made;
+    rubraview_mkv_walk_t old_walk, new_walk;
+    size_t               blocks, sub_blocks;
+    int                  phase;
+    const char          *why;
+} rubraview_mkv_check_t;
+
+bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, const uint8_t *made, uint64_t made_size);
+int rubraview_mkv_check_step(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, size_t budget_blocks);
 
 #ifdef __cplusplus
 }

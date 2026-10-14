@@ -550,6 +550,22 @@ typedef struct app_state {
         double                 said_at;
         int                    percent;
     } takeout;
+    /* RV-115 stage 4 (D-128): the subtitle on screen put into the film.
+       Asked first; written to a temporary file beside the film, checked
+       against it, and only then the film renamed (kept, in its folder)
+       and the new file given its name (the owner, 2026-10-14). */
+    struct {
+        int                    phase;          /* 0 idle, 1 writing, 2 checking */
+        double                 armed_at;       /* the first press; the second within six seconds goes on */
+        rubraview_fs_mapping_t map, made_map;
+        rubraview_mkv_t        mkv;
+        rubraview_mkv_put_t    put;
+        rubraview_mkv_check_t  check;
+        rubraview_fs_writer_t  writer;
+        char                   film[1024], temp[1100];
+        int                    percent;
+        double                 said_at;
+    } putin;
     int32_t                    subs_edit_row;      /* the row whose text is being typed; -1 */
     rubraview_textedit_t       subs_edit;
     char                       subs_edit_buffer[1024];
@@ -956,6 +972,7 @@ static void files_show(app_state_t *app);
 static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
 static void takeout_begin(app_state_t *app);
+static void reopen_after_removal(app_state_t *app, size_t removed_index);
 static void files_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_eqwin(app_state_t *app, double win_w, double win_h);
@@ -13691,6 +13708,185 @@ static void subs_focus_amount(app_state_t *app, bool on) {
     app->subs_dirty = true;
 }
 
+/* ---- A subtitle put into a Matroska film (RV-115 stage 4, D-128) ---- */
+
+static u8str_t putin_temp(const app_state_t *app) { return (u8str_t){ .ptr = app->putin.temp, .len = strlen(app->putin.temp) }; }
+
+/* Done, stopped or failed: everything let go; unless the swap happened, the temporary file goes. */
+static void putin_end(app_state_t *app, bool swapped) {
+    if (app->putin.phase == 0 && !app->putin.map.os && !app->putin.made_map.os && !app->putin.writer.os) return;
+    if (app->putin.writer.os) rubraview_pal_fs_writer_abort(&app->putin.writer, putin_temp(app));
+    if (app->putin.made_map.os) rubraview_pal_fs_unmap(&app->putin.made_map);
+    if (app->putin.map.os) rubraview_pal_fs_unmap(&app->putin.map);
+    app->putin.made_map = app->putin.map = (rubraview_fs_mapping_t){0};
+    if (!swapped && app->putin.temp[0] && rubraview_pal_fs_exists(putin_temp(app))) (void)rubraview_pal_fs_delete(putin_temp(app));
+    rubraview_mkv_put_free(&app->putin.put);
+    app->putin.phase = 0;
+    app->subs_dirty = true;
+}
+
+static void putin_fail(app_state_t *app, const char *why) {
+    putin_end(app, false);
+    char line[300];
+    int n = snprintf(line, sizeof(line), "the subtitle was not put in: %s; the film is as it was", why ? why : "it could not be done");
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+}
+
+/* Why the subtitle on screen cannot go into the film, or NULL when it can be tried. */
+static const char *putin_refusal(app_state_t *app) {
+    if (!app->media || !app->media_info.has_video || app->media_page < 0 || (size_t)app->media_page >= page_count(app) ||
+        app->source.archive_path.len > 0) return "no film file is open";
+    if (subs_kind(app) != SUBS_TEXT) return "no text subtitle is on";
+    if (app->subtitle.source_path.len == 0) return "the subtitle on is already inside the film";
+    if (app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAVIEW_SUBTITLE_ASS) return "only SubRip and SubStation subtitles are put in";
+    if (rubraview_subtitle_changed(&app->subtitle)) return "save the subtitle's changes first";
+    if (app->takeout.running) return "subtitles are being taken out";
+    return NULL;
+}
+
+static bool putin_emit(void *ctx, const void *bytes, size_t size) {
+    return rubraview_pal_fs_writer_write((rubraview_fs_writer_t*)ctx, bytes, size);
+}
+
+static void putin_begin(app_state_t *app) {
+    const char *why = putin_refusal(app);
+    if (why) { putin_fail(app, why); return; }
+    u8str_t film = app->source.pages[app->media_page].path;
+    if (film.len == 0 || film.len >= sizeof(app->putin.film)) { putin_fail(app, "the film's name is too long"); return; }
+    memcpy(app->putin.film, film.ptr, film.len);
+    app->putin.film[film.len] = '\0';
+    int tn = snprintf(app->putin.temp, sizeof(app->putin.temp), "%s.rubraview-part", app->putin.film);
+    if (tn <= 0 || (size_t)tn >= sizeof(app->putin.temp)) { putin_fail(app, "the film's name is too long"); return; }
+    if (!rubraview_pal_fs_map(film, &app->putin.map)) { putin_fail(app, "the film could not be read"); return; }
+    if (!rubraview_mkv_open(&app->putin.mkv, app->putin.map.data, app->putin.map.size, &why)) {
+        putin_fail(app, "subtitles are put into Matroska films (.mkv) only, for now");
+        return;
+    }
+    rubraview_mkv_put_track_t track;
+    if (!rubraview_mkv_put_track_from_subtitle(app->arena, &app->subtitle, &track, &why)) { putin_fail(app, why); return; }
+    u8str_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
+    if (tag.len == 3) track.language = tag;                   /* `film.kor.srt`: a three-letter code is Matroska's own */
+    track.name = rubraview_path_basename(app->subtitle.source_path);
+    uint64_t uid = (uint64_t)(rubraview_pal_time_now_seconds() * 1000003.0) ^ 0x5DEECE66Du;
+    if (!rubraview_mkv_put_plan(&app->putin.put, &app->putin.mkv, &track, uid, &why)) { putin_fail(app, why); return; }
+    uint64_t free_bytes = 0;
+    if (rubraview_pal_fs_free_bytes(rubraview_path_dirname(film), &free_bytes) && free_bytes < app->putin.put.total + (64u << 20)) {
+        putin_fail(app, "there is not room on the disk for the film written again");
+        return;
+    }
+    if (rubraview_pal_fs_exists(putin_temp(app))) (void)rubraview_pal_fs_delete(putin_temp(app));   /* ours, left by a stop */
+    if (!rubraview_pal_fs_writer_open(&app->putin.writer, putin_temp(app))) { putin_fail(app, "the new film could not be made beside the old"); return; }
+    app->putin.phase = 1;
+    app->putin.percent = -1;
+    app->putin.said_at = 0.0;
+    osd_say(app, U8("writing the film with the subtitle in it..."));
+}
+
+/* The temporary film is sound: the film takes a numbered name and stays in its folder; the new one takes the film's name. */
+static void putin_swap(app_state_t *app) {
+    if (app->putin.made_map.os) rubraview_pal_fs_unmap(&app->putin.made_map);
+    if (app->putin.map.os) rubraview_pal_fs_unmap(&app->putin.map);
+    app->putin.made_map = app->putin.map = (rubraview_fs_mapping_t){0};
+    u8str_t film = { .ptr = app->putin.film, .len = strlen(app->putin.film) };
+    u8str_t kept = { .ptr = "", .len = 0 };
+    for (unsigned number = 1; number < 10000 && kept.len == 0; ++number) {
+        u8str_t name = rubraview_subtitle_backup_path(app->arena, film, number);
+        if (name.len == 0) break;
+        if (!rubraview_pal_fs_exists(name)) kept = name;
+    }
+    if (kept.len == 0) { putin_fail(app, "no free name to keep the film under"); return; }
+    bool on_screen = app->media && app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
+                     rubraview_u8_eq(app->source.pages[app->media_page].path, film);
+    int32_t page = current_page_index(app);
+    if (!rubraview_pal_fs_move(film, kept)) {
+        if (on_screen) media_close(app);                         /* the player may hold it: let go and try again */
+        if (!rubraview_pal_fs_move(film, kept)) { putin_fail(app, "the film could not be renamed"); if (on_screen) reopen_after_removal(app, page >= 0 ? (size_t)page : 0); return; }
+    }
+    if (!rubraview_pal_fs_move(putin_temp(app), film)) {
+        (void)rubraview_pal_fs_move(kept, film);                /* put it back */
+        putin_fail(app, "the new film could not take the film's name");
+        if (on_screen) reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
+        return;
+    }
+    putin_end(app, true);
+    char line[400];
+    u8str_t kept_name = rubraview_path_basename(kept);
+    int n = snprintf(line, sizeof(line), "the subtitle is in the film now; the film as it was is %.*s", (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    if (on_screen) reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
+}
+
+static void putin_step(app_state_t *app) {
+    if (app->putin.phase == 0) return;
+    double began = rubraview_pal_time_now_seconds();
+    if (rubraview_pal_fs_mapping_lost(&app->putin.map)) { putin_fail(app, "the film went away while it was read"); return; }
+    if (app->putin.phase == 1) {
+        int r = 1;
+        while (r == 1 && rubraview_pal_time_now_seconds() - began < 0.008) {
+            r = rubraview_mkv_put_step(&app->putin.put, putin_emit, &app->putin.writer, 4u << 20);
+        }
+        if (r < 0) { putin_fail(app, "the new film could not be written (is the disk full?)"); return; }
+        if (r == 0) {
+            if (!rubraview_pal_fs_writer_close(&app->putin.writer)) { putin_fail(app, "the new film could not be written whole"); return; }
+            if (!rubraview_pal_fs_map(putin_temp(app), &app->putin.made_map) ||
+                !rubraview_mkv_check_begin(&app->putin.check, &app->putin.put, app->putin.made_map.data, app->putin.made_map.size)) {
+                putin_fail(app, app->putin.check.why ? app->putin.check.why : "the new film could not be read back");
+                return;
+            }
+            app->putin.phase = 2;
+        }
+    } else {
+        int r = 1;
+        while (r == 1 && rubraview_pal_time_now_seconds() - began < 0.008) {
+            r = rubraview_mkv_check_step(&app->putin.check, &app->putin.put, 2000);
+        }
+        if (r < 0) { putin_fail(app, app->putin.check.why); return; }
+        if (r == 0) { putin_swap(app); return; }
+    }
+    double share = app->putin.phase == 1 ? (app->putin.put.total ? (double)app->putin.writer.written / (double)app->putin.put.total : 0.0) * 0.5
+                                         : 0.5 + rubraview_mkv_walk_share(&app->putin.mkv, &app->putin.check.old_walk) * 0.5;
+    int percent = (int)(share * 100.0);
+    if (percent != app->putin.percent && began - app->putin.said_at > 0.5) {
+        app->putin.percent = percent;
+        app->putin.said_at = began;
+        char line[80];
+        int n = snprintf(line, sizeof(line), "%s... %d %%", app->putin.phase == 1 ? "writing the film with the subtitle in it" : "checking the new film against the old", percent);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        app->subs_dirty = true;
+    }
+}
+
+/* The button: a first press says what will happen and asks for a second; the second goes on; during the work it stops. */
+static void putin_press(app_state_t *app) {
+    double now = rubraview_pal_time_now_seconds();
+    if (app->putin.phase != 0) {
+        putin_end(app, false);
+        osd_say(app, U8("putting the subtitle in was stopped; the film is as it was"));
+        return;
+    }
+    const char *why = putin_refusal(app);
+    if (why) {
+        char line[200];
+        int n = snprintf(line, sizeof(line), "cannot put the subtitle in: %s", why);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+        return;
+    }
+    if (app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0) {
+        app->putin.armed_at = 0.0;
+        putin_begin(app);
+        return;
+    }
+    app->putin.armed_at = now;
+    u8str_t film = app->source.pages[app->media_page].path;
+    u8str_t kept = rubraview_path_basename(rubraview_subtitle_backup_path(app->arena, film, 1));
+    u8str_t sub = rubraview_path_basename(app->subtitle.source_path);
+    char line[600];
+    int n = snprintf(line, sizeof(line), "put %.*s into the film? It is written again and checked; the film as it is stays as %.*s. Press again to go on",
+                     (int)(sub.len < 200 ? sub.len : 200), sub.ptr, (int)(kept.len < 200 ? kept.len : 200), kept.ptr);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    app->subs_dirty = true;
+}
+
 static void subs_close(app_state_t *app) {
     if (!app->subs_open) return;
     rubraview_pal_window_get_frame(app->subs_window, &app->subs_frame[0], &app->subs_frame[1],
@@ -13755,7 +13951,7 @@ static void subs_show(app_state_t *app) {
 }
 
 /* Where the parts above the rows are, in the window's own pixels. */
-typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER, SUBS_PART_SAVE, SUBS_PART_TAKEOUT } subs_part_t;
+typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER, SUBS_PART_SAVE, SUBS_PART_TAKEOUT, SUBS_PART_PUTIN } subs_part_t;
 
 static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t part) {
     const rubraview_listwin_t *lw = &app->subs_list;
@@ -13768,7 +13964,8 @@ static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t p
         case SUBS_PART_AMOUNT:  return (rubraview_pal_rect_t){ pad * 2.0 + button, y, field, rh * 0.9 };
         case SUBS_PART_LATER:   return (rubraview_pal_rect_t){ pad * 4.0 + button + field + rh * 0.6, y, button, rh * 0.9 };
         case SUBS_PART_SAVE:    return (rubraview_pal_rect_t){ lw->width - pad - button, y, button, rh * 0.9 };   /* at the right */
-        default:                return (rubraview_pal_rect_t){ lw->width - pad - button, (band - rh * 0.9) * 0.5, button, rh * 0.9 };   /* Take out, above Save */
+        case SUBS_PART_TAKEOUT: return (rubraview_pal_rect_t){ lw->width - pad - button, (band - rh * 0.9) * 0.5, button, rh * 0.9 };   /* above Save */
+        default:                return (rubraview_pal_rect_t){ lw->width - 2.0 * (pad + button), (band - rh * 0.9) * 0.5, button, rh * 0.9 };   /* Put in, left of Take out */
     }
 }
 
@@ -13986,7 +14183,20 @@ static void draw_subs_window(app_state_t *app) {
         rubraview_pal_render_stroke_rect(r, takeout, COLOR_BOX_BORDER, 1.0, 3.0);
         if (ln > 0) rubraview_pal_render_draw_text(r, (u8str_t){ label, (size_t)ln }, takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    rubraview_pal_rect_t head_text = { head_x, 0.0, (takeout_shown ? takeout.x : lw->width) - head_x - pad, band };
+    rubraview_pal_rect_t putin = subs_part_rect(app, SUBS_PART_PUTIN);
+    bool putin_shown = takeout_shown && kind == SUBS_TEXT && putin.x > head_x + lw->row_height * 4.0;
+    if (putin_shown) {
+        double now = rubraview_pal_time_now_seconds();
+        bool armed = app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0;
+        char label[32];
+        int ln = app->putin.phase ? snprintf(label, sizeof(label), "Stop %d %%", app->putin.percent < 0 ? 0 : app->putin.percent)
+                                  : snprintf(label, sizeof(label), "%s", armed ? "Sure? Put in" : "Put in film");
+        rubraview_pal_render_fill_rect(r, putin, app->putin.phase || armed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(r, putin, COLOR_BOX_BORDER, 1.0, 3.0);
+        if (ln > 0) rubraview_pal_render_draw_text(r, (u8str_t){ label, (size_t)ln }, putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (armed) app->subs_dirty = true;            /* the question goes away by itself */
+    }
+    rubraview_pal_rect_t head_text = { head_x, 0.0, (putin_shown ? putin.x : takeout_shown ? takeout.x : lw->width) - head_x - pad, band };
     if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
                                                                  head_text.width, font), head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 
@@ -14097,6 +14307,11 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     subs_edit_end(app, true);                    /* a press anywhere keeps what was typed */
     subs_focus_amount(app, on_amount);
     if (on_amount) return;
+    if (app->media && app->media_info.has_video && kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_PUTIN), x, y)) {
+        putin_press(app);
+        app->subs_dirty = true;
+        return;
+    }
     if (app->media && app->media_info.has_video && subs_in(subs_part_rect(app, SUBS_PART_TAKEOUT), x, y)) {
         takeout_begin(app);
         app->subs_dirty = true;
@@ -18108,6 +18323,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         files_preview_step(&app, now);
         draw_files_window(&app);
         takeout_step(&app);
+        putin_step(&app);
         draw_subs_window(&app);
         toolbox_window_pump(&app);
         draw_toolbox_window(&app);
@@ -18140,6 +18356,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     files_close(&app);
     subs_close(&app);
     takeout_end(&app);
+    putin_end(&app, false);
     settings_write_if_changed(&app, false);   /* a volume or opacity changed with the window shut */
     if (app.toolbox_window) {
         rubraview_pal_render_destroy(app.toolbox_renderer);

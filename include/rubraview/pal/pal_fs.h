@@ -132,6 +132,18 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents);
 bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents);
 
 /**
+ * A file written a piece at a time (RV-115: a film of several gigabytes
+ * written again). `open` makes a new file and fails when one of that
+ * name is there already — it never writes over anything; `close` says
+ * whether every piece was written; `abort` closes and removes the file.
+ */
+typedef struct rubraview_fs_writer { void *os; bool failed; uint64_t written; } rubraview_fs_writer_t;
+bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, u8str_t path);
+bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size);
+bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer);
+void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path);
+
+/**
  * D-99: one viewer at a time reads a state file, puts its changes in and
  * writes it back. `lock` waits up to `wait_ms` for the others; false when
  * they did not let go in time (the caller then writes anyway, or not at

@@ -198,6 +198,42 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
 }
 
+bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, u8str_t path) {
+    if (!writer) return false;
+    *writer = (rubraview_fs_writer_t){0};
+    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+    char path_z[4096];
+    memcpy(path_z, path.ptr, path.len);
+    path_z[path.len] = '\0';
+    FILE *file = fopen(path_z, "wbx");              /* "x": never over a file that is there */
+    if (!file) return false;
+    writer->os = file;
+    return true;
+}
+
+bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size) {
+    if (!writer || !writer->os || writer->failed) return false;
+    if (size > 0 && fwrite(bytes, 1, size, (FILE*)writer->os) != size) { writer->failed = true; return false; }
+    writer->written += size;
+    return true;
+}
+
+bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer) {
+    if (!writer || !writer->os) return false;
+    bool ok = !writer->failed;
+    if (fclose((FILE*)writer->os) != 0) ok = false;
+    writer->os = NULL;
+    return ok;
+}
+
+void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path) {
+    if (writer && writer->os) {
+        fclose((FILE*)writer->os);
+        writer->os = NULL;
+    }
+    (void)rubraview_pal_fs_delete(path);
+}
+
 bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
 

@@ -331,6 +331,51 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
 }
 
+bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, u8str_t path) {
+    if (!writer) return false;
+    *writer = (rubraview_fs_writer_t){0};
+    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+    WCHAR wide[4096];
+    char path_z[4096];
+    memcpy(path_z, path.ptr, path.len);
+    path_z[path.len] = '\0';
+    if (MultiByteToWideChar(CP_UTF8, 0, path_z, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
+    /* CREATE_NEW: a file of that name already there is never written over. */
+    HANDLE h = CreateFileW(wide, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    writer->os = h;
+    return true;
+}
+
+bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size) {
+    if (!writer || !writer->os || writer->failed) return false;
+    const uint8_t *p = bytes;
+    while (size > 0) {
+        DWORD chunk = size > (1u << 30) ? (1u << 30) : (DWORD)size, done = 0;
+        if (!WriteFile((HANDLE)writer->os, p, chunk, &done, NULL) || done != chunk) { writer->failed = true; return false; }
+        p += chunk;
+        size -= chunk;
+        writer->written += chunk;
+    }
+    return true;
+}
+
+bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer) {
+    if (!writer || !writer->os) return false;
+    bool ok = !writer->failed && FlushFileBuffers((HANDLE)writer->os);
+    if (!CloseHandle((HANDLE)writer->os)) ok = false;
+    writer->os = NULL;
+    return ok;
+}
+
+void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path) {
+    if (writer && writer->os) {
+        CloseHandle((HANDLE)writer->os);
+        writer->os = NULL;
+    }
+    (void)rubraview_pal_fs_delete(path);
+}
+
 bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
 

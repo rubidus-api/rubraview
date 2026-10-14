@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.76.exe              the viewer, as built
-dist/rubraview-v0.0.76/                 the release bundle
-dist/rubraview-v0.0.76.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.77.exe              the viewer, as built
+dist/rubraview-v0.0.77/                 the release bundle
+dist/rubraview-v0.0.77.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -584,8 +584,18 @@ While it does:
   changed, and no FFmpeg is needed. A long film takes a while: the button
   says how far it is, and a press stops it. Picture subtitles and
   compressed tracks are not taken out; a file of that name already there
-  is kept under a numbered name unless it is the same. The wheel and the
-  arrow keys move the list;
+  is kept under a numbered name unless it is the same. **Put in film**,
+  beside it, does the other way round with the subtitle on screen (a
+  SubRip or SubStation file, its changes saved): the film is written again
+  with the subtitle as one more track. It asks first — the first press says
+  what will happen, a second press within six seconds goes on. The new film
+  is written beside the old one as a temporary file and checked against it
+  (every picture and sound block the same, the subtitle as it was put in,
+  the file read to its end); only then the film is renamed `film.old1.mkv`,
+  kept in its folder, and the new one takes the film's name. Anything that
+  fails leaves the film as it was and removes the temporary file; a press
+  while it works stops it. It needs room on the disk for a second copy of
+  the film. The wheel and the arrow keys move the list;
   other keys do what they do in the viewer, so `Space` pauses and
   `Shift+C` or `Esc` closes it. A DVD's or a Blu-ray's picture subtitles
   are listed by their times only.
