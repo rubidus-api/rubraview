@@ -567,10 +567,10 @@ rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view
             case RUBRAVIEW_SETTING_BOOL:
                 return nudge(view, settings, i, +1, 1.0, true);
             case RUBRAVIEW_SETTING_CHOICE: {
-                /* The left half of `< word >` goes back, the right half on. */
-                int32_t middle = view->content_col + view->label_cols +
-                                 (view->cols - view->content_col - 1 - view->label_cols) / 4;
-                return nudge(view, settings, i, col < middle ? -1 : +1, 1.0, true);
+                /* `<` goes back; the word, `>` and the rest go on (owner, 2026-10-14: a click on the
+                   word went back, 4/4 3/4 2/4, since the left quarter of the row was "back"). */
+                int32_t start = view->content_col + view->label_cols;
+                return nudge(view, settings, i, col <= start ? -1 : +1, 1.0, true);
             }
             case RUBRAVIEW_SETTING_INT:
             case RUBRAVIEW_SETTING_FLOAT: {
@@ -792,4 +792,19 @@ size_t rubraview_grid_selection_copy(const rubraview_grid_selection_t *selection
     }
     out[len] = '\0';
     return len;
+}
+
+int32_t rubraview_settings_view_table_row_at(const rubraview_settings_view_t *view, int32_t col, int32_t row) {
+    if (!view || !view->doc || col < view->list_cols || row >= view->rows - 1) return -1;
+    int32_t content_row = row - TITLE_ROWS;
+    if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(view)) return -1;
+    content_row += view->scroll;
+    for (size_t i = 0; i < view->line_count; ++i) {
+        const rubraview_settings_line_t *line = &view->lines[i];
+        if (content_row < line->row || content_row >= line->row + line->height) continue;
+        if (line->kind != RUBRAVIEW_LINE_TABLE) return -1;
+        int32_t k = content_row - line->row;
+        return k > 0 ? k : -1;   /* row 0 is the heading */
+    }
+    return -1;
 }

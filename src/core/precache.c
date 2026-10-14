@@ -56,6 +56,8 @@ rubraview_precache_t rubraview_precache_create(proven_job_sys_t *jobs,
         .page_count = page_count,
         .lookahead = PRECACHE_AHEAD_NORMAL,
         .lookbehind = PRECACHE_BEHIND_NORMAL,
+        .want_ahead = PRECACHE_AHEAD_NORMAL,
+        .want_behind = PRECACHE_BEHIND_NORMAL,
         .estimated_bytes = estimated_bytes,
         .submitted_total = 0,
     };
@@ -66,12 +68,11 @@ void rubraview_precache_set_interval(rubraview_precache_t *precache,
                                      double fast_threshold_seconds) {
     if (!precache) return;
 
+    precache->lookahead = precache->want_ahead;
+    precache->lookbehind = precache->want_behind;
     if (slide_interval_seconds > 0.0 && slide_interval_seconds < fast_threshold_seconds) {
-        precache->lookahead = PRECACHE_AHEAD_FAST;
-        precache->lookbehind = PRECACHE_BEHIND_FAST;
-    } else {
-        precache->lookahead = PRECACHE_AHEAD_NORMAL;
-        precache->lookbehind = PRECACHE_BEHIND_NORMAL;
+        if (precache->lookahead < PRECACHE_AHEAD_FAST) precache->lookahead = PRECACHE_AHEAD_FAST;
+        if (precache->lookbehind < PRECACHE_BEHIND_FAST) precache->lookbehind = PRECACHE_BEHIND_FAST;
     }
 }
 
@@ -125,6 +126,13 @@ size_t rubraview_precache_update(rubraview_precache_t *precache,
     size_t window[RUBRAVIEW_PRECACHE_MAX_WINDOW];
     size_t window_count = rubraview_precache_window(precache, current, window, RUBRAVIEW_PRECACHE_MAX_WINDOW);
     if (window_count == 0) return 0;
+    /* No more than the budget holds, the nearest kept: a page read only to be evicted by a nearer one
+       is a decode for nothing (owner, 2026-10-14: up to 99 a side). */
+    if (precache->cache && precache->estimated_bytes > 0 && precache->cache->budget_bytes > 0) {
+        size_t fit = precache->cache->budget_bytes / precache->estimated_bytes;
+        if (fit < 1) fit = 1;
+        if (window_count > fit) window_count = fit;
+    }
 
     /* Which pages still need decoding is decided before the budget is
        touched, since touching marks them resident. */

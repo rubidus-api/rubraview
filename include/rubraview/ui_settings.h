@@ -140,6 +140,9 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
 /** On a focused table line, the row in focus as the `table_row` source counts it (1 = the first below the heading); otherwise -1. */
 int32_t rubraview_settings_view_focused_table_row(const rubraview_settings_view_t *view);
 
+/** The table row (1 = the first below the heading) under a cell, as a press would take it; -1 for none. */
+int32_t rubraview_settings_view_table_row_at(const rubraview_settings_view_t *view, int32_t col, int32_t row);
+
 /** The focused line's document node, or NULL when a button has focus. */
 const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view);
 

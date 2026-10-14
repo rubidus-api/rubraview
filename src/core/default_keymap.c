@@ -78,8 +78,10 @@ const char *rubraview_default_keymap(void) {
        — PageDown/PageUp, Space/Enter and Backspace. The arrows, J/K and
        A/D were bound here too; they were removed on request so that what
        moves between files is a short, deliberate list. */
-    "next_page = \"PageDown, Space, Enter\"\n"
-    "prev_page = \"PageUp, Backspace, Shift+Space\"\n"
+    /* . and , as well (owner, 2026-10-14); in a multi-page file they step its pages first ([subpage]),
+       and in an animation or a film its frames ([media]). */
+    "next_page = \"PageDown, Space, Enter, Period\"\n"
+    "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
     "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"

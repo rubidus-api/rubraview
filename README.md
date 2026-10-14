@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.85** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.86** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.86/rubraview-v0.0.86.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.86/rubraview-v0.0.86.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -80,8 +80,8 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space` | Previous page |
+| `PageDown`, `Space`, `Enter`, `.` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |

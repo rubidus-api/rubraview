@@ -670,3 +670,28 @@ u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
         if (!rubraview_page_source_is_later_volume(archives.paths[at])) return archives.paths[at];
     }
 }
+
+size_t rubraview_page_source_sibling_folders(proven_arena_t *arena, const rubraview_fs_listing_t *listing,
+                                             u8str_t current_dir, bool forward, u8str_t *out, size_t max) {
+    if (!arena || !listing || !out || max == 0 || listing->count == 0) return 0;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing->count, sizeof(u8str_t));
+    if (!proven_is_ok(res.err)) return 0;
+    u8str_t *dirs = (u8str_t*)(void*)res.value.ptr;
+    size_t n = 0;
+    for (size_t i = 0; i < listing->count; ++i) {
+        if (listing->entries[i].is_directory) dirs[n++] = listing->entries[i].path;
+    }
+    rubraview_sort_paths(dirs, n, RUBRAVIEW_SORT_NAME_NATURAL, true);
+    size_t at = SIZE_MAX;
+    for (size_t i = 0; i < n && at == SIZE_MAX; ++i) {
+        if (rubraview_path_same(dirs[i], current_dir)) at = i;
+    }
+    if (at == SIZE_MAX) return 0;
+    size_t count = 0;
+    if (forward) {
+        for (size_t i = at + 1; i < n && count < max; ++i) out[count++] = dirs[i];
+    } else {
+        for (size_t i = at; i > 0 && count < max; --i) out[count++] = dirs[i - 1];
+    }
+    return count;
+}

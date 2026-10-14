@@ -279,6 +279,15 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                the entire window rectangle — no caption, no borders, so
                100% of the pixels belong to the Direct2D canvas. */
             if (w->frameless && wparam == TRUE) {
+                /* Maximized, Windows makes the window larger than the screen by its frame on every
+                   side; with no frame to take it, that was canvas off the screen — at 100 % the
+                   picture's edges were cut, at 90 % they showed (owner, 2026-10-14). The client is
+                   the monitor's work area then. Full screen places itself and is left alone. */
+                if (IsZoomed(hwnd) && !w->fullscreen) {
+                    NCCALCSIZE_PARAMS *params = (NCCALCSIZE_PARAMS*)lparam;
+                    MONITORINFO mi = { .cbSize = sizeof(mi) };
+                    if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) params->rgrc[0] = mi.rcWork;
+                }
                 return 0;
             }
             break;
@@ -588,6 +597,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         case WM_MOUSEACTIVATE:
             /* A tool window is clicked without taking the keyboard away from the viewer. */
             if (w->tool) return MA_NOACTIVATE;
+            break;
+
+        case WM_SETCURSOR:
+            /* §3.2.5: hidden over this window's client area only. ShowCursor hid it over every
+               window of the program, the settings window too, where moving it brought nothing back. */
+            if (!w->cursor_visible && LOWORD(lparam) == HTCLIENT) { SetCursor(NULL); return TRUE; }
             break;
 
         case WM_SYSCOMMAND:
@@ -1202,9 +1217,11 @@ bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window) {
 void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible) {
     if (!window || window->cursor_visible == visible) return;
     window->cursor_visible = visible;
-    /* ShowCursor keeps an internal counter, so it is only stepped on an
-       actual change — matching the flag we track here. */
-    ShowCursor(visible ? TRUE : FALSE);
+    /* WM_SETCURSOR answers for this window alone; the pointer over it now is set at once. */
+    POINT at;
+    if (window->hwnd && GetCursorPos(&at) && WindowFromPoint(at) == window->hwnd) {
+        SetCursor(visible ? LoadCursorW(NULL, IDC_ARROW) : NULL);
+    }
 }
 
 void rubraview_pal_window_begin_drag(rubraview_window_t *window) {

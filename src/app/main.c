@@ -74,6 +74,7 @@
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_subwin.h"
 #include "rubraview/ui_ctxmenu.h"
+#include "rubraview/action_words.h"
 #include "rubraview/ui_slidepop.h"
 #include "rubraview/matroska.h"
 #include "rubraview/mp4.h"
@@ -869,6 +870,9 @@ typedef struct app_state {
     rubraview_renderer_t      *settings_renderer;
     rubraview_settings_view_t  settings_view;
     double                     settings_font, settings_cell_w, settings_cell_h;
+    int32_t                    settings_tip_row;   /* the keys table's row the pointer rests on; -1 (owner, 2026-10-14) */
+    double                     settings_tip_since, settings_tip_x, settings_tip_y;
+    bool                       settings_tip_shown;
     bool                       settings_dirty;       /* its picture is out of date */
     double                     settings_info_seconds; /* when `info` lines were last redrawn */
     /* Where the window was left (layout.ini); width 0 until known. Closing
@@ -3239,7 +3243,31 @@ static void go_to_spread(app_state_t *app, size_t index) {
     update_window_title(app);
 }
 
-static void open_sibling_archive(app_state_t *app, bool forward);
+static bool open_sibling_archive(app_state_t *app, bool forward);
+static bool open_sibling_folder(app_state_t *app, bool forward);
+
+/* Next past the last page, or Back before the first (owner, 2026-10-14):
+   Settings › Files › At the first and last — say so (as it comes), open the
+   next or the previous folder or archive (from its last page going back),
+   or go round within what is open. */
+static void past_the_end(app_state_t *app, bool forward) {
+    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("at_ends")));
+    if (mode == 2 && app->layout.count > 1) {
+        go_to_spread(app, forward ? 0 : app->layout.count - 1);
+        update_precache(app);
+        osd_say(app, forward ? U8("the last: round again to the first") : U8("the first: round again to the last"));
+        return;
+    }
+    if (mode == 1) {
+        bool opened = app->source.archive_path.len > 0 ? open_sibling_archive(app, forward)
+                    : !app->list_is_set ? open_sibling_folder(app, forward) : false;
+        if (opened) return;
+        osd_say(app, forward ? U8("the last, and nothing after it to open")
+                             : U8("the first, and nothing before it to open"));
+        return;
+    }
+    osd_say(app, forward ? U8("this is the last") : U8("this is the first"));
+}
 
 static void next_spread(app_state_t *app) {
     if (strip_active(app)) {
@@ -3248,7 +3276,7 @@ static void next_spread(app_state_t *app) {
         rubraview_pal_window_get_size(app->window, &win_w, &win_h);
         double step = (double)win_h * 0.9;
         if (strip_scroll_by(app, step) < step - 1.0) return;
-        open_sibling_archive(app, true);
+        past_the_end(app, true);
         return;
     }
     if (app->spread_index + 1 < app->layout.count) {
@@ -3256,8 +3284,7 @@ static void next_spread(app_state_t *app) {
         update_precache(app);
         return;
     }
-    /* §3.8.1 point 4: past the last page, continue into the next volume. */
-    open_sibling_archive(app, true);
+    past_the_end(app, true);   /* §3.8.1 point 4 when Settings › Files › At the first and last says so */
 }
 
 static void prev_spread(app_state_t *app) {
@@ -3266,7 +3293,7 @@ static void prev_spread(app_state_t *app) {
         rubraview_pal_window_get_size(app->window, &win_w, &win_h);
         double step = (double)win_h * 0.9;
         if (strip_scroll_by(app, -step) > -(step - 1.0)) return;
-        open_sibling_archive(app, false);
+        past_the_end(app, false);
         return;
     }
     if (app->spread_index > 0) {
@@ -3274,7 +3301,7 @@ static void prev_spread(app_state_t *app) {
         update_precache(app);
         return;
     }
-    open_sibling_archive(app, false);
+    past_the_end(app, false);
 }
 
 static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
@@ -5143,6 +5170,20 @@ static bool cue_step(app_state_t *app, int direction) {
 /* The layout, from the tile, the menu or the key: written to the setting
    (Settings › Viewer › Layout shows the same thing and is saved with the
    rest), which is what applies it. The page on screen stays. */
+/* A layout said: its short name first — the one its button and the settings use — then what it is (owner, 2026-10-14). */
+static const char *layout_said(rubraview_layout_choice_t choice) {
+    static const char *const SAY[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
+        "single: one page at a time",
+        "dual: two pages side by side, left to right",
+        "dual-rtl: two pages side by side, right to left",
+        "book: the cover alone, then two pages, left to right",
+        "book-rtl: the cover alone, then two pages, right to left",
+        "webtoon: every page one under the other, at one width",
+        "comic: one page, a wide scan as its two halves, left first",
+        "comic-rtl: one page, a wide scan as its two halves, the right one first" };
+    return SAY[choice >= 0 && choice < RUBRAVIEW_LAYOUT_CHOICE_COUNT ? choice : 0];
+}
+
 static void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool say) {
     int32_t page = current_page_index(app);
     if (page >= 0 && app->spread_index < app->layout.count) {
@@ -5157,13 +5198,7 @@ static void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool 
     menu_rebuild(app);
     sync_menubox_tiles(app);
     if (say) {
-        static const char *const SAY[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
-            "one page", "two pages", "two pages, right to left",
-            "book: the cover alone, then two pages", "book, right to left: the cover alone, then two pages",
-            "webtoon: every page one under the other, at one width",
-            "comic: one page, a wide scan as its two halves",
-            "comic, right to left: one page, a wide scan as its two halves, the right one first" };
-        osd_say(app, cstr(SAY[choice >= 0 && choice < RUBRAVIEW_LAYOUT_CHOICE_COUNT ? choice : 0]));
+        osd_say(app, cstr(layout_said(choice)));
     }
 }
 
@@ -5749,6 +5784,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         else rubraview_animation_pause(&app->animation);
         if (ended) show_frame(app, app->animation.current);   /* played again: from the first frame */
         update_window_title(app);
+    } else if (rubraview_u8_eq_lit(action, "subpage_next") && app->anim_active &&
+               app->animation.current + 1 >= app->animation.frame_count) {
+        next_spread(app);   /* past a multi-page file's last page: the next file (owner, 2026-10-14) */
+    } else if (rubraview_u8_eq_lit(action, "subpage_prev") && app->anim_active && app->animation.current == 0) {
+        prev_spread(app);
     } else if (rubraview_u8_eq_lit(action, "anim_step_forward") || rubraview_u8_eq_lit(action, "subpage_next")) {
         rubraview_animation_step(&app->animation, true);
         show_frame(app, app->animation.current);
@@ -5823,9 +5863,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
         int now = app->names_codepage >= 0 ? app->names_codepage : (int)app->archive_codepage;
         archive_names_reread(app, (rubraview_codepage_t)((now + 1) % ((int)RUBRAVIEW_CODEPAGE_WESTERN + 1)));
     } else if (rubraview_u8_eq_lit(action, "next_archive")) {
-        open_sibling_archive(app, true);
+        if (!open_sibling_archive(app, true)) osd_say(app, U8("no next archive beside this one"));
     } else if (rubraview_u8_eq_lit(action, "prev_archive")) {
-        open_sibling_archive(app, false);
+        if (!open_sibling_archive(app, false)) osd_say(app, U8("no previous archive beside this one"));
     } else if (rubraview_u8_eq_lit(action, "resume_accept")) {
         /* §3.17.1: the prompt is answered by opening the remembered page. */
         if (app->resume_offer) {
@@ -7220,6 +7260,13 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
     u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
                                                                       : page_display_name(app, (size_t)current_page_index(app));
+    char said[160];
+    if (hovered >= 0 && hovered < app->toolbox_tile_count) {
+        /* the state with the name: "Layout: book-rtl", "Crisp: on" (owner, 2026-10-14) */
+        rubraview_action_facts_t facts = action_facts(app);
+        rubraview_action_state_t st = rubraview_action_state(app->toolbox_tiles[hovered].action, &facts);
+        label = rubraview_tile_caption(label, false, st.mark == RUBRAVIEW_MARK_CURRENT ? RUBRAVIEW_MARK_NONE : st.mark, st.value, said, sizeof(said));
+    }
     if (hovered < 0 && app->strip_name[0]) label = cstr(app->strip_name);   /* D-124: cut to its rows */
     char place[96];
     int n = strip_place_text(app, hovered, place, sizeof(place));
@@ -11910,8 +11957,8 @@ static void settings_apply_rest(app_state_t *app) {
 
     /* Cache */
     app->cache_budget = (size_t)rubraview_settings_get(st, U8("cache"), U8("memory_cap_mb")) * 1024u * 1024u;
-    app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookahead")));
-    app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookbehind")));
+    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookahead")));
+    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookbehind")));
     double privacy = rubraview_settings_get(st, U8("cache"), U8("privacy_clean"));
     if (privacy != last_privacy) { app->export_options.privacy_clean = privacy > 0.5; last_privacy = privacy; }
 
@@ -12459,6 +12506,12 @@ static void settings_path_draw(app_state_t *app) {
 static size_t settings_pump(app_state_t *app) {
     size_t handled = 0;
     rubraview_window_event_t event;
+    /* the keys page: a row rested on says what its action does */
+    if (app->settings_open && app->settings_tip_row > 0 && !app->settings_tip_shown &&
+        rubraview_pal_time_now_seconds() - app->settings_tip_since >= 0.6) {
+        app->settings_tip_shown = true;
+        app->settings_dirty = true;
+    }
     while (app->settings_open && rubraview_pal_window_poll_event(app->settings_window, &event)) {
         handled++;
         rubraview_settings_view_t *view = &app->settings_view;
@@ -12528,7 +12581,18 @@ static size_t settings_pump(app_state_t *app) {
                 settings_event(app, rubraview_settings_view_press(view, &app->settings, col, row));
                 break;
             }
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                int32_t tip = rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w),
+                                                                   (int32_t)(event.mouse.y / app->settings_cell_h));
+                if (tip != app->settings_tip_row) {
+                    if (app->settings_tip_shown) app->settings_dirty = true;
+                    app->settings_tip_row = tip;
+                    app->settings_tip_since = rubraview_pal_time_now_seconds();
+                    app->settings_tip_shown = false;
+                }
+                app->settings_tip_x = event.mouse.x;
+                app->settings_tip_y = event.mouse.y;
+            }
                 if (app->settings_selecting) {
                     int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w) - view->content_col;
                     int32_t rr = (int32_t)(event.mouse.y / app->settings_cell_h);
@@ -15481,6 +15545,28 @@ static void draw_settings_window(app_state_t *app) {
                                             cw * col, y, fs, SETTINGS_TEXT);
     }
 
+    if (app->settings_tip_shown && app->settings_tip_row > 0 && (size_t)(app->settings_tip_row - 1) < app->keymap.count) {
+        /* what the row's action does, under the pointer */
+        const rubraview_key_binding_t *b = &app->keymap.bindings[app->settings_tip_row - 1];
+        const char *words = rubraview_action_words(b->action);
+        char tip[400];
+        int n = snprintf(tip, sizeof(tip), "%.*s: %s", (int)b->action.len, b->action.ptr, words ? words : "(no words for it)");
+        if (n > 0) {
+            int32_t ww = 0, wh = 0;
+            rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
+            double tw = (double)n * cw * 0.95 + cw * 2.0, th = ch * 1.6;
+            if (tw > (double)ww - 4.0) tw = (double)ww - 4.0;
+            double x = app->settings_tip_x + cw, y = app->settings_tip_y + ch * 1.2;
+            if (x + tw > (double)ww) x = (double)ww - tw - 2.0;
+            if (y + th > (double)wh) y = app->settings_tip_y - th - ch * 0.4;
+            if (x < 0.0) x = 0.0;
+            rubraview_pal_rect_t box = { x, y, tw, th };
+            rubraview_pal_render_fill_rect(r, box, 0xF0303030u, 3.0);
+            rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0, 3.0);
+            rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = tip, .len = (size_t)n < sizeof(tip) ? (size_t)n : sizeof(tip) - 1 },
+                                           box, fs, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }
 
@@ -16081,6 +16167,14 @@ static void tick_timers(app_state_t *app, double dt) {
             ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
         if (hint.len == 0 && app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open)
             hint = rubraview_box_hint(&app->toolbox, &base, app->pointer_x, app->pointer_y);
+        if (hint.len == 0 && app->pointer_inside && app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED &&
+            app->toolbox.state != RUBRAVIEW_BOX_DETACHED && !app->ctx_open && !app->slidepop_open) {
+            /* the layout's icon says which it is, as words, when the pointer rests on it (owner, 2026-10-14) */
+            int32_t tile = rubraview_box_tile_at(&app->toolbox, &base, app->pointer_x, app->pointer_y);
+            if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_layout")) {
+                hint = cstr(layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)));
+            }
+        }
         if (hint.ptr != app->hint.ptr) {
             app->hint = hint;
             app->hint_since = rubraview_pal_time_now_seconds();
@@ -16092,8 +16186,15 @@ static void tick_timers(app_state_t *app, double dt) {
     if (rubraview_box_just_opened(&app->menubox, &app->menubox_was_open)) menu_rebuild(app);
 
     if (app->slideshow_running) {
-        if (rubraview_cursor_hide_tick(&app->cursor, dt)) {
-            rubraview_pal_window_set_cursor_visible(app->window, false); /* §3.2.5 */
+        /* §3.2.5: the pointer goes away over the slides only — not while something is open to be
+           pointed at (the slide show's settings, a list, a box, the settings window). */
+        bool pointing = app->slidepop_open || app->ctx_open || app->settings_open || app->panel.open || app->listwin.open ||
+                        app->sub_list_open || app->menubox.state != RUBRAVIEW_BOX_COLLAPSED ||
+                        (app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED && app->toolbox.state != RUBRAVIEW_BOX_DETACHED);
+        if (pointing) {
+            if (rubraview_cursor_hide_notify_motion(&app->cursor)) rubraview_pal_window_set_cursor_visible(app->window, true);
+        } else if (rubraview_cursor_hide_tick(&app->cursor, dt)) {
+            rubraview_pal_window_set_cursor_visible(app->window, false);
         }
         /* What the slide show steps through is what is on screen (owner, 2026-10-14: it skipped files):
            the spreads as they are now, from the one shown, timed from when it is drawn. */
@@ -16891,8 +16992,8 @@ static void finish_open(app_state_t *app, size_t start_page) {
     app->precache = rubraview_precache_create(app->jobs, &app->page_cache,
                                               page_count(app), ESTIMATED_PAGE_BYTES);
     /* Settings › Cache: how many pages are read ahead and kept behind. */
-    app->precache.lookahead = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookahead")));
-    app->precache.lookbehind = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookbehind")));
+    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookahead")));
+    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookbehind")));
 
     if (start_page >= page_count(app)) start_page = 0;
     ensure_page_loaded(app, (int32_t)start_page);
@@ -17000,15 +17101,45 @@ static void open_path(app_state_t *app, u8str_t path) {
 
 /* §3.8.1 point 4: reaching the end of a volume continues into the next
    archive in the same directory. */
-static void open_sibling_archive(app_state_t *app, bool forward) {
-    if (app->source.archive_path.len == 0 || app->source_dir.len == 0) return;
-    if (!subs_may_leave(app)) return;
+static bool open_sibling_archive(app_state_t *app, bool forward) {
+    if (app->source.archive_path.len == 0 || app->source_dir.len == 0) return false;
 
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, app->source_dir);
     u8str_t next = rubraview_page_source_sibling_archive(app->arena, &listing,
                                                           app->source.archive_path, forward);
-    if (next.len == 0) return;
+    if (next.len == 0) return false;
+    if (!subs_may_leave(app)) return true;   /* held: it said why */
     open_path(app, next);
+    if (!forward && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);   /* going back: its last page */
+    return true;
+}
+
+/* The folder beside this one, after or before it, that has something to show (owner, 2026-10-14). */
+static bool open_sibling_folder(app_state_t *app, bool forward) {
+    u8str_t dir = app->source_dir;
+    if (dir.len == 0) return false;
+    u8str_t parent = rubraview_path_dirname(dir);
+    if (parent.len == 0 || rubraview_path_same(parent, dir)) return false;
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, parent);
+    u8str_t beside[64];
+    size_t n = rubraview_page_source_sibling_folders(app->arena, &listing, dir, forward, beside, 64);
+    for (size_t i = 0; i < n; ++i) {
+        rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(app->arena, beside[i]);
+        bool shows = false;
+        for (size_t k = 0; k < inside.count && !shows; ++k) {
+            shows = !inside.entries[k].is_directory && path_is_listed_kind(inside.entries[k].path);
+        }
+        if (!shows) continue;   /* empty, or nothing the viewer opens: the one after it */
+        if (!subs_may_leave(app)) return true;
+        open_path(app, beside[i]);
+        if (!forward && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);
+        char line[400];
+        u8str_t name = rubraview_path_basename(beside[i]);
+        int m = snprintf(line, sizeof(line), "%s folder: %.*s", forward ? "next" : "previous", (int)(name.len < 300 ? name.len : 300), name.ptr);
+        if (m > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
+        return true;
+    }
+    return false;
 }
 
 #ifdef _WIN32

@@ -212,6 +212,16 @@ u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
                                               u8str_t current_archive_path,
                                               bool forward);
 
+/**
+ * Past a folder's last file or before its first (owner, 2026-10-14): the
+ * folders beside `current_dir` in its parent's `listing`, in natural order,
+ * from the one after it (`forward`) or before it, outward — the caller
+ * opens the first that holds something to show. At most `max` written to
+ * `out`; how many. None when `current_dir` is not among them.
+ */
+size_t rubraview_page_source_sibling_folders(proven_arena_t *arena, const rubraview_fs_listing_t *listing,
+                                             u8str_t current_dir, bool forward, u8str_t *out, size_t max);
+
 #ifdef __cplusplus
 }
 #endif

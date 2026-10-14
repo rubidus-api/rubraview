@@ -34,7 +34,7 @@ typedef struct proven_job_sys proven_job_sys_t;
 /** Called on a worker thread to decode one page. */
 typedef void (*rubraview_precache_decode_fn)(void *ctx, size_t page_index);
 
-#define RUBRAVIEW_PRECACHE_MAX_WINDOW 16
+#define RUBRAVIEW_PRECACHE_MAX_WINDOW 200   /* the page, 99 ahead and 99 behind (owner, 2026-10-14) */
 
 typedef struct rubraview_precache {
     proven_job_sys_t     *jobs;   /* NULL runs decodes inline on the calling thread */
@@ -42,6 +42,9 @@ typedef struct rubraview_precache {
     size_t page_count;
     size_t lookahead;             /* pages after the current one */
     size_t lookbehind;            /* pages before it */
+    /* the reader's own (Settings › Cache): the ring is these, widened only for a fast slide show.
+       Before 2026-10-14 every update set the ring back to 2 and 1, and the settings never held. */
+    size_t want_ahead, want_behind;
     size_t estimated_bytes;       /* per decoded page, charged to the budget */
     size_t submitted_total;       /* jobs handed to workers since creation, for diagnostics */
 } rubraview_precache_t;

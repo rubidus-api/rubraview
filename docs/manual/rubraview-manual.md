@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.85.exe              the viewer, as built
-dist/rubraview-v0.0.85/                 the release bundle
-dist/rubraview-v0.0.85.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.86.exe              the viewer, as built
+dist/rubraview-v0.0.86/                 the release bundle
+dist/rubraview-v0.0.86.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -216,8 +216,14 @@ screen is read again from the file at full detail: it sharpens a moment
 after, tile by tile, and so does whatever you move to. Every key is in **Keys** at the
 end of this manual.
 
-Reaching the last page of `Vol 01.cbz` and pressing `PageDown` opens
-`Vol 02.cbz`. Close the viewer partway through a book and it offers your
+What `PageDown` (or `.`) does past the last page, and `PageUp` (or `,`)
+before the first, is **Settings › Files › At the first and last**: `say`
+(as it comes) tells you it is the last or the first and stays; `next` opens
+the next archive beside it — `Vol 01.cbz` runs into `Vol 02.cbz` — or the
+next folder beside this one that has something to show, and going back
+opens the previous one at its last page; `round` goes round to the other end
+of what is open. In a multi-page file (a TIFF, an icon) `.` and `,` turn its
+pages and then go on to the next or previous file. Close the viewer partway through a book and it offers your
 place when you open it again — press `Enter` to take it.
 
 Folders and archives are the same thing to the viewer: `.cbz`, `.zip`,
@@ -819,7 +825,9 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 
 ## Settings
 
-`F10` opens the settings. Every setting there now does what it says; most
+`F10` opens the settings. A click on a choice's word goes to the next one;
+the `<` before it goes back. On **Keys**, resting the pointer on a row says
+what its action does. Every setting there now does what it says; most
 take effect at once, a few the next time something is opened (the archive
 filename code page, the memory cap). Some worth knowing:
 
@@ -868,8 +876,9 @@ filename code page, the memory cap). Some worth knowing:
   Windows' dialog, not the picker.
 - **Cache** has **In use now** (pages and megabytes of the cap),
   **Clear the picker's thumbnails**, and **Forget every reading place**.
-- **Cache** — how much memory pages may take and how many are read ahead
-  and kept behind; **Always strip metadata on export** starts Export with
+- **Cache** — how much memory pages may take (up to 16 GB) and how many are
+  read ahead and kept behind (up to 99 each; as many as the memory holds,
+  the nearest first); **Always strip metadata on export** starts Export with
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
@@ -1002,8 +1011,8 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space` | Previous page |
+| `PageDown`, `Space`, `Enter`, `.` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |

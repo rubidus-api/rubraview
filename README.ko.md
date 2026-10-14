@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.85** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.85/rubraview-v0.0.85.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.86** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.86/rubraview-v0.0.86.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.86/rubraview-v0.0.86.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -79,8 +79,8 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `PageDown`, `Space`, `Enter` | 다음 장 |
-| `PageUp`, `Backspace`, `Shift+Space` | 이전 장 |
+| `PageDown`, `Space`, `Enter`, `.` | 다음 장 |
+| `PageUp`, `Backspace`, `Shift+Space`, `,` | 이전 장 |
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |
 | `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |

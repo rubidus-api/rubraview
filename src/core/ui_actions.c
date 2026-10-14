@@ -65,14 +65,15 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
 
     /* The layout and the way its pages run are one choice (owner, 2026-10-11). */
     static const struct { const char *action; const char *value; } LAYOUTS[RUBRAVIEW_LAYOUT_CHOICE_COUNT] = {
-        [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { "layout_single",    "1" },
-        [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { "layout_dual",      "2" },
-        [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { "layout_dual_rtl",  "2 rtl" },
+        /* the short names are the settings' own (Settings › Viewer › Layout), owner, 2026-10-14 */
+        [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { "layout_single",    "single" },
+        [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { "layout_dual",      "dual" },
+        [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { "layout_dual_rtl",  "dual-rtl" },
         [RUBRAVIEW_LAYOUT_CHOICE_BOOK]      = { "layout_book",      "book" },
-        [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { "layout_book_rtl",  "book rtl" },
+        [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { "layout_book_rtl",  "book-rtl" },
         [RUBRAVIEW_LAYOUT_CHOICE_WEBTOON]   = { "layout_webtoon",   "webtoon" },
         [RUBRAVIEW_LAYOUT_CHOICE_COMIC]     = { "layout_comic",     "comic" },
-        [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { "layout_comic_rtl", "comic rtl" },
+        [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { "layout_comic_rtl", "comic-rtl" },
     };
     rubraview_layout_choice_t choice = rubraview_layout_choice_of(f->layout, f->rtl ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR);
     if (rubraview_u8_eq_lit(action, "toggle_layout")) st.value = LAYOUTS[choice].value;
