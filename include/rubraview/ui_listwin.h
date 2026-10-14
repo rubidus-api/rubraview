@@ -28,7 +28,8 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_BODY,    /* inside, below the last row */
     /* D-111, a list that can be changed (`editable`): */
     RUBRAVIEW_LISTWIN_RESIZE,     /* left of Close: dragged, it sizes the window */
-    RUBRAVIEW_LISTWIN_DEL,        /* the bar under the title: the checked rows leave the list */
+    RUBRAVIEW_LISTWIN_ADD,        /* the bar under the title: files picked go into the list (RV-117) */
+    RUBRAVIEW_LISTWIN_DEL,        /* the checked rows leave the list */
     RUBRAVIEW_LISTWIN_SAVE,
     RUBRAVIEW_LISTWIN_LOAD,
     RUBRAVIEW_LISTWIN_PATHS,      /* saved with relative or whole paths */
@@ -55,6 +56,9 @@ typedef struct rubraview_listwin {
     bool   resizing;           /* the resize button held */
     double resize_dx, resize_dy;
     double resize_bottom;      /* the bottom edge, which stays while the top follows */
+    /* RV-117: the list in a window of its own (F3): the window's frame moves,
+       sizes and closes it, so it has no R, no X and no title to drag */
+    bool   own_window;
 } rubraview_listwin_t;
 
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale);

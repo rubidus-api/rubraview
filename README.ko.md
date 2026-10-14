@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.82** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.83** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -173,6 +173,11 @@
 | 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
 | 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
+| 오른쪽 클릭 `Open` | 목록의 파일 우클릭: 열기 |
+| 오른쪽 클릭 `Copy the whole path` | 목록의 파일 우클릭: 전체 경로를 클립보드로 |
+| 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |
+| 오른쪽 클릭 `Take out of the list` | 목록의 파일 우클릭: 목록에서 빼기 (파일은 그대로) |
+| 오른쪽 클릭 `Delete the file...` | 목록의 파일 우클릭: 경고하고 확인한 뒤 휴지통으로 |
 | 오른쪽 클릭 `One page`, 메뉴 `Single` | 보기 방식: 한 장씩 |
 | 오른쪽 클릭 `Two pages`, 메뉴 `Dual` | 보기 방식: 두 장 나란히 |
 | 오른쪽 클릭 `Book`, 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |

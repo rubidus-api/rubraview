@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.82.exe              the viewer, as built
-dist/rubraview-v0.0.82/                 the release bundle
-dist/rubraview-v0.0.82.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.83.exe              the viewer, as built
+dist/rubraview-v0.0.83/                 the release bundle
+dist/rubraview-v0.0.83.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -734,7 +734,8 @@ be changed there. At the left of every row are a checkbox, an `x` that
 takes the row out of the list, and arrows that move it up or down one
 place. Drag a row by its name to put it somewhere else — a line shows
 where it will go — and a checked row takes every other checked row along.
-Under the title, **Del** takes the checked rows out (the files themselves
+Under the title, **Add** puts files you pick in the open dialog at the
+end of the list, **Del** takes the checked rows out (the files themselves
 stay on the disk), **Save** writes the list to a file (`.m3u8`, or
 `.rvlist`), **Load** opens such a file, and **Rel** / **Abs** says how a
 saved list names its files: from the list's own folder, so that the folder
@@ -756,7 +757,20 @@ its pixels and its size. A click, or `Enter`, turns the viewer to that
 file. Any other key pressed there does what it does in the viewer, so
 `F3` or `Esc` closes it. A film or a sound has no preview, and a page far
 inside a solid archive is not decoded for a glance: both say so, and open
-with `Enter`.
+with `Enter`. For a folder's files or a playlist it is changed exactly as
+the floating list is — the boxes, `x`, the arrows, a row dragged by its
+name, the box for all, **Add**, **Del**, **Save**, **Load**, **Rel**/**Abs**,
+and files dropped on it from Explorer — and both show the same list, so a
+change in one is in the other. The two differ in what they are for: the
+floating list lies over the picture, see-through; this one is a window of
+its own with the pictures shown large.
+
+A right click on a file in either list opens its own short list: **Open**;
+**Copy the whole path** (to the clipboard); **Show in Explorer**, the file
+picked out there; **Take out of the list** (the file stays on the disk);
+and **Delete the file...**, which first asks in a warning of Windows' own —
+No is the answer it starts on — and then moves the file to the recycle
+bin, from where it can be put back.
 
 `I` (or `Ctrl+I`, or File › Information) opens the file's information: its
 size, dates, pixels and format, and for a photo what the camera wrote —
@@ -1070,6 +1084,11 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `Open` | A file of a list, right-clicked: open it |
+| Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
+| Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
+| Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
+| Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
 | Right click `One page`, Menu `Single` | Layout: one page at a time |
 | Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |

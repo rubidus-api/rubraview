@@ -1254,3 +1254,13 @@ Do not store credentials, private infrastructure details, personal data, private
   - The titlebar comes when the pointer is anywhere in its own height: the trigger is never less than 36 px, whatever a settings file kept (they keep every value, so a new default alone would not reach anyone).
 - Consequences: the menu is two levels for most things and fits the 4 x 4 box everywhere; a user's own boxes document without `context` lists gets none.
 - Not run: a right click on a picture in an archive or a multipage file on the VM; the slide show with an animation or a film among its slides; the page bar's hints at more than one DPI.
+
+## D-133: The Two File Lists Changed Alike, And A File's Own Right Click (2026-10-14)
+
+- Context: RV-117. The owner: the window of its own (thumbnails) and the floating see-through list stay different in that, but take out, change, add and save alike; a right click on a file offers its whole path to the clipboard, Explorer with it selected, out of the list, and deleting it for real — warned and asked, to the recycle bin.
+- Decision:
+  - One editing path for both: the press, the drag of a row and its release, and the drawing of the bar and of a row's four buttons are shared; the file window's list is `own_window` (its frame moves, sizes and closes it). Both show the same list and the same checks.
+  - The bar gains **Add** (both): files picked in the open dialog go to the end, by the rules of a drop (only what the viewer opens, nothing twice). The file window takes drops from Explorer as the floating list does.
+  - `context listrow` in the boxes document: Open, Copy the whole path, Show in Explorer, Take out of the list, Delete the file... — for a folder's files or a playlist (not a book's pages). Delete asks in a Windows warning over the window it was asked from, No the default; yes moves the file to the recycle bin (a film playing from it is closed first) and the row leaves the list.
+- Consequences: a folder's list changed by Add, Del, a take-out or a delete is from then on a playlist (D-111's rule). A delete from the list is not on `Ctrl+Z` (the file is in the recycle bin).
+- Not run: a drop from Explorer onto the file window (no drag could be made on the VM); a delete of the film playing.

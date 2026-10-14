@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.82** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.82/rubraview-v0.0.82.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.83** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.83/rubraview-v0.0.83.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -174,6 +174,11 @@ ships with, so it cannot drift from them.
 | Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `Open` | A file of a list, right-clicked: open it |
+| Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
+| Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
+| Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
+| Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
 | Right click `One page`, Menu `Single` | Layout: one page at a time |
 | Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |

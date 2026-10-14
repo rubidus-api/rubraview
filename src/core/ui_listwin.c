@@ -45,19 +45,20 @@ rubraview_rect_t rubraview_listwin_rect(const rubraview_listwin_t *lw) {
 }
 
 rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw) {
-    if (!lw) return (rubraview_rect_t){0};
+    if (!lw || lw->own_window) return (rubraview_rect_t){0};
     double s = lw->title_height;
     return (rubraview_rect_t){ lw->x + lw->width - s, lw->y, s, s };
 }
 
 rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
-    if (!lw || !lw->editable) return (rubraview_rect_t){0};
+    if (!lw || !lw->editable || lw->own_window) return (rubraview_rect_t){0};
     double s = lw->title_height;
     return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
 }
 
-static const rubraview_listwin_part_t BAR[] = {
-    RUBRAVIEW_LISTWIN_DEL, RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS,
+#define BAR_COUNT 5
+static const rubraview_listwin_part_t BAR[BAR_COUNT] = {
+    RUBRAVIEW_LISTWIN_ADD, RUBRAVIEW_LISTWIN_DEL, RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS,
 };
 static const rubraview_listwin_part_t ROW_PARTS[] = {
     RUBRAVIEW_LISTWIN_ROW_CHECK, RUBRAVIEW_LISTWIN_ROW_REMOVE, RUBRAVIEW_LISTWIN_ROW_UP, RUBRAVIEW_LISTWIN_ROW_DOWN,
@@ -67,8 +68,8 @@ rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubra
     if (!lw || !lw->editable) return (rubraview_rect_t){0};
     /* the box for all, in the rows' check column; the four buttons share the rest */
     if (part == RUBRAVIEW_LISTWIN_ALL) return (rubraview_rect_t){ lw->x, lw->y + lw->title_height, lw->row_height, lw->bar_height };
-    double w = (lw->width - lw->row_height) / 4.0;
-    for (size_t i = 0; i < 4; ++i) {
+    double w = (lw->width - lw->row_height) / (double)BAR_COUNT;
+    for (size_t i = 0; i < BAR_COUNT; ++i) {
         if (BAR[i] == part) return (rubraview_rect_t){ lw->x + lw->row_height + (double)i * w, lw->y + lw->title_height, w, lw->bar_height };
     }
     return (rubraview_rect_t){0};
@@ -156,8 +157,8 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
     double head = rubraview_listwin_head_height(lw);
     if (py < lw->y + head) {
         if (px < lw->x + lw->row_height) return RUBRAVIEW_LISTWIN_ALL;
-        size_t b = (size_t)((px - lw->x - lw->row_height) / ((lw->width - lw->row_height) / 4.0));
-        return BAR[b < 4 ? b : 3];
+        size_t b = (size_t)((px - lw->x - lw->row_height) / ((lw->width - lw->row_height) / (double)BAR_COUNT));
+        return BAR[b < BAR_COUNT ? b : BAR_COUNT - 1];
     }
     size_t row = (size_t)((py - lw->y - head) / lw->row_height);
     size_t index = lw->first + row;
@@ -225,6 +226,8 @@ rubraview_rect_t rubraview_filewin_layout(rubraview_listwin_t *lw, double client
     }
     lw->open = true;
     lw->placed = true;
+    lw->own_window = true;
+    lw->bar_height = 28.0 * dpi_scale;
     lw->x = 0.0;
     lw->y = 0.0;
     lw->width = list_w;

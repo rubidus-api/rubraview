@@ -407,6 +407,8 @@ typedef struct app_state {
     bool                  *list_checked;         /* one a page: its row is checked */
     size_t                 list_checked_count;
     bool                   list_row_pressed, list_row_dragging;   /* a row's name held; moved, the row is being carried */
+    bool                   list_held_in_files;  /* RV-117: that row is the file window's (F3), not the floating list's */
+    size_t                 list_ctx_row;        /* RV-117: the row a right click opened its list for */
     size_t                 list_press_row, list_drop_at;
     double                 list_press_y;
     rubraview_eqwin_t      eqwin;                /* the equaliser's ten sliders (owner, 2026-10-01) */
@@ -532,6 +534,8 @@ typedef struct app_state {
     /* RV-116: a right click on the picture — the list for what is on screen,
        or, while the slide show runs, its settings */
     bool                       ctx_open;
+    bool                       ctx_in_files;       /* RV-117: open in the file window (F3), over its rows */
+    double                     files_px, files_py; /* the pointer in that window */
     double                     ctx_x, ctx_y;
     const rubraview_toolbox_profile_t *ctx_list;
     int32_t                    ctx_focus;          /* the row the arrow keys are on, -1 */
@@ -4873,19 +4877,83 @@ static void list_load(app_state_t *app) {
     open_playlist(app, picked.paths[0]);
 }
 
-static bool listwin_press(app_state_t *app, double x, double y) {
+static void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files);
+
+/* RV-117: Add — files picked in the open dialog go to the end of the list. */
+static void list_add_picked(app_state_t *app, rubraview_window_t *owner) {
+    rubraview_file_dialog_opts_t opts = {
+        .title = "Add to the list", .allow_multi = true,
+        .parent_window_handle = rubraview_pal_window_native_handle(owner),
+    };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    listwin_sync(app);
+    list_insert_paths(app, picked.paths, picked.count, page_count(app));
+}
+
+/* RV-117: a file of the list to the recycle bin — warned and asked first, in a
+   question of Windows' own over the window it was asked from; No is the default. */
+static void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner) {
+    size_t count = page_count(app);
+    if (row >= count || !list_editable(app)) return;
+    char path[1024];
+    u8str_t from = app->source.pages[row].path;
+    if (from.len == 0 || from.len >= sizeof(path)) return;
+    memcpy(path, from.ptr, from.len);                       /* the list it points into is made again below */
+    path[from.len] = '\0';
+    u8str_t name = rubraview_path_basename((u8str_t){ .ptr = path, .len = from.len });
+    char text[1400];
+    int n = snprintf(text, sizeof(text), "Move this file to the recycle bin?\n\n%.*s\n\nIt leaves the list and its folder; "
+                     "the recycle bin can give it back.", (int)(name.len < 600 ? name.len : 600), name.ptr);
+    WCHAR wide[1500];
+    if (n <= 0 || MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1500) <= 0) return;
+    int answer = MessageBoxW((HWND)rubraview_pal_window_native_handle(owner), wide, L"Rubraview - delete a file",
+                             MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (answer != IDYES) { osd_say(app, U8("not deleted")); return; }
+    if (app->media && app->media_page == (int32_t)row) media_close(app);   /* a film playing holds its file */
+    u8str_t gone = { .ptr = path, .len = from.len };
+    if (!rubraview_pal_fs_recycle(gone)) {
+        osd_say(app, U8("could not move it to the recycle bin (is it open in another program?)"));
+        return;
+    }
+    if (page_count(app) <= 1) {
+        reopen_after_removal(app, 0);
+    } else {
+        bool *one = (bool*)calloc(page_count(app), sizeof(bool));
+        if (one) {
+            one[row < page_count(app) ? row : page_count(app) - 1] = true;
+            list_remove(app, one);
+            free(one);
+        }
+    }
+    char line[700];
+    int m = snprintf(line, sizeof(line), "moved to the recycle bin: %.*s", (int)(name.len < 600 ? name.len : 600), name.ptr);
+    if (m > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
+}
+
+/* A press on either list (RV-117: the floating one, or the file window's,
+   `in_files`, which its own frame moves, sizes and closes): true when it took it. */
+static bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, bool right, bool in_files) {
     size_t index = 0, count = page_count(app);
     listwin_sync(app);
-    rubraview_listwin_part_t part = rubraview_listwin_hit(&app->listwin, x, y, count, &index);
+    lw->editable = list_editable(app);
+    rubraview_listwin_part_t part = rubraview_listwin_hit(lw, x, y, count, &index);
     if (part == RUBRAVIEW_LISTWIN_NONE) return false;
     note_activity(app);
+    if (right) {   /* RV-117: a file's own list — its path, Explorer, out of the list, the recycle bin */
+        if ((part == RUBRAVIEW_LISTWIN_ROW || part >= RUBRAVIEW_LISTWIN_ROW_CHECK) && index < count && list_editable(app)) {
+            list_row_menu(app, index, x, y, in_files);
+        }
+        return true;
+    }
     bool *one = NULL;
     switch (part) {
-        case RUBRAVIEW_LISTWIN_CLOSE: app->listwin.open = false; break;
-        case RUBRAVIEW_LISTWIN_TITLE: rubraview_listwin_drag_begin(&app->listwin, x, y); break;
-        case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(&app->listwin, x, y); break;
+        case RUBRAVIEW_LISTWIN_CLOSE: lw->open = false; break;
+        case RUBRAVIEW_LISTWIN_TITLE: if (!in_files) rubraview_listwin_drag_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(lw, x, y); break;
         case RUBRAVIEW_LISTWIN_ROW:
             /* Known when it is let go: not moved, it goes to that file; carried, the row moves. */
+            app->list_held_in_files = in_files;
             app->list_row_pressed = true;
             app->list_row_dragging = false;
             app->list_press_row = index;
@@ -4912,6 +4980,7 @@ static bool listwin_press(app_state_t *app, double x, double y) {
             for (size_t i = 0; i < app->list_checked_count; ++i) app->list_checked[i] = !all;
             break;
         }
+        case RUBRAVIEW_LISTWIN_ADD: list_add_picked(app, in_files ? app->files_window : app->window); break;
         case RUBRAVIEW_LISTWIN_SAVE: list_save(app); break;
         case RUBRAVIEW_LISTWIN_LOAD: list_load(app); break;
         case RUBRAVIEW_LISTWIN_PATHS: {
@@ -4924,24 +4993,38 @@ static bool listwin_press(app_state_t *app, double x, double y) {
         default: break;
     }
     free(one);
+    if (in_files) app->files_dirty = true;
     return true;
 }
 
-/* The pointer moved with something of the list window held. */
-static void listwin_motion(app_state_t *app, double x, double y) {
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->window, &w, &h);
-    if (app->listwin.dragging) rubraview_listwin_drag_to(&app->listwin, x, y, (double)w, (double)h);
-    if (app->listwin.resizing) {
-        rubraview_listwin_resize_to(&app->listwin, x, y, (double)w, (double)h);
-        rubraview_listwin_scroll(&app->listwin, 0, page_count(app));
+static bool listwin_press(app_state_t *app, double x, double y, bool right) {
+    return list_press(app, &app->listwin, x, y, right, false);
+}
+
+/* The pointer moved with something of a list held (`in_files`: over the file window). */
+static void list_motion(app_state_t *app, double x, double y, bool in_files) {
+    if (!in_files) {
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->window, &w, &h);
+        if (app->listwin.dragging) rubraview_listwin_drag_to(&app->listwin, x, y, (double)w, (double)h);
+        if (app->listwin.resizing) {
+            rubraview_listwin_resize_to(&app->listwin, x, y, (double)w, (double)h);
+            rubraview_listwin_scroll(&app->listwin, 0, page_count(app));
+        }
     }
-    if (app->list_row_pressed && app->listwin.editable) {
-        if (!app->list_row_dragging && fabs(y - app->list_press_y) > 4.0 * rubraview_pal_window_dpi_scale(app->window)) {
+    if (app->list_row_pressed && app->list_held_in_files == in_files && list_editable(app)) {
+        rubraview_listwin_t *lw = in_files ? &app->files_list : &app->listwin;
+        rubraview_window_t *win = in_files ? app->files_window : app->window;
+        if (!app->list_row_dragging && fabs(y - app->list_press_y) > 4.0 * rubraview_pal_window_dpi_scale(win)) {
             app->list_row_dragging = true;
         }
-        if (app->list_row_dragging) app->list_drop_at = rubraview_listwin_insert_index(&app->listwin, y, page_count(app));
+        if (app->list_row_dragging) app->list_drop_at = rubraview_listwin_insert_index(lw, y, page_count(app));
+        if (in_files) app->files_dirty = true;
     }
+}
+
+static void listwin_motion(app_state_t *app, double x, double y) {
+    list_motion(app, x, y, false);
 }
 
 /* The button let go: true when the list window had hold of something. */
@@ -4958,6 +5041,7 @@ static bool listwin_release(app_state_t *app) {
             go_to_spread(app, spread_for_chosen_page(app, (int32_t)row));
             update_precache(app);
         }
+        if (app->list_held_in_files) { app->files_selected = -1; app->files_dirty = true; }
         return held;
     }
     app->list_row_dragging = false;
@@ -5312,6 +5396,32 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
+    } else if (rubraview_u8_eq_lit(action, "list_open") || rubraview_u8_eq_lit(action, "list_copy_path") ||
+               rubraview_u8_eq_lit(action, "list_reveal") || rubraview_u8_eq_lit(action, "list_take_out") ||
+               rubraview_u8_eq_lit(action, "list_delete_file")) {
+        /* RV-117: a file of a list, right-clicked on its row */
+        size_t row = app->list_ctx_row;
+        rubraview_window_t *owner = app->ctx_in_files && app->files_window ? app->files_window : app->window;
+        if (row >= page_count(app)) {
+            osd_say(app, U8("that file is no longer in the list"));
+        } else if (rubraview_u8_eq_lit(action, "list_open")) {
+            if ((int32_t)row != current_page_index(app)) {
+                go_to_spread(app, spread_for_chosen_page(app, (int32_t)row));
+                update_precache(app);
+            }
+        } else if (rubraview_u8_eq_lit(action, "list_copy_path")) {
+            u8str_t whole = rubraview_pal_fs_absolute(app->arena, app->source.pages[row].path);
+            osd_say(app, rubraview_pal_clipboard_set_text(owner, whole) ? U8("its whole path is on the clipboard")
+                                                                         : U8("the path could not be copied"));
+        } else if (rubraview_u8_eq_lit(action, "list_reveal")) {
+            if (!rubraview_pal_shell_reveal(app->source.pages[row].path)) osd_say(app, U8("Explorer could not show the file"));
+        } else if (rubraview_u8_eq_lit(action, "list_take_out")) {
+            bool *one = (bool*)calloc(page_count(app), sizeof(bool));
+            if (one) { one[row] = true; list_remove(app, one); free(one); }
+        } else {
+            list_delete_row(app, row, owner);
+        }
+        app->files_dirty = true;
     } else if (rubraview_u8_eq_lit(action, "reveal_in_explorer")) {
         /* Owner, 2026-10-09: the file on screen picked out in Explorer; a
            page inside an archive has no file of its own, so the archive. */
@@ -7824,8 +7934,12 @@ static void draw_sub_list(app_state_t *app) {
 
 #define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
 
+static rubraview_window_t *ctx_window(const app_state_t *app) {
+    return app->ctx_in_files && app->files_window ? app->files_window : app->window;   /* RV-117: or over the file window's rows */
+}
+
 static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double dpi = rubraview_pal_window_dpi_scale(ctx_window(app));
     return (rubraview_ctxmenu_metrics_t){ .row_height = 30.0 * dpi, .gap = 9.0 * dpi, .pad = 6.0 * dpi, .width = 250.0 * dpi };
 }
 
@@ -7846,7 +7960,7 @@ static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
 
 static rubraview_rect_t ctx_frame(const app_state_t *app, const int32_t *groups, size_t n) {
     int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_pal_window_get_size(ctx_window(app), &w, &h);
     rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
     return rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &m, groups, n);
 }
@@ -7859,6 +7973,7 @@ static rubraview_rect_t slidepop_frame(const app_state_t *app) {
 }
 
 static void ctx_close(app_state_t *app) {
+    if (app->ctx_open && app->ctx_in_files) app->files_dirty = true;
     app->ctx_open = false;
     app->ctx_list = NULL;
     app->ctx_focus = -1;
@@ -7875,6 +7990,7 @@ static void slidepop_close(app_state_t *app) {
 static void ctx_open_at(app_state_t *app, double x, double y) {
     ctx_close(app);
     slidepop_close(app);
+    app->ctx_in_files = false;
     app->sub_list_open = false;
     if (app->slideshow_running) {
         app->slidepop_open = true;
@@ -7907,19 +8023,18 @@ static void ctx_choose(app_state_t *app, int32_t row) {
     handle_action(app, action);
 }
 
-static void draw_ctxmenu(app_state_t *app) {
+static void draw_ctxmenu_on(app_state_t *app, rubraview_renderer_t *r, double px, double py) {
     if (!app->ctx_open) return;
     int32_t groups[CTX_MAX];
     bool enabled[CTX_MAX];
     size_t n = ctx_rows(app, groups, enabled);
     if (n == 0) return;
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double dpi = rubraview_pal_window_dpi_scale(ctx_window(app));
     rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
     rubraview_rect_t f = ctx_frame(app, groups, n);
-    rubraview_renderer_t *r = app->renderer;
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
-    int32_t hover = rubraview_ctxmenu_row_at(f, &m, groups, n, app->pointer_x, app->pointer_y);
+    int32_t hover = rubraview_ctxmenu_row_at(f, &m, groups, n, px, py);
     if (hover < 0) hover = app->ctx_focus;
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     rubraview_action_facts_t facts = action_facts(app);
@@ -7940,6 +8055,25 @@ static void draw_ctxmenu(app_state_t *app) {
         rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi, enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
+}
+
+static void draw_ctxmenu(app_state_t *app) {
+    if (!app->ctx_in_files) draw_ctxmenu_on(app, app->renderer, app->pointer_x, app->pointer_y);
+}
+
+/* RV-117: a file's own list, from a right click on its row in either list. */
+static void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files) {
+    ctx_close(app);
+    slidepop_close(app);
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), U8("listrow"));
+    if (!list || list->tile_count <= 0) return;
+    app->ctx_open = true;
+    app->ctx_list = list;
+    app->ctx_in_files = in_files;
+    app->ctx_x = x;
+    app->ctx_y = y;
+    app->list_ctx_row = row;
+    app->files_dirty = true;
 }
 
 /* What the field says when it is not being typed in: the delay, "3.5". */
@@ -8440,12 +8574,72 @@ static void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
    on screen is in it, then a row a file, that one marked. See-through as
    the toolbox is. */
 /* A button of the list window: lit under the pointer, or when `on`. */
-static void listwin_button(app_state_t *app, rubraview_rect_t r, const char *label, double size, bool on, uint32_t color) {
+/* A small button of a list, drawn by `r` with the pointer at (px, py) in its window. */
+static void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_t r, const char *label, double size,
+                        bool on, uint32_t color) {
     if (r.width <= 0.0) return;
     rubraview_pal_rect_t box = { r.x + 1.0, r.y + 1.0, r.width - 2.0, r.height - 2.0 };
-    if (on) rubraview_pal_render_fill_rect(app->renderer, box, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u, 2.0);
-    else if (rubraview_rect_contains(r, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, box, COLOR_TILE_FILL, 2.0);
-    rubraview_pal_render_draw_text(app->renderer, cstr(label), box, size, color, RUBRAVIEW_TEXT_CENTER);
+    if (on) rubraview_pal_render_fill_rect(rr, box, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u, 2.0);
+    else if (rubraview_rect_contains(r, px, py)) rubraview_pal_render_fill_rect(rr, box, COLOR_TILE_FILL, 2.0);
+    rubraview_pal_render_draw_text(rr, cstr(label), box, size, color, RUBRAVIEW_TEXT_CENTER);
+}
+
+static void listwin_button(app_state_t *app, rubraview_rect_t r, const char *label, double size, bool on, uint32_t color) {
+    list_button(app->renderer, app->pointer_x, app->pointer_y, r, label, size, on, color);
+}
+
+static void list_check_mark(rubraview_renderer_t *rr, rubraview_rect_t c, bool every, bool some) {
+    double side = c.width < c.height ? c.width : c.height;
+    double inset = side * 0.25;
+    rubraview_pal_rect_t mark = { c.x + (c.width - side) * 0.5 + inset, c.y + (c.height - side) * 0.5 + inset,
+                                  side - inset * 2.0, side - inset * 2.0 };
+    if (every) rubraview_pal_render_fill_rect(rr, mark, 0xFF5B9BD5u, 2.0);
+    else if (some) rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ mark.x + mark.width * 0.2, mark.y + mark.height * 0.4,
+                                                                            mark.width * 0.6, mark.height * 0.2 }, 0xFF5B9BD5u, 1.0);
+    rubraview_pal_render_stroke_rect(rr, mark, COLOR_TEXT, 1.0, 2.0);
+}
+
+/* RV-117: what both lists have when they can be changed — the bar (the box
+   for all, Add, Del, Save, Load, Rel/Abs) ... */
+static void draw_list_bar(app_state_t *app, rubraview_renderer_t *rr, const rubraview_listwin_t *lw, double px, double py) {
+    double small = lw->row_height * 0.5;
+    char del[40];
+    size_t checked = list_checked_total(app);
+    if (checked > 0) snprintf(del, sizeof(del), "Del (%zu)", checked); else snprintf(del, sizeof(del), "Del");
+    list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL),
+                    app->list_checked_count > 0 && checked == app->list_checked_count, checked > 0);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), "Add", small, false, COLOR_TEXT);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), "Save", small, false, COLOR_TEXT);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), "Load", small, false, COLOR_TEXT);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_PATHS), list_saves_whole_paths(app) ? "Abs" : "Rel",
+                small, false, COLOR_TEXT);
+    double head_h = rubraview_listwin_head_height(lw);
+    rubraview_pal_rect_t rule = { lw->x + 2.0, lw->y + head_h - 1.0, lw->width - 4.0, 1.0 };
+    rubraview_pal_render_fill_rect(rr, rule, COLOR_BOX_BORDER, 0.0);
+}
+
+/* ... the four buttons at a row's left ... */
+static void draw_list_row_parts(app_state_t *app, rubraview_renderer_t *rr, const rubraview_listwin_t *lw, size_t i, size_t count,
+                                double px, double py) {
+    double small = lw->row_height * 0.5;
+    bool checked = i < app->list_checked_count && app->list_checked[i];
+    list_check_mark(rr, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_CHECK), checked, false);
+    list_button(rr, px, py, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_REMOVE), "x", small, false, COLOR_TEXT);
+    list_button(rr, px, py, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_UP), "\xE2\x96\xB2", small * 0.8, false,
+                i > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+    list_button(rr, px, py, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_DOWN), "\xE2\x96\xBC", small * 0.8, false,
+                i + 1 < count ? COLOR_TEXT : COLOR_BOX_BORDER);
+}
+
+/* ... and, while a row is carried, a line where it would go. */
+static void draw_list_drop_line(app_state_t *app, rubraview_renderer_t *rr, const rubraview_listwin_t *lw, bool in_files) {
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    if (!app->list_row_dragging || app->list_held_in_files != in_files) return;
+    if (app->list_drop_at < lw->first || app->list_drop_at > lw->first + rows) return;
+    rubraview_pal_rect_t line = { lw->x + 4.0, lw->y + rubraview_listwin_head_height(lw) + (double)(app->list_drop_at - lw->first) * lw->row_height - 1.0,
+                                  lw->width - 8.0, 2.0 };
+    rubraview_pal_render_fill_rect(rr, line, 0xFF5B9BD5u, 0.0);
 }
 
 static void draw_listwin(app_state_t *app, double win_w, double win_h) {
@@ -8485,28 +8679,7 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
     if (lw->editable) {
         /* D-111: R sizes the window when dragged; the bar acts on the list. */
         listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
-        char del[40];
-        size_t checked = list_checked_total(app);
-        if (checked > 0) snprintf(del, sizeof(del), "Del (%zu)", checked); else snprintf(del, sizeof(del), "Del");
-        {   /* the box for all: filled when every row is checked, a bar when some are */
-            rubraview_rect_t c = rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL);
-            double side = c.width < c.height ? c.width : c.height;
-            double inset = side * 0.25;
-            rubraview_pal_rect_t mark = { c.x + (c.width - side) * 0.5 + inset, c.y + (c.height - side) * 0.5 + inset,
-                                          side - inset * 2.0, side - inset * 2.0 };
-            bool every = app->list_checked_count > 0 && checked == app->list_checked_count;
-            if (every) rubraview_pal_render_fill_rect(app->renderer, mark, 0xFF5B9BD5u, 2.0);
-            else if (checked > 0) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ mark.x + mark.width * 0.2,
-                     mark.y + mark.height * 0.4, mark.width * 0.6, mark.height * 0.2 }, 0xFF5B9BD5u, 1.0);
-            rubraview_pal_render_stroke_rect(app->renderer, mark, COLOR_TEXT, 1.0, 2.0);
-        }
-        listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
-        listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), "Save", small, false, COLOR_TEXT);
-        listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), "Load", small, false, COLOR_TEXT);
-        listwin_button(app, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_PATHS), list_saves_whole_paths(app) ? "Abs" : "Rel",
-                       small, false, COLOR_TEXT);
-        rubraview_pal_rect_t rule = { lw->x + 2.0, lw->y + head_h - 1.0, lw->width - 4.0, 1.0 };
-        rubraview_pal_render_fill_rect(app->renderer, rule, COLOR_BOX_BORDER, 0.0);
+        draw_list_bar(app, app->renderer, lw, app->pointer_x, app->pointer_y);
     }
 
     size_t hovered = SIZE_MAX, index = 0;
@@ -8523,18 +8696,7 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
         if ((int32_t)i == current) rubraview_pal_render_fill_rect(app->renderer, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
         else if (carried) rubraview_pal_render_fill_rect(app->renderer, row, 0x405B9BD5u, 2.0);
         else if (i == hovered) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_FILL, 2.0);
-        if (lw->editable) {
-            rubraview_rect_t c = rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_CHECK);
-            double inset = c.height * 0.25;
-            rubraview_pal_rect_t mark = { c.x + inset, c.y + inset, c.width - inset * 2.0, c.height - inset * 2.0 };
-            if (checked) rubraview_pal_render_fill_rect(app->renderer, mark, 0xFF5B9BD5u, 2.0);
-            rubraview_pal_render_stroke_rect(app->renderer, mark, COLOR_TEXT, 1.0, 2.0);
-            listwin_button(app, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_REMOVE), "x", small, false, COLOR_TEXT);
-            listwin_button(app, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_UP), "\xE2\x96\xB2", small * 0.8, false,
-                           i > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
-            listwin_button(app, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_DOWN), "\xE2\x96\xBC", small * 0.8, false,
-                           i + 1 < count ? COLOR_TEXT : COLOR_BOX_BORDER);
-        }
+        if (lw->editable) draw_list_row_parts(app, app->renderer, lw, i, count, app->pointer_x, app->pointer_y);
         char line[512], fit[512];
         u8str_t name = page_display_name(app, i);
         int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.len < 480 ? name.len : 480), name.ptr);
@@ -8544,12 +8706,7 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
                                                                  text.width, small),
                                                   text, small, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
-    /* A row being carried: a line where it would go. */
-    if (app->list_row_dragging && app->list_drop_at >= lw->first && app->list_drop_at <= lw->first + rows) {
-        rubraview_pal_rect_t line = { lw->x + 4.0, lw->y + head_h + (double)(app->list_drop_at - lw->first) * lw->row_height - 1.0,
-                                      lw->width - 8.0, 2.0 };
-        rubraview_pal_render_fill_rect(app->renderer, line, 0xFF5B9BD5u, 0.0);
-    }
+    draw_list_drop_line(app, app->renderer, lw, false);   /* a row being carried */
     /* A thin bar says where in a long list the rows are. */
     if (count > rows && rows > 0) {
         double track = lw->height - head_h;
@@ -13545,6 +13702,7 @@ static void files_show(app_state_t *app) {
     app->files_followed = -1;
     app->files_want = -1;
     files_preview_drop(app);
+    rubraview_pal_window_accept_drops(app->files_window, true);   /* RV-117: files dragged in join the list */
     files_layout(app);
 }
 
@@ -13664,6 +13822,8 @@ static void draw_files_window(app_state_t *app) {
     app->files_dirty = false;
 
     rubraview_renderer_t *r = app->files_renderer;
+    listwin_sync(app);
+    app->files_list.editable = list_editable(app);   /* RV-117: changed as the floating list is, or only looked at */
     const rubraview_listwin_t *lw = &app->files_list;
     double dpi = rubraview_pal_window_dpi_scale(app->files_window);
     double font = lw->row_height * 0.5;
@@ -13682,14 +13842,22 @@ static void draw_files_window(app_state_t *app) {
     rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, lw->title_height };
     if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)hn }, head_text.width, font),
                                                head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    if (lw->editable) draw_list_bar(app, r, lw, app->files_px, app->files_py);
+    double head_h = rubraview_listwin_head_height(lw);
 
     size_t rows = rubraview_listwin_rows_visible(lw);
     for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
         rubraview_rect_t rr = rubraview_listwin_row_rect(lw, i, count);
         rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 8.0, rr.height };
+        bool checked = i < app->list_checked_count && app->list_checked[i];
+        bool carried = app->list_row_dragging && app->list_held_in_files && (i == app->list_press_row ||
+                       (checked && app->list_press_row < app->list_checked_count && app->list_checked[app->list_press_row]));
         if ((int32_t)i == current) rubraview_pal_render_fill_rect(r, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
+        else if (carried) rubraview_pal_render_fill_rect(r, row, 0x405B9BD5u, 2.0);
         else if ((int32_t)i == app->files_hover) rubraview_pal_render_fill_rect(r, row, COLOR_TILE_FILL, 2.0);
         if ((int32_t)i == app->files_selected) rubraview_pal_render_stroke_rect(r, row, COLOR_TEXT, 1.0, 2.0);
+        if (lw->editable) draw_list_row_parts(app, r, lw, i, count, app->files_px, app->files_py);
+        double text_left = lw->editable ? rubraview_listwin_row_text_x(lw) : row.x;
 
         /* its size at the right (an archive knows it; a folder's files are not asked), its name in what is left */
         char size_text[32];
@@ -13704,15 +13872,16 @@ static void draw_files_window(app_state_t *app) {
         char line[640];
         u8str_t name = page_display_name(app, i);
         int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.len < 600 ? name.len : 600), name.ptr);
-        rubraview_pal_rect_t text = { row.x + lw->row_height * 0.3, row.y, row.width - lw->row_height * 0.9 - size_w, row.height };
+        rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, row.x + row.width - text_left - lw->row_height * 0.9 - size_w, row.height };
         if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
                                                   text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
+    draw_list_drop_line(app, r, lw, true);
     if (count > rows && rows > 0) {              /* where in a long list the rows are */
-        double track = lw->height - lw->title_height;
+        double track = lw->height - head_h;
         double bh = track * (double)rows / (double)count;
         if (bh < lw->row_height * 0.5) bh = lw->row_height * 0.5;
-        double by = lw->y + lw->title_height + (track - bh) * (double)lw->first / (double)(count - rows);
+        double by = lw->y + head_h + (track - bh) * (double)lw->first / (double)(count - rows);
         rubraview_pal_rect_t bar = { lw->x + lw->width - 5.0, by, 3.0, bh };
         rubraview_pal_render_fill_rect(r, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
     }
@@ -13766,6 +13935,7 @@ static void draw_files_window(app_state_t *app) {
             if (fn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
+    if (app->ctx_in_files) draw_ctxmenu_on(app, r, app->files_px, app->files_py);   /* RV-117: a file's own list */
     if (!rubraview_pal_render_end(r)) files_close(app);   /* its device went: the key opens it again */
 }
 
@@ -13789,19 +13959,44 @@ static size_t files_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 int32_t was = app->files_hover;
+                app->files_px = event.mouse.x;
+                app->files_py = event.mouse.y;
                 app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
                                      ? (int32_t)index : -1;
                 if (app->files_hover != was) app->files_dirty = true;
+                if (app->files_list.editable || app->ctx_in_files) app->files_dirty = true;   /* its buttons light under the pointer */
+                list_motion(app, event.mouse.x, event.mouse.y, true);
                 break;
             }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (app->list_held_in_files && listwin_release(app)) app->files_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_DROP:
+                /* RV-117: files from Explorer join the list at the row they are let go over */
+                if (event.drop.count > 0 && list_editable(app)) {
+                    u8str_t paths[16];
+                    size_t n = event.drop.count < 16 ? event.drop.count : 16;
+                    for (size_t i = 0; i < n; ++i) paths[i] = (u8str_t){ .ptr = event.drop.paths[i], .len = event.drop.path_lengths[i] };
+                    listwin_sync(app);
+                    size_t at = event.drop.has_point ? rubraview_listwin_insert_index(&app->files_list, event.drop.y, page_count(app)) : page_count(app);
+                    list_insert_paths(app, paths, n, at);
+                    app->files_dirty = true;
+                }
+                break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE:
                 if (app->files_hover != -1) { app->files_hover = -1; app->files_dirty = true; }
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
-                if (rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW) {
-                    files_go_to(app, (int32_t)index);
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+                bool right = event.mouse.button == RUBRAVIEW_MOUSE_RIGHT;
+                if (app->ctx_open && app->ctx_in_files) {          /* its own list takes the press first */
+                    if (popups_press(app, event.mouse.x, event.mouse.y, right) || !right) { app->files_dirty = true; break; }
                 }
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT || right) {
+                    list_press(app, &app->files_list, event.mouse.x, event.mouse.y, right, true);   /* RV-117: as the floating list */
+                }
+                app->files_dirty = true;
                 break;
+            }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 rubraview_listwin_scroll(&app->files_list, event.mouse.wheel_delta > 0 ? -3 : 3, count);
                 /* the row under the pointer is another one now */
@@ -13813,6 +14008,7 @@ static size_t files_pump(app_state_t *app) {
                 rubraview_key_combo_t combo = event.key.combo;
                 long rows = (long)rubraview_listwin_rows_visible(&app->files_list);
                 long step = 0;
+                if (app->ctx_open && app->ctx_in_files && popups_key(app, combo)) { app->files_dirty = true; break; }
                 if (key_is(combo, "Escape")) { files_close(app); return handled; }
                 if (key_is(combo, "Enter")) {
                     files_go_to(app, app->files_selected >= 0 ? app->files_selected : files_target(app));
@@ -18644,7 +18840,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (app.eqwin.open && eqwin_press(&app, event.mouse.x, event.mouse.y,
                                                       event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
-                    if (app.listwin.open && listwin_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (app.listwin.open && listwin_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
                         subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
                     /* The anchors answer before the rest of the chrome: a
