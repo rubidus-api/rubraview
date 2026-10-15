@@ -62,15 +62,13 @@ u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text
 size_t rubraview_utf8_chars(u8str_t text);
 
 /**
- * The right half of the information bar (owner, 2026-10-16): "3 / 120",
- * then, when known, the resolution, the zoom, the format (`ext`, said in
- * capitals) and the size ("2.4 MB"); "shown reduced" last when it is.
- * A width of 0 leaves the resolution and the zoom out (a song); a size of 0
- * leaves the size out.
+ * The right half of the information bar (owner, 2026-10-16), read towards
+ * the window's right edge: "shown reduced" when it is, the size ("2.4 MB"),
+ * the resolution, and "3 / 120" at the very right. A width of 0 leaves the
+ * resolution out (a song); a size of 0 leaves the size out.
  */
 u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
-                            int32_t width, int32_t height, double zoom_percent,
-                            u8str_t ext, uint64_t bytes, bool reduced);
+                            int32_t width, int32_t height, uint64_t bytes, bool reduced);
 
 /* ---- Hover titlebar (§3.21.2, §3.21.3) ---- */
 

@@ -1,7 +1,6 @@
 #include "rubraview/ui_chrome.h"
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 
 /* ---- On-Screen Display ---- */
 
@@ -98,29 +97,23 @@ u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text
 }
 
 u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
-                            int32_t width, int32_t height, double zoom_percent,
-                            u8str_t ext, uint64_t bytes, bool reduced) {
+                            int32_t width, int32_t height, uint64_t bytes, bool reduced) {
     if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
     size_t at = 0;
     #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
                               if (w_ > 0) { at += (size_t)w_; } \
                               if (at >= buffer_size) { at = buffer_size - 1; } } } while (0)
-    OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);
-    if (width > 0 && height > 0) OSD_PUT("  |  %d x %d  |  %.0f%%", (int)width, (int)height, zoom_percent);
-    if (ext.len > 0 && ext.len < 12) {
-        char up[12];
-        for (size_t i = 0; i < ext.len; ++i) up[i] = (char)toupper((unsigned char)ext.ptr[i]);
-        OSD_PUT("  |  %.*s", (int)ext.len, up);
-    }
+    if (reduced) OSD_PUT("shown reduced  |  ");
     if (bytes > 0) {
         static const char *const UNIT[] = { "B", "KB", "MB", "GB", "TB" };
         double v = (double)bytes;
         int u = 0;
         while (v >= 1024.0 && u < 4) { v /= 1024.0; u++; }
-        if (u == 0) OSD_PUT("  |  %.0f %s", v, UNIT[u]);
-        else OSD_PUT("  |  %.*f %s", v < 10.0 ? 1 : 0, v, UNIT[u]);
+        if (u == 0) OSD_PUT("%.0f %s  |  ", v, UNIT[u]);
+        else OSD_PUT("%.*f %s  |  ", v < 10.0 ? 1 : 0, v, UNIT[u]);
     }
-    if (reduced) OSD_PUT("  |  shown reduced");
+    if (width > 0 && height > 0) OSD_PUT("%d x %d  |  ", (int)width, (int)height);
+    OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);   /* the place, at the very right */
     #undef OSD_PUT
     buffer[at] = '\0';
     return (u8str_t){ .ptr = buffer, .len = at };

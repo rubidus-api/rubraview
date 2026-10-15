@@ -9569,7 +9569,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     if (app->osd.always_on && rubraview_osd_opacity(&app->osd) > 0.01) {
         int32_t page = current_page_index(app);
         if (page >= 0 && (size_t)page < page_count(app)) {
-            /* The file's name at the left, where it is and what it is at the right (owner, 2026-10-16). */
+            /* The file's name at the left; its size, resolution and place at the right, the place last (owner, 2026-10-16). */
             const app_page_t *pg = &app->pages[page];
             u8str_t name = app->source.pages[page].name;
             if (app->osd_size_page != page) {
@@ -9581,16 +9581,11 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                 if (path.len == 0) app->osd_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
                 else if (rubraview_pal_fs_stat(app->arena, path, &entry)) app->osd_size_bytes = entry.size_bytes;
             }
-            u8str_t ext = { .ptr = "", .len = 0 };
-            for (size_t k = name.len; k > 0; --k) {
-                if (name.ptr[k - 1] == '.') { ext = (u8str_t){ .ptr = name.ptr + k, .len = name.len - k }; break; }
-                if (name.ptr[k - 1] == '/' || name.ptr[k - 1] == '\\') break;
-            }
             bool picture = pg->loaded && !(app->media && page == app->media_page);
             char right_buf[192];
             u8str_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
-                                                picture ? real_w(pg) : 0, picture ? real_h(pg) : 0, app->zoom * 100.0,
-                                                ext, app->osd_size_bytes, picture && pg->reduced);
+                                                picture ? real_w(pg) : 0, picture ? real_h(pg) : 0,
+                                                app->osd_size_bytes, picture && pg->reduced);
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
