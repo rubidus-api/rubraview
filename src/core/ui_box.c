@@ -85,6 +85,7 @@ static int32_t grid_rows(const rubraview_box_t *box, const rubraview_tile_metric
    button, side by side. */
 rubraview_rect_t rubraview_box_anchor_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics) {
     if (!box || !metrics) return (rubraview_rect_t){0};
+    if (box->headless) return (rubraview_rect_t){ .x = box->anchor_x, .y = box->anchor_y };
     return (rubraview_rect_t){
         .x = box->anchor_x, .y = box->anchor_y,
         .width = metrics->anchor_size * 2.0, .height = metrics->anchor_size,
@@ -94,7 +95,7 @@ rubraview_rect_t rubraview_box_anchor_rect(const rubraview_box_t *box, const rub
 rubraview_rect_t rubraview_box_anchor_half_rect(const rubraview_box_t *box,
                                                 const rubraview_tile_metrics_t *metrics,
                                                 rubraview_anchor_half_t half) {
-    if (!box || !metrics || half == RUBRAVIEW_ANCHOR_NONE) return (rubraview_rect_t){0};
+    if (!box || !metrics || half == RUBRAVIEW_ANCHOR_NONE || box->headless) return (rubraview_rect_t){0};
     return (rubraview_rect_t){
         .x = box->anchor_x + (half == RUBRAVIEW_ANCHOR_HOVER ? metrics->anchor_size : 0.0),
         .y = box->anchor_y,
@@ -106,7 +107,7 @@ rubraview_rect_t rubraview_box_anchor_half_rect(const rubraview_box_t *box,
 rubraview_anchor_half_t rubraview_box_anchor_half_at(const rubraview_box_t *box,
                                                       const rubraview_tile_metrics_t *metrics,
                                                       double px, double py) {
-    if (!box || !metrics) return RUBRAVIEW_ANCHOR_NONE;
+    if (!box || !metrics || box->headless) return RUBRAVIEW_ANCHOR_NONE;
 
     /* The anchor stays where it is while the box is open, so the two
        buttons remain reachable — closing by leaving is what the hover
@@ -224,6 +225,13 @@ static void grid_origin(const rubraview_box_t *box, const rubraview_tile_metrics
     *out_x = box->anchor_x;
     *out_y = box->anchor_y;
     if (box->view_width <= 0.0 || box->view_height <= 0.0) return;
+    if (box->headless) {
+        if (*out_x + width > box->view_width) *out_x = box->view_width - width;
+        if (*out_x < 0.0) *out_x = 0.0;
+        if (*out_y + height > box->view_height) *out_y = box->view_height - height;
+        if (*out_y < 0.0) *out_y = 0.0;
+        return;
+    }
     double below = box->anchor_y + metrics->anchor_size + metrics->gutter;
     double above = box->anchor_y - metrics->gutter - height;
     if (box->open_side != 0) {
@@ -352,11 +360,8 @@ rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubravie
     metrics = &sized;
 
     if (!is_open(box) || box->tile_count <= 0) {
-        /* Collapsed, the box *is* the two-button anchor bar. */
-        return (rubraview_rect_t){
-            .x = box->anchor_x, .y = box->anchor_y,
-            .width = metrics->anchor_size * 2.0, .height = metrics->anchor_size,
-        };
+        /* Collapsed, the box *is* the two-button anchor bar (none when headless). */
+        return rubraview_box_anchor_rect(box, metrics);
     }
 
     double width = 0.0, height = 0.0;
@@ -573,7 +578,7 @@ static rubraview_rect_t body_relative(const rubraview_box_t *box, const rubravie
    is open (owner, 2026-09-22): to the anchor's right, or to its left when
    the window has no room on the right. */
 rubraview_rect_t rubraview_box_pin_rect(const rubraview_box_t *box, const rubraview_tile_metrics_t *m) {
-    if (!box || !m || !is_open(box) || box->state == RUBRAVIEW_BOX_DETACHED) return (rubraview_rect_t){0};
+    if (!box || !m || !is_open(box) || box->state == RUBRAVIEW_BOX_DETACHED || box->headless) return (rubraview_rect_t){0};
     double a = m->anchor_size;
     double x = box->anchor_x + a * 2.0;
     if (box->view_width > 0.0 && x + a > box->view_width && box->anchor_x - a >= 0.0) x = box->anchor_x - a;
@@ -732,15 +737,17 @@ u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metr
     const char *text = NONE;
     if (!box || !m || box->state == RUBRAVIEW_BOX_DETACHED) return (u8str_t){ .ptr = NONE, .len = 0 };
     bool menu = box->kind == RUBRAVIEW_BOX_MENU;
-    /* the anchor's words while it is folded only: open, they would lie over the box's own tiles */
-    rubraview_anchor_half_t half = box->state == RUBRAVIEW_BOX_COLLAPSED ? rubraview_box_anchor_half_at(box, m, px, py)
-                                                                         : RUBRAVIEW_ANCHOR_NONE;
+    /* the anchor's words, folded or open: the open grid sits beside the anchor, not over it
+       (owner, 2026-10-15: both halves say what they do) */
+    rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, m, px, py);
     if (half == RUBRAVIEW_ANCHOR_CLICK) {
         text = menu ? "Click: open the menu and keep it open (again: close). Drag: move it"
-                    : "Click: open the toolbox and keep it open (again: close). Drag: move it";
+                    : "T - Click: open the toolbox and keep it open; click again: close. "
+                      "Drag: move it; past the window's edge it becomes a window of its own";
     } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
         text = menu ? "Rest the pointer here: the menu opens, and folds when the pointer leaves"
-                    : "Rest the pointer here: the toolbox opens, and folds when the pointer leaves";
+                    : "v - Rest the pointer here: the toolbox opens, and folds when the pointer leaves "
+                      "(the pin keeps it open). Drag: move it";
     } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
         text = "Pin: on, the box stays open; off, it folds when the pointer leaves";
     } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {

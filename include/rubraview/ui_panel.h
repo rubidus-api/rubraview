@@ -94,7 +94,11 @@ typedef enum rubraview_panel_event {
     RUBRAVIEW_PANEL_NONE = 0,
     RUBRAVIEW_PANEL_VALUE_CHANGED,
     RUBRAVIEW_PANEL_BUTTON_PRESSED,
+    RUBRAVIEW_PANEL_CLOSE,          /* the X at the title's right end (owner, 2026-10-15) */
 } rubraview_panel_event_t;
+
+/** The X at the right end of the title row, a row tall and square; empty while closed. */
+rubraview_rect_t rubraview_panel_close_rect(const rubraview_panel_t *panel);
 
 /**
  * A press. A slider starts dragging and jumps to where it was clicked —

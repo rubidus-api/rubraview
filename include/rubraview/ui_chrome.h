@@ -67,12 +67,16 @@ typedef enum rubraview_titlebar_button {
        reader reaches for what the window does. */
     RUBRAVIEW_TITLEBAR_PIN,
     /* Between the pin and minimise (owner, 2026-09-29): pressed and
-       dragged, it sizes the window from its bottom-right corner. */
+       dragged, it sizes the window from its top-right corner, staying
+       under the pointer (owner, 2026-10-15). */
     RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_CLOSE,
+    /* At the bar's left end (owner, 2026-10-15): three lines, the menu
+       opened under the bar, which stays while it is open. */
+    RUBRAVIEW_TITLEBAR_MENU,
     RUBRAVIEW_TITLEBAR_CAPTION, /* empty space: dragging here moves the window */
 } rubraview_titlebar_button_t;
 

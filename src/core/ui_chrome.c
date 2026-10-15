@@ -140,6 +140,7 @@ rubraview_rect_t rubraview_titlebar_button_rect(const rubraview_titlebar_t *bar,
     if (!bar) return (rubraview_rect_t){0};
 
     double w = button_width(bar);
+    if (button == RUBRAVIEW_TITLEBAR_MENU) return (rubraview_rect_t){ .x = 0.0, .y = 0.0, .width = w, .height = bar->height };
     for (int32_t i = 0; i < BUTTON_COUNT; ++i) {
         if (BUTTON_ORDER[i] != button) continue;
         /* Rightmost button is the last in the order. */
@@ -158,6 +159,9 @@ rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *b
                                                    double x, double y, double window_width) {
     if (!bar || !bar->shown) return RUBRAVIEW_TITLEBAR_NONE;
     if (y < 0.0 || y >= bar->height) return RUBRAVIEW_TITLEBAR_NONE;
+    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_MENU, window_width), x, y)) {
+        return RUBRAVIEW_TITLEBAR_MENU;
+    }
 
     for (int32_t i = 0; i < BUTTON_COUNT; ++i) {
         rubraview_rect_t r = rubraview_titlebar_button_rect(bar, BUTTON_ORDER[i], window_width);

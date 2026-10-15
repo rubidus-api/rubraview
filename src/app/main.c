@@ -445,6 +445,12 @@ typedef struct app_state {
     int32_t                ab_edit_field;     /* 0 = A, 1 = B */
     char                   ab_edit_text[2][32];
     size_t                 ab_edit_length[2];
+    /* The Adjust panel's size in pixels (owner, 2026-10-15): width and height typed,
+       the other following the shape. */
+    bool                   px_edit_open;
+    int32_t                px_edit_field;     /* 0 = width, 1 = height */
+    char                   px_edit_text[2][8];
+    size_t                 px_edit_length[2];
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
     bool                   pagebar_dragging, pagebar_detached;
@@ -800,6 +806,9 @@ typedef struct app_state {
     int32_t                edit_preview_w, edit_preview_h;
     rubraview_edit_params_t edit_shown_params;
     rubraview_edit_curve_t edit_shown_curves[5];
+    rubraview_edit_session_t edit_shown_session;   /* blur and sharpen, outside params (owner, 2026-10-15) */
+    double                 edit_preview_tried;     /* when the reduced copy was last asked for and not had */
+    int32_t                edit_preview_tries;     /* how often, since the panel opened: twenty at most */
     bool                   edit_shown_valid;
     uint32_t               edit_hist[4][256];  /* R, G, B, luminance of the preview */
     bool                   edit_hist_ok;
@@ -1036,6 +1045,8 @@ static bool open_archive(app_state_t *app, u8str_t archive_path);
 static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
+static void menu_from_bar(app_state_t *app);
+static void panel_build_edit(app_state_t *app);
 static void chrome_hide(app_state_t *app, bool hide);
 static void open_playlist(app_state_t *app, u8str_t path);
 static bool path_is_playlist(u8str_t path);
@@ -4504,10 +4515,11 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
            tile that says it goes its round on a tap (`zoom_cycle`). */
         static char percent[16];   /* drawn before the next call */
         /* Real size is not a point on that scale: the owner's name for it is 0%. */
-        if (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005) return U8("0%");
+        if (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005) return U8("Real\nsize");   /* 0 %, on two rows (owner, 2026-10-15) */
         u8str_t text = rubraview_scale_caption(percent, sizeof(percent), app->zoom);
         return text.len > 0 ? text : tile->caption;
     }
+    if (rubraview_u8_eq_lit(tile->action, "fit_cycle")) return cstr(rubraview_fit_tile_name(app->fit_mode));
     if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? U8("Play") : U8("Pause");
@@ -5322,6 +5334,13 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->fit_mode = RUBRAVIEW_FIT_SMART; reset_view(app);
     } else if (rubraview_u8_eq_lit(action, "fit_stretch")) {
         app->fit_mode = RUBRAVIEW_FIT_STRETCH; reset_view(app);
+    } else if (rubraview_u8_eq_lit(action, "fit_cycle")) {
+        /* the one fit tile (owner, 2026-10-15): window, width, height, smart, stretch */
+        app->fit_mode = rubraview_fit_cycle_next(app->fit_mode); reset_view(app);
+        static const char *const SAID[] = { [RUBRAVIEW_FIT_WINDOW] = "fit: the window", [RUBRAVIEW_FIT_WIDTH] = "fit: the width",
+                                            [RUBRAVIEW_FIT_HEIGHT] = "fit: the height", [RUBRAVIEW_FIT_SMART] = "fit: smart (never enlarged)",
+                                            [RUBRAVIEW_FIT_STRETCH] = "fit: stretched to fill" };
+        if ((size_t)app->fit_mode < sizeof(SAID) / sizeof(SAID[0]) && SAID[app->fit_mode]) osd_say(app, cstr(SAID[app->fit_mode]));
     } else if (rubraview_u8_eq_lit(action, "toggle_fit_lock")) {
         app->fit_lock = !app->fit_lock;
     } else if (rubraview_u8_eq_lit(action, "skip_forward")) {
@@ -5403,9 +5422,13 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "toggle_filmstrip")) {
         app->filmstrip.visible = !app->filmstrip.visible;
     } else if (rubraview_u8_eq_lit(action, "toggle_menu")) {
-        rubraview_box_click_anchor(&app->menubox);
-        menu_rebuild(app);
-        sync_menubox_tiles(app);
+        if (app->menubox.headless) {
+            menu_from_bar(app);
+        } else {
+            rubraview_box_click_anchor(&app->menubox);
+            menu_rebuild(app);
+            sync_menubox_tiles(app);
+        }
     } else if (rubraview_u8_eq_lit(action, "layout_single")) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_SINGLE, false);
     } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
@@ -6235,6 +6258,96 @@ static void ab_edit_text_typed(app_state_t *app, u8str_t text) {
     }
 }
 
+/* ---- The Adjust panel's size in pixels (owner, 2026-10-15) ---- */
+
+static void px_edit_fill(app_state_t *app, int32_t field, int32_t value) {
+    int n = snprintf(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "%d", (int)value);
+    app->px_edit_length[field] = n > 0 ? (size_t)n : 0;
+}
+
+static int32_t px_edit_value(const app_state_t *app, int32_t field) {
+    int32_t v = 0;
+    for (size_t i = 0; i < app->px_edit_length[field]; ++i) v = v * 10 + (app->px_edit_text[field][i] - '0');
+    return v;
+}
+
+static void px_edit_begin(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
+    int32_t w = e->resize_width, h = e->resize_height;
+    if (w <= 0 || h <= 0) { w = e->crop_active ? e->crop.width : e->image_width; h = e->crop_active ? e->crop.height : e->image_height; }
+    if (w <= 0 || h <= 0) { osd_say(app, U8("the picture's size is not known yet")); return; }
+    px_edit_fill(app, 0, w);
+    px_edit_fill(app, 1, h);
+    app->px_edit_field = 0;
+    app->px_edit_open = true;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+static void px_edit_close(app_state_t *app) {
+    app->px_edit_open = false;
+    rubraview_pal_window_text_input(app->window, false);
+}
+
+/* The field in hand changed: the other follows the shape. */
+static void px_edit_follow(app_state_t *app) {
+    int32_t f = app->px_edit_field;
+    int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
+    if (rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
+        px_edit_fill(app, 1 - f, f == 0 ? h : w);
+    }
+}
+
+static bool px_edit_commit(app_state_t *app) {
+    int32_t f = app->px_edit_field;
+    int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
+    if (!rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
+        osd_say(app, U8("a size is 1 to 65535 pixels"));
+        return false;
+    }
+    rubraview_edit_set_resize(&app->edit, w, h, f == 0);
+    app->edit.resize_width = w;    /* both as typed, also with the lock off */
+    app->edit.resize_height = h;
+    if (app->panel.open) panel_build_edit(app);   /* Resize % and its pixels from the session */
+    app->edit_shown_valid = false;
+    char line[64];
+    int n = snprintf(line, sizeof(line), "saved at %d x %d pixels", (int)w, (int)h);
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    return true;
+}
+
+static bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->px_edit_open) return false;
+    if (key_is(combo, "Escape")) { px_edit_close(app); return true; }
+    if (key_is(combo, "Enter")) {
+        if (px_edit_commit(app)) px_edit_close(app);
+        return true;
+    }
+    if (key_is(combo, "Tab") || key_is(combo, "Up") || key_is(combo, "Down")) {
+        app->px_edit_field = 1 - app->px_edit_field;
+        return true;
+    }
+    if (key_is(combo, "Backspace")) {
+        int32_t f = app->px_edit_field;
+        if (app->px_edit_length[f] > 0) app->px_edit_text[f][--app->px_edit_length[f]] = '\0';
+        px_edit_follow(app);
+        return true;
+    }
+    return true;   /* the digits arrive as text; the rest is swallowed */
+}
+
+static void px_edit_text_typed(app_state_t *app, u8str_t text) {
+    int32_t f = app->px_edit_field;
+    for (size_t i = 0; i < text.len; ++i) {
+        char c = text.ptr[i];
+        if (c < '0' || c > '9') continue;
+        if (app->px_edit_length[f] + 1 >= sizeof(app->px_edit_text[0]) || app->px_edit_length[f] >= 5) break;
+        if (app->px_edit_length[f] == 1 && app->px_edit_text[f][0] == '0') app->px_edit_length[f] = 0;
+        app->px_edit_text[f][app->px_edit_length[f]++] = c;
+        app->px_edit_text[f][app->px_edit_length[f]] = '\0';
+    }
+    px_edit_follow(app);
+}
+
 /* ---- §3.14.6: the mini player ---- */
 
 #define MINI_BACKGROUND 0xFF181818u
@@ -6691,6 +6804,7 @@ static void toolbox_window_pump(app_state_t *app) {
 
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (ab_edit_handle_key(app, combo)) return;
+    if (px_edit_handle_key(app, combo)) return;
     if (popups_key(app, combo)) return;   /* RV-116 */
     /* D-33: Escape closes the list of subtitle tracks, and only that. */
     if (app->sub_list_open && rubraview_u8_eq_lit(combo.key_name, "Escape") && combo.modifiers == 0) {
@@ -6815,6 +6929,19 @@ static void chrome_hide(app_state_t *app, bool hide) {
     app->toolbox_window_drawn = 0.0;
 }
 
+/* The menu from the title bar's three lines (owner, 2026-10-15): it opens
+   under the bar, which stays while it is open, and folds on a second press,
+   on a choice, on Esc or on a click elsewhere. */
+static void menu_from_bar(app_state_t *app) {
+    rubraview_box_click_anchor(&app->menubox);
+    menu_rebuild(app);
+    sync_menubox_tiles(app);
+    if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
+        app->titlebar.shown = true;
+        app->titlebar.idle_seconds = 0.0;
+    }
+}
+
 /* §3.21.3: the titlebar's controls take precedence while it is shown,
    over the viewer and over the picker alike. True when it took the click. */
 static bool titlebar_click(app_state_t *app, double x, double y) {
@@ -6832,11 +6959,12 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
             return true;
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
+        case RUBRAVIEW_TITLEBAR_MENU:       menu_from_bar(app); return true;
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window; the menu
                box below where the title bar comes (owner, 2026-10-15). */
             app->menubox.home_top = app->titlebar.height;
-            rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
+            if (!app->menubox.headless) rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
             if (app->toolbox_window) toolbox_dock(app, 0.0, 0.0);
             rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
             osd_say(app, U8("the floating boxes are back in their corners"));
@@ -6870,6 +6998,14 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
     if (titlebar_click(app, x, y)) return true;
+
+    /* The title bar's menu folds on a click anywhere else, and that click does nothing more. */
+    if (app->menubox.headless && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED &&
+        !rubraview_rect_contains(rubraview_box_bounds(&app->menubox, &metrics), x, y) &&
+        !(app->titlebar.shown && y < app->titlebar.height)) {
+        rubraview_box_dismiss(&app->menubox);
+        return true;
+    }
 
     /* The anchor's two buttons answer first: they sit on top of the
        box, and a click there is never a tile. */
@@ -6930,6 +7066,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         u8str_t action;
         rubraview_menu_result_t result = rubraview_menu_activate(&app->menu, tile, &action);
         if (result == RUBRAVIEW_MENU_ACTIVATED) {
+            if (app->menubox.headless) rubraview_box_dismiss(&app->menubox);   /* a choice made: the bar's menu folds */
             handle_action(app, action);
         } else if (result == RUBRAVIEW_MENU_DESCENDED || result == RUBRAVIEW_MENU_WENT_BACK) {
             sync_menubox_tiles(app);
@@ -7310,12 +7447,23 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
     uint32_t ink = enabled ? COLOR_TEXT : 0x70F0F0F0u;
     uint32_t icon = rubraview_action_icon(app->toolbox_tiles[i].action, facts);
     if (icon && rubraview_pal_render_draw_icon(r, icon, tile, tile.height * 0.5, ink)) return;
-    rubraview_pal_render_draw_text(r, caption, tile, tile.height * 0.34, ink, RUBRAVIEW_TEXT_CENTER);
+    /* A word longer than five letters ("Stretch") is drawn smaller to stay inside; a caption
+       of two rows ("Real\nsize") keeps its size (owner, 2026-10-15). */
+    size_t longest = 0, run = 0;
+    for (size_t k = 0; k < caption.len; ++k) {
+        if (caption.ptr[k] == '\n') run = 0;
+        else if (((uint8_t)caption.ptr[k] & 0xC0) != 0x80 && ++run > longest) longest = run;
+    }
+    double size = tile.height * 0.34;
+    if (longest > 5) size = fmax(tile.height * 0.22, size * 5.0 / (double)longest);
+    rubraview_pal_render_draw_text(r, caption, tile, size, ink, RUBRAVIEW_TEXT_CENTER);
 }
 
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
+    /* The menu opened from the title bar has no anchor: nothing to draw while it is folded. */
+    if (box->headless && box->state == RUBRAVIEW_BOX_COLLAPSED) return;
     rubraview_rect_t bounds = rubraview_box_bounds(box, metrics);
     rubraview_pal_rect_t body = { bounds.x, bounds.y, bounds.width, bounds.height };
 
@@ -7327,7 +7475,7 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
 
     rubraview_pal_render_fill_rect(app->renderer, body, box_fill, 2.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, box_border, 1.0, 2.0);
-    if (box->state != RUBRAVIEW_BOX_COLLAPSED) {
+    if (box->state != RUBRAVIEW_BOX_COLLAPSED && !box->headless) {
         /* Open, the grid sits beside the anchor, which keeps its own ground. */
         rubraview_rect_t a = rubraview_box_anchor_rect(box, metrics);
         rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ a.x, a.y, a.width, a.height }, box_fill, 2.0);
@@ -7342,16 +7490,18 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     rubraview_pal_rect_t left = { click_half.x, click_half.y, click_half.width, click_half.height };
     rubraview_pal_rect_t right = { hover_half.x, hover_half.y, hover_half.width, hover_half.height };
 
-    rubraview_pal_render_stroke_rect(app->renderer, left, box_border, 1.0, 2.0);
-    rubraview_pal_render_fill_rect(app->renderer, right, tile_fill, 2.0);
-    rubraview_pal_render_stroke_rect(app->renderer, right, box_border, 1.0, 2.0);
+    if (!box->headless) {
+        rubraview_pal_render_stroke_rect(app->renderer, left, box_border, 1.0, 2.0);
+        rubraview_pal_render_fill_rect(app->renderer, right, tile_fill, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, right, box_border, 1.0, 2.0);
 
-    /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
-    rubraview_pal_render_draw_text(app->renderer,
-                                   box->kind == RUBRAVIEW_BOX_MENU ? U8("M") : U8("T"),
-                                   left, metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    rubraview_pal_render_draw_text(app->renderer, box->pinned ? U8("*") : U8("v"), right,
-                                   metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
+        rubraview_pal_render_draw_text(app->renderer,
+                                       box->kind == RUBRAVIEW_BOX_MENU ? U8("M") : U8("T"),
+                                       left, metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer, box->pinned ? U8("*") : U8("v"), right,
+                                       metrics->anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
 
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
 
@@ -7361,14 +7511,16 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
     rubraview_rect_t pr = rubraview_box_pin_rect(box, metrics);
     rubraview_pal_rect_t pin = { pr.x, pr.y, pr.width, pr.height };
     bool pinned = rubraview_box_pin_shown_on(box);
-    rubraview_pal_render_fill_rect(app->renderer, pin, box_fill, 2.0);
-    rubraview_pal_render_stroke_rect(app->renderer, pin, box_border, 1.0, 2.0);
-    if (!rubraview_pal_render_draw_icon(app->renderer, rubraview_pin_icon(pinned), pin, pr.height * 0.45,
-                                        pinned ? COLOR_TILE_CURRENT : COLOR_TEXT)) {
-        rubraview_pal_render_draw_text(app->renderer, pinned ? U8("*") : U8("o"), pin, pr.height * 0.8,
-                                       pinned ? COLOR_TILE_CURRENT : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    if (!box->headless) {
+        rubraview_pal_render_fill_rect(app->renderer, pin, box_fill, 2.0);
+        rubraview_pal_render_stroke_rect(app->renderer, pin, box_border, 1.0, 2.0);
+        if (!rubraview_pal_render_draw_icon(app->renderer, rubraview_pin_icon(pinned), pin, pr.height * 0.45,
+                                            pinned ? COLOR_TILE_CURRENT : COLOR_TEXT)) {
+            rubraview_pal_render_draw_text(app->renderer, pinned ? U8("*") : U8("o"), pin, pr.height * 0.8,
+                                           pinned ? COLOR_TILE_CURRENT : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+        draw_box_grip(app, box, metrics, box_fill, box_border);
     }
-    draw_box_grip(app, box, metrics, box_fill, box_border);
 
     bool strip = box == &app->toolbox;
     rubraview_action_facts_t facts = action_facts(app);
@@ -8592,6 +8744,32 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
+static void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->px_edit_open) return;
+    double box_w = 520.0 * dpi, box_h = 96.0 * dpi;
+    if (box_w > win_w - 16.0) box_w = win_w - 16.0;
+    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.62, box_w, box_h };
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+    bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+    char line[128];
+    int n = snprintf(line, sizeof(line), "Width %s%.*s%s  x  Height %s%.*s%s  px",
+                     app->px_edit_field == 0 ? "[" : " ", (int)app->px_edit_length[0], app->px_edit_text[0],
+                     app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ",
+                     app->px_edit_field == 1 ? "[" : " ", (int)app->px_edit_length[1], app->px_edit_text[1],
+                     app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ");
+    if (n > 0) {
+        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                                       top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
+    rubraview_pal_render_draw_text(app->renderer,
+                                   app->edit.resize_lock_aspect ? U8("The other side follows the shape  ·  Tab swaps  ·  Enter keeps  ·  Esc")
+                                                                : U8("Tab swaps  ·  Enter keeps  ·  Esc leaves"),
+                                   hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
 /* §3.18's confirmation, the text boxes and the notices sit above
    everything else: they are answers to something the reader just did. They
    used to be drawn first, under the floating boxes, and the toolbox's
@@ -8631,6 +8809,7 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     }
     draw_rename_box(app, win_w, win_h, chrome_dpi);
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
+    draw_px_edit_box(app, win_w, win_h, chrome_dpi);
     draw_notice(app, win_w, win_h, chrome_dpi);
 }
 
@@ -8893,8 +9072,25 @@ static void draw_titlebar(app_state_t *app, double win_w) {
     rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
 
     int32_t page = current_page_index(app);
-    rubraview_pal_rect_t title = { 12.0, 0.0, win_w * 0.6, app->titlebar.height };
-    if (app->picker_open) {
+    /* The menu's three lines at the left end (owner, 2026-10-15), lit while the menu is open. */
+    rubraview_rect_t mr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_MENU, win_w);
+    rubraview_pal_rect_t mb = { mr.x, mr.y, mr.width, mr.height };
+    bool menu_open = app->menubox.headless && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED;
+    if (menu_open) rubraview_pal_render_fill_rect(app->renderer, mb, 0xFF2D4A6Eu, 0.0);
+    else if (rubraview_rect_contains(mr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, mb, COLOR_TILE_FILL, 0.0);
+    {
+        double lw = mr.width * 0.42, lh = fmax(1.0, mr.height * 0.055), lx = mr.x + (mr.width - lw) * 0.5;
+        for (int k = -1; k <= 1; ++k) {
+            rubraview_pal_rect_t line = { lx, mr.y + mr.height * 0.5 + k * mr.height * 0.18 - lh * 0.5, lw, lh };
+            rubraview_pal_render_fill_rect(app->renderer, line, COLOR_TEXT, 0.0);
+        }
+    }
+    rubraview_pal_rect_t title = { mr.width + 8.0, 0.0, win_w * 0.6, app->titlebar.height };
+    if (menu_open) {
+        char crumb[128];
+        rubraview_pal_render_draw_text(app->renderer, rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb)), title,
+                                       app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    } else if (app->picker_open) {
         rubraview_pal_render_draw_text(app->renderer, app->picker_dir.len > 0 ? app->picker_dir : U8("Rubraview"),
                                        title, app->titlebar.height * 0.38, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     } else if (page >= 0 && (size_t)page < page_count(app)) {
@@ -8964,7 +9160,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     if (!app->chrome_hidden && app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
     if (!app->chrome_hidden) draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
 
-    if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
+    if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->menubox.headless) {
         char crumb[128];
         u8str_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
         /* Beside the anchor, on its row: the grid is below or above it now. */
@@ -9653,6 +9849,12 @@ static void rename_text(app_state_t *app, const rubraview_window_event_t *event)
         }
         return;
     }
+    if (app->px_edit_open) {
+        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+            px_edit_text_typed(app, (u8str_t){ .ptr = event->text.utf8, .len = event->text.length });
+        }
+        return;
+    }
     if (!app->rename_active) return;
     u8str_t text = { .ptr = event->text.utf8, .len = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
@@ -10231,7 +10433,7 @@ enum {
     PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
     /* RV-108: the adjust panel's second page, and two more of Export's rows. */
     PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
-    PANEL_RESIZE, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
+    PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
@@ -10255,8 +10457,11 @@ static void media_reopen_on_new_device(app_state_t *app);
 static void arc_ask_clear(app_state_t *app);
 static void print_temp_drop(app_state_t *app);
 
+static void px_edit_close(app_state_t *app);
+
 static void panel_close(app_state_t *app) {
     edit_preview_close(app);
+    if (app->px_edit_open) px_edit_close(app);
     app->panel.open = false;
     app->panel.row_count = 0;
     app->panel_is_export = false;
@@ -10278,8 +10483,19 @@ static void panel_close(app_state_t *app) {
    made from the session as it stands: turning the page changes nothing. */
 static bool g_edit_page_two = false;
 
+/* The size Save makes, in pixels, on the button that types it (owner, 2026-10-15). */
+static u8str_t px_button_label(const app_state_t *app) {
+    static char label[64];
+    const rubraview_edit_session_t *e = &app->edit;
+    int32_t w = e->resize_width, h = e->resize_height;
+    if (w <= 0 || h <= 0) { w = e->crop_active ? e->crop.width : e->image_width; h = e->crop_active ? e->crop.height : e->image_height; }
+    int n = snprintf(label, sizeof(label), "Size: %d x %d px...", (int)w, (int)h);
+    return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : U8("Size in pixels...");
+}
+
 static void panel_build_edit(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->edit_preview_tries = 0;
     const rubraview_edit_session_t *e = &app->edit;
     app->panel = rubraview_panel_create(g_edit_page_two ? U8("Adjust: sharpness and size") : U8("Adjust"), dpi);
     app->panel_is_export = false;
@@ -10313,6 +10529,7 @@ static void panel_build_edit(app_state_t *app) {
         double percent = e->resize_width > 0 && e->image_width > 0
                        ? 100.0 * (double)e->resize_width / (double)(e->crop_active ? e->crop.width : e->image_width) : 100.0;
         rubraview_panel_add_slider(&app->panel, PANEL_RESIZE, U8("Resize %"), percent, 10.0, 500.0, 1.0);
+        rubraview_panel_add_button(&app->panel, PANEL_RESIZE_PX, px_button_label(app));
     }
     rubraview_panel_add_separator(&app->panel);
     rubraview_panel_add_button(&app->panel, PANEL_EDIT_PAGE,
@@ -10339,7 +10556,8 @@ static void panel_open_edit(app_state_t *app) {
 }
 
 /* What a row's value is called: a choice's word, or a number worth reading. */
-static u8str_t adjust_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
+static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size) {
+    (void)app;
     static const char *const CROP[] = { "free", "1:1", "4:3", "16:9", "the picture's" };
     static const char *const BLUR[] = { "soft (Gaussian)", "flat (box)" };
     static const char *const SHARP[] = { "unsharp mask", "Laplacian" };
@@ -10372,23 +10590,39 @@ static void panel_open_export(app_state_t *app) {
     app->panel_is_convert = false;
 
     rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, U8("Format"), (int32_t)app->export_options.format, 8);
-    rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, U8("Quality"),
-                               (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, U8("PNG level"),
-                               (double)app->export_options.png_compression, 0.0, 9.0, 1.0);
+    /* Only what the format chosen has use for (owner, 2026-10-15); "as the file" is the file's own. */
+    int32_t page = current_page_index(app);
+    u8str_t name = page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : U8("");
+    uint32_t rows = rubraview_export_rows(app->export_options.format, name, app->export_options.webp_lossless);
+    if (rows & RUBRAVIEW_EXPORT_ROW_QUALITY) {
+        rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, U8("Quality"),
+                                   (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_PROGRESSIVE) {
+        rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, U8("Progressive JPEG"), app->export_options.jpeg_progressive);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_LEVEL) {
+        rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, U8("PNG level"),
+                                   (double)app->export_options.png_compression, 0.0, 9.0, 1.0);
+    }
     /* RV-108 (§3.10): the two choices the writer had and no row gave. */
-    rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, U8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
-    rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, U8("Progressive JPEG"), app->export_options.jpeg_progressive);
+    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_DEPTH) {
+        rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, U8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
+    }
     /* RV-109: WebP is written by the vendored libwebp. */
-    rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_LOSSLESS, U8("WebP lossless"), app->export_options.webp_lossless);
-    rubraview_panel_add_slider(&app->panel, PANEL_WEBP_EFFORT, U8("WebP effort"),
-                               (double)app->export_options.webp_effort, 0.0, 6.0, 1.0);
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP) {
+        rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_LOSSLESS, U8("WebP lossless"), app->export_options.webp_lossless);
+        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_EFFORT, U8("WebP effort"),
+                                   (double)app->export_options.webp_effort, 0.0, 6.0, 1.0);
+    }
     rubraview_panel_add_separator(&app->panel);
     /* §3.10 makes this an explicit tick, and it starts unticked: quietly
        discarding a photographer's metadata would be its own surprise. */
-    rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, U8("Privacy clean"),
-                               app->export_options.privacy_clean);
-    rubraview_panel_add_separator(&app->panel);
+    if (rows & RUBRAVIEW_EXPORT_ROW_PRIVACY) {
+        rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, U8("Privacy clean"),
+                                   app->export_options.privacy_clean);
+        rubraview_panel_add_separator(&app->panel);
+    }
     rubraview_panel_add_button(&app->panel, PANEL_EXPORT_NOW, U8("Export"));
 
     app->panel.open = true;
@@ -11258,6 +11492,8 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             default: break;
         }
         rubraview_export_clamp(&app->export_options);
+        /* Another format, or WebP's lossless: the rows that have use change with it. */
+        if (row->id == PANEL_FORMAT || row->id == PANEL_WEBP_LOSSLESS) panel_open_export(app);
         return;
     }
 
@@ -11319,6 +11555,8 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             } else {
                 rubraview_edit_set_resize(&app->edit, w, h, true);
             }
+            int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
+            if (k >= 0) app->panel.rows[k].label = px_button_label(app);
             break;
         }
         default: break;
@@ -11337,6 +11575,9 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_EDIT_PAGE:
             g_edit_page_two = !g_edit_page_two;
             panel_build_edit(app);
+            break;
+        case PANEL_RESIZE_PX:
+            px_edit_begin(app);
             break;
         case PANEL_TRIM: {
             /* RV-108 (§3.13): the plain margin of a scan — white, or black when there is no white one —
@@ -11408,6 +11649,10 @@ static bool panel_handle_press(app_state_t *app, double px, double py) {
 
     int32_t row = -1;
     rubraview_panel_event_t event = rubraview_panel_press(&app->panel, px, py, &row);
+    if (event == RUBRAVIEW_PANEL_CLOSE) {   /* its X (owner, 2026-10-15) */
+        panel_close(app);
+        return true;
+    }
     if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) {
         panel_apply_row(app, row);
         return true;
@@ -11444,6 +11689,13 @@ static void draw_panel(app_state_t *app) {
                                    panel->row_height };
     rubraview_pal_render_draw_text(app->renderer, panel->title, title,
                                    text_size * 1.15, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    {
+        /* The X that closes it with the mouse (owner, 2026-10-15). */
+        rubraview_rect_t xr = rubraview_panel_close_rect(panel);
+        rubraview_pal_rect_t xb = { xr.x, xr.y, xr.width, xr.height };
+        if (rubraview_rect_contains(xr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, xb, COLOR_CLOSE_HOVER, 2.0);
+        rubraview_pal_render_draw_text(app->renderer, U8("X"), xb, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
 
     g_conv_is_7z = lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1;
     for (size_t i = 0; i < panel->row_count; ++i) {
@@ -11484,7 +11736,7 @@ static void draw_panel(app_state_t *app) {
                 (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
                 char number[16];
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(row, number, sizeof(number)),
+                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, number, sizeof(number)),
                                                at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
             }
             if (app->panel_is_print || app->panel_is_convert) {
@@ -11512,7 +11764,7 @@ static void draw_panel(app_state_t *app) {
             /* RV-108: a choice says its word. */
             char words[48];
             rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(row, words, sizeof(words)),
+            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, words, sizeof(words)),
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
     }
@@ -15747,14 +15999,33 @@ static void edit_preview_open(app_state_t *app) {
 /* Runs the session over the reduced copy when a slider or a curve changed
    since the last run: a new picture for the page and a new histogram. The
    crop is left out — it is shown by its own overlay, on the whole picture. */
+static bool edit_extras_same(const rubraview_edit_session_t *a, const rubraview_edit_session_t *b) {
+    return a->blur_sigma == b->blur_sigma && a->blur_box == b->blur_box &&
+           a->sharpen_amount == b->sharpen_amount && a->sharpen_radius == b->sharpen_radius &&
+           a->sharpen_threshold == b->sharpen_threshold && a->sharpen_laplacian == b->sharpen_laplacian;
+}
+
 static void edit_preview_update(app_state_t *app) {
-    if (!edit_panel_open(app) || !app->edit_work_mem || !app->edit_small_mem || app->edit_page < 0) return;
+    if (!edit_panel_open(app)) return;
+    if (!app->edit_small_mem || app->edit_page < 0) {
+        /* Not had when the panel opened — the page still on its way, a page job under way:
+           asked again, twice a second, until it is (owner, 2026-10-15: the picture shows the change). */
+        double now = rubraview_pal_time_now_seconds();
+        if (now - app->edit_preview_tried < 0.5 || app->edit_preview_tries >= 20) return;
+        app->edit_preview_tried = now;
+        app->edit_preview_tries++;
+        edit_preview_open(app);
+        if (!app->edit_small_mem || app->edit_page < 0) return;
+    }
+    if (!app->edit_work_mem) return;
     if (current_page_index(app) != app->edit_page) { edit_preview_close(app); return; }
     if (app->edit_shown_valid &&
         memcmp(&app->edit_shown_params, &app->edit.params, sizeof(app->edit.params)) == 0 &&
-        memcmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0) {
+        memcmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0 &&
+        edit_extras_same(&app->edit_shown_session, &app->edit)) {
         return;
     }
+    app->edit_shown_session = app->edit;
     app->edit_shown_params = app->edit.params;
     memcpy(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves));
     app->edit_shown_valid = true;
@@ -16155,6 +16426,10 @@ static void tick_timers(app_state_t *app, double dt) {
     /* With Windows' own title bar (Settings › General › Frameless window off) ours stays away. */
     if (app->frameless && !app->chrome_hidden) rubraview_titlebar_pointer_moved(&app->titlebar, app->pointer_y);
     else app->titlebar.shown = false;
+    if (app->frameless && !app->chrome_hidden && app->menubox.headless && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
+        app->titlebar.shown = true;   /* the bar stays while its menu is open (owner, 2026-10-15) */
+        app->titlebar.idle_seconds = 0.0;
+    }
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
     animation_tick(app, dt);
@@ -16527,7 +16802,7 @@ static void boxes_place(app_state_t *app) {
     rubraview_box_t *boxes[2] = { &app->toolbox, &app->menubox };
     for (int i = 0; i < 2; ++i) {
         rubraview_box_t *box = boxes[i];
-        if (box->state == RUBRAVIEW_BOX_DETACHED || app->box_drag == box) continue;
+        if (box->state == RUBRAVIEW_BOX_DETACHED || app->box_drag == box || box->headless) continue;
         rubraview_rect_t anchor = rubraview_box_anchor_rect(box, &metrics);
         if (!app->box_share_known[i] || box->anchor_x != app->box_put[i][0] || box->anchor_y != app->box_put[i][1]) {
             app->box_share[i][0] = rubraview_box_share_of(box->anchor_x, (double)win_w, anchor.width, margin);
@@ -18477,9 +18752,9 @@ static bool box_press(app_state_t *app, double x, double y) {
             app->box_sizing = boxes[i];
             return true;
         }
-        /* Only the left half is a handle (owner, 2026-09-22): the right
-           one only hovers. */
-        if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) != RUBRAVIEW_ANCHOR_CLICK) continue;
+        /* Either half is a handle (owner, 2026-10-15; the right one only
+           hovered before): a press without a drag is the half's own click. */
+        if (rubraview_box_anchor_half_at(boxes[i], &metrics, x, y) == RUBRAVIEW_ANCHOR_NONE) continue;
         app->box_drag = boxes[i];
         app->box_grab_dx = x - boxes[i]->anchor_x;
         app->box_grab_dy = y - boxes[i]->anchor_y;
@@ -18870,6 +19145,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             rubraview_pal_window_get_size(app.window, &view_w, &view_h);
             app.toolbox.view_width = app.menubox.view_width = (double)view_w;
             app.toolbox.view_height = app.menubox.view_height = (double)view_h;
+            /* With our own title bar the menu is its ☰'s, under the bar; with Windows' frame the M box stays. */
+            app.menubox.headless = app.frameless;
+            if (app.menubox.headless) {
+                app.menubox.anchor_x = 0.0;
+                app.menubox.anchor_y = app.titlebar.height;
+                app.menubox.pinned = false;   /* no pin: it folds as a menu does */
+            }
             boxes_place(&app);
             rubraview_tile_metrics_t side_metrics = tile_metrics(rubraview_pal_window_dpi_scale(app.window));
             rubraview_box_keep_side(&app.toolbox, &side_metrics);

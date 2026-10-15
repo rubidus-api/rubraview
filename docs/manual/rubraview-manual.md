@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.88.exe              the viewer, as built
-dist/rubraview-v0.0.88/                 the release bundle
-dist/rubraview-v0.0.88.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.89.exe              the viewer, as built
+dist/rubraview-v0.0.89/                 the release bundle
+dist/rubraview-v0.0.89.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -322,14 +322,24 @@ Tones** back): **Blur** and its kind (soft, or flat); **Sharpen** and its
 kind — the unsharp mask, with a **radius** and a **threshold** under which
 it leaves grain alone, or the harsher Laplacian; **Crop ratio**; **Trim
 plain margins**, which finds a scan's white (or black) border and marks
-the cut; and **Resize %**, the size the copy is saved at.
+the cut; **Resize %**, the size the copy is saved at; and under it the
+size in pixels (**Size: 1000 x 1500 px...**): press it and type the width
+or the height — the other follows the picture's shape — `Tab` for the
+other, `Enter` to keep it. Every slider shows on the picture at once,
+the blur and the sharpening as well as the tones. Each panel — Adjust,
+Export, Batch, Print, Convert — closes with the `X` at its top right, a
+click outside it, or `Esc`.
 
 With the panel open, dragging over the picture marks a rectangle to cut
 to; **Crop ratio** keeps it free, square, 4:3, 16:9 or the picture's own
 shape. A click without a drag lets the rectangle go.
 
-`Ctrl+E` opens Export: pick a format and a quality, tick **Privacy
-clean** to strip GPS and camera details, and press Export. **PNG
+`Ctrl+E` opens Export: pick a format, and the panel shows what that format
+has: JPEG its quality and progressive; PNG its level and colours; WebP its
+quality (not when lossless), lossless and effort; GIF, BMP and ICO
+nothing more ("as the file" shows the file's own format's). Tick **Privacy
+clean** (JPEG, PNG, WebP, TIFF) to strip GPS and camera details, and press
+Export. **PNG
 colours** writes a PNG with or without transparency, in 256 colours or in
 grey; **Progressive JPEG** writes one that a browser shows whole and
 coarse first.
@@ -653,15 +663,19 @@ While it does:
 
 ## The floating boxes
 
-Two small anchors float over the picture: **M** opens the menu, **T** the
-toolbox. The toolbox changes with what is on screen — playing controls for a
+The menu opens from the three lines at the title bar's left end (or `Tab`):
+its tiles come under the bar, which stays while the menu is open; a choice,
+the three lines again, `Esc` or a click elsewhere folds it. (With Windows'
+own title bar — Settings > General > Frameless window off — the menu is an
+**M** box floating over the picture, as the toolbox is.) A small anchor,
+**T**, floats over the picture for the toolbox. The toolbox changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or previous
 archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
 it more or less see-through (never below 30 %).
 
 Each anchor has two halves. Point at the right one and the box opens; move
 away and it folds again. Click the left one and the box opens and stays;
-drag the left one to move the box. A box never opens past the window's
+drag either one to move the box. Resting the pointer on either says so. A box never opens past the window's
 edge. While a box is open, a pin appears beside its anchor: it says
 whether the box stays open when the pointer leaves — click it to switch.
 
@@ -700,17 +714,19 @@ numbers under Settings › Viewer › Shape. **On its side** turns the chosen
 ratio over (9:16; paper lying down). `Shift+A` goes round them; **Original**
 puts the file's own shape back. The choice lasts until the viewer is closed.
 
-The two floating boxes start in opposite corners, the menu box top left and
-the toolbox bottom right; the menu box sits below where the title bar comes,
-and the title bar's box button puts them back there. They are always whole
+The toolbox starts in the bottom-right corner (an M box top left, below
+where the title bar comes), and the title bar's box button puts it back
+there. They are always whole
 inside the window, and when the window changes size each stays the same
 part of the way across and down.
 
 100 % is the size the fit option gives. The zoom button shows the zoom from
 there (`100%`, `250%`). Real size — one screen pixel for each of the
-picture's own — is 0 %, and the button reads `0%` while it is on screen.
-A tap on the button goes round: `0%`, then 20 % to 200 % by twenties, then
-`0%` again. The wheel turned over the button, or `Ctrl` and the wheel over
+picture's own — is 0 %, and the button reads `Real size`, on two rows,
+while it is on screen. A tap on the button goes round: real size, then
+20 % to 200 % by twenties, then real size again. The fit button beside it
+goes round the fits: window, width, height, smart (never enlarged),
+stretched to fill, and names the one in force. The wheel turned over the button, or `Ctrl` and the wheel over
 the picture, zooms by one step — 10 % as it comes (Settings > Viewer > Zoom
 step) — to the next round figure: 100 %, 110 %, 120 %. `0` puts 100 %
 back with the picture in the middle; `4` shows real size.
@@ -723,13 +739,15 @@ seeking and the volume; in the webtoon strip Up and Down scroll). A click
 without a drag is what it was: a page turned at the window's sides, the
 boxes shown in its middle.
 
-Most of what the viewer does has a toolbox button: turning pages one, ten
-or all the way, zoom and fit, turning and flipping, the slide show, the
-filmstrip, the playlist, the information, editing and exporting, opening,
-always on top, the settings and full screen; for a film, 5 s back and on
-as well (held, those two offer steps up to 5 min). Its buttons come in the
-same order of groups for every kind of page: going and playing, how it
-plays, sound, subtitles, view, turning, the file, the window. The menu box
+The toolbox keeps what is used most: turning pages, the zoom and the fit,
+turning, the layout and the slide show, opening, the lists and the
+information, editing and exporting; for a film, playing, 5 s back and on
+(held, those two offer steps up to 5 min), the sound and the subtitles.
+Ten on and back, zooming by steps, the single fits, the filmstrip,
+flipping, renaming, copying and moving are in the menu; always on top and
+full screen are the title bar's, and Settings is the menu's. Its buttons
+come in the same order of groups for every kind of page: going and
+playing, how it plays, sound, subtitles, view, turning, the file. The menu
 holds everything the viewer does, by what it is about: File, Edit (copy,
 adjust, save the frame, undo), Go (every way of turning pages), View,
 Playback (a film, a song or an animation), Sound and Subtitles (a film or
@@ -972,7 +990,7 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `Tab` | Open or close the menu box |
+| `Tab` | Open or close the menu (under the title bar) |
 | `T` | Open or close the toolbox |
 | `Shift+T` | Pin the toolbox open |
 | `Ctrl+T` | Give the toolbox a window of its own, or dock it |
@@ -1112,7 +1130,8 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
+| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
+| Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | A file of a list, right-clicked: open it |

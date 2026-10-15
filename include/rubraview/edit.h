@@ -200,6 +200,15 @@ void rubraview_edit_set_resize(rubraview_edit_session_t *session, int32_t width,
 bool rubraview_edit_resize_percent(const rubraview_edit_session_t *session, double percent,
                                    int32_t *out_width, int32_t *out_height);
 
+/**
+ * A size typed in pixels (owner, 2026-10-15): `typed` is the width (or,
+ * `from_width` false, the height); the other follows the picture's shape
+ * (of what the cut leaves) while the aspect lock is on. False for a
+ * number under 1 or over 65535, or a source of no size.
+ */
+bool rubraview_edit_resize_pair(const rubraview_edit_session_t *session, int32_t typed, bool from_width,
+                                int32_t *out_width, int32_t *out_height);
+
 /* ---- preview ---- */
 
 /**

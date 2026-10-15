@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.88** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.88/rubraview-v0.0.88.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.88/rubraview-v0.0.88.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.89** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -35,7 +35,7 @@ ships with, so it cannot drift from them.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `Tab` | Open or close the menu box |
+| `Tab` | Open or close the menu (under the title bar) |
 | `T` | Open or close the toolbox |
 | `Shift+T` | Pin the toolbox open |
 | `Ctrl+T` | Give the toolbox a window of its own, or dock it |
@@ -175,7 +175,8 @@ ships with, so it cannot drift from them.
 | Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
+| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
+| Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | A file of a list, right-clicked: open it |

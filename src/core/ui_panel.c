@@ -186,9 +186,17 @@ static double value_from_x(const rubraview_panel_t *panel, size_t index, double 
     return snap(row, row->min_value + t * (row->max_value - row->min_value));
 }
 
+rubraview_rect_t rubraview_panel_close_rect(const rubraview_panel_t *panel) {
+    if (!panel || !panel->open) return (rubraview_rect_t){0};
+    double a = panel->row_height;
+    return (rubraview_rect_t){ panel->bounds.x + panel->bounds.width - panel->padding - a,
+                               panel->bounds.y + panel->padding, a, a };
+}
+
 rubraview_panel_event_t rubraview_panel_press(rubraview_panel_t *panel, double px, double py,
                                               int32_t *out_row) {
     if (out_row) *out_row = -1;
+    if (rubraview_rect_contains(rubraview_panel_close_rect(panel), px, py)) return RUBRAVIEW_PANEL_CLOSE;
     int32_t index = rubraview_panel_row_at(panel, px, py);
     if (index < 0) return RUBRAVIEW_PANEL_NONE;
 

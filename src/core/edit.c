@@ -304,6 +304,25 @@ void rubraview_edit_set_resize(rubraview_edit_session_t *session, int32_t width,
     session->dirty = true;
 }
 
+bool rubraview_edit_resize_pair(const rubraview_edit_session_t *session, int32_t typed, bool from_width,
+                                int32_t *out_width, int32_t *out_height) {
+    if (!session || !out_width || !out_height || typed < 1 || typed > 65535) return false;
+    int32_t src_w = session->crop_active ? session->crop.width : session->image_width;
+    int32_t src_h = session->crop_active ? session->crop.height : session->image_height;
+    if (src_w <= 0 || src_h <= 0) return false;
+    int32_t w = from_width ? typed : *out_width, h = from_width ? *out_height : typed;
+    if (session->resize_lock_aspect) {
+        if (from_width) h = (int32_t)((double)typed * (double)src_h / (double)src_w + 0.5);
+        else            w = (int32_t)((double)typed * (double)src_w / (double)src_h + 0.5);
+    }
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (w > 65535 || h > 65535) return false;
+    *out_width = w;
+    *out_height = h;
+    return true;
+}
+
 bool rubraview_edit_resize_percent(const rubraview_edit_session_t *session, double percent,
                                    int32_t *out_width, int32_t *out_height) {
     if (!session || !out_width || !out_height) return false;

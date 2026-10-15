@@ -4,6 +4,7 @@
 #include "rubraview/core.h"
 #include "rubraview/keymap.h"
 #include "rubraview/layout.h"
+#include "rubraview/viewport.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,6 +91,15 @@ double rubraview_zoom_step_percent(double percent, double step, bool larger);
  * is returned as 0 (the owner's name for it: "0%").
  */
 double rubraview_zoom_cycle_percent(double percent, bool at_real_size);
+
+/**
+ * The fit tile's round (owner, 2026-10-15): window, width, height, smart,
+ * stretch, window again. Real size (or anything else) goes to window.
+ */
+rubraview_fit_mode_t rubraview_fit_cycle_next(rubraview_fit_mode_t fit);
+
+/** A fit's name on its tile: "Fit", "Fit W", "Fit H", "Smart", "Stretch", and real size on two rows. */
+const char *rubraview_fit_tile_name(rubraview_fit_mode_t fit);
 
 /**
  * The arrow keys over a picture larger than the window (owner, 2026-10-14):

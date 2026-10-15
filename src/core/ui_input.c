@@ -110,6 +110,27 @@ double rubraview_zoom_cycle_percent(double percent, bool at_real_size) {
     return next > 200.0 + 1e-6 ? 0.0 : next;
 }
 
+rubraview_fit_mode_t rubraview_fit_cycle_next(rubraview_fit_mode_t fit) {
+    switch (fit) {
+        case RUBRAVIEW_FIT_WINDOW: return RUBRAVIEW_FIT_WIDTH;
+        case RUBRAVIEW_FIT_WIDTH:  return RUBRAVIEW_FIT_HEIGHT;
+        case RUBRAVIEW_FIT_HEIGHT: return RUBRAVIEW_FIT_SMART;
+        case RUBRAVIEW_FIT_SMART:  return RUBRAVIEW_FIT_STRETCH;
+        default:                   return RUBRAVIEW_FIT_WINDOW;
+    }
+}
+
+const char *rubraview_fit_tile_name(rubraview_fit_mode_t fit) {
+    switch (fit) {
+        case RUBRAVIEW_FIT_WIDTH:       return "Fit W";
+        case RUBRAVIEW_FIT_HEIGHT:      return "Fit H";
+        case RUBRAVIEW_FIT_SMART:       return "Smart";
+        case RUBRAVIEW_FIT_STRETCH:     return "Stretch";
+        case RUBRAVIEW_FIT_ACTUAL_SIZE: return "Real\nsize";
+        default:                        return "Fit";
+    }
+}
+
 double rubraview_pan_key_delta(double view_extent, double start, double extent, int direction, double step) {
     if (!(extent > view_extent) || !(step > 0.0) || direction == 0) return 0.0;
     double room = direction > 0 ? start + extent - view_extent   /* hidden past the far edge */

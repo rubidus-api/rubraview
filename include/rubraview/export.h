@@ -71,6 +71,22 @@ u8str_t rubraview_export_extension(rubraview_export_format_t format);
 /** The format a filename implies, or SAME_AS_SOURCE when it names none. */
 rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename);
 
+/* The export panel's rows a format has use for (owner, 2026-10-15: only those shown). */
+enum {
+    RUBRAVIEW_EXPORT_ROW_QUALITY     = 1u << 0,   /* JPEG, and WebP when not lossless */
+    RUBRAVIEW_EXPORT_ROW_PROGRESSIVE = 1u << 1,   /* JPEG */
+    RUBRAVIEW_EXPORT_ROW_PNG_LEVEL   = 1u << 2,   /* PNG */
+    RUBRAVIEW_EXPORT_ROW_PNG_DEPTH   = 1u << 3,   /* PNG */
+    RUBRAVIEW_EXPORT_ROW_WEBP        = 1u << 4,   /* WebP: lossless and effort */
+    RUBRAVIEW_EXPORT_ROW_PRIVACY     = 1u << 5,   /* a format that carries EXIF or XMP: JPEG, PNG, WebP, TIFF */
+};
+
+/**
+ * Which rows the export panel shows for `format`; "as the file" stands
+ * for the format `source_name`'s extension names (none known: no rows).
+ */
+uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_name, bool webp_lossless);
+
 /** The sizes §3.10's multi-size ICO packs. Returns how many were written. */
 size_t rubraview_export_ico_sizes(int32_t *out_sizes, size_t capacity);
 

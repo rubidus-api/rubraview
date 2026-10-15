@@ -111,6 +111,10 @@ typedef struct rubraview_box {
        that grows — a longer name, another layout — does not jump to the
        other side (owner, 2026-10-15). */
     int32_t open_side;
+    /* No anchor, pin or grip (owner, 2026-10-15: the menu opens from the
+       title bar's ☰): the box is opened and folded by its owner, and its
+       grid's top-left is the anchor's place itself, kept inside the view. */
+    bool headless;
     bool timeline;               /* toolbox: a seek bar in the header row (a film or music) */
     /* D-124: the strip in groups. The name's rows (0 is 1), and how many
        buttons each group holds, in order (group_count 0: all in one). */

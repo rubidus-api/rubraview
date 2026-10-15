@@ -11,7 +11,7 @@ static const char *const NEEDS_PAGE[] = {
     "layout_single", "layout_dual", "layout_dual_rtl", "layout_book", "layout_book_rtl", "layout_webtoon",
     "layout_comic", "layout_comic_rtl", "toggle_layout",
     "toggle_spread_detect",
-    "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "toggle_fit_lock",
+    "fit_window", "fit_width", "fit_height", "actual_size", "smart_fit", "fit_stretch", "fit_cycle", "toggle_fit_lock",
     "rotate_cw", "rotate_ccw", "flip_horizontal", "flip_vertical",
     "zoom_in", "zoom_out", "zoom_reset", "zoom_cycle", "hide_boxes", "toggle_nearest", "toggle_pixel_grid",
 };

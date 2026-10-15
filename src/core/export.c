@@ -97,3 +97,19 @@ rubraview_export_route_t rubraview_export_plan(const rubraview_export_options_t 
 
     return RUBRAVIEW_EXPORT_REENCODE;
 }
+
+uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_name, bool webp_lossless) {
+    if (format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) format = rubraview_export_format_for_name(source_name);
+    switch (format) {
+        case RUBRAVIEW_EXPORT_JPEG:
+            return RUBRAVIEW_EXPORT_ROW_QUALITY | RUBRAVIEW_EXPORT_ROW_PROGRESSIVE | RUBRAVIEW_EXPORT_ROW_PRIVACY;
+        case RUBRAVIEW_EXPORT_PNG:
+            return RUBRAVIEW_EXPORT_ROW_PNG_LEVEL | RUBRAVIEW_EXPORT_ROW_PNG_DEPTH | RUBRAVIEW_EXPORT_ROW_PRIVACY;
+        case RUBRAVIEW_EXPORT_WEBP:
+            return (webp_lossless ? 0u : (uint32_t)RUBRAVIEW_EXPORT_ROW_QUALITY) | RUBRAVIEW_EXPORT_ROW_WEBP | RUBRAVIEW_EXPORT_ROW_PRIVACY;
+        case RUBRAVIEW_EXPORT_TIFF:
+            return RUBRAVIEW_EXPORT_ROW_PRIVACY;
+        default:
+            return 0u;   /* GIF, BMP, ICO: nothing to choose */
+    }
+}
