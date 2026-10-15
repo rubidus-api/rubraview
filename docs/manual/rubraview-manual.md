@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.90.exe              the viewer, as built
-dist/rubraview-v0.0.90/                 the release bundle
-dist/rubraview-v0.0.90.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.91.exe              the viewer, as built
+dist/rubraview-v0.0.91/                 the release bundle
+dist/rubraview-v0.0.91.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -540,11 +540,13 @@ While it does:
   The point you just set wins: an A at or after B moves B to the end of
   the film, a B at or before A (or with no A) moves A to its start.
 - `Shift+\` opens the same two points as numbers, so a repeat can be set
-  to the millisecond. Inside that box **A = now** and **B = now** (or `[`
-  and `]`) put the moment you are at into A or B, with the same rule —
+  to the millisecond: each point has three fields, hours, minutes and
+  seconds (with up to three decimals); a field you come to is replaced by
+  the first digit you type, and `:` goes on to the next field. Inside
+  that box **A = now** and **B = now** (or `[` and `]`) put the moment you are at into A or B, with the same rule —
   so you can tap a point, correct the number, and tap it again. Click a
-  field or press `Tab` to move between them, `Enter` keeps them, `Esc` or
-  the `X` at the box's top right leaves them as they were.
+  field or press `Tab` to move between them (`Up` / `Down` go to the
+  other point), `Enter` keeps them, `Esc` or the `X` at the box's top right leaves them as they were.
   `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
 - The toolbox's seek bar shows the time; click or drag on it to go

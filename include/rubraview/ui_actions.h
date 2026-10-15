@@ -84,6 +84,13 @@ u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
  * caption says it better ("1x", "1:1", "A-B"); the caller draws that.
  */
 uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *facts);
+
+/**
+ * What a menu item or a tile does, said when the pointer rests on it, for
+ * the ones whose short name does not explain itself (owner, 2026-10-15:
+ * Crisp and Grid). NULL for the rest.
+ */
+const char *rubraview_action_hint(u8str_t action);
 /** The pin at a box's top-left: an outline when off, filled when on. */
 uint32_t rubraview_pin_icon(bool on);
 

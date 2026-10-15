@@ -443,8 +443,10 @@ typedef struct app_state {
        and what is typed goes back to the points when it closes. */
     bool                   ab_edit_open;
     int32_t                ab_edit_field;     /* 0 = A, 1 = B */
-    char                   ab_edit_text[2][32];
-    size_t                 ab_edit_length[2];
+    int32_t                ab_edit_part;      /* 0 hours, 1 minutes, 2 seconds (owner, 2026-10-15) */
+    bool                   ab_edit_fresh;     /* the field in hand was just come to: the first digit replaces it */
+    char                   ab_edit_text[2][3][12];
+    size_t                 ab_edit_length[2][3];
     /* The Adjust panel's size in pixels (owner, 2026-10-15): width and height typed,
        the other following the shape. */
     bool                   px_edit_open;
@@ -6299,7 +6301,7 @@ static rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_p
     double s = 26.0 * rubraview_pal_window_dpi_scale(app->window);
     return (rubraview_pal_rect_t){ box.x + box.width - s - 4.0, box.y + 4.0, s, s };
 }
-static rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 132.0); }
+static rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 158.0); }
 static rubraview_pal_rect_t px_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 96.0); }
 /* "A = now" (0) and "B = now" (1), side by side under the fields. */
 static rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which) {
@@ -6307,45 +6309,81 @@ static rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which)
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double bw = 150.0 * dpi, bh = 30.0 * dpi, gap = 20.0 * dpi;
     double left = box.x + (box.width - 2.0 * bw - gap) * 0.5;
-    return (rubraview_pal_rect_t){ left + (double)which * (bw + gap), box.y + 52.0 * dpi, bw, bh };
+    return (rubraview_pal_rect_t){ left + (double)which * (bw + gap), box.y + 80.0 * dpi, bw, bh };
 }
 static bool pal_rect_has(rubraview_pal_rect_t r, double x, double y) {
     return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
 }
+/* A point's field in the A-B box: A's at the left half, B's at the right; hours, minutes,
+   seconds, each followed by its unit (owner, 2026-10-15). */
+static const double AB_PART_W[3] = { 48.0, 56.0, 90.0 };
+#define AB_LABEL_W 28.0
+#define AB_UNIT_W 14.0
+static rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t part) {
+    rubraview_pal_rect_t box = ab_box_rect(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double total = AB_LABEL_W + AB_PART_W[0] + AB_PART_W[1] + AB_PART_W[2] + 3.0 * AB_UNIT_W;
+    double half = box.width * 0.5;
+    double x = box.x + (double)side * half + (half - total * dpi) * 0.5 + AB_LABEL_W * dpi;
+    for (int32_t k = 0; k < part; ++k) x += (AB_PART_W[k] + AB_UNIT_W) * dpi;
+    return (rubraview_pal_rect_t){ x, box.y + 38.0 * dpi, AB_PART_W[part] * dpi, 30.0 * dpi };
+}
 
-/* One point as text, the way the timeline writes it. An unset point is
-   an empty field rather than a nought: nought is a time. */
-static void ab_edit_fill(app_state_t *app, int32_t field, double seconds) {
-    char buffer[32];
+/* A point in three fields, hours, minutes and seconds (owner, 2026-10-15). An unset
+   point is three empty fields rather than noughts: nought is a time. */
+static u8str_t ab_part(const app_state_t *app, int32_t side, int32_t part) {
+    return (u8str_t){ .ptr = app->ab_edit_text[side][part], .len = app->ab_edit_length[side][part] };
+}
+
+static void ab_part_set(app_state_t *app, int32_t side, int32_t part, const char *text) {
+    size_t n = strlen(text);
+    if (n >= sizeof(app->ab_edit_text[0][0])) n = sizeof(app->ab_edit_text[0][0]) - 1;
+    memcpy(app->ab_edit_text[side][part], text, n);
+    app->ab_edit_text[side][part][n] = '\0';
+    app->ab_edit_length[side][part] = n;
+}
+
+static void ab_edit_fill(app_state_t *app, int32_t side, double seconds) {
     if (seconds < 0.0) {
-        app->ab_edit_length[field] = 0;
-        app->ab_edit_text[field][0] = '\0';
+        for (int32_t p = 0; p < 3; ++p) ab_part_set(app, side, p, "");
         return;
     }
-    u8str_t text = rubraview_format_timecode(buffer, sizeof(buffer), seconds, true);
-    size_t n = text.len < sizeof(app->ab_edit_text[0]) - 1 ? text.len : sizeof(app->ab_edit_text[0]) - 1;
-    memcpy(app->ab_edit_text[field], text.ptr, n);
-    app->ab_edit_text[field][n] = '\0';
-    app->ab_edit_length[field] = n;
+    int32_t h = 0, m = 0;
+    double sec = 0.0;
+    rubraview_timecode_split(seconds, &h, &m, &sec);
+    char text[16];
+    snprintf(text, sizeof(text), "%d", (int)h);     ab_part_set(app, side, 0, text);
+    snprintf(text, sizeof(text), "%02d", (int)m);   ab_part_set(app, side, 1, text);
+    snprintf(text, sizeof(text), "%06.3f", sec);    ab_part_set(app, side, 2, text);
+}
+
+/* The point a side's fields say: -1 when all three are empty; false when one is not a number. */
+static bool ab_edit_value(const app_state_t *app, int32_t side, double *out) {
+    return rubraview_timecode_join(ab_part(app, side, 0), ab_part(app, side, 1), ab_part(app, side, 2), out);
+}
+
+static void ab_edit_goto(app_state_t *app, int32_t side, int32_t part) {
+    app->ab_edit_field = side;
+    app->ab_edit_part = part;
+    app->ab_edit_fresh = true;
 }
 
 /* This moment into A or B; the other gives way when they cross (rubraview_ab_take). */
 static void ab_edit_take(app_state_t *app, int32_t f) {
     double v[2] = { -1.0, -1.0 };
     for (int32_t k = 0; k < 2; ++k) {
-        if (app->ab_edit_length[k] > 0 &&
-            !rubraview_parse_timecode((u8str_t){ .ptr = app->ab_edit_text[k], .len = app->ab_edit_length[k] }, &v[k])) v[k] = -1.0;
+        if (!ab_edit_value(app, k, &v[k])) v[k] = -1.0;
     }
     rubraview_ab_take(&v[0], &v[1], play_position(app), f == 0, play_duration(app));
     ab_edit_fill(app, 0, v[0]);
     ab_edit_fill(app, 1, v[1]);
-    app->ab_edit_field = f;
+    ab_edit_goto(app, f, 2);
 }
 
 static void ab_edit_begin(app_state_t *app) {
     if (!app->media && !anim_plays(app)) { osd_say(app, U8("nothing is playing")); return; }
     app->ab_edit_open = true;
-    app->ab_edit_field = 0;
+    ab_edit_goto(app, 0, 2);
     ab_edit_fill(app, 0, app->ab_a);
     ab_edit_fill(app, 1, app->ab_b);
     rubraview_pal_window_text_input(app->window, true);
@@ -6359,21 +6397,19 @@ static void ab_edit_close(app_state_t *app) {
 /* What was typed becomes the points — or says why it cannot, and keeps
    the box open so the reader can fix it rather than start again. */
 static bool ab_edit_commit(app_state_t *app) {
-    double a = -1.0, b = -1.0;
-    for (int32_t field = 0; field < 2; ++field) {
-        u8str_t text = { .ptr = app->ab_edit_text[field], .len = app->ab_edit_length[field] };
-        double *into = field == 0 ? &a : &b;
-        if (text.len == 0) continue;            /* left empty: that point is unset */
-        if (!rubraview_parse_timecode(text, into)) {
-            osd_say(app, field == 0 ? U8("A is not a time — try 1:23.5")
-                                    : U8("B is not a time — try 1:23.5"));
-            app->ab_edit_field = field;
+    double v[2] = { -1.0, -1.0 };
+    for (int32_t side = 0; side < 2; ++side) {
+        if (!ab_edit_value(app, side, &v[side])) {
+            osd_say(app, side == 0 ? U8("A is not a time: hours and minutes are whole, seconds like 23.5")
+                                   : U8("B is not a time: hours and minutes are whole, seconds like 23.5"));
+            ab_edit_goto(app, side, 2);
             return false;
         }
     }
+    double a = v[0], b = v[1];
     if (a >= 0.0 && b >= 0.0 && b <= a) {
         osd_say(app, U8("B has to come after A"));
-        app->ab_edit_field = 1;
+        ab_edit_goto(app, 1, 2);
         return false;
     }
     app->ab_a = a;
@@ -6395,54 +6431,67 @@ static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (ab_edit_commit(app)) ab_edit_close(app);
         return true;
     }
-    if (key_is(combo, "Tab") || key_is(combo, "Up") || key_is(combo, "Down")) {
-        app->ab_edit_field = app->ab_edit_field == 0 ? 1 : 0;
+    /* Tab goes through the six fields, A's hours to B's seconds; Up and Down change the point. */
+    if (key_is(combo, "Tab") || key_is(combo, "Shift+Tab")) {
+        int32_t at = app->ab_edit_field * 3 + app->ab_edit_part;
+        at = (at + (key_is(combo, "Tab") ? 1 : 5)) % 6;
+        ab_edit_goto(app, at / 3, at % 3);
+        return true;
+    }
+    if (key_is(combo, "Up") || key_is(combo, "Down")) {
+        ab_edit_goto(app, 1 - app->ab_edit_field, app->ab_edit_part);
         return true;
     }
     if (key_is(combo, "Backspace")) {
-        int32_t f = app->ab_edit_field;
-        if (app->ab_edit_length[f] > 0) app->ab_edit_text[f][--app->ab_edit_length[f]] = '\0';
+        int32_t f = app->ab_edit_field, p = app->ab_edit_part;
+        if (app->ab_edit_length[f][p] > 0) app->ab_edit_text[f][p][--app->ab_edit_length[f][p]] = '\0';
+        app->ab_edit_fresh = false;
         return true;
     }
     /* Left / Right move the point in hand by Settings › Video › A-B step
-       (owner, 2026-09-30); a field still empty starts from where the film is. */
+       (owner, 2026-09-30); a point still empty starts from where the film is. */
     if (key_is(combo, "Left") || key_is(combo, "Right")) {
         int32_t f = app->ab_edit_field;
         double step = rubraview_settings_get(&app->settings, U8("video"), U8("ab_step_seconds"));
         double now = app->media_position;
-        double parsed = 0.0;
-        if (app->ab_edit_length[f] > 0 &&
-            rubraview_parse_timecode((u8str_t){ .ptr = app->ab_edit_text[f], .len = app->ab_edit_length[f] }, &parsed)) now = parsed;
+        double typed = -1.0;
+        if (ab_edit_value(app, f, &typed) && typed >= 0.0) now = typed;
         now += key_is(combo, "Left") ? -step : step;
         if (now < 0.0) now = 0.0;
         ab_edit_fill(app, f, now);
+        app->ab_edit_fresh = true;
         return true;
     }
     /* The crossing-over the owner asked for: the keys that set a point
-       put the playhead into the field in hand, as a number, and it can
-       then be typed over. */
+       put the playhead into it, as numbers, and they can then be typed over. */
     if (key_is(combo, "BracketLeft") || key_is(combo, "BracketRight")) {
         ab_edit_take(app, key_is(combo, "BracketLeft") ? 0 : 1);
         return true;
     }
     if (key_is(combo, "Backslash")) {
-        app->ab_edit_length[0] = app->ab_edit_length[1] = 0;
-        app->ab_edit_text[0][0] = app->ab_edit_text[1][0] = '\0';
+        for (int32_t k = 0; k < 2; ++k) ab_edit_fill(app, k, -1.0);
         return true;
     }
     return true;   /* the digits arrive as text; the rest is swallowed */
 }
 
-/* The characters themselves: only what a time is made of. */
+/* The characters themselves: digits, a point in the seconds, and a colon to go on to the next field. */
 static void ab_edit_text_typed(app_state_t *app, u8str_t text) {
-    int32_t f = app->ab_edit_field;
+    static const size_t MOST[3] = { 3, 3, 6 };   /* 999 hours; 999 minutes add up; 59.999 */
     for (size_t i = 0; i < text.len; ++i) {
         char c = text.ptr[i];
-        bool wanted = (c >= '0' && c <= '9') || c == ':' || c == '.' || c == ',';
-        if (!wanted) continue;
-        if (app->ab_edit_length[f] + 1 >= sizeof(app->ab_edit_text[0])) return;
-        app->ab_edit_text[f][app->ab_edit_length[f]++] = c;
-        app->ab_edit_text[f][app->ab_edit_length[f]] = '\0';
+        int32_t f = app->ab_edit_field, p = app->ab_edit_part;
+        if (c == ':') {
+            if (p < 2) ab_edit_goto(app, f, p + 1);
+            continue;
+        }
+        bool point = c == '.' || c == ',';
+        if (!(c >= '0' && c <= '9') && !(point && p == 2)) continue;
+        if (app->ab_edit_fresh) { ab_part_set(app, f, p, ""); app->ab_edit_fresh = false; }
+        if (point && memchr(app->ab_edit_text[f][p], '.', app->ab_edit_length[f][p])) continue;
+        if (app->ab_edit_length[f][p] >= MOST[p]) continue;
+        app->ab_edit_text[f][p][app->ab_edit_length[f][p]++] = point ? '.' : c;
+        app->ab_edit_text[f][p][app->ab_edit_length[f][p]] = '\0';
     }
 }
 
@@ -8978,23 +9027,33 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
         rubraview_pal_render_draw_text(app->renderer, cstr(TAKE[k]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
+    rubraview_pal_rect_t title = { box.x + 12.0 * dpi, box.y + 4.0 * dpi, box.width - 60.0 * dpi, 26.0 * dpi };
+    rubraview_pal_render_draw_text(app->renderer, U8("Repeat from A to B  (hours, minutes, seconds)"), title, 14.0 * dpi,
+                                   0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    /* Each point in three fields, the one in hand lit with a caret (owner, 2026-10-15). */
     bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
-    char line[160];
-    int n = snprintf(line, sizeof(line), "A  %s%.*s%s     B  %s%.*s%s",
-                     app->ab_edit_field == 0 ? "[" : " ",
-                     (int)app->ab_edit_length[0], app->ab_edit_text[0],
-                     app->ab_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ",
-                     app->ab_edit_field == 1 ? "[" : " ",
-                     (int)app->ab_edit_length[1], app->ab_edit_text[1],
-                     app->ab_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ");
-    if (n > 0) {
-        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
-                                       top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    static const char *const UNIT[3] = { "h", "m", "s" };
+    for (int32_t side = 0; side < 2; ++side) {
+        rubraview_pal_rect_t first = ab_part_rect(app, side, 0);
+        rubraview_pal_rect_t label = { first.x - AB_LABEL_W * dpi, first.y, AB_LABEL_W * dpi, first.height };
+        rubraview_pal_render_draw_text(app->renderer, side == 0 ? U8("A") : U8("B"), label, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        for (int32_t part = 0; part < 3; ++part) {
+            rubraview_pal_rect_t r = ab_part_rect(app, side, part);
+            bool here = app->ab_edit_field == side && app->ab_edit_part == part;
+            rubraview_pal_render_fill_rect(app->renderer, r, here ? 0xFF3A3A3Au : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, r, here ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, here ? 2.0 : 1.0, 3.0);
+            char shown[16];
+            u8str_t t = ab_part(app, side, part);
+            int n = snprintf(shown, sizeof(shown), "%.*s%s", (int)t.len, t.ptr, here && caret_lit && !app->ab_edit_fresh ? "|" : "");
+            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = (size_t)n }, r, 17.0 * dpi,
+                                                      COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_rect_t unit = { r.x + r.width, r.y, AB_UNIT_W * dpi, r.height };
+            rubraview_pal_render_draw_text(app->renderer, cstr(UNIT[part]), unit, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
     }
-    rubraview_pal_rect_t hint = { box.x, box.y + 90.0 * dpi, box.width, 34.0 * dpi };
+    rubraview_pal_rect_t hint = { box.x, box.y + 118.0 * dpi, box.width, 34.0 * dpi };
     rubraview_pal_render_draw_text(app->renderer,
-                                   U8("Click a field or Tab  ·  \\ empties  ·  Enter keeps  ·  Esc or X leaves"),
+                                   U8("Click a field or Tab  ·  : next field  ·  \\ empties  ·  Enter keeps  ·  Esc or X leaves"),
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
@@ -16794,6 +16853,17 @@ static void tick_timers(app_state_t *app, double dt) {
             if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "fit_cycle")) {
                 hint = cstr(rubraview_fit_tile_hint(app->fit_mode));   /* the fit it is in, in words (owner, 2026-10-15) */
             }
+            if (hint.len == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
+                const char *said = rubraview_action_hint(app->toolbox_tiles[tile].action);
+                if (said) hint = cstr(said);
+            }
+        }
+        if (hint.len == 0 && app->pointer_inside && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->ctx_open) {
+            /* A menu item whose name does not explain itself says what it does (owner, 2026-10-15: Crisp, Grid). */
+            int32_t tile = rubraview_box_tile_at(&app->menubox, &base, app->pointer_x, app->pointer_y);
+            const rubraview_menu_item_t *item = tile >= 0 ? rubraview_menu_item_at(&app->menu, tile) : NULL;
+            const char *said = item ? rubraview_action_hint(item->action) : NULL;
+            if (said) hint = cstr(said);
         }
         if (hint.ptr != app->hint.ptr) {
             app->hint = hint;
@@ -19756,7 +19826,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         if (pal_rect_has(ab_box_button(&app, 0), event.mouse.x, event.mouse.y)) { ab_edit_take(&app, 0); break; }
                         if (pal_rect_has(ab_box_button(&app, 1), event.mouse.x, event.mouse.y)) { ab_edit_take(&app, 1); break; }
                         if (pal_rect_has(box, event.mouse.x, event.mouse.y)) {
-                            app.ab_edit_field = event.mouse.x < box.x + box.width * 0.5 ? 0 : 1;
+                            /* A field clicked is the one typed into; elsewhere in a half, that point's seconds. */
+                            int32_t side = event.mouse.x < box.x + box.width * 0.5 ? 0 : 1, part = 2;
+                            for (int32_t k = 0; k < 3; ++k) {
+                                if (pal_rect_has(ab_part_rect(&app, side, k), event.mouse.x, event.mouse.y)) part = k;
+                            }
+                            ab_edit_goto(&app, side, part);
                             break;
                         }
                     }

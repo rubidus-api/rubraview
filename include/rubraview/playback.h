@@ -112,6 +112,22 @@ u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position
  */
 bool rubraview_parse_timecode(u8str_t text, double *out_seconds);
 
+/**
+ * A time as the A-B box shows it, in three fields (owner, 2026-10-15):
+ * whole hours, whole minutes, seconds with their milliseconds. Rounded to
+ * the millisecond first, so 59.9996 s is 1 minute, not 0:59.1000.
+ */
+void rubraview_timecode_split(double seconds, int32_t *out_hours, int32_t *out_minutes, double *out_seconds);
+
+/**
+ * The three fields back to seconds. An empty field counts as nought;
+ * all three empty is a point not set (`*out` = -1). Hours and minutes are
+ * digits, seconds digits with one point (or comma) and up to three
+ * decimals; minutes or seconds past 59 just add up. False, `*out`
+ * untouched, when a field is not a number.
+ */
+bool rubraview_timecode_join(u8str_t hours, u8str_t minutes, u8str_t seconds, double *out);
+
 /* ---- §3.16.2 track switching ---- */
 
 typedef enum rubraview_track_kind {

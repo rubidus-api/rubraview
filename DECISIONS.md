@@ -1348,3 +1348,11 @@ Do not store credentials, private infrastructure details, personal data, private
   - A click on a thumbnail goes to its page (`rubraview_filmstrip_index_at`, `spread_for_chosen_page`); the wheel over the strip goes a page a notch. The toolbox drawn over it keeps its clicks.
   - `F4` keeps the strip up as before, now the same drawing, and kept across books (it was let go at each open).
 - Consequences: the old strip drew only pages already decoded, stretched to the cell; thumbnails now keep their shape (the thread's are cut to a square, as the picker's are).
+
+## 2026-10-15: D-142 A-B in hours, minutes and seconds; Crisp and Grid explained
+
+- Status: Accepted (owner 2026-10-15: "구간반복 화면에서 시:분:초 각각 입력할 수도 있게 해 주세요"; "crisp와 grid에 대해 아이콘 위에 커서 올리면 툴팁으로 안내메시지 나오게 해 주세요")
+- Decision:
+  - The A-B box shows each point as three fields with their units: hours (whole), minutes (whole, past 59 adds up), seconds (up to three decimals). `rubraview_timecode_split` fills them (rounded to the millisecond); `rubraview_timecode_join` reads them (all empty: the point unset; a field not a number: refused, the box stays). `Tab` / `Shift+Tab` go through the six fields, `Up` / `Down` to the same field of the other point, `:` to the next field, a click to the field under it; a field just come to is replaced by the first digit. `[`, `]`, Left / Right, `\\` and the buttons work as before.
+  - `rubraview_action_hint`: Crisp (`toggle_nearest`) and Grid (`toggle_pixel_grid`) say what they do when the pointer rests on them, in the menu or on a tile.
+- Consequences: the box is taller (a title line clear of its X). One free-form timecode field is gone; `rubraview_parse_timecode` stays for the command line and the tests.

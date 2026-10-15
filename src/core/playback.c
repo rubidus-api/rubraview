@@ -368,3 +368,43 @@ u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position
     size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
     return (u8str_t){ .ptr = buffer, .len = len };
 }
+
+void rubraview_timecode_split(double seconds, int32_t *out_hours, int32_t *out_minutes, double *out_seconds) {
+    if (!(seconds > 0.0)) seconds = 0.0;
+    long long ms = llround(seconds * 1000.0);
+    if (out_hours) *out_hours = (int32_t)(ms / 3600000);
+    if (out_minutes) *out_minutes = (int32_t)((ms / 60000) % 60);
+    if (out_seconds) *out_seconds = (double)(ms % 60000) / 1000.0;
+}
+
+/* One field: digits, and for the seconds one point (or comma) and up to three decimals. */
+static bool timecode_field(u8str_t text, bool fraction, double *out) {
+    double value = 0.0, scale = 0.0;
+    for (size_t i = 0; i < text.len; ++i) {
+        char c = text.ptr[i];
+        if (c >= '0' && c <= '9') {
+            if (scale > 0.0) {
+                if (scale < 0.0005) return false;   /* past the millisecond */
+                value += (double)(c - '0') * scale;
+                scale *= 0.1;
+            } else {
+                value = value * 10.0 + (double)(c - '0');
+            }
+        } else if ((c == '.' || c == ',') && fraction && scale == 0.0) {
+            scale = 0.1;
+        } else {
+            return false;
+        }
+    }
+    *out = value;
+    return true;
+}
+
+bool rubraview_timecode_join(u8str_t hours, u8str_t minutes, u8str_t seconds, double *out) {
+    if (!out) return false;
+    if (hours.len == 0 && minutes.len == 0 && seconds.len == 0) { *out = -1.0; return true; }
+    double h = 0.0, m = 0.0, s = 0.0;
+    if (!timecode_field(hours, false, &h) || !timecode_field(minutes, false, &m) || !timecode_field(seconds, true, &s)) return false;
+    *out = h * 3600.0 + m * 60.0 + s;
+    return true;
+}

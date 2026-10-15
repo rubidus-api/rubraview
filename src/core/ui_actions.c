@@ -240,3 +240,14 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
 uint32_t rubraview_pin_icon(bool on) {
     return on ? 0xE840 : 0xE718;   /* Pinned / Pin */
 }
+
+const char *rubraview_action_hint(u8str_t action) {
+    static const struct { const char *action; const char *hint; } HINTS[] = {
+        { "toggle_nearest", "Crisp - enlarged, every pixel stays a sharp square instead of being smoothed (pixel art, icons, old games). Click: on / off (N)" },
+        { "toggle_pixel_grid", "Grid - zoomed past 400 %, a thin line around every pixel, to see each one. Click: on / off (G)" },
+    };
+    for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]); ++i) {
+        if (rubraview_u8_eq_lit(action, HINTS[i].action)) return HINTS[i].hint;
+    }
+    return NULL;
+}
