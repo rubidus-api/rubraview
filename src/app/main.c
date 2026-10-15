@@ -170,7 +170,7 @@ static double g_gutter = 8.0;
 #define IDLE_REDRAW_GRACE 3.0
 #define HISTORY_MAX_ENTRIES 512
 #define RECENT_KEPT 30          /* D-104: files in recent.ini; the menu shows the newest ten */
-#define RECENT_SKIP_DIRS 8
+#define RECENT_SKIP_DIRS 264   /* the list, as many as wanted, and the eight of before (owner, 2026-10-16) */
 #define MENU_MAX_TILES 16   /* 4 x 4; the owner chose a larger grid over splitting File (2026-09-21) */
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
@@ -810,6 +810,7 @@ typedef struct app_state {
     char                   spath_composing[64];
     size_t                 spath_composing_length;
     u8str_t                spath_section, spath_key;
+    int32_t                spath_list_index;   /* a folder of a list (`recent.skip_dirs`) being typed, or -1 */
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
@@ -948,7 +949,7 @@ typedef struct app_state {
     /* D-34: one picture per listed item, made on a thread of its own for
        the tiles on screen and added as each arrives. 0 = not asked for,
        1 = ready, 2 = none to show, 3 = asked for. */
-    struct picker_thumb { uint8_t state; rubraview_texture_t *texture; } *picker_thumbs;
+    struct picker_thumb { uint8_t state; rubraview_texture_t *texture; rubraview_picker_media_t media; } *picker_thumbs;
     size_t                 picker_thumb_count;
     rubraview_thumbs_t    *thumbs;              /* the thread, started with the first picker */
     uint32_t               picker_generation;   /* one per listing: late results are known by it */
@@ -1074,6 +1075,8 @@ static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width,
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
+static void skip_dirs_take_old(app_state_t *app);
+static void skip_dirs_table_rows(app_state_t *app);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
 static void media_ab_check(app_state_t *app);
@@ -3400,6 +3403,11 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
         return true;
     }
     index -= app->favorites.count;
+    if (index == 0) {   /* the recent files, a place of their own (owner, 2026-10-16) */
+        *out = (picker_bar_item_t){ U8("Recent"), U8(RUBRAVIEW_PICKER_RECENT), false };
+        return true;
+    }
+    index -= 1;
     if (index >= app->picker_places.count) return false;
     *out = (picker_bar_item_t){ app->picker_places.entries[index].name, app->picker_places.entries[index].path, false };
     return true;
@@ -3408,7 +3416,7 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
 /* The star after the path: lit when the folder on screen is a favourite.
    None on the PC page, which is not a folder. */
 static u8str_t picker_star_label(const app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || app->picker_in_book) return U8("");
+    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) return U8("");
     return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? U8("\xE2\x98\x85") : U8("\xE2\x98\x86");
 }
 
@@ -3417,7 +3425,8 @@ static void osd_say(app_state_t *app, u8str_t text);
 /* The star pressed, or Ctrl+D: the folder on screen in or out, and the
    file written at once, so a crash later does not lose it. */
 static void picker_toggle_favorite(app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || app->picker_dir.len == 0 || app->picker_in_book) return;
+    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) ||
+        app->picker_dir.len == 0 || app->picker_in_book) return;
     /* D-99: another viewer may have changed the list since this one read it:
        the file as it is now is what the folder goes into or comes out of. */
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
@@ -3798,6 +3807,8 @@ static void picker_thumbs_step(app_state_t *app) {
             if (t->texture) rubraview_pal_texture_destroy(t->texture);
             t->texture = texture;
             t->state = texture ? 1 : 2;
+            /* what the file is, for the details view's columns (owner, 2026-10-16) */
+            t->media = (rubraview_picker_media_t){ done.source_width, done.source_height, done.seconds };
             app->picker_thumbs_arrived = true;
         }
         free(done.bgra);
@@ -4026,16 +4037,91 @@ static u8str_t app_keep(app_state_t *app, u8str_t text) {
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = text.len };
 }
 
+/* The recent files as a listing (owner, 2026-10-16): newest first, each read from the
+   disk so the details have its size and dates; one gone since is left out. */
+static rubraview_fs_listing_t recent_listing(app_state_t *app, proven_arena_t *pa) {
+    rubraview_fs_listing_t out = {0};
+    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);   /* another viewer's too (D-104) */
+    size_t newest[RECENT_KEPT];
+    size_t shown = rubraview_recent_newest(&app->recent, newest, RECENT_KEPT);
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, shown ? shown : 1, sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return out;
+    out.entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    for (size_t r = 0; r < shown; ++r) {
+        rubraview_fs_entry_t e;
+        if (!rubraview_pal_fs_stat(pa, app->recent.list.entries[newest[r]].path, &e)) continue;
+        out.entries[out.count++] = e;
+    }
+    return out;
+}
+
+/* The details view's order (owner, 2026-10-16): the column chosen, kept in
+   Settings › Files; every array that follows the listing is put in the same order. */
+static void picker_apply_sort(app_state_t *app) {
+    int32_t choice = (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort")));
+    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+    size_t n = app->picker_listing.count;
+    if (choice <= 0 || n < 2 || rubraview_picker_is_places(app->picker_dir)) return;   /* as the folder has it */
+    size_t *order = (size_t*)malloc(n * sizeof(size_t));
+    rubraview_picker_media_t *media = (rubraview_picker_media_t*)calloc(n, sizeof(rubraview_picker_media_t));
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)malloc(n * sizeof(rubraview_fs_entry_t));
+    struct picker_thumb *thumbs = (struct picker_thumb*)malloc(n * sizeof(struct picker_thumb));
+    bool *picked = (bool*)malloc(n * sizeof(bool));
+    if (order && media && entries && thumbs && picked) {
+        bool have_thumbs = app->picker_thumbs && app->picker_thumb_count == n;
+        for (size_t i = 0; i < n && have_thumbs; ++i) media[i] = app->picker_thumbs[i].media;
+        rubraview_picker_sort_order(&app->picker_listing, media, (rubraview_picker_sort_key_t)(choice - 1), desc, order);
+        size_t focus = app->picker.focus;
+        for (size_t i = 0; i < n; ++i) {
+            entries[i] = app->picker_listing.entries[order[i]];
+            if (have_thumbs) thumbs[i] = app->picker_thumbs[order[i]];
+            picked[i] = app->picker_selected ? app->picker_selected[order[i]] : false;
+            if (order[i] == focus) app->picker.focus = i;
+        }
+        memcpy((void*)app->picker_listing.entries, entries, n * sizeof(rubraview_fs_entry_t));
+        if (have_thumbs) memcpy(app->picker_thumbs, thumbs, n * sizeof(struct picker_thumb));
+        if (app->picker_selected) memcpy(app->picker_selected, picked, n * sizeof(bool));
+        if (app->picker_in_book && app->picker_page_of) {
+            /* a page's place in the book goes with its entry; `..` stays first */
+            size_t skip = app->picker_page_skip;
+            size_t *pages = (size_t*)malloc(n * sizeof(size_t));
+            if (pages) {
+                for (size_t i = skip; i < n; ++i) pages[i] = order[i] >= skip ? app->picker_page_of[order[i] - skip] : RUBRAVIEW_PICKER_NOT_A_PAGE;
+                for (size_t i = skip; i < n; ++i) app->picker_page_of[i - skip] = pages[i];
+                free(pages);
+            }
+        }
+        app->picker.range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
+    }
+    free(order); free(media); free(entries); free(thumbs); free(picked);
+}
+
+/* A column's name pressed: by it, rising; pressed again, falling. Kept in Settings › Files. */
+static void picker_sort_by(app_state_t *app, int key) {
+    int now = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
+    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+    desc = now == key ? !desc : false;
+    rubraview_settings_set(&app->settings, U8("files"), U8("picker_sort"), (double)(key + 1));
+    rubraview_settings_set(&app->settings, U8("files"), U8("picker_sort_desc"), desc ? 1.0 : 0.0);
+    settings_write_if_changed(app, false);
+    picker_apply_sort(app);
+    char line[64];
+    int n = snprintf(line, sizeof(line), "by %s, %s", rubraview_picker_sort_name((rubraview_picker_sort_key_t)key),
+                     desc ? "falling" : "rising");
+    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+}
+
 static void picker_navigate(app_state_t *app, u8str_t dir) {
     proven_arena_t *pa = picker_next_arena(app);
     /* The PC page lists drives and the usual folders, in the PAL's order
        (owner, 2026-09-28: the whole machine, not only the folder the
        viewer was started in). */
     bool places = rubraview_picker_is_places(dir);
+    bool recent = rubraview_picker_is_recent(dir);
     /* Inside the book being read (owner, 2026-09-28): its own folders and
        pages, a level at a time, in the order they are read. */
     u8str_t inner = { .ptr = "", .len = 0 };
-    bool in_book = !places && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
+    bool in_book = !places && !recent && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
                    rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
     rubraview_archive_level_t level = {0};
     if (in_book) {
@@ -4044,9 +4130,10 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     }
     /* "." has no parent by name, which kept the reader below the folder the
        viewer was run from (owner, 2026-09-28): every folder is made whole. */
-    if (!places && !in_book) dir = rubraview_pal_fs_absolute(pa, dir);
+    if (!places && !in_book && !recent) dir = rubraview_pal_fs_absolute(pa, dir);
     rubraview_fs_listing_t listing = in_book ? level.listing
                                    : places ? rubraview_pal_fs_list_places(pa)
+                                   : recent ? recent_listing(app, pa)
                                             : rubraview_pal_fs_list_dir(pa, dir);
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, U8(IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;*.m3u8;*.m3u;*.rvlist"));
@@ -4074,7 +4161,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
        what a reader scans for first on a touch screen. */
     rubraview_sort_item_t *items = NULL;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, listing.count, sizeof(rubraview_sort_item_t));
-    if (!places && !in_book && proven_is_ok(res.err)) {
+    if (!places && !in_book && !recent && proven_is_ok(res.err)) {   /* the recent files stay newest first */
         items = (rubraview_sort_item_t*)(void*)res.value.ptr;
         for (size_t i = 0; i < listing.count; ++i) {
             items[i] = (rubraview_sort_item_t){
@@ -4160,6 +4247,7 @@ static void picker_navigate(app_state_t *app, u8str_t dir) {
     for (size_t i = 0; i < listing.count; ++i) {
         if (!listing.entries[i].is_directory) { app->picker.focus = i; break; }
     }
+    picker_apply_sort(app);   /* the column chosen in the details view, kept (owner, 2026-10-16) */
 }
 
 /* The extension of the item the focus is on, ".jpg" and such. */
@@ -4355,10 +4443,18 @@ static void picker_button(app_state_t *app, picker_button_t button) {
                                                    : U8("press 1-9 for the folder to copy them to"));
             break;
         case PICKER_BTN_CLEAR:
+            /* one button for both (owner, 2026-10-16): Select all until all are, then Deselect all */
             app->picker_has_pending = false;
             rubraview_confirm_clear(&app->picker_confirm);
-            rubraview_picker_clear_selection(&app->picker);
-            osd_say(app, U8("nothing picked"));
+            if (rubraview_picker_all_selected(&app->picker)) {
+                rubraview_picker_clear_selection(&app->picker);
+                osd_say(app, U8("nothing picked"));
+            } else {
+                if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
+                char line[48];
+                int k = snprintf(line, sizeof(line), "%zu files picked", rubraview_picker_select_all(&app->picker));
+                if (k > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)k });
+            }
             break;
         case PICKER_BTN_VIEW: {
             bool details = !picker_details(app);
@@ -5630,6 +5726,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         /* A toolbox that is its own window is put back, not shown twice. */
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
         else rubraview_box_click_anchor(&app->toolbox);
+    } else if (rubraview_u8_eq_lit(action, "open_recent_list")) {
+        /* The recent files on the open-file screen, tiles or details, sortable (owner, 2026-10-16). */
+        if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
+        picker_navigate(app, U8(RUBRAVIEW_PICKER_RECENT));
+        app->picker_open = app->picker_listing.count > 0;
     } else if (rubraview_u8_eq_lit(action, "open_picker")) {
         if (app->picker_open) {
             app->picker_open = false;
@@ -5802,6 +5903,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->settings_open) {
             rubraview_settings_view_set_page(&app->settings_view, RUBRAVIEW_TAB_KEYS);
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            skip_dirs_table_rows(app);
             app->settings_dirty = true;
         }
     } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
@@ -7889,16 +7991,41 @@ static rubraview_interpolation_t page_interpolation(const app_state_t *app) {
 
 static void draw_titlebar(app_state_t *app, double win_w);
 
-/* Where the details view's columns begin. */
-typedef struct picker_columns { double name_x, type_x, size_x, date_x; } picker_columns_t;
+/* Where the details view's columns begin (owner, 2026-10-16): Name, Type, Size, Created,
+   Modified, Resolution, Length. A narrow window lets Created go first, then Resolution,
+   Length and Type, so the name keeps room to be read. A column let go is 0 wide. */
+static const double PICKER_COL_WIDTH[RUBRAVIEW_PICKER_SORT_COUNT] = { 0.0, 62.0, 84.0, 140.0, 140.0, 110.0, 80.0 };
+typedef struct picker_columns {
+    double name_x;
+    double x[RUBRAVIEW_PICKER_SORT_COUNT];      /* where each begins; Name's end is x[TYPE] */
+    double w[RUBRAVIEW_PICKER_SORT_COUNT];      /* how wide, 0 when let go */
+} picker_columns_t;
 
 static picker_columns_t picker_detail_columns(double win_w, double dpi) {
-    picker_columns_t c;
-    c.name_x = 10.0 * dpi;
-    c.date_x = win_w - 160.0 * dpi;
-    c.size_x = c.date_x - 110.0 * dpi;
-    c.type_x = c.size_x - 80.0 * dpi;
+    static const rubraview_picker_sort_key_t DROP[] = { RUBRAVIEW_PICKER_SORT_CREATED, RUBRAVIEW_PICKER_SORT_RESOLUTION,
+                                                        RUBRAVIEW_PICKER_SORT_LENGTH, RUBRAVIEW_PICKER_SORT_TYPE };
+    picker_columns_t c = { .name_x = 10.0 * dpi };
+    for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) c.w[k] = PICKER_COL_WIDTH[k] * dpi;
+    double right = win_w - 8.0 * dpi;
+    for (size_t d = 0;; ++d) {
+        double used = 0.0;
+        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) used += c.w[k];
+        if (right - used - c.name_x >= 240.0 * dpi || d >= sizeof(DROP) / sizeof(DROP[0])) break;
+        c.w[DROP[d]] = 0.0;
+    }
+    double x = right;
+    for (int k = RUBRAVIEW_PICKER_SORT_COUNT - 1; k >= 1; --k) { x -= c.w[k]; c.x[k] = x; }
+    c.x[0] = c.name_x;
+    c.w[0] = c.x[1] - c.name_x;
     return c;
+}
+
+/* The column under `x` on the heads' line, or -1. */
+static int picker_column_at(const picker_columns_t *c, double x) {
+    for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
+        if (c->w[k] > 0.0 && x >= c->x[k] && x < c->x[k] + c->w[k]) return k;
+    }
+    return -1;
 }
 
 /* "2026-10-12 09:30", this machine's time; empty when there is none. */
@@ -7958,24 +8085,41 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         }
         char fit[512], cellbuf[48];
         double name_x = cols.name_x + side + 8.0 * dpi;
-        rubraview_pal_rect_t name = { name_x, y, cols.type_x - name_x - 8.0 * dpi, cell };
+        rubraview_pal_rect_t name = { name_x, y, cols.x[RUBRAVIEW_PICKER_SORT_TYPE] - name_x - 8.0 * dpi, cell };
         rubraview_pal_render_draw_text(app->renderer, files_fit_text(fit, sizeof(fit), entry->name, name.width, font), name,
                                        font, entry->is_directory ? 0xFFB8D8FFu : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         bool up = entry->is_directory && rubraview_u8_eq_lit(entry->name, "..");
-        size_t n = up ? 0 : rubraview_picker_type_text(cellbuf, sizeof(cellbuf), entry->name, entry->is_directory);
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
-                                       (rubraview_pal_rect_t){ cols.type_x, y, cols.size_x - cols.type_x, cell },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
         /* A folder, a drive or a page of a book has no size or date to give. */
-        n = (entry->is_directory || (entry->size_bytes == 0 && entry->mtime == 0)) ? 0
-            : rubraview_picker_size_text(cellbuf, sizeof(cellbuf), entry->size_bytes);
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
-                                       (rubraview_pal_rect_t){ cols.size_x, y, cols.date_x - cols.size_x - 16.0 * dpi, cell },
-                                       font, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
-        n = picker_date_text(cellbuf, sizeof(cellbuf), entry->mtime);
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
-                                       (rubraview_pal_rect_t){ cols.date_x, y, win_w - cols.date_x - 8.0 * dpi, cell },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        bool no_file = entry->is_directory || (entry->size_bytes == 0 && entry->mtime == 0);
+        rubraview_picker_media_t media = (app->picker_thumbs && index < app->picker_thumb_count)
+                                             ? app->picker_thumbs[index].media : (rubraview_picker_media_t){ 0 };
+        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
+            if (cols.w[k] <= 0.0) continue;
+            size_t n = 0;
+            rubraview_text_align_t align = RUBRAVIEW_TEXT_LEFT;
+            uint32_t ink = COLOR_BOX_BORDER;
+            switch ((rubraview_picker_sort_key_t)k) {
+                case RUBRAVIEW_PICKER_SORT_TYPE: n = up ? 0 : rubraview_picker_type_text(cellbuf, sizeof(cellbuf), entry->name, entry->is_directory); break;
+                case RUBRAVIEW_PICKER_SORT_SIZE:
+                    n = no_file ? 0 : rubraview_picker_size_text(cellbuf, sizeof(cellbuf), entry->size_bytes);
+                    align = RUBRAVIEW_TEXT_RIGHT; ink = COLOR_TEXT;
+                    break;
+                case RUBRAVIEW_PICKER_SORT_CREATED: n = no_file ? 0 : picker_date_text(cellbuf, sizeof(cellbuf), entry->ctime); break;
+                case RUBRAVIEW_PICKER_SORT_MODIFIED: n = no_file ? 0 : picker_date_text(cellbuf, sizeof(cellbuf), entry->mtime); break;
+                case RUBRAVIEW_PICKER_SORT_RESOLUTION: {
+                    int w = media.width > 0 && media.height > 0 ? snprintf(cellbuf, sizeof(cellbuf), "%d x %d", (int)media.width, (int)media.height) : 0;
+                    n = w > 0 ? (size_t)w : 0;
+                    break;
+                }
+                case RUBRAVIEW_PICKER_SORT_LENGTH:
+                    if (media.seconds > 0.0) n = rubraview_format_timecode(cellbuf, sizeof(cellbuf), media.seconds, false).len;
+                    break;
+                default: break;
+            }
+            double pad = align == RUBRAVIEW_TEXT_RIGHT ? 14.0 * dpi : 4.0 * dpi;
+            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
+                                           (rubraview_pal_rect_t){ cols.x[k], y, cols.w[k] - pad, cell }, font, ink, align);
+        }
     }
 
     for (size_t i = 0; !details && i < visible.count; ++i) {
@@ -8037,15 +8181,23 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         /* The columns' names, on the line the rows scroll under. */
         double hy = header_h - PICKER_DETAIL_HEAD * dpi, hh = PICKER_DETAIL_HEAD * dpi, font = 13.0 * dpi;
         rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, hy, win_w, hh }, COLOR_BAR_FILL, 0.0);
-        rubraview_pal_render_draw_text(app->renderer, U8("Name"), (rubraview_pal_rect_t){ cols.name_x, hy, 200.0 * dpi, hh },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
-        rubraview_pal_render_draw_text(app->renderer, U8("Type"), (rubraview_pal_rect_t){ cols.type_x, hy, cols.size_x - cols.type_x, hh },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
-        rubraview_pal_render_draw_text(app->renderer, U8("Size"),
-                                       (rubraview_pal_rect_t){ cols.size_x, hy, cols.date_x - cols.size_x - 16.0 * dpi, hh },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_RIGHT);
-        rubraview_pal_render_draw_text(app->renderer, U8("Modified"), (rubraview_pal_rect_t){ cols.date_x, hy, win_w - cols.date_x, hh },
-                                       font, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        /* A click on a column's name sorts by it; again, the other way round (owner, 2026-10-16). */
+        int sorted = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
+        bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+        for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
+            if (cols.w[k] <= 0.0) continue;
+            char head[48];
+            int n = snprintf(head, sizeof(head), "%s%s", rubraview_picker_sort_name((rubraview_picker_sort_key_t)k),
+                             k == sorted ? (desc ? " \xE2\x96\xBC" : " \xE2\x96\xB2") : "");
+            bool right = k == RUBRAVIEW_PICKER_SORT_SIZE;
+            double pad = right ? 14.0 * dpi : 4.0 * dpi;
+            rubraview_pal_rect_t at = { k == 0 ? cols.name_x : cols.x[k], hy, cols.w[k] - pad, hh };
+            if (app->pointer_y >= hy && app->pointer_y < hy + hh && app->pointer_x >= cols.x[k] && app->pointer_x < cols.x[k] + cols.w[k]) {
+                rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_FILL, 0.0);
+            }
+            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ head, (size_t)n }, at, font,
+                                                      k == sorted ? COLOR_TEXT : COLOR_BOX_BORDER, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);
+        }
     }
     if (top > 0.0) {
         /* What this screen is, and nothing to press. */
@@ -8127,7 +8279,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                    (b == PICKER_BTN_RANGE && app->picker.mode == RUBRAVIEW_PICK_RANGE);
         rubraview_pal_render_fill_rect(app->renderer, rect, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, rect, COLOR_BOX_BORDER, 1.0, 3.0);
-        const char *label = b == PICKER_BTN_VIEW && details ? "Tiles" : PICKER_BUTTON_LABEL[b];
+        const char *label = b == PICKER_BTN_VIEW && details ? "Tiles"
+                          : b == PICKER_BTN_CLEAR ? rubraview_picker_select_label(&app->picker) : PICKER_BUTTON_LABEL[b];
         rubraview_pal_render_draw_text(app->renderer, cstr(label), rect,
                                        rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
@@ -12256,6 +12409,7 @@ static void settings_read_file(app_state_t *app) {
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
     app->settings_saved = app->settings;
+    skip_dirs_take_old(app);
 }
 
 
@@ -12297,8 +12451,47 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
 }
 
 /* The rows the document's `table` lines name. */
+/* ---- The folders kept out of Recent, as many as wanted (owner, 2026-10-16) ---- */
+
+static size_t skip_dirs_count(const app_state_t *app) {
+    return rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), NULL, 0);
+}
+
+/* The table's height: its heading, a row a folder, and one to add another. */
+static void skip_dirs_table_rows(app_state_t *app) {
+    rubraview_settings_view_set_named_table_rows(&app->settings_view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 2);
+}
+
+/* The eight folders of before go into the list, once, and are emptied in the file. */
+static void skip_dirs_take_old(app_state_t *app) {
+    static const char *const OLD[8] = { "skip_dir_1", "skip_dir_2", "skip_dir_3", "skip_dir_4",
+                                        "skip_dir_5", "skip_dir_6", "skip_dir_7", "skip_dir_8" };
+    bool moved = false;
+    for (int i = 0; i < 8; ++i) {
+        u8str_t key = { .ptr = OLD[i], .len = strlen(OLD[i]) };
+        u8str_t folder = rubraview_settings_get_text(&app->settings, U8("recent"), key);
+        if (folder.len == 0) continue;
+        char buffer[8192];
+        u8str_t list = rubraview_folder_list_put(buffer, sizeof(buffer), rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")),
+                                                 folder, (size_t)-1);
+        if (list.len == 0) continue;
+        rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
+        rubraview_settings_set_text(&app->settings, U8("recent"), key, U8(""));
+        moved = true;
+    }
+    if (moved) settings_write_if_changed(app, false);
+}
+
 static size_t settings_table_row(void *user, u8str_t source, size_t index, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
+    if (rubraview_u8_eq_lit(source, "skip_dirs")) {
+        u8str_t dirs[256];
+        size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
+        int w = index == 0 ? snprintf(buffer, capacity, "Folder  (Enter changes it, Delete takes it off)")
+              : index <= n ? snprintf(buffer, capacity, "%.*s", (int)dirs[index - 1].len, dirs[index - 1].ptr)
+              : index == n + 1 ? snprintf(buffer, capacity, "+ add a folder  (Enter)") : 0;
+        return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
+    }
     if (!rubraview_u8_eq_lit(source, "keymap")) return 0;
     if (index == 0) {
         int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", "keys  (Enter adds a key, Delete takes the last off)");
@@ -12414,6 +12607,7 @@ static void settings_open(app_state_t *app) {
     settings_grid(app, &cols, &rows);
     app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
     rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);  /* heading + bindings */
+    skip_dirs_table_rows(app);
     app->settings_open = true;
     app->settings_dirty = true;
     app->settings_mouse_down = false;
@@ -12732,6 +12926,7 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
     }
     app->keymap = keymap;
     rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+    skip_dirs_table_rows(app);
     settings_say(app, "keys imported (Revert undoes this)");
 }
 
@@ -12917,6 +13112,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             app->settings.revision_total = total + 1;
             app->keymap = rubraview_keymap_copy(app->arena, &app->keymap_saved);
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            skip_dirs_table_rows(app);
             app->key_capture = 0;
             settings_took_effect(app);
             settings_say(app, "back to what the settings were when this window opened");
@@ -12926,6 +13122,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             rubraview_settings_reset(&app->settings);
             app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
             rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            skip_dirs_table_rows(app);
             app->key_capture = 0;
             settings_took_effect(app);
             settings_say(app, "every setting and key is at its default (Revert undoes this)");
@@ -12936,6 +13133,30 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_TABLE_EDIT:
         case RUBRAVIEW_SEVENT_TABLE_CLEAR: {
             int32_t row = rubraview_settings_view_focused_table_row(&app->settings_view);
+            if (rubraview_u8_eq_lit(rubraview_settings_view_focused_table(&app->settings_view), "skip_dirs")) {
+                /* A folder kept out: Enter types or browses it (the last row adds one), Delete takes it off. */
+                size_t n = skip_dirs_count(app);
+                if (row < 1) break;
+                if (event == RUBRAVIEW_SEVENT_TABLE_CLEAR) {
+                    if ((size_t)row > n) break;
+                    char buffer[8192];
+                    u8str_t list = rubraview_folder_list_remove(buffer, sizeof(buffer),
+                                                                rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), (size_t)row - 1);
+                    rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
+                    skip_dirs_table_rows(app);
+                    settings_took_effect(app);
+                    settings_say(app, "folder taken off: its files are written down again from now on");
+                } else {
+                    const rubraview_setting_def_t *def = rubraview_settings_find(U8("recent"), U8("skip_dirs"));
+                    if (def) settings_path_begin(app, def);
+                    app->spath_list_index = row - 1;   /* the folder in place, or past the end: a new one */
+                    u8str_t dirs[256];
+                    size_t have = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
+                    rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : U8(""));
+                    rubraview_textedit_select_all(&app->spath_edit);
+                }
+                break;
+            }
             if (row < 1 || (size_t)row > app->keymap.count) break;
             const rubraview_key_binding_t *b = &app->keymap.bindings[row - 1];
             char text[160];
@@ -13075,6 +13296,7 @@ static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t 
     rubraview_textedit_select_all(&app->spath_edit);
     app->spath_section = def->section;
     app->spath_key = def->key;
+    app->spath_list_index = -1;
     app->spath_composing_length = 0;
     app->spath_active = true;
     rubraview_pal_window_text_input(app->settings_window, true);
@@ -13096,6 +13318,26 @@ static void settings_path_commit(app_state_t *app) {
     /* RV-106: "Only names like" is typed like a folder and is not one. */
     bool is_folder = !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern")) &&
                      !rubraview_u8_eq_lit(app->spath_section, "video");   /* RV-107: a font's name, a language */
+    if (app->spath_list_index >= 0) {
+        /* A folder of the list kept out of Recent: put in its place, or added; empty takes it off. */
+        rubraview_fs_entry_t is;
+        if (text.len > 0 && (!rubraview_pal_fs_stat(app->arena, text, &is) || !is.is_directory)) {
+            settings_say(app, "no such folder - put it right, or Esc");
+            return;
+        }
+        u8str_t now = rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs"));
+        char buffer[8192];
+        u8str_t list = text.len == 0 ? rubraview_folder_list_remove(buffer, sizeof(buffer), now, (size_t)app->spath_list_index)
+                                     : rubraview_folder_list_put(buffer, sizeof(buffer), now, text, (size_t)app->spath_list_index);
+        if (text.len > 0 && list.len == 0) { settings_say(app, "the list is full"); return; }
+        rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
+        app->spath_list_index = -1;
+        settings_path_end(app);
+        skip_dirs_table_rows(app);
+        settings_took_effect(app);
+        settings_say(app, text.len == 0 ? "folder taken off" : "folder kept out of Recent, and all under it");
+        return;
+    }
     if (text.len == 0) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
         settings_path_end(app);
@@ -17346,6 +17588,7 @@ static void layout_save(app_state_t *app) {
 static size_t recent_skip_dirs(const app_state_t *app, u8str_t *out) {
     /* Each by its own name, so the settings check sees every row is read. */
     const rubraview_settings_t *st = &app->settings;
+    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(st, U8("recent"), U8("skip_dirs")), out + 8, RECENT_SKIP_DIRS - 8);
     out[0] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_1"));
     out[1] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_2"));
     out[2] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_3"));
@@ -17354,7 +17597,7 @@ static size_t recent_skip_dirs(const app_state_t *app, u8str_t *out) {
     out[5] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_6"));
     out[6] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_7"));
     out[7] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_8"));
-    return RECENT_SKIP_DIRS;
+    return 8 + n;
 }
 
 static bool recent_kept_out(const app_state_t *app, u8str_t path) {
@@ -19823,7 +20066,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             }
                             break;
                         }
-                        if (event.mouse.y < grid_top) break;   /* the columns' names */
+                        if (event.mouse.y < grid_top) {
+                            /* the columns' names: sort by the one pressed, again the other way round (owner, 2026-10-16) */
+                            if (picker_details(&app) && event.mouse.y >= grid_top - PICKER_DETAIL_HEAD * dpi) {
+                                picker_columns_t cols = picker_detail_columns((double)pw, dpi);
+                                int k = picker_column_at(&cols, event.mouse.x);
+                                if (k >= 0) picker_sort_by(&app, k);
+                            }
+                            break;
+                        }
                         size_t columns = (size_t)app.picker.columns;
                         double cell_w = (double)pw / (double)columns;
                         size_t column = (size_t)(event.mouse.x / cell_w);

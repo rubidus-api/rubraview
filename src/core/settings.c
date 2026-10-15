@@ -199,7 +199,12 @@ u8str_t rubraview_settings_save(proven_arena_t *arena, const rubraview_settings_
            name is a number, a choice is its quoted name. */
         switch (def->type) {
             case RUBRAVIEW_SETTING_PATH:
-                if (settings->texts[i].len == 0) continue;   /* an unset folder is left out entirely */
+                if (settings->texts[i].len == 0) {
+                    /* An unset folder is left out entirely — unless the file holds one, which is
+                       emptied, or it would come back when the file is read (owner, 2026-10-16). */
+                    if (rubraview_ini_get(&doc, def->section, def->key)) rubraview_ini_set_string(arena, &doc, def->section, def->key, settings->texts[i]);
+                    continue;
+                }
                 rubraview_ini_set_string(arena, &doc, def->section, def->key, settings->texts[i]);
                 break;
             case RUBRAVIEW_SETTING_CHOICE: {

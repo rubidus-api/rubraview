@@ -35,7 +35,9 @@ extern "C" {
  * it. `toggle`, `choice`, `int`, `float` and `path` are settings: a
  * `section.key` — the place in settings.ini — then the label, then what
  * the kind needs. `wired` says something in the viewer reads the key
- * today (scripts/check-settings.py holds the document to that). `info`
+ * today (scripts/check-settings.py holds the document to that); `hidden`
+ * keeps a setting saved without a row of its own, for a `table` that
+ * shows it (a list of folders). `info`
  * is a read-only line filled from a named source while the window is
  * open, `note` a line of fixed help text across the page, `preview` a block the viewer paints for a named sample, `table`
  * rows from a named source in fixed-width columns. `action` is a button

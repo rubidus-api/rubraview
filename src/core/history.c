@@ -305,6 +305,55 @@ bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t c
     return false;
 }
 
+size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity) {
+    size_t n = 0, start = 0;
+    for (size_t i = 0; i <= joined.len; ++i) {
+        if (i < joined.len && joined.ptr[i] != '|') continue;
+        if (i > start && n < capacity && out) out[n++] = (u8str_t){ .ptr = joined.ptr + start, .len = i - start };
+        else if (i > start && !out) n++;
+        start = i + 1;
+    }
+    return n;
+}
+
+/* Every piece of `joined` but `skip`, with `insert` at `at`, joined again. */
+static u8str_t folder_list_build(char *buffer, size_t capacity, u8str_t joined, size_t skip, u8str_t insert, size_t at) {
+    u8str_t none = { .ptr = buffer ? buffer : "", .len = 0 };
+    if (!buffer || capacity == 0) return none;
+    u8str_t parts[256];
+    size_t n = rubraview_folder_list_split(joined, parts, 256);
+    size_t len = 0;
+    bool placed = insert.len == 0;
+    for (size_t i = 0; i <= n; ++i) {
+        u8str_t piece = { .ptr = "", .len = 0 };
+        if (!placed && i == at) { piece = insert; placed = true; --i; }
+        else if (i < n && i != skip) piece = parts[i];
+        else if (i == n && !placed) { piece = insert; placed = true; }
+        else continue;
+        if (piece.len == 0) continue;
+        if (len + (len ? 1 : 0) + piece.len + 1 > capacity) { buffer[0] = '\0'; return none; }
+        if (len) buffer[len++] = '|';
+        memcpy(buffer + len, piece.ptr, piece.len);
+        len += piece.len;
+    }
+    buffer[len] = '\0';
+    return (u8str_t){ .ptr = buffer, .len = len };
+}
+
+u8str_t rubraview_folder_list_put(char *buffer, size_t capacity, u8str_t joined, u8str_t folder, size_t replace) {
+    u8str_t parts[256];
+    size_t n = rubraview_folder_list_split(joined, parts, 256);
+    for (size_t i = 0; i < n; ++i) {
+        if (i != replace && rubraview_path_same(parts[i], folder)) return folder_list_build(buffer, capacity, joined, (size_t)-1, (u8str_t){ 0 }, 0);
+    }
+    if (replace < n) return folder_list_build(buffer, capacity, joined, replace, folder, replace);
+    return folder_list_build(buffer, capacity, joined, (size_t)-1, folder, n);
+}
+
+u8str_t rubraview_folder_list_remove(char *buffer, size_t capacity, u8str_t joined, size_t index) {
+    return folder_list_build(buffer, capacity, joined, index, (u8str_t){ .ptr = "", .len = 0 }, 0);
+}
+
 size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count) {
     if (!history || !history->entries) return 0;
     size_t gone = 0;

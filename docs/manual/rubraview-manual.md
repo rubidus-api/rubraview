@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.94.exe              the viewer, as built
-dist/rubraview-v0.0.94/                 the release bundle
-dist/rubraview-v0.0.94.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.95.exe              the viewer, as built
+dist/rubraview-v0.0.95/                 the release bundle
+dist/rubraview-v0.0.95.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -899,11 +899,12 @@ filename code page, the memory cap). Some worth knowing:
 - **Files** — **Remember the page** off keeps no reading history;
   **Offer to resume** off opens where you stopped without asking.
   **Keep the list** off writes nothing more to File › Recent. Under
-  **Folders that are not written down** are eight rows: a file in a
-  folder named there, or in any folder under it, is written neither to
-  the recent list nor to the reading history. Press `Enter` on a free row
-  and type or paste the folder to add one; `Delete` on a row takes it
-  off.
+  **Folders that are not written down** is a list as long as you like: a
+  file in a folder named there, or in any folder under it, is written
+  neither to the recent list nor to the reading history (and leaves the
+  list if it was on it). `Enter` on **+ add a folder** types, pastes or
+  (`Ctrl+O`) browses one more; `Enter` on a folder changes it; `Delete`
+  takes it off.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
@@ -951,12 +952,21 @@ ext** gives all the picked files one extension you type, **Playlist**
 writes them as a playlist file beside themselves and opens them as one
 sequence, **Recycle** bins them (press it twice), **Move to** and **Copy
 to** send them to one of the numbered folders — press the number after
-the button — and **Deselect all** lets them all go. **Details** at the
-right end shows the files as a list — a row a file, with its type, size
-and date — and **Tiles** brings the pictures back (the same switch is in
+the button — and **Select all** picks every file, after which the same
+button reads **Deselect all** and lets them all go. **Details** at the
+right end shows the files as a list — a row a file, with its type (the
+extension), size, created and modified times, resolution and, for a film
+or a song, its length; resolution and length fill in as each row comes on
+screen. A click on a column's name sorts by it, rising (▲); again,
+falling (▼); folders stay first, and the choice is kept (Settings > Files
+> sorted by). **Tiles** brings the pictures back (the same switch is in
 Settings > Files). `Ctrl+Z` undoes any of it,
 one file at a time. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
+
+**Recent** on the bar under the path (or File › Recent › **All recent
+files...**) shows the files opened lately on this same screen — newest
+first, in tiles or details, sorted and picked like any folder.
 
 Your favourite folders come first on the bar under the path (`Ctrl+D` or the
 star adds or removes the folder on screen). Right-click one to give it a
@@ -1170,6 +1180,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
+| Menu `All recent files...` | The recent files on the open-file screen |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |

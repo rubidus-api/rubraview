@@ -125,6 +125,24 @@ bool rubraview_path_is_within(u8str_t path, u8str_t folder);
 /** Whether `path` lies in any of `folders` (empty ones are skipped). */
 bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count);
 
+/*
+ * The folders kept out of Recent, as many as wanted (owner, 2026-10-16):
+ * one setting, the folders joined by '|', a character no Windows path holds.
+ */
+
+/** The folders in `joined`, in order, empty pieces skipped; returns how many (at most `capacity`). */
+size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity);
+
+/**
+ * `joined` with `folder` added at the end, or put in place of the one at
+ * `replace` (0-based; past the end adds). A folder already there is not
+ * added twice. Written into `buffer`; the result is empty when it does not fit.
+ */
+u8str_t rubraview_folder_list_put(char *buffer, size_t capacity, u8str_t joined, u8str_t folder, size_t replace);
+
+/** `joined` without the folder at `index` (0-based), written into `buffer`. */
+u8str_t rubraview_folder_list_remove(char *buffer, size_t capacity, u8str_t joined, size_t index);
+
 /** D-104: the entries lying in any of `folders` are taken out. Returns how many went. */
 size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count);
 

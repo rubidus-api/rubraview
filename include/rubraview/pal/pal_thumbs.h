@@ -30,6 +30,10 @@ typedef struct rubraview_thumb_result {
     size_t   index;
     uint8_t *bgra;          /* NULL: nothing to show; else free() it */
     int32_t  width, height;
+    /* What the file itself is, for the details view (owner, 2026-10-16): its own
+       size in pixels and, for a film or a song, its length. 0 when not known. */
+    int32_t  source_width, source_height;
+    double   seconds;
 } rubraview_thumb_result_t;
 
 typedef void (*rubraview_thumbs_wake_fn)(void *context);

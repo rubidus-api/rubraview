@@ -2,17 +2,24 @@
 #include <stdio.h>
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
+#include "rubraview/sort.h"
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
 
 bool rubraview_picker_is_places(u8str_t dir) {
     return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_PLACES);
+}
+
+bool rubraview_picker_is_recent(u8str_t dir) {
+    return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_RECENT);
 }
 
 u8str_t rubraview_picker_parent(u8str_t dir) {
     const u8str_t none = { .ptr = "", .len = 0 };
     const u8str_t places = { .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
     if (!dir.ptr || dir.len == 0 || rubraview_picker_is_places(dir)) return none;
+    if (rubraview_picker_is_recent(dir)) return places;
 
     size_t len = dir.len;
     while (len > 0 && rubraview_path_is_sep(dir.ptr[len - 1])) --len;
@@ -164,6 +171,12 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path) {
     crumbs.items[0].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
     crumbs.count = 1;
     if (rubraview_picker_is_places(path)) return crumbs;
+    if (rubraview_picker_is_recent(path)) {
+        crumbs.items[1].label = (u8str_t){ .ptr = "Recent", .len = 6 };
+        crumbs.items[1].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_RECENT, .len = sizeof(RUBRAVIEW_PICKER_RECENT) - 1 };
+        crumbs.count = 2;
+        return crumbs;
+    }
 
     size_t start = 0;
     for (size_t i = 0; i <= path.len; ++i) {
@@ -404,4 +417,125 @@ size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_d
     if (n >= cap) return 0;
     for (size_t i = 0; i <= n; ++i) buf[i] = word[i];
     return n;
+}
+
+size_t rubraview_picker_select_all(rubraview_picker_t *picker) {
+    if (!picker || !picker->selected || !picker->listing) return 0;
+    size_t n = 0;
+    for (size_t i = 0; i < picker->listing->count; ++i) {
+        picker->selected[i] = !picker->listing->entries[i].is_directory;
+        if (picker->selected[i]) n++;
+    }
+    picker->range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
+    return n;
+}
+
+bool rubraview_picker_all_selected(const rubraview_picker_t *picker) {
+    if (!picker || !picker->selected || !picker->listing) return false;
+    size_t files = 0;
+    for (size_t i = 0; i < picker->listing->count; ++i) {
+        if (picker->listing->entries[i].is_directory) continue;
+        files++;
+        if (!picker->selected[i]) return false;
+    }
+    return files > 0;
+}
+
+const char *rubraview_picker_select_label(const rubraview_picker_t *picker) {
+    return rubraview_picker_all_selected(picker) ? "Deselect all" : "Select all";
+}
+
+const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key) {
+    static const char *const NAMES[RUBRAVIEW_PICKER_SORT_COUNT] = {
+        "Name", "Type", "Size", "Created", "Modified", "Resolution", "Length",
+    };
+    return key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT ? NAMES[key] : "";
+}
+
+/* The extension, without its dot; empty for a folder or a name without one. */
+static u8str_t sort_ext(const rubraview_fs_entry_t *e) {
+    if (e->is_directory) return (u8str_t){ .ptr = "", .len = 0 };
+    for (size_t k = e->name.len; k > 0; --k) {
+        if (e->name.ptr[k - 1] == '.') return (u8str_t){ .ptr = e->name.ptr + k, .len = e->name.len - k };
+    }
+    return (u8str_t){ .ptr = "", .len = 0 };
+}
+
+typedef struct sort_ctx {
+    const rubraview_fs_listing_t *listing;
+    const rubraview_picker_media_t *media;
+    rubraview_picker_sort_key_t key;
+    bool descending;
+} sort_ctx_t;
+
+static bool is_dotdot(const rubraview_fs_entry_t *e) {
+    return e->is_directory && e->name.len == 2 && e->name.ptr[0] == '.' && e->name.ptr[1] == '.';
+}
+
+/* <0 when entry a goes before entry b. */
+static int sort_cmp(const sort_ctx_t *c, size_t ia, size_t ib) {
+    const rubraview_fs_entry_t *a = &c->listing->entries[ia], *b = &c->listing->entries[ib];
+    if (is_dotdot(a) != is_dotdot(b)) return is_dotdot(a) ? -1 : 1;
+    if (a->is_directory != b->is_directory) return a->is_directory ? -1 : 1;
+    int r = 0;
+    bool unread_a = false, unread_b = false;
+    switch (c->key) {
+        case RUBRAVIEW_PICKER_SORT_TYPE: r = rubraview_str_lexcmp(sort_ext(a), sort_ext(b)); break;
+        case RUBRAVIEW_PICKER_SORT_SIZE: r = a->size_bytes < b->size_bytes ? -1 : a->size_bytes > b->size_bytes; break;
+        case RUBRAVIEW_PICKER_SORT_CREATED: r = a->ctime < b->ctime ? -1 : a->ctime > b->ctime; break;
+        case RUBRAVIEW_PICKER_SORT_MODIFIED: r = a->mtime < b->mtime ? -1 : a->mtime > b->mtime; break;
+        case RUBRAVIEW_PICKER_SORT_RESOLUTION: {
+            int64_t pa = c->media ? (int64_t)c->media[ia].width * c->media[ia].height : 0;
+            int64_t pb = c->media ? (int64_t)c->media[ib].width * c->media[ib].height : 0;
+            unread_a = pa <= 0; unread_b = pb <= 0;
+            r = pa < pb ? -1 : pa > pb;
+            break;
+        }
+        case RUBRAVIEW_PICKER_SORT_LENGTH: {
+            double sa = c->media ? c->media[ia].seconds : 0.0, sb = c->media ? c->media[ib].seconds : 0.0;
+            unread_a = !(sa > 0.0); unread_b = !(sb > 0.0);
+            r = sa < sb ? -1 : sa > sb;
+            break;
+        }
+        case RUBRAVIEW_PICKER_SORT_NAME:
+        default: r = 0; break;
+    }
+    /* not read yet: after the read ones, whichever way */
+    if (unread_a != unread_b) return unread_a ? 1 : -1;
+    if (c->descending) r = -r;
+    if (r == 0) {
+        r = rubraview_str_natcmp(a->name, b->name);
+        if (c->descending && c->key == RUBRAVIEW_PICKER_SORT_NAME) r = -r;
+    }
+    return r;
+}
+
+void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
+                                 rubraview_picker_sort_key_t key, bool descending, size_t *order) {
+    if (!listing || !order) return;
+    size_t n = listing->count;
+    for (size_t i = 0; i < n; ++i) order[i] = i;
+    sort_ctx_t c = { .listing = listing, .media = media, .key = key, .descending = descending };
+    size_t *tmp = n > 1 ? (size_t*)malloc(n * sizeof(size_t)) : NULL;
+    if (!tmp) {
+        /* no room for the merge: insertion, stable too */
+        for (size_t i = 1; i < n; ++i) {
+            size_t v = order[i], j = i;
+            while (j > 0 && sort_cmp(&c, order[j - 1], v) > 0) { order[j] = order[j - 1]; --j; }
+            order[j] = v;
+        }
+        return;
+    }
+    /* bottom-up merge sort: stable, n log n for a folder of ten thousand */
+    for (size_t width = 1; width < n; width *= 2) {
+        for (size_t lo = 0; lo < n; lo += 2 * width) {
+            size_t mid = lo + width < n ? lo + width : n, hi = lo + 2 * width < n ? lo + 2 * width : n;
+            size_t i = lo, j = mid, k = lo;
+            while (i < mid && j < hi) tmp[k++] = sort_cmp(&c, order[j], order[i]) < 0 ? order[j++] : order[i++];
+            while (i < mid) tmp[k++] = order[i++];
+            while (j < hi) tmp[k++] = order[j++];
+        }
+        memcpy(order, tmp, n * sizeof(size_t));
+    }
+    free(tmp);
 }

@@ -69,6 +69,12 @@ typedef struct rubraview_setting_def {
      * invisible gap does not get closed.
      */
     bool wired;
+    /**
+     * Kept and saved like any other but given no row of its own: a list
+     * that a `table` on the page shows and edits (owner, 2026-10-16: the
+     * folders kept out of Recent, as many as wanted).
+     */
+    bool hidden;
 } rubraview_setting_def_t;
 
 /** The whole schema, and how many entries it has. */

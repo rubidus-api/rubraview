@@ -47,6 +47,15 @@ typedef struct rubraview_breadcrumbs {
 bool rubraview_picker_is_places(u8str_t dir);
 
 /**
+ * The recent files as a place of their own (owner, 2026-10-16): the same
+ * screen, tiles or details, sorting and choosing as a folder. Its crumbs
+ * are PC > Recent, and `..` is the PC page.
+ */
+#define RUBRAVIEW_PICKER_RECENT "::recent"
+
+bool rubraview_picker_is_recent(u8str_t dir);
+
+/**
  * The folder `..` opens: the parent, or the PC page from a root ("C:",
  * "C:/", "/", "//server/share") or a bare relative name. Empty for the
  * PC page itself and for an empty path.
@@ -163,6 +172,50 @@ size_t rubraview_picker_select_extension(rubraview_picker_t *picker, u8str_t ext
 
 /** Nothing selected, and no range half-marked. */
 void rubraview_picker_clear_selection(rubraview_picker_t *picker);
+
+/** Every file selected (folders are opened, not picked); returns how many are. */
+size_t rubraview_picker_select_all(rubraview_picker_t *picker);
+
+/** True when every file is selected (and there is at least one). */
+bool rubraview_picker_all_selected(const rubraview_picker_t *picker);
+
+/**
+ * The one button that selects all and lets all go (owner, 2026-10-16):
+ * "Select all" until every file is selected, then "Deselect all".
+ */
+const char *rubraview_picker_select_label(const rubraview_picker_t *picker);
+
+/* ---- The details view's columns and their order (owner, 2026-10-16) ---- */
+
+typedef enum rubraview_picker_sort_key {
+    RUBRAVIEW_PICKER_SORT_NAME = 0,
+    RUBRAVIEW_PICKER_SORT_TYPE,        /* the extension */
+    RUBRAVIEW_PICKER_SORT_SIZE,
+    RUBRAVIEW_PICKER_SORT_CREATED,
+    RUBRAVIEW_PICKER_SORT_MODIFIED,
+    RUBRAVIEW_PICKER_SORT_RESOLUTION,  /* width x height, as pixels */
+    RUBRAVIEW_PICKER_SORT_LENGTH,      /* a film's or a song's */
+    RUBRAVIEW_PICKER_SORT_COUNT,
+} rubraview_picker_sort_key_t;
+
+/** What a file is, once it has been opened for its thumbnail; zero until then. */
+typedef struct rubraview_picker_media {
+    int32_t width, height;
+    double  seconds;
+} rubraview_picker_media_t;
+
+/** The column's heading ("Name", "Type", ...). */
+const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key);
+
+/**
+ * The order to show `listing` in, by `key`, ascending or not, written into
+ * `order` (a permutation of 0..count-1). ".." stays first and folders come
+ * before files whichever way; names break ties in the viewer's natural
+ * order. `media` (one per entry, or NULL) gives resolution and length; a
+ * file not read yet goes after the read ones in both directions.
+ */
+void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
+                                 rubraview_picker_sort_key_t key, bool descending, size_t *order);
 
 /**
  * Keep the folders and the files whose names match `patterns` (a glob

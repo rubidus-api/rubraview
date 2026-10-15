@@ -179,6 +179,9 @@ static void layout(rubraview_settings_view_t *view) {
             case RUBRAVIEW_NODE_TABLE:
                 line.kind = RUBRAVIEW_LINE_TABLE;
                 line.height = view->table_rows > 0 ? view->table_rows : RUBRAVIEW_TABLE_ROWS;
+                for (int32_t t = 0; t < view->named_table_count; ++t) {
+                    if (rubraview_u8_eq(view->named_tables[t].name, node->name)) line.height = view->named_tables[t].rows;
+                }
                 break;
             case RUBRAVIEW_NODE_ACTION:
                 line.kind = RUBRAVIEW_LINE_ACTION;
@@ -279,6 +282,34 @@ void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t col
     view->rows = rows;
     layout(view);
     keep_focus_visible(view);
+}
+
+void rubraview_settings_view_set_named_table_rows(rubraview_settings_view_t *view, u8str_t name, int32_t rows) {
+    if (!view || !view->doc) return;
+    if (rows < 1) rows = 1;
+    if (rows > RUBRAVIEW_TABLE_ROWS_MAX) rows = RUBRAVIEW_TABLE_ROWS_MAX;
+    int32_t at = -1;
+    for (int32_t t = 0; t < view->named_table_count; ++t) if (rubraview_u8_eq(view->named_tables[t].name, name)) at = t;
+    if (at < 0) {
+        if (view->named_table_count >= (int32_t)(sizeof(view->named_tables) / sizeof(view->named_tables[0]))) return;
+        at = view->named_table_count++;
+        view->named_tables[at].name = name;
+    }
+    view->named_tables[at].rows = rows;
+    layout(view);
+    if (view->focus_line >= 0 && (size_t)view->focus_line < view->line_count &&
+        view->lines[view->focus_line].kind == RUBRAVIEW_LINE_TABLE && view->focus_row >= view->lines[view->focus_line].height) {
+        view->focus_row = view->lines[view->focus_line].height > 1 ? view->lines[view->focus_line].height - 1 : 1;
+    }
+    keep_focus_visible(view);
+}
+
+u8str_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *view) {
+    u8str_t none = { .ptr = "", .len = 0 };
+    if (!view || !view->doc || view->focus_line < 0 || (size_t)view->focus_line >= view->line_count) return none;
+    const rubraview_settings_line_t *ln = &view->lines[view->focus_line];
+    if (ln->kind != RUBRAVIEW_LINE_TABLE) return none;
+    return view->doc->nodes[ln->node].name;
 }
 
 void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows) {

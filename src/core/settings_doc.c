@@ -185,6 +185,9 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
         } else if (word_is(t[i], "wired")) {
             def.wired = true;
             ++i;
+        } else if (word_is(t[i], "hidden")) {
+            def.hidden = true;
+            ++i;
         } else if (word_is(t[i], "step")) {
             if (i + 1 >= n || !number(t[i + 1].text, &def.step) || def.step <= 0.0) {
                 return fail(p, "`step` needs a positive number");
@@ -236,6 +239,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
 
     size_t index = p->doc.def_count++;
     p->doc.defs[index] = def;
+    if (def.hidden) return true;   /* in the schema, saved, but not a row: a table shows it */
     return add_node(p, (rubraview_settings_node_t){
         .kind = RUBRAVIEW_NODE_SETTING, .page = p->page, .setting = (int32_t)index,
     });

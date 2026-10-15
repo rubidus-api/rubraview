@@ -302,6 +302,7 @@ static const char *const PARTS[] = {
 "  item up_to_folder         \"Up a folder\"\n"
 "  menu \"Recent\"\n"
 "    recent\n"
+"    item open_recent_list   \"All recent files...\"\n"
 "    item recent_clear       \"Clear this list\"\n"
 "  end\n"
 "  item save_as              \"Save a copy as\"\n"

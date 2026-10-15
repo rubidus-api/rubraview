@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.94** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.95** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.95/rubraview-v0.0.95.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.95/rubraview-v0.0.95.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -192,6 +192,7 @@ ships with, so it cannot drift from them.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
+| Menu `All recent files...` | The recent files on the open-file screen |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |

@@ -29,6 +29,13 @@
 
 /* Defined here so the link does not depend on which MinGW carries it. */
 static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
+static const GUID RV_IID_IShellItem2_T = {0x7E9FB0D3, 0x919F, 0x4307, {0xAB, 0x2E, 0x9B, 0x18, 0x60, 0x31, 0x0C, 0x93}};
+/* System.Image.HorizontalSize / VerticalSize, System.Media.Duration (100 ns). */
+static const PROPERTYKEY RV_PKEY_Image_Width  = { {0x6444048F, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
+static const PROPERTYKEY RV_PKEY_Image_Height = { {0x6444048F, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 4 };
+static const PROPERTYKEY RV_PKEY_Video_Width  = { {0x64440491, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
+static const PROPERTYKEY RV_PKEY_Video_Height = { {0x64440491, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 4 };
+static const PROPERTYKEY RV_PKEY_Media_Duration = { {0x64440490, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
 
 #define THUMB_JOBS 256
 #define THUMB_RESULTS 64
@@ -116,12 +123,43 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t 
     return result;
 }
 
+/* ---- what the file is: its size in pixels, its length (owner, 2026-10-16) ----
+   From the shell's property store, which reads them from the file's header
+   for every type it has a handler for; 0 for what it does not know. */
+static void shell_meta(u8str_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
+    char narrow[MAX_PATH * 4];
+    WCHAR wide[MAX_PATH * 2];
+    if (path.len == 0 || path.len >= sizeof(narrow)) return;
+    memcpy(narrow, path.ptr, path.len);
+    narrow[path.len] = '\0';
+    for (size_t i = 0; i < path.len; ++i) if (narrow[i] == '/') narrow[i] = '\\';
+    IShellItem2 *item = NULL;
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0 ||
+        FAILED(SHCreateItemFromParsingName(wide, NULL, &RV_IID_IShellItem2_T, (void**)&item)) || !item) return;
+    ULONG w = 0, h = 0;
+    ULONGLONG ticks = 0;
+    if (FAILED(item->lpVtbl->GetUInt32(item, &RV_PKEY_Image_Width, &w)) || w == 0) {
+        w = 0;
+        (void)item->lpVtbl->GetUInt32(item, &RV_PKEY_Video_Width, &w);
+    }
+    if (FAILED(item->lpVtbl->GetUInt32(item, &RV_PKEY_Image_Height, &h)) || h == 0) {
+        h = 0;
+        (void)item->lpVtbl->GetUInt32(item, &RV_PKEY_Video_Height, &h);
+    }
+    if (SUCCEEDED(item->lpVtbl->GetUInt64(item, &RV_PKEY_Media_Duration, &ticks)) && ticks > 0) *out_seconds = (double)ticks / 1e7;
+    if (w > 0 && h > 0 && w < 0x7FFFFFFF && h < 0x7FFFFFFF) { *out_w = (int32_t)w; *out_h = (int32_t)h; }
+    item->lpVtbl->Release(item);
+}
+
 /* ---- a picture in memory, decoded small ---- */
 
 /* An archive's page is bytes, not a file the shell can see: WIC decodes
    it, scaled down on the way (a comic page at full size is tens of MB). */
+static _Thread_local int32_t g_decoded_w, g_decoded_h;   /* the last decoded picture's own size, each thumbnail thread its own */
+
 static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *data, size_t size, int32_t side,
                                   int32_t *out_w, int32_t *out_h) {
+    g_decoded_w = g_decoded_h = 0;
     if (!factory || !data || size == 0 || size > 0xFFFFFFFFu) return NULL;
     uint8_t *result = NULL;
     IWICStream *stream = NULL;
@@ -135,6 +173,7 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
     if ((decoder = rubraview_wic_decoder_for_bytes(factory, data, size, &stream)) != NULL &&
         SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame &&
         SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) && w > 0 && h > 0) {
+        if (w < 0x7FFFFFFF && h < 0x7FFFFFFF) { g_decoded_w = (int32_t)w; g_decoded_h = (int32_t)h; }
         double scale = (double)side / (double)(w > h ? w : h);
         if (scale > 1.0) scale = 1.0;
         UINT sw = (UINT)((double)w * scale + 0.5), sh = (UINT)((double)h * scale + 0.5);
@@ -212,7 +251,7 @@ static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *
 /* ---- one job ---- */
 
 static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICImagingFactory *factory,
-                         const rubraview_thumb_job_t *job, int32_t *out_w, int32_t *out_h) {
+                         const rubraview_thumb_job_t *job, int32_t *out_w, int32_t *out_h, rubraview_thumb_result_t *meta) {
     u8str_t path = { .ptr = job->path, .len = job->path_len };
     u8str_t pictures = { .ptr = t->pictures, .len = t->pictures_len };
     u8str_t films = { .ptr = t->films, .len = t->films_len };
@@ -223,6 +262,8 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     if (job->bytes) {
         /* a page inside a book: decoded small from its bytes */
         raw = decode_small_bgra(factory, job->bytes, job->bytes_len, THUMB_DECODE_SIDE, &w, &h);
+        meta->source_width = g_decoded_w;
+        meta->source_height = g_decoded_h;
     } else if (job->folder) {
         /* Its first picture in the order it would open, else its first film;
            when the shell has nothing for one, the next — three at most, so
@@ -242,8 +283,12 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     } else if (rubraview_glob_match_list(rubraview_path_basename(path), archives)) {
         raw = archive_first_page(scratch, factory, path, pictures, &w, &h);
     } else {
+        shell_meta(path, &meta->source_width, &meta->source_height, &meta->seconds);
         raw = rubraview_pal_shell_thumbnail_bgra(path, 192, &w, &h);
-        if (!raw) raw = own_file_small(factory, path, &w, &h);
+        if (!raw) {
+            raw = own_file_small(factory, path, &w, &h);
+            if (raw && meta->source_width == 0) { meta->source_width = g_decoded_w; meta->source_height = g_decoded_h; }
+        }
     }
     if (!raw) return NULL;
 
@@ -290,7 +335,7 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
         if (memory && com) {
             proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory,
                                                                              .size = THUMB_SCRATCH_BYTES });
-            result.bgra = make_one(t, &scratch, factory, &job, &result.width, &result.height);
+            result.bgra = make_one(t, &scratch, factory, &job, &result.width, &result.height, &result);
         }
         free(job.bytes);   /* taken: the thread's */
 

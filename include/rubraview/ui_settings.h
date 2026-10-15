@@ -74,7 +74,10 @@ typedef struct rubraview_settings_view {
     int32_t focus_button;            /* a button, or RUBRAVIEW_BUTTON_NONE */
     int32_t scroll;                  /* the first content row shown */
     int32_t dragging_line;           /* a number being dragged, or -1 */
-    int32_t table_rows;              /* how tall a `table` line is, in rows */
+    int32_t table_rows;              /* how tall a `table` line is, in rows (the key bindings) */
+    /* Other tables by name, as tall as the viewer says (owner, 2026-10-16: the folders kept out of Recent). */
+    struct { u8str_t name; int32_t rows; } named_tables[4];
+    int32_t named_table_count;
     int32_t focus_row;               /* on a focused table line: which row (1.., row 0 is its heading) */
 
     rubraview_settings_line_t lines[RUBRAVIEW_SETTINGS_VIEW_MAX_LINES];
@@ -94,6 +97,12 @@ void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t col
  * Clamped to 1..RUBRAVIEW_TABLE_ROWS_MAX.
  */
 void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows);
+
+/** How tall the table named `name` is (heading included); other tables keep `table_rows`. */
+void rubraview_settings_view_set_named_table_rows(rubraview_settings_view_t *view, u8str_t name, int32_t rows);
+
+/** The name of the table line in focus (its `source`), empty when the focus is not on a table. */
+u8str_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *view);
 
 /** Go to a page; focus its first setting. */
 void rubraview_settings_view_set_page(rubraview_settings_view_t *view, int32_t page);
