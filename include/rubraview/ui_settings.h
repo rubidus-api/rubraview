@@ -104,6 +104,12 @@ void rubraview_settings_view_set_named_table_rows(rubraview_settings_view_t *vie
 /** The name of the table line in focus (its `source`), empty when the focus is not on a table. */
 u8str_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *view);
 
+/** Focus row `row` (1 = the first below the heading) of the table named `name`, scrolled into sight; false when there is no such table. */
+bool rubraview_settings_view_focus_table_row(rubraview_settings_view_t *view, u8str_t name, int32_t row);
+
+/** The screen row of row `row` of the table named `name`, or -1 when it is not on the page or scrolled out of sight. */
+int32_t rubraview_settings_view_table_screen_row(const rubraview_settings_view_t *view, u8str_t name, int32_t row);
+
 /** Go to a page; focus its first setting. */
 void rubraview_settings_view_set_page(rubraview_settings_view_t *view, int32_t page);
 

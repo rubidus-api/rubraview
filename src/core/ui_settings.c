@@ -312,6 +312,33 @@ u8str_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *v
     return view->doc->nodes[ln->node].name;
 }
 
+static int32_t table_line(const rubraview_settings_view_t *view, u8str_t name) {
+    for (size_t i = 0; i < view->line_count; ++i) {
+        if (view->lines[i].kind == RUBRAVIEW_LINE_TABLE && rubraview_u8_eq(view->doc->nodes[view->lines[i].node].name, name)) return (int32_t)i;
+    }
+    return -1;
+}
+
+bool rubraview_settings_view_focus_table_row(rubraview_settings_view_t *view, u8str_t name, int32_t row) {
+    if (!view || !view->doc) return false;
+    int32_t line = table_line(view, name);
+    if (line < 0) return false;
+    int32_t height = view->lines[line].height;
+    focus_on(view, line, false);
+    view->focus_row = row < 1 ? 1 : row >= height ? (height > 1 ? height - 1 : 1) : row;
+    keep_focus_visible(view);
+    return true;
+}
+
+int32_t rubraview_settings_view_table_screen_row(const rubraview_settings_view_t *view, u8str_t name, int32_t row) {
+    if (!view || !view->doc) return -1;
+    int32_t line = table_line(view, name);
+    if (line < 0 || row < 0 || row >= view->lines[line].height) return -1;
+    int32_t at = view->lines[line].row + row - view->scroll;
+    if (at < 0 || at >= rubraview_settings_view_visible_rows(view)) return -1;
+    return TITLE_ROWS + at;
+}
+
 void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows) {
     if (!view || !view->doc) return;
     if (rows < 1) rows = 1;

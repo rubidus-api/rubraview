@@ -12487,9 +12487,14 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
     if (rubraview_u8_eq_lit(source, "skip_dirs")) {
         u8str_t dirs[256];
         size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
-        int w = index == 0 ? snprintf(buffer, capacity, "Folder  (Enter changes it, Delete takes it off)")
-              : index <= n ? snprintf(buffer, capacity, "%.*s", (int)dirs[index - 1].len, dirs[index - 1].ptr)
-              : index == n + 1 ? snprintf(buffer, capacity, "+ add a folder  (Enter)") : 0;
+        /* The last row is the box every folder is typed in; the one being changed says so. */
+        bool changing = app->spath_active && app->spath_list_index >= 0 && (size_t)app->spath_list_index == index - 1;
+        int w = index == 0 ? snprintf(buffer, capacity, "Folder  (Enter changes it in the box below, Delete takes it off)")
+              : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].len, dirs[index - 1].ptr,
+                                      changing ? "   (being changed below)" : "")
+              : index == n + 1 ? (app->spath_active && app->spath_list_index >= 0 ? 0
+                                  : snprintf(buffer, capacity, " type or paste a folder to add  (Enter or a click; Ctrl+O browses)"))
+              : 0;
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (!rubraview_u8_eq_lit(source, "keymap")) return 0;
@@ -13154,6 +13159,9 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     size_t have = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
                     rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : U8(""));
                     rubraview_textedit_select_all(&app->spath_edit);
+                    /* Typed in the box that is always there, the list's last row, never over another row. */
+                    rubraview_settings_view_focus_table_row(&app->settings_view, U8("skip_dirs"), (int32_t)n + 1);
+                    if ((size_t)row <= n) settings_say(app, "change the folder in the box; Enter keeps it, Esc leaves it, Ctrl+O browses");
                 }
                 break;
             }
@@ -13305,6 +13313,7 @@ static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t 
 
 static void settings_path_end(app_state_t *app) {
     app->spath_active = false;
+    app->spath_list_index = -1;
     app->spath_composing_length = 0;
     rubraview_pal_window_text_input(app->settings_window, false);
     app->settings_dirty = true;
@@ -13334,6 +13343,7 @@ static void settings_path_commit(app_state_t *app) {
         app->spath_list_index = -1;
         settings_path_end(app);
         skip_dirs_table_rows(app);
+        rubraview_settings_view_focus_table_row(&app->settings_view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1);   /* the box, for the next one */
         settings_took_effect(app);
         settings_say(app, text.len == 0 ? "folder taken off" : "folder kept out of Recent, and all under it");
         return;
@@ -13396,34 +13406,72 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
     return true;   /* nothing else happens while typing */
 }
 
-/* The box over the focused path row: its text, the selection, the caret. */
-static void settings_path_draw(app_state_t *app) {
-    if (!app->spath_active) return;
+/* Where the typing box is: the list's last row for a folder kept out of
+   Recent (drawn there all the time), else over the focused path setting's
+   value. Grid row, first column and width; false when out of sight. */
+static bool settings_path_box(const app_state_t *app, bool list, int32_t *row, int32_t *col0, int32_t *cols) {
     const rubraview_settings_view_t *v = &app->settings_view;
-    if (v->focus_line < 0) return;
+    if (list) {
+        *row = rubraview_settings_view_table_screen_row(v, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1);
+        *col0 = v->content_col;
+    } else {
+        if (v->focus_line < 0) return false;
+        int32_t content_row = v->lines[v->focus_line].row - v->scroll;
+        *row = content_row >= 0 && content_row < rubraview_settings_view_visible_rows(v) ? 2 + content_row : -1;
+        *col0 = v->content_col + v->label_cols;
+    }
+    *cols = v->cols - *col0 - 1;
+    return *row >= 0 && *cols >= 8;
+}
+
+/* The first character shown: a long path shows its end, where the caret usually is. */
+static size_t settings_path_first(const app_state_t *app, int32_t cols) {
+    size_t caret_chars = 0;
+    for (size_t i = 0; i < app->spath_edit.caret && i < app->spath_edit.len; ++i) {
+        if (((unsigned char)app->spath_edit.buf[i] & 0xC0) != 0x80) caret_chars++;
+    }
+    return caret_chars + 2 > (size_t)cols ? caret_chars + 2 - (size_t)cols : 0;
+}
+
+/* A click in the box puts the caret at that character. */
+static void settings_path_click(app_state_t *app, int32_t col, int32_t cols) {
+    size_t want = settings_path_first(app, cols) + (size_t)(col < 0 ? 0 : col), seen = 0, at = 0;
+    const char *t = app->spath_edit.buf;
+    while (at < app->spath_edit.len && seen < want) {
+        at++;
+        while (at < app->spath_edit.len && ((unsigned char)t[at] & 0xC0) == 0x80) at++;
+        seen++;
+    }
+    app->spath_edit.caret = app->spath_edit.anchor = at;
+    app->settings_dirty = true;
+}
+
+/* The typing box: its text, the selection, the caret. The list's box is
+   there even when nothing is typed, an empty field waiting for a folder. */
+static void settings_path_draw(app_state_t *app) {
+    bool list = !app->spath_active || app->spath_list_index >= 0;
+    int32_t row = 0, col0 = 0, cols = 0;
+    if (!settings_path_box(app, list, &row, &col0, &cols)) return;
     rubraview_renderer_t *r = app->settings_renderer;
     const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
-    int32_t content_row = v->lines[v->focus_line].row - v->scroll;
-    if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(v)) return;
-    double y = ch * (2 + content_row);
-    int32_t col0 = v->content_col + v->label_cols;
-    int32_t cols = v->cols - col0 - 1;
-    if (cols < 8) return;
+    double y = ch * row;
     rubraview_pal_rect_t box = { cw * col0, y, cw * cols, ch };
+    if (!app->spath_active) {   /* waiting: the field's frame round its hint */
+        rubraview_pal_render_stroke_rect(r, box, 0xFF707070u, 1.0, 0.0);
+        return;
+    }
     rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 0.0);
     rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 0.0);
-    /* Columns are characters: a long path shows its end, where the caret usually is. */
     u8str_t text = rubraview_textedit_text(&app->spath_edit);
-    size_t caret_chars = 0, total_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
+    size_t caret_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
     rubraview_textedit_selection_range(&app->spath_edit, &a, &b);
     for (size_t i = 0; i < text.len; ++i) {
         if (((unsigned char)text.ptr[i] & 0xC0) == 0x80) continue;
         if (i < app->spath_edit.caret) caret_chars++;
         if (i < a) sel_a++;
         if (i < b) sel_b++;
-        total_chars++;
     }
-    size_t first = caret_chars + 2 > (size_t)cols ? caret_chars + 2 - (size_t)cols : 0;
+    size_t first = settings_path_first(app, cols);
     size_t skip = 0, seen = 0;
     while (skip < text.len && seen < first) {
         skip++;
@@ -13441,7 +13489,6 @@ static void settings_path_draw(app_state_t *app) {
                                             cx, y, fs, 0xFFFFD27Fu);
     }
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
-    (void)total_chars;
 }
 
 static size_t settings_pump(app_state_t *app) {
@@ -13495,7 +13542,14 @@ static size_t settings_pump(app_state_t *app) {
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
-                if (app->spath_active) {   /* a click elsewhere keeps the folder as it was */
+                if (app->spath_active) {   /* a click in the box moves the caret; elsewhere keeps the folder as it was */
+                    int32_t brow = 0, bcol = 0, bcols = 0;
+                    int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                    if (settings_path_box(app, app->spath_list_index >= 0, &brow, &bcol, &bcols) &&
+                        mr == brow && mc >= bcol && mc < bcol + bcols) {
+                        settings_path_click(app, mc - bcol, bcols);
+                        break;
+                    }
                     settings_path_end(app);
                     settings_say(app, "folder left as it was");
                     break;
@@ -13519,12 +13573,22 @@ static size_t settings_pump(app_state_t *app) {
                     break;
                 }
                 app->settings_mouse_down = true;
-                settings_event(app, rubraview_settings_view_press(view, &app->settings, col, row));
+                {
+                    /* One click on the folder box starts typing in it. */
+                    bool box = rubraview_settings_view_table_row_at(view, col, row) == (int32_t)skip_dirs_count(app) + 1 &&
+                               rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1) == row;
+                    rubraview_settings_event_t pressed = rubraview_settings_view_press(view, &app->settings, col, row);
+                    if (box && rubraview_u8_eq_lit(rubraview_settings_view_focused_table(view), "skip_dirs")) pressed = RUBRAVIEW_SEVENT_TABLE_EDIT;
+                    settings_event(app, pressed);
+                }
                 break;
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 int32_t tip = rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w),
                                                                    (int32_t)(event.mouse.y / app->settings_cell_h));
+                /* Only the keys' rows say what an action does; the folders' rows are not actions. */
+                if (tip > 0 && rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), tip) ==
+                                   (int32_t)(event.mouse.y / app->settings_cell_h)) tip = -1;
                 if (tip != app->settings_tip_row) {
                     if (app->settings_tip_shown) app->settings_dirty = true;
                     app->settings_tip_row = tip;

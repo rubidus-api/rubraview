@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.95.exe              the viewer, as built
-dist/rubraview-v0.0.95/                 the release bundle
-dist/rubraview-v0.0.95.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.96.exe              the viewer, as built
+dist/rubraview-v0.0.96/                 the release bundle
+dist/rubraview-v0.0.96.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -902,9 +902,11 @@ filename code page, the memory cap). Some worth knowing:
   **Folders that are not written down** is a list as long as you like: a
   file in a folder named there, or in any folder under it, is written
   neither to the recent list nor to the reading history (and leaves the
-  list if it was on it). `Enter` on **+ add a folder** types, pastes or
-  (`Ctrl+O`) browses one more; `Enter` on a folder changes it; `Delete`
-  takes it off.
+  list if it was on it). The list ends in a box for typing a folder: click
+  it, or press `Enter` on it, then type, paste or (`Ctrl+O`) browse one, and
+  `Enter` adds it. `Enter` on a folder in the list puts it in the same box
+  to change (the row says it is being changed); `Esc` leaves it as it was.
+  `Delete` takes a folder off.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
