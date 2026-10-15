@@ -1321,3 +1321,30 @@ Do not store credentials, private infrastructure details, personal data, private
   - **Export**: rows by `rubraview_export_rows(format, the file's name, lossless)` — JPEG: quality, progressive; PNG: level, colours; WebP: quality unless lossless, lossless, effort; privacy for JPEG, PNG, WebP, TIFF; GIF, BMP, ICO nothing; "as the file" is the file's own format. The panel is built again when the format or WebP's lossless changes.
   - **Adjust**: `Size: W x H px...` under Resize % opens a two-field box like A-B's; digits only, five at most; the other side follows the shape while the aspect lock is on (`rubraview_edit_resize_pair`); Enter sets the resize and rebuilds the panel. The preview, if not had at opening (a page job under way, the page not yet in), is asked for again every half second, twenty times at most; blur and sharpen are compared too.
 - Consequences: the M box's place in layout.ini is still read and kept, for a frame of Windows'. The menu cannot be pinned open under the bar. The edit preview was seen working on the VM for a still JPEG and PNG (exposure, blur); what the owner saw not change was not reproduced, and the retry covers the one way found for it to be missing.
+
+## 2026-10-15: D-139 No "On top" in the menu
+
+- Status: Accepted (owner 2026-10-15: "메뉴에서 On top 항목을 지워주세요. 타이틀바에 이미 pin이 있어요")
+- Decision: the menu's top-level "On top" entry (D-17) is removed; always on top toggles from the title bar's **Pin** and `Ctrl+Shift+T`.
+- Also (owner, the same day: "그림 모드에서는 마우스 휠 버튼으로 이미지 다음/이전 장으로 넘어갈 수 있으면 좋겠네요"): the plain wheel turns pages on a picture or book page that fits (`wheel_turns_pages` in the pointer context: not media, not the strip), away from you the one before, reversing 2026-09-09. Fit Width still scrolls; a picture zoomed past the window takes nothing from the wheel, so one notch never nudges here and jumps there.
+- Also ("Fit 버튼도 ... 현재 어떤 옵션인지 알려주게 ... 아이콘도 현재 옵션에 따라"): `fit_cycle`'s icon follows the fit (FitPage, Switch, Sort, LightningBolt, FullScreen; real size in words) over its short name; its hint is `rubraview_fit_tile_hint`, one string a fit.
+- Consequences: the menu's top level starts with File. The same day (owner: "메뉴 버튼의 Information은 Info로 줄여주세요") `toggle_info` reads "Info" in the menu and in the right-click lists too, as on the toolbox.
+
+## 2026-10-15: D-140 The crop typed; A-B's point just taken wins
+
+- Status: Accepted (owner 2026-10-15: "크롭에 대해 좌표 입력해서 해당 위치를 자르거나, 그걸 이미지 위에서 지정할 수 있게 해 주세요"; "구간반복 시 뜨는 박스의 오른쪽 위에 취소를 위한 x 버튼 ... 현재 위치를 A 또는 B에 넣을 수 있어야 하고 ... 방금 입력한게 A 일때는 영상 마지막까지, 방금 입력한게 B일때는 영상 처음부터")
+- Decision:
+  - **Crop**: Adjust's second page has `Crop: x, y  W x H px...` under Crop ratio; it opens the pixel box with four fields (X, Y, W, H), `rubraview_edit_crop_set` takes them (the ratio becomes free; a corner outside or a size under 1 px is refused; a size past the edge is cut at it). The drag on the picture, which was there, now fills the box while it is open and the button says the cut.
+  - **A-B**: `rubraview_ab_take(a, b, t, is_a, duration)`: a new A at or past B moves B to the end, 0.1 s short so the loop comes before the file ends (unset when the length is not known); a new B at or before A, or with no A, moves A to 0. It serves `[`, `]`, the A-B tile and the box. The box gains **A = now [** and **B = now ]**, a click on a half of it chooses that field, and an X at its top right; the pixel box has the X too.
+- Consequences: "B must come after A" is no longer said for `]`; it remains for two typed numbers out of order, where neither was just taken.
+
+## 2026-10-15: D-141 The wheel brings up the filmstrip
+
+- Status: Accepted (owner 2026-10-15: "휠 돌려서 이미지 사이 이동할 때, 하단에 썸네일들이 좌우로 움직이면서 선택 가능하게 해 줘요")
+- Decision:
+  - A page turned by the wheel (D-139) shows the filmstrip over the foot of the picture for 2.5 s, then a 0.4 s fade; the pointer on it holds it. It does not move the picture up, as `F4`'s strip does.
+  - It slides to keep the page in the middle (`rubraview_filmstrip_centre_offset`, `rubraview_filmstrip_glide`: most of the way in a fifth of a second); a short row sits in the middle (`rubraview_filmstrip_lead`).
+  - Thumbnails come from a second thumbnail thread, the picker's kind (`strip_thumbs`, a generation per book or folder): a folder's file by its path, a page in a book by its bytes, three a pass and none far inside a streamed block; until one comes, the page itself if it is in memory, else its number.
+  - A click on a thumbnail goes to its page (`rubraview_filmstrip_index_at`, `spread_for_chosen_page`); the wheel over the strip goes a page a notch. The toolbox drawn over it keeps its clicks.
+  - `F4` keeps the strip up as before, now the same drawing, and kept across books (it was let go at each open).
+- Consequences: the old strip drew only pages already decoded, stretched to the cell; thumbnails now keep their shape (the thread's are cut to a square, as the picker's are).

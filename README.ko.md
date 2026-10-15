@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.89** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.90** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.90/rubraview-v0.0.90.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.90/rubraview-v0.0.90.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -148,7 +148,7 @@
 | `[` | 여기서부터 반복(A) |
 | `]` | 여기까지 반복(B) |
 | `\` | 반복 끄기 |
-| `Shift+\` | 반복 구간 숫자로 |
+| `Shift+\` | 반복 구간 숫자로: A-B 상자 (도구 상자 `Set A-B`), A = now·B = now로 지금 재생 위치를 넣음 |
 | `Ctrl+\` | 보통 속도 |
 | `Z` | 자막 0.5초 빠르게 |
 | `X` | 자막 0.5초 늦게 |
@@ -244,7 +244,7 @@
 | 줌 버튼 클릭 | 실제 크기(0%), 20%부터 200%까지 20%씩, 다시 실제 크기 |
 | 영상·음악 재생 중 휠 | 음량 |
 | `Shift` + 휠 | 10쪽 뒤로/앞으로 |
-| 휠 | 웹툰 스트립과 폭 맞춤으로 본 쪽을 스크롤. 그 밖에는 아무 일도 없음 (쪽 넘김은 휠이 아니라 키로) |
+| 휠 | 창에 맞는 그림에서는 쪽 넘김 (위로 이전, 아래로 다음). 이때 아래에 필름스트립이 잠시 나타나고, 썸네일을 클릭하면 그 그림으로 이동. 웹툰 스트립과 폭 맞춤으로 본 쪽은 스크롤. 창보다 크게 확대한 그림에서는 아무 일도 없음 |
 | 떠 있는 상자 위에서 `Alt` + 휠 | 그 상자를 더 투명하게/덜 투명하게 |
 | 창 맨 위 가장자리에 포인터 | 제목 표시줄: 끌면 창 이동, 두 번 클릭하면 최대화, **Size**로 크기 조절, **Pin**은 항상 맨 위, **Box**는 떠 있는 상자를 제자리로 |
 | 왼쪽·오른쪽 가장자리 가운데 근처에 포인터 | 이전·다음 쪽 버튼 |

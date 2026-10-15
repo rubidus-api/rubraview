@@ -90,3 +90,35 @@ size_t rubraview_filmstrip_sync_cache(const rubraview_filmstrip_t *strip,
     if (out_needed_count) *out_needed_count = needed_total;
     return evicted_total;
 }
+
+double rubraview_filmstrip_lead(const rubraview_filmstrip_t *strip) {
+    if (!strip) return 0.0;
+    double spare = strip->viewport_extent - (double)strip->item_count * strip->thumb_extent;
+    return spare > 0.0 ? spare * 0.5 : 0.0;
+}
+
+double rubraview_filmstrip_centre_offset(const rubraview_filmstrip_t *strip, size_t index) {
+    if (!strip || strip->item_count == 0) return 0.0;
+    if (index >= strip->item_count) index = strip->item_count - 1;
+    double centre = ((double)index + 0.5) * strip->thumb_extent - strip->viewport_extent * 0.5;
+    return rubraview_virtual_clamp_offset(strip->item_count, strip->thumb_extent, strip->viewport_extent, centre);
+}
+
+bool rubraview_filmstrip_index_at(const rubraview_filmstrip_t *strip, double x, size_t *out_index) {
+    if (!strip || strip->item_count == 0 || !(strip->thumb_extent > 0.0)) return false;
+    double along = x - rubraview_filmstrip_lead(strip) + strip->scroll_offset;
+    if (along < 0.0) return false;
+    double slot = along / strip->thumb_extent;
+    if (slot >= (double)strip->item_count) return false;
+    if (out_index) *out_index = (size_t)slot;
+    return true;
+}
+
+double rubraview_filmstrip_glide(double offset, double target, double dt) {
+    double gap = target - offset;
+    if (gap > -1.0 && gap < 1.0) return target;
+    double k = dt > 0.0 ? dt / 0.2 : 0.0;   /* a fifth of a second covers most of it */
+    if (k > 1.0) k = 1.0;
+    double step = gap * (k * 0.9 + (k > 0.0 ? 0.05 : 0.0));
+    return offset + step;
+}

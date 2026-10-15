@@ -178,6 +178,14 @@ void rubraview_edit_curve_reset(rubraview_edit_session_t *session, rubraview_edi
 void rubraview_edit_crop_drag(rubraview_edit_session_t *session,
                               int32_t x0, int32_t y0, int32_t x1, int32_t y1);
 
+/**
+ * A crop typed as numbers (owner, 2026-10-15): the left and top corner and
+ * the size, in image pixels. The ratio lock is let go (the numbers are
+ * what was asked for); a corner outside the picture or a size under one
+ * pixel is refused, and a size running past the edge is cut at it.
+ */
+bool rubraview_edit_crop_set(rubraview_edit_session_t *session, int32_t x, int32_t y, int32_t width, int32_t height);
+
 /** Change the ratio lock, re-shaping the current rectangle to match. */
 void rubraview_edit_crop_set_ratio(rubraview_edit_session_t *session, rubraview_crop_ratio_t ratio);
 

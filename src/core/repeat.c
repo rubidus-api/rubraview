@@ -106,3 +106,18 @@ int32_t rubraview_repeat_follow(rubraview_repeat_mode_t mode, int32_t current, s
         default: return -1;
     }
 }
+
+void rubraview_ab_take(double *a, double *b, double t, bool is_a, double duration) {
+    if (!a || !b) return;
+    if (t < 0.0) t = 0.0;
+    if (is_a) {
+        *a = t;
+        if (*b >= 0.0 && *b <= t) {
+            double end = duration - 0.1;
+            *b = end > t ? end : -1.0;
+        }
+    } else {
+        *b = t;
+        if (*a < 0.0 || *a >= t) *a = 0.0;
+    }
+}

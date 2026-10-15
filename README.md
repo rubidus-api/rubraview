@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.89** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.89/rubraview-v0.0.89.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.90** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.90/rubraview-v0.0.90.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.90/rubraview-v0.0.90.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -149,7 +149,7 @@ ships with, so it cannot drift from them.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
-| `Shift+\` | Repeat by number |
+| `Shift+\` | Repeat by number: the A-B box (toolbox `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
@@ -245,7 +245,7 @@ ships with, so it cannot drift from them.
 | Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |
 | Wheel while a film or music plays | Volume |
 | `Shift` + wheel | Ten pages back or forward |
-| Wheel over a picture | Scrolls the webtoon strip, and a page shown at Fit Width; otherwise nothing — pages turn on the keys, not the wheel |
+| Wheel over a picture | Turns the page (away from you the one before, towards you the next) when it fits the window, and the filmstrip comes up at the bottom for a moment: click a thumbnail to go to it; scrolls the webtoon strip and a page shown at Fit Width; nothing on a picture zoomed past the window |
 | `Alt` + wheel over a floating box | Makes that box more or less see-through |
 | Point at the window's top edge | The title bar: drag it to move the window, double-click it to maximise, **Size** to resize, **Pin** for always on top, **Box** to bring the floating boxes back to their corners |
 | Point near the middle of the left or right side | A button for the previous or next page |

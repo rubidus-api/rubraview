@@ -210,6 +210,18 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
             default:                            return 0xE7C3;
         }
     }
+    if (rubraview_u8_eq_lit(action, "fit_cycle")) {
+        /* The fit it is in now (owner, 2026-10-15): FitPage, Switch (side to side), Sort (top to
+           bottom), LightningBolt, FullScreen; real size has none and says it in words. */
+        switch (f->fit) {
+            case RUBRAVIEW_FIT_WINDOW:  return 0xE9A6;
+            case RUBRAVIEW_FIT_WIDTH:   return 0xE8AB;
+            case RUBRAVIEW_FIT_HEIGHT:  return 0xE8CB;
+            case RUBRAVIEW_FIT_SMART:   return 0xE945;
+            case RUBRAVIEW_FIT_STRETCH: return 0xE740;
+            default:                    return 0;
+        }
+    }
     if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
         /* RepeatOne / RepeatAll / Shuffle; "Once" and "Next" say it in words. */
         switch (f->repeat_mode) {

@@ -41,6 +41,23 @@ void rubraview_filmstrip_reveal(rubraview_filmstrip_t *strip, size_t index);
 
 void rubraview_filmstrip_scroll_by(rubraview_filmstrip_t *strip, double delta);
 
+/*
+ * The strip the wheel brings up (owner, 2026-10-15): it slides to keep the
+ * page in the middle, and a click on a thumbnail goes to it.
+ */
+
+/** The room before the first thumbnail: half of what is left when they all fit, so a short row sits in the middle. */
+double rubraview_filmstrip_lead(const rubraview_filmstrip_t *strip);
+
+/** The offset that puts thumbnail `index` in the middle of the strip, kept within the row. */
+double rubraview_filmstrip_centre_offset(const rubraview_filmstrip_t *strip, size_t index);
+
+/** The thumbnail under `x` (from the strip's left edge), as drawn with the lead; false over none. */
+bool rubraview_filmstrip_index_at(const rubraview_filmstrip_t *strip, double x, size_t *out_index);
+
+/** One step of the slide from `offset` toward `target` over `dt` seconds: most of the way in a fifth of a second, there within a pixel. */
+double rubraview_filmstrip_glide(double offset, double target, double dt);
+
 /**
  * Register the visible thumbnails with the cache, newest-first from
  * `current_index` outwards so the ones nearest the reader survive

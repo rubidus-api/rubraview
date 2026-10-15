@@ -75,6 +75,16 @@ int32_t rubraview_shuffle_pick(rubraview_shuffle_t *sh, int32_t current, rubravi
 int32_t rubraview_repeat_follow(rubraview_repeat_mode_t mode, int32_t current, size_t count,
                                 rubraview_repeat_plays_fn plays, void *ctx, rubraview_shuffle_t *sh);
 
+/**
+ * A-B repeat: a point just taken at `t` (owner, 2026-10-15). When it
+ * crosses the other one, the other gives way: a new A at or past B moves
+ * B to the end (`duration`, a tenth of a second short of it so the loop
+ * comes before the file ends; unset when the length is not known); a new
+ * B at or before A, or with no A, moves A to the start. Points are file
+ * seconds, -1 unset.
+ */
+void rubraview_ab_take(double *a, double *b, double t, bool is_a, double duration);
+
 #ifdef __cplusplus
 }
 #endif

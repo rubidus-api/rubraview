@@ -274,6 +274,18 @@ void rubraview_edit_crop_drag(rubraview_edit_session_t *session,
     session->dirty = true;
 }
 
+bool rubraview_edit_crop_set(rubraview_edit_session_t *session, int32_t x, int32_t y, int32_t width, int32_t height) {
+    if (!session || session->image_width <= 0 || session->image_height <= 0) return false;
+    if (x < 0 || y < 0 || x >= session->image_width || y >= session->image_height || width < 1 || height < 1) return false;
+    if (width > session->image_width - x) width = session->image_width - x;
+    if (height > session->image_height - y) height = session->image_height - y;
+    session->crop_ratio = RUBRAVIEW_CROP_FREE;
+    session->crop = (rubraview_crop_rect_t){ .x = x, .y = y, .width = width, .height = height };
+    session->crop_active = true;
+    session->dirty = true;
+    return true;
+}
+
 void rubraview_edit_crop_set_ratio(rubraview_edit_session_t *session, rubraview_crop_ratio_t ratio) {
     if (!session) return;
     session->crop_ratio = ratio;

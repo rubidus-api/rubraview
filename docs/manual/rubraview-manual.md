@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.89.exe              the viewer, as built
-dist/rubraview-v0.0.89/                 the release bundle
-dist/rubraview-v0.0.89.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.90.exe              the viewer, as built
+dist/rubraview-v0.0.90/                 the release bundle
+dist/rubraview-v0.0.90.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -265,7 +265,7 @@ from there.
 A right click on the picture otherwise opens **a short list** where you
 clicked, for what is on screen. For a picture: Copy picture, Adjust
 picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
-Information; Rename, Copy to folder, Move to folder, Show in Explorer,
+Info; Rename, Copy to folder, Move to folder, Show in Explorer,
 Delete (click it twice: it goes to the recycle bin); and Menu... for the
 menu box. A book or an archive has the next and previous archive and
 the layouts; a film has play and stop, the subtitles, the sound track,
@@ -274,7 +274,12 @@ the previous and next file, what the end does, the equaliser and the
 mini player. A row that cannot act now is grey. The arrow keys and
 `Enter` choose, `Esc` or a click elsewhere closes it. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
-`Shift` and the wheel go ten pages; on a touch screen two fingers move
+the wheel turns the page on a picture that fits the window (away from
+you the one before, towards you the next) and brings up the filmstrip
+along the bottom for a moment — it slides to keep the page in the
+middle, stays while the pointer is on it, and a click on a thumbnail
+goes to that page (`F4` keeps it up) — `Shift` and the wheel go ten
+pages; on a touch screen two fingers move
 the picture and a pinch zooms it. (README has the whole table, under
 Mouse and touch.)
 
@@ -332,7 +337,12 @@ click outside it, or `Esc`.
 
 With the panel open, dragging over the picture marks a rectangle to cut
 to; **Crop ratio** keeps it free, square, 4:3, 16:9 or the picture's own
-shape. A click without a drag lets the rectangle go.
+shape. A click without a drag lets the rectangle go. To type it instead,
+press **Crop: ... px...** under Crop ratio: X and Y are the top left
+corner and W and H the size, in the picture's pixels; `Tab` or a click
+moves between them, `Enter` cuts (a size running past the edge stops at
+it, and the ratio becomes free), `Esc` or the `X` leaves. A drag on the
+picture while the box is open fills its numbers.
 
 `Ctrl+E` opens Export: pick a format, and the panel shows what that format
 has: JPEG its quality and progressive; PNG its level and colours; WebP its
@@ -527,11 +537,14 @@ While it does:
 - `Space` plays and pauses, `←` / `→` jump 5 seconds, `↑` / `↓` change the
   volume, `Shift+M` mutes.
 - `[` marks where a repeat starts and `]` where it ends; `\` turns it off.
+  The point you just set wins: an A at or after B moves B to the end of
+  the film, a B at or before A (or with no A) moves A to its start.
 - `Shift+\` opens the same two points as numbers, so a repeat can be set
-  to the millisecond. Inside that box `[` and `]` put the moment you are
-  at into the field you are in — so you can tap a point, correct the
-  number, and tap it again, whichever way round suits you. `Tab` swaps
-  fields, `Enter` keeps them, `Esc` leaves them as they were.
+  to the millisecond. Inside that box **A = now** and **B = now** (or `[`
+  and `]`) put the moment you are at into A or B, with the same rule —
+  so you can tap a point, correct the number, and tap it again. Click a
+  field or press `Tab` to move between them, `Enter` keeps them, `Esc` or
+  the `X` at the box's top right leaves them as they were.
   `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
 - The toolbox's seek bar shows the time; click or drag on it to go
@@ -813,7 +826,7 @@ and **Delete the file...**, which first asks in a warning of Windows' own —
 No is the answer it starts on — and then moves the file to the recycle
 bin, from where it can be put back.
 
-`I` (or `Ctrl+I`, or File › Information) opens the file's information: its
+`I` (or `Ctrl+I`, or File › Info) opens the file's information: its
 size, dates, pixels and format, and for a photo what the camera wrote —
 camera and lens, when it was taken (with the time zone), exposure, aperture,
 ISO, focal length, program, metering, white balance, colour space, and where
@@ -1104,7 +1117,7 @@ listed under a later heading only means that while that is on screen.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
-| `Shift+\` | Repeat by number |
+| `Shift+\` | Repeat by number: the A-B box (toolbox `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |

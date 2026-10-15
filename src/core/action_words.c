@@ -73,7 +73,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "media_ab_b", "Repeat to here (B)" },
     { "media_ab_clear", "Repeat off" },
     { "media_ab_cycle", "A-B repeat: from here, to here, off" },
-    { "media_ab_edit", "Repeat by number" },
+    { "media_ab_edit", "Repeat by number: the A-B box (toolbox `Set A-B`), A = now and B = now take the moment playing" },
     { "media_eq_cycle", "The equaliser's next preset" },
     { "media_eq_window", "The equaliser's ten bands, in a window over the picture" },
     { "media_mute", "Mute / sound" },

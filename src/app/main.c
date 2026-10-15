@@ -448,9 +448,10 @@ typedef struct app_state {
     /* The Adjust panel's size in pixels (owner, 2026-10-15): width and height typed,
        the other following the shape. */
     bool                   px_edit_open;
-    int32_t                px_edit_field;     /* 0 = width, 1 = height */
-    char                   px_edit_text[2][8];
-    size_t                 px_edit_length[2];
+    bool                   px_edit_crop;      /* the crop's corner and size instead (owner, 2026-10-15) */
+    int32_t                px_edit_field;     /* 0 = width, 1 = height; for the crop 0..3 = x, y, width, height */
+    char                   px_edit_text[4][8];
+    size_t                 px_edit_length[4];
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
     bool                   pagebar_dragging, pagebar_detached;
@@ -714,6 +715,16 @@ typedef struct app_state {
     rubraview_box_tile_t   toolbox_tiles[RUBRAVIEW_TOOLBOX_MAX_TILES];
     int32_t                toolbox_tile_count;
     rubraview_filmstrip_t filmstrip;       /* RV-042 */
+    /* The wheel's strip (owner, 2026-10-15): the filmstrip shown for a while after
+       the wheel turns a page, sliding to keep the page in the middle; a click on a
+       thumbnail goes to it. Its thumbnails come from a thread of their own. */
+    double                 strip_peek_until;   /* shown until then, then fades */
+    double                 strip_target;       /* the offset it slides to */
+    struct picker_thumb   *strip_cells;        /* one a page: state and texture */
+    size_t                 strip_cell_count;
+    rubraview_thumbs_t    *strip_thumbs;
+    uint32_t               strip_generation;   /* one per book or folder opened */
+    bool                   strip_arrived;      /* a thumbnail came in this pass: draw */
     rubraview_slideshow_t slideshow;       /* RV-015, state machine from RV-032 */
     rubraview_slideshow_item_t *slides;
     bool slideshow_running;
@@ -1047,6 +1058,8 @@ static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
 static void menu_from_bar(app_state_t *app);
 static void panel_build_edit(app_state_t *app);
+static void strip_follow(app_state_t *app, size_t page);
+static bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
 static void chrome_hide(app_state_t *app, bool hide);
 static void open_playlist(app_state_t *app, u8str_t path);
 static bool path_is_playlist(u8str_t path);
@@ -3207,7 +3220,7 @@ static double strip_scroll_by(app_state_t *app, double delta) {
            and the lists speak of. No fade, no view reset — nothing jumped. */
         app->spread_index = pos.top;
         app->prev_spread_valid = false;
-        rubraview_filmstrip_reveal(&app->filmstrip, pos.top);
+        strip_follow(app, pos.top);
         update_window_title(app);
         update_precache(app);
     }
@@ -3250,7 +3263,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
         app->layout_exempt = -1;      /* D-98: turned away from: it is left out like the others */
         app->needs_relayout = true;
     }
-    if (page >= 0) rubraview_filmstrip_reveal(&app->filmstrip, (size_t)page);
+    if (page >= 0) strip_follow(app, (size_t)page);
     animation_prepare(app);
     media_prepare(app);
     update_window_title(app);
@@ -3834,6 +3847,137 @@ static void picker_thumbs_step(app_state_t *app) {
             t->state = 2;   /* a path the queue cannot hold */
         }
     }
+}
+
+/* ---- The wheel's strip (owner, 2026-10-15) ---- */
+
+#define STRIP_PEEK_SECONDS 2.5
+#define STRIP_FADE_SECONDS 0.4
+
+static void strip_cells_free(app_state_t *app) {
+    for (size_t i = 0; i < app->strip_cell_count; ++i) {
+        if (app->strip_cells[i].texture) rubraview_pal_texture_destroy(app->strip_cells[i].texture);
+    }
+    free(app->strip_cells);
+    app->strip_cells = NULL;
+    app->strip_cell_count = 0;
+}
+
+/* A new book or folder: new cells, and what is still being made is for nobody. */
+static void strip_cells_reset(app_state_t *app) {
+    strip_cells_free(app);
+    app->strip_generation++;
+    if (app->strip_thumbs) rubraview_pal_thumbs_generation(app->strip_thumbs, app->strip_generation);
+    size_t n = page_count(app);
+    app->strip_cells = n ? (struct picker_thumb*)calloc(n, sizeof(*app->strip_cells)) : NULL;
+    app->strip_cell_count = app->strip_cells ? n : 0;
+}
+
+/* How much of the strip shows: 1 while it is up, fading after the wheel's time, 0 when gone. */
+static uint32_t strip_fade(uint32_t argb, double k) {   /* alpha times k, 0..1 */
+    uint32_t alpha = (uint32_t)lround((double)((argb >> 24) & 0xFFu) * (k < 0.0 ? 0.0 : k > 1.0 ? 1.0 : k));
+    return (alpha << 24) | (argb & 0x00FFFFFFu);
+}
+
+static double strip_shown(const app_state_t *app) {
+    if (app->filmstrip.visible) return 1.0;
+    double left = app->strip_peek_until - rubraview_pal_time_now_seconds();
+    if (left <= -STRIP_FADE_SECONDS) return 0.0;
+    return left >= 0.0 ? 1.0 : 1.0 + left / STRIP_FADE_SECONDS;
+}
+
+static rubraview_pal_rect_t strip_rect(const app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double strip_h = FILMSTRIP_THUMB * rubraview_pal_window_dpi_scale(app->window);
+    return (rubraview_pal_rect_t){ 0.0, (double)h - strip_h, (double)w, strip_h };
+}
+
+/* The page on screen is the one the strip slides to; a strip not showing goes there at once. */
+static void strip_follow(app_state_t *app, size_t page) {
+    app->strip_target = rubraview_filmstrip_centre_offset(&app->filmstrip, page);
+    if (strip_shown(app) <= 0.0) app->filmstrip.scroll_offset = app->strip_target;
+}
+
+/* The wheel turned a page: the strip comes up, or stays up longer. */
+static void strip_peek(app_state_t *app) {
+    if (page_count(app) < 2) return;
+    app->strip_peek_until = rubraview_pal_time_now_seconds() + STRIP_PEEK_SECONDS;
+}
+
+/* Each pass: slide, keep it up under the pointer, take in thumbnails, ask for the ones in view. */
+static void strip_step(app_state_t *app, double dt) {
+    app->strip_arrived = false;
+    double shown = strip_shown(app);
+    if (shown > 0.0 && !app->filmstrip.visible && app->pointer_inside &&
+        pal_rect_has(strip_rect(app), app->pointer_x, app->pointer_y)) {
+        double now = rubraview_pal_time_now_seconds();
+        if (app->strip_peek_until < now + 1.0) app->strip_peek_until = now + 1.0;   /* held while pointed at */
+    }
+    app->filmstrip.scroll_offset = rubraview_filmstrip_glide(app->filmstrip.scroll_offset, app->strip_target, dt);
+    if (shown <= 0.0) return;
+    if (app->strip_cell_count != page_count(app)) strip_cells_reset(app);
+    if (!app->strip_cells) return;
+    if (!app->strip_thumbs) {
+        app->strip_thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(VIDEO_FILTER), U8(ARCHIVE_FILTER),
+                                                       thumbs_wake, app->window);
+        if (!app->strip_thumbs) return;
+        rubraview_pal_thumbs_generation(app->strip_thumbs, app->strip_generation);
+    }
+    rubraview_thumb_result_t done;
+    while (rubraview_pal_thumbs_take(app->strip_thumbs, &done)) {
+        if (done.generation == app->strip_generation && done.index < app->strip_cell_count) {
+            struct picker_thumb *t = &app->strip_cells[done.index];
+            rubraview_texture_t *texture = NULL;
+            if (done.bgra) {
+                texture = rubraview_pal_texture_create_bgra(app->renderer, done.width, done.height);
+                if (texture && !rubraview_pal_texture_upload_bgra(texture, done.bgra, done.width * 4)) {
+                    rubraview_pal_texture_destroy(texture);
+                    texture = NULL;
+                }
+            }
+            if (t->texture) rubraview_pal_texture_destroy(t->texture);
+            t->texture = texture;
+            t->state = texture ? 1 : 2;
+            app->strip_arrived = true;
+        }
+        free(done.bgra);
+    }
+    /* The ones in view, nearest the page last so they are made first. */
+    rubraview_virtual_range_t visible = rubraview_filmstrip_visible(&app->filmstrip);
+    int book_reads = 0;
+    for (size_t k = visible.count; k-- > 0;) {
+        size_t index = visible.first + k;
+        if (index >= app->strip_cell_count) continue;
+        struct picker_thumb *t = &app->strip_cells[index];
+        if (t->state != 0) continue;
+        u8str_t path = app->source.pages[index].path;
+        if (path.len > 0) {
+            t->state = rubraview_pal_thumbs_request(app->strip_thumbs, app->strip_generation, index, false, 1.0, path) ? 3 : 2;
+            continue;
+        }
+        /* A page inside a book: its bytes, three a pass, never one far inside a streamed block. */
+        if (page_read_cost(app, index) > PAGE_JOB_MIN_COST) { t->state = 2; continue; }
+        if (book_reads >= 3) continue;
+        book_reads++;
+        void *mem = NULL;
+        rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, index, &mem);
+        uint8_t *copy = pb.ok && pb.data.len > 0 ? (uint8_t*)malloc(pb.data.len) : NULL;
+        if (copy) memcpy(copy, pb.data.ptr, pb.data.len);
+        free(mem);
+        t->state = copy && rubraview_pal_thumbs_request_bytes(app->strip_thumbs, app->strip_generation, index, 1.0, copy, pb.data.len) ? 3 : 2;
+    }
+}
+
+/* A click on the strip: the page whose thumbnail it is. True when the strip took it. */
+static bool strip_press(app_state_t *app, double x, double y) {
+    if (strip_shown(app) <= 0.0 || !pal_rect_has(strip_rect(app), x, y)) return false;
+    size_t page = 0;
+    if (rubraview_filmstrip_index_at(&app->filmstrip, x, &page) && page < page_count(app)) {
+        go_to_spread(app, spread_for_chosen_page(app, (int32_t)page));
+        if (!app->filmstrip.visible) app->strip_peek_until = rubraview_pal_time_now_seconds() + STRIP_PEEK_SECONDS;
+    }
+    return true;
 }
 
 #define PICKER_ARENA_BYTES (32u * 1024u * 1024u)
@@ -4520,6 +4664,7 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         return text.len > 0 ? text : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "fit_cycle")) return cstr(rubraview_fit_tile_name(app->fit_mode));
+    if (rubraview_u8_eq_lit(tile->action, "media_ab_edit")) return U8("Set\nA-B");   /* on two rows (owner, 2026-10-15) */
     if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? U8("Play") : U8("Pause");
@@ -5421,6 +5566,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->osd.always_on = !app->osd.always_on;
     } else if (rubraview_u8_eq_lit(action, "toggle_filmstrip")) {
         app->filmstrip.visible = !app->filmstrip.visible;
+        int32_t page = current_page_index(app);
+        if (page >= 0) strip_follow(app, (size_t)page);
     } else if (rubraview_u8_eq_lit(action, "toggle_menu")) {
         if (app->menubox.headless) {
             menu_from_bar(app);
@@ -5851,15 +5998,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         int n = 0;
         bool set_a = rubraview_u8_eq_lit(action, "media_ab_a") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a < 0.0);
         bool set_b = rubraview_u8_eq_lit(action, "media_ab_b") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
-        if (set_a) {
-            app->ab_a = play_position(app);
-            if (app->ab_b >= 0.0 && app->ab_b <= app->ab_a) app->ab_b = -1.0;
-            n = snprintf(line, sizeof(line), "repeat from %.1f s", app->ab_a);
-        } else if (set_b && app->ab_a >= 0.0 && play_position(app) > app->ab_a) {
-            app->ab_b = play_position(app);
-            n = snprintf(line, sizeof(line), "repeating %.1f - %.1f s", app->ab_a, app->ab_b);
-        } else if (set_b) {
-            n = snprintf(line, sizeof(line), "B must come after A");
+        if (set_a || set_b) {
+            /* The point just taken wins; the other goes to the end or the start (owner, 2026-10-15). */
+            rubraview_ab_take(&app->ab_a, &app->ab_b, play_position(app), set_a, play_duration(app));
+            n = app->ab_b < 0.0 ? snprintf(line, sizeof(line), "repeat from %.1f s", app->ab_a)
+                                : snprintf(line, sizeof(line), "repeating %.1f - %.1f s", app->ab_a, app->ab_b);
         } else {
             app->ab_a = app->ab_b = -1.0;
             n = snprintf(line, sizeof(line), "repeat off");
@@ -6136,6 +6279,40 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 
 /* ---- A-B by hand (owner, 2026-09-24) ---- */
 
+/* The A-B box and the pixel box sit in the same place: centred, a little below the middle.
+   Each has an X at its top right, and the A-B box two buttons that take this moment (owner, 2026-10-15). */
+static rubraview_pal_rect_t answer_box_rect(const app_state_t *app, double box_w, double box_h) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    box_w *= dpi; box_h *= dpi;
+    if (box_w > (double)w - 16.0) box_w = (double)w - 16.0;
+    double x = ((double)w - box_w) * 0.5;
+    /* Clear of an open panel (the Adjust panel the crop box comes from), when there is room. */
+    if (app->panel.open && x + box_w > app->panel.bounds.x - 8.0) {
+        double left = app->panel.bounds.x - 8.0 - box_w;
+        x = left >= 8.0 ? left : 8.0;
+    }
+    return (rubraview_pal_rect_t){ x, (double)h * 0.62, box_w, box_h };
+}
+static rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box) {
+    double s = 26.0 * rubraview_pal_window_dpi_scale(app->window);
+    return (rubraview_pal_rect_t){ box.x + box.width - s - 4.0, box.y + 4.0, s, s };
+}
+static rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 132.0); }
+static rubraview_pal_rect_t px_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 96.0); }
+/* "A = now" (0) and "B = now" (1), side by side under the fields. */
+static rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which) {
+    rubraview_pal_rect_t box = ab_box_rect(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double bw = 150.0 * dpi, bh = 30.0 * dpi, gap = 20.0 * dpi;
+    double left = box.x + (box.width - 2.0 * bw - gap) * 0.5;
+    return (rubraview_pal_rect_t){ left + (double)which * (bw + gap), box.y + 52.0 * dpi, bw, bh };
+}
+static bool pal_rect_has(rubraview_pal_rect_t r, double x, double y) {
+    return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+}
+
 /* One point as text, the way the timeline writes it. An unset point is
    an empty field rather than a nought: nought is a time. */
 static void ab_edit_fill(app_state_t *app, int32_t field, double seconds) {
@@ -6150,6 +6327,19 @@ static void ab_edit_fill(app_state_t *app, int32_t field, double seconds) {
     memcpy(app->ab_edit_text[field], text.ptr, n);
     app->ab_edit_text[field][n] = '\0';
     app->ab_edit_length[field] = n;
+}
+
+/* This moment into A or B; the other gives way when they cross (rubraview_ab_take). */
+static void ab_edit_take(app_state_t *app, int32_t f) {
+    double v[2] = { -1.0, -1.0 };
+    for (int32_t k = 0; k < 2; ++k) {
+        if (app->ab_edit_length[k] > 0 &&
+            !rubraview_parse_timecode((u8str_t){ .ptr = app->ab_edit_text[k], .len = app->ab_edit_length[k] }, &v[k])) v[k] = -1.0;
+    }
+    rubraview_ab_take(&v[0], &v[1], play_position(app), f == 0, play_duration(app));
+    ab_edit_fill(app, 0, v[0]);
+    ab_edit_fill(app, 1, v[1]);
+    app->ab_edit_field = f;
 }
 
 static void ab_edit_begin(app_state_t *app) {
@@ -6232,9 +6422,7 @@ static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        put the playhead into the field in hand, as a number, and it can
        then be typed over. */
     if (key_is(combo, "BracketLeft") || key_is(combo, "BracketRight")) {
-        int32_t f = key_is(combo, "BracketLeft") ? 0 : 1;
-        app->ab_edit_field = f;
-        ab_edit_fill(app, f, app->media_position);
+        ab_edit_take(app, key_is(combo, "BracketLeft") ? 0 : 1);
         return true;
     }
     if (key_is(combo, "Backslash")) {
@@ -6271,8 +6459,30 @@ static int32_t px_edit_value(const app_state_t *app, int32_t field) {
     return v;
 }
 
+static int32_t px_edit_fields(const app_state_t *app) { return app->px_edit_crop ? 4 : 2; }
+
+/* The crop's numbers into the box, from the session: after a drag on the picture too. */
+static void px_edit_fill_crop(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
+    rubraview_crop_rect_t c = e->crop_active ? e->crop : (rubraview_crop_rect_t){ 0, 0, e->image_width, e->image_height };
+    px_edit_fill(app, 0, c.x);
+    px_edit_fill(app, 1, c.y);
+    px_edit_fill(app, 2, c.width);
+    px_edit_fill(app, 3, c.height);
+}
+
+static void px_edit_begin_crop(app_state_t *app) {
+    if (app->edit.image_width <= 0 || app->edit.image_height <= 0) { osd_say(app, U8("the picture's size is not known yet")); return; }
+    app->px_edit_crop = true;
+    px_edit_fill_crop(app);
+    app->px_edit_field = 0;
+    app->px_edit_open = true;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
 static void px_edit_begin(app_state_t *app) {
     const rubraview_edit_session_t *e = &app->edit;
+    app->px_edit_crop = false;
     int32_t w = e->resize_width, h = e->resize_height;
     if (w <= 0 || h <= 0) { w = e->crop_active ? e->crop.width : e->image_width; h = e->crop_active ? e->crop.height : e->image_height; }
     if (w <= 0 || h <= 0) { osd_say(app, U8("the picture's size is not known yet")); return; }
@@ -6290,6 +6500,7 @@ static void px_edit_close(app_state_t *app) {
 
 /* The field in hand changed: the other follows the shape. */
 static void px_edit_follow(app_state_t *app) {
+    if (app->px_edit_crop) return;   /* the crop's four numbers stand alone */
     int32_t f = app->px_edit_field;
     int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
     if (rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
@@ -6297,7 +6508,21 @@ static void px_edit_follow(app_state_t *app) {
     }
 }
 
+static u8str_t crop_button_label(const app_state_t *app);
 static bool px_edit_commit(app_state_t *app) {
+    if (app->px_edit_crop) {
+        if (!rubraview_edit_crop_set(&app->edit, px_edit_value(app, 0), px_edit_value(app, 1), px_edit_value(app, 2), px_edit_value(app, 3))) {
+            osd_say(app, U8("the corner must be inside the picture, and the size at least 1 pixel"));
+            return false;
+        }
+        if (app->panel.open) panel_build_edit(app);   /* the ratio is free now, the sizes from the cut */
+        app->edit_shown_valid = false;
+        char line[80];
+        const rubraview_crop_rect_t *c = &app->edit.crop;
+        int n = snprintf(line, sizeof(line), "cut at %d, %d: %d x %d pixels", (int)c->x, (int)c->y, (int)c->width, (int)c->height);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        return true;
+    }
     int32_t f = app->px_edit_field;
     int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
     if (!rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
@@ -6322,8 +6547,12 @@ static bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (px_edit_commit(app)) px_edit_close(app);
         return true;
     }
-    if (key_is(combo, "Tab") || key_is(combo, "Up") || key_is(combo, "Down")) {
-        app->px_edit_field = 1 - app->px_edit_field;
+    if (key_is(combo, "Tab") || key_is(combo, "Down")) {
+        app->px_edit_field = (app->px_edit_field + 1) % px_edit_fields(app);
+        return true;
+    }
+    if (key_is(combo, "Shift+Tab") || key_is(combo, "Up")) {
+        app->px_edit_field = (app->px_edit_field + px_edit_fields(app) - 1) % px_edit_fields(app);
         return true;
     }
     if (key_is(combo, "Backspace")) {
@@ -6849,6 +7078,7 @@ static rubraview_pointer_context_t pointer_context(const app_state_t *app) {
         .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || page_count(app) > 1,
         .zoomed_in = app->zoom > 1.001 || strip_active(app),   /* a drag moves the strip */
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
+        .wheel_turns_pages = !app->media && !strip_active(app),
     };
 }
 
@@ -7446,6 +7676,15 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
     u8str_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
     uint32_t ink = enabled ? COLOR_TEXT : 0x70F0F0F0u;
     uint32_t icon = rubraview_action_icon(app->toolbox_tiles[i].action, facts);
+    if (icon && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "fit_cycle")) {
+        /* The fit's sign above and its short name below, both changing with the fit (owner, 2026-10-15). */
+        rubraview_pal_rect_t top = { tile.x, tile.y + tile.height * 0.06, tile.width, tile.height * 0.58 };
+        rubraview_pal_rect_t bottom = { tile.x, tile.y + tile.height * 0.60, tile.width, tile.height * 0.36 };
+        if (rubraview_pal_render_draw_icon(r, icon, top, tile.height * 0.38, ink)) {
+            rubraview_pal_render_draw_text(r, caption, bottom, tile.height * 0.27, ink, RUBRAVIEW_TEXT_CENTER);
+            return;
+        }
+    }
     if (icon && rubraview_pal_render_draw_icon(r, icon, tile, tile.height * 0.5, ink)) return;
     /* A word longer than five letters ("Stretch") is drawn smaller to stay inside; a caption
        of two rows ("Real\nsize") keeps its size (owner, 2026-10-15). */
@@ -8717,12 +8956,27 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
 
 /* The two points as text, side by side, with the one in hand marked and
    a line saying how the keys and the numbers cross over. */
+static void draw_answer_close(app_state_t *app, rubraview_pal_rect_t box, double dpi) {
+    rubraview_pal_rect_t x = answer_box_close(app, box);
+    if (pal_rect_has(x, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, x, COLOR_CLOSE_HOVER, 2.0);
+    rubraview_pal_render_draw_text(app->renderer, U8("X"), x, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+}
+
 static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->ab_edit_open) return;
-    double box_w = 560.0 * dpi, box_h = 96.0 * dpi;
-    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.62, box_w, box_h };
+    (void)win_w; (void)win_h;
+    rubraview_pal_rect_t box = ab_box_rect(app);
     rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
     rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+    draw_answer_close(app, box, dpi);
+    static const char *const TAKE[2] = { "A = now  [", "B = now  ]" };
+    for (int32_t k = 0; k < 2; ++k) {
+        rubraview_pal_rect_t b = ab_box_button(app, k);
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, b, over ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, cstr(TAKE[k]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
 
     bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
     char line[160];
@@ -8738,21 +8992,40 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
         rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
                                        top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
+    rubraview_pal_rect_t hint = { box.x, box.y + 90.0 * dpi, box.width, 34.0 * dpi };
     rubraview_pal_render_draw_text(app->renderer,
-                                   U8("[ or ] takes this moment  ·  Tab swaps  ·  \\ empties  ·  Enter keeps"),
+                                   U8("Click a field or Tab  ·  \\ empties  ·  Enter keeps  ·  Esc or X leaves"),
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
 static void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->px_edit_open) return;
-    double box_w = 520.0 * dpi, box_h = 96.0 * dpi;
-    if (box_w > win_w - 16.0) box_w = win_w - 16.0;
-    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.62, box_w, box_h };
+    (void)win_w; (void)win_h;
+    rubraview_pal_rect_t box = px_box_rect(app);
     rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
     rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+    draw_answer_close(app, box, dpi);
     bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
-    char line[128];
+    char line[160];
+    if (app->px_edit_crop) {
+        /* The crop: its left and top corner and its size, the field in hand in brackets. */
+        static const char *const NAME[4] = { "X", "Y", "W", "H" };
+        int at = 0;
+        for (int32_t k = 0; k < 4 && at < (int)sizeof(line); ++k) {
+            bool here = app->px_edit_field == k;
+            int m = snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %s%.*s%s", k == 0 ? "" : k == 2 ? "    " : "  ", NAME[k],
+                             here ? "[" : " ", (int)app->px_edit_length[k], app->px_edit_text[k], here ? (caret_lit ? "|]" : " ]") : " ");
+            if (m < 0) break;
+            at += m;
+        }
+        if (at > (int)sizeof(line) - 1) at = (int)sizeof(line) - 1;
+        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
+        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)at }, top, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
+        rubraview_pal_render_draw_text(app->renderer, U8("Pixels from the top left  ·  Tab next  ·  Enter cuts  ·  Esc  ·  or drag on the picture"),
+                                       hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        return;
+    }
     int n = snprintf(line, sizeof(line), "Width %s%.*s%s  x  Height %s%.*s%s  px",
                      app->px_edit_field == 0 ? "[" : " ", (int)app->px_edit_length[0], app->px_edit_text[0],
                      app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ",
@@ -9124,34 +9397,64 @@ static void draw_titlebar(app_state_t *app, double win_w) {
     }
 }
 
-static void draw_chrome(app_state_t *app, double win_w, double win_h) {
-    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
-
-    /* Filmstrip (§3.1): tiles come from pages already decoded; dedicated
-       low-resolution thumbnail decoding arrives with the asynchronous
-       pre-cache worker in M4 (RV-044), where async decode belongs. */
-    if (app->filmstrip.visible && page_count(app) > 0) {
-        double strip_h = FILMSTRIP_THUMB * rubraview_pal_window_dpi_scale(app->window);
-        rubraview_pal_rect_t strip = { 0.0, win_h - strip_h, win_w, strip_h };
-        rubraview_pal_render_fill_rect(app->renderer, strip, COLOR_BAR_FILL, 0.0);
-
+/* The filmstrip (F4, or the wheel's for a while): thumbnails from its own thread, else the
+   page if it is in memory, else the page's number; the page on screen framed. */
+static void draw_wheel_strip(app_state_t *app) {
+    double shown = page_count(app) > 0 ? strip_shown(app) : 0.0;
+    if (shown > 0.0) {
+        /* The thumbnails, the page on screen framed; the wheel's strip fades as it goes (owner, 2026-10-15). */
+        double dpi = rubraview_pal_window_dpi_scale(app->window);
+        rubraview_pal_rect_t strip = strip_rect(app);
+        rubraview_pal_render_fill_rect(app->renderer, strip, strip_fade(COLOR_BAR_FILL, shown), 0.0);
+        double lead = rubraview_filmstrip_lead(&app->filmstrip);
+        int32_t current = current_page_index(app);
         rubraview_virtual_range_t visible = rubraview_filmstrip_visible(&app->filmstrip);
         for (size_t i = 0; i < visible.count; ++i) {
             size_t index = visible.first + i;
-            double x = (double)index * app->filmstrip.thumb_extent - app->filmstrip.scroll_offset;
-            rubraview_pal_rect_t cell = { x, strip.y + 4.0, app->filmstrip.thumb_extent - 8.0, strip_h - 8.0 };
-            rubraview_pal_render_stroke_rect(app->renderer, cell, COLOR_BOX_BORDER, 1.0, 0.0);
-
-            if (index < page_count(app) && app->pages[index].loaded) {
+            if (index >= page_count(app)) break;
+            double x = lead + (double)index * app->filmstrip.thumb_extent - app->filmstrip.scroll_offset;
+            rubraview_pal_rect_t cell = { x + 4.0 * dpi, strip.y + 6.0 * dpi,
+                                          app->filmstrip.thumb_extent - 8.0 * dpi, strip.height - 12.0 * dpi };
+            rubraview_texture_t *tex = NULL;
+            double tw = 0.0, th = 0.0;
+            if (index < app->strip_cell_count && app->strip_cells[index].texture) {
+                tex = app->strip_cells[index].texture;
+                int32_t w = 0, h = 0;
+                rubraview_pal_texture_size(tex, &w, &h);
+                tw = (double)w; th = (double)h;
+            } else if (app->pages[index].loaded && app->pages[index].texture) {
+                tex = app->pages[index].texture;
+                tw = (double)app->pages[index].width; th = (double)app->pages[index].height;
+            }
+            if (tex && tw > 0.0 && th > 0.0) {
+                double s = fmin(cell.width / tw, cell.height / th);   /* whole, its own shape */
                 rubraview_mat3x2_t fit = rubraview_mat3x2_multiply(
-                    rubraview_mat3x2_scale(cell.width / (double)app->pages[index].width,
-                                           cell.height / (double)app->pages[index].height),
-                    rubraview_mat3x2_translate(cell.x, cell.y));
-                rubraview_pal_render_draw_texture(app->renderer, app->pages[index].texture,
-                                                  fit, RUBRAVIEW_INTERP_LINEAR);
+                    rubraview_mat3x2_scale(s, s),
+                    rubraview_mat3x2_translate(cell.x + (cell.width - tw * s) * 0.5, cell.y + (cell.height - th * s) * 0.5));
+                rubraview_pal_render_draw_texture_opacity(app->renderer, tex, fit, RUBRAVIEW_INTERP_LINEAR, shown);
+            } else {
+                char number[24];
+                int n = snprintf(number, sizeof(number), "%zu", index + 1);
+                rubraview_pal_render_fill_rect(app->renderer, cell, strip_fade(COLOR_TILE_FILL, shown), 3.0);
+                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = number, .len = (size_t)n }, cell,
+                                                          14.0 * dpi, strip_fade(COLOR_TEXT, shown), RUBRAVIEW_TEXT_CENTER);
+            }
+            bool here = (int32_t)index == current;
+            bool over = pal_rect_has(cell, app->pointer_x, app->pointer_y);
+            if (here || over) {
+                rubraview_pal_render_stroke_rect(app->renderer, cell, strip_fade(here ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, shown),
+                                                 here ? 3.0 * dpi : 1.5 * dpi, 3.0);
             }
         }
     }
+
+}
+
+static void draw_chrome(app_state_t *app, double win_w, double win_h) {
+    rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+
+    /* Filmstrip (§3.1): under the boxes, over the picture. */
+    draw_wheel_strip(app);
 
     draw_edge_nav(app, win_w, win_h);
 
@@ -10433,7 +10736,7 @@ enum {
     PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
     /* RV-108: the adjust panel's second page, and two more of Export's rows. */
     PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
-    PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
+    PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_CROP_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
@@ -10493,6 +10796,26 @@ static u8str_t px_button_label(const app_state_t *app) {
     return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : U8("Size in pixels...");
 }
 
+/* The cut on the button that types it (owner, 2026-10-15). */
+static u8str_t crop_button_label(const app_state_t *app) {
+    static char label[64];
+    const rubraview_edit_session_t *e = &app->edit;
+    if (!e->crop_active) return U8("Crop: type it, or drag on the picture...");
+    int n = snprintf(label, sizeof(label), "Crop: %d, %d  %d x %d px...", (int)e->crop.x, (int)e->crop.y, (int)e->crop.width, (int)e->crop.height);
+    return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : U8("Crop...");
+}
+
+/* The cut changed (a drag, Trim, the ratio): the buttons and the box say it again. */
+static void crop_shown_again(app_state_t *app) {
+    if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) {
+        int32_t k = rubraview_panel_find(&app->panel, PANEL_CROP_PX);
+        if (k >= 0) app->panel.rows[k].label = crop_button_label(app);
+        k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
+        if (k >= 0) app->panel.rows[k].label = px_button_label(app);
+    }
+    if (app->px_edit_open && app->px_edit_crop) px_edit_fill_crop(app);
+}
+
 static void panel_build_edit(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     app->edit_preview_tries = 0;
@@ -10525,6 +10848,7 @@ static void panel_build_edit(app_state_t *app) {
                                    (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
         rubraview_panel_add_separator(&app->panel);
         rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, U8("Crop ratio"), (int32_t)e->crop_ratio, 5);
+        rubraview_panel_add_button(&app->panel, PANEL_CROP_PX, crop_button_label(app));
         rubraview_panel_add_button(&app->panel, PANEL_TRIM, U8("Trim plain margins"));
         double percent = e->resize_width > 0 && e->image_width > 0
                        ? 100.0 * (double)e->resize_width / (double)(e->crop_active ? e->crop.width : e->image_width) : 100.0;
@@ -11541,7 +11865,7 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         case PANEL_WHITE:       rubraview_edit_set_white_point(&app->edit, (int32_t)v);
                                 rubraview_panel_set_value(&app->panel, PANEL_BLACK,
                                                           (double)app->edit.params.black_point); break;
-        case PANEL_CROP_RATIO:  rubraview_edit_crop_set_ratio(&app->edit, (rubraview_crop_ratio_t)(int32_t)v); break;
+        case PANEL_CROP_RATIO:  rubraview_edit_crop_set_ratio(&app->edit, (rubraview_crop_ratio_t)(int32_t)v); crop_shown_again(app); break;
         /* RV-108 */
         case PANEL_BLUR_KIND:    app->edit.blur_box = v > 0.5; break;
         case PANEL_SHARPEN_KIND: app->edit.sharpen_laplacian = v > 0.5; break;
@@ -11578,6 +11902,9 @@ static void panel_button(app_state_t *app, int32_t index) {
             break;
         case PANEL_RESIZE_PX:
             px_edit_begin(app);
+            break;
+        case PANEL_CROP_PX:
+            px_edit_begin_crop(app);
             break;
         case PANEL_TRIM: {
             /* RV-108 (§3.13): the plain margin of a scan — white, or black when there is no white one —
@@ -16464,6 +16791,9 @@ static void tick_timers(app_state_t *app, double dt) {
             if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_layout")) {
                 hint = cstr(layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)));
             }
+            if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "fit_cycle")) {
+                hint = cstr(rubraview_fit_tile_hint(app->fit_mode));   /* the fit it is in, in words (owner, 2026-10-15) */
+            }
         }
         if (hint.ptr != app->hint.ptr) {
             app->hint = hint;
@@ -17309,8 +17639,13 @@ static void finish_open(app_state_t *app, size_t start_page) {
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     double scale = rubraview_pal_window_dpi_scale(app->window);
+    bool strip_kept = app->filmstrip.visible;   /* the menu's toggle outlives a book */
     app->filmstrip = rubraview_filmstrip_create(page_count(app), FILMSTRIP_THUMB * scale, (double)win_w);
-    rubraview_filmstrip_reveal(&app->filmstrip, start_page);
+    app->filmstrip.visible = strip_kept;
+    strip_cells_reset(app);
+    app->strip_peek_until = 0.0;
+    strip_follow(app, start_page);
+    app->filmstrip.scroll_offset = app->strip_target;
     build_slides(app);
     update_precache(app);
     /* A file opened straight onto an animation: it plays from the start,
@@ -19231,6 +19566,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         int32_t ix = 0, iy = 0;
                         if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
                             rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0, ix, iy);
+                            crop_shown_again(&app);
                         }
                         app.pointer_x = event.mouse.x;
                         app.pointer_y = event.mouse.y;
@@ -19402,6 +19738,39 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
+                    /* The A-B box and the pixel box answer a click of their own: the X leaves,
+                       the A-B box's buttons take this moment, a field is chosen (owner, 2026-10-15).
+                       Elsewhere the click goes on (the seek bar, a crop drag). */
+                    /* The strip at the bottom: a thumbnail clicked is the page to go to (owner, 2026-10-15).
+                       The floating boxes are drawn over it and keep their own clicks. */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && !app.panel.open) {
+                        rubraview_tile_metrics_t m = tile_metrics(rubraview_pal_window_dpi_scale(app.window));
+                        rubraview_rect_t tb = rubraview_box_bounds(&app.toolbox, &m);
+                        bool on_box = app.toolbox.state != RUBRAVIEW_BOX_DETACHED && !app.chrome_hidden &&
+                                      rubraview_rect_contains(tb, event.mouse.x, event.mouse.y);
+                        if (!on_box && strip_press(&app, event.mouse.x, event.mouse.y)) break;
+                    }
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.ab_edit_open) {
+                        rubraview_pal_rect_t box = ab_box_rect(&app);
+                        if (pal_rect_has(answer_box_close(&app, box), event.mouse.x, event.mouse.y)) { ab_edit_close(&app); break; }
+                        if (pal_rect_has(ab_box_button(&app, 0), event.mouse.x, event.mouse.y)) { ab_edit_take(&app, 0); break; }
+                        if (pal_rect_has(ab_box_button(&app, 1), event.mouse.x, event.mouse.y)) { ab_edit_take(&app, 1); break; }
+                        if (pal_rect_has(box, event.mouse.x, event.mouse.y)) {
+                            app.ab_edit_field = event.mouse.x < box.x + box.width * 0.5 ? 0 : 1;
+                            break;
+                        }
+                    }
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.px_edit_open) {
+                        rubraview_pal_rect_t box = px_box_rect(&app);
+                        if (pal_rect_has(answer_box_close(&app, box), event.mouse.x, event.mouse.y)) { px_edit_close(&app); break; }
+                        if (pal_rect_has(box, event.mouse.x, event.mouse.y)) {
+                            int32_t n = px_edit_fields(&app);
+                            int32_t k = (int32_t)((event.mouse.x - box.x) / box.width * (double)n);
+                            app.px_edit_field = k < 0 ? 0 : k >= n ? n - 1 : k;
+                            break;
+                        }
+                    }
+
                     /* §3.13: with the workbench open, a drag on the picture
                        is the crop rectangle. It is asked before the panel,
                        whose "a click outside closes it" rule would otherwise
@@ -19515,6 +19884,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         if (app.edit.crop.width < 4 || app.edit.crop.height < 4) {
                             app.edit.crop_active = false;
                         }
+                        crop_shown_again(&app);
                         break;
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) {
@@ -19546,6 +19916,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
                     if (event.mouse.modifiers == 0 &&
                         zoom_tile_wheel(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta)) break;
+                    if (event.mouse.modifiers == 0 && !app.media && strip_shown(&app) > 0.0 &&
+                        pal_rect_has(strip_rect(&app), event.mouse.x, event.mouse.y)) {
+                        /* Over the strip the wheel goes through the thumbnails, a page a notch. */
+                        apply_intent(&app, event.mouse.wheel_delta > 0.0 ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE);
+                        strip_peek(&app);
+                        break;
+                    }
                     rubraview_pointer_context_t ctx = pointer_context(&app);
                     uint32_t wheel_mods = event.mouse.modifiers;
                     /* D-109: while a film or music plays the plain wheel is the volume
@@ -19567,6 +19944,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     apply_intent(&app, wheel_intent);
+                    if (wheel_intent == RUBRAVIEW_INTENT_NEXT_PAGE || wheel_intent == RUBRAVIEW_INTENT_PREV_PAGE) strip_peek(&app);
                     break;
                 }
 
@@ -19668,6 +20046,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.picker_generation++;   /* what is still being made is for nobody */
             if (app.thumbs) rubraview_pal_thumbs_generation(app.thumbs, app.picker_generation);
         }
+        strip_step(&app, dt);   /* the wheel's strip: slide, fade, thumbnails */
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
         arc_job_poll(&app, false);
@@ -19695,6 +20074,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                              app.seekfan.down ||                      /* a seek button held: its choices open and light up */
                              app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE ||
                              app.picker_thumbs_arrived ||   /* D-34: a picture came in; the thread wakes the loop */
+                             app.strip_arrived ||           /* a strip thumbnail came in */
+                             (!app.filmstrip.visible && strip_shown(&app) > 0.0) ||   /* the wheel's strip is up or fading */
+                             app.filmstrip.scroll_offset != app.strip_target ||      /* it slides */
                              app.tiles_arrived;             /* D-40: a sharper tile came in */
         if (handled > 0) last_input_seconds = now;
         if (handled > 0 || media_playing || others_moving) last_busy_seconds = now;
@@ -19798,6 +20180,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     picker_thumbs_free(&app);
     rubraview_pal_thumbs_stop(app.thumbs);   /* D-34: before the renderer and the window go */
+    rubraview_pal_thumbs_stop(app.strip_thumbs);
+    strip_cells_free(&app);
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
     save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
     arc_job_poll(&app, true);    /* D-88: an archive being written again is stopped; the old one stands */

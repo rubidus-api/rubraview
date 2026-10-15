@@ -63,16 +63,14 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
         return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
     }
 
-    /* The wheel does *not* turn pages (owner, 2026-09-09).
-     *
-     * It used to, and that is a common thing for a viewer to do, but it
-     * makes the wheel mean two different things depending on whether the
-     * picture happens to be taller than the window — so a small scroll
-     * on one image nudges it, and the same gesture on the next image
-     * jumps to a different file. Turning pages stays on the keys, where
-     * it is deliberate. Ctrl+wheel still zooms, and a scrollable image
-     * still scrolls. */
-    (void)forward;
+    /* On a picture that fits, the wheel turns pages: away from you the one
+     * before, towards you the next (owner, 2026-10-15, reversing 2026-09-09).
+     * A picture larger than the window is left alone, so one notch never
+     * nudges it here and jumps to another file there; a film or a song
+     * has its own wheel. */
+    if (ctx->wheel_turns_pages && !ctx->zoomed_in) {
+        return forward ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
+    }
     return RUBRAVIEW_INTENT_NONE;
 }
 
@@ -128,6 +126,18 @@ const char *rubraview_fit_tile_name(rubraview_fit_mode_t fit) {
         case RUBRAVIEW_FIT_STRETCH:     return "Stretch";
         case RUBRAVIEW_FIT_ACTUAL_SIZE: return "Real\nsize";
         default:                        return "Fit";
+    }
+}
+
+const char *rubraview_fit_tile_hint(rubraview_fit_mode_t fit) {
+    /* One string a fit, so a change of fit is a change of hint (owner, 2026-10-15). */
+    switch (fit) {
+        case RUBRAVIEW_FIT_WIDTH:       return "Fit: to the window's width. Click: fit to its height";
+        case RUBRAVIEW_FIT_HEIGHT:      return "Fit: to the window's height. Click: smart fit";
+        case RUBRAVIEW_FIT_SMART:       return "Fit: smart (a large picture made smaller, a small one left at 100%). Click: stretch to fill";
+        case RUBRAVIEW_FIT_STRETCH:     return "Fit: stretched to fill the window. Click: fit to the window";
+        case RUBRAVIEW_FIT_ACTUAL_SIZE: return "Fit: none, real size. Click: fit to the window";
+        default:                        return "Fit: the whole picture in the window. Click: fit to its width";
     }
 }
 

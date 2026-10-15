@@ -56,6 +56,7 @@ typedef struct rubraview_pointer_context {
     bool comic_mode;             /* §3.7.3: the click zones only flip pages in comic viewing */
     bool zoomed_in;
     bool scrollable_vertically;
+    bool wheel_turns_pages;      /* a picture or a book, not a film or a song (owner, 2026-10-15) */
 } rubraview_pointer_context_t;
 
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click);
@@ -100,6 +101,9 @@ rubraview_fit_mode_t rubraview_fit_cycle_next(rubraview_fit_mode_t fit);
 
 /** A fit's name on its tile: "Fit", "Fit W", "Fit H", "Smart", "Stretch", and real size on two rows. */
 const char *rubraview_fit_tile_name(rubraview_fit_mode_t fit);
+
+/** What the fit tile says when the pointer rests on it: the fit it is in, and that a click goes on to the next. */
+const char *rubraview_fit_tile_hint(rubraview_fit_mode_t fit);
 
 /**
  * The arrow keys over a picture larger than the window (owner, 2026-10-14):
