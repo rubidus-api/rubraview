@@ -173,6 +173,10 @@ const char *rubraview_default_keymap(void) {
        nudged half a second at a time. */
     "subtitle_earlier = \"Z\"\n"
     "subtitle_later = \"X\"\n"
+    /* A tenth of a second at a time, and back to the file's own times (owner, 2026-10-16). */
+    "subtitle_earlier_fine = \"Shift+Z\"\n"
+    "subtitle_later_fine = \"Shift+X\"\n"
+    "subtitle_sync_reset = \"Alt+Z\"\n"
     /* §3.16.2 / R135: the next sound track, and the next subtitle. */
     "next_audio_track = \"A\"\n"
     "next_subtitle_track = \"C\"\n"

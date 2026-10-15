@@ -39,7 +39,9 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
     }
     if (rubraview_u8_eq_lit(action, "toggle_subtitle_window")) st.enabled = f->media;
     if (rubraview_u8_eq_lit(action, "extract_subtitles")) st.enabled = f->media && f->video;
-    if (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later")) st.enabled = f->subtitle_shown;
+    if (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later") ||
+        rubraview_u8_eq_lit(action, "subtitle_earlier_fine") || rubraview_u8_eq_lit(action, "subtitle_later_fine") ||
+        rubraview_u8_eq_lit(action, "subtitle_sync_reset")) st.enabled = f->subtitle_shown;
 
     static const struct { const char *action; size_t offset; } TOGGLES[] = {
         { "toggle_slideshow",      offsetof(rubraview_action_facts_t, slideshow) },

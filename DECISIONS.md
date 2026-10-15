@@ -1363,3 +1363,9 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: the bar's left is the page's name, whole when it fits, else the longest beginning that fits, "...", and its last ten characters (UTF-8 code points, `rubraview_middle_ellipsis`); its right is `rubraview_osd_right`: "3 / 120", width x height and zoom for a picture, the format in capitals from the name, the size ("2.4 MB"), "shown reduced". The size is read once a page. A film or a song shows its place, format and size.
 - Consequences: this reverses 2026-09-29's "the name and the position are on the toolbox's line: not shown twice" for the bar, which is off until asked for.
 - Amended (owner, the same day: "정보 막대에서 제일 오른쪽은 15/15의 순서고, 그 왼쪽이 해상도여야 할 것 같아요. 그리고 파일 형식은 불필요해서 정보막대에는요. 배율은 없애주세요."): the right half reads "shown reduced", the size, the resolution, and the place at the very right; the format and the zoom are left out.
+
+## 2026-10-16: D-144 Subtitle sync by tenths, reset, and in sight
+
+- Status: Accepted (owner 2026-10-16: "자막 싱크 보완 처리해 주세요", the three items offered: a reset, a finer step, the value in sight)
+- Decision: `Shift+Z` / `Shift+X` (`subtitle_earlier_fine` / `subtitle_later_fine`) move the subtitles 0.1 s; `Alt+Z` (`subtitle_sync_reset`) sets the offset back to 0; Subtitles in the menu lists "Earlier 0.1 s", "Later 0.1 s", "Sync reset". The offset is kept to the millisecond (`rubraview_subtitle_shift`), so mixed steps come back to 0 exactly. The playback line under the toolbox's bar ends with "sub +0.6 s" while it is not 0; the OSD says "subtitles in the file's own time" at 0.
+- Consequences: the keys are the implementer's picks (`Ctrl+Z` is Undo, so Alt+Z for the reset). The offset is still per film and written into the file only by the list window's Save (D-131).

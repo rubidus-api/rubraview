@@ -191,6 +191,22 @@ size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, u8s
 void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later);
 
 /**
+ * The sync moved by `seconds` (owner, 2026-10-16: a tenth of a second with
+ * Shift+Z / Shift+X), kept to the millisecond so that steps of 0.1 and 0.5
+ * come back to 0 exactly. 0 seconds puts the sync back where the file has it.
+ */
+void rubraview_subtitle_shift(rubraview_subtitle_track_t *track, double seconds);
+
+/** The sync back to the file's own times (Alt+Z). */
+void rubraview_subtitle_sync_reset(rubraview_subtitle_track_t *track);
+
+/**
+ * What the playback line says of the sync: "sub +0.6 s" (a minus when
+ * earlier), empty when it is 0. Written into `buffer`.
+ */
+u8str_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds);
+
+/**
  * §3.16.1: the subtitle files that go with a video, found by sharing its
  * base name. Returns how many were written to `out`.
  */

@@ -5907,7 +5907,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
             int n = snprintf(line, sizeof(line), "subtitles %.*s", (int)text.len, text.ptr);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
-    } else if (app->media && (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later"))) {
+    } else if (app->media && (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later") ||
+                              rubraview_u8_eq_lit(action, "subtitle_earlier_fine") || rubraview_u8_eq_lit(action, "subtitle_later_fine") ||
+                              rubraview_u8_eq_lit(action, "subtitle_sync_reset"))) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
         /* A DVD's or a Blu-ray's pictures are subtitles too, and they are
@@ -5915,14 +5917,19 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->subtitle.count == 0 && app->vobsub.count == 0 && app->pgs.count == 0) {
             osd_say(app, U8("no subtitles are showing"));
         } else {
-            rubraview_subtitle_nudge(&app->subtitle, rubraview_u8_eq_lit(action, "subtitle_later"));
+            /* Half a second (Z / X), a tenth (Shift), or back to the file's own times (Alt+Z) (owner, 2026-10-16). */
+            if (rubraview_u8_eq_lit(action, "subtitle_sync_reset")) rubraview_subtitle_sync_reset(&app->subtitle);
+            else if (rubraview_u8_eq_lit(action, "subtitle_earlier_fine")) rubraview_subtitle_shift(&app->subtitle, -0.1);
+            else if (rubraview_u8_eq_lit(action, "subtitle_later_fine")) rubraview_subtitle_shift(&app->subtitle, 0.1);
+            else rubraview_subtitle_nudge(&app->subtitle, rubraview_u8_eq_lit(action, "subtitle_later"));
             app->subs_dirty = true;   /* the list's Save lights: the offset can be written in */
             if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
                 app->subtitle_offset_for = app->source.pages[app->media_page].path;
                 app->subtitle_offset_seconds = app->subtitle.offset_seconds;
             }
             char line[96];
-            int n = snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
+            int n = app->subtitle.offset_seconds == 0.0 ? snprintf(line, sizeof(line), "subtitles in the file's own time")
+                                                        : snprintf(line, sizeof(line), "subtitles %+.1f s", app->subtitle.offset_seconds);
             if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
         }
     } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_stop")) {
@@ -7585,6 +7592,12 @@ static int strip_place_text(const app_state_t *app, int32_t hovered, char *place
         bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
         n = (int)rubraview_media_status(place, size, app->media_position, app->media_info.duration_seconds,
                                         volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
+        /* The sync moved by hand stays in sight while it is not nought (owner, 2026-10-16). */
+        char sync[32];
+        u8str_t moved = rubraview_subtitle_offset_text(sync, sizeof(sync), app->subtitle.offset_seconds);
+        if (moved.len > 0 && n > 0 && (size_t)n + 3 + moved.len < size) {
+            n += snprintf(place + n, size - (size_t)n, "   %.*s", (int)moved.len, moved.ptr);
+        }
     }
     if (anim_plays(app) && !app->pagebar_dragging && hovered < 0) {
         /* D-82: an animation's time, and its speed when that is not 1x. */

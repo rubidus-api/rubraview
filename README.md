@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.93** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.93/rubraview-v0.0.93.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.93/rubraview-v0.0.93.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.94** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -153,6 +153,9 @@ ships with, so it cannot drift from them.
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
+| `Shift+Z` | Subtitles a tenth of a second earlier |
+| `Shift+X` | Subtitles a tenth of a second later |
+| `Alt+Z` | Subtitles back to the file's own times |
 | `A` | Next sound track |
 | `C` | Next subtitles |
 | `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |

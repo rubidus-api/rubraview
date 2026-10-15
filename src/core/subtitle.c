@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* ---- shared scanning ---- */
 
@@ -640,8 +641,27 @@ const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_t
 }
 
 void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later) {
+    rubraview_subtitle_shift(track, later ? 0.5 : -0.5);
+}
+
+void rubraview_subtitle_shift(rubraview_subtitle_track_t *track, double seconds) {
     if (!track) return;
-    track->offset_seconds += later ? 0.5 : -0.5;
+    /* To the millisecond: ten steps of 0.1 are one second, not 0.9999999. */
+    track->offset_seconds = (double)llround((track->offset_seconds + seconds) * 1000.0) / 1000.0;
+}
+
+void rubraview_subtitle_sync_reset(rubraview_subtitle_track_t *track) {
+    if (track) track->offset_seconds = 0.0;
+}
+
+u8str_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds) {
+    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    buffer[0] = '\0';
+    if (fabs(offset_seconds) < 0.0005) return (u8str_t){ .ptr = buffer, .len = 0 };
+    int n = snprintf(buffer, buffer_size, "sub %+.1f s", offset_seconds);
+    if (n < 0) { buffer[0] = '\0'; n = 0; }
+    size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
+    return (u8str_t){ .ptr = buffer, .len = len };
 }
 
 u8str_t rubraview_subtitle_language_tag(u8str_t video_path, u8str_t subtitle_path) {

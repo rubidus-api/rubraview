@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.93** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.93/rubraview-v0.0.93.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.93/rubraview-v0.0.93.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.94** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.94/rubraview-v0.0.94.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -152,6 +152,9 @@
 | `Ctrl+\` | 보통 속도 |
 | `Z` | 자막 0.5초 빠르게 |
 | `X` | 자막 0.5초 늦게 |
+| `Shift+Z` | 자막 0.1초 빠르게 |
+| `Shift+X` | 자막 0.1초 늦게 |
+| `Alt+Z` | 자막 싱크를 원래대로 |
 | `A` | 다음 소리 트랙 |
 | `C` | 다음 자막 |
 | `Shift+C` | 영상의 자막을 별도 창의 목록으로 — 클릭하면 그 자막으로 이동, 체크박스로 선택, 앞으로/뒤로 버튼으로 선택한 자막 이동 |

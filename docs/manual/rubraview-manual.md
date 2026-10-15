@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.93.exe              the viewer, as built
-dist/rubraview-v0.0.93/                 the release bundle
-dist/rubraview-v0.0.93.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.94.exe              the viewer, as built
+dist/rubraview-v0.0.94/                 the release bundle
+dist/rubraview-v0.0.94.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -592,7 +592,11 @@ While it does:
   you turn to a picture, and steps aside on its own while a film with
   sound is playing.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
-  half a second earlier or later.
+  half a second earlier or later, `Shift+Z` / `Shift+X` a tenth of a second,
+  and `Alt+Z` puts them back to the file's own times (Subtitles in the menu
+  has the same). The move is for this film only and leaves the file alone;
+  while it is not nought the line under the toolbox's bar says so
+  (`sub -0.3 s`).
 - Text subtitles sit in a shaded box, and the box always holds the whole
   subtitle: one of many lines, or one long enough to wrap, makes the box
   grow from the edge it is anchored by (it stays inside the window, and
@@ -1127,6 +1131,9 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
+| `Shift+Z` | Subtitles a tenth of a second earlier |
+| `Shift+X` | Subtitles a tenth of a second later |
+| `Alt+Z` | Subtitles back to the file's own times |
 | `A` | Next sound track |
 | `C` | Next subtitles |
 | `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
