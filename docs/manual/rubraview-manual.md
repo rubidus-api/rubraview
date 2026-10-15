@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.87.exe              the viewer, as built
-dist/rubraview-v0.0.87/                 the release bundle
-dist/rubraview-v0.0.87.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.88.exe              the viewer, as built
+dist/rubraview-v0.0.88/                 the release bundle
+dist/rubraview-v0.0.88.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -668,8 +668,11 @@ whether the box stays open when the pointer leaves — click it to switch.
 The toolbox is a strip: the seek bar (click or drag to go there) with the
 file's name under it, then small icon buttons in groups — moving between
 files, playing, sound, size, turning and layout, files, the window — each
-group on a row of its own, and on more rows when it is longer than the
-strip is wide (the grip beside the pin sets how many buttons a row). A
+group in a rounded frame of its own. Groups go along a row while they fit
+and the next one starts a new row, as words wrap; a group longer than a row
+has rows of its own (the grip beside the pin sets how many buttons a row).
+An open box stays on the side of its anchor it opened on, so a longer name
+or another layout does not make it jump. A
 film's and a song's first row is Play / Pause, Stop, five seconds back and
 forward, then the file before and after. A
 long name takes two or three rows instead of being cut. Pointing at a
@@ -698,8 +701,10 @@ ratio over (9:16; paper lying down). `Shift+A` goes round them; **Original**
 puts the file's own shape back. The choice lasts until the viewer is closed.
 
 The two floating boxes start in opposite corners, the menu box top left and
-the toolbox bottom right. They are always whole inside the window, and when
-the window changes size each stays the same part of the way across and down.
+the toolbox bottom right; the menu box sits below where the title bar comes,
+and the title bar's box button puts them back there. They are always whole
+inside the window, and when the window changes size each stays the same
+part of the way across and down.
 
 100 % is the size the fit option gives. The zoom button shows the zoom from
 there (`100%`, `250%`). Real size — one screen pixel for each of the
@@ -707,8 +712,8 @@ picture's own — is 0 %, and the button reads `0%` while it is on screen.
 A tap on the button goes round: `0%`, then 20 % to 200 % by twenties, then
 `0%` again. The wheel turned over the button, or `Ctrl` and the wheel over
 the picture, zooms by one step — 10 % as it comes (Settings > Viewer > Zoom
-step) — to the next round figure: 100 %, 110 %, 120 %. `Ctrl+0` puts 100 %
-back with the picture in the middle; `0` or `4` shows real size.
+step) — to the next round figure: 100 %, 110 %, 120 %. `0` puts 100 %
+back with the picture in the middle; `4` shows real size.
 
 The picture follows the pointer when it is dragged, at any zoom. When it
 is larger than the window the arrow keys move it too: a seventh of the
@@ -814,7 +819,8 @@ file and on what opened it (FFmpeg reads more out of a container than
 Windows does).
 
 The title bar (point at the top edge) has, after the pin, a `Size` button:
-press it and drag to size the window from its bottom-right corner. A double
+press it and drag, and it stays under the pointer — the top and the right
+edge follow it, the bottom and the left stay. A double
 click on the title bar maximises the window or gives it back its size.
 
 `Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
@@ -1030,10 +1036,10 @@ listed under a later heading only means that while that is on screen.
 | `1` | Fit to the window |
 | `2` | Fit to the width |
 | `3` | Fit to the height |
-| `4`, `0` | Actual size (1:1) |
-| `Ctrl+0` | Zoom back to 100%: the size the fit option gives, centred |
+| `4` | Actual size (1:1) |
+| `0` | Zoom back to 100%: the size the fit option gives, centred |
 | `5` | Smart fit (shrink only) |
-| `Ctrl+1` | Stretch to fill |
+| `6` | Stretch to fill |
 | `Shift+A` | Shape shown in: the file's own, 4:3, 16:9, cinema, paper ... (round) |
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |

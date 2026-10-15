@@ -101,10 +101,10 @@ const char *rubraview_default_keymap(void) {
     "fit_window = \"1\"\n"
     "fit_width = \"2\"\n"
     "fit_height = \"3\"\n"
-    "actual_size = \"4, 0\"\n"
-    "zoom_reset = \"Ctrl+0\"\n"            /* back to the fitted size, which is 100% (D-97) */
+    "actual_size = \"4\"\n"
+    "zoom_reset = \"0\"\n"                 /* back to the fitted size, which is 100% (D-97); 4 is real size (owner, 2026-10-15) */
     "smart_fit = \"5\"\n"
-    "fit_stretch = \"Ctrl+1\"\n"
+    "fit_stretch = \"6\"\n"
     "aspect_cycle = \"Shift+A\"\n"       /* the shape the picture is shown in, round (D-94) */
     "toggle_fit_lock = \"L\"\n"
     "zoom_in = \"Plus\"\n"

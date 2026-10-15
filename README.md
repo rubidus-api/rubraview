@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.87** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.87/rubraview-v0.0.87.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.87/rubraview-v0.0.87.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.88** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.88/rubraview-v0.0.88.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.88/rubraview-v0.0.88.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -99,10 +99,10 @@ ships with, so it cannot drift from them.
 | `1` | Fit to the window |
 | `2` | Fit to the width |
 | `3` | Fit to the height |
-| `4`, `0` | Actual size (1:1) |
-| `Ctrl+0` | Zoom back to 100%: the size the fit option gives, centred |
+| `4` | Actual size (1:1) |
+| `0` | Zoom back to 100%: the size the fit option gives, centred |
 | `5` | Smart fit (shrink only) |
-| `Ctrl+1` | Stretch to fill |
+| `6` | Stretch to fill |
 | `Shift+A` | Shape shown in: the file's own, 4:3, 16:9, cinema, paper ... (round) |
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |

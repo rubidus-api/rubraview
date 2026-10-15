@@ -324,7 +324,8 @@ void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool vi
 /** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */
 void rubraview_pal_window_begin_drag(rubraview_window_t *window);
 /* The title bar's Resize button (owner, 2026-09-29): the OS sizes the
-   window from its bottom-right corner while the button is held. */
+   window from its top-right corner while the button is held, so the
+   button follows the pointer (owner, 2026-10-15). */
 void rubraview_pal_window_begin_resize(rubraview_window_t *window);
 /* Settings › General › Frameless window (owner, 2026-09-30): the zero-margin
    canvas, or Windows' own title bar and borders. Left alone in fullscreen,

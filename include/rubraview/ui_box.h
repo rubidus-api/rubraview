@@ -100,11 +100,17 @@ typedef struct rubraview_box {
     double idle_seconds;         /* time since the pointer left the box */
     int32_t tile_count;          /* how many tiles the expanded grid holds */
     rubraview_box_home_t home;   /* the corner "put it back" returns it to */
+    double home_top;             /* a top corner's room kept clear above it: the title bar's (owner, 2026-10-15) */
     /* The client area the box opens in, set by the caller each frame; 0
        when unknown. Known, an open grid sits beside its anchor instead of
        over it — below, or above when there is no room below — and is
        shifted to stay inside (RFC-0002 §4: ten tiles by a corner). */
     double view_width, view_height;
+    /* Which side of its anchor the open grid took: 1 below, -1 above, 0 not
+       yet (rubraview_box_keep_side). Kept while it stays open, so a grid
+       that grows — a longer name, another layout — does not jump to the
+       other side (owner, 2026-10-15). */
+    int32_t open_side;
     bool timeline;               /* toolbox: a seek bar in the header row (a film or music) */
     /* D-124: the strip in groups. The name's rows (0 is 1), and how many
        buttons each group holds, in order (group_count 0: all in one). */
@@ -125,7 +131,7 @@ typedef struct rubraview_box {
 /*
  * The toolbox strip (owner, 2026-09-22): for a film or music, the seek
  * bar on the top row; the file's name under it; then
- * the buttons, `strip_columns` to a row, as many rows as they need. All
+ * the buttons in their groups, up to `strip_columns` to a line. All
  * rectangles are relative to the body's top-left, so the detached window
  * lays itself out with the same numbers.
  */
@@ -134,14 +140,21 @@ typedef struct rubraview_toolbox_layout {
     rubraview_rect_t timeline, title;
     double buttons_y;
     int32_t columns, rows;
-    /* D-124: the name's rows and one row's height; the groups, each
-       starting a row of its own and going on to more when it is longer
-       than `columns`, with `group_gap` more between two groups. */
+    /* D-124: the name's rows and one row's height. The groups (owner,
+       2026-10-15) go along a line while its buttons are no more than
+       `columns`, then on the next, as words do; a group longer than a line
+       has lines of its own. Each is framed: `group_rects` (relative to the
+       body) hold its buttons `group_pad` in, `group_gap` apart. `rows` counts
+       the rows of buttons. The strip is as wide as its widest line, and
+       never narrower than `columns` buttons in one frame. */
     int32_t title_lines;
     double title_line_height;
     double group_gap;
+    double group_pad;
     int32_t group_count;
     int32_t group_sizes[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
+    int32_t group_columns[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
+    rubraview_rect_t group_rects[RUBRAVIEW_TOOLBOX_MAX_GROUPS];
 } rubraview_toolbox_layout_t;
 
 /* What the strip holds (D-124): `count` buttons in `group_count` groups
@@ -234,6 +247,12 @@ double rubraview_box_share_of(double position, double window, double size, doubl
  */
 void rubraview_box_snap_home(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                              double window_width, double window_height);
+
+/**
+ * Once a frame: an open box keeps the side of its anchor it opened on; a
+ * folded one (or one in a window of its own) forgets it.
+ */
+void rubraview_box_keep_side(rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);
 
 /** The box's current outer rectangle: the anchor when collapsed, the whole grid when expanded. */
 rubraview_rect_t rubraview_box_bounds(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics);

@@ -178,6 +178,8 @@ static double g_gutter = 8.0;
 #define COLOR_BOX_FILL    0xE01A1A1Au
 #define COLOR_BOX_BORDER  0x30FFFFFFu
 #define COLOR_TILE_FILL   0xE0242424u
+#define COLOR_GROUP_FILL   0xE0303A4Au   /* a toolbox group's ground (owner, 2026-10-15) */
+#define COLOR_GROUP_BORDER 0xA08A9BB8u
 #define COLOR_TEXT        0xFFF0F0F0u
 #define COLOR_BAR_FILL    0xE1141414u
 #define COLOR_CLOSE_HOVER 0xFFE81123u
@@ -6400,7 +6402,7 @@ static void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const ru
 
 /* Its size: the anchor bar on top, the profile's grid under it. */
 static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
-                            double ox, double oy, int32_t hovered);
+                            double ox, double oy, int32_t hovered, double opacity);
 static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubraview_pal_rect_t tile, int32_t i,
                               const rubraview_action_facts_t *facts, bool hovered, uint32_t fill, uint32_t border);
 
@@ -6555,7 +6557,7 @@ static void draw_toolbox_window(app_state_t *app) {
     for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
         if (rubraview_rect_contains(toolbox_window_tile(app, &m, i), app->toolbox_window_pointer_x, app->toolbox_window_pointer_y)) hovered = i;
     }
-    draw_strip_head(app, r, &l, 0.0, m.anchor_size, hovered);
+    draw_strip_head(app, r, &l, 0.0, m.anchor_size, hovered, 100.0);
     for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
         rubraview_rect_t t = toolbox_window_tile(app, &m, i);
         draw_strip_button(app, r, (rubraview_pal_rect_t){ t.x, t.y, t.width, t.height }, i, &facts, i == hovered,
@@ -6831,7 +6833,9 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
-            /* Both boxes back to their corners, inside the window. */
+            /* Both boxes back to their corners, inside the window; the menu
+               box below where the title bar comes (owner, 2026-10-15). */
+            app->menubox.home_top = app->titlebar.height;
             rubraview_box_snap_home(&app->menubox, &metrics, (double)win_w, (double)win_h);
             if (app->toolbox_window) toolbox_dock(app, 0.0, 0.0);
             rubraview_box_snap_home(&app->toolbox, &metrics, (double)win_w, (double)win_h);
@@ -7186,7 +7190,9 @@ static double strip_place_width(int n, double line_height) {
 static void strip_title_plan(app_state_t *app) {
     rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_tile_metrics_t sized = rubraview_box_metrics(&app->toolbox, &base);
-    rubraview_toolbox_layout_t l = rubraview_toolbox_layout(&sized, 0, false);
+    rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(&app->toolbox);
+    shape.count = app->toolbox_tile_count;
+    rubraview_toolbox_layout_t l = rubraview_toolbox_layout_shaped(&sized, &shape);   /* its width follows its lines */
     double width = l.title.width, line = sized.title_height, font = line * 0.72;
     u8str_t name = page_count(app) > 0 ? page_display_name(app, (size_t)current_page_index(app)) : (u8str_t){ .ptr = "", .len = 0 };
     char place[96];
@@ -7243,7 +7249,16 @@ static void strip_title_plan(app_state_t *app) {
 }
 
 static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
-                            double ox, double oy, int32_t hovered) {
+                            double ox, double oy, int32_t hovered, double opacity) {
+    /* Each group in a frame of its own (owner, 2026-10-15): a rounded
+       ground of another colour, its edge drawn plain, under the buttons. */
+    double round = l->group_pad * 1.5;
+    for (int32_t k = 0; k < l->group_count; ++k) {
+        rubraview_rect_t g = l->group_rects[k];
+        rubraview_pal_rect_t f = { ox + g.x, oy + g.y, g.width, g.height };
+        rubraview_pal_render_fill_rect(r, f, rubraview_box_fade(COLOR_GROUP_FILL, opacity), round);
+        rubraview_pal_render_stroke_rect(r, f, rubraview_box_fade(COLOR_GROUP_BORDER, opacity), l->group_pad * 0.4, round);
+    }
     if (l->timeline.width > 0.0) {
         rubraview_pal_rect_t track = { ox + l->timeline.x, oy + l->timeline.y + l->timeline.height * 0.35,
                                        l->timeline.width, l->timeline.height * 0.3 };
@@ -7362,7 +7377,7 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
         rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(box);
         rubraview_toolbox_layout_t l = rubraview_toolbox_layout_shaped(&sized, &shape);
-        draw_strip_head(app, app->renderer, &l, bounds.x, bounds.y, hovered);
+        draw_strip_head(app, app->renderer, &l, bounds.x, bounds.y, hovered, opacity);
     }
 
     for (int32_t i = 0; i < box->tile_count; ++i) {
@@ -18799,11 +18814,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.rename_favorite = -1;
     app.fav_press = -1;
     app.toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */
-    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 24.0 * dpi, 24.0 * dpi, app.menu_tree.root_count);
+    app.menubox = rubraview_box_create(RUBRAVIEW_BOX_MENU, 8.0 * dpi, 8.0 * dpi + app.titlebar.height, app.menu_tree.root_count);
     /* One in the top-left corner, one in the bottom-right (owner, 2026-10-11), until they are moved. */
     app.box_share[0][0] = app.box_share[0][1] = 1.0;
-    app.box_share[1][0] = app.box_share[1][1] = 0.0;
-    app.box_share_known[0] = app.box_share_known[1] = true;
+    app.box_share_known[0] = true;   /* the menu box's share is taken from its place, under the title bar (owner, 2026-10-15) */
     app.box_put[0][0] = app.toolbox.anchor_x; app.box_put[0][1] = app.toolbox.anchor_y;
     app.box_put[1][0] = app.menubox.anchor_x; app.box_put[1][1] = app.menubox.anchor_y;
     layout_load(&app);   /* §3.6: back where the reader left them */
@@ -18857,6 +18871,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.toolbox.view_width = app.menubox.view_width = (double)view_w;
             app.toolbox.view_height = app.menubox.view_height = (double)view_h;
             boxes_place(&app);
+            rubraview_tile_metrics_t side_metrics = tile_metrics(rubraview_pal_window_dpi_scale(app.window));
+            rubraview_box_keep_side(&app.toolbox, &side_metrics);
+            rubraview_box_keep_side(&app.menubox, &side_metrics);
             aspect_refresh(&app);   /* the orientation, the edit panel or the custom pair may have changed */
         }
         while (rubraview_pal_window_poll_event(app.window, &event)) {

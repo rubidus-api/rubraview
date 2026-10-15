@@ -1298,3 +1298,14 @@ Do not store credentials, private infrastructure details, personal data, private
   - **`.` and `,`** are Next and Back too; in a multi-page file they turn its pages and go on past its ends; an animation's and a film's frames keep them.
   - **The keys page** says what a row's action does when the pointer rests on it, from `src/core/action_words.c`, generated from `check-actions.py`'s words (the same as the manual's key tables).
 - Not run: `round` with more than one spread on the VM (the VM's layout was two pages); the strip's hint on a non-layout tile; a TIFF's pages with `.`.
+
+## D-137: The Toolbox In Framed Groups; The Menu Box Below The Title Bar; 0 And 6 (2026-10-15)
+
+- Context: the owner: the box button put the menu box where the title bar comes; the toolbox's groups each took a row of their own; "레이아웃이 바뀌어도 툴바 위치는 바뀌지 않도록"; the title bar's Size button sized from the bottom right while it sits top right; 4 is real size, so `Ctrl+0` can be `0`; Stretch from `Ctrl+1` to `6`.
+- Decision:
+  - **Groups wrap as words**: a group goes on the line while the line's buttons stay within `strip_columns` (8 as it comes; the grip changes it), else on the next; a group longer than a line has lines of its own. Each group sits in a rounded frame of its own colour (`COLOR_GROUP_FILL`, `COLOR_GROUP_BORDER`), `group_pad` inside it, `group_gap` between frames. The strip is as wide as its widest line, never narrower than one frame of `strip_columns`. The name's rows are measured on that width.
+  - **An open box keeps its side**: `open_side` is decided once the grid is open (below the anchor when it fits, else above) and kept while it stays open; grown past the window's edge it is pulled inside instead of going to the other side. Folded or detached, it is forgotten.
+  - **The menu box's home** is `gutter` below the title bar's height (`home_top`); a first start puts it there too (its share is taken from that place). Saved places are kept.
+  - **Size** in the title bar is `SC_SIZE | WMSZ_TOPRIGHT`: the button stays under the pointer.
+  - **Keys**: `0` → `zoom_reset`, `4` → `actual_size` only, `6` → `fit_stretch`; `Ctrl+0` and `Ctrl+1` are free. A keymap.ini of the reader's own keeps what it says.
+- Consequences: the toolbox is shorter (an image's: five lines) and, with lines of two groups, a little wider than eight buttons. On the VM, changing the layout with `B` and with the layout tile did not move the toolbox in this build (nor did a saved place from an older test); the side kept is for what could still move it (a grid that grows past its side). Not seen: the reader's own case of it moving.

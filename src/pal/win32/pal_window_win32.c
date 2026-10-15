@@ -1233,10 +1233,13 @@ void rubraview_pal_window_begin_drag(rubraview_window_t *window) {
 
 void rubraview_pal_window_begin_resize(rubraview_window_t *window) {
     if (!window || !window->hwnd || IsZoomed(window->hwnd)) return;
-    /* SC_SIZE + WMSZ_BOTTOMRIGHT: the system's own sizing loop, as if the
-       corner had been taken, so snapping and the minimum size still hold. */
+    /* SC_SIZE + WMSZ_TOPRIGHT: the system's own sizing loop, as if the
+       top-right corner had been taken, so snapping and the minimum size
+       still hold. The title bar's Size button is at the top and on the
+       right: the top and the right edge follow the pointer and the button
+       stays under it (owner, 2026-10-15). */
     ReleaseCapture();
-    SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_SIZE | WMSZ_BOTTOMRIGHT, 0);
+    SendMessageW(window->hwnd, WM_SYSCOMMAND, SC_SIZE | WMSZ_TOPRIGHT, 0);
 }
 
 void rubraview_pal_window_set_frameless(rubraview_window_t *window, bool frameless) {
