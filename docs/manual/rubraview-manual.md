@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.91.exe              the viewer, as built
-dist/rubraview-v0.0.91/                 the release bundle
-dist/rubraview-v0.0.91.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.92.exe              the viewer, as built
+dist/rubraview-v0.0.92/                 the release bundle
+dist/rubraview-v0.0.92.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -709,8 +709,12 @@ button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
 for a picture, with its place in the folder or archive (`4 / 6`), and the
 bar is a page bar; where the name needs the whole width, that goes on a
-row of its own under it. The seek bar is only in the toolbox; the information
-bar (`Shift+I`, off until asked for) keeps the picture's size and the zoom.
+row of its own under it. The seek bar is only in the toolbox. The information
+bar (`Shift+I`, off until asked for) runs along the bottom: the file's name
+at the left — a name too long for the room keeps its beginning and its last
+ten characters, with "..." between — and at the right which file it is of
+how many in the folder or archive (`3 / 120`), the picture's size in pixels,
+the zoom, the format and the file's size.
 
 The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
 a switch says whether it is on (`Crisp: off`), the layout and fit in use

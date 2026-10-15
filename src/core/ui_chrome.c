@@ -1,5 +1,7 @@
 #include "rubraview/ui_chrome.h"
 #include <stdio.h>
+#include <string.h>
+#include <ctype.h>
 
 /* ---- On-Screen Display ---- */
 
@@ -61,6 +63,67 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
     size_t len = (size_t)written;
     if (len >= buffer_size) len = buffer_size - 1; /* snprintf truncated */
     return (u8str_t){ .ptr = buffer, .len = len };
+}
+
+size_t rubraview_utf8_chars(u8str_t text) {
+    size_t n = 0;
+    for (size_t i = 0; i < text.len; ++i) if (((uint8_t)text.ptr[i] & 0xC0) != 0x80) n++;
+    return n;
+}
+
+/* The byte offset of code point `chars` in `text` (its length when past the end). */
+static size_t utf8_offset(u8str_t text, size_t chars) {
+    size_t n = 0;
+    for (size_t i = 0; i < text.len; ++i) {
+        if (((uint8_t)text.ptr[i] & 0xC0) != 0x80) {
+            if (n == chars) return i;
+            n++;
+        }
+    }
+    return text.len;
+}
+
+u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text, size_t head_chars, size_t tail_chars) {
+    size_t total = rubraview_utf8_chars(text);
+    if (total <= head_chars + tail_chars + 3 || !buffer) return text;
+    size_t head = utf8_offset(text, head_chars);
+    size_t tail = utf8_offset(text, total - tail_chars);
+    size_t need = head + 3 + (text.len - tail);
+    if (need + 1 > buffer_size) return text;
+    memcpy(buffer, text.ptr, head);
+    memcpy(buffer + head, "...", 3);
+    memcpy(buffer + head + 3, text.ptr + tail, text.len - tail);
+    buffer[need] = '\0';
+    return (u8str_t){ .ptr = buffer, .len = need };
+}
+
+u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
+                            int32_t width, int32_t height, double zoom_percent,
+                            u8str_t ext, uint64_t bytes, bool reduced) {
+    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    size_t at = 0;
+    #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
+                              if (w_ > 0) { at += (size_t)w_; } \
+                              if (at >= buffer_size) { at = buffer_size - 1; } } } while (0)
+    OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);
+    if (width > 0 && height > 0) OSD_PUT("  |  %d x %d  |  %.0f%%", (int)width, (int)height, zoom_percent);
+    if (ext.len > 0 && ext.len < 12) {
+        char up[12];
+        for (size_t i = 0; i < ext.len; ++i) up[i] = (char)toupper((unsigned char)ext.ptr[i]);
+        OSD_PUT("  |  %.*s", (int)ext.len, up);
+    }
+    if (bytes > 0) {
+        static const char *const UNIT[] = { "B", "KB", "MB", "GB", "TB" };
+        double v = (double)bytes;
+        int u = 0;
+        while (v >= 1024.0 && u < 4) { v /= 1024.0; u++; }
+        if (u == 0) OSD_PUT("  |  %.0f %s", v, UNIT[u]);
+        else OSD_PUT("  |  %.*f %s", v < 10.0 ? 1 : 0, v, UNIT[u]);
+    }
+    if (reduced) OSD_PUT("  |  shown reduced");
+    #undef OSD_PUT
+    buffer[at] = '\0';
+    return (u8str_t){ .ptr = buffer, .len = at };
 }
 
 /* ---- Hover titlebar ---- */

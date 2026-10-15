@@ -50,6 +50,28 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
                              u8str_t file_name, int32_t width, int32_t height,
                              double zoom_percent, size_t index, size_t total);
 
+/**
+ * A name too long for its place (owner, 2026-10-16): its first `head_chars`
+ * characters, "...", and its last `tail_chars`. Characters are UTF-8 code
+ * points, never cut in half. A name that fits in head + tail + 3 is
+ * returned whole (pointing at `text`, not copied).
+ */
+u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text, size_t head_chars, size_t tail_chars);
+
+/** How many UTF-8 code points `text` holds. */
+size_t rubraview_utf8_chars(u8str_t text);
+
+/**
+ * The right half of the information bar (owner, 2026-10-16): "3 / 120",
+ * then, when known, the resolution, the zoom, the format (`ext`, said in
+ * capitals) and the size ("2.4 MB"); "shown reduced" last when it is.
+ * A width of 0 leaves the resolution and the zoom out (a song); a size of 0
+ * leaves the size out.
+ */
+u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
+                            int32_t width, int32_t height, double zoom_percent,
+                            u8str_t ext, uint64_t bytes, bool reduced);
+
 /* ---- Hover titlebar (§3.21.2, §3.21.3) ---- */
 
 typedef enum rubraview_titlebar_button {

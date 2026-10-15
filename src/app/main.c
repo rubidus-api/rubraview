@@ -705,6 +705,8 @@ typedef struct app_state {
     rubraview_aspect_t aspect;             /* D-94: the shape pictures are shown in, for the session */
     bool aspect_side;                      /* that shape on its side */
     rubraview_osd_t osd;                   /* RV-039 */
+    int32_t         osd_size_page;         /* the page whose size the bar holds, -1 none (owner, 2026-10-16) */
+    uint64_t        osd_size_bytes;
     rubraview_titlebar_t titlebar;         /* RV-040 */
     rubraview_box_t toolbox;               /* RV-020 */
     rubraview_box_t menubox;
@@ -9566,29 +9568,65 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
        at every page (owner, 2026-10-08). */
     if (app->osd.always_on && rubraview_osd_opacity(&app->osd) > 0.01) {
         int32_t page = current_page_index(app);
-        if (page >= 0 && (size_t)page < page_count(app) && app->pages[page].loaded) {
-            char line[192];
-            /* The name and the position are on the toolbox's line: here only
-               what nothing else shows (owner, 2026-09-29). */
-            u8str_t text = rubraview_osd_format(line, sizeof(line), U8(""),
-                                                real_w(&app->pages[page]), real_h(&app->pages[page]),
-                                                app->zoom * 100.0, 0, 0);
-            static const char REDUCED[] = "  |  shown reduced";
-            if (app->pages[page].reduced && text.ptr == line && text.len + sizeof(REDUCED) <= sizeof(line)) {
-                memcpy(line + text.len, REDUCED, sizeof(REDUCED));
-                text.len += sizeof(REDUCED) - 1;
+        if (page >= 0 && (size_t)page < page_count(app)) {
+            /* The file's name at the left, where it is and what it is at the right (owner, 2026-10-16). */
+            const app_page_t *pg = &app->pages[page];
+            u8str_t name = app->source.pages[page].name;
+            if (app->osd_size_page != page) {
+                /* Read once a page: from the archive's index, or the file's own entry. */
+                app->osd_size_page = page;
+                app->osd_size_bytes = 0;
+                u8str_t path = app->source.pages[page].path;
+                rubraview_fs_entry_t entry;
+                if (path.len == 0) app->osd_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+                else if (rubraview_pal_fs_stat(app->arena, path, &entry)) app->osd_size_bytes = entry.size_bytes;
             }
+            u8str_t ext = { .ptr = "", .len = 0 };
+            for (size_t k = name.len; k > 0; --k) {
+                if (name.ptr[k - 1] == '.') { ext = (u8str_t){ .ptr = name.ptr + k, .len = name.len - k }; break; }
+                if (name.ptr[k - 1] == '/' || name.ptr[k - 1] == '\\') break;
+            }
+            bool picture = pg->loaded && !(app->media && page == app->media_page);
+            char right_buf[192];
+            u8str_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
+                                                picture ? real_w(pg) : 0, picture ? real_h(pg) : 0, app->zoom * 100.0,
+                                                ext, app->osd_size_bytes, picture && pg->reduced);
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
             uint32_t alpha = (uint32_t)(rubraview_osd_opacity(&app->osd) * 255.0) & 0xFFu;
-            double bar_h = 28.0 * rubraview_pal_window_dpi_scale(app->window);
+            double dpi = rubraview_pal_window_dpi_scale(app->window);
+            double bar_h = 28.0 * dpi, pad = 10.0 * dpi, font = bar_h * 0.5;
             double bottom = win_h - bar_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
             rubraview_pal_rect_t back = { 0.0, bottom, win_w, bar_h };
             rubraview_pal_render_fill_rect(app->renderer, back, (alpha / 2u) << 24, 0.0);
-            rubraview_pal_render_draw_text(app->renderer, text, back, bar_h * 0.5,
-                                           (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu),
-                                           RUBRAVIEW_TEXT_CENTER);
+            uint32_t ink = (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu);
+
+            double right_w = 0.0;
+            if (!rubraview_pal_render_measure_text(app->renderer, right, font, &right_w)) right_w = (double)right.len * font * 0.55;
+            rubraview_pal_rect_t right_box = { win_w - pad - right_w - 2.0, bottom, right_w + 2.0, bar_h };
+            rubraview_pal_render_draw_text(app->renderer, right, right_box, font, ink, RUBRAVIEW_TEXT_LEFT);
+
+            /* The name in what is left: whole if it fits, else its start, "...", and its last ten characters. */
+            double room = right_box.x - 2.0 * pad;
+            char name_buf[1024];
+            u8str_t shown = name;
+            double w = 0.0;
+            if (room > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &w) && w > room) {
+                size_t total = rubraview_utf8_chars(name);
+                size_t lo = 0, hi = total > 13 ? total - 13 : 0;   /* head characters that fit */
+                while (lo < hi) {
+                    size_t mid = (lo + hi + 1) / 2;
+                    u8str_t trial = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, mid, 10);
+                    if (rubraview_pal_render_measure_text(app->renderer, trial, font, &w) && w <= room) lo = mid;
+                    else hi = mid - 1;
+                }
+                shown = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, lo, 10);
+            }
+            if (room > 0.0) {
+                rubraview_pal_rect_t left_box = { pad, bottom, room, bar_h };
+                rubraview_pal_render_draw_text(app->renderer, shown, left_box, font, ink, RUBRAVIEW_TEXT_LEFT);
+            }
         }
     }
 }
@@ -17712,6 +17750,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
     bool strip_kept = app->filmstrip.visible;   /* the menu's toggle outlives a book */
     app->filmstrip = rubraview_filmstrip_create(page_count(app), FILMSTRIP_THUMB * scale, (double)win_w);
     app->filmstrip.visible = strip_kept;
+    app->osd_size_page = -1;
     strip_cells_reset(app);
     app->strip_peek_until = 0.0;
     strip_follow(app, start_page);
@@ -19483,6 +19522,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        only from a file in the working folder. */
     settings_took_effect(&app);
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
+    app.osd_size_page = -1;
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px"))) * dpi;
     app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;

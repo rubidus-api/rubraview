@@ -1356,3 +1356,9 @@ Do not store credentials, private infrastructure details, personal data, private
   - The A-B box shows each point as three fields with their units: hours (whole), minutes (whole, past 59 adds up), seconds (up to three decimals). `rubraview_timecode_split` fills them (rounded to the millisecond); `rubraview_timecode_join` reads them (all empty: the point unset; a field not a number: refused, the box stays). `Tab` / `Shift+Tab` go through the six fields, `Up` / `Down` to the same field of the other point, `:` to the next field, a click to the field under it; a field just come to is replaced by the first digit. `[`, `]`, Left / Right, `\\` and the buttons work as before.
   - `rubraview_action_hint`: Crisp (`toggle_nearest`) and Grid (`toggle_pixel_grid`) say what they do when the pointer rests on them, in the menu or on a tile.
 - Consequences: the box is taller (a title line clear of its X). One free-form timecode field is gone; `rubraview_parse_timecode` stays for the command line and the tests.
+
+## 2026-10-16: D-143 The information bar says the name and the place
+
+- Status: Accepted (owner 2026-10-16: "인포메이션 바에서 파일이름과, 현재 몇번째 파일인지 보이게 해 주세요. 좌측부터 파일 이름(너무 길면 처음부분부터 보여주다가 중간에 ...으로 그리고 마지막 10자 정도 보여주게.) 그리고 우측부터 현재 목록/폴더 안에 몇개의 파일이 있고 그중 몇번째인지, 해상도와 그밖의 주요 정보를 보여주게 해 주세요.")
+- Decision: the bar's left is the page's name, whole when it fits, else the longest beginning that fits, "...", and its last ten characters (UTF-8 code points, `rubraview_middle_ellipsis`); its right is `rubraview_osd_right`: "3 / 120", width x height and zoom for a picture, the format in capitals from the name, the size ("2.4 MB"), "shown reduced". The size is read once a page. A film or a song shows its place, format and size.
+- Consequences: this reverses 2026-09-29's "the name and the position are on the toolbox's line: not shown twice" for the bar, which is off until asked for.
