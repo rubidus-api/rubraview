@@ -8,6 +8,19 @@ Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: 
 
 > This English README is the canonical version; the Korean one is its translation.
 
+## Screenshots
+
+|  |  |
+|---|---|
+| <img src="docs/manual/images/screenshot-1-picture.png" alt="A picture and the filmstrip" width="420"> | <img src="docs/manual/images/screenshot-2-comic.png" alt="A comic, two pages" width="420"> |
+| A picture and the filmstrip | A comic, two pages |
+| <img src="docs/manual/images/screenshot-3-video.png" alt="A film with subtitles" width="420"> | <img src="docs/manual/images/screenshot-4-picker.png" alt="The open-file screen" width="420"> |
+| A film with subtitles | The open-file screen |
+| <img src="docs/manual/images/screenshot-5-info.png" alt="The information window" width="420"> | <img src="docs/manual/images/screenshot-6-settings.png" alt="Settings" width="420"> |
+| The information window | Settings |
+
+The pictures, the comic and the film in these screenshots were generated for them.
+
 ## Overview
 
 Rubraview is designed as a fast, bloat-free desktop tool that combines responsive media viewing with flexible non-destructive image adjustments and high-throughput batch operations.

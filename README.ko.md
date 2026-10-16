@@ -8,6 +8,19 @@
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
+## 스크린샷
+
+|  |  |
+|---|---|
+| <img src="docs/manual/images/screenshot-1-picture.png" alt="사진과 필름 스트립" width="420"> | <img src="docs/manual/images/screenshot-2-comic.png" alt="만화 두 쪽 보기" width="420"> |
+| 사진과 필름 스트립 | 만화 두 쪽 보기 |
+| <img src="docs/manual/images/screenshot-3-video.png" alt="자막이 나오는 동영상" width="420"> | <img src="docs/manual/images/screenshot-4-picker.png" alt="파일 열기 화면" width="420"> |
+| 자막이 나오는 동영상 | 파일 열기 화면 |
+| <img src="docs/manual/images/screenshot-5-info.png" alt="정보 창" width="420"> | <img src="docs/manual/images/screenshot-6-settings.png" alt="설정" width="420"> |
+| 정보 창 | 설정 |
+
+스크린샷 속 사진, 만화, 동영상은 이 스크린샷을 위해 프로그램으로 만든 것입니다.
+
 ## 무엇인가
 
 군더더기 없이 빠른 도구를 목표로 합니다. 반응이 빠른 보기, 원본을 건드리지 않는 이미지 보정, 많은 파일을 한 번에 처리하는 일괄 작업을 한 프로그램에 담았습니다.
