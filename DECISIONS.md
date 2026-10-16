@@ -1398,3 +1398,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: D-122 gave the Store package the program's version with the first number one higher, because the Store refuses a first number of 0 (0.0.70 was 1.0.70.0). At 1.0.0 that rule would give 2.0.0.0. RV-113's item (6) left this rule to be decided once the program reached 1.0.
 - Decision: the program is 1.0.0. From 1.0 on, `scripts/package-store.sh` gives the Store package the program's own version plus a fourth number, 0 (1.0.0 is 1.0.0.0). A 0.x version keeps the old rule. The installer and the Store package are made with rubrapack 0.47.0, and `vendor/rubrapack/VENDORED.md` notes v0.47.0. Its files are the same as before.
 - Consequences: the Store and the program show the same number. If a test package of 1.0.70.0 to 1.0.89.0 had been submitted to Partner Center, it would refuse 1.0.0.0 as lower; the owner says none was.
+
+## 2026-10-16: D-148 The RFCs are private
+
+- Status: Accepted (owner 2026-10-16: "readme에서 rfc 내용과, 공개된 rfc 등도 회수하고 삭제하고 비공개 폴더로 옮겨줘요", and "히스토리까지 지움").
+- Context: D-69 made `docs/rfc` public with the source, the manual and the decisions.
+- Decision: `docs/rfc` moves to the private repository; the READMEs no longer link to it; the allowlist no longer lets it in. The public history was rewritten without `docs/rfc` and pushed again, main and every tag; the releases stay on their tags.
+- Consequences: every public commit hash changed; a clone made before 2026-10-16 still holds the RFCs. Comments in the source that name an RFC section stay, as references.
+
