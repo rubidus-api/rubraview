@@ -30,6 +30,8 @@ static size_t next_code_point(const char *p, size_t len, uint32_t *out) {
 
 /* East Asian wide characters take two cells: Hangul, CJK, fullwidth forms. */
 static int cell_width(uint32_t cp) {
+    /* Bidi controls and Arabic vowel marks take no cell (RV-114). */
+    if ((cp >= 0x2066 && cp <= 0x2069) || (cp >= 0x200B && cp <= 0x200F) || (cp >= 0x064B && cp <= 0x065F) || cp == 0x0670) return 0;
     if ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) ||
         (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
         (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
@@ -65,13 +67,14 @@ size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capac
         uint32_t cp = 0;
         size_t n = next_code_point(text.ptr + i, text.len - i, &cp);
         int w = cell_width(cp);
-        if (w == 1 && open_narrow) {
-            out[count - 1].length += n;
+        bool isolate = cp >= 0x2066 && cp <= 0x2069;   /* drawn apart: what it sets apart is a run of its own */
+        if (!isolate && ((w == 1 && open_narrow) || (w == 0 && count > 0))) {
+            out[count - 1].length += n;      /* a joiner or a mark stays with the letters around it */
         } else if (count == capacity) {
             out[count - 1].length += n;      /* out of room: the rest rides on the last run */
         } else {
             out[count++] = (rubraview_cell_run_t){ .offset = i, .length = n, .col = col };
-            open_narrow = w == 1;
+            open_narrow = w <= 1 && !isolate;
         }
         if (count == capacity) open_narrow = true;
         col += w;
@@ -106,6 +109,24 @@ static void put_text(cell_writer_t *w, u8str_t text, int32_t limit) {
         written += cw;
         i += n;
     }
+}
+
+/* A text in a right-to-left script (Persian) is set apart with a first-strong
+   isolate, so the grid's line keeps its columns left to right around it. */
+static bool has_rtl(u8str_t text) {
+    for (size_t i = 0; i < text.len;) {
+        uint32_t cp = 0;
+        i += next_code_point(text.ptr + i, text.len - i, &cp);
+        if ((cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)) return true;
+    }
+    return false;
+}
+
+static void put_words(cell_writer_t *w, u8str_t text, int32_t limit) {
+    if (!has_rtl(text)) { put_text(w, text, limit); return; }
+    put_bytes(w, "\xE2\x81\xA8", 3, 0);   /* FSI */
+    put_text(w, text, limit);
+    put_bytes(w, "\xE2\x81\xA9", 3, 0);   /* PDI */
 }
 
 static void pad_to(cell_writer_t *w, int32_t cells) {
@@ -682,7 +703,7 @@ u8str_t rubraview_settings_page_text(const rubraview_settings_view_t *view, int3
     cell_writer_t w = { .buffer = buffer, .capacity = capacity };
     if (!view || !view->doc || capacity == 0) return finish(&w);
     put_text(&w, page == view->page ? U8(" > ") : U8("   "), 3);
-    put_text(&w, tr(rubraview_settings_page_title((size_t)page)), view->list_cols - 4);
+    put_words(&w, tr(rubraview_settings_page_title((size_t)page)), view->list_cols - 4);
     pad_to(&w, view->list_cols - 1);
     return finish(&w);
 }
@@ -702,13 +723,13 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
         case RUBRAVIEW_LINE_SECTION:
             repeat(&w, "\xE2\x94\x80", 2);                 /* ── */
             put_bytes(&w, " ", 1, 1);
-            put_text(&w, tr(node->text), width - 4);
+            put_words(&w, tr(node->text), width - 4);
             put_bytes(&w, " ", 1, 1);
             repeat(&w, "\xE2\x94\x80", width - w.cells);
             break;
 
         case RUBRAVIEW_LINE_INFO: {
-            put_text(&w, tr(node->text), view->label_cols - 1);
+            put_words(&w, tr(node->text), view->label_cols - 1);
             pad_to(&w, view->label_cols);
             char value[256];
             size_t n = sources && sources->info ? sources->info(sources->user, node->name, value, sizeof(value)) : 0;
@@ -717,7 +738,7 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
         }
 
         case RUBRAVIEW_LINE_NOTE:
-            put_text(&w, tr(node->text), width);
+            put_words(&w, tr(node->text), width);
             break;
 
         case RUBRAVIEW_LINE_TABLE: {
@@ -736,14 +757,14 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             pad_to(&w, view->label_cols);
             put_bytes(&w, "<", 1, 1);
             put_bytes(&w, " ", 1, 1);
-            put_text(&w, tr(node->text), width - w.cells - 2);
+            put_words(&w, tr(node->text), width - w.cells - 2);
             put_bytes(&w, " ", 1, 1);
             put_bytes(&w, ">", 1, 1);
             break;
 
         case RUBRAVIEW_LINE_SETTING: {
             const rubraview_setting_def_t *def = &view->doc->defs[node->setting];
-            put_text(&w, tr(def->label), view->label_cols - 1);
+            put_words(&w, tr(def->label), view->label_cols - 1);
             pad_to(&w, view->label_cols);
             int32_t room = width - view->label_cols;
             double value = settings ? rubraview_settings_get(settings, def->section, def->key) : def->default_value;
@@ -761,7 +782,9 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
                         word = rubraview_lang_native_name(def->choices[index]);
                     }
                     char text[96];
-                    int n = snprintf(text, sizeof(text), "< %s >  %d/%d", word, index + 1, def->choice_count);
+                    bool rtl = has_rtl((u8str_t){ .ptr = word, .len = strlen(word) });
+                    int n = snprintf(text, sizeof(text), rtl ? "< \xE2\x81\xA8%s\xE2\x81\xA9 >  %d/%d" : "< %s >  %d/%d",
+                                     word, index + 1, def->choice_count);
                     put_text(&w, (u8str_t){ .ptr = text, .len = n > 0 ? (size_t)n : 0 }, room);
                     break;
                 }
@@ -784,7 +807,7 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
                     put_text(&w, (u8str_t){ .ptr = text, .len = n > 0 ? (size_t)n : 0 }, width - w.cells);
                     if (def->unit.len > 0) {
                         put_bytes(&w, " ", 1, 1);
-                        put_text(&w, tr_unit(def->unit), width - w.cells);
+                        put_words(&w, tr_unit(def->unit), width - w.cells);
                     }
                     break;
                 }

@@ -155,9 +155,9 @@ void rubraview_pal_media_seek(rubraview_media_t *media, double seconds);
 /** The decoder has reached the end and every decoded frame has been taken. */
 bool rubraview_pal_media_finished(rubraview_media_t *media);
 
-/** Whether the sound has run out: the file has no more of it and the device
-    has played what it held. Pictures may still be due after it (a film
-    whose picture runs longer than its sound). */
+/** Whether the sound device has played all it was given and holds nothing
+    more: the sound has run out (a film whose picture runs longer than its
+    sound) or is late. */
 bool rubraview_pal_media_sound_over(rubraview_media_t *media);
 
 /** Pause or resume the sound (the picture is paused by the caller's clock). */

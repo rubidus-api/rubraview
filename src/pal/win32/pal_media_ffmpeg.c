@@ -1208,7 +1208,8 @@ static bool ff_finished(void *handle) {
 static bool ff_sound_over(void *handle) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || !m->audio) return false;
-    if (atomic_load_explicit(&m->end_generation, memory_order_acquire) != m->consumer_generation) return false;
+    /* Not the file's end: the decoder may be held up by pictures not yet
+       due, and those come due only when the clock moves on. */
     AcquireSRWLockShared(&m->audio_lock);
     bool drained = rubraview_pal_audio_drained(m->audio);
     ReleaseSRWLockShared(&m->audio_lock);

@@ -437,6 +437,7 @@ typedef struct app_state {
     uint8_t               *shuffle_flags;
     size_t                 shuffle_flags_count;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
+    double                 sound_dry_since;   /* when the sound device last ran empty; 0 while it plays */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
     /* The same two points, typed (owner, 2026-09-24). The box holds one
@@ -2824,7 +2825,11 @@ static void media_tick(app_state_t *app) {
        runs longer), the clock goes on by the wall: held at the last sound
        heard, the pictures after it never came due and the film never
        ended, so To Next did not go on (owner, 2026-10-16). */
-    if (app->media_master == RUBRAVIEW_CLOCK_AUDIO && !rubraview_pal_media_sound_over(m)) {
+    bool dry = !app->media_paused && rubraview_pal_media_sound_over(m);
+    if (!dry) app->sound_dry_since = 0.0;
+    else if (app->sound_dry_since == 0.0) app->sound_dry_since = now;
+    bool sound_runs = !dry || now - app->sound_dry_since < 0.25;   /* a moment's gap is not the end */
+    if (app->media_master == RUBRAVIEW_CLOCK_AUDIO && sound_runs) {
         double heard = 0.0, at = 0.0;
         if (rubraview_pal_media_audio_position(m, &heard, &at)) {
             rubraview_media_clock_sync_audio(&app->media_clock,
@@ -3426,7 +3431,7 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
     }
     index -= 1;
     if (index >= app->picker_places.count) return false;
-    *out = (picker_bar_item_t){ app->picker_places.entries[index].name, app->picker_places.entries[index].path, false };
+    *out = (picker_bar_item_t){ rubraview_tr_u8(app->picker_places.entries[index].name), app->picker_places.entries[index].path, false };
     return true;
 }
 
@@ -16733,8 +16738,8 @@ static void draw_settings_window(app_state_t *app) {
     /* The page. Each row's text is kept as drawn, for a marked block to copy. */
     memset(app->settings_grid_len, 0, sizeof(app->settings_grid_len));
     double x0 = cw * v->content_col;
-    settings_grid_keep(app, 0, rubraview_settings_page_title((size_t)v->page));
-    settings_text(app, rubraview_settings_page_title((size_t)v->page), x0, 0.0, SETTINGS_ACCENT);
+    settings_grid_keep(app, 0, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)));
+    settings_text(app, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)), x0, 0.0, SETTINGS_ACCENT);
     for (size_t i = 0; i < v->line_count; ++i) {
         const rubraview_settings_line_t *ln = &v->lines[i];
         const rubraview_settings_node_t *node = &v->doc->nodes[ln->node];

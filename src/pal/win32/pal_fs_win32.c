@@ -6,6 +6,7 @@
 #include <knownfolders.h>
 #include <stdio.h>
 #include <string.h>
+#include "rubraview/lang.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
 
@@ -137,13 +138,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     /* The usual folders first, where they are on this PC (they may have
        been moved, so they are asked for rather than spelt). */
     static const struct { const KNOWNFOLDERID *id; const char *name; } FOLDERS[] = {
-        { &FOLDERID_Profile,   "Home" },
-        { &FOLDERID_Desktop,   "Desktop" },
-        { &FOLDERID_Documents, "Documents" },
-        { &FOLDERID_Downloads, "Downloads" },
-        { &FOLDERID_Pictures,  "Pictures" },
-        { &FOLDERID_Videos,    "Videos" },
-        { &FOLDERID_Music,     "Music" },
+        { &FOLDERID_Profile,   N_("Home") },
+        { &FOLDERID_Desktop,   N_("Desktop") },
+        { &FOLDERID_Documents, N_("Documents") },
+        { &FOLDERID_Downloads, N_("Downloads") },
+        { &FOLDERID_Pictures,  N_("Pictures") },
+        { &FOLDERID_Videos,    N_("Videos") },
+        { &FOLDERID_Music,     N_("Music") },
     };
     for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
         PWSTR wide = NULL;

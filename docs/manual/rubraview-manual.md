@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.0.0.exe              the viewer, as built
-dist/rubraview-v1.0.0/                 the release bundle
-dist/rubraview-v1.0.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.1.0.exe              the viewer, as built
+dist/rubraview-v1.1.0/                 the release bundle
+dist/rubraview-v1.1.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -888,6 +888,17 @@ what its action does. Every setting there now does what it says; most
 take effect at once, a few the next time something is opened (the archive
 filename code page, the memory cap). Some worth knowing:
 
+- **General › Language** — the language the viewer speaks: `Auto` (as it
+  comes) follows Windows' display language, or choose English, 한국어,
+  日本語, 简体中文, 繁體中文 or فارسی; each is named in its own words so it
+  can be found whatever is on screen. The change is at once. A language is
+  a text file, `lang\<code>.txt` beside `rubraview.exe` (the zip, the
+  installer and the Store package carry them; `rubraview.exe` on its own is
+  English). A file of the same name in the settings folder's `lang` folder
+  is read first, so a translation can be put right there. Each line is
+  `"English" = "translation"`; a line whose `%` placeholders differ from the
+  English is left out. Persian is shown in its letters, but the windows are
+  still laid out left to right.
 - **General › On startup** — started with no file, the viewer shows
   nothing (`blank`), reopens what you read last (`last_file`), or opens the
   picker in its folder (`last_folder`, the default). **Frameless window**

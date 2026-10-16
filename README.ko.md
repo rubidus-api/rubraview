@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.0.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.0.0/rubraview-v1.0.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.0.0/rubraview-v1.0.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.1.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -32,6 +32,7 @@
 - **동영상 재생**: 분리된 PAL 을 통한 FFmpeg(`libavcodec`/`libavformat`) 연결로 재생, 한 프레임씩 이동, 정지 화면 저장.
 - **보정과 후처리**: 노출·대비·채도·감마·언샤프 마스크·가우시안 흐림을 실시간으로, 리샘플링은 Nearest·Bilinear·Bicubic·Lanczos-3.
 - **일괄 처리**: 여러 스레드로 도는 변환·크기 조정기. 창에서도, 창 없이 명령줄에서도 씁니다.
+- **여러 언어**: 영어, 한국어, 일본어, 중국어(간체·번체), 페르시아어. Windows 언어를 따르거나 설정 › General › Language에서 고릅니다. 언어는 프로그램 옆 `lang` 폴더의 텍스트 파일이라, 빌드하지 않고도 고치거나 더할 수 있습니다.
 - **순수 C23**: 벤더링한 `proven_c_lib` 의 아레나·문자열 조각·동적 배열 위에서, 힙 파편화 없이.
 
 ## 단축키

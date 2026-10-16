@@ -1406,3 +1406,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: `docs/rfc` moves to the private repository; the READMEs no longer link to it; the allowlist no longer lets it in. The public history was rewritten without `docs/rfc` and pushed again, main and every tag; the releases stay on their tags.
 - Consequences: every public commit hash changed; a clone made before 2026-10-16 still holds the RFCs. Comments in the source that name an RFC section stay, as references.
 
+## 2026-10-16: D-149 Language packs: Korean, Japanese, Chinese and Persian
+
+- Status: Accepted (owner 2026-10-16: "프로그램 자체의 한글팩 만들어 주시고 언어 바꾸는거 가능하게 해 주세요", "그리고 일본어 중국어 대만 등 주요 국가 번역도요", "번역에 페르시아어 추가해 주세요"; the plan's answers: files only, `auto`, the information window copies what is on screen, one release when all is done; the English text as the key is the implementer's pick).
+- Context: every text the viewer showed was English; Korean existed only in Explorer's menu, the README and the installer (RV-114).
+- Decision:
+  - A pack is `lang/<code>.txt`, UTF-8, `"English" = "translation"` a line, `context "English" = ...` where one word needs two (`toolbox`, `menu`, `choice`, `unit`, `plural`). The English text is the key; a text not in the pack stays English (`rubraview_tr`, `T()`, `TU8()`, `TC()`, `N_()`).
+  - A pack is data from outside: a line whose printf conversions differ from the English is refused, sizes are bounded, a broken line is skipped (`rubraview_lang_load`).
+  - None is built in: `rubraview.exe` alone is English; the zip, the MSI and the Store package carry `lang\` beside it. The settings folder's `lang\` is read first.
+  - `general.language` = `auto` (Windows' display language; `zh-TW/HK/MO` take Traditional, other Chinese Simplified) | `en` | `ko` | `ja` | `zh-hans` | `zh-hant` | `fa`, shown by each language's own name; a change applies at once (menus, the settings window, the title).
+  - Wide characters take two cells of the settings grid (it already counted them so).
+  - `scripts/check-lang.py` (in the project check) collects every marked text, the settings document's labels, choices and units, the boxes' captions and the actions' descriptions, and fails when a pack lacks one or holds one that is gone. 2018 texts at 1.1.0.
+- Consequences: a text written later stays English until the packs get it (the check says so). Not translated: settings.ini and keymap.ini, command-line output and the diagnostics, file contents, format names, licence texts, the file dialogs' filter names. Persian is right-to-left; the windows are not mirrored, DirectWrite orders the letters. Explorer's own menu keeps its English and Korean.
+
