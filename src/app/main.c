@@ -12565,6 +12565,9 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
     if (rubraview_u8_eq_lit(source, "config.path")) {
         n = snprintf(buffer, capacity, "%.*s%s", (int)app->settings_path.len, app->settings_path.ptr,
                      app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? "  (portable)" : "");
+        /* The folder comes from Windows with backslashes and the file name is
+           joined with '/': shown with Windows' own separator throughout. */
+        for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
     } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
         n = snprintf(buffer, capacity, "%s",
                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
