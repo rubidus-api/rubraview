@@ -1,5 +1,6 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/lang.h"
+#include "rubraview/playback.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -98,7 +99,8 @@ u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text
 }
 
 u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
-                            int32_t width, int32_t height, uint64_t bytes, bool reduced) {
+                            int32_t width, int32_t height, uint64_t bytes, bool reduced,
+                            double position, double duration) {
     if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
     size_t at = 0;
     #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
@@ -112,6 +114,12 @@ u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size
         while (v >= 1024.0 && u < 4) { v /= 1024.0; u++; }
         if (u == 0) OSD_PUT("%.0f %s  |  ", v, UNIT[u]);
         else OSD_PUT("%.*f %s  |  ", v < 10.0 ? 1 : 0, v, UNIT[u]);
+    }
+    if (duration > 0.0) {
+        char where[32], length[32];   /* to the second (owner, 2026-10-16) */
+        u8str_t a = rubraview_format_timecode(where, sizeof(where), position > duration ? duration : position, false);
+        u8str_t l = rubraview_format_timecode(length, sizeof(length), duration, false);
+        OSD_PUT("%.*s / %.*s  |  ", (int)a.len, a.ptr, (int)l.len, l.ptr);
     }
     if (width > 0 && height > 0) OSD_PUT("%d x %d  |  ", (int)width, (int)height);
     OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);   /* the place, at the very right */

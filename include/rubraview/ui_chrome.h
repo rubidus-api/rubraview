@@ -65,10 +65,13 @@ size_t rubraview_utf8_chars(u8str_t text);
  * The right half of the information bar (owner, 2026-10-16), read towards
  * the window's right edge: "shown reduced" when it is, the size ("2.4 MB"),
  * the resolution, and "3 / 120" at the very right. A width of 0 leaves the
- * resolution out (a song); a size of 0 leaves the size out.
+ * resolution out (a song); a size of 0 leaves the size out. A film or a
+ * song playing says where it is of how long, "01:14 / 04:56", between the
+ * size and the place (owner, 2026-10-16); a `duration` of 0 leaves it out.
  */
 u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
-                            int32_t width, int32_t height, uint64_t bytes, bool reduced);
+                            int32_t width, int32_t height, uint64_t bytes, bool reduced,
+                            double position, double duration);
 
 /* ---- Hover titlebar (§3.21.2, §3.21.3) ---- */
 

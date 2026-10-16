@@ -9803,11 +9803,14 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                 if (path.len == 0) app->osd_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
                 else if (rubraview_pal_fs_stat(app->arena, path, &entry)) app->osd_size_bytes = entry.size_bytes;
             }
-            bool picture = pg->loaded && !(app->media && page == app->media_page);
+            bool playing = app->media && page == app->media_page;
+            bool picture = pg->loaded && !playing;
             char right_buf[192];
             u8str_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
                                                 picture ? real_w(pg) : 0, picture ? real_h(pg) : 0,
-                                                app->osd_size_bytes, picture && pg->reduced);
+                                                app->osd_size_bytes, picture && pg->reduced,
+                                                playing ? app->media_position : 0.0,
+                                                playing ? app->media_info.duration_seconds : 0.0);
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
