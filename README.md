@@ -346,9 +346,6 @@ this at the bottom of the page.
 
 ## Documentation
 
-- [RFC-0001: Architecture & Multimedia Pipeline](docs/rfc/archive/rfc-0001-rubraview-architecture.md) (built; archived)
-- [RFC-0004: What Is Left of RFC-0001](docs/rfc/rfc-0004-what-is-left.md)
-- [RFC Index](docs/rfc/rfc-0000-index.md)
 - [User Manual](docs/manual/)
 
 ## Building
