@@ -12,8 +12,9 @@
 # The values are not kept in the repository and are not printed here.
 #
 # The Store refuses a version whose first part is 0, and keeps the fourth
-# for itself: the package's version is the program's with the first part
-# one higher (0.0.70 is 1.0.70.0 in the Store).
+# for itself: from 1.0 the package's version is the program's (1.0.0 is
+# 1.0.0.0 in the Store, D-147); a 0.x one has its first part one higher
+# (0.0.70 was 1.0.70.0).
 set -eu
 
 version=${1:-$(sed -n 's/^#define RUBRAVIEW_VERSION_STRING "\(.*\)".*/\1/p' include/rubraview/version.h)}
@@ -38,7 +39,11 @@ publisher_name=$(field Package/Properties/PublisherDisplayName)
   || fail "the identity file lacks one of the three values"
 
 major=${version%%.*}
-store_version="$((major + 1)).${version#*.}"
+if [ "$major" -ge 1 ]; then
+  store_version=$version
+else
+  store_version="$((major + 1)).${version#*.}"
+fi
 
 python3 scripts/check-store.py
 rm -f "$out"

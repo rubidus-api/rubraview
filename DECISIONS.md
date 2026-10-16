@@ -1391,3 +1391,10 @@ Do not store credentials, private infrastructure details, personal data, private
   - **New folders**: Enter on a folder that is there puts the files in it; on one that is not, it says so (`rubraview_target_folder_step` OFFER) and a second Enter on the same path makes it (MAKE); a file of that name is refused. Ctrl+O browses with the system's folder dialog.
   - **X**: each folder kept out has an X at its row's end; a click takes it off, as Delete does.
 - Consequences: no folder is made by one stray Enter; a relative name is taken from the picker's folder or the file's own.
+
+## 2026-10-16: D-147 Version 1.0.0; the Store's version is the program's
+
+- Status: Accepted (owner 2026-10-16: "버젼도 이제 1.0.0 으로 올려주세요. MS Store 공개를 위해서요", and the answer "1.0.0.0, 그대로").
+- Context: D-122 gave the Store package the program's version with the first number one higher, because the Store refuses a first number of 0 (0.0.70 was 1.0.70.0). At 1.0.0 that rule would give 2.0.0.0. RV-113's item (6) left this rule to be decided once the program reached 1.0.
+- Decision: the program is 1.0.0. From 1.0 on, `scripts/package-store.sh` gives the Store package the program's own version plus a fourth number, 0 (1.0.0 is 1.0.0.0). A 0.x version keeps the old rule. The installer and the Store package are made with rubrapack 0.47.0, and `vendor/rubrapack/VENDORED.md` notes v0.47.0. Its files are the same as before.
+- Consequences: the Store and the program show the same number. If a test package of 1.0.70.0 to 1.0.89.0 had been submitted to Partner Center, it would refuse 1.0.0.0 as lower; the owner says none was.
