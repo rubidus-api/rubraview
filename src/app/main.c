@@ -38,6 +38,7 @@
 #include <time.h>
 
 #include "rubraview/number.h"
+#include "rubraview/lang.h"
 #include "rubraview/subbox.h"
 #include "rubraview/aspect.h"
 #include "rubraview/detail.h"
@@ -12892,6 +12893,62 @@ static void settings_close(app_state_t *app) {
    that belong to opening something take effect at the next open. Defaults
    (fit, layout, pixel grid) apply at start and when they are changed, and
    leave alone what the reader changed by hand in between. */
+/* RV-114: the language. `general.language` names it; `auto` takes Windows'
+   display language. A pack is lang\<code>.txt in the settings folder (a
+   user's own) or beside the program; none is built in. A pack that is
+   missing or cannot be read leaves the viewer in English and says so. */
+static rubraview_lang_t g_lang;
+static char g_lang_code[24];   /* what is in use: "" for English */
+
+static void lang_apply(app_state_t *app) {
+    static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant" };
+    static const char *const PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant" };
+    int c = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("language")));
+    const char *want = CHOICES[c >= 0 && c < 6 ? c : 0];
+    if (strcmp(want, "auto") == 0) {
+        char tag[96];
+        want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, PACKS, 4) : NULL;
+    }
+    if (want && strcmp(want, "en") == 0) want = NULL;
+    if (strcmp(want ? want : "", g_lang_code) == 0) return;
+
+    rubraview_lang_use(NULL);
+    rubraview_lang_free(&g_lang);
+    g_lang_code[0] = '\0';
+    if (want) {
+        char name[48];
+        snprintf(name, sizeof(name), "lang/%s.txt", want);
+        u8str_t dirs[2] = { rubraview_path_dirname(app->settings_path), app->config_beside };
+        bool loaded = false;
+        for (int i = 0; i < 2 && !loaded; i++) {
+            if (dirs[i].len == 0) continue;
+            u8str_t path = rubraview_path_join(app->arena, dirs[i], cstr(name));
+            u8str_t text = rubraview_pal_fs_read_file(app->arena, path, RUBRAVIEW_LANG_MAX_FILE);
+            if (text.len == 0) continue;
+            rubraview_lang_stats_t stats;
+            loaded = rubraview_lang_load(&g_lang, text, &stats);
+        }
+        if (loaded) {
+            rubraview_lang_use(&g_lang);
+            snprintf(g_lang_code, sizeof(g_lang_code), "%s", want);
+        } else {
+            char line[96];
+            int n = snprintf(line, sizeof(line), "no language pack lang\\%s.txt beside rubraview.exe: English it is", want);
+            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+        }
+    }
+    /* Everything that holds text made in the old language is made again. */
+    menu_rebuild(app);
+    if (app->settings_window) {
+        int32_t cols = 0, rows = 0;
+        settings_grid(app, &cols, &rows);
+        if (cols > 0 && rows > 0) rubraview_settings_view_resize(&app->settings_view, cols, rows);
+        app->settings_dirty = true;
+    }
+    update_window_title(app);
+    app->needs_relayout = true;
+}
+
 static void load_keymap(app_state_t *app);
 static void settings_apply_rest(app_state_t *app) {
     static bool first = true;
@@ -12901,6 +12958,7 @@ static void settings_apply_rest(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
 
     /* General */
+    lang_apply(app);
     app->frameless = rubraview_settings_get(st, U8("general"), U8("frameless")) > 0.5;
     rubraview_pal_window_set_frameless(app->window, app->frameless);
     app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(st, U8("general"), U8("titlebar_trigger_px"))) * dpi;   /* never less than the bar (owner, 2026-10-14) */

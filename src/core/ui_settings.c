@@ -1,4 +1,5 @@
 #include "rubraview/ui_settings.h"
+#include "rubraview/lang.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +48,13 @@ static int32_t cells_of(u8str_t text) {
     }
     return cells;
 }
+
+/* The document's texts in the language in use (RV-114): labels, titles and
+   notes as they are, a choice's word and a unit with a context, since the
+   same short word means other things elsewhere. */
+static u8str_t tr(u8str_t text) { return rubraview_tr_u8(text); }
+static u8str_t tr_unit(u8str_t unit) { return rubraview_tr_ctx_u8("unit", unit); }
+static const char *tr_choice(const char *word) { return rubraview_tr_ctx("choice", word); }
 
 size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity) {
     if (!out || capacity == 0) return 0;
@@ -139,7 +147,7 @@ static void layout(rubraview_settings_view_t *view) {
     int32_t longest_title = 0;
     for (size_t i = 0; i < doc->node_count; ++i) {
         if (doc->nodes[i].kind == RUBRAVIEW_NODE_PAGE) {
-            int32_t c = cells_of(doc->nodes[i].text);
+            int32_t c = cells_of(tr(doc->nodes[i].text));
             if (c > longest_title) longest_title = c;
         }
     }
@@ -162,13 +170,13 @@ static void layout(rubraview_settings_view_t *view) {
                 break;
             case RUBRAVIEW_NODE_SETTING: {
                 line.kind = RUBRAVIEW_LINE_SETTING;
-                int32_t c = cells_of(doc->defs[node->setting].label);
+                int32_t c = cells_of(tr(doc->defs[node->setting].label));
                 if (c > longest_label) longest_label = c;
                 break;
             }
             case RUBRAVIEW_NODE_INFO: {
                 line.kind = RUBRAVIEW_LINE_INFO;
-                int32_t c = cells_of(node->text);
+                int32_t c = cells_of(tr(node->text));
                 if (c > longest_label) longest_label = c;
                 break;
             }
@@ -367,11 +375,12 @@ int32_t rubraview_settings_view_screen_row(const rubraview_settings_view_t *view
     return TITLE_ROWS + row;
 }
 
-static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { "[ Revert ]", "[ Defaults ]", "[ Close ]" };
+static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"), N_("[ Defaults ]"), N_("[ Close ]") };
 
 u8str_t rubraview_settings_button_text(rubraview_settings_button_t button) {
     if (button < 0 || button >= RUBRAVIEW_BUTTON_COUNT) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = BUTTON_TEXT[button], .len = strlen(BUTTON_TEXT[button]) };
+    const char *text = rubraview_tr(BUTTON_TEXT[button]);
+    return (u8str_t){ .ptr = text, .len = strlen(text) };
 }
 
 void rubraview_settings_view_button_cells(const rubraview_settings_view_t *view,
@@ -379,7 +388,7 @@ void rubraview_settings_view_button_cells(const rubraview_settings_view_t *view,
                                           int32_t *out_col, int32_t *out_width) {
     int32_t col = view->content_col;
     for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
-        int32_t width = (int32_t)strlen(BUTTON_TEXT[b]);
+        int32_t width = cells_of(rubraview_settings_button_text((rubraview_settings_button_t)b));
         if (b == (int32_t)button) {
             *out_col = col;
             *out_width = width;
@@ -430,7 +439,7 @@ static void slider_cells(const rubraview_settings_view_t *view, const rubraview_
     int n = def->type == RUBRAVIEW_SETTING_FLOAT
         ? snprintf(value_text, sizeof(value_text), " %.1f", def->max_value)
         : snprintf(value_text, sizeof(value_text), " %.0f", def->max_value);
-    int32_t value_cells = (n > 0 ? n : 0) + (def->unit.len > 0 ? (int32_t)def->unit.len + 1 : 0);
+    int32_t value_cells = (n > 0 ? n : 0) + (def->unit.len > 0 ? cells_of(tr_unit(def->unit)) + 1 : 0);
     int32_t inner = width - 2 - value_cells;
     if (inner < 4) inner = 4;
     *out_col = view->content_col + view->label_cols + 1;
@@ -673,7 +682,7 @@ u8str_t rubraview_settings_page_text(const rubraview_settings_view_t *view, int3
     cell_writer_t w = { .buffer = buffer, .capacity = capacity };
     if (!view || !view->doc || capacity == 0) return finish(&w);
     put_text(&w, page == view->page ? U8(" > ") : U8("   "), 3);
-    put_text(&w, rubraview_settings_page_title((size_t)page), view->list_cols - 4);
+    put_text(&w, tr(rubraview_settings_page_title((size_t)page)), view->list_cols - 4);
     pad_to(&w, view->list_cols - 1);
     return finish(&w);
 }
@@ -693,13 +702,13 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
         case RUBRAVIEW_LINE_SECTION:
             repeat(&w, "\xE2\x94\x80", 2);                 /* ── */
             put_bytes(&w, " ", 1, 1);
-            put_text(&w, node->text, width - 4);
+            put_text(&w, tr(node->text), width - 4);
             put_bytes(&w, " ", 1, 1);
             repeat(&w, "\xE2\x94\x80", width - w.cells);
             break;
 
         case RUBRAVIEW_LINE_INFO: {
-            put_text(&w, node->text, view->label_cols - 1);
+            put_text(&w, tr(node->text), view->label_cols - 1);
             pad_to(&w, view->label_cols);
             char value[256];
             size_t n = sources && sources->info ? sources->info(sources->user, node->name, value, sizeof(value)) : 0;
@@ -708,7 +717,7 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
         }
 
         case RUBRAVIEW_LINE_NOTE:
-            put_text(&w, node->text, width);
+            put_text(&w, tr(node->text), width);
             break;
 
         case RUBRAVIEW_LINE_TABLE: {
@@ -727,25 +736,30 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             pad_to(&w, view->label_cols);
             put_bytes(&w, "<", 1, 1);
             put_bytes(&w, " ", 1, 1);
-            put_text(&w, node->text, width - w.cells - 2);
+            put_text(&w, tr(node->text), width - w.cells - 2);
             put_bytes(&w, " ", 1, 1);
             put_bytes(&w, ">", 1, 1);
             break;
 
         case RUBRAVIEW_LINE_SETTING: {
             const rubraview_setting_def_t *def = &view->doc->defs[node->setting];
-            put_text(&w, def->label, view->label_cols - 1);
+            put_text(&w, tr(def->label), view->label_cols - 1);
             pad_to(&w, view->label_cols);
             int32_t room = width - view->label_cols;
             double value = settings ? rubraview_settings_get(settings, def->section, def->key) : def->default_value;
 
             switch (def->type) {
                 case RUBRAVIEW_SETTING_BOOL:
-                    put_text(&w, value > 0.5 ? U8("[x] on") : U8("[ ] off"), room);
+                    put_text(&w, value > 0.5 ? TU8("[x] on") : TU8("[ ] off"), room);
                     break;
                 case RUBRAVIEW_SETTING_CHOICE: {
                     int32_t index = (int32_t)value;
-                    const char *word = index >= 0 && index < def->choice_count ? def->choices[index] : "?";
+                    const char *word = index >= 0 && index < def->choice_count ? tr_choice(def->choices[index]) : "?";
+                    /* The languages by their own names, so each is found whatever is on screen. */
+                    if (index >= 0 && index < def->choice_count && rubraview_u8_eq_lit(def->section, "general") &&
+                        rubraview_u8_eq_lit(def->key, "language") && rubraview_lang_native_name(def->choices[index])) {
+                        word = rubraview_lang_native_name(def->choices[index]);
+                    }
                     char text[96];
                     int n = snprintf(text, sizeof(text), "< %s >  %d/%d", word, index + 1, def->choice_count);
                     put_text(&w, (u8str_t){ .ptr = text, .len = n > 0 ? (size_t)n : 0 }, room);
@@ -770,7 +784,7 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
                     put_text(&w, (u8str_t){ .ptr = text, .len = n > 0 ? (size_t)n : 0 }, width - w.cells);
                     if (def->unit.len > 0) {
                         put_bytes(&w, " ", 1, 1);
-                        put_text(&w, def->unit, width - w.cells);
+                        put_text(&w, tr_unit(def->unit), width - w.cells);
                     }
                     break;
                 }
@@ -780,7 +794,7 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
                                             : (u8str_t){ .ptr = "", .len = 0 };
                     put_bytes(&w, "[", 1, 1);
                     int32_t inner = room - 2;
-                    put_text(&w, text.len > 0 ? text : U8("(not set)"), inner);
+                    put_text(&w, text.len > 0 ? text : TU8("(not set)"), inner);
                     pad_to(&w, view->label_cols + room - 1);
                     put_bytes(&w, "]", 1, 1);
                     break;

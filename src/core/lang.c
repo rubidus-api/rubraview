@@ -315,6 +315,23 @@ size_t rubraview_text_fit(u8str_t text, size_t columns) {
 
 /* ---- choosing a pack ---- */
 
+static bool tag_eq(const char *a, size_t n, const char *b);
+
+const char *rubraview_lang_native_name(const char *code) {
+    static const struct { const char *code, *name; } NAMES[] = {
+        { "en", "English" },
+        { "ko", "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4" },                         /* 한국어 */
+        { "ja", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E" },                         /* 日本語 */
+        { "zh-hans", "\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87" },          /* 简体中文 */
+        { "zh-hant", "\xE7\xB9\x81\xE9\xAB\x94\xE4\xB8\xAD\xE6\x96\x87" },          /* 繁體中文 */
+    };
+    if (!code) return NULL;
+    for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+        if (tag_eq(code, strlen(code), NAMES[i].code)) return NAMES[i].name;
+    }
+    return NULL;
+}
+
 static bool tag_eq(const char *a, size_t n, const char *b) {
     if (strlen(b) != n) return false;
     for (size_t i = 0; i < n; i++) if (rubraview_ascii_lower(a[i]) != rubraview_ascii_lower(b[i])) return false;

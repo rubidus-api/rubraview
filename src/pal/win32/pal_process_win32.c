@@ -12,6 +12,14 @@ static u8str_t wide_to_u8(proven_arena_t *arena, const WCHAR *wide) {
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (proven_size_t)(len - 1) };
 }
 
+bool rubraview_pal_process_ui_language(char *buf, size_t cap) {
+    if (!buf || cap == 0) return false;
+    WCHAR name[LOCALE_NAME_MAX_LENGTH];
+    if (LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(), SORT_DEFAULT), name, LOCALE_NAME_MAX_LENGTH, 0) <= 0) return false;
+    int n = WideCharToMultiByte(CP_UTF8, 0, name, -1, buf, (int)cap, NULL, NULL);
+    return n > 1;
+}
+
 u8str_t rubraview_pal_process_executable(proven_arena_t *arena) {
     if (!arena) return (u8str_t){0};
     WCHAR path[32768];

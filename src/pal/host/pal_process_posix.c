@@ -4,6 +4,11 @@
 /* The host build exists to run the core's tests; it starts no second
    process of its own. Both calls fail honestly rather than pretending. */
 
+bool rubraview_pal_process_ui_language(char *buf, size_t cap) {
+    (void)buf; (void)cap;
+    return false;
+}
+
 u8str_t rubraview_pal_process_executable(proven_arena_t *arena) {
     (void)arena;
     return (u8str_t){0};

@@ -33,6 +33,9 @@ static const char *const PARTS[] = {
 "  int    general.titlebar_hide_ms    \"Titlebar hide delay\"     100..3000 step 50 unit \"ms\" = 500 wired\n"
 "  section \"Where this is kept\"\n"
 "  info   \"Settings file\"           {config.path}\n"
+"  section \"Language\"\n"
+"  choice general.language         \"Language\"                auto | en | ko | ja | zh-hans | zh-hant = auto wired\n"
+"  note \"Auto follows Windows' display language. A language is a file in the lang folder beside rubraview.exe.\"\n"
 "\n",
 "page explorer \"Explorer\"\n"
 "  section \"What Rubraview is given\"\n"

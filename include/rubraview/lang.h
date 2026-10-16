@@ -101,6 +101,11 @@ size_t rubraview_text_fit(u8str_t text, size_t columns);
 /** Whether a code point takes two columns. */
 bool rubraview_codepoint_is_wide(uint32_t cp);
 
+/** A language's own name for itself, by its code as the setting stores it
+    ("ko" is "한국어", "zh-hant" "繁體中文"), or NULL: shown as it is in
+    every language, so it is found whatever language is on screen. */
+const char *rubraview_lang_native_name(const char *code);
+
 /** Which pack a Windows language tag ("ko-KR", "zh-TW", "ja") wants, from
     `available` codes ("ko", "ja", "zh-Hans", "zh-Hant"); NULL when none
     (English). Whole tag first, then the script, then the language. */

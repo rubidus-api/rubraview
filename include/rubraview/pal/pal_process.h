@@ -16,6 +16,10 @@ extern "C" {
  * does not take the conversion with it.
  */
 
+/** Windows' display language as a tag ("ko-KR", "zh-TW"), into `buf`; false
+    when it cannot be had (and on hosts other than Windows). RV-114. */
+bool rubraview_pal_process_ui_language(char *buf, size_t cap);
+
 /** This program's own executable, as a full path. Empty when it cannot be had. */
 u8str_t rubraview_pal_process_executable(proven_arena_t *arena);
 

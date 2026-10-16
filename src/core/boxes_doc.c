@@ -1,4 +1,5 @@
 #include "rubraview/boxes_doc.h"
+#include "rubraview/lang.h"
 #include <string.h>
 
 /*
@@ -292,7 +293,7 @@ rubraview_menu_tree_t rubraview_boxes_menu(proven_arena_t *arena, const rubravie
             item.label = recent[s.recent].label;
             item.action = recent[s.recent].action;
         } else {
-            item.label = node->label;
+            item.label = rubraview_tr_ctx_u8("menu", node->label);   /* RV-114: built again when the language changes */
             item.action = node->kind == RUBRAVIEW_BOX_NODE_ITEM ? node->action : (u8str_t){ .ptr = "", .len = 0 };
             if (node->kind == RUBRAVIEW_BOX_NODE_MENU) {
                 size_t k = children_of(doc, s.node, when, recent_count, kids, capacity);

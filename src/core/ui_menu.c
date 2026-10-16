@@ -1,4 +1,5 @@
 #include "rubraview/ui_menu.h"
+#include "rubraview/lang.h"
 #include <string.h>
 
 rubraview_menu_state_t rubraview_menu_create(const rubraview_menu_tree_t *tree) {
@@ -107,10 +108,10 @@ u8str_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buf
     if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
 
     size_t pos = 0;
-    static const char ROOT[] = "Menu";
+    const char *ROOT = T("Menu");
     static const char SEPARATOR[] = " > ";
 
-    pos = append_bounded(buffer, buffer_size, pos, ROOT, sizeof(ROOT) - 1);
+    pos = append_bounded(buffer, buffer_size, pos, ROOT, strlen(ROOT));
 
     if (state && state->tree && state->tree->items) {
         for (int32_t level = 0; level < state->depth; ++level) {
