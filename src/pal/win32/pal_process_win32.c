@@ -28,7 +28,7 @@ u8str_t rubraview_pal_process_executable(proven_arena_t *arena) {
     return wide_to_u8(arena, path);
 }
 
-bool rubraview_pal_process_start_console(u8str_t command_line) {
+static bool start_process(u8str_t command_line, DWORD flags) {
     if (command_line.len == 0) return false;
 
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, command_line.ptr, (int)command_line.len, NULL, 0);
@@ -42,15 +42,22 @@ bool rubraview_pal_process_start_console(u8str_t command_line) {
 
     STARTUPINFOW si = { .cb = sizeof(si) };
     PROCESS_INFORMATION pi = {0};
-    /* CREATE_NEW_CONSOLE: a window of its own to report into. The handles
-       are closed at once — nothing here waits for it, which is the point:
-       the run outlives this viewer. */
+    /* The handles are closed at once — nothing here waits for it, which
+       is the point: the process outlives this viewer. */
     BOOL ok = CreateProcessW(NULL, wide, NULL, NULL, FALSE,
-                             CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi);
+                             flags, NULL, NULL, &si, &pi);
     HeapFree(GetProcessHeap(), 0, wide);
     if (!ok) return false;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return true;
+}
+
+bool rubraview_pal_process_start_console(u8str_t command_line) {
+    return start_process(command_line, CREATE_NEW_CONSOLE);   /* a window of its own to report into */
+}
+
+bool rubraview_pal_process_start(u8str_t command_line) {
+    return start_process(command_line, 0);
 }
 #endif /* _WIN32 */

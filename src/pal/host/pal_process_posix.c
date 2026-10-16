@@ -18,4 +18,9 @@ bool rubraview_pal_process_start_console(u8str_t command_line) {
     (void)command_line;
     return false;
 }
+
+bool rubraview_pal_process_start(u8str_t command_line) {
+    (void)command_line;
+    return false;
+}
 #endif

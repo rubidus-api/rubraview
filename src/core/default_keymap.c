@@ -30,6 +30,8 @@ const char *rubraview_default_keymap(void) {
     "copy_frame = \"Ctrl+C\"\n"
     "save_frame = \"Ctrl+Shift+E\"\n"
     "open_batch = \"Ctrl+B\"\n"
+    /* Owner, 2026-10-16: the viewer once more, in a window of its own. */
+    "new_window = \"Ctrl+N\"\n"
     /* §3.22.1 */
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"

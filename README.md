@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.1.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.2.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -64,6 +64,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
+| `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |

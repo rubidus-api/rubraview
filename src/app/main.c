@@ -1103,6 +1103,7 @@ static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
+static void new_window(app_state_t *app);
 static void panel_write_archive_page(app_state_t *app, bool over);
 static void panel_run_batch(app_state_t *app);
 static void print_paths(app_state_t *app, const u8str_t *paths, size_t count);
@@ -5870,6 +5871,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
     } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
         else panel_open_export(app);
+    } else if (rubraview_u8_eq_lit(action, "new_window")) {
+        new_window(app);
     } else if (rubraview_u8_eq_lit(action, "open_batch")) {
         app->batch_list_count = 0;   /* opened by hand: on the folder being read */
         if (app->panel.open && app->panel_is_batch) panel_close(app);
@@ -18805,6 +18808,22 @@ static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text) {
 
 static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text) {
     append_arg(buf, cap, pos, cstr(text));
+}
+
+/* File › New window (owner, 2026-10-16): this program once more, with
+   nothing open, a window of its own whatever "Reuse the open window" says. */
+static void new_window(app_state_t *app) {
+    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    char line[4096];
+    size_t pos = 0;
+    line[0] = '\0';
+    if (exe.len > 0) {
+        append_arg(line, sizeof(line), &pos, exe);
+        append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
+    }
+    if (exe.len == 0 || !rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) {
+        osd_say(app, TU8("a new window could not be started"));
+    }
 }
 
 /* The chosen files as a list file in the user's temporary folder, which

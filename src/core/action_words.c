@@ -97,6 +97,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "media_volume_up", "Volume up 5%" },
     { "move_to_folder", "Move the file on screen to the folder set for it" },
     { "move_to_other_folder", "Move the file on screen to a folder typed or browsed; one not there yet is made" },
+    { "new_window", "A new window: the viewer once more, nothing open" },
     { "next_archive", "Next archive in the folder" },
     { "next_audio_track", "Next sound track" },
     { "next_page", "Next page" },

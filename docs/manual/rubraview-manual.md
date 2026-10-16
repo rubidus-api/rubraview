@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.1.0.exe              the viewer, as built
-dist/rubraview-v1.1.0/                 the release bundle
-dist/rubraview-v1.1.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.2.0.exe              the viewer, as built
+dist/rubraview-v1.2.0/                 the release bundle
+dist/rubraview-v1.2.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1064,6 +1064,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 | `Ctrl+B` | Convert many files |
+| `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |

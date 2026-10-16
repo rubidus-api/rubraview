@@ -30,6 +30,12 @@ u8str_t rubraview_pal_process_executable(proven_arena_t *arena);
  */
 bool rubraview_pal_process_start_console(u8str_t command_line);
 
+/**
+ * Start `command_line` as a separate process with no console, not waited
+ * for: a window program such as this one again. As above otherwise.
+ */
+bool rubraview_pal_process_start(u8str_t command_line);
+
 #ifdef __cplusplus
 }
 #endif

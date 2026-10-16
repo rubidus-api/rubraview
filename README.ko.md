@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.1.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.1.0/rubraview-v1.1.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.2.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -63,6 +63,7 @@
 | `Ctrl+C` | 화면의 프레임 복사 (영상, 애니메이션), 사진이면 그림 자체 |
 | `Ctrl+Shift+E` | 화면의 프레임을 파일 옆에 PNG로 저장 |
 | `Ctrl+B` | 여러 파일 변환 |
+| `Ctrl+N` | 새 창: 뷰어를 하나 더, 빈 채로 |
 | `F10`, `Ctrl+,` | 설정 |
 | `F1` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |

@@ -299,6 +299,7 @@ static const char *const PARTS[] = {
 "end\n"
 "\n",
 "menu \"File\"\n"
+"  item new_window           \"New window\"\n"
 "  item open_picker          \"Open file\"\n"
 "  item open_folder          \"Open folder\"\n"
 "  item up_to_folder         \"Up a folder\"\n"
