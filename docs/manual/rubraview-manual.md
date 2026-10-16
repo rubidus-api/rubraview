@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v0.0.96.exe              the viewer, as built
-dist/rubraview-v0.0.96/                 the release bundle
-dist/rubraview-v0.0.96.zip              that bundle, zipped — the download
+dist/rubraview-v0.0.97.exe              the viewer, as built
+dist/rubraview-v0.0.97/                 the release bundle
+dist/rubraview-v0.0.97.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -265,7 +265,8 @@ from there.
 A right click on the picture otherwise opens **a short list** where you
 clicked, for what is on screen. For a picture: Copy picture, Adjust
 picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
-Info; Rename, Copy to folder, Move to folder, Show in Explorer,
+Info; Rename, Copy to folder, Move to folder, Copy to another folder...,
+Move to another folder..., Show in Explorer,
 Delete (click it twice: it goes to the recycle bin); and Menu... for the
 menu box. A book or an archive has the next and previous archive and
 the layouts; a film has play and stop, the subtitles, the sound track,
@@ -429,6 +430,15 @@ copied out with `F6` — it is written as a file of its own — but not moved
 (to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
 the name is taken the file goes in as `name-1.jpg`, then `name-2.jpg`, and
 so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
+
+To send it somewhere else, `Shift+F6` (copy) and `Shift+F7` (move) — also
+Menu › File › This file › Copy to another folder... / Move to another
+folder..., and `F6` / `F7` themselves while no folder is set for them —
+open a box in the middle of the window holding the last folder you used.
+Type or paste a folder, or press `Ctrl+O` to browse to one, and press
+`Enter`. A folder that is not there yet is not made by accident: the
+first `Enter` says it is new, a second `Enter` makes it and puts the file
+in it; `Esc` leaves everything as it was.
 
 **Inside an archive** the same keys work on the page on screen, and the
 archive is written again with the change in it:
@@ -906,7 +916,8 @@ filename code page, the memory cap). Some worth knowing:
   it, or press `Enter` on it, then type, paste or (`Ctrl+O`) browse one, and
   `Enter` adds it. `Enter` on a folder in the list puts it in the same box
   to change (the row says it is being changed); `Esc` leaves it as it was.
-  `Delete` takes a folder off.
+  `Delete`, or a click on the **X** at the end of its row, takes a folder
+  off.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
@@ -954,7 +965,9 @@ ext** gives all the picked files one extension you type, **Playlist**
 writes them as a playlist file beside themselves and opens them as one
 sequence, **Recycle** bins them (press it twice), **Move to** and **Copy
 to** send them to one of the numbered folders — press the number after
-the button — and **Select all** picks every file, after which the same
+the button, or `0` for another folder, typed or browsed in the same box
+as `Shift+F6`, a new one made on a second `Enter` (with no numbered
+folder set, the button opens that box at once) — and **Select all** picks every file, after which the same
 button reads **Deselect all** and lets them all go. **Details** at the
 right end shows the files as a list — a row a file, with its type (the
 extension), size, created and modified times, resolution and, for a film
@@ -1057,6 +1070,8 @@ listed under a later heading only means that while that is on screen.
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
+| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
+| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |

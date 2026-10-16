@@ -151,6 +151,7 @@ static const char *const PARTS[] = {
 "  section \"The file on screen, to a folder\"\n"
 "  path   curation.copy_dir        \"Copy to (F6)\"            wired\n"
 "  path   curation.move_dir        \"Move to (F7)\"            wired\n"
+"  path   curation.other_dir       \"Another folder\"          hidden wired\n"
 "  note \"F6 copies the file on screen to the first folder and F7 moves it to the second; a page inside an archive can only be copied. A name already there gets -1, -2, ... added.\"\n"
 "  section \"Number keys send the file to\"\n"
 "  choice curation.curation_mode   \"Number keys\"             move | copy = move wired\n"

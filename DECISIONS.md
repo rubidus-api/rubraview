@@ -1381,3 +1381,13 @@ Do not store credentials, private infrastructure details, personal data, private
   - **Recent**: `::recent`, crumbs PC > Recent, `..` the PC page, a chip first after the favourites; File › Recent › "All recent files..." (`open_recent_list`). Thirty at most, newest first, each read from the disk; one gone is left out; no star.
   - **Folders kept out**: one hidden setting `recent.skip_dirs`, folders joined by '|'; a `table skip_dirs` on Files shows them and "+ add a folder" (Enter types or browses, Delete takes off). The settings document gains `hidden` (kept, saved, no row) and the window tables by name. A held path emptied is written empty, so the eight `skip_dir_N` moved into the list at start-up stay empty.
 - Consequences: a stored sort applies to every folder and to Recent alike; "as_folder" in Settings goes back to the folder's order. The ▲ / ▼ glyphs need a font that has them (Segoe UI does).
+
+## 2026-10-16: D-146 A copy or a move to any folder, made when new; the folders kept out taken off by mouse
+
+- Status: Accepted (owner 2026-10-16, two answers: "다른 폴더 고르기 추가" and "줄 끝에 ✕ 추가"; the keys, the 0 and the second Enter are the implementer's picks).
+- Context: the owner asked whether a new folder could be made right where files are copied or moved, and whether a folder kept out of Recent could be deleted; it could only be with Delete, and a copy or a move went only to the folders set in Settings.
+- Decision:
+  - **Another folder**: `copy_to_other_folder` (Shift+F6) and `move_to_other_folder` (Shift+F7), also Menu › File › This file and the picture's right-click list, and F6 / F7 while no folder is set for them, open the text box in the middle of the window holding the last folder used (`curation.other_dir`, hidden) or else the F6 / F7 folder. On the open-file screen, Move to / Copy to take `0` for it beside 1-9, and with no numbered folder set open it at once.
+  - **New folders**: Enter on a folder that is there puts the files in it; on one that is not, it says so (`rubraview_target_folder_step` OFFER) and a second Enter on the same path makes it (MAKE); a file of that name is refused. Ctrl+O browses with the system's folder dialog.
+  - **X**: each folder kept out has an X at its row's end; a click takes it off, as Delete does.
+- Consequences: no folder is made by one stray Enter; a relative name is taken from the picker's folder or the file's own.

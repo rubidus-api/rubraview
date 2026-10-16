@@ -243,6 +243,18 @@ u8str_t rubraview_curation_target(const rubraview_curation_t *curation, int32_t 
     return curation->dirs[digit - 1];
 }
 
+rubraview_target_step_t rubraview_target_folder_step(u8str_t path, bool exists, bool is_directory, u8str_t offered) {
+    if (path.len == 0) return RUBRAVIEW_TARGET_NOTHING;
+    if (exists) return is_directory ? RUBRAVIEW_TARGET_USE : RUBRAVIEW_TARGET_NOT_FOLDER;
+    return offered.len > 0 && rubraview_path_same(path, offered) ? RUBRAVIEW_TARGET_MAKE : RUBRAVIEW_TARGET_OFFER;
+}
+
+u8str_t rubraview_target_folder_trim(u8str_t typed) {
+    while (typed.len > 0 && (typed.ptr[0] == ' ' || typed.ptr[0] == '"')) { typed.ptr++; typed.len--; }
+    while (typed.len > 0 && (typed.ptr[typed.len - 1] == ' ' || typed.ptr[typed.len - 1] == '"')) typed.len--;
+    return typed;
+}
+
 bool rubraview_curation_advances(const rubraview_curation_t *curation) {
     /* A move takes the file out of the sequence, so staying on it would
        mean staying on something that is no longer there. A copy leaves

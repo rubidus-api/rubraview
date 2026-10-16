@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v0.0.96** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.96/rubraview-v0.0.96.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.96/rubraview-v0.0.96.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v0.0.97** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.97/rubraview-v0.0.97.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.97/rubraview-v0.0.97.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -67,6 +67,8 @@ ships with, so it cannot drift from them.
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `F7` | Move the file on screen to the folder set for it |
+| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
+| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |

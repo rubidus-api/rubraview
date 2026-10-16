@@ -783,6 +783,14 @@ typedef struct app_state {
     SRWLOCK                source_lock;/* held around every read of the page source */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
+    /* The box takes the folder to copy or move to (owner, 2026-10-16): the
+       picked files, or the file on screen; a folder not there yet is
+       offered once and made on the next Enter. */
+    bool                   rename_is_target;
+    bool                   target_moving;
+    bool                   target_from_picker;
+    char                   target_offered[1024];
+    size_t                 target_offered_len;
     int32_t                rename_favorite;       /* the box renames this favourite, or -1 (owner, 2026-09-30) */
     /* An encrypted RAR (owner, 2026-10-01): the box takes its password,
        shown as dots, for the archive named here. The passwords that opened
@@ -1076,6 +1084,10 @@ static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
 static void skip_dirs_take_old(app_state_t *app);
+static void target_begin(app_state_t *app, bool moving, bool from_picker);
+static void target_commit(app_state_t *app);
+static void target_browse(app_state_t *app);
+static void filing_put_to(app_state_t *app, u8str_t dir, bool moving);
 static void skip_dirs_table_rows(app_state_t *app);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
@@ -4362,10 +4374,8 @@ static void picker_recycle(app_state_t *app) {
     picker_navigate(app, app->picker_dir);
 }
 
-/* Move or copy the picked files into the curation folder a digit names. */
-static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
-    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
-    if (target_dir.len == 0) { osd_say(app, U8("no folder is bound to that number")); return; }
+/* Move or copy the picked files into a folder. */
+static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) {
     rubraview_fs_entry_t *entries = NULL;
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) { osd_say(app, U8("pick some files first")); return; }
@@ -4391,6 +4401,18 @@ static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
                            (int)target_dir.len, target_dir.ptr);
     if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
     if (moving) picker_navigate(app, app->picker_dir);
+}
+
+/* Move or copy the picked files into the curation folder a digit names. */
+static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
+    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
+    if (target_dir.len == 0) { osd_say(app, U8("no folder is bound to that number")); return; }
+    picker_curate_to(app, target_dir, moving);
+}
+
+static bool curation_has_numbers(const app_state_t *app) {
+    for (int32_t d = 1; d <= 9; ++d) if (rubraview_curation_target(&app->curation, d).len > 0) return true;
+    return false;
 }
 
 /* One of the buttons along the bottom was pressed. */
@@ -4437,10 +4459,12 @@ static void picker_button(app_state_t *app, picker_button_t button) {
             break;
         case PICKER_BTN_MOVE:
         case PICKER_BTN_COPY:
+            /* No numbered folder yet: straight to the box, where any folder is typed or made. */
+            if (!curation_has_numbers(app)) { target_begin(app, button == PICKER_BTN_MOVE, true); break; }
             app->picker_pending = (int32_t)button;
             app->picker_has_pending = true;
-            osd_say(app, button == PICKER_BTN_MOVE ? U8("press 1-9 for the folder to move them to")
-                                                   : U8("press 1-9 for the folder to copy them to"));
+            osd_say(app, button == PICKER_BTN_MOVE ? U8("press 1-9 for the folder to move them to, or 0 for another folder")
+                                                   : U8("press 1-9 for the folder to copy them to, or 0 for another folder"));
             break;
         case PICKER_BTN_CLEAR:
             /* one button for both (owner, 2026-10-16): Select all until all are, then Deselect all */
@@ -5806,6 +5830,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
         filing_put(app, false);
     } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
         filing_put(app, true);
+    } else if (rubraview_u8_eq_lit(action, "copy_to_other_folder")) {
+        target_begin(app, false, false);
+    } else if (rubraview_u8_eq_lit(action, "move_to_other_folder")) {
+        target_begin(app, true, false);
     } else if (rubraview_u8_eq_lit(action, "open_settings")) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
@@ -6188,12 +6216,17 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 
     if (combo.key_name.len == 1) {
         char c = combo.key_name.ptr[0];
+        if (app->picker_has_pending && c == '0') {
+            app->picker_has_pending = false;
+            target_begin(app, app->picker_pending == (int32_t)PICKER_BTN_MOVE, true);
+            return true;
+        }
         if (app->picker_has_pending && c >= '1' && c <= '9') {
             /* A number with no folder behind it leaves the picker waiting
                rather than letting the next one fall through to §3.18.3's
                own meaning, which would move the page on screen. */
             if (rubraview_curation_target(&app->curation, c - '0').len == 0) {
-                osd_say(app, U8("no folder is bound to that number - Settings > Files"));
+                osd_say(app, U8("no folder is bound to that number - Settings > Files, or 0 for another folder"));
                 return true;
             }
             app->picker_has_pending = false;
@@ -6336,6 +6369,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         }
         /* A password is never copied out of its box. */
         if (app->rename_is_password && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && (key_is(combo, "C") || key_is(combo, "X"))) return true;
+        if (app->rename_is_target && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "O")) { target_browse(app); return true; }
         if (rename_edit_key(app, combo)) return true;
         /* The characters themselves arrive as text (rename_text), in
            either case and from the IME; the keys that make them are
@@ -9091,7 +9125,15 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
         /* A password is asked in the middle, clear of the toolbox's anchor
            (VM, 2026-10-01: it showed through the box). */
-        if (app->rename_is_password) box.y = (win_h - box_h) * 0.5;
+        if (app->rename_is_password || app->rename_is_target) box.y = (win_h - box_h) * 0.5;
+        if (app->rename_is_target) {
+            rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
+            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
+            rubraview_pal_render_draw_text(app->renderer,
+                                           app->target_moving ? U8("Move to which folder?  Enter  /  Ctrl+O browses  /  a new one is made")
+                                                              : U8("Copy to which folder?  Enter  /  Ctrl+O browses  /  a new one is made"),
+                                           label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
         /* The typed path sits where the path is, as an address bar does. */
         if (app->rename_is_path) {
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, picker_top(app), win_w, PICKER_CRUMB_HEIGHT * dpi },
@@ -10276,14 +10318,16 @@ static bool filing_exists(void *ctx, u8str_t path) {
 }
 
 static void filing_put(app_state_t *app, bool moving) {
+    if (current_page_index(app) < 0) return;
+    u8str_t dir = moving ? app->curation.move_dir : app->curation.copy_dir;
+    /* None set yet: the box asks for one, as Shift+F6 / Shift+F7 do. */
+    if (dir.len == 0) { target_begin(app, moving, false); return; }
+    filing_put_to(app, dir, moving);
+}
+
+static void filing_put_to(app_state_t *app, u8str_t dir, bool moving) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
-    u8str_t dir = moving ? app->curation.move_dir : app->curation.copy_dir;
-    if (dir.len == 0) {
-        osd_say(app, moving ? U8("no folder to move to yet: Settings (F10) > Files > Move to")
-                            : U8("no folder to copy to yet: Settings (F10) > Files > Copy to"));
-        return;
-    }
     bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
     if (in_archive && moving) {
         osd_say(app, U8("a page inside an archive can be copied (F6), not moved"));
@@ -10391,6 +10435,8 @@ static void rename_end(app_state_t *app) {
     app->rename_is_archive = false;
     app->rename_is_extension = false;
     app->rename_is_path = false;
+    app->rename_is_target = false;
+    app->target_offered_len = 0;
     if (app->rename_is_password) {                       /* nothing of it stays behind */
         secure_wipe(app->rename_buffer, sizeof(app->rename_buffer));
         secure_wipe(app->rename_composing, sizeof(app->rename_composing));
@@ -10462,6 +10508,97 @@ static void picker_path_commit(app_state_t *app) {
         app->picker_open = false;
         open_path(app, path);
     }
+}
+
+/* The folder box for a copy or a move (owner, 2026-10-16): the last
+   folder typed in it, or the one set for F6 / F7, all selected. */
+static void target_begin(app_state_t *app, bool moving, bool from_picker) {
+    if (from_picker) {
+        size_t picked = 0;
+        uint64_t bytes = 0;
+        rubraview_picker_selection_metrics(&app->picker, &picked, &bytes);
+        if (picked == 0) { osd_say(app, U8("pick some files first")); return; }
+    } else {
+        if (current_page_index(app) < 0) return;
+        if (moving && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) {
+            osd_say(app, U8("a page inside an archive can be copied (F6), not moved"));
+            return;
+        }
+    }
+    if (app->rename_active) rename_end(app);
+    u8str_t last = rubraview_settings_get_text(&app->settings, U8("curation"), U8("other_dir"));
+    if (last.len == 0) last = moving ? app->curation.move_dir : app->curation.copy_dir;
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, last.len < sizeof(app->rename_buffer) ? last : U8(""));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_target = true;
+    app->target_moving = moving;
+    app->target_from_picker = from_picker;
+    app->target_offered_len = 0;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, moving ? U8("type the folder to move to; Ctrl+O browses, a new one is made")
+                        : U8("type the folder to copy to; Ctrl+O browses, a new one is made"));
+}
+
+static void target_browse(app_state_t *app) {
+    rubraview_file_dialog_opts_t opts = {
+        .title = app->target_moving ? "Move to which folder" : "Copy to which folder", .folder_mode = true,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
+    };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+    if (picked.accepted && picked.count > 0 && picked.paths[0].len < sizeof(app->rename_buffer)) {
+        rubraview_textedit_set(&app->rename_edit, picked.paths[0]);   /* in the box, for Enter */
+        app->target_offered_len = 0;
+    }
+}
+
+/* Enter in the folder box: a folder there takes the files; one not there
+   is offered, and made when Enter comes again for it. */
+static void target_commit(app_state_t *app) {
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    u8str_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
+    u8str_t base = app->target_from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
+    u8str_t path = typed.len ? rubraview_picker_typed_path(app->arena, typed, base) : typed;
+    rubraview_fs_entry_t found;
+    bool exists = path.len > 0 && rubraview_pal_fs_stat(app->arena, path, &found);
+    u8str_t offered = { .ptr = app->target_offered, .len = app->target_offered_len };
+    char line[1200];
+    switch (rubraview_target_folder_step(path, exists, exists && found.is_directory, offered)) {
+        case RUBRAVIEW_TARGET_NOTHING:
+            rename_end(app);
+            return;
+        case RUBRAVIEW_TARGET_NOT_FOLDER:
+            osd_say(app, U8("that is a file, not a folder - put it right, or Esc"));
+            return;
+        case RUBRAVIEW_TARGET_OFFER: {
+            size_t n = path.len < sizeof(app->target_offered) ? path.len : 0;
+            memcpy(app->target_offered, path.ptr, n);
+            app->target_offered_len = n;
+            int w = snprintf(line, sizeof(line), "%.*s is not there yet: Enter again makes it, Esc leaves it",
+                             (int)path.len, path.ptr);
+            if (w > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)w < sizeof(line) ? (size_t)w : sizeof(line) - 1 });
+            return;
+        }
+        case RUBRAVIEW_TARGET_MAKE:
+            if (!rubraview_pal_fs_make_dirs(path) && !rubraview_pal_fs_exists(path)) {
+                osd_say(app, U8("that folder could not be made"));
+                return;
+            }
+            break;
+        case RUBRAVIEW_TARGET_USE:
+            break;
+    }
+    /* Kept, to be offered first next time. */
+    u8str_t kept = app_keep(app, path);
+    rubraview_settings_set_text(&app->settings, U8("curation"), U8("other_dir"), kept);
+    settings_write_if_changed(app, false);
+    bool moving = app->target_moving, from_picker = app->target_from_picker;
+    rename_end(app);
+    if (from_picker) picker_curate_to(app, kept, moving);
+    else filing_put_to(app, kept, moving);
 }
 
 static void rename_begin(app_state_t *app) {
@@ -10561,6 +10698,7 @@ static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
+    if (app->rename_is_target) { target_commit(app); return; }
     if (app->rename_is_password) { password_commit(app); return; }
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
@@ -12489,7 +12627,7 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
         size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
         /* The last row is the box every folder is typed in; the one being changed says so. */
         bool changing = app->spath_active && app->spath_list_index >= 0 && (size_t)app->spath_list_index == index - 1;
-        int w = index == 0 ? snprintf(buffer, capacity, "Folder  (Enter changes it in the box below, Delete takes it off)")
+        int w = index == 0 ? snprintf(buffer, capacity, "Folder  (Enter changes it in the box below; Delete or the x at the end takes it off)")
               : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].len, dirs[index - 1].ptr,
                                       changing ? "   (being changed below)" : "")
               : index == n + 1 ? (app->spath_active && app->spath_list_index >= 0 ? 0
@@ -13446,6 +13584,28 @@ static void settings_path_click(app_state_t *app, int32_t col, int32_t cols) {
     app->settings_dirty = true;
 }
 
+/* The column of a folder row's X, which takes the folder off (owner, 2026-10-16). */
+static int32_t skip_dirs_x_col(const app_state_t *app) {
+    return app->settings_view.cols - 4;
+}
+
+/* An X at the end of each folder kept out, for the mouse. */
+static void skip_dirs_draw_x(app_state_t *app) {
+    const rubraview_settings_view_t *v = &app->settings_view;
+    rubraview_renderer_t *r = app->settings_renderer;
+    const double cw = app->settings_cell_w, ch = app->settings_cell_h;
+    size_t n = skip_dirs_count(app);
+    int32_t mc = (int32_t)(app->settings_tip_x / cw), mr = (int32_t)(app->settings_tip_y / ch);
+    for (size_t k = 1; k <= n; ++k) {
+        int32_t row = rubraview_settings_view_table_screen_row(v, U8("skip_dirs"), (int32_t)k);
+        if (row < 0) continue;
+        rubraview_pal_rect_t cell = { cw * skip_dirs_x_col(app), ch * row, cw * 3, ch };
+        bool over = mr == row && mc >= skip_dirs_x_col(app) && mc < skip_dirs_x_col(app) + 3;
+        rubraview_pal_render_fill_rect(r, cell, over ? COLOR_CLOSE_HOVER : SETTINGS_PANE, 2.0);
+        rubraview_pal_render_draw_text(r, U8("X"), cell, app->settings_font, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 /* The typing box: its text, the selection, the caret. The list's box is
    there even when nothing is typed, an empty field waiting for a folder. */
 static void settings_path_draw(app_state_t *app) {
@@ -13572,6 +13732,17 @@ static size_t settings_pump(app_state_t *app) {
                     app->settings_dirty = true;
                     break;
                 }
+                {
+                    /* The X at a folder's end takes it off. */
+                    int32_t k = rubraview_settings_view_table_row_at(view, col, row);
+                    if (k >= 1 && (size_t)k <= skip_dirs_count(app) && col >= skip_dirs_x_col(app) && col < skip_dirs_x_col(app) + 3 &&
+                        rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), k) == row) {
+                        rubraview_settings_view_focus_table_row(view, U8("skip_dirs"), k);
+                        settings_event(app, RUBRAVIEW_SEVENT_TABLE_CLEAR);
+                        app->settings_dirty = true;
+                        break;
+                    }
+                }
                 app->settings_mouse_down = true;
                 {
                     /* One click on the folder box starts typing in it. */
@@ -13595,6 +13766,9 @@ static size_t settings_pump(app_state_t *app) {
                     app->settings_tip_since = rubraview_pal_time_now_seconds();
                     app->settings_tip_shown = false;
                 }
+                /* the folders' X lights under the pointer */
+                if ((int32_t)(event.mouse.x / app->settings_cell_w) >= skip_dirs_x_col(app) - 1 ||
+                    (int32_t)(app->settings_tip_x / app->settings_cell_w) >= skip_dirs_x_col(app) - 1) app->settings_dirty = true;
                 app->settings_tip_x = event.mouse.x;
                 app->settings_tip_y = event.mouse.y;
             }
@@ -16522,6 +16696,7 @@ static void draw_settings_window(app_state_t *app) {
         }
     }
 
+    skip_dirs_draw_x(app);
     settings_path_draw(app);
 
     /* Under the page: the last action's result, then the buttons. */

@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v0.0.96** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.96/rubraview-v0.0.96.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.96/rubraview-v0.0.96.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v0.0.97** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.97/rubraview-v0.0.97.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v0.0.97/rubraview-v0.0.97.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -66,6 +66,8 @@
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
+| `Shift+F6` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 복사(없는 폴더는 새로 만듦) |
+| `Shift+F7` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 이동(없는 폴더는 새로 만듦) |
 | `Ctrl+Left` | 창 좁게 |
 | `Ctrl+Right` | 창 넓게 |
 | `Ctrl+Up` | 창 낮게 |

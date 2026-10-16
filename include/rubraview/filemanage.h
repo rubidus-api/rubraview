@@ -162,6 +162,26 @@ typedef bool (*rubraview_path_exists_fn)(void *ctx, u8str_t path);
 u8str_t rubraview_filing_target(proven_arena_t *arena, u8str_t dir, u8str_t filename,
                                 rubraview_path_exists_fn exists, void *ctx);
 
+/**
+ * A folder typed for a copy or a move (owner, 2026-10-16: "복사 및 이동할 때
+ * 거기서 바로 새 폴더 추가"): what Enter does with it. A folder that is
+ * there takes the files; one that is not is offered first, and made when
+ * Enter comes again for the same path (`offered`); a file there, or
+ * nothing typed, takes nothing.
+ */
+typedef enum rubraview_target_step {
+    RUBRAVIEW_TARGET_NOTHING = 0,   /* nothing typed */
+    RUBRAVIEW_TARGET_USE,           /* the folder is there: put the files in it */
+    RUBRAVIEW_TARGET_OFFER,         /* not there yet: say it will be made on the next Enter */
+    RUBRAVIEW_TARGET_MAKE,          /* offered already: make it, then put the files in it */
+    RUBRAVIEW_TARGET_NOT_FOLDER,    /* a file has that name */
+} rubraview_target_step_t;
+
+rubraview_target_step_t rubraview_target_folder_step(u8str_t path, bool exists, bool is_directory, u8str_t offered);
+
+/** The typed text without the spaces and quotes round it (Explorer's "Copy as path"). */
+u8str_t rubraview_target_folder_trim(u8str_t typed);
+
 /* ---- §3.19.2 drops ---- */
 
 typedef enum rubraview_drop_kind {

@@ -62,6 +62,9 @@ const char *rubraview_default_keymap(void) {
     "toggle_file_list = \"F3\"\n"
     "copy_to_folder = \"F6\"\n"
     "move_to_folder = \"F7\"\n"
+    /* Owner, 2026-10-16: any folder, typed or browsed, made when it is not there. */
+    "copy_to_other_folder = \"Shift+F6\"\n"
+    "move_to_other_folder = \"Shift+F7\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
        arrows move it — everywhere, whatever is on screen. */
     "window_narrower = \"Ctrl+Left\"\n"
