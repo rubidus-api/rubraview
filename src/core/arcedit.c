@@ -1,4 +1,5 @@
 #include "rubraview/arcedit.h"
+#include "rubraview/lang.h"
 #include "rubraview/path.h"
 #include "fulta/arc.h"
 #include "proven/algorithm.h"
@@ -99,16 +100,16 @@ size_t rubraview_arcedit_sibling_name(u8str_t entry_name, u8str_t new_base, char
 }
 
 const char *rubraview_arcedit_result_text(rubraview_arcedit_result_t result) {
-    static const char *const TEXT[RUBRAVIEW_ARCEDIT_RESULT_COUNT] = {
-        "the archive was written again",
-        "stopped: the archive is as it was",
-        "this archive is encrypted: its pages cannot be changed",
-        "not changed: the archive could not be read",
-        "not changed: the new archive could not be written",
-        "not changed: the archive already holds that name",
-        "not changed: that name cannot be stored",
-        "not changed: the new archive did not check out",
-        "not changed: not enough memory",
+    const char *const TEXT[RUBRAVIEW_ARCEDIT_RESULT_COUNT] = {
+        T("the archive was written again"),
+        T("stopped: the archive is as it was"),
+        T("this archive is encrypted: its pages cannot be changed"),
+        T("not changed: the archive could not be read"),
+        T("not changed: the new archive could not be written"),
+        T("not changed: the archive already holds that name"),
+        T("not changed: that name cannot be stored"),
+        T("not changed: the new archive did not check out"),
+        T("not changed: not enough memory"),
     };
     return (int)result >= 0 && result < RUBRAVIEW_ARCEDIT_RESULT_COUNT ? TEXT[result] : "";
 }

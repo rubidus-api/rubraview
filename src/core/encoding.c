@@ -1,4 +1,5 @@
 #include "rubraview/encoding.h"
+#include "rubraview/lang.h"
 #include "rubraview/utf8.h"
 
 rubraview_encoding_verdict_t rubraview_archive_filename_detect(u8str_t raw_name, bool utf8_flag) {
@@ -26,14 +27,14 @@ uint32_t rubraview_codepage_id(rubraview_codepage_t codepage) {
 
 u8str_t rubraview_codepage_label(rubraview_codepage_t codepage) {
     switch (codepage) {
-        case RUBRAVIEW_CODEPAGE_UTF8:                 return U8("UTF-8");
-        case RUBRAVIEW_CODEPAGE_KOREAN:               return U8("Korean (CP949)");
-        case RUBRAVIEW_CODEPAGE_JAPANESE:             return U8("Japanese (Shift-JIS)");
-        case RUBRAVIEW_CODEPAGE_SIMPLIFIED_CHINESE:   return U8("Simplified Chinese (GBK)");
-        case RUBRAVIEW_CODEPAGE_TRADITIONAL_CHINESE:  return U8("Traditional Chinese (Big5)");
-        case RUBRAVIEW_CODEPAGE_WESTERN:              return U8("Western European (CP1252)");
+        case RUBRAVIEW_CODEPAGE_UTF8:                 return TU8("UTF-8");
+        case RUBRAVIEW_CODEPAGE_KOREAN:               return TU8("Korean (CP949)");
+        case RUBRAVIEW_CODEPAGE_JAPANESE:             return TU8("Japanese (Shift-JIS)");
+        case RUBRAVIEW_CODEPAGE_SIMPLIFIED_CHINESE:   return TU8("Simplified Chinese (GBK)");
+        case RUBRAVIEW_CODEPAGE_TRADITIONAL_CHINESE:  return TU8("Traditional Chinese (Big5)");
+        case RUBRAVIEW_CODEPAGE_WESTERN:              return TU8("Western European (CP1252)");
         case RUBRAVIEW_CODEPAGE_AUTO:
-        default:                                      return U8("Auto-Detect");
+        default:                                      return TU8("Auto-Detect");
     }
 }
 

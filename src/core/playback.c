@@ -1,4 +1,5 @@
 #include "rubraview/playback.h"
+#include "rubraview/lang.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -293,7 +294,7 @@ u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
     if (!buffer || buffer_size < 8) return empty;
 
     if (!set || index < 0 || (size_t)index >= set->count) {
-        int written = snprintf(buffer, buffer_size, "Off");
+        int written = snprintf(buffer, buffer_size, T("Off"));
         return written > 0 ? (u8str_t){ .ptr = buffer, .len = (size_t)written } : empty;
     }
 

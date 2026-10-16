@@ -1,4 +1,5 @@
 #include "rubraview/repeat.h"
+#include "rubraview/lang.h"
 #include <string.h>
 
 rubraview_repeat_mode_t rubraview_repeat_cycle(rubraview_repeat_mode_t mode) {
@@ -8,22 +9,22 @@ rubraview_repeat_mode_t rubraview_repeat_cycle(rubraview_repeat_mode_t mode) {
 
 const char *rubraview_repeat_caption(rubraview_repeat_mode_t mode) {
     switch (mode) {
-        case RUBRAVIEW_REPEAT_STOP:    return "Once";
-        case RUBRAVIEW_REPEAT_NEXT:    return "Next";
-        case RUBRAVIEW_REPEAT_ONE:     return "1 loop";
-        case RUBRAVIEW_REPEAT_ALL:     return "Loop";
-        case RUBRAVIEW_REPEAT_SHUFFLE: return "Shuffle";
+        case RUBRAVIEW_REPEAT_STOP:    return T("Once");
+        case RUBRAVIEW_REPEAT_NEXT:    return T("Next");
+        case RUBRAVIEW_REPEAT_ONE:     return T("1 loop");
+        case RUBRAVIEW_REPEAT_ALL:     return T("Loop");
+        case RUBRAVIEW_REPEAT_SHUFFLE: return T("Shuffle");
         default:                       return "";
     }
 }
 
 const char *rubraview_repeat_sentence(rubraview_repeat_mode_t mode) {
     switch (mode) {
-        case RUBRAVIEW_REPEAT_STOP:    return "at the end: stop";
-        case RUBRAVIEW_REPEAT_NEXT:    return "at the end: the next file";
-        case RUBRAVIEW_REPEAT_ONE:     return "repeat: this file";
-        case RUBRAVIEW_REPEAT_ALL:     return "repeat: all of them";
-        case RUBRAVIEW_REPEAT_SHUFFLE: return "shuffle: each once, then again";
+        case RUBRAVIEW_REPEAT_STOP:    return T("at the end: stop");
+        case RUBRAVIEW_REPEAT_NEXT:    return T("at the end: the next file");
+        case RUBRAVIEW_REPEAT_ONE:     return T("repeat: this file");
+        case RUBRAVIEW_REPEAT_ALL:     return T("repeat: all of them");
+        case RUBRAVIEW_REPEAT_SHUFFLE: return T("shuffle: each once, then again");
         default:                       return "";
     }
 }

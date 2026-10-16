@@ -1205,6 +1205,16 @@ static bool ff_finished(void *handle) {
     return drained;
 }
 
+static bool ff_sound_over(void *handle) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !m->audio) return false;
+    if (atomic_load_explicit(&m->end_generation, memory_order_acquire) != m->consumer_generation) return false;
+    AcquireSRWLockShared(&m->audio_lock);
+    bool drained = rubraview_pal_audio_drained(m->audio);
+    ReleaseSRWLockShared(&m->audio_lock);
+    return drained;
+}
+
 static void ff_set_paused(void *handle, bool paused) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m) return;
@@ -1404,6 +1414,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .frames_ready = ff_frames_ready,
     .seek = ff_seek,
     .finished = ff_finished,
+    .sound_over = ff_sound_over,
     .set_paused = ff_set_paused,
     .audio_position = ff_audio_position,
     .audio_format = ff_audio_format,

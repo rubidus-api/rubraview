@@ -28,6 +28,7 @@ typedef struct rubraview_media_backend_api {
     size_t (*frames_ready)(void *impl);
     void  (*seek)(void *impl, double seconds);
     bool  (*finished)(void *impl);
+    bool  (*sound_over)(void *impl);   /* the file's sound has all been read and heard; NULL: never */
     void  (*set_paused)(void *impl, bool paused);
     bool  (*audio_position)(void *impl, double *out_position, double *out_wall);
     /** D-120: the rate and channels the sound is played at now — not always

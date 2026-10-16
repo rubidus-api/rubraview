@@ -1,4 +1,5 @@
 #include "rubraview/mp4.h"
+#include "rubraview/lang.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,22 +145,22 @@ bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!mp4 || !data || size < 16) { *out_why = "not an MP4 file"; return false; }
+    if (!mp4 || !data || size < 16) { *out_why = N_("not an MP4 file"); return false; }
     *mp4 = (rubraview_mp4_t){ .data = data, .size = size };
     box_t b, moov = {0};
     bool have_ftyp = false, have_moov = false;
     for (uint64_t at = 0; at < size && box_at(mp4, at, size, &b); at = b.end) {
         if (b.type == FOURCC('f', 't', 'y', 'p')) have_ftyp = true;
-        if (b.type == FOURCC('m', 'o', 'o', 'f')) { *out_why = "a fragmented MP4 is not read yet"; return false; }
+        if (b.type == FOURCC('m', 'o', 'o', 'f')) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
         if (b.type == FOURCC('m', 'o', 'o', 'v') && !have_moov) { moov = b; have_moov = true; }
         if (b.end <= at) break;
     }
-    if (!have_ftyp && !have_moov) { *out_why = "not an MP4 file"; return false; }
-    if (!have_moov) { *out_why = "the MP4 file's head (moov) could not be read"; return false; }
+    if (!have_ftyp && !have_moov) { *out_why = N_("not an MP4 file"); return false; }
+    if (!have_moov) { *out_why = N_("the MP4 file's head (moov) could not be read"); return false; }
     mp4->moov_at = moov.body - 8;
     mp4->moov_end = moov.end;
     for (uint64_t at = moov.body; at < moov.end && box_at(mp4, at, moov.end, &b); at = b.end) {
-        if (b.type == FOURCC('m', 'v', 'e', 'x')) { *out_why = "a fragmented MP4 is not read yet"; return false; }
+        if (b.type == FOURCC('m', 'v', 'e', 'x')) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
         if (b.type == FOURCC('t', 'r', 'a', 'k')) read_track(mp4, &b);
         if (b.end <= at) break;
     }
@@ -398,7 +399,7 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!put || !mp4 || !subtitle || subtitle->count == 0) { *out_why = "nothing to put in"; return false; }
+    if (!put || !mp4 || !subtitle || subtitle->count == 0) { *out_why = N_("nothing to put in"); return false; }
     *put = (rubraview_mp4_put_t){ .mp4 = mp4 };
 
     /* The film's own boxes: none may run "to the end", and the moov is one of them. */
@@ -406,18 +407,18 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
     bool have_moov = false;
     uint64_t at = 0;
     while (at < mp4->size && box_at(mp4, at, mp4->size, &b)) {
-        if (be32(mp4->data + at) == 0) { *out_why = "the film's last box runs to the end of the file"; return false; }
+        if (be32(mp4->data + at) == 0) { *out_why = N_("the film's last box runs to the end of the file"); return false; }
         if (b.type == FOURCC('m', 'o', 'o', 'v') && !have_moov) { moov = b; have_moov = true; put->type_at = at + 4; }
         if (b.end <= at) break;
         at = b.end;
     }
-    if (!have_moov) { *out_why = "the film's head (moov) could not be found"; return false; }
-    if (at != mp4->size) { *out_why = "the film does not end where its last box does"; return false; }
+    if (!have_moov) { *out_why = N_("the film's head (moov) could not be found"); return false; }
+    if (at != mp4->size) { *out_why = N_("the film does not end where its last box does"); return false; }
 
     /* The samples: the words, a gap as an empty sample, no two at once. */
     size_t room = subtitle->count * 2 + 1;
     put->samples = calloc(room, sizeof(*put->samples));
-    if (!put->samples) { *out_why = "no memory"; return false; }
+    if (!put->samples) { *out_why = N_("no memory"); return false; }
     wbuf_t data = {0};
     uint64_t now = 0;
     for (size_t i = 0; i < subtitle->count; ++i) {
@@ -443,9 +444,9 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
         w16(&data, (uint16_t)len);
         wput(&data, cue->text.ptr, len);
         now = end;
-        if (data.len > UINT32_MAX / 2) { wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = "the subtitle is too long"; return false; }
+        if (data.len > UINT32_MAX / 2) { wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = N_("the subtitle is too long"); return false; }
     }
-    if (put->sample_count == 0 || data.failed) { wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = "the subtitle holds no lines to put in"; return false; }
+    if (put->sample_count == 0 || data.failed) { wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = N_("the subtitle holds no lines to put in"); return false; }
 
     /* The track's number, and the movie's clock. */
     uint32_t movie_scale = 1000;
@@ -467,7 +468,7 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
     }
     for (size_t i = 0; i < mp4->track_count; ++i) if (mp4->tracks[i].id >= put->track_id) put->track_id = mp4->tracks[i].id + 1;
     if (mvhd_at == 0 || movie_scale == 0 || put->track_id == 0 || put->track_id == UINT32_MAX) {
-        wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = "the film's movie header could not be read"; return false;
+        wbuf_free(&data); rubraview_mp4_put_free(put); *out_why = N_("the film's movie header could not be read"); return false;
     }
 
     /* The tail: an mdat of the samples, then the new moov. */
@@ -496,7 +497,7 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
     write_trak(&newmoov, put, movie_scale, last, language, name, chunk_at);
     wbox(&tail, "moov", &newmoov);
     wbuf_free(&newmoov);
-    if (tail.failed) { wbuf_free(&tail); rubraview_mp4_put_free(put); *out_why = "no memory"; return false; }
+    if (tail.failed) { wbuf_free(&tail); rubraview_mp4_put_free(put); *out_why = N_("no memory"); return false; }
     put->tail = tail.data;
     put->tail_size = tail.len;
     put->total = mp4->size + tail.len;
@@ -543,7 +544,7 @@ static bool same_tables(const rubraview_mp4_t *a, const rubraview_mp4_track_t *x
 bool rubraview_mp4_check_begin(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, const uint8_t *made, uint64_t made_size) {
     if (!check || !put || !made) return false;
     *check = (rubraview_mp4_check_t){0};
-    if (made_size != put->total) { check->why = "the new film is not the size it was laid out to be"; return false; }
+    if (made_size != put->total) { check->why = N_("the new film is not the size it was laid out to be"); return false; }
     return true;
 }
 
@@ -556,12 +557,12 @@ int rubraview_mp4_check_step(rubraview_mp4_check_t *check, const rubraview_mp4_p
         uint64_t mark = put->type_at;
         if (check->at < mark && end > mark) end = mark;
         if (check->at == mark) {
-            if (memcmp(made + mark, "free", 4) != 0) { check->why = "the film's old head was not set aside"; return -1; }
+            if (memcmp(made + mark, "free", 4) != 0) { check->why = N_("the film's old head was not set aside"); return -1; }
             check->at += 4;
             return 1;
         }
         if (memcmp(made + check->at, old->data + check->at, (size_t)(end - check->at)) != 0) {
-            check->why = "a byte of the film differs in the new one";
+            check->why = N_("a byte of the film differs in the new one");
             return -1;
         }
         check->at = end;
@@ -571,28 +572,28 @@ int rubraview_mp4_check_step(rubraview_mp4_check_t *check, const rubraview_mp4_p
     }
     /* the new head: the film's tracks as they were, and the subtitle */
     if (!rubraview_mp4_open(&check->made, made, put->total, &check->why)) return -1;
-    if (check->made.track_count != old->track_count + 1) { check->why = "the new film's tracks are not the film's and one more"; return -1; }
+    if (check->made.track_count != old->track_count + 1) { check->why = N_("the new film's tracks are not the film's and one more"); return -1; }
     for (size_t i = 0; i < old->track_count; ++i) {
-        if (!same_tables(old, &old->tracks[i], &check->made, &check->made.tracks[i])) { check->why = "a track of the new film is not as it was"; return -1; }
+        if (!same_tables(old, &old->tracks[i], &check->made, &check->made.tracks[i])) { check->why = N_("a track of the new film is not as it was"); return -1; }
     }
     const rubraview_mp4_track_t *added = &check->made.tracks[old->track_count];
     if (added->id != put->track_id || added->subtitle != RUBRAVIEW_MP4_SUB_TX3G || added->timescale != 1000) {
-        check->why = "the subtitle track was not found in the new film";
+        check->why = N_("the subtitle track was not found in the new film");
         return -1;
     }
     rubraview_mp4_walk_t walk = {0};
     rubraview_mp4_sample_t s;
     size_t n = 0;
     while (rubraview_mp4_sample_next(&check->made, added, &walk, &s)) {
-        if (n >= put->sample_count) { check->why = "the new film holds more subtitle samples than were put in"; return -1; }
+        if (n >= put->sample_count) { check->why = N_("the new film holds more subtitle samples than were put in"); return -1; }
         const rubraview_mp4_put_sample_t *want = &put->samples[n];
         if (s.offset != old->size + want->at || s.size != want->size || s.start != want->start || s.duration != want->duration ||
             memcmp(made + s.offset, put->tail + want->at, want->size) != 0) {
-            check->why = "a subtitle in the new film is not the one put in";
+            check->why = N_("a subtitle in the new film is not the one put in");
             return -1;
         }
         n++;
     }
-    if (n != put->sample_count) { check->why = "not every subtitle is in the new film"; return -1; }
+    if (n != put->sample_count) { check->why = N_("not every subtitle is in the new film"); return -1; }
     return 0;
 }

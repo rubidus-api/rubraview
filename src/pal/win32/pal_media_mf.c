@@ -1420,6 +1420,16 @@ static bool mf_finished(void *handle) {
     return drained;
 }
 
+static bool mf_sound_over(void *handle) {
+    mf_media_t *media = (mf_media_t*)handle;
+    if (!media || !media->audio) return false;
+    if (atomic_load_explicit(&media->end_generation, memory_order_acquire) != media->consumer_generation) return false;
+    AcquireSRWLockShared(&media->audio_lock);
+    bool drained = rubraview_pal_audio_drained(media->audio);
+    ReleaseSRWLockShared(&media->audio_lock);
+    return drained;
+}
+
 static void mf_set_paused(void *handle, bool paused) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
@@ -1509,6 +1519,7 @@ static const rubraview_media_backend_api_t MF_API = {
     .frames_ready = mf_frames_ready,
     .seek = mf_seek,
     .finished = mf_finished,
+    .sound_over = mf_sound_over,
     .set_paused = mf_set_paused,
     .audio_position = mf_audio_position,
     .audio_format = mf_audio_format,

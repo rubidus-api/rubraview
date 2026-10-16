@@ -1,4 +1,5 @@
 #include "rubraview/fileinfo.h"
+#include "rubraview/lang.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -61,12 +62,12 @@ size_t rubraview_info_bytes(char *buf, size_t cap, uint64_t bytes) {
         grouped[g++] = digits[i];
     }
     grouped[g] = '\0';
-    if (bytes < 1024) return done(buf, cap, snprintf(buf, cap, "%s bytes", grouped));
-    static const char *const UNIT[] = { "KB", "MB", "GB", "TB" };
+    if (bytes < 1024) return done(buf, cap, snprintf(buf, cap, T("%s bytes"), grouped));
+    const char *const UNIT[] = { T("KB"), T("MB"), T("GB"), T("TB") };
     double v = (double)bytes / 1024.0;
     int u = 0;
     while (v >= 1024.0 && u < 3) { v /= 1024.0; ++u; }
-    return done(buf, cap, snprintf(buf, cap, "%.2f %s (%s bytes)", v, UNIT[u], grouped));
+    return done(buf, cap, snprintf(buf, cap, T("%.2f %s (%s bytes)"), v, UNIT[u], grouped));
 }
 
 size_t rubraview_info_exposure(char *buf, size_t cap, uint32_t num, uint32_t den) {
@@ -133,14 +134,14 @@ uint32_t rubraview_info_fourcc_or_name(uint32_t fourcc, const char *name) {
 
 static const char *orientation_words(int32_t o) {
     switch (o) {
-        case 1: return "1 (upright)";
-        case 2: return "2 (mirrored)";
-        case 3: return "3 (upside down)";
-        case 4: return "4 (flipped)";
-        case 5: return "5 (mirrored, turned a quarter to the left)";
-        case 6: return "6 (turned a quarter to the right)";
-        case 7: return "7 (mirrored, turned a quarter to the right)";
-        case 8: return "8 (turned a quarter to the left)";
+        case 1: return T("1 (upright)");
+        case 2: return T("2 (mirrored)");
+        case 3: return T("3 (upside down)");
+        case 4: return T("4 (flipped)");
+        case 5: return T("5 (mirrored, turned a quarter to the left)");
+        case 6: return T("6 (turned a quarter to the right)");
+        case 7: return T("7 (mirrored, turned a quarter to the right)");
+        case 8: return T("8 (turned a quarter to the left)");
         default: return NULL;
     }
 }
@@ -150,65 +151,65 @@ static u8str_t lit(const char *s) { return (u8str_t){ .ptr = s, .len = strlen(s)
 /* The EXIF enumerations in words; NULL for "not given" and for values the
    standard does not name. */
 static const char *pick(uint32_t v, const char *const *names, uint32_t count) {
-    return v < count ? names[v] : NULL;
+    return v < count && names[v] ? rubraview_tr(names[v]) : NULL;
 }
-static const char *const PROGRAM[] = { NULL, "manual", "normal program", "aperture priority", "shutter priority",
-                                       "creative (depth of field)", "action (fast shutter)", "portrait", "landscape" };
-static const char *const METERING[] = { NULL, "average", "centre-weighted", "spot", "multi-spot", "pattern", "partial" };
-static const char *const WHITE_BALANCE[] = { NULL, "auto", "manual" };        /* stored + 1 */
-static const char *const EXPOSURE_MODE[] = { NULL, "auto", "manual", "auto bracket" };   /* stored + 1 */
-static const char *const SCENE[] = { NULL, "standard", "landscape", "portrait", "night" };    /* stored + 1 */
+static const char *const PROGRAM[] = { NULL, N_("manual"), N_("normal program"), N_("aperture priority"), N_("shutter priority"),
+                                       N_("creative (depth of field)"), N_("action (fast shutter)"), N_("portrait"), N_("landscape") };
+static const char *const METERING[] = { NULL, N_("average"), N_("centre-weighted"), N_("spot"), N_("multi-spot"), N_("pattern"), N_("partial") };
+static const char *const WHITE_BALANCE[] = { NULL, N_("auto"), N_("manual") };        /* stored + 1 */
+static const char *const EXPOSURE_MODE[] = { NULL, N_("auto"), N_("manual"), N_("auto bracket") };   /* stored + 1 */
+static const char *const SCENE[] = { NULL, N_("standard"), N_("landscape"), N_("portrait"), N_("night") };    /* stored + 1 */
 
 void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, const rubraview_exif_info_t *x) {
     if (!x || !x->found) return;
-    rubraview_info_heading(arena, info, "EXIF");
+    rubraview_info_heading(arena, info, T("EXIF"));
     char b[160];
     /* "Canon EOS R5", once: many cameras put the maker in the model too */
     size_t ml = strlen(x->make);
-    if (ml > 0 && strncmp(x->model, x->make, ml) != 0) rubraview_info_addf(arena, info, "Camera", "%s %s", x->make, x->model);
-    else rubraview_info_add(arena, info, "Camera", lit(x->model[0] ? x->model : x->make));
+    if (ml > 0 && strncmp(x->model, x->make, ml) != 0) rubraview_info_addf(arena, info, T("Camera"), "%s %s", x->make, x->model);
+    else rubraview_info_add(arena, info, T("Camera"), lit(x->model[0] ? x->model : x->make));
     if (x->lens_make[0] && x->lens[0] && strncmp(x->lens, x->lens_make, strlen(x->lens_make)) != 0)
-        rubraview_info_addf(arena, info, "Lens", "%s %s", x->lens_make, x->lens);
-    else rubraview_info_add(arena, info, "Lens", lit(x->lens));
-    rubraview_info_add(arena, info, "Serial number", lit(x->serial));
-    rubraview_info_add(arena, info, "Description", lit(x->description));
-    if (x->date_taken[0] && x->offset_time[0]) rubraview_info_addf(arena, info, "Taken", "%s (%s)", x->date_taken, x->offset_time);
-    else rubraview_info_add(arena, info, "Taken", lit(x->date_taken));
-    if (strcmp(x->date_digitized, x->date_taken) != 0) rubraview_info_add(arena, info, "Digitized", lit(x->date_digitized));
-    rubraview_info_add(arena, info, "Changed", lit(x->date_modified));
-    if (x->has_exposure) rubraview_info_add(arena, info, "Exposure", (u8str_t){ b, rubraview_info_exposure(b, sizeof(b), x->exposure_num, x->exposure_den) });
-    if (x->has_fnumber) rubraview_info_addf(arena, info, "Aperture", "f/%.1f", x->fnumber);
-    if (x->iso) rubraview_info_addf(arena, info, "ISO", "%u", (unsigned)x->iso);
+        rubraview_info_addf(arena, info, T("Lens"), "%s %s", x->lens_make, x->lens);
+    else rubraview_info_add(arena, info, T("Lens"), lit(x->lens));
+    rubraview_info_add(arena, info, T("Serial number"), lit(x->serial));
+    rubraview_info_add(arena, info, T("Description"), lit(x->description));
+    if (x->date_taken[0] && x->offset_time[0]) rubraview_info_addf(arena, info, T("Taken"), "%s (%s)", x->date_taken, x->offset_time);
+    else rubraview_info_add(arena, info, T("Taken"), lit(x->date_taken));
+    if (strcmp(x->date_digitized, x->date_taken) != 0) rubraview_info_add(arena, info, T("Digitized"), lit(x->date_digitized));
+    rubraview_info_add(arena, info, T("Changed"), lit(x->date_modified));
+    if (x->has_exposure) rubraview_info_add(arena, info, T("Exposure"), (u8str_t){ b, rubraview_info_exposure(b, sizeof(b), x->exposure_num, x->exposure_den) });
+    if (x->has_fnumber) rubraview_info_addf(arena, info, T("Aperture"), "f/%.1f", x->fnumber);
+    if (x->iso) rubraview_info_addf(arena, info, T("ISO"), "%u", (unsigned)x->iso);
     if (x->has_focal) {
-        if (x->focal_35mm) rubraview_info_addf(arena, info, "Focal length", "%.0f mm (%u mm in 35 mm terms)", x->focal_mm, (unsigned)x->focal_35mm);
-        else rubraview_info_addf(arena, info, "Focal length", "%.0f mm", x->focal_mm);
+        if (x->focal_35mm) rubraview_info_addf(arena, info, T("Focal length"), T("%.0f mm (%u mm in 35 mm terms)"), x->focal_mm, (unsigned)x->focal_35mm);
+        else rubraview_info_addf(arena, info, T("Focal length"), T("%.0f mm"), x->focal_mm);
     }
-    if (x->has_bias) rubraview_info_addf(arena, info, "Exposure bias", "%+.2f EV", x->exposure_bias);
-    if (x->has_flash) rubraview_info_add(arena, info, "Flash", lit((x->flash & 1) ? "fired" : "did not fire"));
+    if (x->has_bias) rubraview_info_addf(arena, info, T("Exposure bias"), T("%+.2f EV"), x->exposure_bias);
+    if (x->has_flash) rubraview_info_add(arena, info, T("Flash"), lit((x->flash & 1) ? T("fired") : T("did not fire")));
     const char *w;
-    if ((w = pick(x->exposure_program, PROGRAM, 9)))      rubraview_info_add(arena, info, "Program", lit(w));
-    if ((w = pick(x->exposure_mode, EXPOSURE_MODE, 4)))   rubraview_info_add(arena, info, "Exposure mode", lit(w));
-    if ((w = pick(x->metering, METERING, 7)))             rubraview_info_add(arena, info, "Metering", lit(w));
-    if ((w = pick(x->white_balance, WHITE_BALANCE, 3)))   rubraview_info_add(arena, info, "White balance", lit(w));
-    if ((w = pick(x->scene_type, SCENE, 5)))              rubraview_info_add(arena, info, "Scene", lit(w));
-    if (x->has_digital_zoom && x->digital_zoom > 1.0)     rubraview_info_addf(arena, info, "Digital zoom", "%.2gx", x->digital_zoom);
-    if (x->color_space == 1) rubraview_info_add(arena, info, "Colour space", lit("sRGB"));
-    else if (x->color_space == 0xFFFF) rubraview_info_add(arena, info, "Colour space", lit("uncalibrated (often Adobe RGB)"));
+    if ((w = pick(x->exposure_program, PROGRAM, 9)))      rubraview_info_add(arena, info, T("Program"), lit(w));
+    if ((w = pick(x->exposure_mode, EXPOSURE_MODE, 4)))   rubraview_info_add(arena, info, T("Exposure mode"), lit(w));
+    if ((w = pick(x->metering, METERING, 7)))             rubraview_info_add(arena, info, T("Metering"), lit(w));
+    if ((w = pick(x->white_balance, WHITE_BALANCE, 3)))   rubraview_info_add(arena, info, T("White balance"), lit(w));
+    if ((w = pick(x->scene_type, SCENE, 5)))              rubraview_info_add(arena, info, T("Scene"), lit(w));
+    if (x->has_digital_zoom && x->digital_zoom > 1.0)     rubraview_info_addf(arena, info, T("Digital zoom"), "%.2gx", x->digital_zoom);
+    if (x->color_space == 1) rubraview_info_add(arena, info, T("Colour space"), lit(T("sRGB")));
+    else if (x->color_space == 0xFFFF) rubraview_info_add(arena, info, T("Colour space"), lit(T("uncalibrated (often Adobe RGB)")));
     const char *o = orientation_words(x->orientation);
-    if (o) rubraview_info_add(arena, info, "Orientation", lit(o));
-    if (x->pixel_x && x->pixel_y) rubraview_info_addf(arena, info, "Pixels (EXIF)", "%u x %u", (unsigned)x->pixel_x, (unsigned)x->pixel_y);
-    if (x->has_gps) rubraview_info_add(arena, info, "Location", (u8str_t){ b, rubraview_info_gps(b, sizeof(b), x->latitude, x->longitude) });
+    if (o) rubraview_info_add(arena, info, T("Orientation"), lit(o));
+    if (x->pixel_x && x->pixel_y) rubraview_info_addf(arena, info, T("Pixels (EXIF)"), "%u x %u", (unsigned)x->pixel_x, (unsigned)x->pixel_y);
+    if (x->has_gps) rubraview_info_add(arena, info, T("Location"), (u8str_t){ b, rubraview_info_gps(b, sizeof(b), x->latitude, x->longitude) });
     /* The same place in decimal degrees, which a map's search box takes as typed. */
-    if (x->has_gps) rubraview_info_addf(arena, info, "Coordinates", "%.6f, %.6f", x->latitude, x->longitude);
-    if (x->has_altitude) rubraview_info_addf(arena, info, "Altitude", "%.0f m", x->altitude_m);
-    if (x->has_direction) rubraview_info_addf(arena, info, "Facing", "%.0f degrees (%s north)", x->direction,
-                                              x->direction_ref == 'M' ? "magnetic" : "true");
-    if (x->has_speed) rubraview_info_addf(arena, info, "Moving at", "%.1f %s", x->speed,
-                                          x->speed_ref == 'M' ? "mph" : x->speed_ref == 'N' ? "knots" : "km/h");
-    rubraview_info_add(arena, info, "GPS time", lit(x->gps_time));
-    rubraview_info_add(arena, info, "Software", lit(x->software));
-    rubraview_info_add(arena, info, "Artist", lit(x->artist));
-    rubraview_info_add(arena, info, "Copyright", lit(x->copyright));
+    if (x->has_gps) rubraview_info_addf(arena, info, T("Coordinates"), "%.6f, %.6f", x->latitude, x->longitude);
+    if (x->has_altitude) rubraview_info_addf(arena, info, T("Altitude"), "%.0f m", x->altitude_m);
+    if (x->has_direction) rubraview_info_addf(arena, info, T("Facing"), T("%.0f degrees (%s north)"), x->direction,
+                                              x->direction_ref == 'M' ? T("magnetic") : T("true"));
+    if (x->has_speed) rubraview_info_addf(arena, info, T("Moving at"), "%.1f %s", x->speed,
+                                          x->speed_ref == 'M' ? T("mph") : x->speed_ref == 'N' ? T("knots") : T("km/h"));
+    rubraview_info_add(arena, info, T("GPS time"), lit(x->gps_time));
+    rubraview_info_add(arena, info, T("Software"), lit(x->software));
+    rubraview_info_add(arena, info, T("Artist"), lit(x->artist));
+    rubraview_info_add(arena, info, T("Copyright"), lit(x->copyright));
 }
 
 size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, int32_t label_cols,

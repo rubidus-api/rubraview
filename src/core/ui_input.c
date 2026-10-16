@@ -1,5 +1,6 @@
 #include <math.h>
 #include "rubraview/ui_input.h"
+#include "rubraview/lang.h"
 
 rubraview_click_zone_t rubraview_click_zone_at(double x, double window_width) {
     if (window_width <= 0.0) return RUBRAVIEW_ZONE_CENTER;
@@ -120,24 +121,24 @@ rubraview_fit_mode_t rubraview_fit_cycle_next(rubraview_fit_mode_t fit) {
 
 const char *rubraview_fit_tile_name(rubraview_fit_mode_t fit) {
     switch (fit) {
-        case RUBRAVIEW_FIT_WIDTH:       return "Fit W";
-        case RUBRAVIEW_FIT_HEIGHT:      return "Fit H";
-        case RUBRAVIEW_FIT_SMART:       return "Smart";
-        case RUBRAVIEW_FIT_STRETCH:     return "Stretch";
-        case RUBRAVIEW_FIT_ACTUAL_SIZE: return "Real\nsize";
-        default:                        return "Fit";
+        case RUBRAVIEW_FIT_WIDTH:       return T("Fit W");
+        case RUBRAVIEW_FIT_HEIGHT:      return T("Fit H");
+        case RUBRAVIEW_FIT_SMART:       return T("Smart");
+        case RUBRAVIEW_FIT_STRETCH:     return T("Stretch");
+        case RUBRAVIEW_FIT_ACTUAL_SIZE: return T("Real\nsize");
+        default:                        return T("Fit");
     }
 }
 
 const char *rubraview_fit_tile_hint(rubraview_fit_mode_t fit) {
     /* One string a fit, so a change of fit is a change of hint (owner, 2026-10-15). */
     switch (fit) {
-        case RUBRAVIEW_FIT_WIDTH:       return "Fit: to the window's width. Click: fit to its height";
-        case RUBRAVIEW_FIT_HEIGHT:      return "Fit: to the window's height. Click: smart fit";
-        case RUBRAVIEW_FIT_SMART:       return "Fit: smart (a large picture made smaller, a small one left at 100%). Click: stretch to fill";
-        case RUBRAVIEW_FIT_STRETCH:     return "Fit: stretched to fill the window. Click: fit to the window";
-        case RUBRAVIEW_FIT_ACTUAL_SIZE: return "Fit: none, real size. Click: fit to the window";
-        default:                        return "Fit: the whole picture in the window. Click: fit to its width";
+        case RUBRAVIEW_FIT_WIDTH:       return T("Fit: to the window's width. Click: fit to its height");
+        case RUBRAVIEW_FIT_HEIGHT:      return T("Fit: to the window's height. Click: smart fit");
+        case RUBRAVIEW_FIT_SMART:       return T("Fit: smart (a large picture made smaller, a small one left at 100%). Click: stretch to fill");
+        case RUBRAVIEW_FIT_STRETCH:     return T("Fit: stretched to fill the window. Click: fit to the window");
+        case RUBRAVIEW_FIT_ACTUAL_SIZE: return T("Fit: none, real size. Click: fit to the window");
+        default:                        return T("Fit: the whole picture in the window. Click: fit to its width");
     }
 }
 

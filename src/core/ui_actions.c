@@ -1,4 +1,5 @@
 #include "rubraview/ui_actions.h"
+#include "rubraview/lang.h"
 #include "rubraview/repeat.h"
 #include "rubraview/aspect.h"
 #include <string.h>
@@ -244,9 +245,9 @@ uint32_t rubraview_pin_icon(bool on) {
 }
 
 const char *rubraview_action_hint(u8str_t action) {
-    static const struct { const char *action; const char *hint; } HINTS[] = {
-        { "toggle_nearest", "Crisp - enlarged, every pixel stays a sharp square instead of being smoothed (pixel art, icons, old games). Click: on / off (N)" },
-        { "toggle_pixel_grid", "Grid - zoomed past 400 %, a thin line around every pixel, to see each one. Click: on / off (G)" },
+    const struct { const char *action; const char *hint; } HINTS[] = {
+        { "toggle_nearest", T("Crisp - enlarged, every pixel stays a sharp square instead of being smoothed (pixel art, icons, old games). Click: on / off (N)") },
+        { "toggle_pixel_grid", T("Grid - zoomed past 400 %, a thin line around every pixel, to see each one. Click: on / off (G)") },
     };
     for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]); ++i) {
         if (rubraview_u8_eq_lit(action, HINTS[i].action)) return HINTS[i].hint;

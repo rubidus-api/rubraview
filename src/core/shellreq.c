@@ -1,4 +1,5 @@
 #include "rubraview/shellreq.h"
+#include "rubraview/lang.h"
 #include "rubraview/filemanage.h"
 #include <stdlib.h>
 #include <string.h>
@@ -243,22 +244,22 @@ void rubraview_print_options_clamp(rubraview_print_options_t *o) {
 }
 
 const char *rubraview_print_turn_name(rubraview_print_turn_t turn) {
-    static const char *const NAMES[RUBRAVIEW_PRINT_TURN_COUNT] = {
-        "Auto", "None", "90\xC2\xB0 right", "180\xC2\xB0", "90\xC2\xB0 left",
+    const char *const NAMES[RUBRAVIEW_PRINT_TURN_COUNT] = {
+        T("Auto"), T("None"), T("90\xC2\xB0 right"), "180\xC2\xB0", T("90\xC2\xB0 left"),
     };
     return (int)turn >= 0 && turn < RUBRAVIEW_PRINT_TURN_COUNT ? NAMES[turn] : "";
 }
 
 const char *rubraview_print_size_name(rubraview_print_size_t size) {
-    static const char *const NAMES[RUBRAVIEW_PRINT_SIZE_COUNT] = {
-        "Fit the sheet", "Fill the sheet", "Stretch", "Actual size",
+    const char *const NAMES[RUBRAVIEW_PRINT_SIZE_COUNT] = {
+        T("Fit the sheet"), T("Fill the sheet"), T("Stretch"), T("Actual size"),
     };
     return (int)size >= 0 && size < RUBRAVIEW_PRINT_SIZE_COUNT ? NAMES[size] : "";
 }
 
 const char *rubraview_print_place_name(rubraview_print_place_t place) {
-    static const char *const NAMES[RUBRAVIEW_PRINT_PLACE_COUNT] = {
-        "Centre", "Top left", "Top", "Top right", "Left", "Right", "Bottom left", "Bottom", "Bottom right",
+    const char *const NAMES[RUBRAVIEW_PRINT_PLACE_COUNT] = {
+        T("Centre"), T("Top left"), T("Top"), T("Top right"), T("Left"), T("Right"), T("Bottom left"), T("Bottom"), T("Bottom right"),
     };
     return (int)place >= 0 && place < RUBRAVIEW_PRINT_PLACE_COUNT ? NAMES[place] : "";
 }

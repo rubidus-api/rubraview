@@ -1,4 +1,5 @@
 #include "rubraview/picker.h"
+#include "rubraview/lang.h"
 #include <stdio.h>
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
@@ -167,12 +168,12 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.len == 0) return crumbs;
 
-    crumbs.items[0].label = (u8str_t){ .ptr = "PC", .len = 2 };
+    crumbs.items[0].label = (u8str_t){ .ptr = T("PC"), .len = 2 };
     crumbs.items[0].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
     crumbs.count = 1;
     if (rubraview_picker_is_places(path)) return crumbs;
     if (rubraview_picker_is_recent(path)) {
-        crumbs.items[1].label = (u8str_t){ .ptr = "Recent", .len = 6 };
+        crumbs.items[1].label = (u8str_t){ .ptr = T("Recent"), .len = 6 };
         crumbs.items[1].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_RECENT, .len = sizeof(RUBRAVIEW_PICKER_RECENT) - 1 };
         crumbs.count = 2;
         return crumbs;
@@ -387,9 +388,9 @@ size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
     int n;
     if (!buf || cap == 0) return 0;
     if (bytes < 1024u) n = snprintf(buf, cap, "%u B", (unsigned)bytes);
-    else if (bytes < 1024u * 1024u) n = snprintf(buf, cap, "%.0f KB", (double)bytes / 1024.0);
-    else if (bytes < 1024ull * 1024ull * 1024ull) n = snprintf(buf, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
-    else n = snprintf(buf, cap, "%.2f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    else if (bytes < 1024u * 1024u) n = snprintf(buf, cap, T("%.0f KB"), (double)bytes / 1024.0);
+    else if (bytes < 1024ull * 1024ull * 1024ull) n = snprintf(buf, cap, T("%.1f MB"), (double)bytes / (1024.0 * 1024.0));
+    else n = snprintf(buf, cap, T("%.2f GB"), (double)bytes / (1024.0 * 1024.0 * 1024.0));
     if (n <= 0 || (size_t)n >= cap) { buf[0] = '\0'; return 0; }
     return (size_t)n;
 }
@@ -397,7 +398,7 @@ size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
 size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_directory) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
-    const char *word = is_directory ? "Folder" : "File";
+    const char *word = is_directory ? T("Folder") : T("File");
     size_t dot = name.len;
     for (size_t i = name.len; !is_directory && i-- > 1;) {
         if (name.ptr[i] == '.') { dot = i; break; }
@@ -442,12 +443,12 @@ bool rubraview_picker_all_selected(const rubraview_picker_t *picker) {
 }
 
 const char *rubraview_picker_select_label(const rubraview_picker_t *picker) {
-    return rubraview_picker_all_selected(picker) ? "Deselect all" : "Select all";
+    return rubraview_picker_all_selected(picker) ? T("Deselect all") : T("Select all");
 }
 
 const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key) {
-    static const char *const NAMES[RUBRAVIEW_PICKER_SORT_COUNT] = {
-        "Name", "Type", "Size", "Created", "Modified", "Resolution", "Length",
+    const char *const NAMES[RUBRAVIEW_PICKER_SORT_COUNT] = {
+        T("Name"), T("Type"), T("Size"), T("Created"), T("Modified"), T("Resolution"), T("Length"),
     };
     return key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT ? NAMES[key] : "";
 }

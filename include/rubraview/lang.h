@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 /**
- * Language packs (RV-114, D-148). The English text is the key: a pack
+ * Language packs (RV-114, D-149). The English text is the key: a pack
  * maps it to another language's text, and a text the pack does not have
  * stays English. A pack is a UTF-8 text file, one entry a line:
  *
@@ -79,9 +79,16 @@ bool rubraview_lang_same_conversions(u8str_t english, u8str_t translation);
 void rubraview_lang_use(const rubraview_lang_t *lang);
 const rubraview_lang_t *rubraview_lang_current(void);
 
-/** The text in the language in use, or `english` itself. NUL-terminated. */
-const char *rubraview_tr(const char *english);
-const char *rubraview_tr_ctx(const char *context, const char *english);
+/** The text in the language in use, or `english` itself. NUL-terminated.
+    format_arg keeps the compiler checking a format looked up this way
+    against its arguments (a pack's own is checked as it is read). */
+#if defined(__GNUC__) || defined(__clang__)
+#define RUBRAVIEW_FORMAT_ARG(n) __attribute__((format_arg(n)))
+#else
+#define RUBRAVIEW_FORMAT_ARG(n)
+#endif
+const char *rubraview_tr(const char *english) RUBRAVIEW_FORMAT_ARG(1);
+const char *rubraview_tr_ctx(const char *context, const char *english) RUBRAVIEW_FORMAT_ARG(2);
 u8str_t rubraview_tr_u8(u8str_t english);
 u8str_t rubraview_tr_ctx_u8(const char *context, u8str_t english);
 

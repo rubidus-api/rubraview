@@ -1,4 +1,5 @@
 #include "rubraview/ui_edgenav.h"
+#include "rubraview/lang.h"
 
 rubraview_edgenav_t rubraview_edgenav_create(double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
@@ -60,10 +61,10 @@ static const char *const ACTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
       { "media_seek_forward", "media_seek_forward_long", "next_page" } },
 };
 static const char *const CAPTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-    { { "Previous", "10 back", "First" },
-      { "Next", "10 on", "Last" } },
-    { { "Back 5 s", "Back 30 s", "Previous file" },
-      { "On 5 s", "On 30 s", "Next file" } },
+    { { N_("Previous"), N_("10 back"), N_("First") },
+      { N_("Next"), N_("10 on"), N_("Last") } },
+    { { N_("Back 5 s"), N_("Back 30 s"), N_("Previous file") },
+      { N_("On 5 s"), N_("On 30 s"), N_("Next file") } },
 };
 
 const char *rubraview_edgenav_action(rubraview_edge_side_t side, int32_t slot, bool media) {
@@ -73,5 +74,5 @@ const char *rubraview_edgenav_action(rubraview_edge_side_t side, int32_t slot, b
 
 const char *rubraview_edgenav_caption(rubraview_edge_side_t side, int32_t slot, bool media) {
     if (side == RUBRAVIEW_EDGE_NONE || slot < 0 || slot >= RUBRAVIEW_EDGE_SLOTS) return "";
-    return CAPTIONS[media ? 1 : 0][side][slot];
+    return rubraview_tr(CAPTIONS[media ? 1 : 0][side][slot]);
 }

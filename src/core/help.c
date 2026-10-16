@@ -1,4 +1,5 @@
 #include "rubraview/help.h"
+#include "rubraview/lang.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -6,12 +7,12 @@
    reader would use for it. A context the keymap has and this table does
    not still appears, under its own name. */
 static const struct { const char *context; const char *heading; } GROUPS[] = {
-    { "",           "Everywhere" },
-    { "navigation", "Moving about" },
-    { "view",       "Looking at a picture" },
-    { "media",      "Film and music" },
-    { "subpage",    "Pages inside one file" },
-    { "slideshow",  "Slide show" },
+    { "",           N_("Everywhere") },
+    { "navigation", N_("Moving about") },
+    { "view",       N_("Looking at a picture") },
+    { "media",      N_("Film and music") },
+    { "subpage",    N_("Pages inside one file") },
+    { "slideshow",  N_("Slide show") },
 };
 
 static u8str_t arena_text(proven_arena_t *arena, const char *text, size_t len) {
@@ -101,8 +102,8 @@ size_t rubraview_help_build(proven_arena_t *arena,
     size_t count = 0;
 
     u8str_t empty = { .ptr = "", .len = 0 };
-    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text("F1 opens and closes this window. It stays open while you read."))) return count;
-    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text("Every key below can be changed on the settings window's Keys page."))) return count;
+    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("F1 opens and closes this window. It stays open while you read.")))) return count;
+    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("Every key below can be changed on the settings window's Keys page.")))) return count;
 
     size_t group_count = sizeof(GROUPS) / sizeof(GROUPS[0]);
     /* The known groups in their order, then anything else the keymap has. */
@@ -121,7 +122,7 @@ size_t rubraview_help_build(proven_arena_t *arena,
             }
 
             if (!wrote_heading) {
-                u8str_t heading = pass < group_count ? lit_text(GROUPS[pass].heading) : binding->context;
+                u8str_t heading = pass < group_count ? lit_text(rubraview_tr(GROUPS[pass].heading)) : binding->context;
                 if (!push(out, max, &count, RUBRAVIEW_HELP_BLANK, empty, empty)) return count;
                 if (!push(out, max, &count, RUBRAVIEW_HELP_HEADING, empty, heading)) return count;
                 wrote_heading = true;

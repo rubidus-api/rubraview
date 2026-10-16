@@ -1,4 +1,5 @@
 #include "rubraview/audio_dsp.h"
+#include "rubraview/lang.h"
 #include "rubraview/number.h"
 #include <string.h>
 #include <stdlib.h>
@@ -138,14 +139,14 @@ void rubraview_eq_preset_gains(rubraview_eq_preset_t preset, float *out_gains_db
 
 u8str_t rubraview_eq_preset_name(rubraview_eq_preset_t preset) {
     switch (preset) {
-        case RUBRAVIEW_EQ_FLAT: return U8("Flat");
-        case RUBRAVIEW_EQ_ROCK: return U8("Rock");
-        case RUBRAVIEW_EQ_POP: return U8("Pop");
-        case RUBRAVIEW_EQ_JAZZ: return U8("Jazz");
-        case RUBRAVIEW_EQ_CLASSICAL: return U8("Classical");
-        case RUBRAVIEW_EQ_BASS_BOOST: return U8("Bass boost");
-        case RUBRAVIEW_EQ_VOCAL_BOOST: return U8("Vocal boost");
-        case RUBRAVIEW_EQ_ACOUSTIC: return U8("Acoustic");
+        case RUBRAVIEW_EQ_FLAT: return TU8("Flat");
+        case RUBRAVIEW_EQ_ROCK: return TU8("Rock");
+        case RUBRAVIEW_EQ_POP: return TU8("Pop");
+        case RUBRAVIEW_EQ_JAZZ: return TU8("Jazz");
+        case RUBRAVIEW_EQ_CLASSICAL: return TU8("Classical");
+        case RUBRAVIEW_EQ_BASS_BOOST: return TU8("Bass boost");
+        case RUBRAVIEW_EQ_VOCAL_BOOST: return TU8("Vocal boost");
+        case RUBRAVIEW_EQ_ACOUSTIC: return TU8("Acoustic");
         default: return U8("");
     }
 }

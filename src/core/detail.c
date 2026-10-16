@@ -1,4 +1,5 @@
 #include "rubraview/detail.h"
+#include "rubraview/lang.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -57,39 +58,39 @@ size_t rubraview_detail_bitrate(char *buf, size_t cap, double bps) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
     if (!(bps > 0.0)) return 0;
-    if (bps >= 10.0e6) return clip(snprintf(buf, cap, "%.1f Mbit/s", bps / 1.0e6), cap);
-    if (bps >= 1000.0) return clip(snprintf(buf, cap, "%.0f kbit/s", bps / 1000.0), cap);
-    return clip(snprintf(buf, cap, "%.0f bit/s", bps), cap);
+    if (bps >= 10.0e6) return clip(snprintf(buf, cap, T("%.1f Mbit/s"), bps / 1.0e6), cap);
+    if (bps >= 1000.0) return clip(snprintf(buf, cap, T("%.0f kbit/s"), bps / 1000.0), cap);
+    return clip(snprintf(buf, cap, T("%.0f bit/s"), bps), cap);
 }
 
 size_t rubraview_detail_channels(char *buf, size_t cap, uint32_t count, uint32_t mask) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
     if (count == 0) return 0;
-    static const char *const SPEAKER[18] = { "FL", "FR", "FC", "LFE", "BL", "BR", "FLC", "FRC", "BC", "SL", "SR",
-                                             "TC", "TFL", "TFC", "TFR", "TBL", "TBC", "TBR" };
+    const char *const SPEAKER[18] = { T("FL"), T("FR"), T("FC"), T("LFE"), T("BL"), T("BR"), T("FLC"), T("FRC"), T("BC"), T("SL"), T("SR"),
+                                             T("TC"), T("TFL"), T("TFC"), T("TFR"), T("TBL"), T("TBC"), T("TBR") };
     const char *name = NULL;
     switch (mask) {
-        case 0x4: name = "mono"; break;
-        case 0x3: name = "stereo"; break;
+        case 0x4: name = T("mono"); break;
+        case 0x3: name = T("stereo"); break;
         case 0xB: name = "2.1"; break;
         case 0x7: name = "3.0"; break;
         case 0x33: case 0x603: name = "4.0"; break;
-        case 0x107: name = "4.0 (surround)"; break;
+        case 0x107: name = T("4.0 (surround)"); break;
         case 0x37: case 0x607: name = "5.0"; break;
         case 0x3F: name = "5.1"; break;
-        case 0x60F: name = "5.1 (side)"; break;
+        case 0x60F: name = T("5.1 (side)"); break;
         case 0x70F: name = "6.1"; break;
         case 0x63F: name = "7.1"; break;
-        case 0xFF: name = "7.1 (wide)"; break;
+        case 0xFF: name = T("7.1 (wide)"); break;
         default: break;
     }
     if (mask == 0) {
-        if (count == 1) return clip(snprintf(buf, cap, "mono"), cap);
-        if (count == 2) return clip(snprintf(buf, cap, "stereo"), cap);
-        return clip(snprintf(buf, cap, "%u channels", (unsigned)count), cap);
+        if (count == 1) return clip(snprintf(buf, cap, T("mono")), cap);
+        if (count == 2) return clip(snprintf(buf, cap, T("stereo")), cap);
+        return clip(snprintf(buf, cap, T("%u channels"), (unsigned)count), cap);
     }
-    int n = name ? snprintf(buf, cap, "%s", name) : snprintf(buf, cap, "%u channels", (unsigned)count);
+    int n = name ? snprintf(buf, cap, "%s", name) : snprintf(buf, cap, T("%u channels"), (unsigned)count);
     if (count <= 2 && name) return clip(n, cap);
     size_t at = clip(n, cap);
     bool first = true;
@@ -107,23 +108,23 @@ size_t rubraview_detail_h264_profile(char *buf, size_t cap, uint32_t profile, ui
     buf[0] = '\0';
     const char *name = NULL;
     switch (profile) {
-        case 44: name = "CAVLC 4:4:4 Intra"; break;
-        case 66: name = "Baseline"; break;
-        case 77: name = "Main"; break;
-        case 88: name = "Extended"; break;
-        case 100: name = "High"; break;
-        case 110: name = "High 10"; break;
-        case 118: name = "Multiview High"; break;
-        case 122: name = "High 4:2:2"; break;
-        case 128: name = "Stereo High"; break;
-        case 244: name = "High 4:4:4 Predictive"; break;
+        case 44: name = T("CAVLC 4:4:4 Intra"); break;
+        case 66: name = T("Baseline"); break;
+        case 77: name = T("Main"); break;
+        case 88: name = T("Extended"); break;
+        case 100: name = T("High"); break;
+        case 110: name = T("High 10"); break;
+        case 118: name = T("Multiview High"); break;
+        case 122: name = T("High 4:2:2"); break;
+        case 128: name = T("Stereo High"); break;
+        case 244: name = T("High 4:4:4 Predictive"); break;
         default: break;
     }
     size_t at = 0;
     if (name) at = clip(snprintf(buf, cap, "%s", name), cap);
-    else if (profile) at = clip(snprintf(buf, cap, "profile %u", (unsigned)profile), cap);
+    else if (profile) at = clip(snprintf(buf, cap, T("profile %u"), (unsigned)profile), cap);
     if (level) {
-        at = append(buf, cap, at, "%slevel %u", at ? ", " : "", (unsigned)(level / 10));
+        at = append(buf, cap, at, T("%slevel %u"), at ? ", " : "", (unsigned)(level / 10));
         if (level % 10) at = append(buf, cap, at, ".%u", (unsigned)(level % 10));
     }
     return at;
@@ -132,13 +133,13 @@ size_t rubraview_detail_h264_profile(char *buf, size_t cap, uint32_t profile, ui
 size_t rubraview_detail_hevc_profile(char *buf, size_t cap, uint32_t profile, uint32_t level) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
-    static const char *const NAME[] = { NULL, "Main", "Main 10", "Main Still Picture", "Range Extensions" };
+    const char *const NAME[] = { NULL, T("Main"), T("Main 10"), T("Main Still Picture"), T("Range Extensions") };
     size_t at = 0;
     if (profile >= 1 && profile <= 4) at = clip(snprintf(buf, cap, "%s", NAME[profile]), cap);
-    else if (profile) at = clip(snprintf(buf, cap, "profile %u", (unsigned)profile), cap);
+    else if (profile) at = clip(snprintf(buf, cap, T("profile %u"), (unsigned)profile), cap);
     if (level) {
         /* general_level_idc is thirty times the level. */
-        at = append(buf, cap, at, "%slevel %u", at ? ", " : "", (unsigned)(level / 30));
+        at = append(buf, cap, at, T("%slevel %u"), at ? ", " : "", (unsigned)(level / 30));
         if (level % 30) at = append(buf, cap, at, ".%u", (unsigned)(level % 30 / 3));
     }
     return at;
@@ -147,24 +148,24 @@ size_t rubraview_detail_hevc_profile(char *buf, size_t cap, uint32_t profile, ui
 size_t rubraview_detail_aac_profile(char *buf, size_t cap, uint32_t indication) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
-    static const struct { uint32_t code; const char *name; int level; } KNOWN[] = {
-        { 0x28, "AAC-LC", 1 }, { 0x29, "AAC-LC", 2 }, { 0x2A, "AAC-LC", 4 }, { 0x2B, "AAC-LC", 5 },
-        { 0x2C, "HE-AAC", 2 }, { 0x2D, "HE-AAC", 3 }, { 0x2E, "HE-AAC", 4 }, { 0x2F, "HE-AAC", 5 },
-        { 0x30, "HE-AAC v2", 2 }, { 0x31, "HE-AAC v2", 3 }, { 0x32, "HE-AAC v2", 4 }, { 0x33, "HE-AAC v2", 5 },
-        { 0x50, "AAC-LC", 7 }, { 0x51, "AAC-LC", 7 }, { 0x52, "HE-AAC", 7 },
+    const struct { uint32_t code; const char *name; int level; } KNOWN[] = {
+        { 0x28, T("AAC-LC"), 1 }, { 0x29, T("AAC-LC"), 2 }, { 0x2A, T("AAC-LC"), 4 }, { 0x2B, T("AAC-LC"), 5 },
+        { 0x2C, T("HE-AAC"), 2 }, { 0x2D, T("HE-AAC"), 3 }, { 0x2E, T("HE-AAC"), 4 }, { 0x2F, T("HE-AAC"), 5 },
+        { 0x30, T("HE-AAC v2"), 2 }, { 0x31, T("HE-AAC v2"), 3 }, { 0x32, T("HE-AAC v2"), 4 }, { 0x33, T("HE-AAC v2"), 5 },
+        { 0x50, T("AAC-LC"), 7 }, { 0x51, T("AAC-LC"), 7 }, { 0x52, T("HE-AAC"), 7 },
     };
     for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); ++i) {
-        if (KNOWN[i].code == indication) return clip(snprintf(buf, cap, "%s, level %d", KNOWN[i].name, KNOWN[i].level), cap);
+        if (KNOWN[i].code == indication) return clip(snprintf(buf, cap, T("%s, level %d"), KNOWN[i].name, KNOWN[i].level), cap);
     }
     if (indication == 0 || indication == 0xFE || indication == 0xFF) return 0;
-    return clip(snprintf(buf, cap, "profile and level 0x%02X", (unsigned)indication), cap);
+    return clip(snprintf(buf, cap, T("profile and level 0x%02X"), (unsigned)indication), cap);
 }
 
 size_t rubraview_detail_ratio(char *buf, size_t cap, double stored, double raw) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
     if (!(stored > 0.0) || !(raw > 0.0)) return 0;
-    return clip(snprintf(buf, cap, "1 : %.*f (%.*f %% of the size unpacked)",
+    return clip(snprintf(buf, cap, T("1 : %.*f (%.*f %% of the size unpacked)"),
                          raw / stored >= 100.0 ? 0 : 1, raw / stored,
                          stored / raw * 100.0 >= 10.0 ? 0 : 1, stored / raw * 100.0), cap);
 }
@@ -185,7 +186,7 @@ static void plain(char *out, size_t cap, const uint8_t *p, size_t n) {
 
 /* The IJG quality that scales the standard luminance table to this one. */
 static int jpeg_quality(const uint32_t q[64]) {
-    static const uint8_t STD[64] = {   /* in zig-zag order, as DQT stores them */
+    const uint8_t STD[64] = {   /* in zig-zag order, as DQT stores them */
         16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40, 26, 24, 22, 22, 24, 49, 35, 37, 29, 40, 58, 51, 61, 60, 57, 51,
         56, 55, 64, 72, 92, 78, 64, 68, 87, 69, 55, 56, 80, 109, 81, 87, 95, 98, 103, 104, 103, 62, 77, 113, 121, 112, 100, 120, 92, 101, 103, 99 };
     double sum = 0.0;
@@ -202,12 +203,12 @@ static int jpeg_quality(const uint32_t q[64]) {
 }
 
 static bool jpeg_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
-    static const char *const PROCESS[16] = {
-        "baseline DCT, Huffman", "extended sequential DCT, Huffman", "progressive DCT, Huffman", "lossless, Huffman",
-        NULL, "differential sequential DCT, Huffman", "differential progressive DCT, Huffman", "differential lossless, Huffman",
-        NULL, "extended sequential DCT, arithmetic", "progressive DCT, arithmetic", "lossless, arithmetic",
-        NULL, "differential sequential DCT, arithmetic", "differential progressive DCT, arithmetic", "differential lossless, arithmetic" };
-    rubraview_details_heading(out, "JPEG");
+    const char *const PROCESS[16] = {
+        T("baseline DCT, Huffman"), T("extended sequential DCT, Huffman"), T("progressive DCT, Huffman"), T("lossless, Huffman"),
+        NULL, T("differential sequential DCT, Huffman"), T("differential progressive DCT, Huffman"), T("differential lossless, Huffman"),
+        NULL, T("extended sequential DCT, arithmetic"), T("progressive DCT, arithmetic"), T("lossless, arithmetic"),
+        NULL, T("differential sequential DCT, arithmetic"), T("differential progressive DCT, arithmetic"), T("differential lossless, arithmetic") };
+    rubraview_details_heading(out, T("JPEG"));
     size_t at = 2;
     int tables = 0, luma_quality = -1, chroma_quality = -1;
     bool sixteen_bit_tables = false, seen_frame = false;
@@ -225,22 +226,22 @@ static bool jpeg_details(const uint8_t *b, size_t size, rubraview_details_t *out
             const char *process = PROCESS[marker - 0xC0];
             uint32_t precision = p[0], height = be16(p + 1), width = be16(p + 3), comps = p[5];
             if (!seen_frame) {
-                rubraview_details_add(out, "Process", "%s", process ? process : "unknown");
-                rubraview_details_add(out, "Sample precision", "%u bits", (unsigned)precision);
-                rubraview_details_add(out, "Frame", "%u x %u", (unsigned)width, (unsigned)height);
-                const char *space = comps == 1 ? "greyscale" : comps == 3 ? "three (YCbCr or RGB)" : comps == 4 ? "four (CMYK or YCCK)" : "";
-                rubraview_details_add(out, "Components", "%u%s%s", (unsigned)comps, space[0] ? ": " : "", space);
+                rubraview_details_add(out, T("Process"), "%s", process ? process : T("unknown"));
+                rubraview_details_add(out, T("Sample precision"), T("%u bits"), (unsigned)precision);
+                rubraview_details_add(out, T("Frame"), "%u x %u", (unsigned)width, (unsigned)height);
+                const char *space = comps == 1 ? T("greyscale") : comps == 3 ? T("three (YCbCr or RGB)") : comps == 4 ? T("four (CMYK or YCCK)") : "";
+                rubraview_details_add(out, T("Components"), "%u%s%s", (unsigned)comps, space[0] ? ": " : "", space);
                 if (raw_bits) *raw_bits = precision * comps;
                 if (comps >= 3 && n >= 6 + 3 * (size_t)comps) {
                     uint32_t h0 = p[7] >> 4, v0 = p[7] & 15, h1 = p[10] >> 4, v1 = p[10] & 15;
                     const char *name = "";
                     if (h1 && v1) {
                         uint32_t hr = h0 / h1, vr = v0 / v1;
-                        name = (hr == 1 && vr == 1) ? "4:4:4 (none)" : (hr == 2 && vr == 1) ? "4:2:2"
+                        name = (hr == 1 && vr == 1) ? T("4:4:4 (none)") : (hr == 2 && vr == 1) ? "4:2:2"
                              : (hr == 2 && vr == 2) ? "4:2:0" : (hr == 4 && vr == 1) ? "4:1:1"
                              : (hr == 1 && vr == 2) ? "4:4:0" : (hr == 4 && vr == 2) ? "4:1:0" : "";
                     }
-                    rubraview_details_add(out, "Chroma sampling", "%s%s%ux%u, %ux%u, %ux%u", name, name[0] ? "; " : "",
+                    rubraview_details_add(out, T("Chroma sampling"), "%s%s%ux%u, %ux%u, %ux%u", name, name[0] ? "; " : "",
                                           (unsigned)h0, (unsigned)v0, (unsigned)h1, (unsigned)v1,
                                           (unsigned)(p[13] >> 4), (unsigned)(p[13] & 15));
                 }
@@ -261,45 +262,45 @@ static bool jpeg_details(const uint8_t *b, size_t size, rubraview_details_t *out
                 k += 1 + need;
             }
         } else if (marker == 0xDD && n >= 2) {
-            if (be16(p)) rubraview_details_add(out, "Restart interval", "%u blocks", (unsigned)be16(p));
+            if (be16(p)) rubraview_details_add(out, T("Restart interval"), T("%u blocks"), (unsigned)be16(p));
         } else if (marker == 0xE0 && n >= 14 && memcmp(p, "JFIF\0", 5) == 0) {
-            static const char *const UNIT[3] = { "aspect ratio", "dots an inch", "dots a centimetre" };
-            rubraview_details_add(out, "JFIF", "version %u.%02u, %u x %u %s", (unsigned)p[5], (unsigned)p[6],
+            const char *const UNIT[3] = { T("aspect ratio"), T("dots an inch"), T("dots a centimetre") };
+            rubraview_details_add(out, T("JFIF"), T("version %u.%02u, %u x %u %s"), (unsigned)p[5], (unsigned)p[6],
                                   (unsigned)be16(p + 8), (unsigned)be16(p + 10), p[7] < 3 ? UNIT[p[7]] : "");
-            if (p[12] && p[13]) rubraview_details_add(out, "JFIF thumbnail", "%u x %u", (unsigned)p[12], (unsigned)p[13]);
+            if (p[12] && p[13]) rubraview_details_add(out, T("JFIF thumbnail"), "%u x %u", (unsigned)p[12], (unsigned)p[13]);
         } else if (marker == 0xE1 && n >= 6 && memcmp(p, "Exif\0\0", 6) == 0) {
-            rubraview_details_add(out, "EXIF block", "%zu bytes", n);
+            rubraview_details_add(out, T("EXIF block"), T("%zu bytes"), n);
         } else if (marker == 0xE1 && n >= 28 && memcmp(p, "http://ns.adobe.com/xap/1.0/", 28) == 0) {
-            rubraview_details_add(out, "XMP block", "%zu bytes", n);
+            rubraview_details_add(out, T("XMP block"), T("%zu bytes"), n);
         } else if (marker == 0xE2 && n >= 14 && memcmp(p, "ICC_PROFILE\0", 12) == 0) {
-            if (p[12] == 1) rubraview_details_add(out, "ICC profile", "%u part%s", (unsigned)p[13], p[13] == 1 ? "" : "s");
+            if (p[12] == 1) rubraview_details_add(out, T("ICC profile"), T("%u part%s"), (unsigned)p[13], p[13] == 1 ? "" : TC("plural", "s"));
         } else if (marker == 0xE2 && n >= 4 && memcmp(p, "MPF\0", 4) == 0) {
-            rubraview_details_add(out, "Multi-picture", "yes (MPF)");
+            rubraview_details_add(out, T("Multi-picture"), T("yes (MPF)"));
         } else if (marker == 0xED && n >= 14 && memcmp(p, "Photoshop 3.0\0", 14) == 0) {
-            rubraview_details_add(out, "Photoshop block", "%zu bytes (IPTC)", n);
+            rubraview_details_add(out, T("Photoshop block"), T("%zu bytes (IPTC)"), n);
         } else if (marker == 0xEE && n >= 12 && memcmp(p, "Adobe", 5) == 0) {
-            static const char *const TRANSFORM[3] = { "none (RGB or CMYK)", "YCbCr", "YCCK" };
-            rubraview_details_add(out, "Adobe marker", "colour transform %s", p[11] < 3 ? TRANSFORM[p[11]] : "unknown");
+            const char *const TRANSFORM[3] = { T("none (RGB or CMYK)"), T("YCbCr"), T("YCCK") };
+            rubraview_details_add(out, T("Adobe marker"), T("colour transform %s"), p[11] < 3 ? TRANSFORM[p[11]] : T("unknown"));
         } else if (marker == 0xFE && n > 0) {
             char text[100];
             plain(text, sizeof(text), p, n);
-            rubraview_details_add(out, "Comment", "%s", text);
+            rubraview_details_add(out, T("Comment"), "%s", text);
         } else if (marker == 0xDA) {
             break;   /* the picture's data: nothing more is read */
         }
         at += 2 + len;
     }
     if (luma_quality >= 0) {
-        if (chroma_quality >= 0) rubraview_details_add(out, "Quality (estimate)", "%d, colour tables %d; %d table%s%s", luma_quality,
-                                                       chroma_quality, tables, tables == 1 ? "" : "s", sixteen_bit_tables ? ", 16-bit" : "");
-        else rubraview_details_add(out, "Quality (estimate)", "%d; %d table%s%s", luma_quality, tables, tables == 1 ? "" : "s",
-                                   sixteen_bit_tables ? ", 16-bit" : "");
+        if (chroma_quality >= 0) rubraview_details_add(out, T("Quality (estimate)"), T("%d, colour tables %d; %d table%s%s"), luma_quality,
+                                                       chroma_quality, tables, tables == 1 ? "" : TC("plural", "s"), sixteen_bit_tables ? T(", 16-bit") : "");
+        else rubraview_details_add(out, T("Quality (estimate)"), T("%d; %d table%s%s"), luma_quality, tables, tables == 1 ? "" : TC("plural", "s"),
+                                   sixteen_bit_tables ? T(", 16-bit") : "");
     }
     return true;
 }
 
 static bool png_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
-    rubraview_details_heading(out, "PNG");
+    rubraview_details_heading(out, T("PNG"));
     size_t at = 8;
     uint64_t idat = 0;
     uint32_t idat_chunks = 0, texts = 0;
@@ -309,50 +310,50 @@ static bool png_details(const uint8_t *b, size_t size, rubraview_details_t *out,
         const uint8_t *type = b + at + 4, *p = b + at + 8;
         if ((uint64_t)at + 12 + len > size) break;
         if (memcmp(type, "IHDR", 4) == 0 && len >= 13) {
-            static const char *const KIND[7] = { "greyscale", NULL, "truecolour (RGB)", "palette", "greyscale with alpha", NULL, "truecolour with alpha (RGBA)" };
-            static const uint8_t CHANNELS[7] = { 1, 0, 3, 1, 2, 0, 4 };
+            const char *const KIND[7] = { T("greyscale"), NULL, T("truecolour (RGB)"), T("palette"), T("greyscale with alpha"), NULL, T("truecolour with alpha (RGBA)") };
+            const uint8_t CHANNELS[7] = { 1, 0, 3, 1, 2, 0, 4 };
             uint32_t depth = p[8], kind = p[9];
-            rubraview_details_add(out, "Bit depth", "%u bits a %s", (unsigned)depth, kind == 3 ? "palette index" : "channel");
-            rubraview_details_add(out, "Colour type", "%u: %s", (unsigned)kind, kind < 7 && KIND[kind] ? KIND[kind] : "unknown");
-            rubraview_details_add(out, "Compression", "deflate (method %u), filter method %u", (unsigned)p[10], (unsigned)p[11]);
-            rubraview_details_add(out, "Interlace", "%s", p[12] == 1 ? "Adam7" : "none");
+            rubraview_details_add(out, T("Bit depth"), T("%u bits a %s"), (unsigned)depth, kind == 3 ? T("palette index") : T("channel"));
+            rubraview_details_add(out, T("Colour type"), "%u: %s", (unsigned)kind, kind < 7 && KIND[kind] ? KIND[kind] : T("unknown"));
+            rubraview_details_add(out, T("Compression"), T("deflate (method %u), filter method %u"), (unsigned)p[10], (unsigned)p[11]);
+            rubraview_details_add(out, T("Interlace"), "%s", p[12] == 1 ? T("Adam7") : T("none"));
             if (raw_bits && kind < 7) *raw_bits = depth * CHANNELS[kind];
         } else if (memcmp(type, "PLTE", 4) == 0) {
-            rubraview_details_add(out, "Palette", "%u colours", (unsigned)(len / 3));
+            rubraview_details_add(out, T("Palette"), T("%u colours"), (unsigned)(len / 3));
         } else if (memcmp(type, "tRNS", 4) == 0) {
-            rubraview_details_add(out, "Transparency", "tRNS, %u bytes", (unsigned)len);
+            rubraview_details_add(out, T("Transparency"), T("tRNS, %u bytes"), (unsigned)len);
         } else if (memcmp(type, "gAMA", 4) == 0 && len >= 4) {
             uint32_t g = be32(p);
-            if (g) rubraview_details_add(out, "Gamma", "%.5g (file gamma %.5f)", 100000.0 / (double)g, (double)g / 100000.0);
+            if (g) rubraview_details_add(out, T("Gamma"), T("%.5g (file gamma %.5f)"), 100000.0 / (double)g, (double)g / 100000.0);
         } else if (memcmp(type, "sRGB", 4) == 0 && len >= 1) {
-            static const char *const INTENT[4] = { "perceptual", "relative colorimetric", "saturation", "absolute colorimetric" };
-            rubraview_details_add(out, "sRGB", "rendering intent %s", p[0] < 4 ? INTENT[p[0]] : "unknown");
+            const char *const INTENT[4] = { T("perceptual"), T("relative colorimetric"), T("saturation"), T("absolute colorimetric") };
+            rubraview_details_add(out, T("sRGB"), T("rendering intent %s"), p[0] < 4 ? INTENT[p[0]] : T("unknown"));
         } else if (memcmp(type, "cHRM", 4) == 0 && len >= 32) {
-            rubraview_details_add(out, "Chromaticities", "white %.4f %.4f, R %.3f %.3f, G %.3f %.3f, B %.3f %.3f",
+            rubraview_details_add(out, T("Chromaticities"), T("white %.4f %.4f, R %.3f %.3f, G %.3f %.3f, B %.3f %.3f"),
                                   be32(p) / 1e5, be32(p + 4) / 1e5, be32(p + 8) / 1e5, be32(p + 12) / 1e5,
                                   be32(p + 16) / 1e5, be32(p + 20) / 1e5, be32(p + 24) / 1e5, be32(p + 28) / 1e5);
         } else if (memcmp(type, "iCCP", 4) == 0) {
             char name[80];
             plain(name, sizeof(name), p, len);
-            rubraview_details_add(out, "ICC profile", "\"%s\"", name);
+            rubraview_details_add(out, T("ICC profile"), "\"%s\"", name);
         } else if (memcmp(type, "cICP", 4) == 0 && len >= 4) {
-            rubraview_details_add(out, "Colour (cICP)", "primaries %u, transfer %u, matrix %u, %s range",
-                                  (unsigned)p[0], (unsigned)p[1], (unsigned)p[2], p[3] ? "full" : "limited");
+            rubraview_details_add(out, T("Colour (cICP)"), T("primaries %u, transfer %u, matrix %u, %s range"),
+                                  (unsigned)p[0], (unsigned)p[1], (unsigned)p[2], p[3] ? T("full") : T("limited"));
         } else if (memcmp(type, "pHYs", 4) == 0 && len >= 9) {
-            if (p[8] == 1) rubraview_details_add(out, "Pixel size", "%u x %u a metre (%.0f x %.0f dpi)", (unsigned)be32(p), (unsigned)be32(p + 4),
+            if (p[8] == 1) rubraview_details_add(out, T("Pixel size"), T("%u x %u a metre (%.0f x %.0f dpi)"), (unsigned)be32(p), (unsigned)be32(p + 4),
                                                  be32(p) * 0.0254, be32(p + 4) * 0.0254);
-            else rubraview_details_add(out, "Pixel size", "aspect %u : %u", (unsigned)be32(p), (unsigned)be32(p + 4));
+            else rubraview_details_add(out, T("Pixel size"), T("aspect %u : %u"), (unsigned)be32(p), (unsigned)be32(p + 4));
         } else if (memcmp(type, "tIME", 4) == 0 && len >= 7) {
-            rubraview_details_add(out, "Last changed", "%04u-%02u-%02u %02u:%02u:%02u UTC", (unsigned)be16(p), (unsigned)p[2], (unsigned)p[3],
+            rubraview_details_add(out, T("Last changed"), T("%04u-%02u-%02u %02u:%02u:%02u UTC"), (unsigned)be16(p), (unsigned)p[2], (unsigned)p[3],
                                   (unsigned)p[4], (unsigned)p[5], (unsigned)p[6]);
         } else if (memcmp(type, "acTL", 4) == 0 && len >= 8) {
             uint32_t plays = be32(p + 4);
-            if (plays) rubraview_details_add(out, "Animation", "%u frames, played %u time%s", (unsigned)be32(p), (unsigned)plays, plays == 1 ? "" : "s");
-            else rubraview_details_add(out, "Animation", "%u frames, played without end", (unsigned)be32(p));
+            if (plays) rubraview_details_add(out, T("Animation"), T("%u frames, played %u time%s"), (unsigned)be32(p), (unsigned)plays, plays == 1 ? "" : TC("plural", "s"));
+            else rubraview_details_add(out, T("Animation"), T("%u frames, played without end"), (unsigned)be32(p));
         } else if (memcmp(type, "bKGD", 4) == 0) {
-            rubraview_details_add(out, "Background", "given (bKGD)");
+            rubraview_details_add(out, T("Background"), T("given (bKGD)"));
         } else if (memcmp(type, "eXIf", 4) == 0) {
-            rubraview_details_add(out, "EXIF block", "%u bytes", (unsigned)len);
+            rubraview_details_add(out, T("EXIF block"), T("%u bytes"), (unsigned)len);
         } else if ((memcmp(type, "tEXt", 4) == 0 || memcmp(type, "zTXt", 4) == 0 || memcmp(type, "iTXt", 4) == 0) && texts < 16) {
             char key[24], text[100];
             plain(key, sizeof(key), p, len);
@@ -366,14 +367,14 @@ static bool png_details(const uint8_t *b, size_t size, rubraview_details_t *out,
                 text[w] = '\0';
             }
             char label[24];
-            snprintf(label, sizeof(label), "Text: %.16s", key);
-            rubraview_details_add(out, label, "%s", text[0] ? text : type[0] == 'z' ? "(compressed)" : type[0] == 'i' ? "(international text)" : "(empty)");
+            snprintf(label, sizeof(label), T("Text: %.16s"), key);
+            rubraview_details_add(out, label, "%s", text[0] ? text : type[0] == 'z' ? T("(compressed)") : type[0] == 'i' ? T("(international text)") : T("(empty)"));
             texts++;
         } else if (memcmp(type, "IDAT", 4) == 0) {
             if (first_idat && len >= 2) {
-                static const char *const LEVEL[4] = { "fastest", "fast", "default", "maximum" };
+                const char *const LEVEL[4] = { T("fastest"), T("fast"), T("default"), T("maximum") };
                 unsigned cinfo = (unsigned)p[0] >> 4;
-                rubraview_details_add(out, "Deflate stream", "%u-byte window, compressed at \"%s\"", cinfo <= 7 ? 1u << (cinfo + 8) : 0u,
+                rubraview_details_add(out, T("Deflate stream"), T("%u-byte window, compressed at \"%s\""), cinfo <= 7 ? 1u << (cinfo + 8) : 0u,
                                       LEVEL[p[1] >> 6]);
                 first_idat = false;
             }
@@ -384,21 +385,21 @@ static bool png_details(const uint8_t *b, size_t size, rubraview_details_t *out,
         }
         at += 12 + (size_t)len;
     }
-    if (idat_chunks) rubraview_details_add(out, "Picture data", "%llu bytes in %u chunk%s", (unsigned long long)idat, (unsigned)idat_chunks, idat_chunks == 1 ? "" : "s");
+    if (idat_chunks) rubraview_details_add(out, T("Picture data"), T("%llu bytes in %u chunk%s"), (unsigned long long)idat, (unsigned)idat_chunks, idat_chunks == 1 ? "" : TC("plural", "s"));
     return true;
 }
 
 static bool gif_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
     if (size < 13) return false;
-    rubraview_details_heading(out, "GIF");
-    rubraview_details_add(out, "Version", "%.3s", (const char*)b + 3);
-    rubraview_details_add(out, "Canvas", "%u x %u", (unsigned)le16(b + 6), (unsigned)le16(b + 8));
+    rubraview_details_heading(out, T("GIF"));
+    rubraview_details_add(out, T("Version"), "%.3s", (const char*)b + 3);
+    rubraview_details_add(out, T("Canvas"), "%u x %u", (unsigned)le16(b + 6), (unsigned)le16(b + 8));
     uint8_t flags = b[10];
-    if (flags & 0x80) rubraview_details_add(out, "Global palette", "%u colours%s, background index %u", 2u << (flags & 7),
-                                            (flags & 8) ? ", sorted" : "", (unsigned)b[11]);
-    else rubraview_details_add(out, "Global palette", "none");
-    rubraview_details_add(out, "Colour resolution", "%u bits", (unsigned)(((flags >> 4) & 7) + 1));
-    if (b[12]) rubraview_details_add(out, "Pixel aspect", "%.3f", ((double)b[12] + 15.0) / 64.0);
+    if (flags & 0x80) rubraview_details_add(out, T("Global palette"), T("%u colours%s, background index %u"), 2u << (flags & 7),
+                                            (flags & 8) ? T(", sorted") : "", (unsigned)b[11]);
+    else rubraview_details_add(out, T("Global palette"), T("none"));
+    rubraview_details_add(out, T("Colour resolution"), T("%u bits"), (unsigned)(((flags >> 4) & 7) + 1));
+    if (b[12]) rubraview_details_add(out, T("Pixel aspect"), "%.3f", ((double)b[12] + 15.0) / 64.0);
     if (raw_bits) *raw_bits = 8;
     size_t at = 13 + ((flags & 0x80) ? 3u * (2u << (flags & 7)) : 0u);
     uint32_t frames = 0, local = 0, interlaced = 0, transparent = 0, comments = 0;
@@ -431,7 +432,7 @@ static bool gif_details(const uint8_t *b, size_t size, rubraview_details_t *out,
                     size_t n = b[at];
                     if (at + 1 + n > size) n = size - at - 1;
                     plain(text, sizeof(text), b + at + 1, n);
-                    rubraview_details_add(out, "Comment", "%s", text);
+                    rubraview_details_add(out, T("Comment"), "%s", text);
                 }
                 comments++;
             }
@@ -442,22 +443,22 @@ static bool gif_details(const uint8_t *b, size_t size, rubraview_details_t *out,
         while (at < size && b[at]) at += 1 + (size_t)b[at];
         at++;
     }
-    rubraview_details_add(out, "Frames", "%u%s", (unsigned)frames, frames > 1 ? "" : " (a still picture)");
+    rubraview_details_add(out, T("Frames"), "%u%s", (unsigned)frames, frames > 1 ? "" : T(" (a still picture)"));
     if (frames > 1) {
-        rubraview_details_add(out, "Playing time", "%.2f s a round", (double)centiseconds / 100.0);
-        if (loops == 0) rubraview_details_add(out, "Repeats", "without end");
-        else if (loops > 0) rubraview_details_add(out, "Repeats", "%lld more time%s", (long long)loops, loops == 1 ? "" : "s");
-        else rubraview_details_add(out, "Repeats", "not said (played once)");
+        rubraview_details_add(out, T("Playing time"), T("%.2f s a round"), (double)centiseconds / 100.0);
+        if (loops == 0) rubraview_details_add(out, T("Repeats"), T("without end"));
+        else if (loops > 0) rubraview_details_add(out, T("Repeats"), T("%lld more time%s"), (long long)loops, loops == 1 ? "" : TC("plural", "s"));
+        else rubraview_details_add(out, T("Repeats"), T("not said (played once)"));
     }
-    if (local) rubraview_details_add(out, "Local palettes", "%u frame%s", (unsigned)local, local == 1 ? "" : "s");
-    if (interlaced) rubraview_details_add(out, "Interlaced", "%u frame%s", (unsigned)interlaced, interlaced == 1 ? "" : "s");
-    rubraview_details_add(out, "Transparency", "%s", transparent ? "yes" : "none");
-    rubraview_details_add(out, "Compression", "LZW");
+    if (local) rubraview_details_add(out, T("Local palettes"), T("%u frame%s"), (unsigned)local, local == 1 ? "" : TC("plural", "s"));
+    if (interlaced) rubraview_details_add(out, T("Interlaced"), T("%u frame%s"), (unsigned)interlaced, interlaced == 1 ? "" : TC("plural", "s"));
+    rubraview_details_add(out, T("Transparency"), "%s", transparent ? T("yes") : T("none"));
+    rubraview_details_add(out, T("Compression"), T("LZW"));
     return true;
 }
 
 static bool webp_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
-    rubraview_details_heading(out, "WebP");
+    rubraview_details_heading(out, T("WebP"));
     size_t at = 12;
     uint32_t frames = 0;
     bool lossy = false, lossless = false, alpha = false;
@@ -468,14 +469,14 @@ static bool webp_details(const uint8_t *b, size_t size, rubraview_details_t *out
         size_t n = len < room ? len : room;
         if (memcmp(type, "VP8X", 4) == 0 && n >= 10) {
             uint8_t f = p[0];
-            rubraview_details_add(out, "Container", "extended (VP8X)%s%s%s%s%s", (f & 0x20) ? ", ICC profile" : "", (f & 0x10) ? ", alpha" : "",
-                                  (f & 0x08) ? ", EXIF" : "", (f & 0x04) ? ", XMP" : "", (f & 0x02) ? ", animation" : "");
-            rubraview_details_add(out, "Canvas", "%u x %u", (unsigned)((le32(p + 4) & 0xFFFFFF) + 1), (unsigned)((le32(p + 6) >> 8) + 1));
+            rubraview_details_add(out, T("Container"), T("extended (VP8X)%s%s%s%s%s"), (f & 0x20) ? T(", ICC profile") : "", (f & 0x10) ? T(", alpha") : "",
+                                  (f & 0x08) ? T(", EXIF") : "", (f & 0x04) ? T(", XMP") : "", (f & 0x02) ? T(", animation") : "");
+            rubraview_details_add(out, T("Canvas"), "%u x %u", (unsigned)((le32(p + 4) & 0xFFFFFF) + 1), (unsigned)((le32(p + 6) >> 8) + 1));
             if (f & 0x10) alpha = true;
         } else if (memcmp(type, "ANIM", 4) == 0 && n >= 6) {
             uint32_t loops = le16(p + 4);
-            if (loops) rubraview_details_add(out, "Repeats", "%u time%s", (unsigned)loops, loops == 1 ? "" : "s");
-            else rubraview_details_add(out, "Repeats", "without end");
+            if (loops) rubraview_details_add(out, T("Repeats"), T("%u time%s"), (unsigned)loops, loops == 1 ? "" : TC("plural", "s"));
+            else rubraview_details_add(out, T("Repeats"), T("without end"));
         } else if (memcmp(type, "ANMF", 4) == 0 && n >= 16) {
             frames++;
             /* The frame's own picture is a chunk inside this one. */
@@ -486,32 +487,32 @@ static bool webp_details(const uint8_t *b, size_t size, rubraview_details_t *out
         } else if (memcmp(type, "VP8 ", 4) == 0 && n >= 10) {
             lossy = true;
             if (frames == 0 && p[3] == 0x9D && p[4] == 0x01 && p[5] == 0x2A) {
-                rubraview_details_add(out, "Picture", "VP8 key frame, %u x %u, version %u", (unsigned)(le16(p + 6) & 0x3FFF),
+                rubraview_details_add(out, T("Picture"), T("VP8 key frame, %u x %u, version %u"), (unsigned)(le16(p + 6) & 0x3FFF),
                                       (unsigned)(le16(p + 8) & 0x3FFF), (unsigned)((p[0] >> 1) & 7));
             }
         } else if (memcmp(type, "VP8L", 4) == 0 && n >= 5) {
             lossless = true;
             if (p[0] == 0x2F) {
                 uint32_t bits = le32(p + 1);
-                rubraview_details_add(out, "Picture", "VP8L, %u x %u%s", (unsigned)((bits & 0x3FFF) + 1), (unsigned)(((bits >> 14) & 0x3FFF) + 1),
-                                      (bits >> 28) & 1 ? ", with alpha" : "");
+                rubraview_details_add(out, T("Picture"), T("VP8L, %u x %u%s"), (unsigned)((bits & 0x3FFF) + 1), (unsigned)(((bits >> 14) & 0x3FFF) + 1),
+                                      (bits >> 28) & 1 ? T(", with alpha") : "");
                 if ((bits >> 28) & 1) alpha = true;
             }
         } else if (memcmp(type, "ALPH", 4) == 0 && n >= 1) {
             alpha = true;
-            rubraview_details_add(out, "Alpha plane", "%s, filter %u", (p[0] & 3) == 1 ? "lossless" : "stored", (unsigned)((p[0] >> 2) & 3));
+            rubraview_details_add(out, T("Alpha plane"), T("%s, filter %u"), (p[0] & 3) == 1 ? T("lossless") : T("stored"), (unsigned)((p[0] >> 2) & 3));
         } else if (memcmp(type, "ICCP", 4) == 0) {
-            rubraview_details_add(out, "ICC profile", "%u bytes", (unsigned)len);
+            rubraview_details_add(out, T("ICC profile"), T("%u bytes"), (unsigned)len);
         } else if (memcmp(type, "EXIF", 4) == 0) {
-            rubraview_details_add(out, "EXIF block", "%u bytes", (unsigned)len);
+            rubraview_details_add(out, T("EXIF block"), T("%u bytes"), (unsigned)len);
         } else if (memcmp(type, "XMP ", 4) == 0) {
-            rubraview_details_add(out, "XMP block", "%u bytes", (unsigned)len);
+            rubraview_details_add(out, T("XMP block"), T("%u bytes"), (unsigned)len);
         }
         at += 8 + (size_t)len + (len & 1);
     }
-    rubraview_details_add(out, "Compression", "%s", lossy && lossless ? "lossy and lossless frames" : lossless ? "lossless (VP8L)"
-                                                   : lossy ? "lossy (VP8)" : "unknown");
-    if (frames) rubraview_details_add(out, "Frames", "%u", (unsigned)frames);
+    rubraview_details_add(out, T("Compression"), "%s", lossy && lossless ? T("lossy and lossless frames") : lossless ? T("lossless (VP8L)")
+                                                   : lossy ? T("lossy (VP8)") : T("unknown"));
+    if (frames) rubraview_details_add(out, T("Frames"), "%u", (unsigned)frames);
     if (raw_bits) *raw_bits = alpha ? 32 : 24;
     return true;
 }
@@ -519,32 +520,32 @@ static bool webp_details(const uint8_t *b, size_t size, rubraview_details_t *out
 static bool bmp_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
     if (size < 30) return false;
     uint32_t header = le32(b + 14);
-    rubraview_details_heading(out, "BMP");
-    const char *version = header == 12 ? "OS/2 1.x (BITMAPCOREHEADER)" : header == 40 ? "Windows 3 (BITMAPINFOHEADER)"
-                        : header == 52 ? "BITMAPV2INFOHEADER" : header == 56 ? "BITMAPV3INFOHEADER"
-                        : header == 64 ? "OS/2 2.x" : header == 108 ? "Windows 95 (BITMAPV4HEADER)"
-                        : header == 124 ? "Windows 98 (BITMAPV5HEADER)" : "unknown";
-    rubraview_details_add(out, "Header", "%s, %u bytes", version, (unsigned)header);
+    rubraview_details_heading(out, T("BMP"));
+    const char *version = header == 12 ? T("OS/2 1.x (BITMAPCOREHEADER)") : header == 40 ? T("Windows 3 (BITMAPINFOHEADER)")
+                        : header == 52 ? T("BITMAPV2INFOHEADER") : header == 56 ? T("BITMAPV3INFOHEADER")
+                        : header == 64 ? T("OS/2 2.x") : header == 108 ? T("Windows 95 (BITMAPV4HEADER)")
+                        : header == 124 ? T("Windows 98 (BITMAPV5HEADER)") : T("unknown");
+    rubraview_details_add(out, T("Header"), T("%s, %u bytes"), version, (unsigned)header);
     if (header == 12) {
-        rubraview_details_add(out, "Bits a pixel", "%u", (unsigned)le16(b + 24));
+        rubraview_details_add(out, T("Bits a pixel"), "%u", (unsigned)le16(b + 24));
         if (raw_bits) *raw_bits = le16(b + 24);
         return true;
     }
     if (size < 54) return true;
     int32_t height = (int32_t)le32(b + 22);
     uint32_t bits = le16(b + 28), compression = le32(b + 30), colours = le32(b + 46);
-    static const char *const METHOD[7] = { "none (BI_RGB)", "RLE 8-bit", "RLE 4-bit", "bit fields", "JPEG", "PNG", "bit fields with alpha" };
-    rubraview_details_add(out, "Bits a pixel", "%u", (unsigned)bits);
-    rubraview_details_add(out, "Compression", "%s", compression < 7 ? METHOD[compression] : "unknown");
-    rubraview_details_add(out, "Row order", "%s", height < 0 ? "top down" : "bottom up");
-    if (bits <= 8) rubraview_details_add(out, "Palette", "%u colours", (unsigned)(colours ? colours : 1u << bits));
-    if (le32(b + 38) && le32(b + 42)) rubraview_details_add(out, "Pixel size", "%u x %u a metre (%.0f x %.0f dpi)", (unsigned)le32(b + 38),
+    const char *const METHOD[7] = { T("none (BI_RGB)"), T("RLE 8-bit"), T("RLE 4-bit"), T("bit fields"), T("JPEG"), T("PNG"), T("bit fields with alpha") };
+    rubraview_details_add(out, T("Bits a pixel"), "%u", (unsigned)bits);
+    rubraview_details_add(out, T("Compression"), "%s", compression < 7 ? METHOD[compression] : T("unknown"));
+    rubraview_details_add(out, T("Row order"), "%s", height < 0 ? T("top down") : T("bottom up"));
+    if (bits <= 8) rubraview_details_add(out, T("Palette"), T("%u colours"), (unsigned)(colours ? colours : 1u << bits));
+    if (le32(b + 38) && le32(b + 42)) rubraview_details_add(out, T("Pixel size"), T("%u x %u a metre (%.0f x %.0f dpi)"), (unsigned)le32(b + 38),
                                                               (unsigned)le32(b + 42), le32(b + 38) * 0.0254, le32(b + 42) * 0.0254);
     if (header >= 108 && size >= 14 + 60) {
         uint32_t space = le32(b + 14 + 56);
-        const char *name = space == 0 ? "calibrated RGB" : space == 0x73524742 ? "sRGB" : space == 0x57696E20 ? "the system's"
-                         : space == 0x4C494E4B ? "a linked profile" : space == 0x4D424544 ? "an embedded profile" : "unknown";
-        rubraview_details_add(out, "Colour space", "%s", name);
+        const char *name = space == 0 ? T("calibrated RGB") : space == 0x73524742 ? T("sRGB") : space == 0x57696E20 ? T("the system's")
+                         : space == 0x4C494E4B ? T("a linked profile") : space == 0x4D424544 ? T("an embedded profile") : T("unknown");
+        rubraview_details_add(out, T("Colour space"), "%s", name);
     }
     if (raw_bits) *raw_bits = bits;
     return true;
@@ -566,7 +567,7 @@ static uint64_t tiff_n(const tiff_view_t *t, size_t at, uint32_t bytes) {
 
 /* Where an entry's values are: in the entry when they fit, else where it points. */
 static size_t tiff_values(const tiff_view_t *t, size_t entry, uint32_t type, uint64_t count) {
-    static const uint8_t WIDTH[19] = { 0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4, 0, 0, 8, 8, 8 };
+    const uint8_t WIDTH[19] = { 0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4, 0, 0, 8, 8, 8 };
     uint64_t width = type < 19 ? WIDTH[type] : 0;
     size_t field = entry + (t->big ? 12u : 8u);
     uint32_t room = t->big ? 8u : 4u;
@@ -593,8 +594,8 @@ static bool tiff_details(const uint8_t *b, size_t size, rubraview_details_t *out
     uint32_t count_bytes = t.big ? 8u : 2u, entry_bytes = t.big ? 20u : 12u, next_bytes = t.big ? 8u : 4u;
     if (first < 8 || first >= size || size - first < count_bytes) return false;
 
-    rubraview_details_heading(out, "TIFF");
-    rubraview_details_add(out, "Kind", "%s, %s", t.big ? "BigTIFF (64-bit offsets)" : "classic", t.big_endian ? "big-endian (MM)" : "little-endian (II)");
+    rubraview_details_heading(out, T("TIFF"));
+    rubraview_details_add(out, T("Kind"), "%s, %s", t.big ? T("BigTIFF (64-bit offsets)") : T("classic"), t.big_endian ? T("big-endian (MM)") : T("little-endian (II)"));
 
     uint64_t compression = 1, photometric = 99, samples = 1, rows = 0, strips = 0, tile_w = 0, tile_h = 0, tiles = 0;
     uint64_t planar = 1, predictor = 1, format = 1, extra = 0, subs = 0, bits_count = 0, bits = 1, cfa_w = 0, cfa_h = 0;
@@ -651,43 +652,43 @@ static bool tiff_details(const uint8_t *b, size_t size, rubraview_details_t *out
         dir = next;
         ++pages;
     }
-    if (pages > 1) rubraview_details_add(out, "Directories", "%u (pages, or sizes of one picture)", (unsigned)pages);
+    if (pages > 1) rubraview_details_add(out, T("Directories"), T("%u (pages, or sizes of one picture)"), (unsigned)pages);
 
-    static const struct { uint32_t code; const char *name; } METHOD[] = {
-        { 1, "none" }, { 2, "CCITT Huffman (fax)" }, { 3, "CCITT Group 3 (fax)" }, { 4, "CCITT Group 4 (fax)" }, { 5, "LZW" },
-        { 6, "JPEG (the old way)" }, { 7, "JPEG" }, { 8, "Deflate" }, { 32773, "PackBits" }, { 32946, "Deflate" },
-        { 34712, "JPEG 2000" }, { 34892, "lossy JPEG (DNG)" }, { 34925, "LZMA" }, { 50000, "Zstandard" }, { 50001, "WebP" },
-        { 50002, "JPEG XL" }, { 52546, "JPEG XL (DNG)" }, { 32767, "Sony ARW" }, { 34713, "Nikon NEF" }, { 65000, "Kodak DCR" },
+    const struct { uint32_t code; const char *name; } METHOD[] = {
+        { 1, T("none") }, { 2, T("CCITT Huffman (fax)") }, { 3, T("CCITT Group 3 (fax)") }, { 4, T("CCITT Group 4 (fax)") }, { 5, T("LZW") },
+        { 6, T("JPEG (the old way)") }, { 7, T("JPEG") }, { 8, T("Deflate") }, { 32773, T("PackBits") }, { 32946, T("Deflate") },
+        { 34712, T("JPEG 2000") }, { 34892, T("lossy JPEG (DNG)") }, { 34925, T("LZMA") }, { 50000, T("Zstandard") }, { 50001, T("WebP") },
+        { 50002, T("JPEG XL") }, { 52546, T("JPEG XL (DNG)") }, { 32767, T("Sony ARW") }, { 34713, T("Nikon NEF") }, { 65000, T("Kodak DCR") },
     };
     const char *method = NULL;
     for (size_t i = 0; i < sizeof(METHOD) / sizeof(METHOD[0]); ++i) if (METHOD[i].code == compression) method = METHOD[i].name;
-    if (method) rubraview_details_add(out, "Compression", "%s", method);
-    else rubraview_details_add(out, "Compression", "method %u", (unsigned)compression);
+    if (method) rubraview_details_add(out, T("Compression"), "%s", method);
+    else rubraview_details_add(out, T("Compression"), T("method %u"), (unsigned)compression);
     if ((compression == 5 || compression == 8 || compression == 32946 || compression == 50000) && predictor > 1) {
-        rubraview_details_add(out, "Predictor", "%s", predictor == 2 ? "horizontal differences" : predictor == 3 ? "floating-point" : "unknown");
+        rubraview_details_add(out, T("Predictor"), "%s", predictor == 2 ? T("horizontal differences") : predictor == 3 ? T("floating-point") : T("unknown"));
     }
-    static const char *const COLOUR[11] = { "white is zero", "black is zero", "RGB", "palette", "transparency mask", "CMYK", "YCbCr",
-                                            NULL, "CIE L*a*b*", "ICC L*a*b*", "ITU L*a*b*" };
-    if (photometric < 11 && COLOUR[photometric]) rubraview_details_add(out, "Colour", "%s", COLOUR[photometric]);
-    else if (photometric == 32803) rubraview_details_add(out, "Colour", "colour filter array (the sensor's mosaic)");
-    else if (photometric == 34892) rubraview_details_add(out, "Colour", "linear raw");
+    const char *const COLOUR[11] = { T("white is zero"), T("black is zero"), T("RGB"), T("palette"), T("transparency mask"), T("CMYK"), T("YCbCr"),
+                                            NULL, T("CIE L*a*b*"), T("ICC L*a*b*"), T("ITU L*a*b*") };
+    if (photometric < 11 && COLOUR[photometric]) rubraview_details_add(out, T("Colour"), "%s", COLOUR[photometric]);
+    else if (photometric == 32803) rubraview_details_add(out, T("Colour"), T("colour filter array (the sensor's mosaic)"));
+    else if (photometric == 34892) rubraview_details_add(out, T("Colour"), T("linear raw"));
     if (samples == 0 || samples > 64) samples = 1;
     if (bits_count) {
-        const char *kind = format == 3 ? " floating-point" : format == 2 ? " signed" : "";
-        if (mixed_bits) rubraview_details_add(out, "Samples", "%u a pixel, of differing depths", (unsigned)samples);
-        else rubraview_details_add(out, "Samples", "%u a pixel, %u%s bits each", (unsigned)samples, (unsigned)bits, kind);
+        const char *kind = format == 3 ? T(" floating-point") : format == 2 ? T(" signed") : "";
+        if (mixed_bits) rubraview_details_add(out, T("Samples"), T("%u a pixel, of differing depths"), (unsigned)samples);
+        else rubraview_details_add(out, T("Samples"), T("%u a pixel, %u%s bits each"), (unsigned)samples, (unsigned)bits, kind);
     }
-    if (extra) rubraview_details_add(out, "Extra samples", "%u (transparency or more)", (unsigned)extra);
-    if (samples > 1) rubraview_details_add(out, "Planes", "%s", planar == 2 ? "each sample in its own plane" : "samples together, pixel by pixel");
-    if (tile_w && tile_h) rubraview_details_add(out, "Layout", "%u tiles of %u x %u", (unsigned)tiles, (unsigned)tile_w, (unsigned)tile_h);
-    else if (strips) rubraview_details_add(out, "Layout", "%u strip%s of %u row%s", (unsigned)strips, strips == 1 ? "" : "s", (unsigned)rows, rows == 1 ? "" : "s");
-    if (cfa_w && cfa_h) rubraview_details_add(out, "Mosaic", "%u x %u", (unsigned)cfa_w, (unsigned)cfa_h);
-    if (subs) rubraview_details_add(out, "Sub-pictures", "%u (the full picture of a camera file is one of them)", (unsigned)subs);
-    if (make[0] || model[0]) rubraview_details_add(out, "Camera", "%s%s%s", make, make[0] && model[0] ? " " : "", model);
-    if (dng[0]) rubraview_details_add(out, "DNG version", "%s", dng);
-    if (software[0]) rubraview_details_add(out, "Written by", "%s", software);
+    if (extra) rubraview_details_add(out, T("Extra samples"), T("%u (transparency or more)"), (unsigned)extra);
+    if (samples > 1) rubraview_details_add(out, T("Planes"), "%s", planar == 2 ? T("each sample in its own plane") : T("samples together, pixel by pixel"));
+    if (tile_w && tile_h) rubraview_details_add(out, T("Layout"), T("%u tiles of %u x %u"), (unsigned)tiles, (unsigned)tile_w, (unsigned)tile_h);
+    else if (strips) rubraview_details_add(out, T("Layout"), T("%u strip%s of %u row%s"), (unsigned)strips, strips == 1 ? "" : TC("plural", "s"), (unsigned)rows, rows == 1 ? "" : TC("plural", "s"));
+    if (cfa_w && cfa_h) rubraview_details_add(out, T("Mosaic"), "%u x %u", (unsigned)cfa_w, (unsigned)cfa_h);
+    if (subs) rubraview_details_add(out, T("Sub-pictures"), T("%u (the full picture of a camera file is one of them)"), (unsigned)subs);
+    if (make[0] || model[0]) rubraview_details_add(out, T("Camera"), "%s%s%s", make, make[0] && model[0] ? " " : "", model);
+    if (dng[0]) rubraview_details_add(out, T("DNG version"), "%s", dng);
+    if (software[0]) rubraview_details_add(out, T("Written by"), "%s", software);
     if (exif || icc || xmp || gps) {
-        rubraview_details_add(out, "Carries", "%s%s%s%s", exif ? "EXIF " : "", gps ? "GPS " : "", icc ? "ICC-profile " : "", xmp ? "XMP " : "");
+        rubraview_details_add(out, T("Carries"), "%s%s%s%s", exif ? T("EXIF ") : "", gps ? T("GPS ") : "", icc ? T("ICC-profile ") : "", xmp ? T("XMP ") : "");
     }
     if (raw_bits && bits_count && !mixed_bits && bits * samples <= 512) *raw_bits = (uint32_t)(bits * samples);
     return true;
@@ -764,11 +765,11 @@ static void bmff_walk(const uint8_t *b, size_t size, size_t from, size_t to, int
 }
 
 static const char *cicp_primaries(uint32_t v) {
-    return v == 1 ? "BT.709 / sRGB" : v == 9 ? "BT.2020" : v == 12 ? "Display P3" : v == 11 ? "DCI-P3" : v == 5 || v == 6 ? "BT.601" : NULL;
+    return v == 1 ? T("BT.709 / sRGB") : v == 9 ? T("BT.2020") : v == 12 ? T("Display P3") : v == 11 ? T("DCI-P3") : v == 5 || v == 6 ? T("BT.601") : NULL;
 }
 
 static const char *cicp_transfer(uint32_t v) {
-    return v == 13 ? "sRGB" : v == 1 || v == 6 || v == 14 || v == 15 ? "BT.709" : v == 16 ? "PQ (HDR)" : v == 18 ? "HLG (HDR)" : v == 8 ? "linear" : NULL;
+    return v == 13 ? T("sRGB") : v == 1 || v == 6 || v == 14 || v == 15 ? T("BT.709") : v == 16 ? T("PQ (HDR)") : v == 18 ? T("HLG (HDR)") : v == 8 ? T("linear") : NULL;
 }
 
 static bool bmff_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
@@ -794,39 +795,39 @@ static bool bmff_details(const uint8_t *b, size_t size, rubraview_details_t *out
 
     bmff_facts_t f = {0};
     bmff_walk(b, size, 0, size, 0, &f);
-    rubraview_details_heading(out, "%s", avif ? "AVIF" : canon ? "Canon CR3" : "HEIF");
-    rubraview_details_add(out, "Brand", "%s", major);
-    rubraview_details_add(out, "Also reads as", "%s", also);
-    if (f.items) rubraview_details_add(out, "Items", "%u (pictures, their parts and what is said of them)", (unsigned)f.items);
-    if (f.sequence) rubraview_details_add(out, "Sequence", "yes, %u track%s", (unsigned)f.tracks, f.tracks == 1 ? "" : "s");
-    if (f.width && f.height) rubraview_details_add(out, "Largest picture", "%u x %u", (unsigned)f.width, (unsigned)f.height);
+    rubraview_details_heading(out, "%s", avif ? T("AVIF") : canon ? T("Canon CR3") : T("HEIF"));
+    rubraview_details_add(out, T("Brand"), "%s", major);
+    rubraview_details_add(out, T("Also reads as"), "%s", also);
+    if (f.items) rubraview_details_add(out, T("Items"), T("%u (pictures, their parts and what is said of them)"), (unsigned)f.items);
+    if (f.sequence) rubraview_details_add(out, T("Sequence"), T("yes, %u track%s"), (unsigned)f.tracks, f.tracks == 1 ? "" : TC("plural", "s"));
+    if (f.width && f.height) rubraview_details_add(out, T("Largest picture"), "%u x %u", (unsigned)f.width, (unsigned)f.height);
     if (f.av1) {
-        static const char *const PROFILE[3] = { "Main", "High", "Professional" };
-        const char *chroma = f.av1_mono ? "grey" : f.av1_sub_x && f.av1_sub_y ? "4:2:0" : f.av1_sub_x ? "4:2:2" : "4:4:4";
-        rubraview_details_add(out, "Codec", "AV1, %s profile, level %u.%u", f.av1_profile < 3 ? PROFILE[f.av1_profile] : "unknown",
+        const char *const PROFILE[3] = { T("Main"), T("High"), T("Professional") };
+        const char *chroma = f.av1_mono ? T("grey") : f.av1_sub_x && f.av1_sub_y ? "4:2:0" : f.av1_sub_x ? "4:2:2" : "4:4:4";
+        rubraview_details_add(out, T("Codec"), T("AV1, %s profile, level %u.%u"), f.av1_profile < 3 ? PROFILE[f.av1_profile] : T("unknown"),
                               (unsigned)(2 + (f.av1_level >> 2)), (unsigned)(f.av1_level & 3));
-        rubraview_details_add(out, "Coded as", "%u bits a sample, %s", (unsigned)f.av1_bits, chroma);
+        rubraview_details_add(out, T("Coded as"), T("%u bits a sample, %s"), (unsigned)f.av1_bits, chroma);
     } else if (f.hevc) {
         char profile[64];
-        static const char *const CHROMA[4] = { "grey", "4:2:0", "4:2:2", "4:4:4" };
+        const char *const CHROMA[4] = { T("grey"), "4:2:0", "4:2:2", "4:4:4" };
         rubraview_detail_hevc_profile(profile, sizeof(profile), f.hevc_profile, f.hevc_level);
-        rubraview_details_add(out, "Codec", "HEVC, %s", profile);
-        rubraview_details_add(out, "Coded as", "%u bits a sample, %s", (unsigned)f.hevc_bits, CHROMA[f.hevc_chroma]);
+        rubraview_details_add(out, T("Codec"), T("HEVC, %s"), profile);
+        rubraview_details_add(out, T("Coded as"), T("%u bits a sample, %s"), (unsigned)f.hevc_bits, CHROMA[f.hevc_chroma]);
     }
-    if (f.channels) rubraview_details_add(out, "Pixels", "%u channel%s of %u bits", (unsigned)f.channels, f.channels == 1 ? "" : "s", (unsigned)f.bits);
-    rubraview_details_add(out, "Transparency", "%s", f.alpha ? "yes, a picture of its own" : "");
+    if (f.channels) rubraview_details_add(out, T("Pixels"), T("%u channel%s of %u bits"), (unsigned)f.channels, f.channels == 1 ? "" : TC("plural", "s"), (unsigned)f.bits);
+    rubraview_details_add(out, T("Transparency"), "%s", f.alpha ? T("yes, a picture of its own") : "");
     if (f.nclx) {
         const char *primaries = cicp_primaries(f.primaries), *transfer = cicp_transfer(f.transfer);
         char a[24], c[24];
-        snprintf(a, sizeof(a), "primaries %u", (unsigned)f.primaries);
-        snprintf(c, sizeof(c), "transfer %u", (unsigned)f.transfer);
-        rubraview_details_add(out, "Colour", "%s, %s, matrix %u, %s range", primaries ? primaries : a, transfer ? transfer : c,
-                              (unsigned)f.matrix, f.full_range ? "full" : "limited");
+        snprintf(a, sizeof(a), T("primaries %u"), (unsigned)f.primaries);
+        snprintf(c, sizeof(c), T("transfer %u"), (unsigned)f.transfer);
+        rubraview_details_add(out, T("Colour"), T("%s, %s, matrix %u, %s range"), primaries ? primaries : a, transfer ? transfer : c,
+                              (unsigned)f.matrix, f.full_range ? T("full") : T("limited"));
     }
-    if (f.icc) rubraview_details_add(out, "Colour profile", "ICC, in the file");
+    if (f.icc) rubraview_details_add(out, T("Colour profile"), T("ICC, in the file"));
     if (f.turns || f.mirrored) {
-        rubraview_details_add(out, "Shown", "%s%s%s", f.turns == 1 ? "turned a quarter to the left" : f.turns == 2 ? "upside down"
-                              : f.turns == 3 ? "turned a quarter to the right" : "", f.turns && f.mirrored ? ", " : "", f.mirrored ? "mirrored" : "");
+        rubraview_details_add(out, T("Shown"), "%s%s%s", f.turns == 1 ? T("turned a quarter to the left") : f.turns == 2 ? T("upside down")
+                              : f.turns == 3 ? T("turned a quarter to the right") : "", f.turns && f.mirrored ? ", " : "", f.mirrored ? T("mirrored") : "");
     }
     uint32_t depth = f.av1 ? f.av1_bits : f.hevc ? f.hevc_bits : f.bits;
     uint32_t channels = f.channels ? f.channels : (f.av1 && f.av1_mono) ? 1u : 3u;
@@ -917,7 +918,7 @@ static void jxl_codestream_details(const uint8_t *b, size_t size, rubraview_deta
     bool floating = false;
     jxl_size(&r, &width, &height);
     if (r.short_of) return;
-    rubraview_details_add(out, "Picture", "%u x %u", (unsigned)width, (unsigned)height);
+    rubraview_details_add(out, T("Picture"), "%u x %u", (unsigned)width, (unsigned)height);
     if (!jxl_u(&r, 1)) {                              /* not all as it comes */
         if (jxl_u(&r, 1)) {                           /* extra fields */
             uint32_t orientation = jxl_u(&r, 3) + 1;
@@ -930,11 +931,11 @@ static void jxl_codestream_details(const uint8_t *b, size_t size, rubraview_deta
                 uint32_t ticks = jxl_u32(&r, TB, TN), per = jxl_u32(&r, DB, DN), loops = jxl_u32(&r, LB, LN);
                 (void)jxl_u(&r, 1);                   /* time codes */
                 if (!r.short_of && per) {
-                    if (loops) rubraview_details_add(out, "Animation", "%.4g ticks a second, played %u time%s", (double)ticks / per, (unsigned)loops, loops == 1 ? "" : "s");
-                    else rubraview_details_add(out, "Animation", "%.4g ticks a second, played without end", (double)ticks / per);
+                    if (loops) rubraview_details_add(out, T("Animation"), T("%.4g ticks a second, played %u time%s"), (double)ticks / per, (unsigned)loops, loops == 1 ? "" : TC("plural", "s"));
+                    else rubraview_details_add(out, T("Animation"), T("%.4g ticks a second, played without end"), (double)ticks / per);
                 }
             }
-            if (!r.short_of && orientation > 1) rubraview_details_add(out, "Orientation", "%u (as EXIF counts)", (unsigned)orientation);
+            if (!r.short_of && orientation > 1) rubraview_details_add(out, T("Orientation"), T("%u (as EXIF counts)"), (unsigned)orientation);
         }
         static const uint32_t INT_BASE[4] = { 8, 10, 12, 1 }, INT_BITS[4] = { 0, 0, 0, 6 };
         static const uint32_t FB[4] = { 32, 16, 24, 1 }, FN[4] = { 0, 0, 0, 6 };
@@ -946,19 +947,19 @@ static void jxl_codestream_details(const uint8_t *b, size_t size, rubraview_deta
         extra = jxl_u32(&r, EB, EN);
         if (r.short_of) return;
     }
-    rubraview_details_add(out, "Samples", "%u bits%s", (unsigned)bits, floating ? ", floating-point" : "");
-    if (extra) rubraview_details_add(out, "Extra channels", "%u (transparency or more)", (unsigned)extra);
+    rubraview_details_add(out, T("Samples"), T("%u bits%s"), (unsigned)bits, floating ? T(", floating-point") : "");
+    if (extra) rubraview_details_add(out, T("Extra channels"), T("%u (transparency or more)"), (unsigned)extra);
     if (raw_bits && bits <= 64) *raw_bits = bits * (3 + (extra ? 1u : 0u));
 }
 
 static bool jxl_details(const uint8_t *b, size_t size, rubraview_details_t *out, uint32_t *raw_bits) {
-    rubraview_details_heading(out, "JPEG XL");
+    rubraview_details_heading(out, T("JPEG XL"));
     if (b[0] == 0xFF) {
-        rubraview_details_add(out, "Kind", "a bare codestream");
+        rubraview_details_add(out, T("Kind"), T("a bare codestream"));
         jxl_codestream_details(b, size, out, raw_bits);
         return true;
     }
-    rubraview_details_add(out, "Kind", "in boxes (ISO container)");
+    rubraview_details_add(out, T("Kind"), T("in boxes (ISO container)"));
     uint32_t parts = 0, level = 0;
     bool repacked = false, exif = false, xml = false, squeezed = false, provenance = false, seen = false;
     const uint8_t *kind;
@@ -979,11 +980,11 @@ static bool jxl_details(const uint8_t *b, size_t size, rubraview_details_t *out,
             ++parts;
         }
     }
-    if (level) rubraview_details_add(out, "Level", "%u", (unsigned)level);
-    if (parts > 1) rubraview_details_add(out, "Codestream", "in %u parts", (unsigned)parts);
-    rubraview_details_add(out, "From a JPEG", "%s", repacked ? "yes: the JPEG can be had back, bit for bit" : "");
+    if (level) rubraview_details_add(out, T("Level"), "%u", (unsigned)level);
+    if (parts > 1) rubraview_details_add(out, T("Codestream"), T("in %u parts"), (unsigned)parts);
+    rubraview_details_add(out, T("From a JPEG"), "%s", repacked ? T("yes: the JPEG can be had back, bit for bit") : "");
     if (exif || xml || squeezed || provenance) {
-        rubraview_details_add(out, "Carries", "%s%s%s%s", exif ? "EXIF " : "", xml ? "XMP " : "", squeezed ? "compressed-metadata " : "", provenance ? "provenance (JUMBF) " : "");
+        rubraview_details_add(out, T("Carries"), "%s%s%s%s", exif ? T("EXIF ") : "", xml ? T("XMP ") : "", squeezed ? T("compressed-metadata ") : "", provenance ? T("provenance (JUMBF) ") : "");
     }
     return true;
 }

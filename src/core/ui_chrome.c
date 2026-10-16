@@ -1,4 +1,5 @@
 #include "rubraview/ui_chrome.h"
+#include "rubraview/lang.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -103,9 +104,9 @@ u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size
     #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
                               if (w_ > 0) { at += (size_t)w_; } \
                               if (at >= buffer_size) { at = buffer_size - 1; } } } while (0)
-    if (reduced) OSD_PUT("shown reduced  |  ");
+    if (reduced) OSD_PUT(T("shown reduced  |  "));
     if (bytes > 0) {
-        static const char *const UNIT[] = { "B", "KB", "MB", "GB", "TB" };
+        const char *const UNIT[] = { "B", T("KB"), T("MB"), T("GB"), T("TB") };
         double v = (double)bytes;
         int u = 0;
         while (v >= 1024.0 && u < 4) { v /= 1024.0; u++; }

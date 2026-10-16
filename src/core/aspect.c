@@ -1,4 +1,5 @@
 #include "rubraview/aspect.h"
+#include "rubraview/lang.h"
 #include <math.h>
 #include <string.h>
 
@@ -14,7 +15,7 @@ static const struct { const char *action, *label; double ratio; } ASPECTS[RUBRAV
     [RUBRAVIEW_ASPECT_CINEMA_SCOPE] = { "aspect_239",      "2.39:1",   2.39 },
     [RUBRAVIEW_ASPECT_1_1]          = { "aspect_1_1",      "1:1",      1.0 },
     [RUBRAVIEW_ASPECT_PAPER]        = { "aspect_paper",    "A4 / B4",  0.70710678118654752 },
-    [RUBRAVIEW_ASPECT_LETTER]       = { "aspect_letter",   "Letter",   8.5 / 11.0 },
+    [RUBRAVIEW_ASPECT_LETTER]       = { "aspect_letter",   N_("Letter"),   8.5 / 11.0 },
     [RUBRAVIEW_ASPECT_CUSTOM]       = { "aspect_custom",   "custom",   0.0 },
 };
 
@@ -27,7 +28,7 @@ const char *rubraview_aspect_action(rubraview_aspect_t aspect) {
 }
 
 const char *rubraview_aspect_label(rubraview_aspect_t aspect) {
-    return known(aspect) ? ASPECTS[aspect].label : "";
+    return known(aspect) ? rubraview_tr(ASPECTS[aspect].label) : "";
 }
 
 rubraview_aspect_t rubraview_aspect_from_action(u8str_t action) {

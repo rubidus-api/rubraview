@@ -1,4 +1,5 @@
 #include "rubraview/subtitle.h"
+#include "rubraview/lang.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
 #include <string.h>
@@ -658,7 +659,7 @@ u8str_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double 
     if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
     buffer[0] = '\0';
     if (fabs(offset_seconds) < 0.0005) return (u8str_t){ .ptr = buffer, .len = 0 };
-    int n = snprintf(buffer, buffer_size, "sub %+.1f s", offset_seconds);
+    int n = snprintf(buffer, buffer_size, N_("sub %+.1f s"), offset_seconds);
     if (n < 0) { buffer[0] = '\0'; n = 0; }
     size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
     return (u8str_t){ .ptr = buffer, .len = len };
@@ -1085,13 +1086,13 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
     const char *why_sink = NULL;
     if (!out_why) out_why = &why_sink;
     *out_why = NULL;
-    if (!arena || !track || track->source.len == 0) { *out_why = "the subtitle's file was not kept"; return empty; }
+    if (!arena || !track || track->source.len == 0) { *out_why = N_("the subtitle's file was not kept"); return empty; }
     if (!rubraview_subtitle_changed(track)) return track->source;
 
     /* Three places a cue at most. */
-    if (track->count > SIZE_MAX / 4 / sizeof(patch_t)) { *out_why = "too many subtitles"; return empty; }
+    if (track->count > SIZE_MAX / 4 / sizeof(patch_t)) { *out_why = N_("too many subtitles"); return empty; }
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track->count * 4 + 1, sizeof(patch_t));
-    if (!proven_is_ok(res.err)) { *out_why = "no memory"; return empty; }
+    if (!proven_is_ok(res.err)) { *out_why = N_("no memory"); return empty; }
     patch_t *patches = (patch_t*)(void*)res.value.ptr;
     size_t count = 0;
 
@@ -1100,7 +1101,7 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
     bool *moved = NULL;
     if (track->format == RUBRAVIEW_SUBTITLE_SMI) {
         proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, track->count ? track->count : 1, sizeof(bool));
-        if (!proven_is_ok(mres.err)) { *out_why = "no memory"; return empty; }
+        if (!proven_is_ok(mres.err)) { *out_why = N_("no memory"); return empty; }
         moved = (bool*)(void*)mres.value.ptr;
         memset(moved, 0, track->count * sizeof(bool));
         size_t gap_from = 0;
@@ -1156,7 +1157,7 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
                 }
             }
             u8str_t block = added_block(arena, track, cue, cue, false, cue->text_changed ? cue->written : empty);
-            if (block.len == 0) { *out_why = "a moved caption could not be written"; return empty; }
+            if (block.len == 0) { *out_why = N_("a moved caption could not be written"); return empty; }
             patches[count++] = (patch_t){ at, 0, block, i, false, cue->start_seconds, 1 };
             u8str_t close = added_close(arena, track, cue, cue);
             if (close.len > 0) patches[count++] = (patch_t){ at, 0, close, i, false, cue->end_seconds, 2 };
@@ -1180,7 +1181,7 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
                 const rubraview_subtitle_cue_t *c = &track->cues[k];
                 if (!c->added && !c->removed && place_in(track, c->place.block_at, c->place.block_len)) { tpl = c; after = false; }
             }
-            if (!tpl) { *out_why = "a new subtitle has no other in the file to be written as"; return empty; }
+            if (!tpl) { *out_why = N_("a new subtitle has no other in the file to be written as"); return empty; }
             size_t at = tpl->place.block_at;
             if (after) {
                 at = tpl->place.block_at + tpl->place.block_len;
@@ -1189,7 +1190,7 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
                 }
             }
             u8str_t block = added_block(arena, track, tpl, cue, after, cue->written);
-            if (block.len == 0) { *out_why = "a new subtitle could not be written"; return empty; }
+            if (block.len == 0) { *out_why = N_("a new subtitle could not be written"); return empty; }
             bool smi = track->format == RUBRAVIEW_SUBTITLE_SMI;
             patches[count++] = (patch_t){ at, 0, block, i, false, cue->start_seconds, smi ? 1 : 0 };
             u8str_t close = smi ? added_close(arena, track, tpl, cue) : empty;
@@ -1197,14 +1198,14 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
             continue;
         }
         if (cue->time_changed) {
-            if (!place_in(track, cue->place.start_at, cue->place.start_len)) { *out_why = "a moved subtitle has no place in the file"; return empty; }
+            if (!place_in(track, cue->place.start_at, cue->place.start_len)) { *out_why = N_("a moved subtitle has no place in the file"); return empty; }
             patches[count++] = (patch_t){ cue->place.start_at, cue->place.start_len, write_time(arena, track->format, cue->start_seconds), i, false, 0.0, 0 };
             if (place_in(track, cue->place.end_at, cue->place.end_len)) {
                 patches[count++] = (patch_t){ cue->place.end_at, cue->place.end_len, write_time(arena, track->format, cue->end_seconds), i, false, 0.0, 0 };
             }
         }
         if (cue->text_changed) {
-            if (!place_in(track, cue->place.text_at, cue->place.text_len)) { *out_why = "an edited subtitle has no place in the file"; return empty; }
+            if (!place_in(track, cue->place.text_at, cue->place.text_len)) { *out_why = N_("an edited subtitle has no place in the file"); return empty; }
             patches[count++] = (patch_t){ cue->place.text_at, cue->place.text_len, cue->written, i, false, 0.0, 0 };
         }
     }
@@ -1218,16 +1219,16 @@ u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtit
        a file this cannot save. */
     size_t kept = 0, grow = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (patches[i].with.len == 0 && !patches[i].cut) { *out_why = "a time or a text could not be written"; return empty; }
+        if (patches[i].with.len == 0 && !patches[i].cut) { *out_why = N_("a time or a text could not be written"); return empty; }
         if (kept > 0 && patches[i].len > 0 && patches[i].at == patches[kept - 1].at && patches[i].len == patches[kept - 1].len) continue;
-        if (kept > 0 && patches[i].at < patches[kept - 1].at + patches[kept - 1].len) { *out_why = "two changes touch the same place in the file"; return empty; }
+        if (kept > 0 && patches[i].at < patches[kept - 1].at + patches[kept - 1].len) { *out_why = N_("two changes touch the same place in the file"); return empty; }
         patches[kept++] = patches[i];
-        if (patches[i].with.len > SIZE_MAX / 2 - grow) { *out_why = "too long"; return empty; }
+        if (patches[i].with.len > SIZE_MAX / 2 - grow) { *out_why = N_("too long"); return empty; }
         grow += patches[i].with.len;
     }
-    if (track->source.len > SIZE_MAX / 2 - grow) { *out_why = "too long"; return empty; }
+    if (track->source.len > SIZE_MAX / 2 - grow) { *out_why = N_("too long"); return empty; }
     proven_result_mem_mut_t out_res = proven_arena_alloc(arena, track->source.len + grow + 1);
-    if (!proven_is_ok(out_res.err)) { *out_why = "no memory"; return empty; }
+    if (!proven_is_ok(out_res.err)) { *out_why = N_("no memory"); return empty; }
     char *out = (char*)(void*)out_res.value.ptr;
     size_t n = 0, from = 0;
     for (size_t i = 0; i < kept; ++i) {

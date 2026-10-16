@@ -1,4 +1,5 @@
 #include "rubraview/matroska.h"
+#include "rubraview/lang.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
 
@@ -141,16 +142,16 @@ bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!mkv || !data || size < 8) { *out_why = "not a Matroska file"; return false; }
+    if (!mkv || !data || size < 8) { *out_why = N_("not a Matroska file"); return false; }
     *mkv = (rubraview_mkv_t){ .data = data, .size = size, .timestamp_scale = 1000000u };
 
     elem_t head;
-    if (!elem_at(mkv, 0, size, &head) || head.id != ID_EBML || head.unknown) { *out_why = "not a Matroska file"; return false; }
+    if (!elem_at(mkv, 0, size, &head) || head.id != ID_EBML || head.unknown) { *out_why = N_("not a Matroska file"); return false; }
     /* The DocType, when it is given, is one of the two this is. */
     elem_t e;
     for (uint64_t at = head.body; at < head.next && elem_at(mkv, at, head.next, &e); at = e.next) {
         if (e.id == ID_DOCTYPE && !text_is(read_text(mkv, &e), "matroska") && !text_is(read_text(mkv, &e), "webm")) {
-            *out_why = "an EBML file, but not Matroska";
+            *out_why = N_("an EBML file, but not Matroska");
             return false;
         }
         if (e.id == ID_DOCTYPE) mkv->webm = text_is(read_text(mkv, &e), "webm");
@@ -166,7 +167,7 @@ bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size
         if (e.unknown || e.next <= at) break;
         at = e.next;
     }
-    if (!found) { *out_why = "the Matroska file has no segment"; return false; }
+    if (!found) { *out_why = N_("the Matroska file has no segment"); return false; }
     mkv->segment_at = at;
     mkv->body_at = segment.body;
     mkv->body_end = segment.next;
@@ -201,7 +202,7 @@ bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size
         if (e.unknown || e.next <= at) break;        /* an open cluster before any tracks: the walk would find its end, the head does not look */
         at = e.next;
     }
-    if (!have_tracks) { *out_why = "the Matroska file's tracks could not be read"; return false; }
+    if (!have_tracks) { *out_why = N_("the Matroska file's tracks could not be read"); return false; }
     return true;
 }
 
@@ -563,7 +564,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!arena || !subtitle || !out || subtitle->source.len == 0) { *out_why = "the subtitle's file was not kept"; return false; }
+    if (!arena || !subtitle || !out || subtitle->source.len == 0) { *out_why = N_("the subtitle's file was not kept"); return false; }
     *out = (rubraview_mkv_put_track_t){ .language = { .ptr = "", .len = 0 }, .name = { .ptr = "", .len = 0 },
                                         .private_data = { .ptr = "", .len = 0 } };
     u8str_t src = subtitle->source;
@@ -573,7 +574,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         out->codec = "S_TEXT/UTF8";
         room = subtitle->count;
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, room ? room : 1, sizeof(rubraview_mkv_put_cue_t));
-        if (!proven_is_ok(res.err)) { *out_why = "no memory"; return false; }
+        if (!proven_is_ok(res.err)) { *out_why = N_("no memory"); return false; }
         rubraview_mkv_put_cue_t *cues = (rubraview_mkv_put_cue_t*)(void*)res.value.ptr;
         size_t n = 0;
         for (size_t i = 0; i < subtitle->count; ++i) {
@@ -581,7 +582,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             if (cue->place.text_len == 0 || cue->place.text_at > src.len || cue->place.text_len > src.len - cue->place.text_at) continue;
             /* As written, the file's line ends made '\n'. */
             proven_result_mem_mut_t t = proven_arena_alloc(arena, cue->place.text_len + 1);
-            if (!proven_is_ok(t.err)) { *out_why = "no memory"; return false; }
+            if (!proven_is_ok(t.err)) { *out_why = N_("no memory"); return false; }
             uint8_t *text = t.value.ptr;
             size_t m = 0;
             for (size_t k = 0; k < cue->place.text_len; ++k) {
@@ -611,7 +612,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             if (rubraview_u8_starts_with_ci(line, "format:")) { head_end = line_end < src.len ? line_end + 1 : line_end; break; }
             at = line_end + 1;
         }
-        if (head_end == SIZE_MAX) { *out_why = "the SubStation file's events have no Format line"; return false; }
+        if (head_end == SIZE_MAX) { *out_why = N_("the SubStation file's events have no Format line"); return false; }
         out->private_data = (u8str_t){ .ptr = src.ptr, .len = head_end };
         /* Count the Dialogue lines, then make each a block: ReadOrder,Layer,the rest after the times. */
         for (size_t i = head_end; i < src.len; ) {
@@ -621,7 +622,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             i = e + 1;
         }
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, room ? room : 1, sizeof(rubraview_mkv_put_cue_t));
-        if (!proven_is_ok(res.err)) { *out_why = "no memory"; return false; }
+        if (!proven_is_ok(res.err)) { *out_why = N_("no memory"); return false; }
         rubraview_mkv_put_cue_t *cues = (rubraview_mkv_put_cue_t*)(void*)res.value.ptr;
         size_t n = 0, order = 0;
         for (size_t i = head_end; i < src.len && n < room; ) {
@@ -644,7 +645,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             if (nn <= 0) continue;
             size_t size = (size_t)nn + layer.len + tail.len;
             proven_result_mem_mut_t t = proven_arena_alloc(arena, size + 1);
-            if (!proven_is_ok(t.err)) { *out_why = "no memory"; return false; }
+            if (!proven_is_ok(t.err)) { *out_why = N_("no memory"); return false; }
             uint8_t *text = t.value.ptr;
             memcpy(text, number, (size_t)nn);
             memcpy(text + nn, layer.ptr, layer.len);
@@ -655,10 +656,10 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         out->cues = cues;
         out->count = n;
     } else {
-        *out_why = "only SubRip and SubStation subtitles are put into a film";
+        *out_why = N_("only SubRip and SubStation subtitles are put into a film");
         return false;
     }
-    if (out->count == 0) { *out_why = "the subtitle holds no lines to put in"; return false; }
+    if (out->count == 0) { *out_why = N_("the subtitle holds no lines to put in"); return false; }
     /* In order of start, as the film's clusters are; equal starts keep their order. */
     for (size_t i = 1; i < out->count; ++i) {
         if (out->cues[i].start_ns < out->cues[i - 1].start_ns) {
@@ -906,13 +907,13 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!put || !mkv || !track || track->count == 0 || !track->codec) { *out_why = "nothing to put in"; return false; }
+    if (!put || !mkv || !track || track->count == 0 || !track->codec) { *out_why = N_("nothing to put in"); return false; }
     *put = (rubraview_mkv_put_t){ .mkv = mkv, .track = *track, .uid = uid ? uid : 1 };
-    if (mkv->webm) { *out_why = "a WebM film holds no SubRip or SubStation subtitles"; return false; }
+    if (mkv->webm) { *out_why = N_("a WebM film holds no SubRip or SubStation subtitles"); return false; }
     for (size_t i = 0; i < mkv->track_count; ++i) {
         if (mkv->tracks[i].number >= put->number) put->number = mkv->tracks[i].number + 1;
     }
-    if (put->number == 0 || put->number > 126) { *out_why = "the film has too many tracks to add one"; return false; }
+    if (put->number == 0 || put->number > 126) { *out_why = N_("the film has too many tracks to add one"); return false; }
     wbuf_t own = {0}, kept = {0};
 
     /* The segment's children: how many clusters, where the tracks and the cues are. */
@@ -925,18 +926,18 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             if (e.unknown) next = open_cluster_end(mkv, e.body);
             clusters++;
         } else if (e.unknown) {
-            PUT_FAIL("the film has a part of unknown length that is not a cluster");
+            PUT_FAIL(N_("the film has a part of unknown length that is not a cluster"));
         }
         if (e.id == ID_TRACKS && !have_tracks) { tracks = e; have_tracks = true; }
         if (e.id == ID_CUES && !have_cues) { cues = e; have_cues = true; }
         if (next <= at) break;
         at = next;
     }
-    if (!have_tracks || clusters == 0) PUT_FAIL("the film's tracks or clusters could not be found");
+    if (!have_tracks || clusters == 0) PUT_FAIL(N_("the film's tracks or clusters could not be found"));
     put->clusters = rubraview_malloc_product(clusters, sizeof(put->clusters[0]), 1);
     put->sub_cluster = rubraview_malloc_product(track->count, sizeof(uint64_t), 1);
     put->sub_rel = rubraview_malloc_product(track->count, sizeof(uint64_t), 1);
-    if (!put->clusters || !put->sub_cluster || !put->sub_rel) PUT_FAIL("no memory");
+    if (!put->clusters || !put->sub_cluster || !put->sub_rel) PUT_FAIL(N_("no memory"));
 
     /* The parts kept before the clusters, in their order: Info, Tracks (new), the rest; and the clusters. */
     struct { uint32_t id; uint64_t at; } seek[8];
@@ -962,7 +963,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
         at = next;
     }
     put->cluster_count = found;
-    if (kept.failed || found == 0) PUT_FAIL("the film's head could not be copied");
+    if (kept.failed || found == 0) PUT_FAIL(N_("the film's head could not be copied"));
 
     /* The SeekHead's size does not hang on the places it names (eight bytes each). */
     wbuf_t probe = {0};
@@ -983,7 +984,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
     size_t room = 0, next_sub = 0;
     uint64_t pos = head_size;
     /* The head goes first; its bytes are made last, when every place is known. */
-    if (!add_piece(put, &room, 1, 2, true)) PUT_FAIL("no memory");
+    if (!add_piece(put, &room, 1, 2, true)) PUT_FAIL(N_("no memory"));
     for (size_t k = 0; k < put->cluster_count; ++k) {
         struct rubraview_mkv_put_cluster *c = &put->clusters[k];
         bool last = k + 1 == put->cluster_count;
@@ -999,7 +1000,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             welem(&own, ID_CLUSTER, one.data, one.len);
             bool failed = one.failed;
             wbuf_free(&one);
-            if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL("no memory");
+            if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
             pos += own.len - from;
             next_sub++;
         }
@@ -1010,14 +1011,14 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
         c->new_at = pos;
         c->piece_lo = put->piece_count;
         if (lo == hi) {
-            if (!add_piece(put, &room, c->at, c->end, false)) PUT_FAIL("no memory");
+            if (!add_piece(put, &room, c->at, c->end, false)) PUT_FAIL(N_("no memory"));
             c->new_data_at = pos + (c->data_at - c->at);
             pos += c->end - c->at;
         } else {
             /* Its children again, the subtitles among them; then its new header in front. */
             uint64_t size = 0;
             size_t header = put->piece_count;
-            if (!add_piece(put, &room, own.len, own.len + 12, true)) PUT_FAIL("no memory");
+            if (!add_piece(put, &room, own.len, own.len + 12, true)) PUT_FAIL(N_("no memory"));
             uint64_t header_at = own.len;
             uint8_t zeros[12] = {0};
             wput(&own, zeros, 12);
@@ -1034,11 +1035,11 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
                     put->sub_cluster[sub] = pos;
                     put->sub_rel[sub] = data_pos - (pos + 12);
                     write_sub_group(&own, mkv, put, sub, to_ticks(mkv, track->cues[sub].start_ns) - (int64_t)c->time);
-                    if (own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL("no memory");
+                    if (own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
                     data_pos += own.len - from;
                     sub++;
                 }
-                if (!add_piece(put, &room, at, ch.next, false)) PUT_FAIL("no memory");
+                if (!add_piece(put, &room, at, ch.next, false)) PUT_FAIL(N_("no memory"));
                 data_pos += ch.next - at;
             }
             while (sub < hi) {                            /* after its last block */
@@ -1046,7 +1047,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
                 put->sub_cluster[sub] = pos;
                 put->sub_rel[sub] = data_pos - (pos + 12);
                 write_sub_group(&own, mkv, put, sub, to_ticks(mkv, track->cues[sub].start_ns) - (int64_t)c->time);
-                if (own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL("no memory");
+                if (own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
                 data_pos += own.len - from;
                 sub++;
             }
@@ -1055,7 +1056,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             wbuf_t h = {0};
             wid(&h, ID_CLUSTER);
             wsize(&h, size, 8);
-            if (h.failed || h.len != 12) { wbuf_free(&h); PUT_FAIL("no memory"); }
+            if (h.failed || h.len != 12) { wbuf_free(&h); PUT_FAIL(N_("no memory")); }
             memcpy(own.data + header_at, h.data, 12);
             wbuf_free(&h);
             c->new_data_at = pos + 12;
@@ -1075,7 +1076,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             welem(&own, ID_CLUSTER, one.data, one.len);
             bool failed = one.failed;
             wbuf_free(&one);
-            if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL("no memory");
+            if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
             pos += own.len - from;
             next_sub++;
         }
@@ -1085,7 +1086,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
     uint64_t cues_at = pos;
     uint64_t cues_from = own.len;
     write_cues(&own, mkv, have_cues ? &cues : NULL, put, new_body);
-    if (own.failed || !add_piece(put, &room, cues_from, own.len, true)) PUT_FAIL("no memory");
+    if (own.failed || !add_piece(put, &room, cues_from, own.len, true)) PUT_FAIL(N_("no memory"));
     pos += own.len - cues_from;
     put->total = pos;
 
@@ -1111,7 +1112,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
     wbuf_free(&sh);
     wput(&own, kept.data, kept.len);
     /* The head must be exactly as long as the layout counted, or every place after it is wrong. */
-    if (own.failed || own.len - head_from != head_size) PUT_FAIL("the new film could not be laid out");
+    if (own.failed || own.len - head_from != head_size) PUT_FAIL(N_("the new film could not be laid out"));
     put->pieces[0] = (rubraview_mkv_piece_t){ .from = head_from, .to = own.len, .own = true };
     wbuf_free(&kept);
     put->bytes = own.data;
@@ -1147,23 +1148,23 @@ bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv
     if (!check || !put) return false;
     *check = (rubraview_mkv_check_t){0};
     const rubraview_mkv_t *old = put->mkv;
-    if (made_size != put->total) { check->why = "the new film is not the size it was laid out to be"; return false; }
+    if (made_size != put->total) { check->why = N_("the new film is not the size it was laid out to be"); return false; }
     if (!rubraview_mkv_open(&check->made, made, made_size, &check->why)) return false;
-    if (check->made.track_count != old->track_count + 1) { check->why = "the new film's tracks are not the old ones and one more"; return false; }
+    if (check->made.track_count != old->track_count + 1) { check->why = N_("the new film's tracks are not the old ones and one more"); return false; }
     for (size_t i = 0; i < old->track_count; ++i) {
         const rubraview_mkv_track_t *a = &old->tracks[i], *b = &check->made.tracks[i];
         if (a->number != b->number || a->type != b->type || !rubraview_u8_eq(a->codec, b->codec) ||
             a->private_size != b->private_size || (a->private_size && memcmp(a->private_data, b->private_data, a->private_size) != 0)) {
-            check->why = "a track of the new film is not as it was";
+            check->why = N_("a track of the new film is not as it was");
             return false;
         }
     }
     const rubraview_mkv_track_t *added = &check->made.tracks[old->track_count];
     if (added->number != put->number || added->type != 0x11 || !text_is(added->codec, put->track.codec)) {
-        check->why = "the subtitle track was not found in the new film";
+        check->why = N_("the subtitle track was not found in the new film");
         return false;
     }
-    if (check->made.timestamp_scale != old->timestamp_scale) { check->why = "the new film's clock is not the old one's"; return false; }
+    if (check->made.timestamp_scale != old->timestamp_scale) { check->why = N_("the new film's clock is not the old one's"); return false; }
     rubraview_mkv_walk_begin(old, &check->old_walk);
     rubraview_mkv_walk_begin(&check->made, &check->new_walk);
     return true;
@@ -1177,25 +1178,25 @@ int rubraview_mkv_check_step(rubraview_mkv_check_t *check, const rubraview_mkv_p
     if (check->phase == 0) {
         for (size_t n = 0; n < budget_blocks; ++n) {
             if (!rubraview_mkv_walk_next(&check->made, &check->new_walk, &b)) {
-                if (rubraview_mkv_walk_next(old, &check->old_walk, &a)) { check->why = "a block of the film is missing from the new one"; return -1; }
-                if (check->sub_blocks != put->track.count) { check->why = "not every subtitle is in the new film"; return -1; }
-                if (check->new_walk.at != check->made.body_end) { check->why = "the new film could not be read to its end"; return -1; }
+                if (rubraview_mkv_walk_next(old, &check->old_walk, &a)) { check->why = N_("a block of the film is missing from the new one"); return -1; }
+                if (check->sub_blocks != put->track.count) { check->why = N_("not every subtitle is in the new film"); return -1; }
+                if (check->new_walk.at != check->made.body_end) { check->why = N_("the new film could not be read to its end"); return -1; }
                 check->phase = 1;
                 break;
             }
             if (b.track == put->number) {
-                if (check->sub_blocks >= put->track.count) { check->why = "the new film holds more subtitles than were put in"; return -1; }
+                if (check->sub_blocks >= put->track.count) { check->why = N_("the new film holds more subtitles than were put in"); return -1; }
                 const rubraview_mkv_put_cue_t *cue = &put->track.cues[check->sub_blocks];
                 if (b.start_ns != to_ticks(old, cue->start_ns) * scale || b.duration_ns != to_ticks(old, cue->duration_ns) * scale ||
                     b.size != cue->size || b.laced || memcmp(b.payload, cue->payload, cue->size) != 0) {
-                    check->why = "a subtitle in the new film is not the one put in";
+                    check->why = N_("a subtitle in the new film is not the one put in");
                     return -1;
                 }
                 check->sub_blocks++;
                 continue;
             }
-            if (!rubraview_mkv_walk_next(old, &check->old_walk, &a)) { check->why = "the new film holds a block the film did not"; return -1; }
-            if (!same_block(&a, &b)) { check->why = "a block of the new film differs from the film's"; return -1; }
+            if (!rubraview_mkv_walk_next(old, &check->old_walk, &a)) { check->why = N_("the new film holds a block the film did not"); return -1; }
+            if (!same_block(&a, &b)) { check->why = N_("a block of the new film differs from the film's"); return -1; }
             check->blocks++;
         }
         if (check->phase == 0) return 1;
@@ -1219,7 +1220,7 @@ int rubraview_mkv_check_step(rubraview_mkv_check_t *check, const rubraview_mkv_p
                     elem_t c;
                     if (PROVEN_CKD_ADD(&target, made->body_at, read_uint(made, &t)) || !elem_at(made, target, made->body_end, &c) ||
                         c.id != ID_CLUSTER) {
-                        check->why = "a cue point of the new film does not lead to a cluster";
+                        check->why = N_("a cue point of the new film does not lead to a cluster");
                         return -1;
                     }
                 }

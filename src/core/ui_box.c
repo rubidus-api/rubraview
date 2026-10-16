@@ -1,4 +1,5 @@
 #include "rubraview/ui_box.h"
+#include "rubraview/lang.h"
 #include <math.h>
 
 rubraview_tile_metrics_t rubraview_tile_metrics_default(double dpi_scale) {
@@ -741,19 +742,19 @@ u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metr
        (owner, 2026-10-15: both halves say what they do) */
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, m, px, py);
     if (half == RUBRAVIEW_ANCHOR_CLICK) {
-        text = menu ? "Click: open the menu and keep it open (again: close). Drag: move it"
-                    : "T - Click: open the toolbox and keep it open; click again: close. "
-                      "Drag: move it; past the window's edge it becomes a window of its own";
+        text = menu ? T("Click: open the menu and keep it open (again: close). Drag: move it")
+                    : T("T - Click: open the toolbox and keep it open; click again: close. "
+                      "Drag: move it; past the window's edge it becomes a window of its own");
     } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
-        text = menu ? "Rest the pointer here: the menu opens, and folds when the pointer leaves"
-                    : "v - Rest the pointer here: the toolbox opens, and folds when the pointer leaves "
-                      "(the pin keeps it open). Drag: move it";
+        text = menu ? T("Rest the pointer here: the menu opens, and folds when the pointer leaves")
+                    : T("v - Rest the pointer here: the toolbox opens, and folds when the pointer leaves "
+                      "(the pin keeps it open). Drag: move it");
     } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
-        text = "Pin: on, the box stays open; off, it folds when the pointer leaves";
+        text = T("Pin: on, the box stays open; off, it folds when the pointer leaves");
     } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {
-        text = "Drag sideways: more or fewer buttons a row. Drag away or back: bigger or smaller";
+        text = T("Drag sideways: more or fewer buttons a row. Drag away or back: bigger or smaller");
     } else if (!menu && hint_in(rubraview_box_timeline_rect(box, m), px, py)) {
-        text = "Click or drag: go to that moment (or page)";
+        text = T("Click or drag: go to that moment (or page)");
     }
     size_t n = 0;
     while (text[n]) n++;

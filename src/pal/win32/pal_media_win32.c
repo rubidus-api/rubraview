@@ -74,6 +74,10 @@ bool rubraview_pal_media_finished(rubraview_media_t *media) {
     return !media || media->api->finished(media->impl);
 }
 
+bool rubraview_pal_media_sound_over(rubraview_media_t *media) {
+    return media && media->api->sound_over && media->api->sound_over(media->impl);
+}
+
 void rubraview_pal_media_set_paused(rubraview_media_t *media, bool paused) {
     if (media) media->api->set_paused(media->impl, paused);
 }
