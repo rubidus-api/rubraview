@@ -33,13 +33,13 @@ u8str_t rubraview_help_action_label(const rubraview_boxes_doc_t *boxes, u8str_t 
         const rubraview_box_node_t *node = &boxes->nodes[i];
         if (node->kind != RUBRAVIEW_BOX_NODE_ITEM) continue;
         if (node->action.len == action.len && memcmp(node->action.ptr, action.ptr, action.len) == 0) {
-            return node->label;
+            return rubraview_tr_ctx_u8("menu", node->label);
         }
     }
     for (size_t i = 0; i < boxes->tile_count; ++i) {
         const rubraview_box_tile_t *tile = &boxes->tiles[i];
         if (tile->action.len == action.len && memcmp(tile->action.ptr, action.ptr, action.len) == 0) {
-            return tile->caption;
+            return rubraview_tr_ctx_u8("toolbox", tile->caption);
         }
     }
     return none;

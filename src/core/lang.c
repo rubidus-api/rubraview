@@ -30,7 +30,9 @@ static bool next_conversion(u8str_t s, size_t *at, size_t *start, size_t *end) {
             while (j < s.len && ((s.ptr[j] >= '0' && s.ptr[j] <= '9') || s.ptr[j] == '*')) j++;
         }
         while (j < s.len && strchr("hljztL", s.ptr[j])) j++;
-        if (j < s.len) j++;                /* the conversion letter */
+        /* Only a real conversion counts: "40 % opaque" or "(0%)" is text. */
+        if (j >= s.len || !strchr("diouxXeEfFgGaAcspn", s.ptr[j])) { i++; continue; }
+        j++;                               /* the conversion letter */
         *start = i; *end = j; *at = j;
         return true;
     }
@@ -324,6 +326,7 @@ const char *rubraview_lang_native_name(const char *code) {
         { "ja", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E" },                         /* 日本語 */
         { "zh-hans", "\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87" },          /* 简体中文 */
         { "zh-hant", "\xE7\xB9\x81\xE9\xAB\x94\xE4\xB8\xAD\xE6\x96\x87" },          /* 繁體中文 */
+        { "fa", "\xD9\x81\xD8\xA7\xD8\xB1\xD8\xB3\xDB\x8C" },                         /* فارسی */
     };
     if (!code) return NULL;
     for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {

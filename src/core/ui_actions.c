@@ -114,8 +114,8 @@ u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_
     const char *sep = submenu ? " >" : (value || mark == RUBRAVIEW_MARK_ON || mark == RUBRAVIEW_MARK_OFF) ? ": " : "";
     const char *word = submenu ? ""
                      : value ? value
-                     : mark == RUBRAVIEW_MARK_ON ? "on"
-                     : mark == RUBRAVIEW_MARK_OFF ? "off" : "";
+                     : mark == RUBRAVIEW_MARK_ON ? T("on")
+                     : mark == RUBRAVIEW_MARK_OFF ? T("off") : "";
     size_t a = strlen(sep), b = strlen(word);
     if (a + b == 0 || !buffer || label.len + a + b + 1 > buffer_size) return label;
     memcpy(buffer, label.ptr, label.len);

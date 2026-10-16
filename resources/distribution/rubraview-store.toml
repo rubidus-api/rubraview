@@ -53,6 +53,9 @@ path = "$(ProgramFiles)/Rubraview"
 [dir.Licences]
 path = "$(INSTALLDIR)/licences"
 
+[dir.Lang]
+path = "$(INSTALLDIR)/lang"
+
 [file.App]
 dir = "INSTALLDIR"
 source = "$(STAGE)/rubraview.exe"
@@ -76,6 +79,11 @@ source = "$(STAGE)/THIRD_PARTY_NOTICES.md"
 [files.LicenceFiles]
 dir = "Licences"
 glob = "$(STAGE)/licences/**"
+
+# RV-114: the language packs, read from lang\ beside the program.
+[files.LangFiles]
+dir = "Lang"
+glob = "$(STAGE)/lang/*.txt"
 
 [shortcut.StartMenu]
 dir = "Programs"

@@ -46,6 +46,9 @@ cp dist/rubraview_menu.dll "$out/rubraview_menu.dll"
 python3 scripts/make-menu-package.py "$version" "$out/rubraview_menu.msix"
 
 cp docs/manual/rubraview-manual.md "$out/manual.md"
+# RV-114: the language packs, files beside the program (none is built in).
+mkdir -p "$out/lang"
+cp resources/distribution/lang/*.txt "$out/lang/"
 cp THIRD_PARTY_NOTICES.md "$out/"
 [ -f CHANGELOG.md ] && cp CHANGELOG.md "$out/" || true
 [ -f LICENSE ] && cp LICENSE "$out/" || true

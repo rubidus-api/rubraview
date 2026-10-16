@@ -1183,7 +1183,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
 | Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
-| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20% to 200% by twenties, real size again |
+| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
 | Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
@@ -1229,9 +1229,9 @@ listed under a later heading only means that while that is on screen.
 | Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
 | Menu `100%` | The floating boxes fully opaque |
-| Menu `80%` | The floating boxes 80 % opaque |
-| Menu `60%` | The floating boxes 60 % opaque |
-| Menu `40%` | The floating boxes 40 % opaque |
+| Menu `80%` | The floating boxes' opacity: 80% |
+| Menu `60%` | The floating boxes' opacity: 60% |
+| Menu `40%` | The floating boxes' opacity: 40% |
 | Menu `Change keys` | Settings, opened on its Keys page |
 | Menu `About` | About Rubraview: the version and the licences of what it carries |
 

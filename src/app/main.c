@@ -4774,7 +4774,11 @@ static void aspect_set(app_state_t *app, rubraview_aspect_t aspect, bool side) {
     if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 }
 
-static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile, bool *out_enabled) {
+static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
+    /* RV-114: the document's caption in the language in use. */
+    rubraview_box_tile_t shown = *tile_in;
+    shown.caption = rubraview_tr_ctx_u8("toolbox", tile_in->caption);
+    const rubraview_box_tile_t *tile = &shown;
     rubraview_action_facts_t facts = action_facts(app);
     rubraview_action_state_t st = rubraview_action_state(tile->action, &facts);
     *out_enabled = st.enabled;
@@ -5179,7 +5183,7 @@ static void list_save(app_state_t *app) {
     char line[160];
     u8str_t name = rubraview_path_basename(target);
     snprintf(line, sizeof(line), T("%zu files in %.*s, %s paths"), count, (int)(name.len < 80 ? name.len : 80), name.ptr,
-             whole ? "whole" : "relative");
+             whole ? T("whole") : T("relative"));
     osd_say(app, cstr(line));
 }
 
@@ -7845,7 +7849,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, track.height * 0.5);
     }
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
-    u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? app->toolbox_tiles[hovered].caption
+    u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? rubraview_tr_ctx_u8("toolbox", app->toolbox_tiles[hovered].caption)
                                                                       : page_display_name(app, (size_t)current_page_index(app));
     char said[160];
     if (hovered >= 0 && hovered < app->toolbox_tile_count) {
@@ -8802,7 +8806,7 @@ static void draw_ctxmenu_on(app_state_t *app, rubraview_renderer_t *r, double px
         rubraview_action_state_t st = rubraview_action_state(item->action, &facts);
         char scratch[96];
         u8str_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now) ? TU8("Delete?")
-                     : rubraview_tile_caption(item->caption, false, st.mark, st.value, scratch, sizeof(scratch));
+                     : rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, scratch, sizeof(scratch));
         rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi, enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
@@ -12905,13 +12909,13 @@ static rubraview_lang_t g_lang;
 static char g_lang_code[24];   /* what is in use: "" for English */
 
 static void lang_apply(app_state_t *app) {
-    static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant" };
-    static const char *const PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant" };
+    static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
+    static const char *const PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
     int c = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("language")));
-    const char *want = CHOICES[c >= 0 && c < 6 ? c : 0];
+    const char *want = CHOICES[c >= 0 && c < 7 ? c : 0];
     if (strcmp(want, "auto") == 0) {
         char tag[96];
-        want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, PACKS, 4) : NULL;
+        want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, PACKS, 5) : NULL;
     }
     if (want && strcmp(want, "en") == 0) want = NULL;
     if (strcmp(want ? want : "", g_lang_code) == 0) return;
@@ -13287,7 +13291,7 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
     const char *who = all ? T("for every user") : T("for this user");
     char say[200];
     if (code != SHELL_DONE && code != SHELL_DONE_NO_PARTS && code != SHELL_DONE_REFUSED) {
-        snprintf(say, sizeof(say), T("could not %s %s"), adding ? "register" : "remove", who);
+        snprintf(say, sizeof(say), T("could not %s %s"), adding ? T("register") : T("remove"), who);
     } else if (!adding) {
         snprintf(say, sizeof(say), T("removed %s"), who);
     } else if (!menu) {
@@ -16794,6 +16798,7 @@ static void draw_settings_window(app_state_t *app) {
         /* what the row's action does, under the pointer */
         const rubraview_key_binding_t *b = &app->keymap.bindings[app->settings_tip_row - 1];
         const char *words = rubraview_action_words(b->action);
+        if (words) words = rubraview_tr(words);
         char tip[400];
         int n = snprintf(tip, sizeof(tip), "%.*s: %s", (int)b->action.len, b->action.ptr, words ? words : T("(no words for it)"));
         if (n > 0) {
