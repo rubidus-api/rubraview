@@ -93,6 +93,10 @@ bool rubraview_history_should_offer_resume(const rubraview_history_entry_t *entr
 typedef struct rubraview_recent {
     rubraview_history_t list;   /* `page` and `total` are not used */
     int64_t cleared;            /* Unix seconds; 0: never */
+    /* The owner (2026-10-17): one file taken off the list, and when: kept so
+       that another viewer's older copy does not bring it back. An entry no
+       newer than its removal is dropped wherever lists are put together. */
+    rubraview_history_t removed;
 } rubraview_recent_t;
 
 rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text);
@@ -101,6 +105,9 @@ u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent
 /** `path` was opened at `timestamp`: it becomes the newest; at most `max_entries` are kept. */
 void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
                           int64_t timestamp, size_t max_entries);
+
+/** Take `path` off the list at `timestamp` (the file itself is not touched). */
+void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path, int64_t timestamp);
 
 /** Empty the list, at `timestamp`. */
 void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp);

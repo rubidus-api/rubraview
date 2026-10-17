@@ -415,6 +415,10 @@ typedef struct app_state {
     double                 titlebar_held_x, titlebar_held_y;
     /* The playlist window (owner, 2026-09-29): what is open, floating over the picture. */
     rubraview_listwin_t    listwin;
+    /* The owner (2026-10-17): the recent files in a list window of their own */
+    rubraview_listwin_t    recentwin;
+    struct recent_row { u8str_t path; int64_t opened; uint64_t size; bool there; bool checked; } recent_rows[RECENT_KEPT];
+    size_t                 recent_row_count;
     int32_t                listwin_shown_page;   /* the page it last scrolled to, to follow a new one */
     /* D-111: the list changed from its window. */
     bool                  *list_checked;         /* one a page: its row is checked */
@@ -1067,6 +1071,9 @@ static void open_path(app_state_t *app, u8str_t path);
 static void recent_note(app_state_t *app, u8str_t path);
 static void recent_note_shown(app_state_t *app);
 static void recent_sync(app_state_t *app, u8str_t opened, bool clear);
+static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count);
+static void recentwin_build(app_state_t *app);
+static void recentwin_toggle(app_state_t *app);
 
 static void update_precache(app_state_t *app);
 
@@ -5693,6 +5700,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
         if (app->settings_open) { settings_close(app); return; }
         if (app->panel.open) { panel_close(app); return; }
+        if (app->recentwin.open) { app->recentwin.open = false; return; }   /* the owner's recent window (2026-10-17) */
         if (app->listwin.open) { app->listwin.open = false; return; }
         if (app->eqwin.open) { app->eqwin.open = false; return; }
         /* RV-116: an open menu box or toolbox (not pinned) folds first; it used to close the program */
@@ -5904,10 +5912,9 @@ static void handle_action(app_state_t *app, u8str_t action) {
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
         else rubraview_box_click_anchor(&app->toolbox);
     } else if (rubraview_u8_eq_lit(action, "open_recent_list")) {
-        /* The recent files on the open-file screen, tiles or details, sortable (owner, 2026-10-16). */
-        if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
-        picker_navigate(app, U8(RUBRAVIEW_PICKER_RECENT));
-        app->picker_open = app->picker_listing.count > 0;
+        /* The owner (2026-10-17): a list window of their own, with when, how large and where
+           (the open-file screen's Recent page is still there, as tiles). */
+        recentwin_toggle(app);
     } else if (rubraview_u8_eq_lit(action, "open_picker")) {
         if (app->picker_open) {
             app->picker_open = false;
@@ -9784,6 +9791,215 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
     }
 }
 
+/* ---- the recent files, in a list window (owner, 2026-10-17) ----
+   "recent files 가 너무 보기 안좋다 ... 목록창 띄워서 ... 전체삭제나 삭제(목록 상에서만)
+   ... 파일 이름 옆에 날짜나 용량, 위치". Each row: the name, when it was last
+   opened, its size, its folder. A click opens it; the box and the X at its left,
+   the bar's Remove and Clear all take files off the list only. */
+
+static void recentwin_build(app_state_t *app) {
+    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);   /* what other viewers opened, too */
+    size_t newest[RECENT_KEPT];
+    size_t n = rubraview_recent_newest(&app->recent, newest, RECENT_KEPT);
+    app->recent_row_count = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const rubraview_history_entry_t *e = &app->recent.list.entries[newest[i]];
+        struct recent_row *row = &app->recent_rows[app->recent_row_count++];
+        rubraview_fs_entry_t st;
+        *row = (struct recent_row){ .path = app_keep(app, e->path), .opened = e->timestamp };
+        row->there = rubraview_pal_fs_stat(app->arena, row->path, &st);
+        row->size = row->there ? st.size_bytes : 0;
+    }
+    if (app->recentwin.first > app->recent_row_count) app->recentwin.first = 0;
+}
+
+static void recentwin_toggle(app_state_t *app) {
+    app->recentwin.open = !app->recentwin.open;
+    if (!app->recentwin.open) return;
+    if (app->recentwin.title_height <= 0.0) {
+        app->recentwin = rubraview_listwin_create(rubraview_pal_window_dpi_scale(app->window));
+        app->recentwin.open = true;
+    }
+    app->recentwin.editable = true;   /* the bar and the boxes */
+    recentwin_build(app);
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    if (!app->recentwin.placed) {   /* wide enough for four columns */
+        double dpi = rubraview_pal_window_dpi_scale(app->window);
+        app->recentwin.width = (double)w * 0.8 < 900.0 * dpi ? (double)w * 0.8 : 900.0 * dpi;
+        app->recentwin.height = (double)h * 0.7;
+        app->recentwin.x = ((double)w - app->recentwin.width) / 2.0;
+        app->recentwin.y = (double)h * 0.12;
+        app->recentwin.placed = true;
+    }
+    rubraview_listwin_place(&app->recentwin, (double)w, (double)h);
+}
+
+static size_t recentwin_checked(const app_state_t *app) {
+    size_t n = 0;
+    for (size_t i = 0; i < app->recent_row_count; ++i) n += app->recent_rows[i].checked;
+    return n;
+}
+
+/* "3.4 MB", "820 KB", "512 B" */
+static void recent_size_text(char *b, size_t cap, uint64_t bytes) {
+    if (bytes >= 1024ull * 1024ull * 1024ull) snprintf(b, cap, "%.1f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    else if (bytes >= 1024ull * 1024ull) snprintf(b, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+    else if (bytes >= 1024ull) snprintf(b, cap, "%.0f KB", (double)bytes / 1024.0);
+    else snprintf(b, cap, "%llu B", (unsigned long long)bytes);
+}
+
+static void draw_recentwin(app_state_t *app, double win_w, double win_h) {
+    rubraview_listwin_t *lw = &app->recentwin;
+    if (!lw->open) return;
+    rubraview_listwin_place(lw, win_w, win_h);
+    size_t count = app->recent_row_count;
+    rubraview_renderer_t *rr = app->renderer;
+    rubraview_pal_rect_t body = { lw->x, lw->y, lw->width, lw->height };
+    rubraview_pal_render_fill_rect(rr, body, (COLOR_BOX_FILL & 0x00FFFFFFu) | 0xF0000000u, 4.0);
+    rubraview_pal_render_stroke_rect(rr, body, COLOR_BOX_BORDER, 1.0, 4.0);
+    char title[96];
+    int n = snprintf(title, sizeof(title), T("Recent files   %zu"), count);
+    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height * 2.0 - lw->row_height * 0.4, lw->title_height };
+    if (n > 0) rubraview_pal_render_draw_text(rr, (u8str_t){ title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
+    rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
+    if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
+    rubraview_pal_render_draw_text(rr, U8("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
+
+    /* the bar: all, Remove (the checked), Clear all */
+    double small = lw->row_height * 0.5;
+    size_t checked = recentwin_checked(app);
+    char del[48];
+    if (checked > 0) snprintf(del, sizeof(del), T("Remove (%zu)"), checked); else snprintf(del, sizeof(del), "%s", T("Remove"));
+    list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL), count > 0 && checked == count, checked > 0);
+    list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false,
+                checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+    list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), T("Clear all"), small, false,
+                count > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+    double head_h = rubraview_listwin_head_height(lw);
+    rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ lw->x + 2.0, lw->y + head_h - 1.0, lw->width - 4.0, 1.0 }, COLOR_BOX_BORDER, 0.0);
+
+    size_t hovered = SIZE_MAX, index = 0;
+    rubraview_listwin_part_t under = rubraview_listwin_hit(lw, app->pointer_x, app->pointer_y, count, &index);
+    if (under == RUBRAVIEW_LISTWIN_ROW) hovered = index;
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    /* the row's own parts: its box and its X; the text from after them */
+    double text_x = lw->x + lw->row_height * 2.2;
+    double avail = lw->x + lw->width - text_x - lw->row_height * 0.6;
+    double c_name = avail * 0.36, c_date = avail * 0.2, c_size = avail * 0.11, c_dir = avail - c_name - c_date - c_size;
+    for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
+        const struct recent_row *row = &app->recent_rows[i];
+        rubraview_rect_t r0 = rubraview_listwin_row_rect(lw, i, count);
+        rubraview_pal_rect_t rect = { r0.x + 2.0, r0.y, r0.width - 4.0, r0.height };
+        if (i == hovered) rubraview_pal_render_fill_rect(rr, rect, COLOR_TILE_FILL, 2.0);
+        list_check_mark(rr, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_CHECK), row->checked, false);
+        list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_REMOVE), "x",
+                    small, false, COLOR_TEXT);
+        uint32_t ink = row->there ? COLOR_TEXT : COLOR_BOX_BORDER;   /* gone from the disk: dimmed */
+        char fit[512], when[40], size[32];
+        u8str_t name = rubraview_path_basename(row->path), dir = rubraview_path_dirname(row->path);
+        info_local_time(when, sizeof(when), row->opened);
+        when[16] = '\0';   /* to the minute */
+        if (row->there) recent_size_text(size, sizeof(size), row->size); else snprintf(size, sizeof(size), "%s", T("gone"));
+        double x = text_x;
+        rubraview_pal_rect_t c1 = { x, rect.y, c_name - small, rect.height };
+        rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), name, c1.width, small), c1, small, ink, RUBRAVIEW_TEXT_LEFT);
+        x += c_name;
+        rubraview_pal_render_draw_text(rr, cstr(when), (rubraview_pal_rect_t){ x, rect.y, c_date - small, rect.height }, small, ink, RUBRAVIEW_TEXT_LEFT);
+        x += c_date;
+        rubraview_pal_render_draw_text(rr, cstr(size), (rubraview_pal_rect_t){ x, rect.y, c_size - small, rect.height }, small, ink, RUBRAVIEW_TEXT_RIGHT);
+        x += c_size + small;
+        rubraview_pal_rect_t c4 = { x, rect.y, c_dir - small, rect.height };
+        rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), dir, c4.width, small), c4, small,
+                                       (ink & 0x00FFFFFFu) | 0xB0000000u, RUBRAVIEW_TEXT_LEFT);
+    }
+    if (count == 0) {
+        rubraview_pal_rect_t empty = { lw->x, lw->y + head_h, lw->width, lw->row_height * 2.0 };
+        rubraview_pal_render_draw_text(rr, TU8("nothing opened lately"), empty, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
+    }
+    if (count > rows && rows > 0) {
+        double track = lw->height - head_h, h = track * (double)rows / (double)count;
+        if (h < lw->row_height * 0.5) h = lw->row_height * 0.5;
+        double y = lw->y + head_h + (track - h) * (double)lw->first / (double)(count - rows);
+        rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ lw->x + lw->width - 4.0, y, 3.0, h }, COLOR_BOX_BORDER | 0x60000000u, 1.5);
+    }
+}
+
+/* A press on the recent window: true when it took it. */
+static bool recentwin_press(app_state_t *app, double x, double y) {
+    rubraview_listwin_t *lw = &app->recentwin;
+    if (!lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), x, y)) return false;
+    size_t count = app->recent_row_count, index = 0;
+    switch (rubraview_listwin_hit(lw, x, y, count, &index)) {
+        case RUBRAVIEW_LISTWIN_CLOSE:  lw->open = false; break;
+        case RUBRAVIEW_LISTWIN_TITLE:  rubraview_listwin_drag_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_ALL: {
+            bool all = recentwin_checked(app) < count;
+            for (size_t i = 0; i < count; ++i) app->recent_rows[i].checked = all;
+            break;
+        }
+        case RUBRAVIEW_LISTWIN_ROW_CHECK:
+            if (index < count) app->recent_rows[index].checked = !app->recent_rows[index].checked;
+            break;
+        case RUBRAVIEW_LISTWIN_ROW_REMOVE:
+            if (index < count) {
+                recent_forget(app, &app->recent_rows[index].path, 1);
+                recentwin_build(app);
+                menu_rebuild(app);
+                osd_say(app, TU8("taken off the list (the file is where it was)"));
+            }
+            break;
+        case RUBRAVIEW_LISTWIN_DEL: {
+            u8str_t gone[RECENT_KEPT];
+            size_t n = 0;
+            for (size_t i = 0; i < count; ++i) if (app->recent_rows[i].checked) gone[n++] = app->recent_rows[i].path;
+            if (n == 0) { osd_say(app, TU8("tick the files to take off first")); break; }
+            recent_forget(app, gone, n);
+            recentwin_build(app);
+            menu_rebuild(app);
+            osd_say(app, TU8("taken off the list (the files are where they were)"));
+            break;
+        }
+        case RUBRAVIEW_LISTWIN_SAVE:   /* Clear all */
+            if (count == 0) break;
+            recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, true);
+            recentwin_build(app);
+            menu_rebuild(app);
+            osd_say(app, TU8("the recent list is empty"));
+            break;
+        case RUBRAVIEW_LISTWIN_ROW:
+        case RUBRAVIEW_LISTWIN_ROW_UP: case RUBRAVIEW_LISTWIN_ROW_DOWN:   /* no arrows here: the name starts there */
+            if (index < count) {
+                u8str_t path = app->recent_rows[index].path;
+                if (!rubraview_pal_fs_exists(path)) { osd_say(app, TU8("that file is no longer there")); break; }
+                lw->open = false;
+                open_path(app, path);
+            }
+            break;
+        default: break;   /* the bar's other places, a row's arrows: nothing here */
+    }
+    return true;
+}
+
+static void recentwin_motion(app_state_t *app, double x, double y) {
+    rubraview_listwin_t *lw = &app->recentwin;
+    if (!lw->open || (!lw->dragging && !lw->resizing)) return;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    if (lw->dragging) rubraview_listwin_drag_to(lw, x, y, (double)w, (double)h);
+    if (lw->resizing) { rubraview_listwin_resize_to(lw, x, y, (double)w, (double)h); rubraview_listwin_scroll(lw, 0, app->recent_row_count); }
+}
+
+static bool recentwin_release(app_state_t *app) {
+    bool held = app->recentwin.dragging || app->recentwin.resizing;
+    app->recentwin.dragging = false;
+    app->recentwin.resizing = false;
+    return held;
+}
+
 static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
     rubraview_eqwin_t *w = &app->eqwin;
     if (!w->open) return;
@@ -9990,6 +10206,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     }
 
     draw_listwin(app, win_w, win_h);
+    draw_recentwin(app, win_w, win_h);
 
     draw_titlebar(app, win_w);
 
@@ -14094,7 +14311,8 @@ static void settings_read_file(app_state_t *app) {
 #define SETTINGS_FOCUS       0xFF2D4A6Eu
 #define SETTINGS_TEXT        0xFFE8E8E8u
 #define SETTINGS_DIM         0xFF8A8A8Au   /* a setting nothing reads yet (not `wired`) */
-#define SETTINGS_ACCENT      0xFF6FA8DCu
+#define SETTINGS_ACCENT      0xFFE0B46Au   /* headings: warm, so that blue means "press it" (owner, 2026-10-17) */
+#define SETTINGS_LINK        0xFF5AAEFFu   /* what can be pressed: an action, a button, a path's box, underlined */
 
 /* The live values the document's `info` lines name. */
 static size_t settings_info(void *user, u8str_t source, char *buffer, size_t capacity) {
@@ -15754,6 +15972,31 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
         rubraview_pal_render_draw_text_mono(app->settings_renderer, piece, x + app->settings_cell_w * runs[i].col,
                                             y, app->settings_font, color);
     }
+}
+
+/* The owner (2026-10-17): "설정에서 누를 수 있는 기능은 파란색 글씨와 밑줄로". The part
+   of `text` from its first `open` to its last `close` ("< Register >", "[ Close ]",
+   a path's "[C:\\...]") in link blue, its words underlined; the rest in `base`. */
+static void settings_text_link(app_state_t *app, u8str_t text, double x, double y, uint32_t base, char open, char close) {
+    size_t a = 0, b = text.len;
+    while (a < text.len && text.ptr[a] != open) ++a;
+    while (b > a && text.ptr[b - 1] != close) --b;
+    if (a >= text.len || b <= a + 1) { settings_text(app, text, x, y, base); return; }
+    u8str_t before = { text.ptr, a }, link = { text.ptr + a, b - a }, after = { text.ptr + b, text.len - b };
+    double cw = app->settings_cell_w, ch = app->settings_cell_h;
+    double lx = x + cw * (double)rubraview_text_columns(before);
+    settings_text(app, before, x, y, base);
+    settings_text(app, link, lx, y, SETTINGS_LINK);
+    settings_text(app, after, lx + cw * (double)rubraview_text_columns(link), y, base);
+    /* under the words, not the brackets or the spaces inside them */
+    size_t i = 1, j = link.len - 1;
+    while (i < j && link.ptr[i] == ' ') ++i;
+    while (j > i && link.ptr[j - 1] == ' ') --j;
+    if (j <= i) return;
+    double ux = lx + cw * (double)rubraview_text_columns((u8str_t){ link.ptr, i });
+    double uw = cw * (double)rubraview_text_columns((u8str_t){ link.ptr + i, j - i });
+    double line = ch > 16.0 ? ch / 16.0 : 1.0;
+    rubraview_pal_render_fill_rect(app->settings_renderer, (rubraview_pal_rect_t){ ux, y + ch - line * 1.5, uw, line }, SETTINGS_LINK, 0.0);
 }
 
 /* ---- the help window (owner, 2026-09-23) ---- */
@@ -18577,7 +18820,10 @@ static void draw_settings_window(app_state_t *app) {
                 (int32_t)i != v->focus_line) color = SETTINGS_DIM;
             if (ln->kind == RUBRAVIEW_LINE_TABLE && k == 0) color = SETTINGS_ACCENT;
             settings_grid_keep(app, 2 + content_row, text);
-            settings_text(app, text, x0, y, color);
+            if (ln->kind == RUBRAVIEW_LINE_ACTION) settings_text_link(app, text, x0, y, color, '<', '>');
+            else if (ln->kind == RUBRAVIEW_LINE_SETTING && v->doc->defs[node->setting].type == RUBRAVIEW_SETTING_PATH)
+                settings_text_link(app, text, x0, y, color, '[', ']');   /* pressed, it is typed or chosen */
+            else settings_text(app, text, x0, y, color);
         }
     }
 
@@ -18606,8 +18852,7 @@ static void draw_settings_window(app_state_t *app) {
         if (b == v->focus_button) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * col, y, cw * width, ch }, SETTINGS_FOCUS, 0.0);
         }
-        rubraview_pal_render_draw_text_mono(r, rubraview_settings_button_text((rubraview_settings_button_t)b),
-                                            cw * col, y, fs, SETTINGS_TEXT);
+        settings_text_link(app, rubraview_settings_button_text((rubraview_settings_button_t)b), cw * col, y, SETTINGS_TEXT, '[', ']');
     }
 
     if (app->settings_tip_shown && app->settings_tip_row > 0 && (size_t)(app->settings_tip_row - 1) < app->keymap.count) {
@@ -20631,6 +20876,21 @@ static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
     if (!same && (before.len > 0 || all.list.count > 0 || all.cleared > 0)) {
         (void)rubraview_pal_fs_write_file_atomic(app->recent_path, after);
     }
+    if (locked) rubraview_pal_config_unlock();
+    app->recent = all;
+}
+
+/* The owner (2026-10-17): files taken off the recent list (not off the disk),
+   under the same lock, so the other viewers do not bring them back. */
+static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count) {
+    if (app->recent_path.len == 0 || count == 0) return;
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    u8str_t before = rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u);
+    rubraview_recent_t all = rubraview_recent_parse(app->arena, before);
+    rubraview_recent_merge(app->arena, &all, &app->recent, RECENT_KEPT);
+    int64_t now = (int64_t)time(NULL);
+    for (size_t i = 0; i < count; ++i) rubraview_recent_remove(app->arena, &all, app_keep(app, paths[i]), now);
+    (void)rubraview_pal_fs_write_file_atomic(app->recent_path, rubraview_recent_serialize(app->arena, &all));
     if (locked) rubraview_pal_config_unlock();
     app->recent = all;
 }
@@ -23146,6 +23406,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                                             rubraview_eqwin_db_at(&app.eqwin, (size_t)app.eqwin.sliding, event.mouse.y));
                     }
                     listwin_motion(&app, event.mouse.x, event.mouse.y);
+                    recentwin_motion(&app, event.mouse.x, event.mouse.y);
                     app.pointer_inside = true;
                     app.pointer_x = event.mouse.x;
                     app.pointer_y = event.mouse.y;
@@ -23357,6 +23618,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (app.eqwin.open && eqwin_press(&app, event.mouse.x, event.mouse.y,
                                                       event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
+                    if (app.recentwin.open && event.mouse.button == RUBRAVIEW_MOUSE_LEFT && recentwin_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (app.listwin.open && listwin_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && app.subbox.selected &&
                         subbox_press(&app, event.mouse.x, event.mouse.y, true)) break;   /* D-33: S M R X on top */
@@ -23437,6 +23699,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     if (app.eqwin.dragging || app.eqwin.sliding >= 0) { app.eqwin.dragging = false; app.eqwin.sliding = -1; break; }
+                    if (recentwin_release(&app)) break;
                     if (listwin_release(&app)) break;
                     if (app.subbox.dragging != RUBRAVIEW_SUBBOX_NONE) {
                         rubraview_subbox_end_drag(&app.subbox);
@@ -23497,6 +23760,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         if (took) break;
                     }
                     if (app.eqwin.open && eqwin_wheel(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta)) break;
+                    if (app.recentwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app.recentwin), event.mouse.x, event.mouse.y)) {
+                        rubraview_listwin_scroll(&app.recentwin, event.mouse.wheel_delta > 0 ? -3 : 3, app.recent_row_count);
+                        break;
+                    }
                     if (app.listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y)) {
                         rubraview_listwin_scroll(&app.listwin, event.mouse.wheel_delta > 0 ? -3 : 3, page_count(&app));
                         break;

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.7.0.exe              the viewer, as built
-dist/rubraview-v1.7.0/                 the release bundle
-dist/rubraview-v1.7.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.8.0.exe              the viewer, as built
+dist/rubraview-v1.8.0/                 the release bundle
+dist/rubraview-v1.8.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -988,6 +988,10 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 ## Settings
 
 
+What can be pressed is blue and underlined: the actions (Register,
+Import, ...), the buttons under the page, and the box of a folder or a
+font.
+
 Rest the pointer on a setting's name and a fuller explanation comes up
 for the harder ones. **Defaults** puts back every setting, **this page**
 only the page you are on, **this setting** only the one with the focus;
@@ -1208,6 +1212,7 @@ listed under a later heading only means that while that is on screen.
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
 | `F7` | Move the file on screen to the folder set for it |
 | `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
@@ -1336,7 +1341,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `All recent files...` | The recent files on the open-file screen |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |

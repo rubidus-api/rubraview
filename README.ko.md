@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.7.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.7.0/rubraview-v1.7.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.7.0/rubraview-v1.7.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.8.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.8.0/rubraview-v1.8.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.8.0/rubraview-v1.8.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -85,6 +85,7 @@
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
 | `K` | 분류: 아홉 폴더를 창에 띄우고 그림을 폴더별로 예약한 뒤 한꺼번에 복사하거나 옮기기 |
+| `Ctrl+Shift+R` | 최근 파일 목록 창: 연 날짜, 크기, 위치. 목록에서만 빼거나 전체 지우기 |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
 | `Shift+F6` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 복사(없는 폴더는 새로 만듦) |
 | `Shift+F7` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 이동(없는 폴더는 새로 만듦) |
@@ -213,7 +214,6 @@
 | 오른쪽 클릭 `Book`, 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
 | 오른쪽 클릭 `Webtoon`, 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 오른쪽 클릭 `Choose subtitles`, 메뉴 `Choose` | 목록에서 자막 고르기 |
-| 메뉴 `All recent files...` | 최근 파일을 열기 화면에서 보기 |
 | 메뉴 `Clear this list` | 최근 파일 목록 비우기 |
 | 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
 | 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |

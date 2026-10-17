@@ -212,9 +212,24 @@ static void drop_at(rubraview_history_t *history, size_t at) {
     history->count--;
 }
 
+/* The removal of `path` that counts, or 0 (none). */
+static int64_t removed_at(const rubraview_recent_t *recent, u8str_t path) {
+    int64_t at = 0;
+    for (size_t k = 0; k < recent->removed.count; ++k) {
+        if (rubraview_path_same(recent->removed.entries[k].path, path) && recent->removed.entries[k].timestamp > at)
+            at = recent->removed.entries[k].timestamp;
+    }
+    return at;
+}
+
 static void recent_drop_cleared(rubraview_recent_t *recent) {
     for (size_t i = recent->list.count; i-- > 0;) {
-        if (recent->list.entries[i].timestamp <= recent->cleared) drop_at(&recent->list, i);
+        const rubraview_history_entry_t *e = &recent->list.entries[i];
+        if (e->timestamp <= recent->cleared || e->timestamp <= removed_at(recent, e->path)) drop_at(&recent->list, i);
+    }
+    /* a removal from before the last clearing has nothing left to keep away */
+    for (size_t k = recent->removed.count; k-- > 0;) {
+        if (recent->removed.entries[k].timestamp <= recent->cleared) drop_at(&recent->removed, k);
     }
 }
 
@@ -225,6 +240,22 @@ rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text) {
     for (size_t i = 0; i < doc.count; ++i) {
         const rubraview_ini_entry_t *e = &doc.entries[i];
         if (rubraview_u8_eq_lit(e->section, "cleared") && rubraview_u8_eq_lit(e->key, "time")) recent.cleared = whole_number(e->value);
+    }
+    /* [removed-N]: path, time */
+    u8str_t section = { .ptr = "", .len = 0 }, path = { .ptr = "", .len = 0 };
+    int64_t when = 0;
+    for (size_t i = 0; i <= doc.count; ++i) {
+        bool boundary = i == doc.count || !rubraview_u8_eq(doc.entries[i].section, section);
+        if (boundary) {
+            if (rubraview_u8_starts_with(section, "removed-") && path.len > 0) rubraview_history_record(arena, &recent.removed, path, 0, 0, when);
+            if (i == doc.count) break;
+            section = doc.entries[i].section;
+            path = (u8str_t){ .ptr = "", .len = 0 };
+            when = 0;
+        }
+        const rubraview_ini_entry_t *e = &doc.entries[i];
+        if (rubraview_u8_eq_lit(e->key, "path")) path = e->value;
+        else if (rubraview_u8_eq_lit(e->key, "time")) when = whole_number(e->value);
     }
     recent_drop_cleared(&recent);
     return recent;
@@ -245,7 +276,30 @@ u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent
         rubraview_ini_set_string(arena, &doc, section, U8("path"), recent->list.entries[i].path);
         rubraview_ini_set_int(arena, &doc, section, U8("time"), recent->list.entries[i].timestamp);
     }
+    for (size_t i = 0; i < recent->removed.count; ++i) {
+        char name[32];
+        int n = snprintf(name, sizeof(name), "removed-%zu", i + 1);
+        if (n <= 0) continue;
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
+        if (!proven_is_ok(res.err)) break;
+        memcpy(res.value.ptr, name, (size_t)n + 1);
+        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
+        rubraview_ini_set_string(arena, &doc, section, U8("path"), recent->removed.entries[i].path);
+        rubraview_ini_set_int(arena, &doc, section, U8("time"), recent->removed.entries[i].timestamp);
+    }
     return rubraview_ini_serialize(arena, &doc);
+}
+
+void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path, int64_t timestamp) {
+    if (!arena || !recent || path.len == 0) return;
+    /* never earlier than the entry it removes, so it counts */
+    for (size_t i = 0; i < recent->list.count; ++i) {
+        if (rubraview_path_same(recent->list.entries[i].path, path) && recent->list.entries[i].timestamp >= timestamp)
+            timestamp = recent->list.entries[i].timestamp;
+    }
+    rubraview_history_record(arena, &recent->removed, path, 0, 0, timestamp);
+    rubraview_history_prune(&recent->removed, 500);
+    recent_drop_cleared(recent);
 }
 
 void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
@@ -253,6 +307,8 @@ void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8s
     if (!arena || !recent || path.len == 0) return;
     /* Opened in the very second the list was emptied, it is still new. */
     if (timestamp <= recent->cleared) timestamp = recent->cleared + 1;
+    int64_t gone = removed_at(recent, path);   /* opened again after it was taken off: new again */
+    if (timestamp <= gone) timestamp = gone + 1;
     rubraview_history_record(arena, &recent->list, path, 0, 0, timestamp);
     rubraview_history_prune(&recent->list, max_entries);
 }
@@ -261,6 +317,7 @@ void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp) {
     if (!recent) return;
     if (timestamp > recent->cleared) recent->cleared = timestamp;
     recent->list.count = 0;
+    recent->removed.count = 0;   /* the clearing keeps them all away now */
 }
 
 void rubraview_recent_merge(proven_arena_t *arena, rubraview_recent_t *into, const rubraview_recent_t *from,
@@ -268,6 +325,8 @@ void rubraview_recent_merge(proven_arena_t *arena, rubraview_recent_t *into, con
     if (!arena || !into || !from) return;
     if (from->cleared > into->cleared) into->cleared = from->cleared;
     rubraview_history_merge(arena, &into->list, &from->list);
+    rubraview_history_merge(arena, &into->removed, &from->removed);   /* the newer removal of a path counts */
+    rubraview_history_prune(&into->removed, 500);
     recent_drop_cleared(into);
     rubraview_history_prune(&into->list, max_entries);
 }

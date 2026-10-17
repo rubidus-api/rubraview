@@ -107,7 +107,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "open_folder", "Open a folder" },
     { "open_keys", "Settings, opened on its Keys page" },
     { "open_picker", "Open a file" },
-    { "open_recent_list", "The recent files on the open-file screen" },
+    { "open_recent_list", "The recent files in a list window: when each was opened, its size and folder; take files off the list" },
     { "open_settings", "Settings" },
     { "pan_down", "A zoomed picture: see further down (the webtoon strip scrolls)" },
     { "pan_left", "A zoomed picture: see further left" },

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.7.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.7.0/rubraview-v1.7.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.7.0/rubraview-v1.7.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.8.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.8.0/rubraview-v1.8.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.8.0/rubraview-v1.8.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -86,6 +86,7 @@ ships with, so it cannot drift from them.
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
 | `F7` | Move the file on screen to the folder set for it |
 | `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
@@ -214,7 +215,6 @@ ships with, so it cannot drift from them.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `All recent files...` | The recent files on the open-file screen |
 | Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
