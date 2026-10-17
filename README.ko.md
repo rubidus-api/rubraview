@@ -1,10 +1,10 @@
-**한국어** | [English](README.md) — **Rubraview v1.2.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.2.0** — [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치는 필요 없습니다. 설치해 두고 싶다면 MSI 를 쓰세요: Program Files 와 시작 메뉴에 넣고, 탐색기 우클릭 메뉴(윈도 11 기본 메뉴 포함)를 모든 사용자용으로 등록합니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치는 필요 없습니다. [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x) 에서 받으면 설치와 업데이트가 저절로 됩니다. 설치해 두고 싶다면 MSI 를 쓰세요: Program Files 와 시작 메뉴에 넣고, 탐색기 우클릭 메뉴(윈도 11 기본 메뉴 포함)를 모든 사용자용으로 등록합니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
