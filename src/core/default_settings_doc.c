@@ -42,6 +42,8 @@ static const char *const PARTS[] = {
 "page explorer \"Explorer\"\n"
 "  section \"What Rubraview is given\"\n"
 "  info   \"This copy\"               {app.kind}\n"
+"  info   \"Other copies\"            {app.others}\n"
+"  toggle shell.told_twice        \"Told of two menus\" = false hidden wired\n"
 "  toggle shell.open_with          \"Open by double click (file types)\" = true wired\n"
 "  toggle shell.menu               \"Right-click menu\"        = true wired\n"
 "  action shell.register           \"Register for this user\"\n"

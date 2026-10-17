@@ -329,7 +329,14 @@ rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selectio
 
     rubraview_shell_menu_result_t result = ok ? RUBRAVIEW_SHELL_MENU_CLASSIC : RUBRAVIEW_SHELL_MENU_FAILED;
     if (ok && all_users) {
-        if (!rubraview_pal_shell_menu_parts_present()) {
+        if (rubraview_pal_shell_other_copies().store) {
+            /* D-154: the Store's copy brings its own Windows 11 menu; a second
+               "Rubraview" there would be this one's. The classic menu stays
+               ("Show more options"), and the item that says where this copy is. */
+            (void)config_write(root, selection, exe);
+            package_remove();
+            result = RUBRAVIEW_SHELL_MENU_CLASSIC_STORE;
+        } else if (!rubraview_pal_shell_menu_parts_present()) {
             result = RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS;
         } else if (config_write(root, selection, exe) && package_add()) {
             result = RUBRAVIEW_SHELL_MENU_BOTH;
@@ -734,6 +741,80 @@ bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *pat
     if (dialog.hDevNames) GlobalFree(dialog.hDevNames);
     if (out_printed) *out_printed = printed;
     return started;
+}
+
+
+/* ---- D-154: the other copies on this machine ---- */
+
+/* The MSI's UpgradeCode: resources/distribution/rubraview.toml's, which never changes. */
+#define RUBRAVIEW_MSI_UPGRADE_CODE L"{C3CBE9C7-8E3F-4E2D-9E98-A28BD69E5714}"
+#define PACKAGES_KEY L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages"
+
+static bool same_file(const WCHAR *a, const WCHAR *b) { return a[0] && b[0] && lstrcmpiW(a, b) == 0; }
+
+/* The program the MSI's copy registered for every user's Windows 11 menu, if any. */
+static bool msi_menu_program(WCHAR *out, DWORD cap) {
+    WCHAR items[512];
+    DWORD size = sizeof(items);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, MENU_CLASS_KEY, L"Items", RRF_RT_REG_MULTI_SZ, NULL, items, &size) != ERROR_SUCCESS || !items[0]) return false;
+    WCHAR sub[600];
+    wcscpy(sub, MENU_CLASS_KEY L"\\");
+    wcsncat(sub, items, 64);
+    size = cap * sizeof(WCHAR);
+    return RegGetValueW(HKEY_LOCAL_MACHINE, sub, L"Command", RRF_RT_REG_SZ, NULL, out, &size) == ERROR_SUCCESS;
+}
+
+rubraview_other_copies_t rubraview_pal_shell_other_copies(void) {
+    rubraview_other_copies_t other = {0};
+    WCHAR exe[MAX_PATH * 2];
+    if (!program_path(exe, MAX_PATH * 2, NULL)) exe[0] = 0;
+
+    /* The MSI: installed if its UpgradeCode has a product; another copy
+       unless its registered menu runs this very program. */
+    HMODULE msi = LoadLibraryExW(L"msi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (msi) {
+        typedef UINT (WINAPI *related_fn)(LPCWSTR, DWORD, DWORD, LPWSTR);
+        related_fn related = (related_fn)(void *)GetProcAddress(msi, "MsiEnumRelatedProductsW");
+        WCHAR product[40];
+        if (related && related(RUBRAVIEW_MSI_UPGRADE_CODE, 0, 0, product) == ERROR_SUCCESS) {
+            WCHAR registered[MAX_PATH * 2];
+            bool menu = msi_menu_program(registered, MAX_PATH * 2);
+            WCHAR full[256];
+            other.msi_menu = menu && get_string(HKEY_LOCAL_MACHINE, MENU_ROOT, PACKAGE_VALUE, full, 256);
+            other.msi = !(menu && same_file(registered, exe));
+            if (!menu) {
+                /* Nothing registered to tell by: the MSI's copy is in Program Files. */
+                WCHAR pf[MAX_PATH];
+                DWORD n = GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH);
+                other.msi = !(n > 0 && n < MAX_PATH && _wcsnicmp(exe, pf, n) == 0);
+            }
+        }
+        FreeLibrary(msi);
+    }
+
+    /* The Store: a package of this user's with rubraview.exe in its folder
+       (not the MSI's own menu package, and not this one). */
+    HKEY packages = NULL;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, PACKAGES_KEY, 0, KEY_READ, &packages) == ERROR_SUCCESS) {
+        static const WCHAR menu_package[] = WIDE(RUBRAVIEW_MENU_PACKAGE_NAME) L"_";
+        WCHAR name[256];
+        for (DWORD i = 0; !other.store; ++i) {
+            DWORD len = 256;
+            if (RegEnumKeyExW(packages, i, name, &len, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
+            if (_wcsnicmp(name, menu_package, wcslen(menu_package)) == 0) continue;
+            WCHAR root[MAX_PATH + 32];
+            DWORD size = MAX_PATH * sizeof(WCHAR);
+            if (RegGetValueW(packages, name, L"PackageRootFolder", RRF_RT_REG_SZ, NULL, root, &size) != ERROR_SUCCESS) continue;
+            size_t n = wcslen(root);
+            if (n == 0 || n > MAX_PATH) continue;
+            wcscpy(root + n, root[n - 1] == L'\\' ? L"rubraview.exe" : L"\\rubraview.exe");
+            if (GetFileAttributesW(root) == INVALID_FILE_ATTRIBUTES) continue;
+            if (same_file(root, exe)) continue;   /* this copy is that package */
+            other.store = true;
+        }
+        RegCloseKey(packages);
+    }
+    return other;
 }
 
 #endif /* _WIN32 */

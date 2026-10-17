@@ -180,6 +180,7 @@ typedef enum rubraview_shell_menu_result {
     RUBRAVIEW_SHELL_MENU_BOTH,              /* and the Windows 11 menu (whose package then carries both: D-116) */
     RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS,  /* classic; rubraview_menu.dll / .msix are not beside the program */
     RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED,   /* classic; Windows did not take the package */
+    RUBRAVIEW_SHELL_MENU_CLASSIC_STORE,     /* classic; the Store's copy has the Windows 11 menu (D-154) */
 } rubraview_shell_menu_result_t;
 
 /**
@@ -190,6 +191,19 @@ typedef enum rubraview_shell_menu_result {
  * are beside the program.
  */
 rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selection, bool all_users);
+
+/**
+ * D-154: other copies of Rubraview on this machine than the one running —
+ * one installed by the MSI (found by its UpgradeCode; it is this one when
+ * its registered menu runs this program), and one from the Microsoft
+ * Store (a package of the user's whose folder holds rubraview.exe).
+ */
+typedef struct rubraview_other_copies {
+    bool msi;
+    bool store;
+    bool msi_menu;   /* the MSI's copy has Windows 11's menu registered */
+} rubraview_other_copies_t;
+rubraview_other_copies_t rubraview_pal_shell_other_copies(void);
 
 /** Take every item of ours away, and for every user the package too. */
 bool rubraview_pal_shell_menu_unregister(bool all_users);

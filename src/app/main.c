@@ -868,6 +868,8 @@ typedef struct app_state {
     u8str_t                  settings_path;
     u8str_t                  config_beside;   /* the executable's own folder: portable mode's home */
     bool                     packaged;        /* RV-113 (2): run from the Store's MSIX */
+    rubraview_other_copies_t other_copies;    /* D-154: the MSI's or the Store's copy beside this one */
+    bool                     copies_told;
     char                     package_family[160];
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
@@ -12620,6 +12622,7 @@ static void settings_read_file(app_state_t *app) {
                                                  rubraview_pal_fs_exists(portable_ini));
     app->config_beside = beside;
     app->packaged = rubraview_pal_process_packaged(app->package_family, sizeof(app->package_family));
+    app->other_copies = rubraview_pal_shell_other_copies();
 
     u8str_t appdata = U8(".");
 #ifdef _WIN32
@@ -12672,6 +12675,15 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
         /* The folder comes from Windows with backslashes and the file name is
            joined with '/': shown with Windows' own separator throughout. */
         for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
+    } else if (rubraview_u8_eq_lit(source, "app.others")) {
+        /* D-154: two copies, two menus: what this machine has besides this one. */
+        const rubraview_other_copies_t *o = &app->other_copies;
+        n = snprintf(buffer, capacity, "%s",
+                     o->msi && o->store ? T("the MSI's and the Store's too: Windows 11's menu may show twice")
+                     : o->store ? T("the Microsoft Store's too: Windows 11's menu is left to it")
+                     : o->msi && o->msi_menu && app->packaged ? T("the MSI's too, with its menu: Windows 11's menu shows twice (Remove for every user in that copy)")
+                     : o->msi ? T("the one the MSI installed too")
+                     : T("none"));
     } else if (rubraview_u8_eq_lit(source, "app.kind")) {
         n = snprintf(buffer, capacity, "%s",
                      app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
@@ -13437,7 +13449,7 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
 
 /* What a registration did, as the line the reader is shown. The same
    numbers are the exit code of the run made as an administrator. */
-enum { SHELL_DONE = 0, SHELL_FAILED = 1, SHELL_DONE_NO_PARTS = 3, SHELL_DONE_REFUSED = 4 };
+enum { SHELL_DONE = 0, SHELL_FAILED = 1, SHELL_DONE_NO_PARTS = 3, SHELL_DONE_REFUSED = 4, SHELL_DONE_STORE = 5 };
 
 /* What a registration does with one of its two parts — the file types
    (double click) and the right-click menu. */
@@ -13464,6 +13476,7 @@ static int shell_apply(proven_arena_t *arena, u8str_t selection, u8str_t menu_se
             case RUBRAVIEW_SHELL_MENU_FAILED: ok = false; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS: code = SHELL_DONE_NO_PARTS; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED: code = SHELL_DONE_REFUSED; break;
+            case RUBRAVIEW_SHELL_MENU_CLASSIC_STORE: code = SHELL_DONE_STORE; break;   /* D-154 */
             default: break;
         }
     } else if (menu == SHELL_PART_REMOVE && !rubraview_pal_shell_menu_unregister(all_users)) {
@@ -13537,7 +13550,8 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
 
     const char *who = all ? T("for every user") : T("for this user");
     char say[200];
-    if (code != SHELL_DONE && code != SHELL_DONE_NO_PARTS && code != SHELL_DONE_REFUSED) {
+    app->other_copies = rubraview_pal_shell_other_copies();
+    if (code != SHELL_DONE && code != SHELL_DONE_NO_PARTS && code != SHELL_DONE_REFUSED && code != SHELL_DONE_STORE) {
         snprintf(say, sizeof(say), T("could not %s %s"), adding ? T("register") : T("remove"), who);
     } else if (!adding) {
         snprintf(say, sizeof(say), T("removed %s"), who);
@@ -13549,6 +13563,8 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
         snprintf(say, sizeof(say), T("registered %s; Windows 11's menu needs rubraview_menu.dll and .msix beside the program (they are in the zip)"), who);
     } else if (code == SHELL_DONE_REFUSED) {
         snprintf(say, sizeof(say), T("registered %s; Windows did not take the Windows 11 menu's package"), who);
+    } else if (code == SHELL_DONE_STORE) {
+        snprintf(say, sizeof(say), T("registered %s; Windows 11's menu is left to the Store's copy (this one's is under \"Show more options\")"), who);
     } else {
         snprintf(say, sizeof(say), T("registered %s, with Windows 11's menu"), who);
     }
@@ -20973,6 +20989,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 console_line(code == SHELL_FAILED ? "rubraview: could not update the file types and the menu"
                            : code == SHELL_DONE_NO_PARTS ? "rubraview: updated; Windows 11's menu needs rubraview_menu.dll and rubraview_menu.msix beside the program"
                            : code == SHELL_DONE_REFUSED ? "rubraview: updated; Windows did not take the Windows 11 menu's package"
+                           : code == SHELL_DONE_STORE ? "rubraview: updated; Windows 11's menu is left to the Microsoft Store's copy"
                            : "rubraview: file types and menu updated");
                 if (cli.shell_setup) code = rubraview_shell_setup_exit(code, cli.unregister_shell && !cli.register_shell);
                 free(memory);
@@ -21762,6 +21779,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
            two cores busy on a GIF and the keys waited behind it). */
         bool media_playing = (app.media && !app.media_paused) || (anim_plays(&app) && !app.animation.paused);
         text_tick(&app, now);   /* RFC-0005: auto-scroll moves by the time since the last pass */
+        /* D-154: two copies with two Windows 11 menus, said once (ever). */
+        if (!app.copies_told && (app.packaged || app.other_copies.store) && app.other_copies.msi_menu) {
+            app.copies_told = true;
+            if (rubraview_settings_get(&app.settings, U8("shell"), U8("told_twice")) < 0.5) {
+                rubraview_settings_set(&app.settings, U8("shell"), U8("told_twice"), 1.0);
+                osd_say(&app, TU8("Rubraview is installed twice (MSI and Store): Windows 11's menu shows two; Settings › Explorer says what to do"));
+            }
+        }
         bool others_moving = app.slideshow_running || text_moving(&app) ||
                              app.notice_seconds > 0.0 || app.pending_decode_count > 0 ||
                              app.rename_active ||   /* the caret blinks (owner, 2026-09-23) */
