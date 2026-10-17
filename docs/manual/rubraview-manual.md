@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.9.0.exe              the viewer, as built
-dist/rubraview-v1.9.0/                 the release bundle
-dist/rubraview-v1.9.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.10.0.exe              the viewer, as built
+dist/rubraview-v1.10.0/                 the release bundle
+dist/rubraview-v1.10.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -337,10 +337,22 @@ is done to it alone; without one, to the whole picture.
 **Automatic colour** (each channel stretched, a colour cast drawn in),
 an **Effect** with its amount (21 of them: grey, sepia, negative, oil
 paint, emboss, edges, pixelize, swirl, red eye, and more), **Crop to the
-selection**, **Resize**. Each is a step: `Ctrl+Z` undoes it, `Ctrl+Y`
-does it again, and the undo list (its own movable box, closed by its `X`)
-goes back to any of them. **Reset** goes back to the picture as it was.
-**Show the original** compares.
+selection**, **Resize**. A change is done at once, to the selection or,
+without one, to the whole picture, and is a step: moving more sliders
+changes that step, until **Done** (`Enter`), another kind of change, or
+another selection starts the next. `Ctrl+Z` undoes the last step,
+`Ctrl+Y` does it again, and the undo list (its own movable box, closed by
+its `X`) goes back to any of them. **Reset** goes back to the picture as
+it was. **Show the original** compares.
+
+**On the next picture.** Turn the page with Edit open and its steps are
+shown done to the new picture too — a selection or a crop at the same
+place, in proportion to its size. Only shown: no file is changed until you
+save. **Edit to all**, on the floating list's bar, does the steps to every
+picture of the folder or playlist and writes each as a copy beside it: you
+type the copy's name with `*` for the picture's own (`*_edit` as it comes,
+or `edited_*`); each copy is in its picture's format, or PNG when that
+cannot be written.
 
 **Resize.** **Resize %**, or **or a size**: half, double, fit the screen,
 640x480 to 8K (turned to the picture's way), the long side, or megapixels.
@@ -910,7 +922,8 @@ where it will go — and a checked row takes every other checked row along.
 Under the title, **Add** puts files you pick in the open dialog at the
 end of the list, **Del** takes the checked rows out (the files themselves
 stay on the disk), **Save** writes the list to a file (`.m3u8`, or
-`.rvlist`), **Load** opens such a file, and **Rel** / **Abs** says how a
+`.rvlist`), **Load** opens such a file, **Edit to all** writes an edited
+copy of every picture (see Edit), and **Rel** / **Abs** says how a
 saved list names its files: from the list's own folder, so that the folder
 can be moved or copied whole, or by their whole paths (Settings > Files >
 A saved list names its files). Files dragged from Explorer onto the list

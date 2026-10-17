@@ -334,6 +334,22 @@ typedef struct rubraview_edit_steps {
 void rubraview_edit_steps_begin(rubraview_edit_steps_t *steps, int32_t width, int32_t height);
 /** A new step after the ones in force; false when it does nothing or there is no room (the oldest is then kept). */
 bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step);
+/**
+ * The owner (2026-10-18): a change is a step at once. The last step in force
+ * is put in `step`'s place (a slider still moving); the ones undone after it
+ * go. With `step` doing nothing the last step is taken off instead. False
+ * when no step is in force.
+ */
+bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step);
+/**
+ * The owner (2026-10-18): the steps made on one picture, for another of
+ * `width` x `height`: every area, cut and size scaled across by width and
+ * down by height (a feather by the smaller), so the same parts of the
+ * picture are changed. Pixel amounts (an effect's) are kept.
+ */
+void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height);
+/** A rectangle of a `from_w` x `from_h` picture, the same part of a `to_w` x `to_h` one (at least 1 x 1, inside it). */
+rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_t from_w, int32_t from_h, int32_t to_w, int32_t to_h);
 bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps);
 bool rubraview_edit_steps_redo(rubraview_edit_steps_t *steps);
 /** To `cursor` steps in force (0 is the picture as it was); false past the end. */

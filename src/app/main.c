@@ -334,6 +334,19 @@ typedef struct save_job {
     int result;
 } save_job_t;
 
+/* The owner (2026-10-18): Edit's steps onto every picture of the list, each
+   written as a copy beside it, named with a prefix or a suffix. */
+typedef struct apply_all_job {
+    char **paths;
+    size_t count;
+    rubraview_edit_steps_t steps;
+    char prefix[64], suffix[64];
+    rubraview_export_options_t options;
+    rubraview_window_t *wake;
+    HANDLE thread;
+    volatile LONG done, failed, finished, cancel;
+} apply_all_job_t;
+
 typedef struct app_state {
     proven_arena_t *arena;
     rubraview_window_t *window;
@@ -825,6 +838,15 @@ typedef struct app_state {
     int32_t                   sel_feather;
     rubraview_panel_t         sel_panel;       /* the selection's numbers, a box of its own */
     rubraview_panel_t         steps_panel;     /* the undo list */
+    apply_all_job_t          *apply_job;       /* the owner (2026-10-18): the steps onto the whole list */
+    bool                      rename_is_apply; /* the rename box holds the copies' name: *_edit */
+    LONG                      apply_said;      /* how many were said done */
+    /* The owner (2026-10-18): a change is a step at once. While one kind of change
+       goes on over one area, the last step is that change, set again as it moves. */
+    bool                      edit_live;
+    int32_t                   edit_live_kind;  /* RUBRAVIEW_STEP_ADJUST or _EFFECT */
+    rubraview_edit_area_t     edit_live_area;
+    bool                      edit_live_busy;  /* a live step is being set: the selection's own sync does not end it */
     /* RV-133: classifying, the files set aside for the nine folders (made on first use) */
     rubraview_classify_t     *classify;
     rubraview_panel_t         classify_panel;
@@ -1205,6 +1227,11 @@ static void panel_open_edit(app_state_t *app);
 static void edit_save_over(app_state_t *app);
 static void edit_sel_sync(app_state_t *app);
 static bool edit_apply_pending(app_state_t *app, bool say);
+static void edit_live_update(app_state_t *app, int32_t kind);
+static void edit_live_close(app_state_t *app);
+static void apply_all_begin(app_state_t *app);
+static void apply_all_typed(app_state_t *app);
+static void apply_all_poll(app_state_t *app, bool quitting);
 static void edit_undo(app_state_t *app, bool redo);
 static void edit_effect_apply(app_state_t *app);
 static void edit_auto_colour(app_state_t *app);
@@ -5142,12 +5169,29 @@ static void sub_tile_result(app_state_t *app, rubraview_tap_result_t r) {
 
 /* ---- The playlist window (owner, 2026-09-29) ---- */
 
+/* Places the floating list; while Edit is open, left of its panel and
+   below its curve box, so the list's bar ("Edit to all") is not under them. */
+static void listwin_place_clear(app_state_t *app, double win_w, double win_h) {
+    rubraview_listwin_t *lw = &app->listwin;
+    double view_w = win_w;
+    if (edit_panel_open(app) && app->panel.open && app->panel.bounds.x > win_w * 0.3 && app->panel.bounds.x < win_w)
+        view_w = app->panel.bounds.x - 4.0;
+    rubraview_listwin_place(lw, view_w, win_h);
+    if (!edit_panel_open(app)) return;
+    rubraview_pal_rect_t curve = curve_widget_rect(app);
+    double below = curve.y + curve.height + 4.0;
+    if (curve.width <= 0.0 || lw->y >= below || curve.x >= lw->x + lw->width || curve.x + curve.width <= lw->x) return;
+    if (below > win_h * 0.6) return;   /* no room under it: leave the list where it is */
+    lw->y = below;
+    if (lw->y + lw->height > win_h) lw->height = win_h - lw->y;
+}
+
 static void listwin_toggle(app_state_t *app) {
     app->listwin.open = !app->listwin.open;
     if (!app->listwin.open) return;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
-    rubraview_listwin_place(&app->listwin, (double)w, (double)h);
+    listwin_place_clear(app, (double)w, (double)h);
     app->listwin_shown_page = -1;   /* the next frame scrolls to the file on screen */
 }
 
@@ -5459,6 +5503,7 @@ static bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, doub
         case RUBRAVIEW_LISTWIN_ADD: list_add_picked(app, in_files ? app->files_window : app->window); break;
         case RUBRAVIEW_LISTWIN_SAVE: list_save(app); break;
         case RUBRAVIEW_LISTWIN_LOAD: list_load(app); break;
+        case RUBRAVIEW_LISTWIN_APPLY: apply_all_begin(app); break;
         case RUBRAVIEW_LISTWIN_PATHS: {
             bool whole = !list_saves_whole_paths(app);
             rubraview_settings_set(&app->settings, U8("files"), U8("list_paths"), whole ? 1.0 : 0.0);
@@ -9375,6 +9420,9 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
     {
         double box_w = 560.0 * dpi, box_h = 64.0 * dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
+        /* Edit to all asks with Edit open: the box goes left of its panel. */
+        if (edit_panel_open(app) && app->panel.open && box.x + box.width > app->panel.bounds.x && app->panel.bounds.x > box_w)
+            box.x = (app->panel.bounds.x - box_w) * 0.5;
         /* A password is asked in the middle, clear of the toolbox's anchor
            (VM, 2026-10-01: it showed through the box). */
         if (app->rename_is_password || app->rename_is_target) box.y = (win_h - box_h) * 0.5;
@@ -9699,6 +9747,9 @@ static void draw_list_bar(app_state_t *app, rubraview_renderer_t *rr, const rubr
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), T("Load"), small, false, COLOR_TEXT);
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_PATHS), list_saves_whole_paths(app) ? T("Abs") : T("Rel"),
                 small, false, COLOR_TEXT);
+    /* the owner (2026-10-18): Edit's steps onto all of them, as copies; lit while Edit has a step */
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_APPLY), T("Edit to all"), small, false,
+                edit_panel_open(app) && app->edit_steps.cursor > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
     double head_h = rubraview_listwin_head_height(lw);
     rubraview_pal_rect_t rule = { lw->x + 2.0, lw->y + head_h - 1.0, lw->width - 4.0, 1.0 };
     rubraview_pal_render_fill_rect(rr, rule, COLOR_BOX_BORDER, 0.0);
@@ -9732,7 +9783,7 @@ static void draw_listwin(app_state_t *app, double win_w, double win_h) {
     if (!lw->open) return;
     size_t count = page_count(app);
     listwin_sync(app);
-    rubraview_listwin_place(lw, win_w, win_h);
+    listwin_place_clear(app, win_w, win_h);
     int32_t current = current_page_index(app);
     if (current != app->listwin_shown_page && current >= 0) {   /* follow the file on screen */
         rubraview_listwin_reveal(lw, (size_t)current, count);
@@ -10786,6 +10837,169 @@ static void triage_curate(app_state_t *app, int32_t digit) {
     }
 }
 
+/* ---- the owner's edit onto the whole list (2026-10-18) ----
+   "재생목록 중 이미지 전체에 적용 버튼을 달아서, 그걸 누르면 이미지 전체에 해당 효과가
+   적용된 사본이 동일 폴더에 사용자가 지정한 접두사 아니면 접미사를 달고 생기게". */
+
+static void apply_all_begin(app_state_t *app) {
+    if (!edit_panel_open(app)) { osd_say(app, TU8("open Edit (E) and make the change first")); return; }
+    edit_live_close(app);
+    if (app->edit_steps.cursor == 0) { osd_say(app, TU8("make a change in Edit first: its steps are what is applied")); return; }
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
+    if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
+    if (app->rename_active) rename_end(app);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    u8str_t last = rubraview_settings_get_text(&app->settings, U8("edit"), U8("copy_name"));
+    rubraview_textedit_set(&app->rename_edit, last.len > 0 ? last : U8("*_edit"));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_apply = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, TU8("each copy's name: * is the picture's own (*_edit, edited_*); Enter"));
+}
+
+static DWORD WINAPI apply_all_run(LPVOID param) {
+    apply_all_job_t *job = (apply_all_job_t*)param;
+    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    for (size_t i = 0; i < job->count && !InterlockedCompareExchange(&job->cancel, 0, 0); ++i) {
+        u8str_t path = cstr(job->paths[i]);
+        bool ok = false;
+        int32_t w = 0, h = 0;
+        if (com && rubraview_pal_image_size(path, &w, &h) && w > 0 && h > 0) {
+            rubraview_edit_steps_t steps = job->steps;
+            rubraview_edit_steps_rebase(&steps, w, h);   /* the same parts of this picture */
+            size_t biggest = (size_t)w * (size_t)h * 4u;
+            for (size_t k = 1; k <= steps.cursor; ++k) {
+                int32_t sw = 0, sh = 0;
+                rubraview_edit_steps_size(&steps, k, &sw, &sh);
+                if ((size_t)sw * (size_t)sh * 4u > biggest) biggest = (size_t)sw * (size_t)sh * 4u;
+            }
+            size_t half = biggest * 6u + (16u << 20);
+            size_t first = (size_t)w * (size_t)h * 4u * 3u + (16u << 20);
+            void *mem = malloc(first + half * 2u);
+            if (mem) {
+                proven_arena_t read = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = first });
+                proven_arena_t lanes[2] = {
+                    proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem + first, .size = half }),
+                    proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem + first + half, .size = half }),
+                };
+                rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&read, path, NULL, 0, true);
+                ok = rubraview_pixbuf_is_valid(&px);
+                for (size_t k = 0; ok && k < steps.cursor; ++k) {
+                    proven_arena_t *lane = &lanes[k % 2u];
+                    proven_arena_reset(lane);
+                    rubraview_pixbuf_t next = rubraview_edit_step_apply(lane, &steps.steps[k], &px, 1.0);
+                    if (rubraview_pixbuf_is_valid(&next)) px = next; else ok = false;
+                }
+                if (ok) {
+                    /* in its own format when it can be written, else PNG */
+                    rubraview_export_options_t options = job->options;
+                    rubraview_export_format_t f = rubraview_export_format_for_name(path);
+                    if (f == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) f = RUBRAVIEW_EXPORT_PNG;
+                    options.format = f;
+                    u8str_t ext = rubraview_export_extension(f);
+                    u8str_t stem = rubraview_path_stem(rubraview_path_basename(path));
+                    char name[1024];
+                    int n = snprintf(name, sizeof(name), "%s%.*s%s.%.*s", job->prefix, (int)stem.len, stem.ptr, job->suffix, (int)ext.len, ext.ptr);
+                    proven_arena_t *names = &lanes[steps.cursor % 2u];
+                    u8str_t target = n > 0 && (size_t)n < sizeof(name)
+                        ? rubraview_filing_target(names, rubraview_path_dirname(path), (u8str_t){ .ptr = name, .len = (size_t)n }, filing_exists, NULL)
+                        : (u8str_t){ .ptr = "", .len = 0 };
+                    ok = target.len > 0 && rubraview_pal_image_save(target, &px, &options);
+                }
+                free(mem);
+            }
+        }
+        if (ok) InterlockedIncrement(&job->done); else InterlockedIncrement(&job->failed);
+        rubraview_pal_window_wake(job->wake);
+    }
+    rubraview_pal_image_thread_end();
+    if (com) CoUninitialize();
+    InterlockedExchange(&job->finished, 1);
+    rubraview_pal_window_wake(job->wake);
+    return 0;
+}
+
+static void apply_all_typed(app_state_t *app) {
+    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    char pattern[160];
+    size_t n = text.len < sizeof(pattern) - 1 ? text.len : sizeof(pattern) - 1;
+    memcpy(pattern, text.ptr, n);
+    pattern[n] = '\0';
+    rename_end(app);
+    char *star = strchr(pattern, '*');
+    bool bad = !star || strchr(star + 1, '*') || n == 1 || strpbrk(pattern, "\\/:\"<>|?");
+    if (bad) { osd_say(app, TU8("the name needs one * for the picture's own name and something beside it: *_edit")); return; }
+    if (app->apply_job || app->edit_steps.cursor == 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) return;
+    rubraview_settings_set_text(&app->settings, U8("edit"), U8("copy_name"), app_keep(app, cstr(pattern)));
+    apply_all_job_t *job = (apply_all_job_t*)calloc(1, sizeof(*job));
+    if (!job) return;
+    size_t count = page_count(app);
+    job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
+    for (size_t i = 0; job->paths && i < count; ++i) {
+        u8str_t p = app->source.pages[i].path;
+        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) continue;   /* pictures only */
+        char *copy = (char*)malloc(p.len + 1);
+        if (!copy) continue;
+        memcpy(copy, p.ptr, p.len);
+        copy[p.len] = '\0';
+        job->paths[job->count++] = copy;
+    }
+    if (job->count == 0) { free(job->paths); free(job); osd_say(app, TU8("no pictures in the list")); return; }
+    *star = '\0';
+    snprintf(job->prefix, sizeof(job->prefix), "%s", pattern);
+    snprintf(job->suffix, sizeof(job->suffix), "%s", star + 1);
+    job->steps = app->edit_steps;
+    job->options = app->export_options;
+    if (app->edit.resize_dpi > 0.0) job->options.dpi = app->edit.resize_dpi;
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, apply_all_run, job, 0, NULL);
+    if (!job->thread) {
+        for (size_t i = 0; i < job->count; ++i) free(job->paths[i]);
+        free(job->paths); free(job);
+        osd_say(app, TU8("could not start applying"));
+        return;
+    }
+    app->apply_job = job;
+    app->apply_said = -1;
+    char said[96];
+    int m = snprintf(said, sizeof(said), T("applying the edit to %zu pictures..."), job->count);
+    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+}
+
+/* How far it is, said as it goes; at the end, what was made. A quit stops it after the picture in hand. */
+static void apply_all_poll(app_state_t *app, bool quitting) {
+    apply_all_job_t *job = app->apply_job;
+    if (!job) return;
+    if (quitting) InterlockedExchange(&job->cancel, 1);
+    LONG done = InterlockedCompareExchange(&job->done, 0, 0), failed = InterlockedCompareExchange(&job->failed, 0, 0);
+    if (!quitting && !InterlockedCompareExchange(&job->finished, 0, 0)) {
+        if (done + failed != app->apply_said) {
+            app->apply_said = done + failed;
+            char said[96];
+            int m = snprintf(said, sizeof(said), T("applying the edit: %ld / %zu"), (long)(done + failed), job->count);
+            if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+        }
+        return;
+    }
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    done = job->done; failed = job->failed;
+    for (size_t i = 0; i < job->count; ++i) free(job->paths[i]);
+    free(job->paths);
+    free(job);
+    app->apply_job = NULL;
+    if (quitting) return;
+    char said[128];
+    int m = failed ? snprintf(said, sizeof(said), T("%ld copies made beside the pictures; %ld could not be"), (long)done, (long)failed)
+                   : snprintf(said, sizeof(said), T("%ld copies made beside the pictures"), (long)done);
+    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+    /* the folder again, the picture on screen kept */
+    int32_t page = current_page_index(app);
+    if (page >= 0 && done > 0) reopen_on_path(app, app_keep(app, app->source.pages[page].path), (size_t)page);
+}
+
 /* ---- the file on screen, to its folder (owner, 2026-10-08) ----
    `copy_to_folder` and `move_to_folder`, each with a folder of its own from
    Settings > Files. A name already there is never replaced: the file goes
@@ -10919,6 +11133,7 @@ static void rename_end(app_state_t *app) {
     app->rename_is_find = false;
     app->rename_is_value = false;
     app->batch_typing = 0;
+    app->rename_is_apply = false;
     app->target_offered_len = 0;
     if (app->rename_is_password) {                       /* nothing of it stays behind */
         secure_wipe(app->rename_buffer, sizeof(app->rename_buffer));
@@ -11182,6 +11397,7 @@ static void rename_commit(app_state_t *app) {
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
     if (app->rename_is_value) { edit_value_typed(app); return; }
     if (app->batch_typing) { batch_typed(app); return; }
+    if (app->rename_is_apply) { apply_all_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
     if (app->rename_is_target) { target_commit(app); return; }
@@ -11922,7 +12138,49 @@ static void edit_steps_changed(app_state_t *app) {
     edit_steps_build(app);
 }
 
+static bool edit_area_same(const rubraview_edit_area_t *a, const rubraview_edit_area_t *b) {
+    if (a->shape != b->shape || a->feather != b->feather) return false;
+    return a->shape == RUBRAVIEW_AREA_ALL || memcmp(&a->rect, &b->rect, sizeof(a->rect)) == 0;
+}
+
+/* The change in hand ends: it stays a step, and the next change starts from nothing. */
+static void edit_live_close(app_state_t *app) {
+    if (!app->edit_live) return;
+    app->edit_live = false;
+    if (app->edit_live_kind == RUBRAVIEW_STEP_EFFECT) app->effect_choice = RUBRAVIEW_EFFECT_NONE;
+    else edit_values_fresh(app);
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    if (edit_panel_open(app)) panel_build_edit(app);
+}
+
+/* A value changed (a slider, a curve, an effect or its amount): it is a step now. */
+static void edit_live_update(app_state_t *app, int32_t kind) {
+    app->edit_live_busy = true;
+    rubraview_edit_step_t s = kind == RUBRAVIEW_STEP_EFFECT
+        ? (rubraview_edit_step_t){ .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount }
+        : edit_pending(app);
+    if (app->edit_live && app->edit_live_kind == kind && edit_area_same(&s.area, &app->edit_live_area) && app->edit_steps.cursor > 0) {
+        (void)rubraview_edit_steps_set_last(&app->edit_steps, &s);   /* set again; taken off when back to nothing */
+        if (!rubraview_edit_step_does_something(&s)) app->edit_live = false;
+    } else {
+        app->edit_live = false;   /* another kind, or another area: a new step */
+        if (rubraview_edit_steps_push(&app->edit_steps, &s)) {
+            app->edit_live = true;
+            app->edit_live_kind = kind;
+            app->edit_live_area = s.area;
+        } else if (rubraview_edit_step_does_something(&s)) {
+            osd_say(app, TU8("the list of steps is full: save, or undo some"));
+        }
+    }
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    edit_steps_build(app);   /* the undo list; the panel itself is not built again under a moving slider */
+    app->edit_live_busy = false;
+}
+
 static bool edit_apply_pending(app_state_t *app, bool say) {
+    if (app->edit_live) { edit_live_close(app); return true; }   /* already a step: it ends here */
     rubraview_edit_step_t s = edit_pending(app);
     if (!rubraview_edit_steps_push(&app->edit_steps, &s)) {
         if (say) osd_say(app, app->edit_steps.cursor >= RUBRAVIEW_EDIT_MAX_STEPS ? TU8("the list of steps is full: save, or undo some")
@@ -11959,6 +12217,7 @@ static void edit_resize_apply(app_state_t *app) {
 }
 
 static void edit_effect_apply(app_state_t *app) {
+    if (app->edit_live && app->edit_live_kind == RUBRAVIEW_STEP_EFFECT) { edit_live_close(app); osd_say(app, TU8("effect applied (Ctrl+Z undoes it)")); return; }
     if (app->effect_choice <= RUBRAVIEW_EFFECT_NONE) { osd_say(app, TU8("choose an effect first")); return; }
     (void)edit_apply_pending(app, false);
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount };
@@ -11971,6 +12230,7 @@ static void edit_effect_apply(app_state_t *app) {
 /* The owner's automatic colour correction, measured on the picture as the steps left it. */
 static void edit_auto_colour(app_state_t *app) {
     if (!rubraview_pixbuf_is_valid(&app->edit_small)) { osd_say(app, TU8("the picture is not read yet")); return; }
+    edit_live_close(app);   /* measured on the steps as they are, then a step of its own */
     size_t bytes = (size_t)app->edit_small.width * (size_t)app->edit_small.height * 4u * (6u + 4u * app->edit_steps.cursor) + (8u << 20);
     void *mem = malloc(bytes);
     if (!mem) return;
@@ -11979,15 +12239,15 @@ static void edit_auto_colour(app_state_t *app) {
     rubraview_pixbuf_t now = rubraview_edit_steps_apply(&arena, &app->edit_steps, &app->edit_small, ratio);
     if (rubraview_pixbuf_is_valid(&now)) {
         rubraview_edit_auto_colour(&app->edit, &now);
-        app->edit_rev++;
-        app->edit_shown_valid = false;
+        edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
         panel_build_edit(app);
-        osd_say(app, TU8("colours corrected: see the curves and Red / Green / Blue; Enter applies"));
+        osd_say(app, TU8("colours corrected (Ctrl+Z undoes it)"));
     }
     free(mem);
 }
 
 static void edit_undo(app_state_t *app, bool redo) {
+    edit_live_close(app);
     bool moved = redo ? rubraview_edit_steps_redo(&app->edit_steps) : rubraview_edit_steps_undo(&app->edit_steps);
     if (!moved) { osd_say(app, redo ? TU8("nothing to redo") : TU8("nothing to undo")); return; }
     edit_steps_changed(app);
@@ -12076,6 +12336,7 @@ static void edit_sel_build(app_state_t *app) {
 
 /* The numbers follow the selection drawn or moved on the picture. */
 static void edit_sel_sync(app_state_t *app) {
+    if (!app->edit_live_busy) edit_live_close(app);   /* another selection: the next change is a step of its own */
     if (!app->sel_panel.open) return;
     edit_sel_build(app);
 }
@@ -12166,7 +12427,9 @@ static void panel_build_edit(app_state_t *app) {
     rubraview_panel_add_choice(&app->panel, PANEL_SHARPEN_KIND, TU8("Sharpen kind"), e->sharpen_laplacian ? 1 : 0, 2);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, U8("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, U8("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
-    rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Apply to the selection (Enter)") : TU8("Apply to the whole picture (Enter)"));
+    /* Changes are on the picture at once (owner, 2026-10-18): this only ends the step, so the next change is one of its own. */
+    rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
+                                                                            : TU8("Done: next change a new step (Enter)"));
     rubraview_panel_add_separator(&app->panel);
     /* Effects (owner, 2026-10-17): one chosen, seen on the picture, applied as a step. */
     rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), app->effect_choice, RUBRAVIEW_EFFECT_COUNT);
@@ -12175,7 +12438,7 @@ static void panel_build_edit(app_state_t *app) {
         rubraview_effect_range((rubraview_effect_t)app->effect_choice, &lo, &hi, NULL);
         rubraview_panel_add_slider(&app->panel, PANEL_EFFECT_AMOUNT, TU8("  amount"), app->effect_amount, lo, hi, 1.0);
     }
-    rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, e->crop_active ? TU8("Apply the effect to the selection") : TU8("Apply the effect to the whole picture"));
+    rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
     rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
     rubraview_panel_add_separator(&app->panel);
     rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, TU8("Crop to the selection"));
@@ -13911,6 +14174,21 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
     /* The preview is of the tones, the blur and the sharpening: any of them changing draws it again. */
     app->edit_shown_valid = false;
     app->edit_rev++;
+    /* The owner (2026-10-18): the change is on the picture at once, a step of the undo list. */
+    if (edit_panel_open(app)) {
+        switch (row->id) {
+            case PANEL_EXPOSURE: case PANEL_BRIGHTNESS: case PANEL_CONTRAST: case PANEL_SATURATION: case PANEL_TEMPERATURE:
+            case PANEL_TINT: case PANEL_BAL_R: case PANEL_BAL_G: case PANEL_BAL_B: case PANEL_GAMMA: case PANEL_BLUR:
+            case PANEL_SHARPEN: case PANEL_BLACK: case PANEL_WHITE: case PANEL_BLUR_KIND: case PANEL_SHARPEN_KIND:
+            case PANEL_SHARPEN_RADIUS: case PANEL_SHARPEN_THRESHOLD:
+                edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
+                break;
+            case PANEL_EFFECT: case PANEL_EFFECT_AMOUNT:
+                edit_live_update(app, RUBRAVIEW_STEP_EFFECT);
+                break;
+            default: break;
+        }
+    }
 }
 
 static void panel_button(app_state_t *app, int32_t index) {
@@ -13918,6 +14196,7 @@ static void panel_button(app_state_t *app, int32_t index) {
     switch (app->panel.rows[index].id) {
         case PANEL_RESET:
             /* Everything since the panel opened: the steps, the values, the selection. */
+            app->edit_live = false;
             rubraview_edit_steps_reset(&app->edit_steps);
             rubraview_edit_reset(&app->edit);
             edit_values_fresh(app);
@@ -14086,6 +14365,7 @@ static bool edit_side_press(app_state_t *app, double px, double py) {
         if (row < 0) return true;
         int32_t id = box->rows[row].id;
         if (box == &app->steps_panel && id >= PANEL_STEP_FIRST) {
+            edit_live_close(app);
             if (rubraview_edit_steps_go(&app->edit_steps, (size_t)(id - PANEL_STEP_FIRST))) edit_steps_changed(app);
         } else if (ev == RUBRAVIEW_PANEL_VALUE_CHANGED) {
             edit_sel_apply_row(app, row);
@@ -19038,6 +19318,26 @@ static void edit_preview_open(app_state_t *app) {
     int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (w <= 0 || h <= 0) return;
 
+    /* The owner (2026-10-18): Edit open, another picture: the undo list's steps go with
+       the reader, onto it, shown there (its file is not touched until it is saved). */
+    if (app->edit_steps.width > 0 && (app->edit_steps.width != w || app->edit_steps.height != h)) {
+        if (app->edit_live) {   /* the change in hand ends where it was made */
+            app->edit_live = false;
+            if (app->edit_live_kind == RUBRAVIEW_STEP_EFFECT) app->effect_choice = RUBRAVIEW_EFFECT_NONE; else edit_values_fresh(app);
+        }
+        int32_t ow = 0, oh = 0, nw = 0, nh = 0;
+        edit_cur_size(app, &ow, &oh);
+        rubraview_edit_steps_rebase(&app->edit_steps, w, h);
+        edit_cur_size(app, &nw, &nh);
+        if (app->edit.crop_active) app->edit.crop = rubraview_edit_rect_rebase(app->edit.crop, ow, oh, nw, nh);
+        app->edit.image_width = nw;
+        app->edit.image_height = nh;
+        app->edit_rev++;
+        if (edit_panel_open(app)) panel_build_edit(app);
+        edit_steps_build(app);
+        if (app->sel_panel.open) edit_sel_build(app);
+    }
+
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     int32_t pw = 0, ph = 0;
@@ -19149,16 +19449,7 @@ static void edit_preview_update(app_state_t *app) {
     double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
     rubraview_pixbuf_t edited = rubraview_edit_steps_apply(&work, &app->edit_steps, &app->edit_small, ratio);
     if (!rubraview_pixbuf_is_valid(&edited)) return;
-    rubraview_edit_step_t pending = edit_pending(app);
-    if (rubraview_edit_step_does_something(&pending)) {
-        rubraview_pixbuf_t next = rubraview_edit_step_apply(&work, &pending, &edited, ratio);
-        if (rubraview_pixbuf_is_valid(&next)) edited = next;
-    }
-    rubraview_edit_step_t effect = { .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount };
-    if (rubraview_edit_step_does_something(&effect)) {
-        rubraview_pixbuf_t next = rubraview_edit_step_apply(&work, &effect, &edited, ratio);
-        if (rubraview_pixbuf_is_valid(&next)) edited = next;
-    }
+    /* Every change is a step already (owner, 2026-10-18): nothing is laid over the steps. */
     if (app->edit_compare) edited = rubraview_pixbuf_clone(&work, &app->edit_small);   /* the original, to compare */
     rubraview_histogram_compute(&edited, app->edit_hist[0], app->edit_hist[1], app->edit_hist[2], app->edit_hist[3]);
     app->edit_hist_ok = true;
@@ -19450,10 +19741,12 @@ static bool curve_widget_press(app_state_t *app, double px, double py, bool remo
     if (remove) {
         rubraview_edit_curve_remove(&app->edit, index);
         app->curve_dragging = -1;
+        edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
         return true;
     }
     rubraview_edit_curve_move(&app->edit, index, x, y);
     app->curve_dragging = index;
+    edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
     return true;
 }
 
@@ -19463,6 +19756,7 @@ static void curve_widget_drag(app_state_t *app, double px, double py) {
     float x = (float)((px - box.x) / box.width * 255.0);
     float y = (float)((1.0 - (py - box.y) / box.height) * 255.0);
     rubraview_edit_curve_move(&app->edit, app->curve_dragging, x, y);
+    edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
 }
 
 /* The boxes' size from settings.ini (owner, 2026-09-29), each frame so the
@@ -23621,6 +23915,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     /* The owner's edit: the boxes beside it, then the selection's handles and inside. */
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && classify_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_side_press(&app, event.mouse.x, event.mouse.y)) break;
+                    /* The floating lists over the picture are theirs, not the selection's ("Edit to all"). */
+                    if (edit_panel_open(&app) && app.recentwin.open && event.mouse.button == RUBRAVIEW_MOUSE_LEFT &&
+                        rubraview_rect_contains(rubraview_listwin_rect(&app.recentwin), event.mouse.x, event.mouse.y) &&
+                        recentwin_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (edit_panel_open(&app) && app.listwin.open &&
+                        rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y) &&
+                        listwin_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
                         !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y)) {
                         int32_t hit = sel_hit(&app, event.mouse.x, event.mouse.y);
@@ -23936,6 +24237,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         strip_step(&app, dt);   /* the wheel's strip: slide, fade, thumbnails */
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
+        apply_all_poll(&app, false);
         arc_job_poll(&app, false);
         page_job_poll(&app);
         arena_refill(&app);
@@ -24081,6 +24383,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     strip_cells_free(&app);
     tiles_reset(&app);                       /* D-40: its textures, then its thread */
     save_job_poll(&app, true);   /* a copy being written is finished, not cut off */
+    apply_all_poll(&app, true);  /* the copy in hand is finished, the rest left */
     arc_job_poll(&app, true);    /* D-88: an archive being written again is stopped; the old one stands */
     arc_undo_drop(&app);         /* D-89: the kept file of the last edit goes with the program */
     print_temp_drop(&app);

@@ -56,9 +56,10 @@ rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
     return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
 }
 
-#define BAR_COUNT 5
+#define BAR_COUNT 6
 static const rubraview_listwin_part_t BAR[BAR_COUNT] = {
     RUBRAVIEW_LISTWIN_ADD, RUBRAVIEW_LISTWIN_DEL, RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS,
+    RUBRAVIEW_LISTWIN_APPLY,
 };
 static const rubraview_listwin_part_t ROW_PARTS[] = {
     RUBRAVIEW_LISTWIN_ROW_CHECK, RUBRAVIEW_LISTWIN_ROW_REMOVE, RUBRAVIEW_LISTWIN_ROW_UP, RUBRAVIEW_LISTWIN_ROW_DOWN,

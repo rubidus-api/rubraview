@@ -38,6 +38,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_ROW_REMOVE,
     RUBRAVIEW_LISTWIN_ROW_UP,
     RUBRAVIEW_LISTWIN_ROW_DOWN,
+    RUBRAVIEW_LISTWIN_APPLY,      /* the bar: Edit's steps onto every picture of the list, as copies (owner, 2026-10-18) */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {

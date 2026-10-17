@@ -641,6 +641,54 @@ bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_ed
     return true;
 }
 
+bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step) {
+    if (!steps || !step || steps->cursor == 0) return false;
+    if (!rubraview_edit_step_does_something(step)) steps->cursor--;
+    else steps->steps[steps->cursor - 1] = *step;
+    steps->count = steps->cursor;
+    return true;
+}
+
+rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_t from_w, int32_t from_h, int32_t to_w, int32_t to_h) {
+    if (from_w <= 0 || from_h <= 0 || to_w <= 0 || to_h <= 0) return r;
+    double sx = (double)to_w / from_w, sy = (double)to_h / from_h;
+    int32_t x = (int32_t)lround(r.x * sx), y = (int32_t)lround(r.y * sy);
+    int32_t w = (int32_t)lround(r.width * sx), h = (int32_t)lround(r.height * sy);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > to_w - 1) x = to_w - 1;
+    if (y > to_h - 1) y = to_h - 1;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (x + w > to_w) w = to_w - x;
+    if (y + h > to_h) h = to_h - y;
+    return (rubraview_crop_rect_t){ x, y, w, h };
+}
+
+void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height) {
+    if (!steps || width <= 0 || height <= 0 || steps->width <= 0 || steps->height <= 0) return;
+    if (steps->width == width && steps->height == height) return;
+    double sx = (double)width / steps->width, sy = (double)height / steps->height, s = sx < sy ? sx : sy;
+    /* the size each step was made on, all taken before any is changed */
+    int32_t before_w[RUBRAVIEW_EDIT_MAX_STEPS], before_h[RUBRAVIEW_EDIT_MAX_STEPS];
+    for (size_t i = 0; i < steps->count; ++i) rubraview_edit_steps_size(steps, i, &before_w[i], &before_h[i]);
+    for (size_t i = 0; i < steps->count; ++i) {
+        rubraview_edit_step_t *st = &steps->steps[i];
+        int32_t bw = before_w[i], bh = before_h[i];
+        int32_t nw = (int32_t)lround(bw * sx), nh = (int32_t)lround(bh * sy);
+        if (st->area.shape != RUBRAVIEW_AREA_ALL || st->kind == RUBRAVIEW_STEP_CROP)
+            st->area.rect = rubraview_edit_rect_rebase(st->area.rect, bw, bh, nw > 0 ? nw : 1, nh > 0 ? nh : 1);
+        st->area.feather = (int32_t)lround(st->area.feather * s);
+        if (st->kind == RUBRAVIEW_STEP_RESIZE) {
+            int32_t rw = (int32_t)lround(st->values.resize_width * sx), rh = (int32_t)lround(st->values.resize_height * sy);
+            st->values.resize_width = rw > 0 ? rw : 1;
+            st->values.resize_height = rh > 0 ? rh : 1;
+        }
+    }
+    steps->width = width;
+    steps->height = height;
+}
+
 bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps) {
     if (!steps || steps->cursor == 0) return false;
     steps->cursor--;
