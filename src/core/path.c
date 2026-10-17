@@ -300,3 +300,12 @@ bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid) {
     if (out_pid) *out_pid = (uint32_t)pid;
     return true;
 }
+
+u8str_t rubraview_path_typed_folder(u8str_t typed) {
+    const char *p = typed.ptr;
+    size_t n = p ? typed.len : 0;
+    while (n > 0 && (p[0] == ' ' || p[0] == '"' || p[0] == '\t')) { p++; n--; }
+    while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '"' || p[n - 1] == '\t')) n--;
+    while (n > 1 && rubraview_path_is_sep(p[n - 1]) && !(n == 3 && p[1] == ':')) n--;
+    return (u8str_t){ .ptr = n ? p : "", .len = n };
+}

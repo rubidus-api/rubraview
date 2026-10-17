@@ -60,6 +60,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
 u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path);
 
 /**
+ * `path` with Windows' %VARIABLES% put in (%LOCALAPPDATA%\ffmpeg), for a
+ * folder typed into the settings. What cannot be expanded is given back as
+ * it was. NUL-terminated, in `arena`.
+ */
+u8str_t rubraview_pal_fs_expand_env(proven_arena_t *arena, u8str_t path);
+
+/**
  * A file mapped read-only (owner, 2026-09-28: comics of several GB). The
  * archive readers take bytes and a size, so a mapping serves them with no
  * copy and no limit but the address space; pages are read from disk as

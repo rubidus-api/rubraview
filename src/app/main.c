@@ -33,6 +33,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -12589,9 +12590,12 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
            joined with '/': shown with Windows' own separator throughout. */
         for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
     } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
+        int place = rubraview_pal_ffmpeg_place();
         n = snprintf(buffer, capacity, "%s",
-                     rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)
-                         ? T("its DLLs are beside the program") : T("not found (or not 9.x) - Media Foundation only"));
+                     place == 1 ? T("its DLLs are beside the program")
+                     : place == 2 ? T("its DLLs were imported into the settings folder")
+                     : place == 3 ? T("its DLLs are in the FFmpeg folder")
+                     : T("not found (or not 9.x) - Media Foundation only"));
     } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
     } else if (rubraview_u8_eq_lit(source, "cache.used")) {
@@ -12918,15 +12922,22 @@ static void settings_close(app_state_t *app) {
    missing or cannot be read leaves the viewer in English and says so. */
 static rubraview_lang_t g_lang;
 static char g_lang_code[24];   /* what is in use: "" for English */
+static const char *const LANG_PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
+
+/* Where Import puts what cannot go beside the program (the Store's package
+   and Program Files take no files): `name` in the settings folder. */
+static u8str_t imported_folder(app_state_t *app, const char *name) {
+    u8str_t dir = rubraview_path_dirname(app->settings_path);
+    return dir.len > 0 ? rubraview_path_join(app->arena, dir, cstr(name)) : U8("");
+}
 
 static void lang_apply(app_state_t *app) {
     static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
-    static const char *const PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
     int c = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("language")));
     const char *want = CHOICES[c >= 0 && c < 7 ? c : 0];
     if (strcmp(want, "auto") == 0) {
         char tag[96];
-        want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, PACKS, 5) : NULL;
+        want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
     }
     if (want && strcmp(want, "en") == 0) want = NULL;
     if (strcmp(want ? want : "", g_lang_code) == 0) return;
@@ -13034,6 +13045,10 @@ static void settings_apply_rest(app_state_t *app) {
         for (size_t i = 0; i < face.len; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
         if (h != last_face) { g_subtitle_style++; last_face = h; }
     }
+    /* Before anything asks for FFmpeg, and again on a change: while it is
+       not loaded, the new folder is tried at the next ask. */
+    rubraview_pal_ffmpeg_set_folders(imported_folder(app, "ffmpeg"), rubraview_pal_fs_expand_env(app->arena,
+        rubraview_path_typed_folder(rubraview_settings_get_text(st, U8("video"), U8("ffmpeg_dir")))));
     double grid = rubraview_settings_get(st, U8("viewer"), U8("pixel_grid"));
     if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
 
@@ -13151,6 +13166,106 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
     rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
     skip_dirs_table_rows(app);
     settings_say(app, T("keys imported (Revert undoes this)"));
+}
+
+/* A copy that may take the place of an older one: written beside it under
+   another name first, so a failed copy leaves the old file whole. */
+static bool copy_over(app_state_t *app, u8str_t from, u8str_t to) {
+    u8str_t spare = rubraview_path_join(app->arena, rubraview_path_dirname(to),
+                                        rubraview_path_with_ext(app->arena, rubraview_path_basename(to), ".importing"));
+    (void)rubraview_pal_fs_delete(spare);
+    if (rubraview_pal_fs_copy(from, spare) && rubraview_pal_fs_replace(spare, to)) return true;
+    (void)rubraview_pal_fs_delete(spare);
+    return false;
+}
+
+/* Import (owner, 2026-10-17): the files copied where the program reads
+   them, so nothing has to be put anywhere by hand: beside the program when
+   that folder can be written (the zip), else into the settings folder's
+   `sub` (the Store's package, Program Files). 0 nothing copied, 1 beside,
+   2 the settings folder. */
+static int import_files(app_state_t *app, const u8str_t *from, const u8str_t *names, size_t count, const char *sub,
+                        bool beside_in_sub) {
+    u8str_t places[2] = {
+        beside_in_sub ? rubraview_path_join(app->arena, app->config_beside, cstr(sub)) : app->config_beside,
+        imported_folder(app, sub),
+    };
+    for (int p = 0; p < 2; p++) {
+        if (places[p].len == 0 || !rubraview_pal_fs_make_dirs(places[p])) continue;
+        size_t done = 0;
+        while (done < count && copy_over(app, from[done], rubraview_path_join(app->arena, places[p], names[done]))) done++;
+        if (done == count) return p + 1;
+    }
+    return 0;
+}
+
+static void ffmpeg_import(app_state_t *app) {
+    rubraview_file_dialog_opts_t opts = {
+        .title = T("Choose the folder with FFmpeg's DLLs (its bin)"), .folder_mode = true,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
+    };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    u8str_t from[RUBRAVIEW_FFMPEG_DLLS], names[RUBRAVIEW_FFMPEG_DLLS];
+    for (size_t i = 0; i < RUBRAVIEW_FFMPEG_DLLS; i++) {
+        names[i] = cstr(rubraview_pal_ffmpeg_dll_name(i));
+        from[i] = rubraview_path_join(app->arena, picked.paths[0], names[i]);
+        if (!rubraview_pal_fs_exists(from[i])) {
+            settings_say(app, T("that folder does not hold FFmpeg 9.0's five DLLs; nothing copied"));
+            return;
+        }
+    }
+    bool loaded = rubraview_pal_ffmpeg_place() != 0;
+    int where = import_files(app, from, names, RUBRAVIEW_FFMPEG_DLLS, "ffmpeg", false);
+    settings_took_effect(app);   /* tried again now, while none is loaded */
+    settings_say(app, where == 0 ? T("FFmpeg could not be copied (is it in use?)")
+                      : loaded ? T("FFmpeg imported; the one in use stays until the next start")
+                      : rubraview_pal_ffmpeg_place() != 0 ? T("FFmpeg imported and in use")
+                      : T("FFmpeg copied, but it would not load: not 9.0, or not the shared build"));
+    app->settings_dirty = true;
+}
+
+static void lang_import(app_state_t *app) {
+    const rubraview_file_filter_t FILTERS[] = { { T("Language pack (*.txt)"), "*.txt" } };
+    rubraview_file_dialog_opts_t opts = {
+        .title = T("Import language packs"), .filters = FILTERS, .filter_count = 1, .allow_multi = true,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
+    };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    u8str_t from[16], names[16];
+    size_t count = 0;
+    for (size_t i = 0; i < picked.count && count < 16; i++) {
+        /* Only a pack this build can choose, under its own name (ko.txt), and one that reads. */
+        u8str_t stem = rubraview_path_stem(picked.paths[i]);
+        const char *code = NULL;
+        for (size_t k = 0; k < 5 && !code; k++) {
+            size_t at = 0, n = strlen(LANG_PACKS[k]);
+            while (at < n && at < stem.len && tolower((unsigned char)stem.ptr[at]) == tolower((unsigned char)LANG_PACKS[k][at])) at++;
+            if (at == n && stem.len == n) code = LANG_PACKS[k];
+        }
+        u8str_t text = code ? rubraview_pal_fs_read_file(app->arena, picked.paths[i], RUBRAVIEW_LANG_MAX_FILE) : U8("");
+        rubraview_lang_t probe = {0};
+        rubraview_lang_stats_t stats;
+        bool reads = text.len > 0 && rubraview_lang_load(&probe, text, &stats);
+        rubraview_lang_free(&probe);
+        if (!reads) continue;
+        char name[32];
+        snprintf(name, sizeof(name), "%s.txt", code);
+        from[count] = picked.paths[i];
+        names[count++] = app_keep(app, cstr(name));
+    }
+    if (count == 0) {
+        settings_say(app, T("no language pack among them (ko.txt, ja.txt, zh-Hans.txt, zh-Hant.txt, fa.txt); nothing copied"));
+        return;
+    }
+    int where = import_files(app, from, names, count, "lang", true);
+    snprintf(g_lang_code, sizeof(g_lang_code), "?");   /* read again, the one in use too */
+    lang_apply(app);
+    settings_say(app, where == 0 ? T("the language packs could not be copied")
+                      : count < picked.count ? T("language packs imported; files that are not one were left out")
+                      : T("language packs imported"));
+    app->settings_dirty = true;
 }
 
 static void settings_say(app_state_t *app, const char *text) {
@@ -13425,6 +13540,11 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 shell_wipe_action(app);
             } else if (rubraview_u8_eq_lit(node->name, "shell.defaults")) {
                 rubraview_pal_shell_open_default_apps();
+            } else if (rubraview_u8_eq_lit(node->name, "ffmpeg.download")) {
+                /* The owner (2026-10-17): where to get FFmpeg, one press away. */
+                settings_say(app, rubraview_pal_shell_open_web("https://github.com/BtbN/FFmpeg-Builds/releases")
+                                      ? T("the FFmpeg download page is opening in the browser")
+                                      : T("the browser could not be started"));
             } else if (rubraview_u8_eq_lit(node->name, "cache.clear_thumbs")) {
                 /* RV-107: the picker's pictures are kept in memory only; they are made again as tiles come into view. */
                 picker_thumbs_free(app);
@@ -13447,6 +13567,10 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, written ? T("every reading place is forgotten") : T("forgotten here; the history file could not be written"));
             } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
                 keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
+            } else if (rubraview_u8_eq_lit(node->name, "ffmpeg.import")) {
+                ffmpeg_import(app);
+            } else if (rubraview_u8_eq_lit(node->name, "lang.import")) {
+                lang_import(app);
             }
             break;
         }
@@ -13544,7 +13668,8 @@ static void settings_path_commit(app_state_t *app) {
     while (text.len > 0 && (text.ptr[text.len - 1] == ' ' || text.ptr[text.len - 1] == '"')) text.len--;
     /* RV-106: "Only names like" is typed like a folder and is not one. */
     bool is_folder = !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern")) &&
-                     !rubraview_u8_eq_lit(app->spath_section, "video");   /* RV-107: a font's name, a language */
+                     (!rubraview_u8_eq_lit(app->spath_section, "video") ||   /* RV-107: a font's name, a language */
+                      rubraview_u8_eq_lit(app->spath_key, "ffmpeg_dir"));
     if (app->spath_list_index >= 0) {
         /* A folder of the list kept out of Recent: put in its place, or added; empty takes it off. */
         rubraview_fs_entry_t is;
@@ -13569,6 +13694,7 @@ static void settings_path_commit(app_state_t *app) {
     if (text.len == 0) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
         settings_path_end(app);
+        settings_took_effect(app);
         settings_say(app, is_folder ? T("folder cleared") : "cleared");
         return;
     }
@@ -13576,12 +13702,14 @@ static void settings_path_commit(app_state_t *app) {
     if (!is_folder) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
         settings_path_end(app);
+        settings_took_effect(app);
         settings_say(app, rubraview_u8_eq_lit(app->spath_section, "files")
                               ? "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*"
                               : T("kept (Delete clears it)"));
         return;
     }
-    if (!rubraview_pal_fs_stat(app->arena, text, &found) || !found.is_directory) {
+    /* %LOCALAPPDATA%\ffmpeg is a folder too: looked for as Windows will read it. */
+    if (!rubraview_pal_fs_stat(app->arena, rubraview_pal_fs_expand_env(app->arena, text), &found) || !found.is_directory) {
         settings_say(app, T("no such folder - put it right, or Esc"));
         return;
     }
@@ -13590,6 +13718,7 @@ static void settings_path_commit(app_state_t *app) {
        1 turned into Folder 2's path once Folder 2 was typed). */
     rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
     settings_path_end(app);
+    settings_took_effect(app);
     settings_say(app, T("folder kept (Delete clears it)"));
 }
 
@@ -19134,6 +19263,12 @@ static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
    rubraview what it actually does with one file. */
 static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     char line[512];
+    u8str_t ini = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
+    if (ini.len > 0) {
+        rubraview_ini_doc_t doc = rubraview_ini_parse(arena, ini);
+        const u8str_t *dir = rubraview_ini_get(&doc, U8("video"), U8("ffmpeg_dir"));
+        if (dir) rubraview_pal_ffmpeg_set_folders(U8(""), rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir)));
+    }
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"

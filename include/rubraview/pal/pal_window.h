@@ -248,6 +248,9 @@ bool rubraview_pal_shell_reveal(u8str_t path);
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
 
+/** A web page in the default browser; only an https:// address is opened. */
+bool rubraview_pal_shell_open_web(const char *https_url);
+
 /** Returns NULL if the window cannot be created (or on a host build with no windowing backend). */
 rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rubraview_window_config_t *config);
 

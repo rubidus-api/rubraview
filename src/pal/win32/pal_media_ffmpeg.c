@@ -150,18 +150,73 @@ typedef struct ff_api {
 
 static ff_api_t g_ff;
 
-static HMODULE load_one(const char *versioned, const char *plain) {
-    WCHAR wide[64];
-    HMODULE module = NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, versioned, -1, wide, 64) > 0) {
-        module = LoadLibraryExW(wide, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
-                                            LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+/* The five, in the order they need one another: each finds the ones it
+   imports already in the process instead of searching for them. */
+#define FF_DLLS 5
+static const char *const FF_VERSIONED[FF_DLLS] = {
+    "avutil-" AV_STRINGIFY(LIBAVUTIL_VERSION_MAJOR) ".dll",
+    "swresample-" AV_STRINGIFY(LIBSWRESAMPLE_VERSION_MAJOR) ".dll",
+    "swscale-" AV_STRINGIFY(LIBSWSCALE_VERSION_MAJOR) ".dll",
+    "avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) ".dll",
+    "avformat-" AV_STRINGIFY(LIBAVFORMAT_VERSION_MAJOR) ".dll",
+};
+static const char *const FF_PLAIN[FF_DLLS] = {
+    "avutil.dll", "swresample.dll", "swscale.dll", "avcodec.dll", "avformat.dll",
+};
+
+/* The other places they may be, after the program's own folder: [0] the
+   one Import copies them to when that folder cannot be written (the
+   settings folder's ffmpeg), [1] the one the user named (video.ffmpeg_dir);
+   L"" for none. And the two the last failed load looked in. All under
+   g_ff_lock. */
+static SRWLOCK g_ff_lock = SRWLOCK_INIT;
+static WCHAR g_ff_dirs[2][MAX_PATH];
+static WCHAR g_ff_tried_dirs[2][MAX_PATH];
+static atomic_bool g_ff_ready;
+static int g_ff_place;   /* 1: beside the program, 2: imported, 3: the chosen folder */
+
+/* `dir` NULL: beside the program (and the system's folders), as before
+   there was a choice. Otherwise only that folder, by full path, and
+   System32 for what the DLLs import from Windows. */
+static HMODULE load_one(const WCHAR *dir, const char *versioned, const char *plain) {
+    const char *names[2] = { versioned, plain };
+    for (int i = 0; i < 2; i++) {
+        WCHAR wide[MAX_PATH + 64];
+        size_t at = 0;
+        if (dir) {
+            at = wcslen(dir);
+            if (at == 0 || at >= MAX_PATH) return NULL;
+            memcpy(wide, dir, at * sizeof(WCHAR));
+            wide[at++] = L'\\';
+        }
+        if (MultiByteToWideChar(CP_UTF8, 0, names[i], -1, wide + at, 64) <= 0) continue;
+        if (dir && GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES) continue;
+        HMODULE module = dir
+            ? LoadLibraryExW(wide, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32)
+            : LoadLibraryExW(wide, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (module) return module;
     }
-    if (!module && MultiByteToWideChar(CP_UTF8, 0, plain, -1, wide, 64) > 0) {
-        module = LoadLibraryExW(wide, NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
-                                            LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    return NULL;
+}
+
+/* All five of the folder there before any of them is loaded: never half a
+   set from here and the rest found elsewhere. */
+static bool folder_has_all(const WCHAR *dir) {
+    size_t n = wcslen(dir);
+    if (n == 0 || n >= MAX_PATH) return false;
+    for (int i = 0; i < FF_DLLS; i++) {
+        bool found = false;
+        const char *names[2] = { FF_VERSIONED[i], FF_PLAIN[i] };
+        for (int k = 0; k < 2 && !found; k++) {
+            WCHAR wide[MAX_PATH + 64];
+            memcpy(wide, dir, n * sizeof(WCHAR));
+            wide[n] = L'\\';
+            if (MultiByteToWideChar(CP_UTF8, 0, names[k], -1, wide + n + 1, 64) <= 0) continue;
+            found = GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES;
+        }
+        if (!found) return false;
     }
-    return module;
+    return true;
 }
 
 #define BIND(module, name) do { \
@@ -205,62 +260,114 @@ static bool versions_match(void) {
            AV_VERSION_MAJOR(g_ff.swresample_version()) == LIBSWRESAMPLE_VERSION_MAJOR;
 }
 
+static bool ff_load_from(const WCHAR *dir) {
+    HMODULE m[FF_DLLS] = {0};
+    bool whole = true;
+    for (int i = 0; i < FF_DLLS && whole; i++) whole = (m[i] = load_one(dir, FF_VERSIONED[i], FF_PLAIN[i])) != NULL;
+    if (whole && bind_all(m[4], m[3], m[0], m[2], m[1]) && versions_match()) return true;
+    /* Not this place: nothing of it is kept, so the next one starts clean. */
+    bool tried = g_ff.tried;
+    memset(&g_ff, 0, sizeof(g_ff));
+    g_ff.tried = tried;
+    for (int i = FF_DLLS - 1; i >= 0; i--) if (m[i]) FreeLibrary(m[i]);
+    return false;
+}
+
 static bool ff_load_once(void) {
-    HMODULE util = load_one("avutil-" AV_STRINGIFY(LIBAVUTIL_VERSION_MAJOR) ".dll", "avutil.dll");
-    HMODULE codec = load_one("avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) ".dll", "avcodec.dll");
-    HMODULE fmt = load_one("avformat-" AV_STRINGIFY(LIBAVFORMAT_VERSION_MAJOR) ".dll", "avformat.dll");
-    HMODULE sws = load_one("swscale-" AV_STRINGIFY(LIBSWSCALE_VERSION_MAJOR) ".dll", "swscale.dll");
-    HMODULE swr = load_one("swresample-" AV_STRINGIFY(LIBSWRESAMPLE_VERSION_MAJOR) ".dll", "swresample.dll");
-    if (!util || !codec || !fmt || !sws || !swr) return false;
-    if (!bind_all(fmt, codec, util, sws, swr)) return false;
-    if (!versions_match()) return false;
+    int place = 0;
+    if (ff_load_from(NULL)) place = 1;
+    for (int i = 0; i < 2 && !place; i++) {
+        if (g_ff_dirs[i][0] && folder_has_all(g_ff_dirs[i]) && ff_load_from(g_ff_dirs[i])) place = 2 + i;
+    }
+    if (!place) return false;
     g_ff.av_log_set_level(AV_LOG_ERROR);
+    g_ff_place = place;
     g_ff.ok = true;
     return true;
 }
 
-/* Once, whoever asks first: the film's thread, or (RV-110) any of the
-   threads that read pictures ahead. */
-static INIT_ONCE g_ff_once = INIT_ONCE_STATIC_INIT;
-
-static BOOL CALLBACK ff_load_call(PINIT_ONCE once, PVOID parameter, PVOID *context) {
-    (void)once; (void)parameter; (void)context;
-    g_ff.tried = true;
-    ff_load_once();
-    return TRUE;
-}
-
+/* Whoever asks first: the film's thread, or (RV-110) any of the threads
+   that read pictures ahead. A load that worked holds for the run; one that
+   did not is tried again only when the folders are given again (a setting
+   changed, Import), so the settings page, which asks on every frame, does
+   not knock each time. */
 static bool ff_load(void) {
-    InitOnceExecuteOnce(&g_ff_once, ff_load_call, NULL, NULL);
-    return g_ff.ok;
+    if (atomic_load_explicit(&g_ff_ready, memory_order_acquire)) return true;
+    AcquireSRWLockExclusive(&g_ff_lock);
+    if (!g_ff.ok && (!g_ff.tried || memcmp(g_ff_dirs, g_ff_tried_dirs, sizeof(g_ff_dirs)) != 0)) {
+        g_ff.tried = true;
+        memcpy(g_ff_tried_dirs, g_ff_dirs, sizeof(g_ff_dirs));
+        if (ff_load_once()) atomic_store_explicit(&g_ff_ready, true, memory_order_release);
+    }
+    bool ok = g_ff.ok;
+    ReleaseSRWLockExclusive(&g_ff_lock);
+    return ok;
 }
 
 static bool ff_available(void) { return ff_load(); }
 
+static void folder_wide(u8str_t folder, WCHAR wide[MAX_PATH]) {
+    memset(wide, 0, MAX_PATH * sizeof(WCHAR));
+    int n = folder.len > 0 && folder.len < MAX_PATH
+        ? MultiByteToWideChar(CP_UTF8, 0, folder.ptr, (int)folder.len, wide, MAX_PATH - 1) : 0;
+    wide[n > 0 ? n : 0] = L'\0';
+    for (WCHAR *c = wide; *c; c++) if (*c == L'/') *c = L'\\';
+}
+
+void rubraview_pal_ffmpeg_set_folders(u8str_t imported, u8str_t chosen) {
+    WCHAR wide[2][MAX_PATH];
+    folder_wide(imported, wide[0]);
+    folder_wide(chosen, wide[1]);
+    AcquireSRWLockExclusive(&g_ff_lock);
+    memcpy(g_ff_dirs, wide, sizeof(wide));
+    /* Told again, as after Import filled a folder already named: none is
+       loaded, so the next ask looks once more. */
+    if (!g_ff.ok) g_ff.tried = false;
+    ReleaseSRWLockExclusive(&g_ff_lock);
+}
+
+const char *rubraview_pal_ffmpeg_dll_name(size_t index) {
+    return index < FF_DLLS ? FF_VERSIONED[index] : NULL;
+}
+
+int rubraview_pal_ffmpeg_place(void) {
+    return ff_load() ? g_ff_place : 0;
+}
+
 /* FFmpeg's DLLs are beside the program and were not taken: another
    version than the headers here know (the owner's VM, 2026-10-12: a set
    of 8.x looked exactly like none at all). Looked for once. */
+static rubraview_ffmpeg_refusal_t refusal_in(WCHAR *path, size_t n) {
+    static const WCHAR pattern[] = L"avcodec*.dll";
+    static const WCHAR ours[] = L"avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) L".dll";
+    rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
+    memcpy(path + n, pattern, sizeof(pattern));
+    WIN32_FIND_DATAW found;
+    HANDLE find = FindFirstFileW(path, &found);
+    if (find != INVALID_HANDLE_VALUE) { state = RUBRAVIEW_FFMPEG_OTHER_VERSION; FindClose(find); }
+    memcpy(path + n, ours, sizeof(ours));
+    /* This build's own avcodec is there: one of its four fellows is not, or would not load. */
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) state = RUBRAVIEW_FFMPEG_NOT_WHOLE;
+    return state;
+}
+
 rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void) {
-    static int state = -1;
     if (ff_load()) return RUBRAVIEW_FFMPEG_NOT_REFUSED;
-    if (state < 0) {
-        WCHAR path[MAX_PATH + 32];
-        DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
-        state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
-        while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
-        if (n > 0 && n < MAX_PATH) {
-            static const WCHAR pattern[] = L"avcodec*.dll";
-            static const WCHAR ours[] = L"avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) L".dll";
-            memcpy(path + n, pattern, sizeof(pattern));
-            WIN32_FIND_DATAW found;
-            HANDLE find = FindFirstFileW(path, &found);
-            if (find != INVALID_HANDLE_VALUE) { state = RUBRAVIEW_FFMPEG_OTHER_VERSION; FindClose(find); }
-            memcpy(path + n, ours, sizeof(ours));
-            /* This build's own avcodec is there: one of its four fellows is not, or would not load. */
-            if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) state = RUBRAVIEW_FFMPEG_NOT_WHOLE;
-        }
+    WCHAR path[MAX_PATH + 32];
+    DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
+    while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
+    rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
+    if (n > 0 && n < MAX_PATH) state = refusal_in(path, n);
+    /* None beside the program: the imported set, then the chosen folder's. */
+    for (int i = 0; i < 2 && state == RUBRAVIEW_FFMPEG_NOT_REFUSED; i++) {
+        AcquireSRWLockShared(&g_ff_lock);
+        size_t d = wcslen(g_ff_dirs[i]);
+        if (d > 0 && d < MAX_PATH - 1) { memcpy(path, g_ff_dirs[i], d * sizeof(WCHAR)); path[d++] = L'\\'; }
+        else d = 0;
+        ReleaseSRWLockShared(&g_ff_lock);
+        if (d) state = refusal_in(path, d);
     }
-    return (rubraview_ffmpeg_refusal_t)state;
+    return state;
 }
 
 /* ---- RV-110: one still picture, from memory ---- */

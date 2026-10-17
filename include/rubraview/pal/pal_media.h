@@ -76,7 +76,25 @@ bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend);
 int rubraview_pal_ffmpeg_jxl_state(void);
 
 /**
- * Whether FFmpeg's DLLs lie beside the program and were not loaded —
+ * The folders FFmpeg's DLLs may also be in, after the program's own: for
+ * the Store's package and Program Files, which cannot be added to.
+ * `imported` is where Import copied them (the settings folder's ffmpeg),
+ * `chosen` the one the user named (`video.ffmpeg_dir`); empty for none,
+ * given clean (rubraview_path_typed_folder, rubraview_pal_fs_expand_env).
+ * Each place is taken whole or not at all. While FFmpeg is not loaded the
+ * places are looked in again at the next ask; once loaded it stays for the run.
+ */
+void rubraview_pal_ffmpeg_set_folders(u8str_t imported, u8str_t chosen);
+
+/** Where the FFmpeg in use came from: 0 none, 1 beside the program, 2 imported, 3 the chosen folder. */
+int rubraview_pal_ffmpeg_place(void);
+
+/** The five DLL names this build takes, versioned ("avcodec-63.dll"), in the order they load. */
+const char *rubraview_pal_ffmpeg_dll_name(size_t index);
+#define RUBRAVIEW_FFMPEG_DLLS 5
+
+/**
+ * Whether FFmpeg's DLLs lie beside the program (or in the chosen folder) and were not loaded —
  * another version than this build takes, or this build's with one of the
  * five missing — so a notice can say that instead of "no FFmpeg".
  */

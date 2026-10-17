@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.2.0.exe              the viewer, as built
-dist/rubraview-v1.2.0/                 the release bundle
-dist/rubraview-v1.2.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.3.0.exe              the viewer, as built
+dist/rubraview-v1.3.0/                 the release bundle
+dist/rubraview-v1.3.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -895,7 +895,10 @@ filename code page, the memory cap). Some worth knowing:
   a text file, `lang\<code>.txt` beside `rubraview.exe` (the zip, the
   installer and the Store package carry them; `rubraview.exe` on its own is
   English). A file of the same name in the settings folder's `lang` folder
-  is read first, so a translation can be put right there. Each line is
+  is read first, so a translation can be put right there. **Import
+  language packs...** under it copies chosen packs (`ko.txt` and the like)
+  to `lang` beside the program, or, where that folder takes no files (the
+  Store's copy, Program Files), to the settings folder's. Each line is
   `"English" = "translation"`; a line whose `%` placeholders differ from the
   English is left out. Persian is shown in its letters, but the windows are
   still laid out left to right.
@@ -943,6 +946,15 @@ filename code page, the memory cap). Some worth knowing:
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,
   `jpn`), chosen when a film has it.
+- **Video › Adding FFmpeg** — FFmpeg's five DLLs (version 9.0, the
+  *shared* build; **Get it** opens BtbN's download page in the browser)
+  beside `rubraview.exe`, or: **Import FFmpeg's DLLs...**
+  copies them out of the folder you choose (the zip's `bin`) to beside the
+  program, or to the settings folder's `ffmpeg` where the program's folder
+  takes no files (the Microsoft Store's copy, Program Files), and uses them
+  at once; **FFmpeg folder** names a folder of your own to read them from.
+  The program's folder is looked in first, then the imported copy, then
+  that folder; each must hold all five.
 - **Viewer › Behind and between pages** — dark, black, grey or white.
 - **General › Open with Windows' own dialog** — `Ctrl+O` then opens
   Windows' dialog, not the picker.

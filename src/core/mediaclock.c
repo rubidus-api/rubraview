@@ -310,7 +310,7 @@ u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t ref
     if (jxl_state == 1) return TU8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)");
     if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) return TU8("JPEG XL: the FFmpeg 9.0 DLLs beside the program could not be loaded (all five are needed)");
     if (refusal == RUBRAVIEW_FFMPEG_OTHER_VERSION) return TU8("JPEG XL: the FFmpeg DLLs beside the program are not 9.0 (avcodec-63) and were not loaded");
-    return TU8("JPEG XL: no decoder for it in this Windows, and no FFmpeg beside the program");
+    return TU8("JPEG XL: no decoder for it in this Windows, and no FFmpeg (Settings › Video › Import)");
 }
 
 u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
@@ -318,12 +318,12 @@ u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
         case RUBRAVIEW_MEDIA_FAIL_FILE:
             return TU8("could not read that file");
         case RUBRAVIEW_MEDIA_FAIL_CONTAINER:
-            return TU8("cannot play this kind of file — FFmpeg DLLs beside rubraview would open it");
+            return TU8("cannot play this kind of file — FFmpeg's DLLs would open it (Settings › Video › Import)");
         case RUBRAVIEW_MEDIA_FAIL_CODEC:
-            return TU8("cannot decode this video — FFmpeg DLLs beside rubraview would play it");
+            return TU8("cannot decode this video — FFmpeg's DLLs would play it (Settings › Video › Import)");
         case RUBRAVIEW_MEDIA_FAIL_HEVC:
             return TU8("HEVC video needs the \"HEVC Video Extensions\" ($0.99, Microsoft Store) "
-                      "or FFmpeg DLLs beside rubraview");
+                      "or FFmpeg's DLLs (Settings › Video)");
         case RUBRAVIEW_MEDIA_OPENED:
         default:
             return U8("");

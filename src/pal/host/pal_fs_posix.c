@@ -116,6 +116,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     return listing;
 }
 
+/* The host has no %VARIABLES% to put in. */
+u8str_t rubraview_pal_fs_expand_env(proven_arena_t *arena, u8str_t path) {
+    if (!arena || path.len == 0) return path;
+    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
+    return path_z.len > 0 ? path_z : path;
+}
+
 u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path) {
     if (!arena || path.len == 0) return path;
     u8str_t path_z = arena_dup(arena, path.ptr, path.len);

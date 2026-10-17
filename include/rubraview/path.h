@@ -96,6 +96,13 @@ u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t pat
 
 u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext);
 
+/**
+ * A folder as typed or pasted into the settings: spaces and quotes taken
+ * off both ends, and the separators at its end ("C:\\x\\" is "C:\\x"; a
+ * drive's root "C:\\" stays). A view into `typed`, not NUL-terminated.
+ */
+u8str_t rubraview_path_typed_folder(u8str_t typed);
+
 /*
  * D-120: `name` is what a viewer writes a state file through before it
  * exchanges it for `base` — "<base>.<pid>-<tick>.tmp" (D-99). True with

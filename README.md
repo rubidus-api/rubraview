@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.2.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.3.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.3.0/rubraview-v1.3.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.3.0/rubraview-v1.3.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -343,8 +343,15 @@ them beside `rubraview.exe`, then start Rubraview again. The
 `lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
 not for running it — leave them.
 
-Settings (`F10`) › Video says whether they were found, and repeats all of
-this at the bottom of the page.
+Or let Rubraview put them in place: Settings (`F10`) › Video ›
+**Import FFmpeg's DLLs...** asks for that `bin` folder and copies the five
+beside `rubraview.exe`, or, where that folder takes no files (the Microsoft
+Store's copy, Program Files), into the settings folder, where Rubraview
+reads them too; they are used at once. Or leave them in a folder of your
+own and name it in **FFmpeg folder** on the same page.
+
+Settings › Video says whether they were found, and repeats all of this at
+the bottom of the page.
 
 ## Documentation
 

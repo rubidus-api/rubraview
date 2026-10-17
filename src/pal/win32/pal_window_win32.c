@@ -1663,4 +1663,11 @@ void rubraview_pal_shell_open_default_apps(void) {
     ShellExecuteW(NULL, L"open", L"ms-settings:defaultapps", NULL, NULL, SW_SHOWNORMAL);
 }
 
+bool rubraview_pal_shell_open_web(const char *https_url) {
+    WCHAR wide[512];
+    if (!https_url || strncmp(https_url, "https://", 8) != 0 ||
+        MultiByteToWideChar(CP_UTF8, 0, https_url, -1, wide, 512) <= 0) return false;
+    return (INT_PTR)ShellExecuteW(NULL, L"open", wide, NULL, NULL, SW_SHOWNORMAL) > 32;
+}
+
 #endif /* _WIN32 */

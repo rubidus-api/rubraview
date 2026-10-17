@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.2.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.2.0/rubraview-v1.2.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.3.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.3.0/rubraview-v1.3.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.3.0/rubraview-v1.3.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -339,8 +339,15 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 루브라뷰를 다시 실행하면 됩니다. `lib` 폴더의 `.dll.a`, `.lib` 는 FFmpeg 을
 링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
 
-설정(`F10`) › Video 에서 인식 여부를 보여 주고, 같은 안내를 그 쪽 아래에도
-적어 두었습니다.
+루브라뷰가 대신 넣게 할 수도 있습니다. 설정(`F10`) › Video ›
+**Import FFmpeg's DLLs...** 에서 그 `bin` 폴더를 고르면 다섯 개를
+`rubraview.exe` 옆에 복사합니다. 그 폴더에 파일을 넣을 수 없으면(Microsoft
+Store 판, Program Files) 설정 폴더에 복사하고, 루브라뷰는 거기서도 읽습니다.
+복사하면 바로 쓰입니다. 아니면 DLL 을 원하는 폴더에 두고 같은 쪽의
+**FFmpeg folder** 에 그 폴더를 적어도 됩니다.
+
+설정 › Video 에서 인식 여부를 보여 주고, 같은 안내를 그 쪽 아래에도 적어
+두었습니다.
 
 ## 문서
 
