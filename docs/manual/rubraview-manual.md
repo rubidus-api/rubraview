@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.6.0.exe              the viewer, as built
-dist/rubraview-v1.6.0/                 the release bundle
-dist/rubraview-v1.6.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.7.0.exe              the viewer, as built
+dist/rubraview-v1.7.0/                 the release bundle
+dist/rubraview-v1.7.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -568,6 +568,8 @@ waits for a key before it closes.
 | `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name |
 | `--exists=replace\|skip\|number` | A name already there: replaced (as before), left, or the next free `name-1` |
 | `--keep-dates`, `--subfolders` | The results take their pictures' dates; with `--recursive`, the same folders under `--out` |
+| `--text="{name} {n:3},br,4,FFFFFF"`, `--text-font=` | Words on each, last of all: where, the letters' height as a percent of the shorter side, the colour; a soft shadow under them |
+| `--dpi=300` | The DPI written into each file (JPEG, PNG, TIFF, BMP) |
 
 A misspelled option stops the run before anything is converted.
 
@@ -776,6 +778,14 @@ full-width forms are ignored, and the bar says which match of how many it
 is. Drag over the text to select it, `Ctrl+A` for all, `Ctrl+C` copies what
 is selected, as it is shown.
 
+
+Settings › Text › **Kind** under Auto-scroll: **smooth** glides at its
+speed; **pages** moves a screen at a time (one line kept to read on from)
+every **A screen every** seconds, `+` / `-` changing it while it runs.
+**Headings stand alone** keeps a short line with no sentence's end and a
+blank line before and after it (`제2장`, `Chapter 2`) as a paragraph of
+its own in paragraphs mode. The information bar (`Shift+I`) says the
+encoding and how far through the file you are.
 ## The floating boxes
 
 The menu opens from the three lines at the title bar's left end (or `Tab`):

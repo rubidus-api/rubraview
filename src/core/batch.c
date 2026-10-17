@@ -218,12 +218,17 @@ rubraview_pixbuf_t rubraview_batch_canvas(proven_arena_t *arena, const rubraview
 
 bool rubraview_batch_watermark(proven_arena_t *arena, rubraview_pixbuf_t *dst, const rubraview_pixbuf_t *mark,
                                rubraview_batch_corner_t corner, int32_t opacity) {
+    return rubraview_batch_overlay(arena, dst, mark, corner, opacity, dst ? dst->width / 4 : 0);
+}
+
+bool rubraview_batch_overlay(proven_arena_t *arena, rubraview_pixbuf_t *dst, const rubraview_pixbuf_t *mark,
+                             rubraview_batch_corner_t corner, int32_t opacity, int32_t max_width) {
     if (!arena || !dst || !dst->pixels || !mark || !mark->pixels || mark->width <= 0 || mark->height <= 0) return false;
     if (dst->format != mark->format || (dst->format != RUBRAVIEW_PIXFMT_RGBA8 && dst->format != RUBRAVIEW_PIXFMT_BGRA8)) return false;
     if (opacity < 1) opacity = 1;
     if (opacity > 100) opacity = 100;
     rubraview_pixbuf_t m = *mark;
-    int32_t most = dst->width / 4 > 1 ? dst->width / 4 : 1;
+    int32_t most = max_width > 1 ? max_width : 1;
     if (m.width > most) {
         int32_t mh = (int32_t)lround((double)m.height * most / m.width);
         m = rubraview_pixbuf_resample(arena, mark, most, mh > 0 ? mh : 1, RUBRAVIEW_FILTER_BICUBIC);
@@ -253,4 +258,47 @@ bool rubraview_batch_watermark(proven_arena_t *arena, rubraview_pixbuf_t *dst, c
         }
     }
     return true;
+}
+
+rubraview_pixbuf_t rubraview_batch_text_layer(proven_arena_t *arena, const rubraview_pixbuf_t *mask, uint32_t rgb,
+                                              rubraview_pixel_format_t format) {
+    rubraview_pixbuf_t none = {0};
+    if (!arena || !mask || !mask->pixels || mask->format != RUBRAVIEW_PIXFMT_GRAY8 ||
+        (format != RUBRAVIEW_PIXFMT_RGBA8 && format != RUBRAVIEW_PIXFMT_BGRA8)) return none;
+    int32_t pad = mask->height / 12 + 1;   /* room for the shadow */
+    int32_t w = mask->width + 2 * pad, h = mask->height + 2 * pad;
+    rubraview_pixbuf_t out = rubraview_pixbuf_create(arena, w, h, format);
+    if (!out.pixels) return none;
+    memset(out.pixels, 0, (size_t)out.stride * (size_t)h);
+    uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
+    bool bgra = format == RUBRAVIEW_PIXFMT_BGRA8;
+    int32_t off = pad / 2 > 0 ? pad / 2 : 1;
+    /* The shadow: the mask spread a little and shifted down-right, black at half strength. */
+    for (int32_t y = 0; y < h; ++y) {
+        uint8_t *q = out.pixels + (size_t)y * (size_t)out.stride;
+        for (int32_t x = 0; x < w; ++x, q += 4) {
+            int32_t best = 0;
+            for (int32_t dy = -1; dy <= 1; ++dy)
+                for (int32_t dx = -1; dx <= 1; ++dx) {
+                    int32_t mx = x - pad - off + dx, my = y - pad - off + dy;
+                    if (mx < 0 || my < 0 || mx >= mask->width || my >= mask->height) continue;
+                    int32_t v = mask->pixels[(size_t)my * (size_t)mask->stride + (size_t)mx];
+                    if (v > best) best = v;
+                }
+            q[3] = (uint8_t)(best / 2);
+        }
+    }
+    /* The letters over it: their colour, at their coverage; the shadow under them shows through the rest. */
+    for (int32_t y = 0; y < mask->height; ++y) {
+        const uint8_t *m = mask->pixels + (size_t)y * (size_t)mask->stride;
+        uint8_t *q = out.pixels + (size_t)(y + pad) * (size_t)out.stride + (size_t)pad * 4u;
+        for (int32_t x = 0; x < mask->width; ++x, q += 4) {
+            uint32_t a = m[x], sa = q[3];
+            uint32_t oa = a + sa * (255u - a) / 255u;   /* letters over shadow */
+            if (oa == 0) continue;
+            uint8_t cr = (uint8_t)(r * a / oa), cg = (uint8_t)(g * a / oa), cb = (uint8_t)(b * a / oa);   /* the shadow is black */
+            q[0] = bgra ? cb : cr; q[1] = cg; q[2] = bgra ? cr : cb; q[3] = (uint8_t)oa;
+        }
+    }
+    return out;
 }

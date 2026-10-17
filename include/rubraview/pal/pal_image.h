@@ -192,6 +192,13 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
                                                           int32_t max_width, int32_t max_height);
 
 /**
+ * RV-134: `text` (UTF-8, one line or several) drawn in the font family
+ * `font` (empty: Segoe UI), its letters `px` pixels high, as a GRAY8 mask
+ * of how much of each pixel the letters cover. Empty when it cannot.
+ */
+rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px);
+
+/**
  * §3.10: encode a pixel buffer and write it to `path`. The format and
  * its quality settings come from the export options, which were already
  * clamped and decided by `rubraview_export_*` — this call does no

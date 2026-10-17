@@ -783,6 +783,10 @@ typedef struct app_state {
         int32_t exists;               /* 0 replace, 1 skip, 2 number */
         bool    keep_dates, recursive, subfolders;
         char    out[1024];
+        /* RV-134 */
+        char    text[256];
+        int32_t text_corner, text_colour;   /* text_colour: 0 white, 1 black, 2 yellow */
+        double  text_size, dpi;
     } batch;
     int32_t                   batch_typing;   /* RV-129: the panel row whose text the rename box holds; 0 none */
     bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
@@ -1087,6 +1091,7 @@ static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
 static void classify_mark(app_state_t *app, int32_t digit);
 static void batch_typed(app_state_t *app);
+static void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
 static bool filing_exists(void *ctx, u8str_t path);
 static void classify_toggle(app_state_t *app);
 static bool classify_press(app_state_t *app, double px, double py);
@@ -1168,6 +1173,8 @@ static bool text_press(app_state_t *app, double x, double y, uint32_t mods);
 static void text_drag(app_state_t *app, double x, double y);
 static bool text_release(app_state_t *app);
 static void text_tick(app_state_t *app, double now);
+static bool text_pages_mode(const app_state_t *app);
+static int text_percent(const app_state_t *app);
 static bool text_moving(const app_state_t *app);
 static void text_find_step(app_state_t *app, bool forward);
 static bool recent_kept_out(const app_state_t *app, u8str_t path);
@@ -10031,6 +10038,13 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                                 app->osd_size_bytes, picture && pg->reduced,
                                                 playing ? app->media_position : 0.0,
                                                 playing ? app->media_info.duration_seconds : 0.0);
+            /* RV-123 (RFC-0005 §6): a text file says its encoding and how far through it is. */
+            char text_buf[256];
+            int through = text_percent(app);
+            if (through >= 0 && text_encoding_shown(app)) {
+                int n = snprintf(text_buf, sizeof(text_buf), T("%s, %d %% through  %.*s"), text_encoding_shown(app), through, (int)right.len, right.ptr);
+                if (n > 0 && (size_t)n < sizeof(text_buf)) right = (u8str_t){ .ptr = text_buf, .len = (size_t)n };
+            }
 
             /* The alpha byte carries the fade, so the whole overlay
                dims together rather than popping out. */
@@ -11385,6 +11399,7 @@ enum {
     PANEL_BATCH_MARK, PANEL_BATCH_MARK_CORNER, PANEL_BATCH_MARK_OPACITY, PANEL_BATCH_QUALITY,
     PANEL_BATCH_NAME, PANEL_BATCH_START, PANEL_BATCH_REPLACE, PANEL_BATCH_EXISTS, PANEL_BATCH_KEEP_DATES,
     PANEL_BATCH_RECURSIVE, PANEL_BATCH_SUBFOLDERS, PANEL_BATCH_OUT, PANEL_BATCH_TEST, PANEL_BATCH_SAVE, PANEL_BATCH_LOAD,
+    PANEL_BATCH_TEXT, PANEL_BATCH_TEXT_CORNER, PANEL_BATCH_TEXT_SIZE, PANEL_BATCH_TEXT_COLOUR, PANEL_BATCH_DPI,   /* RV-134 */
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
     PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
@@ -12067,6 +12082,13 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
             word = i >= 0 && i < 5 ? AT[i] : NULL;
             break;
         }
+        case PANEL_BATCH_TEXT_CORNER: {
+            const char *const AT[] = { T("bottom right"), T("bottom left"), T("top right"), T("top left"), T("centre") };
+            word = i >= 0 && i < 5 ? AT[i] : NULL;
+            break;
+        }
+        case PANEL_BATCH_TEXT_COLOUR: word = i == 0 ? T("white") : i == 1 ? T("black") : i == 2 ? T("yellow") : NULL; break;
+        case PANEL_BATCH_TEXT_SIZE: case PANEL_BATCH_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_BATCH_EXISTS:  word = i == 0 ? T("replace it") : i == 1 ? T("leave it, skip") : i == 2 ? T("a new name (-1, -2...)") : NULL; break;
         case PANEL_BATCH_RESIZE:  snprintf(buffer, size, "%g", row->value); return cstr(buffer);
         case PANEL_BATCH_BOX_H: case PANEL_BATCH_SHARPEN: case PANEL_BATCH_BORDER: case PANEL_BATCH_MARK_OPACITY:
@@ -12197,6 +12219,12 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
     if (b->border > 0.5) batch_token(tk, "--border=%d,%06X", (int)lround(b->border), (unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]);
     if (b->mark[0]) batch_token(tk, "--watermark=%s,%s,%d", b->mark, (const char *[]){ "br", "bl", "tr", "tl", "c" }[b->mark_corner % 5],
                                 (int)lround(b->mark_opacity));
+    if (b->text[0]) {
+        static const uint32_t TEXT_RGB[3] = { 0xFFFFFF, 0x000000, 0xFFD400 };
+        batch_token(tk, "--text=%s,%s,%d,%06X", b->text, (const char *[]){ "br", "bl", "tr", "tl", "c" }[b->text_corner % 5],
+                    (int)lround(b->text_size), (unsigned)TEXT_RGB[b->text_colour % 3]);
+    }
+    if (b->dpi >= 1.0) batch_token(tk, "--dpi=%d", (int)lround(b->dpi));
     if (b->format > 0 && b->format <= RUBRAVIEW_EXPORT_ICO) {
         u8str_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
         batch_token(tk, "--format=%.*s", (int)ext.len, ext.ptr);
@@ -12216,7 +12244,7 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
 
 static void batch_defaults(struct batch_ui *b) {
     *b = (struct batch_ui){ .loaded = true, .size_by = 0, .size_value = 100.0, .box_h = 1080.0, .filter = 3, .effect_amount = 0.0,
-                            .mark_corner = 0, .mark_opacity = 50.0, .quality = 90.0, .start = 1.0 };
+                            .mark_corner = 0, .mark_opacity = 50.0, .quality = 90.0, .start = 1.0, .text_size = 4.0 };
     snprintf(b->name, sizeof(b->name), "%s", "{name}.{ext}");
 }
 
@@ -12271,11 +12299,17 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) 
             b->frame_colour = rgb == 0 ? 1 : rgb == 0x808080 ? 2 : 0;
             if (x->watermark.len > 0) snprintf(b->mark, sizeof(b->mark), "%.*s", (int)x->watermark.len, x->watermark.ptr);
             b->mark_corner = (int32_t)x->watermark_corner; b->mark_opacity = x->watermark_opacity;
+            if (x->text.len > 0) {
+                snprintf(b->text, sizeof(b->text), "%.*s", (int)x->text.len, x->text.ptr);
+                b->text_corner = (int32_t)x->text_corner; b->text_size = x->text_size;
+                b->text_colour = x->text_rgb == 0 ? 1 : x->text_rgb == 0xFFD400 ? 2 : 0;
+            }
         } else if (a->kind == RUBRAVIEW_BATCH_CONVERT) {
             b->format = (int32_t)r.export_options.format;
         }
     }
     if (r.export_options.jpeg_quality > 0) b->quality = r.export_options.jpeg_quality;
+    b->dpi = r.export_options.dpi;
     if (r.job.naming_pattern.len > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.len, r.job.naming_pattern.ptr);
     b->start = r.job.counter_start > 0 ? r.job.counter_start : 1;
     if (r.job.replace_from.len > 0)
@@ -12376,9 +12410,18 @@ static void panel_open_batch(app_state_t *app) {
     }
     rubraview_panel_add_separator(pn);
     /* What is written */
+    /* RV-134: words on each picture */
+    rubraview_panel_add_button(pn, PANEL_BATCH_TEXT, batch_row_label(labels[7], sizeof(labels[7]), T("Text"), b->text, T("none")));
+    if (b->text[0]) {
+        rubraview_panel_add_choice(pn, PANEL_BATCH_TEXT_CORNER, TU8("  where"), b->text_corner, 5);
+        rubraview_panel_add_slider(pn, PANEL_BATCH_TEXT_SIZE, TU8("  size %"), b->text_size, 1, 50, 1);
+        rubraview_panel_add_choice(pn, PANEL_BATCH_TEXT_COLOUR, TU8("  colour"), b->text_colour, 3);
+    }
+    rubraview_panel_add_separator(pn);
     rubraview_panel_add_choice(pn, PANEL_BATCH_FORMAT, TU8("Format"), b->format, 8);
     rubraview_panel_add_slider(pn, PANEL_BATCH_QUALITY, TU8("  quality"), b->quality, 1, 100, 1);
     rubraview_panel_add_toggle(pn, PANEL_PRIVACY, TU8("Privacy clean"), b->privacy);
+    rubraview_panel_add_slider(pn, PANEL_BATCH_DPI, TU8("DPI written (0: as it is)"), b->dpi, 0, 1200, 1);
     rubraview_panel_add_separator(pn);
     /* Names and places */
     rubraview_panel_add_button(pn, PANEL_BATCH_NAME, batch_row_label(labels[3], sizeof(labels[3]), T("Names"), b->name, "{name}.{ext}"));
@@ -12407,7 +12450,7 @@ static void panel_open_batch(app_state_t *app) {
 
 /* A row whose value is text: typed in the rename box. */
 static void batch_type_begin(app_state_t *app, int32_t id) {
-    const char *now = id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
+    const char *now = id == PANEL_BATCH_TEXT ? app->batch.text : id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
                     : id == PANEL_BATCH_NAME ? app->batch.name : id == PANEL_BATCH_REPLACE ? app->batch.replace : app->batch.out;
     if (app->rename_active) rename_end(app);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
@@ -12417,7 +12460,8 @@ static void batch_type_begin(app_state_t *app, int32_t id) {
     app->rename_composing_length = 0;
     app->batch_typing = id;
     rubraview_pal_window_text_input(app->window, true);
-    osd_say(app, id == PANEL_BATCH_NAME ? TU8("{name} {ext} {n} {n:3} {parent} {date} {w} {h}, then Enter (empty: as it was)")
+    osd_say(app, id == PANEL_BATCH_TEXT ? TU8("the words: {name} {n} {n:3} {parent} {date} {w} {h} work here too; Enter (empty: none)")
+               : id == PANEL_BATCH_NAME ? TU8("{name} {ext} {n} {n:3} {parent} {date} {w} {h}, then Enter (empty: as it was)")
                : id == PANEL_BATCH_CROP ? TU8("X,Y,W,H in pixels, then Enter (empty: no crop)")
                : id == PANEL_BATCH_CANVAS ? TU8("width x height, e.g. 1920x1080, then Enter (empty: none)")
                : id == PANEL_BATCH_REPLACE ? TU8("what,with: IMG_,photo-  then Enter (empty: nothing)")
@@ -12427,9 +12471,9 @@ static void batch_type_begin(app_state_t *app, int32_t id) {
 static void batch_typed(app_state_t *app) {
     u8str_t text = rubraview_textedit_text(&app->rename_edit);
     int32_t id = app->batch_typing;
-    char *dst = id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
+    char *dst = id == PANEL_BATCH_TEXT ? app->batch.text : id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
               : id == PANEL_BATCH_NAME ? app->batch.name : id == PANEL_BATCH_REPLACE ? app->batch.replace : app->batch.out;
-    size_t cap = id == PANEL_BATCH_CROP ? sizeof(app->batch.crop) : id == PANEL_BATCH_CANVAS ? sizeof(app->batch.canvas)
+    size_t cap = id == PANEL_BATCH_TEXT ? sizeof(app->batch.text) : id == PANEL_BATCH_CROP ? sizeof(app->batch.crop) : id == PANEL_BATCH_CANVAS ? sizeof(app->batch.canvas)
                : id == PANEL_BATCH_NAME ? sizeof(app->batch.name) : id == PANEL_BATCH_REPLACE ? sizeof(app->batch.replace) : sizeof(app->batch.out);
     char was[1024];
     snprintf(was, sizeof(was), "%s", dst);
@@ -13219,6 +13263,7 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
 
     u8str_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
     rubraview_export_options_t options = app->export_options;
+    if (edit_panel_open(app) && app->edit.resize_dpi > 0.0) options.dpi = app->edit.resize_dpi;   /* RV-134: the DPI chosen in Edit */
     rubraview_export_format_t source_format = rubraview_export_format_for_name(shown);
     rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
     u8str_t stem = rubraview_path_stem(shown), ext = rubraview_export_extension(target);
@@ -13288,6 +13333,7 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
     }
 
     rubraview_export_options_t options = app->export_options;
+    if (apply_edit && app->edit.resize_dpi > 0.0) options.dpi = app->edit.resize_dpi;   /* RV-134: the DPI chosen in Edit */
     rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
     rubraview_edit_step_t pending_now = edit_pending(app);
     bool pixels_change = apply_edit && (rubraview_edit_step_does_something(&pending_now) || app->edit_steps.cursor > 0);
@@ -13532,6 +13578,10 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_BATCH_FRAME_COLOUR:  b->frame_colour = (int32_t)v; break;
             case PANEL_BATCH_MARK_CORNER:   b->mark_corner = (int32_t)v; break;
             case PANEL_BATCH_MARK_OPACITY:  b->mark_opacity = v; break;
+            case PANEL_BATCH_TEXT_CORNER:   b->text_corner = (int32_t)v; break;
+            case PANEL_BATCH_TEXT_SIZE:     b->text_size = v; break;
+            case PANEL_BATCH_TEXT_COLOUR:   b->text_colour = (int32_t)v; break;
+            case PANEL_BATCH_DPI:           b->dpi = v; break;
             case PANEL_BATCH_FORMAT:        b->format = (int32_t)v; break;
             case PANEL_BATCH_QUALITY:       b->quality = v; break;
             case PANEL_PRIVACY:             b->privacy = v > 0.5; app->export_options.privacy_clean = b->privacy; break;
@@ -13708,7 +13758,7 @@ static void panel_button(app_state_t *app, int32_t index) {
             panel_write_current(app, false);
             panel_close(app);
             break;
-        case PANEL_BATCH_CROP: case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT:
+        case PANEL_BATCH_CROP: case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
             batch_type_begin(app, app->panel.rows[index].id);
             break;
         case PANEL_BATCH_TEST: batch_try_names(app); break;
@@ -14825,6 +14875,11 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
         { "ogg",  rubraview_settings_get(st, U8("shell"), U8("ext_ogg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_ogg")) > 0.5 },
         { "opus", rubraview_settings_get(st, U8("shell"), U8("ext_opus")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_opus")) > 0.5 },
         { "m4a",  rubraview_settings_get(st, U8("shell"), U8("ext_m4a")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_m4a")) > 0.5 },
+        /* RV-123: text files */
+        { "txt",  rubraview_settings_get(st, U8("shell"), U8("ext_txt")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_txt")) > 0.5 },
+        { "log",  rubraview_settings_get(st, U8("shell"), U8("ext_log")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_log")) > 0.5 },
+        { "nfo",  rubraview_settings_get(st, U8("shell"), U8("ext_nfo")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_nfo")) > 0.5 },
+        { "md",   rubraview_settings_get(st, U8("shell"), U8("ext_md")) > 0.5,   rubraview_settings_get(st, U8("shell"), U8("menu_md")) > 0.5 },
         { "zip",  rubraview_settings_get(st, U8("shell"), U8("ext_zip")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_zip")) > 0.5 },
         { "7z",   rubraview_settings_get(st, U8("shell"), U8("ext_7z")) > 0.5,   rubraview_settings_get(st, U8("shell"), U8("menu_7z")) > 0.5 },
         { "rar",  rubraview_settings_get(st, U8("shell"), U8("ext_rar")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_rar")) > 0.5 },
@@ -14861,7 +14916,7 @@ static int shell_apply(proven_arena_t *arena, u8str_t selection, u8str_t menu_se
         /* Ours is taken off everything first, so an extension switched
            off since the last time loses it. */
         if (!rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users)) ok = false;
-        u8str_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL)
+        u8str_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT)
                                                  : (u8str_t){ .ptr = "", .len = 0 };
         if (list.len > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
     }
@@ -19179,6 +19234,7 @@ typedef struct text_page {
     rubraview_text_view_t view;
     int built_breaks;                  /* what the view was built with */
     bool built_trim;
+    bool built_headings;   /* RV-123 */
     rubraview_text_block_t **blocks;   /* per paragraph, NULL until laid out */
     double *heights;                   /* per paragraph: measured, or guessed until it is */
     double *tops;                      /* where each begins; `total` is where the last ends */
@@ -19363,9 +19419,11 @@ static bool text_rebuild(app_state_t *app) {
     int breaks = (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks")));
     bool trim = rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) > 0.5;
     if (breaks < 0 || breaks >= RUBRAVIEW_TEXT_BREAKS_COUNT) breaks = 0;
-    if (!rubraview_text_view_build(&t->view, t->source, t->source_len, (rubraview_text_breaks_t)breaks, trim)) return false;
+    bool headings = rubraview_settings_get(&app->settings, U8("text"), U8("headings")) > 0.5;
+    if (!rubraview_text_view_build_ex(&t->view, t->source, t->source_len, (rubraview_text_breaks_t)breaks, trim, headings)) return false;
     t->built_breaks = breaks;
     t->built_trim = trim;
+    t->built_headings = headings;
     t->blocks = (rubraview_text_block_t **)calloc(t->view.count, sizeof(*t->blocks));
     t->heights = (double *)calloc(t->view.count, sizeof(double));
     t->tops = (double *)calloc(t->view.count, sizeof(double));
@@ -19551,7 +19609,8 @@ static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
 
     /* Built again when Settings › Text changed its breaks or its indents. */
     if (t->built_breaks != (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks"))) ||
-        t->built_trim != (rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) > 0.5)) {
+        t->built_trim != (rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) > 0.5) ||
+        t->built_headings != (rubraview_settings_get(&app->settings, U8("text"), U8("headings")) > 0.5)) {
         if (!text_rebuild(app) || t->view.count == 0) return;
     }
     /* Laid out again when what they were laid out for has changed. */
@@ -19619,7 +19678,9 @@ static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
     }
     if (t->autoscroll) {
         char line[64];
-        int n = snprintf(line, sizeof(line), T("auto %d lines/min"), (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"))));
+        int n = text_pages_mode(app)
+            ? snprintf(line, sizeof(line), T("auto: a screen every %d s"), (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"))))
+            : snprintf(line, sizeof(line), T("auto %d lines/min"), (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"))));
         rubraview_pal_rect_t r = { (double)win_w - 220.0 * dpi, (double)win_h - 30.0 * dpi, 200.0 * dpi, 22.0 * dpi };
         if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n }, r, 13.0 * dpi,
                                                   (ink & 0x00FFFFFFu) | 0x90000000u, RUBRAVIEW_TEXT_RIGHT);
@@ -19630,6 +19691,18 @@ static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
 
 static bool text_at_end(text_page_t *t) { return text_scroll_y(t) >= text_scroll_max(t) - 0.5; }
 
+/* How far through the text page on screen, 0-100; -1 when no text is on screen. */
+static int text_percent(const app_state_t *app) {
+    text_page_t *t = app->text;
+    if (!t || t->page != current_page_index(app)) return -1;
+    double max = text_scroll_max(t);
+    return max <= 0.5 ? 100 : (int)lround(100.0 * text_scroll_y(t) / max);
+}
+
+static bool text_pages_mode(const app_state_t *app) {
+    return lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_mode"))) == 1;
+}
+
 /* Auto-scroll (§5, the owner's first wish): each pass moves the text by
    the time since the last, so the speed holds whatever the frame rate. */
 static void text_tick(app_state_t *app, double now) {
@@ -19639,6 +19712,16 @@ static void text_tick(app_state_t *app, double now) {
     double dt = now - t->autoscroll_last;
     t->autoscroll_last = now;
     if (dt <= 0.0 || dt > 0.25) return;
+    if (text_pages_mode(app)) {   /* RV-123 (RFC-0005 §5): a screen at a time, every N seconds */
+        t->autoscroll_carry += dt;
+        double every = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"));
+        if (t->autoscroll_carry < (every >= 1.0 ? every : 10.0)) return;
+        t->autoscroll_carry = 0.0;
+        double step = t->view_h - text_line_h(app);   /* one line kept on screen, to read on from */
+        text_scroll_by(app, step > text_line_h(app) ? step : text_line_h(app));
+        if (text_at_end(t)) { t->autoscroll = false; osd_say(app, TU8("auto-scroll: the end")); }
+        return;
+    }
     double lpm = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"));
     double px = (lpm > 0.0 ? lpm : 30.0) / 60.0 * text_line_h(app) * dt + t->autoscroll_carry;
     double whole = floor(px * 4.0) / 4.0;   /* quarter pixels: smooth, and no drift */
@@ -19657,6 +19740,18 @@ static const char *text_encoding_shown(const app_state_t *app) {
 }
 
 static void text_speed(app_state_t *app, double factor) {
+    if (text_pages_mode(app)) {   /* faster is fewer seconds a screen */
+        double s = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"));
+        double next = round((s >= 1.0 ? s : 10.0) / factor);
+        if (next == s) next = s + (factor > 1.0 ? -1.0 : 1.0);
+        if (next < 2.0) next = 2.0;
+        if (next > 120.0) next = 120.0;
+        rubraview_settings_set(&app->settings, U8("text"), U8("autoscroll_page_seconds"), next);
+        char line[80];
+        int n = snprintf(line, sizeof(line), T("auto-scroll: a screen every %d s"), (int)next);
+        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        return;
+    }
     double lpm = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"));
     double next = round((lpm > 0.0 ? lpm : 30.0) * factor);
     if (next == lpm) next = lpm + (factor > 1.0 ? 1.0 : -1.0);
@@ -21113,6 +21208,8 @@ typedef struct batch_ctx {
     rubraview_pixbuf_t mark;
     bool mark_tried;
     void *mark_memory;
+    size_t seen;              /* RV-134: files begun so far, for {n} in a text */
+    int64_t counter;          /* the {n} of the file in hand */
 } batch_ctx_t;
 
 static rubraview_orientation_t orientation_from_action(const rubraview_batch_orient_params_t *o) {
@@ -21281,6 +21378,25 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
                 batch_say(input->path, "the watermark could not be laid on"); return false;
             }
         }
+        if (extra->text.len > 0) {   /* RV-134: words on it, last of all */
+            u8str_t name = rubraview_path_basename(input->path);
+            u8str_t ext = rubraview_path_ext(name);
+            if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
+            char date[40] = "";
+            rubraview_fs_entry_t e;
+            if (rubraview_pal_fs_stat(arena, input->path, &e)) { info_local_time(date, sizeof(date), e.mtime); date[10] = '\0'; }
+            u8str_t words = rubraview_batch_format_name_ex(arena, extra->text, rubraview_path_stem(name), ext, pixels.width, pixels.height,
+                                                           cstr(date), bc->counter, rubraview_path_basename(rubraview_path_dirname(input->path)));
+            int32_t shorter = pixels.width < pixels.height ? pixels.width : pixels.height;
+            int32_t px = shorter * extra->text_size / 100;
+            rubraview_pixbuf_t mask = rubraview_pal_text_mask(arena, words, extra->text_font, px < 8 ? 8 : px);
+            rubraview_pixbuf_t layer = rubraview_batch_text_layer(arena, &mask, extra->text_rgb, pixels.format);
+            int32_t room = pixels.width - 2 * (shorter / 50) - 2;
+            if (!rubraview_pixbuf_is_valid(&layer) ||
+                !rubraview_batch_overlay(arena, &pixels, &layer, extra->text_corner, 100, room > 1 ? room : 1)) {
+                batch_say(input->path, "the text could not be drawn"); return false;
+            }
+        }
     }
 
     if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
@@ -21293,6 +21409,7 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
 static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *job,
                           const rubraview_batch_input_t *input, u8str_t output_name, void *ctx) {
     batch_ctx_t *bc = (batch_ctx_t*)ctx;
+    bc->counter = (int64_t)(job->counter_start > 0 ? job->counter_start : 1) + (int64_t)bc->seen++;   /* as the core counts for the name */
     u8str_t out_dir = bc->output_dir.len > 0 ? bc->output_dir : rubraview_path_dirname(input->path);
     /* The name carries the source's extension. When the job converts, the
        file must be named after what is actually written, or a PNG lands
@@ -21369,7 +21486,10 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
                 rubraview_jpegtran_result_t turned = rubraview_jpegtran_apply(
                     arena, (const uint8_t*)bytes.ptr, bytes.len, op,
                     RUBRAVIEW_JPEGTRAN_KEEP_EDGE, options.privacy_clean);
-                if (turned.err == RUBRAVIEW_JPEGTRAN_OK) {
+                /* RV-134: a DPI asked for goes into the JFIF block; a file without one is written the other way */
+                bool dpi_ok = options.dpi <= 0.0 || (turned.err == RUBRAVIEW_JPEGTRAN_OK &&
+                              rubraview_jpeg_set_dpi((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.len, options.dpi));
+                if (turned.err == RUBRAVIEW_JPEGTRAN_OK && dpi_ok) {
                     if (rubraview_pal_fs_write_file(out_path, turned.data)) {
                         bc->written++;
                         batch_keep_date(arena, bc, input->path, out_path);

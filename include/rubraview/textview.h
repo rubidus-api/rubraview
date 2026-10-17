@@ -50,6 +50,14 @@ typedef struct rubraview_text_view {
  */
 bool rubraview_text_view_build(rubraview_text_view_t *out, const char *source, size_t len,
                                rubraview_text_breaks_t breaks, bool trim_lead);
+/**
+ * RV-123: the same, and with `headings` a short line (30 columns at most)
+ * that does not end a sentence and is followed by more breaks than usual
+ * (any break, in a file that never has more) is a paragraph of its own in
+ * PARAGRAPHS: "제2장" is not joined to the text after it.
+ */
+bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *source, size_t len,
+                                  rubraview_text_breaks_t breaks, bool trim_lead, bool headings);
 void rubraview_text_view_free(rubraview_text_view_t *view);
 
 /** The paragraph a place in the view's text is in (the last one for the end). */

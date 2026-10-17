@@ -8,6 +8,7 @@
 #include <wincodec.h>
 #include <d2d1.h>
 #include <string.h>
+#include <wchar.h>
 #include <stdlib.h>
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/apng.h"
@@ -1653,6 +1654,7 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
     }
     IWICBitmapFrameEncode_SetPixelFormat(frame, &pixel_format);
     IWICBitmapFrameEncode_SetSize(frame, width, height);
+    if (options && options->dpi > 0.0) IWICBitmapFrameEncode_SetResolution(frame, options->dpi, options->dpi);   /* RV-134 */
 
     bool ok = false;
     IWICFormatConverter *converter = NULL;
@@ -1946,3 +1948,55 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
 }
 
 #endif /* _WIN32 */
+
+rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px) {
+    rubraview_pixbuf_t none = {0};
+    if (!arena || text.len == 0 || text.len > 4000 || px < 4 || px > 2000) return none;
+    WCHAR wtext[4096], face[LF_FACESIZE] = L"Segoe UI";
+    int wn = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wtext, 4095);
+    if (wn <= 0) return none;
+    wtext[wn] = 0;
+    if (font.len > 0) {
+        int fn = MultiByteToWideChar(CP_UTF8, 0, font.ptr, (int)font.len, face, LF_FACESIZE - 1);
+        face[fn > 0 ? fn : 0] = 0;
+        if (fn <= 0) wcscpy(face, L"Segoe UI");
+    }
+    HDC dc = CreateCompatibleDC(NULL);
+    if (!dc) return none;
+    HFONT hf = CreateFontW(-px, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
+                           CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
+    HGDIOBJ old_font = hf ? SelectObject(dc, hf) : NULL;
+    RECT r = { 0, 0, 0, 0 };
+    DrawTextW(dc, wtext, wn, &r, DT_CALCRECT | DT_NOPREFIX);
+    int32_t w = (int32_t)(r.right - r.left) + 2, h = (int32_t)(r.bottom - r.top) + 2;
+    rubraview_pixbuf_t out = none;
+    if (w > 2 && h > 2 && w <= 20000 && h <= 20000) {
+        BITMAPINFO bi = { .bmiHeader = { .biSize = sizeof(BITMAPINFOHEADER), .biWidth = w, .biHeight = -h, .biPlanes = 1,
+                                         .biBitCount = 32, .biCompression = BI_RGB } };
+        void *bits = NULL;
+        HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+        if (bmp && bits) {
+            HGDIOBJ old_bmp = SelectObject(dc, bmp);
+            memset(bits, 0, (size_t)w * (size_t)h * 4u);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, RGB(255, 255, 255));
+            RECT dr = { 1, 1, w - 1, h - 1 };
+            DrawTextW(dc, wtext, wn, &dr, DT_NOPREFIX);
+            GdiFlush();
+            out = rubraview_pixbuf_create(arena, w, h, RUBRAVIEW_PIXFMT_GRAY8);
+            if (out.pixels) {
+                for (int32_t y = 0; y < h; ++y) {
+                    const uint8_t *s = (const uint8_t *)bits + (size_t)y * (size_t)w * 4u;
+                    uint8_t *d = out.pixels + (size_t)y * (size_t)out.stride;
+                    for (int32_t x = 0; x < w; ++x) d[x] = s[(size_t)x * 4u + 1];   /* grey antialiasing: one channel is the cover */
+                }
+            }
+            SelectObject(dc, old_bmp);
+        }
+        if (bmp) DeleteObject(bmp);
+    }
+    if (old_font) SelectObject(dc, old_font);
+    if (hf) DeleteObject(hf);
+    DeleteDC(dc);
+    return out;
+}

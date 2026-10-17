@@ -190,6 +190,37 @@ static bool parse_extra(u8str_t arg, u8str_t value, rubraview_batch_extra_params
         x->canvas_w = (int32_t)a; x->canvas_h = (int32_t)b;
         return true;
     }
+    if (starts_with(arg, "--text-font=", &value)) {   /* RV-134 */
+        if (value.len == 0 || value.len > 64) return false;
+        x->text_font = value;
+        return true;
+    }
+    if (starts_with(arg, "--text=", &value)) {   /* TEXT, TEXT,CORNER, TEXT,CORNER,SIZE or TEXT,CORNER,SIZE,RRGGBB: the last pieces read, the text's own commas kept */
+        static const char *const CORNERS[] = { "br", "bl", "tr", "tl", "c" };
+        u8str_t words = value;
+        x->text_corner = RUBRAVIEW_CORNER_BOTTOM_RIGHT;
+        x->text_size = 4;
+        x->text_rgb = 0xFFFFFF;
+        bool got_corner = false, got_size = false, got_rgb = false;
+        for (int piece = 0; piece < 3; ++piece) {
+            size_t k = words.len;
+            while (k > 0 && words.ptr[k - 1] != ',') --k;
+            if (k == 0) break;
+            u8str_t tail = { .ptr = words.ptr + k, .len = words.len - k };
+            int corner = -1;
+            for (int i = 0; i < 5; ++i) if (rubraview_u8_eq_lit(tail, CORNERS[i])) corner = i;
+            long sz = 0;
+            uint32_t rgb = 0;
+            if (corner >= 0 && !got_corner) { x->text_corner = (rubraview_batch_corner_t)corner; got_corner = true; }
+            else if (!got_size && !got_corner && !got_rgb && tail.len == 6 && parse_rgb(tail, &rgb)) { x->text_rgb = rgb; got_rgb = true; }
+            else if (!got_size && !got_corner && parse_int(tail, &sz) && sz >= 1 && sz <= 50) { x->text_size = (int32_t)sz; got_size = true; }
+            else break;
+            words.len = k - 1;
+        }
+        if (words.len == 0) return false;
+        x->text = words;
+        return true;
+    }
     if (starts_with(arg, "--watermark=", &value)) {   /* FILE or FILE,CORNER or FILE,CORNER,OPACITY; the file's own commas: the last two pieces only are read */
         static const char *const CORNERS[] = { "br", "bl", "tr", "tl", "c" };
         u8str_t file = value;
@@ -476,7 +507,8 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         }
         if (starts_with(arg, "--crop=", &value) || rubraview_u8_eq_lit(arg, "--autocrop") || rubraview_u8_eq_lit(arg, "--auto-colour") ||
             rubraview_u8_eq_lit(arg, "--negative") || starts_with(arg, "--effect=", &value) || starts_with(arg, "--border=", &value) ||
-            starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value)) {
+            starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value) ||
+            starts_with(arg, "--text=", &value) || starts_with(arg, "--text-font=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_EXTRA);
             if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
             if (!parse_extra(arg, value, &a->params.extra)) {
@@ -507,6 +539,12 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
         if (rubraview_u8_eq_lit(arg, "--keep-dates")) { result.keep_dates = true; continue; }
+        if (starts_with(arg, "--dpi=", &value)) {   /* RV-134: the DPI written into each file */
+            long d = 0;
+            if (!parse_int(value, &d) || d < 1 || d > 10000) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.export_options.dpi = (double)d;
+            continue;
+        }
         if (rubraview_u8_eq_lit(arg, "--subfolders")) { result.subfolders = true; continue; }
 
         if (starts_with(arg, "--include=", &value)) { result.job.include_pattern = value; continue; }

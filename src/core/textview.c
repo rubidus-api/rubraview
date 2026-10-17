@@ -1,4 +1,5 @@
 #include "rubraview/textview.h"
+#include "rubraview/lang.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -130,8 +131,16 @@ static void join_line(builder_t *b, const char *s, size_t start, size_t end) {
     put(b, s + start, end - start);
 }
 
+/* RV-123: the line before k is blank. */
+static bool blank_before(const bool *blank, size_t k) { return k > 0 && blank[k - 1]; }
+
 bool rubraview_text_view_build(rubraview_text_view_t *out, const char *s, size_t len,
                                rubraview_text_breaks_t breaks, bool trim_lead) {
+    return rubraview_text_view_build_ex(out, s, len, breaks, trim_lead, false);
+}
+
+bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, size_t len,
+                               rubraview_text_breaks_t breaks, bool trim_lead, bool headings) {
     *out = (rubraview_text_view_t){0};
     builder_t b = { .v = out };
 
@@ -206,11 +215,19 @@ bool rubraview_text_view_build(rubraview_text_view_t *out, const char *s, size_t
         bool more_ever = false;
         for (size_t r = usual + 1; r < 8; ++r) more_ever = more_ever || hist[r] > 0;
 
+        size_t first_line = 0;
+        while (first_line < n && blank[first_line]) ++first_line;
         bool open = false;
         for (size_t k = 0; k < n; ++k) {
             if (blank[k]) continue;
             size_t a = lines[k].start, e = lines[k].end;
             trim(s, &a, &e);
+            /* RV-123: a heading stands alone, the paragraph before it ended first */
+            /* (a blank line before it, or the file's start, and one after it) */
+            bool heading = headings && e > a && run[k] >= 2 && (k == first_line || blank_before(blank, k)) &&
+                           rubraview_text_columns((u8str_t){ .ptr = s + a, .len = e - a }) <= 30 &&
+                           !rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
+            if (heading && open) { end_para(&b); open = false; }
             if (!open) {
                 begin(&b, lines[k].start, b.v->count > 0, false);
                 open = true;
@@ -222,6 +239,7 @@ bool rubraview_text_view_build(rubraview_text_view_t *out, const char *s, size_t
             } else {
                 join_line(&b, s, a, e);
             }
+            if (heading) { end_para(&b); open = false; continue; }
             if (run[k] == 0) continue;
             size_t next = k + run[k];
             bool sentence = rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);

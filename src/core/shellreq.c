@@ -26,9 +26,9 @@ rubraview_shell_verb_t rubraview_shell_verb_for_flag(u8str_t arg) {
    verbs by key name. The order is the menu's, not the verbs' numbers. */
 static const rubraview_shell_menu_item_t MENU_ITEMS[] = {
     { RUBRAVIEW_SHELL_VERB_OPEN,       "1open",    "Open",                 "\xEC\x97\xB4\xEA\xB8\xB0",
-      PLAYABLE | BOOKS, false },
+      PLAYABLE | BOOKS | RUBRAVIEW_SHELL_TEXT, false },
     { RUBRAVIEW_SHELL_VERB_NEW_WINDOW, "2window",  "Open in a new window", "\xEC\x83\x88 \xEC\xB0\xBD\xEC\x97\x90\xEC\x84\x9C \xEC\x97\xB4\xEA\xB8\xB0",
-      PLAYABLE | BOOKS, false },
+      PLAYABLE | BOOKS | RUBRAVIEW_SHELL_TEXT, false },
     { RUBRAVIEW_SHELL_VERB_OPEN_ONLY,  "3only",    "Open these only",      "\xEC\x9D\xB4\xEA\xB2\x83\xEB\xA7\x8C \xEC\x97\xB4\xEA\xB8\xB0",
       PLAYABLE, false },
     { RUBRAVIEW_SHELL_VERB_ADD,        "4add",     "Add to the list",      "\xEC\x9E\xAC\xEC\x83\x9D\xEB\xAA\xA9\xEB\xA1\x9D\xEC\x97\x90 \xEB\x84\xA3\xEA\xB8\xB0",

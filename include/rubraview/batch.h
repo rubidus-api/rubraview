@@ -82,7 +82,22 @@ typedef struct rubraview_batch_extra_params {
     u8str_t  watermark;            /* a picture's path, laid over the result */
     rubraview_batch_corner_t watermark_corner;
     int32_t  watermark_opacity;    /* 1 .. 100 */
+    /* RV-134: words drawn on each picture ({name} {ext} {n} {n:3} {parent} {date} {w} {h}), last of all */
+    u8str_t  text;
+    u8str_t  text_font;            /* a family Windows has; empty: Segoe UI */
+    rubraview_batch_corner_t text_corner;
+    int32_t  text_size;            /* the letters' height, % of the picture's shorter side, 1 .. 50 */
+    uint32_t text_rgb;
 } rubraview_batch_extra_params_t;
+
+/**
+ * RV-134: a mask of text (its alpha in every pixel, colour 0xRRGGBB) made
+ * into a picture to lay on: the letters at `opacity`, with a soft dark
+ * shadow under them so they read on any picture. `mask` is GRAY8 coverage;
+ * the result is `format` (RGBA8 or BGRA8), its own alpha carrying it.
+ */
+rubraview_pixbuf_t rubraview_batch_text_layer(proven_arena_t *arena, const rubraview_pixbuf_t *mask, uint32_t rgb,
+                                              rubraview_pixel_format_t format);
 
 /** A frame `px` wide of colour 0xRRGGBB round `src` (a new picture). */
 rubraview_pixbuf_t rubraview_batch_border(proven_arena_t *arena, const rubraview_pixbuf_t *src, int32_t px, uint32_t rgb);
@@ -96,6 +111,9 @@ rubraview_pixbuf_t rubraview_batch_canvas(proven_arena_t *arena, const rubraview
  */
 bool rubraview_batch_watermark(proven_arena_t *arena, rubraview_pixbuf_t *dst, const rubraview_pixbuf_t *mark,
                                rubraview_batch_corner_t corner, int32_t opacity);
+/** RV-134: the same with the widest the mark may be drawn (`max_width` pixels; a text layer may take the picture's width). */
+bool rubraview_batch_overlay(proven_arena_t *arena, rubraview_pixbuf_t *dst, const rubraview_pixbuf_t *mark,
+                             rubraview_batch_corner_t corner, int32_t opacity, int32_t max_width);
 
 typedef struct rubraview_batch_color_params {
     bool has_color_adjust;

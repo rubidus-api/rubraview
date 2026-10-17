@@ -113,7 +113,16 @@ static const char *const PARTS[] = {
 "  toggle shell.ext_opus       \".opus\" = true wired\n"
 "  pair   shell.menu_opus     \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_m4a        \".m4a\" = true wired\n"
-"  pair   shell.menu_m4a      \"Open with\" \"Right-click menu\" = true wired\n"
+"  pair   shell.menu_m4a      \"Open with\" \"Right-click menu\" = true wired\n",
+"  section \"Text\"\n"
+"  toggle shell.ext_txt     \".txt\" = false wired\n"
+"  pair   shell.menu_txt    \"Open with\" \"Right-click menu\" = false wired\n"
+"  toggle shell.ext_log     \".log\" = false wired\n"
+"  pair   shell.menu_log    \"Open with\" \"Right-click menu\" = false wired\n"
+"  toggle shell.ext_nfo     \".nfo\" = false wired\n"
+"  pair   shell.menu_nfo    \"Open with\" \"Right-click menu\" = false wired\n"
+"  toggle shell.ext_md      \".md\" = false wired\n"
+"  pair   shell.menu_md     \"Open with\" \"Right-click menu\" = false wired\n"
 "  section \"Archives (right-click menu only)\"\n"
 "  toggle shell.ext_zip        \".zip\" = true wired\n"
 "  pair   shell.menu_zip      \"Open with\" \"Right-click menu\" = true wired\n"
@@ -302,8 +311,11 @@ static const char *const PARTS[] = {
 "  note   \"ending where a line ends a sentence (. ! ? or a quote) and more line\"\n"
 "  note   \"breaks follow it than usually do.  B on the page goes round them.\"\n"
 "  toggle text.trim_lead           \"Remove indents\"          = false wired\n"
+"  toggle text.headings            \"Headings stand alone\"    = false wired\n"
 "  section \"Auto-scroll\"\n"
+"  choice text.autoscroll_mode     \"Kind\"                    smooth | pages = smooth wired\n"
 "  int    text.autoscroll_speed    \"Speed\"                   2..600 step 1 unit \"lines/min\" = 30 wired\n"
+"  int    text.autoscroll_page_seconds \"A screen every\"        2..120 step 1 unit \"s\" = 10 wired\n"
 "  note   \"A starts and stops it. While it runs: + / - , the wheel, or the arrows change its speed.\"\n"
 "  section \"Reading the file\"\n"
 "  choice text.encoding            \"Encoding\"                auto | utf8 | utf16le | utf16be | cp949 | iso2022kr | johab | sjis | eucjp | iso2022jp | gbk | gb18030 | hz | big5 | cns | cp1252 | cp437 = auto wired\n"
@@ -390,6 +402,8 @@ static const char *const PARTS[] = {
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
 "help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"
 "help keys.use_keymap_file \"On: the keys come from keymap.ini, which the Keys page edits. Off: the built-in keys are used whatever the file says.\"\n",
+"help text.headings \"In paragraphs: a short line with no sentence's end and a blank line before and after it (Chapter 2) stays a paragraph of its own instead of joining the text after it.\"\n"
+"help text.autoscroll_mode \"smooth: the text glides at the speed below. pages: it moves a screen at a time (one line kept), every so many seconds.\"\n",
 };
 
 static char g_document[32768];

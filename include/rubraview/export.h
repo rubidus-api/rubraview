@@ -57,6 +57,8 @@ typedef struct rubraview_export_options {
     bool    ico_multi_size;
 
     bool    privacy_clean;     /* strip EXIF/GPS/XMP/IPTC */
+
+    double  dpi;               /* RV-134: written into the file (JPEG, PNG, TIFF, BMP); 0 = as the writer does */
 } rubraview_export_options_t;
 
 /** Every field at the specification's default. */
@@ -67,6 +69,13 @@ void rubraview_export_clamp(rubraview_export_options_t *options);
 
 /** The file extension a format writes, without the dot ("jpg", "png", ...). */
 u8str_t rubraview_export_extension(rubraview_export_format_t format);
+
+/**
+ * RV-134: a JPEG's JFIF block (APP0 right after SOI) set to `dpi` dots an
+ * inch, in place: the picture itself is not touched. False when the file
+ * has no JFIF block there (the caller then writes it another way).
+ */
+bool rubraview_jpeg_set_dpi(uint8_t *jpeg, size_t len, double dpi);
 
 /** The format a filename implies, or SAME_AS_SOURCE when it names none. */
 rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename);

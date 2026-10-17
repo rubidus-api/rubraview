@@ -325,11 +325,11 @@ u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension) {
 }
 
 u8str_t rubraview_shell_extensions(void) {
-    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a");
+    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md");
 }
 
 u8str_t rubraview_shell_extensions_all(void) {
-    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a;zip;7z;rar;alz;egg");
+    return U8("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md;zip;7z;rar;alz;egg");
 }
 
 static const struct { uint32_t group; const char *word; const char *extensions; } SHELL_GROUPS[] = {
@@ -337,6 +337,7 @@ static const struct { uint32_t group; const char *word; const char *extensions; 
     { RUBRAVIEW_SHELL_COMICS,   "comics",   "cbz;cb7;cbr" },
     { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov" },
     { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
+    { RUBRAVIEW_SHELL_TEXT,     "text",     "txt;log;nfo;md" },
     /* D-86: offered the right-click menu only, never made a file type of ours. */
     { RUBRAVIEW_SHELL_ARCHIVES, "archives", "zip;7z;rar;alz;egg" },
 };

@@ -30,6 +30,7 @@ void rubraview_export_clamp(rubraview_export_options_t *options) {
     options->webp_quality = clampi(options->webp_quality, 1, 100);
     options->webp_effort = clampi(options->webp_effort, 0, 6);
     options->png_compression = clampi(options->png_compression, 0, 9);
+    if (!(options->dpi >= 1.0 && options->dpi <= 10000.0)) options->dpi = 0.0;   /* RV-134: none, or a sane one */
     if ((int)options->format < 0 || (int)options->format > RUBRAVIEW_EXPORT_ICO) {
         options->format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
     }
@@ -112,4 +113,16 @@ uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_
         default:
             return 0u;   /* GIF, BMP, ICO: nothing to choose */
     }
+}
+
+bool rubraview_jpeg_set_dpi(uint8_t *j, size_t len, double dpi) {
+    if (!j || len < 20 || !(dpi >= 1.0 && dpi <= 65535.0)) return false;
+    if (j[0] != 0xFF || j[1] != 0xD8 || j[2] != 0xFF || j[3] != 0xE0) return false;
+    size_t seg = ((size_t)j[4] << 8) | j[5];
+    if (seg < 16 || 4 + seg > len || memcmp(j + 6, "JFIF\0", 5) != 0) return false;
+    unsigned d = (unsigned)(dpi + 0.5);
+    j[13] = 1;                                          /* units: dots an inch */
+    j[14] = (uint8_t)(d >> 8); j[15] = (uint8_t)d;      /* X density */
+    j[16] = (uint8_t)(d >> 8); j[17] = (uint8_t)d;      /* Y density */
+    return true;
 }

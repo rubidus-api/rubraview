@@ -255,6 +255,31 @@ prog-id = "Rubraview.Music"
 description = "Music"
 target = "file:App"
 
+# RV-123: text files (RFC-0005 §9); in a package Windows' Default apps decides.
+[assoc.Text_txt]
+extension = ".txt"
+prog-id = "Rubraview.Text"
+description = "Text"
+target = "file:App"
+
+[assoc.Text_log]
+extension = ".log"
+prog-id = "Rubraview.Text"
+description = "Text"
+target = "file:App"
+
+[assoc.Text_nfo]
+extension = ".nfo"
+prog-id = "Rubraview.Text"
+description = "Text"
+target = "file:App"
+
+[assoc.Text_md]
+extension = ".md"
+prog-id = "Rubraview.Text"
+description = "Text"
+target = "file:App"
+
 # Explorer's right-click menu (RV-113 (3)): the items of MENU_ITEMS in
 # src/core/shellreq.c, each on the extensions of its kinds (SHELL_GROUPS in
 # src/core/filemanage.c; scripts/check-store.py compares them). One run with
@@ -272,7 +297,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open"
 text-ko = "열기"
@@ -287,7 +312,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open in a new window"
 text-ko = "새 창에서 열기"

@@ -241,6 +241,8 @@ u8str_t rubraview_shell_extensions(void);
 /* D-86: ZIP, 7z, RAR, ALZ, EGG. They get the right-click menu and are
    never registered as a file type of ours, so this is not in ALL. */
 #define RUBRAVIEW_SHELL_ARCHIVES 16u
+/* RV-123 (RFC-0005 §9): .txt .log .nfo .md, offered both columns, off as they come. */
+#define RUBRAVIEW_SHELL_TEXT     32u
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
 u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);
