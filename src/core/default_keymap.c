@@ -203,12 +203,12 @@ const char *rubraview_default_keymap(void) {
        line spacing easy to change). While auto-scroll runs, Up and Down are
        its speed too. */
     "[text]\n"
-    "text_autoscroll = \"A\"\n"
+    "text_autoscroll = \"A, Space\"\n"   /* Space too (owner, 2026-10-18); a screen down is PageDown */
     "text_faster = \"Plus, Shift+Up\"\n"
     "text_slower = \"Minus, Shift+Down\"\n"
     "text_line_down = \"Down\"\n"
     "text_line_up = \"Up\"\n"
-    "text_screen_down = \"PageDown, Space\"\n"
+    "text_screen_down = \"PageDown\"\n"
     "text_screen_up = \"PageUp, Shift+Space\"\n"
     "text_top = \"Home\"\n"
     "text_bottom = \"End\"\n"

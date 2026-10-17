@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.8.0.exe              the viewer, as built
-dist/rubraview-v1.8.0/                 the release bundle
-dist/rubraview-v1.8.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.9.0.exe              the viewer, as built
+dist/rubraview-v1.9.0/                 the release bundle
+dist/rubraview-v1.9.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -781,7 +781,10 @@ is selected, as it is shown.
 
 Settings › Text › **Kind** under Auto-scroll: **smooth** glides at its
 speed; **pages** moves a screen at a time (one line kept to read on from)
-every **A screen every** seconds, `+` / `-` changing it while it runs.
+every **A screen every** seconds, `+` / `-` changing it while it runs. `A`, `Space` or a click in the middle of
+the window starts and stops auto-scroll; the wheel always moves the text
+(the speed is `+` / `-` or the arrows). `,` and `.` go to the previous and
+the next file; the toolbox has the list (**List**) too.
 **Headings stand alone** keeps a short line with no sentence's end and a
 blank line before and after it (`제2장`, `Chapter 2`) as a paragraph of
 its own in paragraphs mode. The information bar (`Shift+I`) says the

@@ -316,7 +316,7 @@ static const char *const PARTS[] = {
 "  choice text.autoscroll_mode     \"Kind\"                    smooth | pages = smooth wired\n"
 "  int    text.autoscroll_speed    \"Speed\"                   2..600 step 1 unit \"lines/min\" = 30 wired\n"
 "  int    text.autoscroll_page_seconds \"A screen every\"        2..120 step 1 unit \"s\" = 10 wired\n"
-"  note   \"A starts and stops it. While it runs: + / - , the wheel, or the arrows change its speed.\"\n"
+"  note   \"A, Space or a click in the middle starts and stops it. While it runs, + / - or the arrows change its speed; the wheel moves the text.\"\n"
 "  section \"Reading the file\"\n"
 "  choice text.encoding            \"Encoding\"                auto | utf8 | utf16le | utf16be | cp949 | iso2022kr | johab | sjis | eucjp | iso2022jp | gbk | gb18030 | hz | big5 | cns | cp1252 | cp437 = auto wired\n"
 "  note   \"auto guesses each file. E on the page reads the file in the next one, and that is kept for it.\"\n"

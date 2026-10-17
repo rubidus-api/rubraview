@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
 #include <windows.h>
+#include <stdio.h>
 #include <shobjidl.h>
 #include <commdlg.h>
 #include <stdbool.h>
@@ -200,9 +201,13 @@ bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char
     }
     /* The face only: the size and the colour have settings of their own. */
     CHOOSEFONTW cf = { .lStructSize = sizeof(cf), .hwndOwner = (HWND)parent_window_handle, .lpLogFont = &lf,
-                       .Flags = CF_SCREENFONTS | CF_NOSIZESEL | CF_NOSTYLESEL | CF_NOSCRIPTSEL | CF_FORCEFONTEXIST |
+                       .Flags = CF_SCREENFONTS | CF_NOSIZESEL | CF_NOSTYLESEL | CF_NOSCRIPTSEL | CF_FORCEFONTEXIST | CF_NOVERTFONTS |
                                 (current.len > 0 ? CF_INITTOLOGFONTSTRUCT : 0) };
-    if (!ChooseFontW(&cf) || lf.lfFaceName[0] == L'\0') return false;
+    if (!ChooseFontW(&cf) || lf.lfFaceName[0] == L'\0') {
+        DWORD err = CommDlgExtendedError();   /* 0: cancelled; else why it could not open */
+        if (err != 0) snprintf(out, cap, "#%lu", (unsigned long)err);
+        return false;
+    }
     int n = WideCharToMultiByte(CP_UTF8, 0, lf.lfFaceName, -1, out, (int)cap, NULL, NULL);
     if (n <= 0) { out[0] = '\0'; return false; }
     return true;

@@ -190,6 +190,7 @@ static const char *const PARTS[] = {
 "  tile text_find                \"Find\"\n"
 "  tile text_encoding            \"Encoding\"\n"
 "  tile open_picker              \"Open\"\n"
+"  tile toggle_playlist          \"List\"\n"
 "  tile toggle_info              \"Info\"\n"
 "\n",
 "# put in front of the profile while a slide show runs\n"

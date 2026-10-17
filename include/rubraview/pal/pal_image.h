@@ -198,6 +198,10 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
  */
 rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px);
 
+/** RV-135: the same, the lines wrapped at `width` pixels and cut at `height` (a page's first lines). */
+rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px,
+                                               int32_t width, int32_t height);
+
 /**
  * §3.10: encode a pixel buffer and write it to `path`. The format and
  * its quality settings come from the export options, which were already

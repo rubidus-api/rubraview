@@ -1178,7 +1178,7 @@ static bool text_active(const app_state_t *app);
 static bool text_wheel(app_state_t *app, double notches, uint32_t mods);
 static bool text_press(app_state_t *app, double x, double y, uint32_t mods);
 static void text_drag(app_state_t *app, double x, double y);
-static bool text_release(app_state_t *app);
+static bool text_release(app_state_t *app, double x, double y);
 static void text_tick(app_state_t *app, double now);
 static bool text_pages_mode(const app_state_t *app);
 static int text_percent(const app_state_t *app);
@@ -4914,10 +4914,22 @@ static void aspect_set(app_state_t *app, rubraview_aspect_t aspect, bool side) {
     if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 }
 
+static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);
+
+/* The owner (2026-10-18): "툴바 아이콘 위의 텍스트는 언제나 영어로 ... 아이콘 안의 텍스트만
+   영어로 해야 넘치지 않아요" — a tile's own words are English whatever the language, so
+   they fit it; its tooltip, the menus and every message stay in the language in use. */
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
-    /* RV-114: the document's caption in the language in use. */
+    const rubraview_lang_t *pack = rubraview_lang_current();
+    rubraview_lang_use(NULL);
+    u8str_t caption = toolbox_caption_in(app, tile_in, out_enabled);
+    rubraview_lang_use(pack);
+    return caption;
+}
+
+static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
     rubraview_box_tile_t shown = *tile_in;
-    shown.caption = rubraview_tr_ctx_u8("toolbox", tile_in->caption);
+    shown.caption = rubraview_tr_ctx_u8("toolbox", tile_in->caption);   /* English here: see toolbox_caption */
     const rubraview_box_tile_t *tile = &shown;
     rubraview_action_facts_t facts = action_facts(app);
     rubraview_action_state_t st = rubraview_action_state(tile->action, &facts);
@@ -15366,6 +15378,10 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     rubraview_settings_set_text(&app->settings, def->section, def->key, app_keep(app, cstr(face)));
                     settings_took_effect(app);
                     settings_say(app, T("font chosen"));
+                } else if (face[0] == '#') {
+                    char why[96];
+                    snprintf(why, sizeof(why), T("the font dialog could not open (%s)"), face);
+                    settings_say(app, why);
                 }
                 break;
             }
@@ -19498,6 +19514,7 @@ typedef struct text_page {
     double x_scroll;                   /* no wrap: how far to the right */
     /* auto-scroll (§5): smooth, by pixels; its speed in lines a minute */
     bool autoscroll;
+    double press_x, press_y;   /* where the last press on the text was: a click in the middle is auto-scroll */
     double autoscroll_last;
     double autoscroll_carry;
     /* the selection, in the view's text: from `sel_a` to `sel_b` */
@@ -20158,8 +20175,9 @@ static bool text_wheel(app_state_t *app, double notches, uint32_t mods) {
         if (!text_wraps(app)) { t->x_scroll -= notches * text_px(app) * 4.0; if (t->x_scroll < 0.0) t->x_scroll = 0.0; }
         return true;
     }
-    if (t->autoscroll) { text_speed(app, notches > 0 ? 1.0 / 1.1 : 1.1); return true; }
+    /* The wheel moves the text, auto-scroll or not; it does not change the speed (owner, 2026-10-18). */
     text_scroll_by(app, -notches * text_line_h(app) * 3.0);
+    if (t->autoscroll) t->autoscroll_carry = 0.0;
     note_activity(app);
     return true;
 }
@@ -20177,11 +20195,13 @@ static size_t text_offset_at(app_state_t *app, double x, double y) {
     return p->start + (in < p->len ? in : p->len);
 }
 
-/* A press on the text starts a selection (and stops auto-scroll). */
+/* A press on the text starts a selection. A click (no drag) in the middle of
+   the window starts or stops auto-scroll (owner, 2026-10-18); a drag stops it. */
 static bool text_press(app_state_t *app, double x, double y, uint32_t mods) {
     if (!text_active(app)) return false;
     text_page_t *t = app->text;
-    if (t->autoscroll) { t->autoscroll = false; osd_say(app, TU8("auto-scroll stopped")); }
+    t->press_x = x;
+    t->press_y = y;
     size_t at = text_offset_at(app, x, y);
     if (!(mods & RUBRAVIEW_MOD_SHIFT)) t->sel_a = at;
     t->sel_b = at;
@@ -20200,10 +20220,16 @@ static void text_drag(app_state_t *app, double x, double y) {
     t->sel_b = text_offset_at(app, x, y);
 }
 
-static bool text_release(app_state_t *app) {
+static bool text_release(app_state_t *app, double x, double y) {
     text_page_t *t = app->text;
     if (!t || !t->selecting) return false;
     t->selecting = false;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    bool click = t->sel_a == t->sel_b && fabs(x - t->press_x) < 6.0 && fabs(y - t->press_y) < 6.0;
+    bool middle = t->press_x > win_w / 3.0 && t->press_x < win_w * 2.0 / 3.0 && t->press_y > win_h / 3.0 && t->press_y < win_h * 2.0 / 3.0;
+    if (click && middle) handle_action(app, U8("text_autoscroll"));
+    else if (!click && t->autoscroll) { t->autoscroll = false; osd_say(app, TU8("auto-scroll stopped")); }   /* a selection */
     return true;
 }
 
@@ -23661,7 +23687,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 }
 
                 case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && text_release(&app)) break;
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && text_release(&app, event.mouse.x, event.mouse.y)) break;
                     if (app.view_pressed && !app.view_dragging && event.mouse.button == RUBRAVIEW_MOUSE_LEFT) {
                         /* D-109: a click. Over a film or music it pauses and plays; over a
                            picture it is what it was (a page turned at the sides, the boxes

@@ -26,6 +26,12 @@
 #include "rubraview/avif_read.h"
 #include "rubraview/bigtiff.h"
 #include "rubraview/pal/pal_image_wic_internal.h"
+#include "rubraview/pal/pal_image.h"
+#include "rubraview/textenc.h"
+
+#define TEXT_TILE_W 192   /* RV-135: a text file's tile, a page */
+#define TEXT_TILE_H 256
+static uint8_t *text_page_small(proven_arena_t *scratch, u8str_t path, double aspect, int32_t *out_w, int32_t *out_h);
 
 /* Defined here so the link does not depend on which MinGW carries it. */
 static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
@@ -258,6 +264,7 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     u8str_t archives = { .ptr = t->archives, .len = t->archives_len };
     int32_t w = 0, h = 0;
     uint8_t *raw = NULL;
+    bool is_text = false;
 
     if (job->bytes) {
         /* a page inside a book: decoded small from its bytes */
@@ -282,6 +289,9 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         }
     } else if (rubraview_glob_match_list(rubraview_path_basename(path), archives)) {
         raw = archive_first_page(scratch, factory, path, pictures, &w, &h);
+    } else if (rubraview_glob_match_list(rubraview_path_basename(path), (u8str_t){ .ptr = "*.txt;*.log;*.nfo;*.md", .len = 22 })) {
+        raw = text_page_small(scratch, path, job->aspect, &w, &h);   /* RV-135 */
+        is_text = raw != NULL;
     } else {
         shell_meta(path, &meta->source_width, &meta->source_height, &meta->seconds);
         raw = rubraview_pal_shell_thumbnail_bgra(path, 192, &w, &h);
@@ -294,7 +304,9 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
 
     rubraview_pixbuf_t shell = { .pixels = raw, .width = w, .height = h, .stride = w * 4,
                                  .format = RUBRAVIEW_PIXFMT_BGRA8 };
-    rubraview_pixbuf_t thumb = rubraview_thumb_make(scratch, &shell, job->aspect, THUMB_MAX_WIDTH, THUMB_BLUR, THUMB_KEEP);
+    /* a page of text keeps its size and its sharpness, only a little darker, so its words can be read */
+    rubraview_pixbuf_t thumb = is_text ? rubraview_thumb_make(scratch, &shell, job->aspect, TEXT_TILE_W, 0, 0.92)
+                                       : rubraview_thumb_make(scratch, &shell, job->aspect, THUMB_MAX_WIDTH, THUMB_BLUR, THUMB_KEEP);
     uint8_t *out = NULL;
     if (rubraview_pixbuf_is_valid(&thumb)) {
         size_t bytes = (size_t)thumb.width * (size_t)thumb.height * 4u;
@@ -309,6 +321,63 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         }
     }
     free(raw);
+    return out;
+}
+
+
+/* RV-135 (2026-10-18): a text file's tile is a page of its first lines, dark on
+   light paper, so text files are told apart at a glance. The first 4 KB are read,
+   the encoding guessed as the viewer guesses it. */
+static uint8_t *text_page_small(proven_arena_t *scratch, u8str_t path, double aspect, int32_t *out_w, int32_t *out_h) {
+    rubraview_fs_mapping_t map;
+    if (!rubraview_pal_fs_map(path, &map)) return NULL;
+    size_t n = map.size < 4096u ? (size_t)map.size : 4096u;
+    size_t bom = 0;
+    rubraview_textenc_t enc = rubraview_textenc_guess(map.data, n, NULL, &bom);
+    const uint8_t *b = map.data + bom;
+    size_t len = n - bom, raw_len = 0;
+    char *raw = NULL;
+    if (enc == RUBRAVIEW_TEXTENC_UTF8) {
+        while (len > 0 && (b[len - 1] & 0xC0u) == 0x80u) --len;   /* a character cut by the 4 KB: left out */
+        if (len > 0 && b[len - 1] >= 0xC0u) --len;
+        raw = (char *)malloc(len + 1);
+        if (raw) { memcpy(raw, b, len); raw[len] = '\0'; raw_len = len; }
+    } else if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
+        raw = rubraview_textenc_utf16_to_utf8(b, len & ~(size_t)1, enc == RUBRAVIEW_TEXTENC_UTF16BE, &raw_len);
+    } else {
+        raw = rubraview_pal_text_decode(b, len, rubraview_textenc_codepage(enc), &raw_len);
+    }
+    rubraview_pal_fs_unmap(&map);
+    if (!raw) return NULL;
+    size_t clean_len = 0;
+    char *clean = rubraview_text_clean(raw, raw_len, &clean_len);
+    free(raw);
+    if (!clean) return NULL;
+    for (size_t i = 0; i < clean_len; ++i) if (clean[i] == '\t') clean[i] = ' ';
+    /* The page is made in the tile's own shape, so nothing is cut from it: the first lines stay at its top. */
+    if (!(aspect > 0.2 && aspect < 5.0)) aspect = (double)TEXT_TILE_W / TEXT_TILE_H;
+    int32_t tw = TEXT_TILE_W, th = (int32_t)((double)TEXT_TILE_W / aspect + 0.5);
+    if (th > TEXT_TILE_H * 2) { th = TEXT_TILE_H * 2; tw = (int32_t)((double)th * aspect + 0.5); }
+    if (th < 48) th = 48;
+    const int32_t pad = 10;
+    rubraview_pixbuf_t mask = rubraview_pal_text_mask_box(scratch, (u8str_t){ .ptr = clean, .len = clean_len }, (u8str_t){ .ptr = "", .len = 0 },
+                                                          14, tw - 2 * pad, th - 2 * pad);
+    free(clean);
+    uint8_t *out = (uint8_t *)malloc((size_t)tw * (size_t)th * 4u);
+    if (!out) return NULL;
+    const uint8_t paper[3] = { 0xE6, 0xEB, 0xEE }, ink[3] = { 0x2A, 0x2A, 0x2A };   /* BGR */
+    for (int32_t y = 0; y < th; ++y) {
+        for (int32_t x = 0; x < tw; ++x) {
+            uint8_t *q = out + ((size_t)y * (size_t)tw + (size_t)x) * 4u;
+            int32_t mx = x - pad, my = y - pad;
+            uint32_t a = mask.pixels && mx >= 0 && my >= 0 && mx < mask.width && my < mask.height
+                       ? mask.pixels[(size_t)my * (size_t)mask.stride + (size_t)mx] : 0u;
+            for (int c = 0; c < 3; ++c) q[c] = (uint8_t)((paper[c] * (255u - a) + ink[c] * a) / 255u);
+            q[3] = 255;
+        }
+    }
+    *out_w = tw;
+    *out_h = th;
     return out;
 }
 

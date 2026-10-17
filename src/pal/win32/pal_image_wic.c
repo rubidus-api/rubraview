@@ -1949,7 +1949,19 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
 
 #endif /* _WIN32 */
 
+static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px, int32_t box_w, int32_t box_h, int weight);
+
 rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px) {
+    return text_mask_in(arena, text, font, px, 0, 0, FW_SEMIBOLD);
+}
+
+rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px,
+                                               int32_t width, int32_t height) {
+    if (width < 8 || height < 8) return (rubraview_pixbuf_t){0};
+    return text_mask_in(arena, text, font, px, width, height, FW_NORMAL);
+}
+
+static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px, int32_t box_w, int32_t box_h, int weight) {
     rubraview_pixbuf_t none = {0};
     if (!arena || text.len == 0 || text.len > 4000 || px < 4 || px > 2000) return none;
     WCHAR wtext[4096], face[LF_FACESIZE] = L"Segoe UI";
@@ -1963,12 +1975,15 @@ rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, 
     }
     HDC dc = CreateCompatibleDC(NULL);
     if (!dc) return none;
-    HFONT hf = CreateFontW(-px, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
+    HFONT hf = CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS,
                            CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
     HGDIOBJ old_font = hf ? SelectObject(dc, hf) : NULL;
     RECT r = { 0, 0, 0, 0 };
-    DrawTextW(dc, wtext, wn, &r, DT_CALCRECT | DT_NOPREFIX);
+    UINT wrap = 0;
+    if (box_w > 0) { wrap = DT_WORDBREAK | DT_EDITCONTROL; r.right = box_w - 2; }   /* RV-135: wrapped, then cut */
+    DrawTextW(dc, wtext, wn, &r, DT_CALCRECT | DT_NOPREFIX | wrap);
     int32_t w = (int32_t)(r.right - r.left) + 2, h = (int32_t)(r.bottom - r.top) + 2;
+    if (box_w > 0) { w = box_w; if (h > box_h) h = box_h; }
     rubraview_pixbuf_t out = none;
     if (w > 2 && h > 2 && w <= 20000 && h <= 20000) {
         BITMAPINFO bi = { .bmiHeader = { .biSize = sizeof(BITMAPINFOHEADER), .biWidth = w, .biHeight = -h, .biPlanes = 1,
@@ -1981,7 +1996,7 @@ rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, 
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, RGB(255, 255, 255));
             RECT dr = { 1, 1, w - 1, h - 1 };
-            DrawTextW(dc, wtext, wn, &dr, DT_NOPREFIX);
+            DrawTextW(dc, wtext, wn, &dr, DT_NOPREFIX | wrap);
             GdiFlush();
             out = rubraview_pixbuf_create(arena, w, h, RUBRAVIEW_PIXFMT_GRAY8);
             if (out.pixels) {
