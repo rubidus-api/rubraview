@@ -81,6 +81,7 @@
 #include "rubraview/matroska.h"
 #include "rubraview/mp4.h"
 #include "rubraview/ui_listwin.h"
+#include "rubraview/classify.h"
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
@@ -122,6 +123,7 @@
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
 #include "rubraview/textview.h"
+#include "rubraview/effects.h"
 
 #define APP_ARENA_BYTES (64u * 1024u * 1024u)
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico;*.avif;*.jxl"
@@ -319,6 +321,8 @@ typedef struct save_job {
     char arc_name[512];
     char source[1024], out[1024];
     rubraview_edit_session_t edit;
+    rubraview_edit_steps_t steps;   /* the owner's edit: the steps in force, applied in order */
+    bool over_original;             /* written beside it, then put in its place (the old one to the Recycle Bin) */
     bool apply_edit;
     rubraview_export_options_t options;
     rubraview_export_format_t source_format;
@@ -459,7 +463,7 @@ typedef struct app_state {
     bool                   px_edit_open;
     bool                   px_edit_crop;      /* the crop's corner and size instead (owner, 2026-10-15) */
     int32_t                px_edit_field;     /* 0 = width, 1 = height; for the crop 0..3 = x, y, width, height */
-    char                   px_edit_text[4][8];
+    char                   px_edit_text[4][16];   /* RV-128: a size may carry its unit, "21cm" */
     size_t                 px_edit_length[4];
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
@@ -561,6 +565,7 @@ typedef struct app_state {
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
     bool                       slidepop_open, slidepop_typing;
     u8str_t                    hint;               /* RV-116: what the box part under the pointer does */
+    char                       hint_text[320];     /* what `hint` points at: a tile's words and keys */
     double                     hint_since;         /* when the pointer came to rest on it */
     double                     slidepop_x, slidepop_y;
     char                       slidepop_text[16];
@@ -750,6 +755,36 @@ typedef struct app_state {
     rubraview_panel_t         panel;
     bool                      panel_is_export;   /* which of the three the panel currently is */
     bool                      panel_is_batch;
+    /* RV-129: the batch window's choices, kept between openings (and in settings.ini as batch.last) */
+    struct batch_ui {
+        bool    loaded;
+        int32_t size_by;              /* 0 as it is, 1 %, 2 long side, 3 short side, 4 width, 5 height, 6 box, 7 megapixels */
+        double  size_value, box_h;
+        int32_t filter;
+        bool    linear, no_enlarge;
+        double  sharpen;
+        int32_t rotate, flip;         /* rotate: 0 none, 1 90, 2 180, 3 270, 4 by EXIF; flip: 0 none, 1 h, 2 v */
+        char    crop[48];
+        bool    autocrop, auto_colour, grayscale, negative;
+        int32_t effect;
+        double  effect_amount;
+        char    canvas[24];
+        double  border;
+        int32_t frame_colour;         /* 0 white, 1 black, 2 grey */
+        char    mark[1024];
+        int32_t mark_corner;
+        double  mark_opacity;
+        int32_t format;
+        double  quality;
+        bool    privacy;
+        char    name[256];
+        double  start;
+        char    replace[256];
+        int32_t exists;               /* 0 replace, 1 skip, 2 number */
+        bool    keep_dates, recursive, subfolders;
+        char    out[1024];
+    } batch;
+    int32_t                   batch_typing;   /* RV-129: the panel row whose text the rename box holds; 0 none */
     bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
     /* D-88: editing inside an archive */
     arc_job_t                *arc_job;           /* the archive is being written again, or NULL */
@@ -775,7 +810,25 @@ typedef struct app_state {
     /* §3.13: the curve widget — which point is being dragged, or -1. */
     int32_t                   curve_dragging;
     int32_t                   crop_drag_x0, crop_drag_y0;
-    rubraview_edit_session_t  edit;
+    rubraview_edit_session_t  edit;            /* the step being made: its values, and the selection (crop rect) */
+    /* The owner's edit (2026-10-17): steps on a selection, undone and redone until saved. */
+    rubraview_edit_steps_t    edit_steps;
+    rubraview_area_shape_t    sel_shape;       /* the selection: a rectangle or an ellipse in the crop's box */
+    int32_t                   sel_feather;
+    rubraview_panel_t         sel_panel;       /* the selection's numbers, a box of its own */
+    rubraview_panel_t         steps_panel;     /* the undo list */
+    /* RV-133: classifying, the files set aside for the nine folders (made on first use) */
+    rubraview_classify_t     *classify;
+    rubraview_panel_t         classify_panel;
+    int32_t                   classify_shown_page;
+    int32_t                   sel_grab;        /* 0 none; 2 moving; 3..10 a handle */
+    int32_t                   sel_grab_x, sel_grab_y;
+    rubraview_crop_rect_t     sel_grab_rect;
+    uint32_t                  edit_rev, edit_shown_rev;
+    int32_t                   typed_panel, typed_id;   /* a value typed: 1 the edit panel, 2 the numbers; its row */
+    int32_t                   effect_choice;           /* the effect chosen (effects.h), shown on the preview until applied */
+    double                    effect_amount;
+    bool                      edit_compare;            /* the original shown instead, to compare */
     rubraview_export_options_t export_options;
     rubraview_batch_job_t      batch_job;
     rubraview_batch_action_t   batch_actions[8];
@@ -795,6 +848,7 @@ typedef struct app_state {
        offered once and made on the next Enter. */
     bool                   rename_is_target;
     bool                   rename_is_find;         /* RFC-0005: the text page's Find (Ctrl+F) */
+    bool                   rename_is_value;        /* the owner's edit: a panel's value typed */
     struct text_page      *text;                   /* RFC-0005: the text page on screen, or NULL */
     bool                   target_moving;
     bool                   target_from_picker;
@@ -870,6 +924,7 @@ typedef struct app_state {
     bool                     packaged;        /* RV-113 (2): run from the Store's MSIX */
     rubraview_other_copies_t other_copies;    /* D-154: the MSI's or the Store's copy beside this one */
     bool                     copies_told;
+    int32_t                  settings_last_setting;   /* the def the settings' focus was last on, -1 none */
     char                     package_family[160];
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
@@ -921,6 +976,7 @@ typedef struct app_state {
     int32_t                    settings_tip_row;   /* the keys table's row the pointer rests on; -1 (owner, 2026-10-14) */
     double                     settings_tip_since, settings_tip_x, settings_tip_y;
     bool                       settings_tip_shown;
+    int32_t                    settings_tip_help;  /* the def whose name the pointer rests on, for its help; -1 */
     bool                       settings_dirty;       /* its picture is out of date */
     double                     settings_info_seconds; /* when `info` lines were last redrawn */
     /* Where the window was left (layout.ini); width 0 until known. Closing
@@ -1029,6 +1085,11 @@ static void source_close(app_state_t *app);
 static void triage_delete(app_state_t *app, bool permanent);
 static void triage_undo(app_state_t *app);
 static void triage_curate(app_state_t *app, int32_t digit);
+static void classify_mark(app_state_t *app, int32_t digit);
+static void batch_typed(app_state_t *app);
+static bool filing_exists(void *ctx, u8str_t path);
+static void classify_toggle(app_state_t *app);
+static bool classify_press(app_state_t *app, double px, double py);
 static void filing_put(app_state_t *app, bool moving);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
@@ -1127,6 +1188,14 @@ static void settings_write_if_changed(app_state_t *app, bool say);
 static void load_keymap(app_state_t *app);
 static void settings_say(app_state_t *app, const char *text);
 static void panel_open_edit(app_state_t *app);
+static void edit_save_over(app_state_t *app);
+static void edit_sel_sync(app_state_t *app);
+static bool edit_apply_pending(app_state_t *app, bool say);
+static void edit_undo(app_state_t *app, bool redo);
+static void edit_effect_apply(app_state_t *app);
+static void edit_auto_colour(app_state_t *app);
+static const char *effect_word(int32_t e);
+static void edit_value_typed(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
 static void new_window(app_state_t *app);
@@ -3308,10 +3377,11 @@ static void go_to_spread(app_state_t *app, size_t index) {
         app->prev_spread_valid = true;
         /* Settings > Viewer > Turning a page; a slide show quicker than half a second cuts (§3.2.5). */
         static const rubraview_transition_kind_t KINDS[] = { RUBRAVIEW_TRANSITION_CUT, RUBRAVIEW_TRANSITION_CROSSFADE,
-                                                             RUBRAVIEW_TRANSITION_SLIDE_LEFT, RUBRAVIEW_TRANSITION_ZOOM_FADE };
+                                                             RUBRAVIEW_TRANSITION_SLIDE_LEFT, RUBRAVIEW_TRANSITION_ZOOM_FADE,
+                                                             RUBRAVIEW_TRANSITION_DISSOLVE };
         int turn = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition")));
         app->transition.kind = rubraview_transition_for_interval(
-            KINDS[turn >= 0 && turn < 4 ? turn : 1],
+            KINDS[turn >= 0 && turn < 5 ? turn : 1],
             app->slideshow_running ? app->slideshow.interval_seconds : 1.0, 0.5);
         rubraview_transition_start(&app->transition);
     }
@@ -4853,6 +4923,9 @@ static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_
         return text.len > 0 ? text : tile->caption;
     }
     if (rubraview_u8_eq_lit(tile->action, "fit_cycle")) return cstr(rubraview_fit_tile_name(app->fit_mode));
+    /* Two pages (owner, 2026-10-17): a wide page alone by its shape, or always two. */
+    if (rubraview_u8_eq_lit(tile->action, "toggle_spread_detect")) return app->spread_detect ? TU8("Wide\nalone") : TU8("Always\ntwo");
+    if (rubraview_u8_eq_lit(tile->action, "text_wrap")) return TU8("Word\nwrap");   /* on two rows (owner, 2026-10-17) */
     if (rubraview_u8_eq_lit(tile->action, "media_ab_edit")) return TU8("Set\nA-B");   /* on two rows (owner, 2026-10-15) */
     if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
@@ -5580,6 +5653,11 @@ static void pan_key(app_state_t *app, int dx, int dy) {
     }
     double mx = dx ? rubraview_pan_key_delta((double)win_w, x0, x1 - x0, dx, step_x) : 0.0;
     double my = dy ? rubraview_pan_key_delta((double)win_h, y0, y1 - y0, dy, step_y) : 0.0;
+    /* Zoomed out (owner, 2026-10-17): the smaller picture moves, inside the window. */
+    if (app->zoom < 0.999) {
+        if (dx && mx == 0.0) mx = rubraview_pan_key_delta_small((double)win_w, x0, x1 - x0, dx, step_x);
+        if (dy && my == 0.0) my = rubraview_pan_key_delta_small((double)win_h, y0, y1 - y0, dy, step_y);
+    }
     if (mx == 0.0 && my == 0.0) return;
     app->pan_x += mx;
     app->pan_y += my;
@@ -5701,6 +5779,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->spread_detect = !app->spread_detect;
         app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
         app->needs_relayout = true;
+        osd_say(app, app->spread_detect ? TU8("two pages: a wide page stands alone, by its shape")
+                                        : TU8("two pages: always two, whatever their shape"));
     } else if (rubraview_u8_eq_lit(action, "interval_up")) {
         interval_set(app, app->slideshow.interval_seconds + 0.5);
     } else if (rubraview_u8_eq_lit(action, "interval_down")) {
@@ -5892,6 +5972,8 @@ static void handle_action(app_state_t *app, u8str_t action) {
         subs_show(app);
     } else if (rubraview_u8_eq_lit(action, "extract_subtitles")) {
         takeout_begin(app);
+    } else if (rubraview_u8_eq_lit(action, "toggle_classify")) {
+        classify_toggle(app);
     } else if (rubraview_u8_eq_lit(action, "copy_to_folder")) {
         filing_put(app, false);
     } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
@@ -6485,6 +6567,10 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         char c = combo.key_name.ptr[0];
         if (c >= '1' && c <= '9') {
             int32_t digit = c - '0';
+            if (app->classify_panel.open && rubraview_curation_target(&app->curation, digit).len > 0) {
+                classify_mark(app, digit);   /* RV-133: set aside, not moved yet */
+                return true;
+            }
             if (rubraview_curation_target(&app->curation, digit).len > 0) {
                 triage_curate(app, digit);
                 return true;
@@ -6719,7 +6805,20 @@ static void px_edit_fill(app_state_t *app, int32_t field, int32_t value) {
     app->px_edit_length[field] = n > 0 ? (size_t)n : 0;
 }
 
+/* RV-128: the resize is of the whole picture whatever is selected: the
+   size helpers are given the session with the selection left out. */
+static rubraview_edit_session_t edit_whole(const app_state_t *app) {
+    rubraview_edit_session_t s = app->edit;
+    s.crop_active = false;
+    return s;
+}
+
 static int32_t px_edit_value(const app_state_t *app, int32_t field) {
+    if (!app->px_edit_crop) {   /* a size: pixels, or a length in any unit (RV-128) */
+        int32_t whole = field == 0 ? app->edit.image_width : app->edit.image_height, px = 0;
+        u8str_t typed = { .ptr = app->px_edit_text[field], .len = app->px_edit_length[field] };
+        return rubraview_resize_parse_length(typed, whole, app->edit.resize_dpi, &px) ? px : 0;
+    }
     int32_t v = 0;
     for (size_t i = 0; i < app->px_edit_length[field]; ++i) v = v * 10 + (app->px_edit_text[field][i] - '0');
     return v;
@@ -6750,7 +6849,7 @@ static void px_edit_begin(app_state_t *app) {
     const rubraview_edit_session_t *e = &app->edit;
     app->px_edit_crop = false;
     int32_t w = e->resize_width, h = e->resize_height;
-    if (w <= 0 || h <= 0) { w = e->crop_active ? e->crop.width : e->image_width; h = e->crop_active ? e->crop.height : e->image_height; }
+    if (w <= 0 || h <= 0) { w = e->image_width; h = e->image_height; }   /* the whole picture (RV-128) */
     if (w <= 0 || h <= 0) { osd_say(app, TU8("the picture's size is not known yet")); return; }
     px_edit_fill(app, 0, w);
     px_edit_fill(app, 1, h);
@@ -6766,10 +6865,20 @@ static void px_edit_close(app_state_t *app) {
 
 /* The field in hand changed: the other follows the shape. */
 static void px_edit_follow(app_state_t *app) {
-    if (app->px_edit_crop) return;   /* the crop's four numbers stand alone */
+    if (app->px_edit_crop) {
+        /* The owner's edit: the four numbers move the selection as they are typed. */
+        if (rubraview_edit_crop_set(&app->edit, px_edit_value(app, 0), px_edit_value(app, 1), px_edit_value(app, 2), px_edit_value(app, 3))) {
+            app->edit.crop_active = true;
+            app->edit_rev++;
+            app->edit_shown_valid = false;
+            edit_sel_sync(app);
+        }
+        return;
+    }
     int32_t f = app->px_edit_field;
     int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
-    if (rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
+    rubraview_edit_session_t whole = edit_whole(app);
+    if (px_edit_value(app, f) > 0 && whole.resize_lock_aspect && rubraview_edit_resize_pair(&whole, px_edit_value(app, f), f == 0, &w, &h)) {
         px_edit_fill(app, 1 - f, f == 0 ? h : w);
     }
 }
@@ -6791,8 +6900,9 @@ static bool px_edit_commit(app_state_t *app) {
     }
     int32_t f = app->px_edit_field;
     int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
-    if (!rubraview_edit_resize_pair(&app->edit, px_edit_value(app, f), f == 0, &w, &h)) {
-        osd_say(app, TU8("a size is 1 to 65535 pixels"));
+    rubraview_edit_session_t whole = edit_whole(app);
+    if (w <= 0 || h <= 0 || (whole.resize_lock_aspect && !rubraview_edit_resize_pair(&whole, px_edit_value(app, f), f == 0, &w, &h))) {
+        osd_say(app, TU8("a size is 1 to 65535 pixels, or a length: 21cm, 210mm, 8.5in, 50%"));
         return false;
     }
     rubraview_edit_set_resize(&app->edit, w, h, f == 0);
@@ -6834,8 +6944,12 @@ static void px_edit_text_typed(app_state_t *app, u8str_t text) {
     int32_t f = app->px_edit_field;
     for (size_t i = 0; i < text.len; ++i) {
         char c = text.ptr[i];
-        if (c < '0' || c > '9') continue;
-        if (app->px_edit_length[f] + 1 >= sizeof(app->px_edit_text[0]) || app->px_edit_length[f] >= 5) break;
+        bool digit = c >= '0' && c <= '9';
+        /* RV-128: a size may be typed with its unit: 21cm, 210 mm, 8.5in, 50% */
+        bool unit = !app->px_edit_crop && c != '\0' && strchr(".,% cmMiInNpPxX\"", c) != NULL;
+        if (!digit && !unit) continue;
+        size_t most = app->px_edit_crop ? 5u : sizeof(app->px_edit_text[0]) - 1u;
+        if (app->px_edit_length[f] + 1 >= sizeof(app->px_edit_text[0]) || app->px_edit_length[f] >= most) break;
         if (app->px_edit_length[f] == 1 && app->px_edit_text[f][0] == '0') app->px_edit_length[f] = 0;
         app->px_edit_text[f][app->px_edit_length[f]++] = c;
         app->px_edit_text[f][app->px_edit_length[f]] = '\0';
@@ -7301,6 +7415,13 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (ab_edit_handle_key(app, combo)) return;
     if (px_edit_handle_key(app, combo)) return;
     if (popups_key(app, combo)) return;   /* RV-116 */
+    /* The owner's edit: Enter applies the step, Ctrl+Z and Ctrl+Y go through the steps. */
+    if (edit_panel_open(app) && !app->rename_active && !app->px_edit_open) {
+        bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
+        if (ctrl && key_is(combo, "Z")) { edit_undo(app, (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0); return; }
+        if (ctrl && key_is(combo, "Y")) { edit_undo(app, true); return; }
+        if (!ctrl && key_is(combo, "Enter")) { (void)edit_apply_pending(app, true); return; }
+    }
     /* D-33: Escape closes the list of subtitle tracks, and only that. */
     if (app->sub_list_open && rubraview_u8_eq_lit(combo.key_name, "Escape") && combo.modifiers == 0) {
         app->sub_list_open = false;
@@ -9077,6 +9198,33 @@ static bool hint_shown(const app_state_t *app) {
 }
 
 /* RV-116: the hint, below and right of the pointer, turned to stay in the window. */
+/* A tile's or a menu item's hint (owner, 2026-10-17): what it does, and its
+   keys, "Toolbox (T, Ctrl+T)". Its words are the hint when it has one, else
+   the action's description as the key list has it. */
+static u8str_t hint_with_keys(app_state_t *app, u8str_t action, const char *said, char *buffer, size_t capacity) {
+    if (action.len == 0 || capacity < 8) return U8("");
+    const char *words = said ? said : rubraview_action_words(action);
+    if (words && !said) words = rubraview_tr(words);
+    size_t at = 0;
+    int n = snprintf(buffer, capacity, "%s", words ? words : "");
+    at = n > 0 ? ((size_t)n < capacity ? (size_t)n : capacity - 1) : 0;
+    size_t keys = 0;
+    for (size_t b = 0; b < app->keymap.count && keys < 3; ++b) {
+        const rubraview_key_binding_t *binding = &app->keymap.bindings[b];
+        if (!rubraview_u8_eq(binding->action, action)) continue;
+        for (size_t c = 0; c < binding->combo_count && keys < 3; ++c) {
+            char combo[48];
+            u8str_t k = rubraview_key_combo_format(combo, sizeof(combo), binding->combos[c]);
+            if (k.len == 0) continue;
+            n = snprintf(buffer + at, capacity - at, "%s%.*s", keys == 0 ? (at > 0 ? "  (" : "(") : ", ", (int)k.len, k.ptr);
+            if (n > 0) at += (size_t)n < capacity - at ? (size_t)n : capacity - at - 1;
+            keys++;
+        }
+    }
+    if (keys > 0 && at + 1 < capacity) { buffer[at++] = ')'; buffer[at] = '\0'; }
+    return (u8str_t){ .ptr = buffer, .len = at };
+}
+
 static void draw_hint(app_state_t *app, double win_w, double win_h) {
     if (!hint_shown(app)) return;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -10526,6 +10674,8 @@ static void rename_end(app_state_t *app) {
     app->rename_is_path = false;
     app->rename_is_target = false;
     app->rename_is_find = false;
+    app->rename_is_value = false;
+    app->batch_typing = 0;
     app->target_offered_len = 0;
     if (app->rename_is_password) {                       /* nothing of it stays behind */
         secure_wipe(app->rename_buffer, sizeof(app->rename_buffer));
@@ -10787,6 +10937,8 @@ static void rename_extension_commit(app_state_t *app) {
 static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
+    if (app->rename_is_value) { edit_value_typed(app); return; }
+    if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
     if (app->rename_is_target) { target_commit(app); return; }
@@ -11226,10 +11378,168 @@ enum {
     PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_CROP_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
+    /* RV-129 */
+    PANEL_BATCH_SIZE_BY, PANEL_BATCH_BOX_H, PANEL_BATCH_LINEAR, PANEL_BATCH_NO_ENLARGE, PANEL_BATCH_SHARPEN,
+    PANEL_BATCH_ROTATE, PANEL_BATCH_FLIP, PANEL_BATCH_CROP, PANEL_BATCH_AUTOCROP, PANEL_BATCH_AUTOCOLOUR, PANEL_BATCH_NEGATIVE,
+    PANEL_BATCH_EFFECT, PANEL_BATCH_EFFECT_AMOUNT, PANEL_BATCH_CANVAS, PANEL_BATCH_BORDER, PANEL_BATCH_FRAME_COLOUR,
+    PANEL_BATCH_MARK, PANEL_BATCH_MARK_CORNER, PANEL_BATCH_MARK_OPACITY, PANEL_BATCH_QUALITY,
+    PANEL_BATCH_NAME, PANEL_BATCH_START, PANEL_BATCH_REPLACE, PANEL_BATCH_EXISTS, PANEL_BATCH_KEEP_DATES,
+    PANEL_BATCH_RECURSIVE, PANEL_BATCH_SUBFOLDERS, PANEL_BATCH_OUT, PANEL_BATCH_TEST, PANEL_BATCH_SAVE, PANEL_BATCH_LOAD,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
     PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
+    /* The owner's edit (2026-10-17) */
+    PANEL_APPLY_SEL, PANEL_CROP_SEL, PANEL_RESIZE_APPLY, PANEL_UNDO, PANEL_REDO, PANEL_STEPS, PANEL_SEL_BOX,
+    PANEL_SAVE_ORIGINAL, PANEL_SEL_SHAPE, PANEL_SEL_X, PANEL_SEL_Y, PANEL_SEL_W, PANEL_SEL_H, PANEL_SEL_FEATHER,
+    PANEL_SEL_ALL, PANEL_SEL_TYPE,
+    PANEL_BAL_R, PANEL_BAL_G, PANEL_BAL_B, PANEL_AUTO_COLOUR, PANEL_EFFECT, PANEL_EFFECT_AMOUNT, PANEL_EFFECT_APPLY, PANEL_COMPARE,
+    /* RV-128 */
+    PANEL_RESIZE_PRESET, PANEL_RESIZE_LOCK, PANEL_RESIZE_FILTER, PANEL_RESIZE_LINEAR, PANEL_RESIZE_SHARPEN, PANEL_RESIZE_DPI,
+    /* RV-133 */
+    PANEL_CLS_HERE, PANEL_CLS_COPY, PANEL_CLS_MOVE, PANEL_CLS_CLEAR, PANEL_CLS_SETTINGS,
+    PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
+    PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
+
+/* ---- RV-133: classifying (owner, 2026-10-17) ----
+   A window of the nine curation folders. A click on one, or its digit,
+   sets the picture on screen aside for it and goes on to the next; Copy
+   all or Move all then puts every one in its folder at once, a name never
+   replaced (name-1.ext), each move undone with Ctrl+Z (the last 64). */
+
+static void classify_build(app_state_t *app) {
+    static char words[13][192];
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    bool placed = app->classify_panel.placed;
+    double px = app->classify_panel.place_x, py = app->classify_panel.place_y;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    app->classify_panel = rubraview_panel_create(TU8("Classify"), dpi);
+    app->classify_panel.bounds.width = 360.0 * dpi;
+    app->classify_panel.place_x = placed ? px : (double)w - 372.0 * dpi;
+    app->classify_panel.place_y = placed ? py : 90.0 * dpi;
+    app->classify_panel.placed = true;
+    const rubraview_classify_t *c = app->classify;
+    u8str_t here = current_file_path(app);
+    int32_t mark = c ? rubraview_classify_folder_of(c, here) : 0;
+    int n;
+    size_t k = 0;
+    bool any = false;
+    for (int32_t d = 1; d <= 9; ++d) {
+        u8str_t dir = rubraview_curation_target(&app->curation, d);
+        if (dir.len == 0) continue;
+        any = true;
+        u8str_t name = rubraview_path_basename(dir);
+        n = snprintf(words[k], sizeof(words[k]), "%s%d  %.*s  (%zu)", d == mark ? "> " : "  ", (int)d,
+                     (int)(name.len < 120 ? name.len : 120), name.ptr, c ? rubraview_classify_count(c, d) : (size_t)0);
+        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_FOLDER + d, (u8str_t){ words[k], n > 0 ? (size_t)n : 0 });
+        ++k;
+    }
+    if (!any) rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_SETTINGS, TU8("No folders yet: set them in Settings > Files..."));
+    rubraview_panel_add_separator(&app->classify_panel);
+    if (mark) {
+        n = snprintf(words[10], sizeof(words[10]), T("This one goes to %d: press to take it off"), (int)mark);
+        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_HERE, (u8str_t){ words[10], n > 0 ? (size_t)n : 0 });
+    } else {
+        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_HERE, TU8("This one is not set aside (a folder or its digit)"));
+    }
+    size_t all = c ? rubraview_classify_count(c, 0) : 0;
+    n = snprintf(words[11], sizeof(words[11]), T("Copy all set aside (%zu)"), all);
+    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_COPY, (u8str_t){ words[11], n > 0 ? (size_t)n : 0 });
+    n = snprintf(words[12], sizeof(words[12]), T("Move all set aside (%zu)"), all);
+    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_MOVE, (u8str_t){ words[12], n > 0 ? (size_t)n : 0 });
+    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_CLEAR, TU8("Forget what is set aside"));
+    if (any) rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_SETTINGS, TU8("The folders: Settings > Files..."));
+    app->classify_panel.open = true;
+    rubraview_panel_layout(&app->classify_panel, (double)w, (double)h);
+    app->classify_shown_page = current_page_index(app);
+}
+
+static void classify_toggle(app_state_t *app) {
+    if (app->classify_panel.open) { app->classify_panel.open = false; return; }
+    if (!app->classify) {
+        app->classify = (rubraview_classify_t*)calloc(1, sizeof(*app->classify));
+        if (!app->classify) { osd_say(app, TU8("out of memory")); return; }
+    }
+    classify_build(app);
+}
+
+static void classify_mark(app_state_t *app, int32_t digit) {
+    if (!app->classify) return;
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("a page inside an archive is not a file of its own: it cannot be set aside")); return; }
+    u8str_t path = current_file_path(app);
+    if (path.len == 0) return;
+    int32_t was = rubraview_classify_folder_of(app->classify, path);
+    if (!rubraview_classify_set(app->classify, was ? path : app_keep(app, path), digit)) {
+        osd_say(app, TU8("the list is full: copy or move what is set aside first"));
+        return;
+    }
+    char said[96];
+    int n = snprintf(said, sizeof(said), T("set aside for %d (%zu in all)"), (int)digit, rubraview_classify_count(app->classify, 0));
+    osd_say(app, (u8str_t){ said, n > 0 ? (size_t)n : 0 });
+    if ((size_t)current_page_index(app) + 1 < page_count(app)) handle_action(app, U8("next_page"));
+    classify_build(app);
+}
+
+static void classify_run(app_state_t *app, bool moving) {
+    rubraview_classify_t *c = app->classify;
+    if (!c || c->count == 0) { osd_say(app, TU8("nothing is set aside")); return; }
+    size_t done = 0, failed = 0;
+    for (size_t i = 0; i < c->count;) {
+        u8str_t path = c->paths[i];
+        u8str_t dir = rubraview_curation_target(&app->curation, c->folders[i]);
+        bool ok = false;
+        if (dir.len > 0 && (rubraview_pal_fs_make_dirs(dir) || rubraview_pal_fs_exists(dir))) {
+            if (moving && rubraview_path_same(rubraview_path_dirname(path), dir)) ok = true;   /* already there */
+            else {
+                u8str_t target = rubraview_filing_target(app->arena, dir, rubraview_path_basename(path), filing_exists, NULL);
+                ok = target.len > 0 && (moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target));
+                if (ok) rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+                    .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+                    .source_path = path, .target_path = target, .playlist_index = 0 });
+            }
+        }
+        if (ok) { rubraview_classify_remove_at(c, i); ++done; }
+        else { ++failed; ++i; }   /* kept, still set aside */
+    }
+    char said[160];
+    int n = failed ? snprintf(said, sizeof(said), moving ? T("moved %zu; %zu could not be put there and are still set aside") : T("copied %zu; %zu could not be put there and are still set aside"), done, failed)
+                   : snprintf(said, sizeof(said), moving ? T("moved %zu") : T("copied %zu"), done);
+    osd_say(app, (u8str_t){ said, n > 0 ? (size_t)n : 0 });
+    if (moving && done > 0) {
+        int32_t page = current_page_index(app);
+        reopen_after_removal(app, page > 0 ? (size_t)page : 0);
+    }
+    classify_build(app);
+}
+
+static bool classify_press(app_state_t *app, double px, double py) {
+    rubraview_panel_t *box = &app->classify_panel;
+    if (!box->open || !rubraview_rect_contains(box->bounds, px, py)) return false;
+    if (rubraview_panel_title_hit(box, px, py)) { rubraview_panel_move_begin(box, px, py); return true; }
+    int32_t row = -1;
+    rubraview_panel_event_t ev = rubraview_panel_press(box, px, py, &row);
+    if (ev == RUBRAVIEW_PANEL_CLOSE) { box->open = false; return true; }
+    if (ev != RUBRAVIEW_PANEL_BUTTON_PRESSED || row < 0) return true;
+    int32_t id = box->rows[row].id;
+    if (id > PANEL_CLS_FOLDER && id <= PANEL_CLS_FOLDER + 9) { classify_mark(app, id - PANEL_CLS_FOLDER); return true; }
+    switch (id) {
+        case PANEL_CLS_HERE:
+            if (app->classify && rubraview_classify_set(app->classify, current_file_path(app), 0)) classify_build(app);
+            break;
+        case PANEL_CLS_COPY:  classify_run(app, false); break;
+        case PANEL_CLS_MOVE:  classify_run(app, true); break;
+        case PANEL_CLS_CLEAR:
+            if (app->classify) rubraview_classify_clear(app->classify);
+            osd_say(app, TU8("nothing is set aside now"));
+            classify_build(app);
+            break;
+        case PANEL_CLS_SETTINGS: settings_open(app); break;
+        default: break;
+    }
+    return true;
+}
+
 
 /* The panel is placed against the window, so it is placed again whenever
    the window changes size. */
@@ -11251,6 +11561,9 @@ static void px_edit_close(app_state_t *app);
 
 static void panel_close(app_state_t *app) {
     edit_preview_close(app);
+    app->sel_panel.open = false;
+    app->steps_panel.open = false;
+    app->sel_grab = 0;
     if (app->px_edit_open) px_edit_close(app);
     app->panel.open = false;
     app->panel.row_count = 0;
@@ -11278,8 +11591,10 @@ static u8str_t px_button_label(const app_state_t *app) {
     static char label[64];
     const rubraview_edit_session_t *e = &app->edit;
     int32_t w = e->resize_width, h = e->resize_height;
-    if (w <= 0 || h <= 0) { w = e->crop_active ? e->crop.width : e->image_width; h = e->crop_active ? e->crop.height : e->image_height; }
-    int n = snprintf(label, sizeof(label), T("Size: %d x %d px..."), (int)w, (int)h);
+    if (w <= 0 || h <= 0) { w = e->image_width; h = e->image_height; }   /* the whole picture is resized (the owner's edit) */
+    /* RV-128: and what it prints at, at the DPI below */
+    double dpi = e->resize_dpi > 0.0 ? e->resize_dpi : 300.0;
+    int n = snprintf(label, sizeof(label), T("Size: %d x %d px (%.1f x %.1f cm)..."), (int)w, (int)h, w / dpi * 2.54, h / dpi * 2.54);
     return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : TU8("Size in pixels...");
 }
 
@@ -11303,67 +11618,417 @@ static void crop_shown_again(app_state_t *app) {
     if (app->px_edit_open && app->px_edit_crop) px_edit_fill_crop(app);
 }
 
+/* ---- the owner's edit (2026-10-17): one window, steps on a selection ---- */
+
+static void edit_sel_sync(app_state_t *app);
+static void edit_steps_build(app_state_t *app);
+
+/* The picture as the steps in force left it. */
+static void edit_cur_size(const app_state_t *app, int32_t *w, int32_t *h) {
+    rubraview_edit_steps_size(&app->edit_steps, app->edit_steps.cursor, w, h);
+}
+
+/* What an effect is put on now: the selection, or the whole picture. */
+static rubraview_edit_area_t edit_area_now(const app_state_t *app) {
+    rubraview_edit_area_t a = { .shape = RUBRAVIEW_AREA_ALL };
+    if (app->edit.crop_active && app->edit.crop.width > 0 && app->edit.crop.height > 0) {
+        a.shape = app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? RUBRAVIEW_AREA_ELLIPSE : RUBRAVIEW_AREA_RECT;
+        a.rect = app->edit.crop;
+        a.feather = app->sel_feather;
+    }
+    return a;
+}
+
+/* The step being made, as it would go into the list. */
+static rubraview_edit_step_t edit_pending(const app_state_t *app) {
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_ADJUST, .area = edit_area_now(app), .values = app->edit };
+    return s;
+}
+
+/* The values back to neutral for the next step; the selection and its ratio stay. */
+static void edit_values_fresh(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    edit_cur_size(app, &w, &h);
+    rubraview_edit_session_t fresh = rubraview_edit_begin(w, h);
+    /* RV-128: how to resize is a preference, kept from step to step */
+    fresh.resize_lock_aspect = app->edit.resize_lock_aspect;
+    fresh.resize_filter = app->edit.resize_filter;
+    fresh.resize_linear = app->edit.resize_linear;
+    fresh.resize_sharpen = app->edit.resize_sharpen;
+    fresh.resize_dpi = app->edit.resize_dpi;
+    fresh.crop_active = app->edit.crop_active;
+    fresh.crop = app->edit.crop;
+    fresh.crop_ratio = app->edit.crop_ratio;
+    app->edit = fresh;
+}
+
+/* After any change of the steps: the picture's size, the panels, the preview. */
+static void edit_steps_changed(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    edit_cur_size(app, &w, &h);
+    app->edit.image_width = w;
+    app->edit.image_height = h;
+    if (app->edit.crop_active && (app->edit.crop.x + app->edit.crop.width > w || app->edit.crop.y + app->edit.crop.height > h)) {
+        app->edit.crop_active = false;   /* a selection outside the picture as it is now */
+    }
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    if (app->panel.open) panel_build_edit(app);
+    edit_sel_sync(app);
+    edit_steps_build(app);
+}
+
+static bool edit_apply_pending(app_state_t *app, bool say) {
+    rubraview_edit_step_t s = edit_pending(app);
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) {
+        if (say) osd_say(app, app->edit_steps.cursor >= RUBRAVIEW_EDIT_MAX_STEPS ? TU8("the list of steps is full: save, or undo some")
+                                                                              : TU8("nothing to apply: move a slider first"));
+        return false;
+    }
+    edit_values_fresh(app);
+    edit_steps_changed(app);
+    if (say) osd_say(app, s.area.shape == RUBRAVIEW_AREA_ALL ? TU8("applied to the whole picture (Ctrl+Z undoes it)")
+                                                             : TU8("applied to the selection (Ctrl+Z undoes it)"));
+    return true;
+}
+
+static void edit_crop_to_selection(app_state_t *app) {
+    if (!app->edit.crop_active) { osd_say(app, TU8("select an area on the picture first")); return; }
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_CROP, .area = { .shape = RUBRAVIEW_AREA_RECT, .rect = app->edit.crop } };
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    app->edit.crop_active = false;
+    edit_values_fresh(app);
+    edit_steps_changed(app);
+    osd_say(app, TU8("cropped to the selection (Ctrl+Z undoes it)"));
+}
+
+static void edit_resize_apply(app_state_t *app) {
+    if (app->edit.resize_width <= 0 || app->edit.resize_height <= 0) { osd_say(app, TU8("choose the size first (the Resize percent or its pixels)")); return; }
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_RESIZE, .values = app->edit };
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    app->edit.crop_active = false;
+    edit_values_fresh(app);
+    edit_steps_changed(app);
+    osd_say(app, TU8("resized (Ctrl+Z undoes it)"));
+}
+
+static void edit_effect_apply(app_state_t *app) {
+    if (app->effect_choice <= RUBRAVIEW_EFFECT_NONE) { osd_say(app, TU8("choose an effect first")); return; }
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount };
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    app->effect_choice = RUBRAVIEW_EFFECT_NONE;
+    edit_steps_changed(app);
+    osd_say(app, TU8("effect applied (Ctrl+Z undoes it)"));
+}
+
+/* The owner's automatic colour correction, measured on the picture as the steps left it. */
+static void edit_auto_colour(app_state_t *app) {
+    if (!rubraview_pixbuf_is_valid(&app->edit_small)) { osd_say(app, TU8("the picture is not read yet")); return; }
+    size_t bytes = (size_t)app->edit_small.width * (size_t)app->edit_small.height * 4u * (6u + 4u * app->edit_steps.cursor) + (8u << 20);
+    void *mem = malloc(bytes);
+    if (!mem) return;
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = bytes });
+    double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
+    rubraview_pixbuf_t now = rubraview_edit_steps_apply(&arena, &app->edit_steps, &app->edit_small, ratio);
+    if (rubraview_pixbuf_is_valid(&now)) {
+        rubraview_edit_auto_colour(&app->edit, &now);
+        app->edit_rev++;
+        app->edit_shown_valid = false;
+        panel_build_edit(app);
+        osd_say(app, TU8("colours corrected: see the curves and Red / Green / Blue; Enter applies"));
+    }
+    free(mem);
+}
+
+static void edit_undo(app_state_t *app, bool redo) {
+    bool moved = redo ? rubraview_edit_steps_redo(&app->edit_steps) : rubraview_edit_steps_undo(&app->edit_steps);
+    if (!moved) { osd_say(app, redo ? TU8("nothing to redo") : TU8("nothing to undo")); return; }
+    edit_steps_changed(app);
+    osd_say(app, redo ? TU8("redone") : TU8("undone"));
+}
+
+/* The undo list's words for a step. */
+static u8str_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
+    const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
+                     : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect) : T("Adjust");
+    if (!what) what = T("Adjust");
+    const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
+    int n;
+    if (s->kind == RUBRAVIEW_STEP_RESIZE) {
+        n = snprintf(buffer, size, "%zu. %s %d x %d", number, what, (int)s->values.resize_width, (int)s->values.resize_height);
+    } else if (s->kind == RUBRAVIEW_STEP_CROP || s->area.shape != RUBRAVIEW_AREA_ALL) {
+        n = snprintf(buffer, size, "%zu. %s: %s %d,%d %dx%d", number, what, s->kind == RUBRAVIEW_STEP_CROP ? T("rectangle") : where,
+                     (int)s->area.rect.x, (int)s->area.rect.y, (int)s->area.rect.width, (int)s->area.rect.height);
+    } else {
+        n = snprintf(buffer, size, "%zu. %s: %s", number, what, where);
+    }
+    return (u8str_t){ .ptr = buffer, .len = n > 0 ? ((size_t)n < size ? (size_t)n : size - 1) : 0 };
+}
+
+/* The undo list: a row for the picture as it was and one for each step; the steps in force marked. */
+static void edit_steps_build(app_state_t *app) {
+    if (!app->steps_panel.open) return;
+    bool placed = app->steps_panel.placed;
+    double px = app->steps_panel.place_x, py = app->steps_panel.place_y;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    app->steps_panel = rubraview_panel_create(TU8("Steps (undo list)"), dpi);
+    app->steps_panel.bounds.width = 300.0 * dpi;
+    app->steps_panel.placed = placed;
+    app->steps_panel.place_x = placed ? px : 12.0 * dpi;
+    app->steps_panel.place_y = placed ? py : 120.0 * dpi;
+    app->steps_panel.placed = true;
+    static char words[RUBRAVIEW_EDIT_MAX_STEPS + 1][96];
+    int n0 = snprintf(words[0], sizeof(words[0]), "%s%s", app->edit_steps.cursor == 0 ? "> " : "  ", T("0. The picture as it was"));
+    rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST, (u8str_t){ .ptr = words[0], .len = n0 > 0 ? (size_t)n0 : 0 });
+    for (size_t i = 0; i < app->edit_steps.count; ++i) {
+        char line[96];
+        u8str_t w = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
+        int n = snprintf(words[i + 1], sizeof(words[0]), "%s%.*s", i + 1 == app->edit_steps.cursor ? "> " : i + 1 > app->edit_steps.cursor ? "- " : "  ",
+                         (int)w.len, w.ptr);
+        rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST + (int32_t)i + 1, (u8str_t){ .ptr = words[i + 1], .len = n > 0 ? (size_t)n : 0 });
+    }
+    app->steps_panel.open = true;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    rubraview_panel_layout(&app->steps_panel, (double)w, (double)h);
+}
+
+static void edit_steps_toggle(app_state_t *app) {
+    app->steps_panel.open = !app->steps_panel.open;
+    if (app->steps_panel.open) edit_steps_build(app);
+}
+
+/* The selection's numbers, a box of their own: shape, corner, size, feather. */
+static void edit_sel_build(app_state_t *app) {
+    bool placed = app->sel_panel.placed;
+    double px = app->sel_panel.place_x, py = app->sel_panel.place_y;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    int32_t w = 0, h = 0;
+    edit_cur_size(app, &w, &h);
+    const rubraview_crop_rect_t *c = &app->edit.crop;
+    bool on = app->edit.crop_active;
+    app->sel_panel = rubraview_panel_create(TU8("Selection"), dpi);
+    app->sel_panel.bounds.width = 300.0 * dpi;
+    app->sel_panel.label_width = 90.0 * dpi;
+    app->sel_panel.placed = true;
+    app->sel_panel.place_x = placed ? px : 12.0 * dpi;
+    app->sel_panel.place_y = placed ? py : 360.0 * dpi;
+    rubraview_panel_add_choice(&app->sel_panel, PANEL_SEL_SHAPE, TU8("Shape"), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? 1 : 0, 2);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_X, U8("X"), on ? c->x : 0, 0.0, w > 1 ? w - 1 : 1, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_Y, U8("Y"), on ? c->y : 0, 0.0, h > 1 ? h - 1 : 1, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_W, TU8("Width"), on ? c->width : w, 1.0, w > 1 ? w : 2, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_H, TU8("Height"), on ? c->height : h, 1.0, h > 1 ? h : 2, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_FEATHER, TU8("Soft edge"), app->sel_feather, 0.0, 200.0, 1.0);
+    rubraview_panel_add_button(&app->sel_panel, PANEL_SEL_TYPE, TU8("Type the four numbers..."));
+    rubraview_panel_add_button(&app->sel_panel, PANEL_SEL_ALL, TU8("Select none (the whole picture)"));
+    app->sel_panel.open = true;
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->window, &ww, &wh);
+    rubraview_panel_layout(&app->sel_panel, (double)ww, (double)wh);
+}
+
+/* The numbers follow the selection drawn or moved on the picture. */
+static void edit_sel_sync(app_state_t *app) {
+    if (!app->sel_panel.open) return;
+    edit_sel_build(app);
+}
+
+/* A number of the box moved: the selection follows at once. */
+static void edit_sel_apply_row(app_state_t *app, int32_t index) {
+    if (index < 0 || (size_t)index >= app->sel_panel.row_count) return;
+    const rubraview_panel_row_t *row = &app->sel_panel.rows[index];
+    int32_t w = 0, h = 0;
+    edit_cur_size(app, &w, &h);
+    if (!app->edit.crop_active) app->edit.crop = (rubraview_crop_rect_t){ 0, 0, w, h };
+    rubraview_crop_rect_t c = app->edit.crop;
+    int32_t v = (int32_t)lround(row->value);
+    switch (row->id) {
+        case PANEL_SEL_SHAPE: app->sel_shape = v == 1 ? RUBRAVIEW_AREA_ELLIPSE : RUBRAVIEW_AREA_RECT; break;
+        case PANEL_SEL_FEATHER: app->sel_feather = v; break;
+        case PANEL_SEL_X: c.x = v; break;
+        case PANEL_SEL_Y: c.y = v; break;
+        case PANEL_SEL_W: c.width = v; break;
+        case PANEL_SEL_H: c.height = v; break;
+        default: return;
+    }
+    if (c.x + c.width > w) c.width = w - c.x;
+    if (c.y + c.height > h) c.height = h - c.y;
+    if (c.width >= 1 && c.height >= 1 && rubraview_edit_crop_set(&app->edit, c.x, c.y, c.width, c.height)) app->edit.crop_active = true;
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    if (row->id == PANEL_SEL_X || row->id == PANEL_SEL_Y || row->id == PANEL_SEL_W || row->id == PANEL_SEL_H) {
+        /* The others' ranges follow the corner and the size. */
+        rubraview_panel_set_value(&app->sel_panel, PANEL_SEL_W, app->edit.crop.width);
+        rubraview_panel_set_value(&app->sel_panel, PANEL_SEL_H, app->edit.crop.height);
+    }
+}
+
+static void edit_sel_toggle(app_state_t *app) {
+    if (app->sel_panel.open) { app->sel_panel.open = false; return; }
+    edit_sel_build(app);
+}
+
+static u8str_t edit_sel_label(const app_state_t *app) {
+    static char line[96];
+    if (!app->edit.crop_active) return TU8("Selection: none (the whole picture)...");
+    const rubraview_crop_rect_t *c = &app->edit.crop;
+    int n = snprintf(line, sizeof(line), T("Selection: %s %d,%d %dx%d..."), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : T("rectangle"),
+                     (int)c->x, (int)c->y, (int)c->width, (int)c->height);
+    return (u8str_t){ .ptr = line, .len = n > 0 ? (size_t)n : 0 };
+}
+
 static void panel_build_edit(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     app->edit_preview_tries = 0;
     const rubraview_edit_session_t *e = &app->edit;
-    app->panel = rubraview_panel_create(g_edit_page_two ? TU8("Adjust: sharpness and size") : TU8("Adjust"), dpi);
+    bool placed = app->panel.open && edit_panel_open(app) && app->panel.placed;
+    double px = app->panel.place_x, py = app->panel.place_y, scroll = app->panel.open ? app->panel.scroll : 0.0;
+    app->panel = rubraview_panel_create(TU8("Edit"), dpi);
+    app->panel.placed = placed;
+    app->panel.place_x = px;
+    app->panel.place_y = py;
+    app->panel.scroll = scroll;
     app->panel_is_export = false;
     app->panel_is_batch = false;
     app->panel_is_print = false;
     app->panel_is_convert = false;
 
-    if (!g_edit_page_two) {
-        rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, TU8("Exposure"), e->params.exposure_ev, -3.0, 3.0, 0.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, TU8("Brightness"), e->params.brightness, -100.0, 100.0, 0.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, TU8("Contrast"), e->params.contrast, -100.0, 100.0, 0.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_SATURATION, TU8("Saturation"), e->params.saturation, -100.0, 100.0, 0.0);
-        rubraview_panel_add_separator(&app->panel);
-        rubraview_panel_add_slider(&app->panel, PANEL_TEMPERATURE, TU8("Temperature"), e->params.temperature, -100.0, 100.0, 0.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_TINT, TU8("Tint"), e->params.tint, -100.0, 100.0, 0.0);
-        rubraview_panel_add_separator(&app->panel);
-        rubraview_panel_add_slider(&app->panel, PANEL_BLACK, TU8("Black point"), (double)e->params.black_point, 0.0, 254.0, 1.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_WHITE, TU8("White point"), (double)e->params.white_point, 1.0, 255.0, 1.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, TU8("Midtone"), e->params.midtone_gamma, 0.1, 3.0, 0.0);
-    } else {
-        rubraview_panel_add_slider(&app->panel, PANEL_BLUR, TU8("Blur"), e->blur_sigma, 0.0, 50.0, 0.0);
-        rubraview_panel_add_choice(&app->panel, PANEL_BLUR_KIND, TU8("Blur kind"), e->blur_box ? 1 : 0, 2);
-        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, TU8("Sharpen"), e->sharpen_amount, 0.0, 300.0, 0.0);
-        rubraview_panel_add_choice(&app->panel, PANEL_SHARPEN_KIND, TU8("Sharpen kind"), e->sharpen_laplacian ? 1 : 0, 2);
-        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, U8("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
-        rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, U8("  threshold"),
-                                   (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
-        rubraview_panel_add_separator(&app->panel);
-        rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
-        rubraview_panel_add_button(&app->panel, PANEL_CROP_PX, crop_button_label(app));
-        rubraview_panel_add_button(&app->panel, PANEL_TRIM, TU8("Trim plain margins"));
-        double percent = e->resize_width > 0 && e->image_width > 0
-                       ? 100.0 * (double)e->resize_width / (double)(e->crop_active ? e->crop.width : e->image_width) : 100.0;
-        rubraview_panel_add_slider(&app->panel, PANEL_RESIZE, TU8("Resize %"), percent, 10.0, 500.0, 1.0);
-        rubraview_panel_add_button(&app->panel, PANEL_RESIZE_PX, px_button_label(app));
-    }
+    /* First where: the selection (drawn on the picture, or its numbers). */
+    rubraview_panel_add_button(&app->panel, PANEL_SEL_BOX, edit_sel_label(app));
+    rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
     rubraview_panel_add_separator(&app->panel);
-    rubraview_panel_add_button(&app->panel, PANEL_EDIT_PAGE,
-                               g_edit_page_two ? TU8("< Tones") : TU8("Sharpness, cut and size >"));
-    rubraview_panel_add_button(&app->panel, PANEL_RESET, TU8("Reset"));
+    /* Then what: every effect, in one window (owner, 2026-10-17). */
+    rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, TU8("Exposure"), e->params.exposure_ev, -3.0, 3.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, TU8("Brightness"), e->params.brightness, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, TU8("Contrast"), e->params.contrast, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SATURATION, TU8("Saturation"), e->params.saturation, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_TEMPERATURE, TU8("Temperature"), e->params.temperature, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_TINT, TU8("Tint"), e->params.tint, -100.0, 100.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_BAL_R, TU8("Red"), e->params.balance_r, -100.0, 100.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_BAL_G, TU8("Green"), e->params.balance_g, -100.0, 100.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_BAL_B, TU8("Blue"), e->params.balance_b, -100.0, 100.0, 1.0);
+    rubraview_panel_add_button(&app->panel, PANEL_AUTO_COLOUR, TU8("Automatic colour correction"));
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_slider(&app->panel, PANEL_BLACK, TU8("Black point"), (double)e->params.black_point, 0.0, 254.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_WHITE, TU8("White point"), (double)e->params.white_point, 1.0, 255.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, TU8("Midtone"), e->params.midtone_gamma, 0.1, 3.0, 0.0);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_slider(&app->panel, PANEL_BLUR, TU8("Blur"), e->blur_sigma, 0.0, 50.0, 0.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_BLUR_KIND, TU8("Blur kind"), e->blur_box ? 1 : 0, 2);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, TU8("Sharpen"), e->sharpen_amount, 0.0, 300.0, 0.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_SHARPEN_KIND, TU8("Sharpen kind"), e->sharpen_laplacian ? 1 : 0, 2);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, U8("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, U8("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
+    rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Apply to the selection (Enter)") : TU8("Apply to the whole picture (Enter)"));
+    rubraview_panel_add_separator(&app->panel);
+    /* Effects (owner, 2026-10-17): one chosen, seen on the picture, applied as a step. */
+    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), app->effect_choice, RUBRAVIEW_EFFECT_COUNT);
+    {
+        double lo = 0.0, hi = 1.0;
+        rubraview_effect_range((rubraview_effect_t)app->effect_choice, &lo, &hi, NULL);
+        rubraview_panel_add_slider(&app->panel, PANEL_EFFECT_AMOUNT, TU8("  amount"), app->effect_amount, lo, hi, 1.0);
+    }
+    rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, e->crop_active ? TU8("Apply the effect to the selection") : TU8("Apply the effect to the whole picture"));
+    rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, TU8("Crop to the selection"));
+    rubraview_panel_add_button(&app->panel, PANEL_TRIM, TU8("Select the plain margins' inside"));
+    int32_t cw = 0, ch = 0;
+    edit_cur_size(app, &cw, &ch);
+    double percent = e->resize_width > 0 && cw > 0 ? 100.0 * (double)e->resize_width / (double)cw : 100.0;
+    rubraview_panel_add_slider(&app->panel, PANEL_RESIZE, TU8("Resize %"), percent, 10.0, 500.0, 1.0);
+    rubraview_panel_add_choice(&app->panel, PANEL_RESIZE_PRESET, TU8("  or a size"), 0, RUBRAVIEW_RESIZE_PRESET_COUNT);
+    rubraview_panel_add_button(&app->panel, PANEL_RESIZE_PX, px_button_label(app));
+    rubraview_panel_add_toggle(&app->panel, PANEL_RESIZE_LOCK, TU8("  Keep the shape"), e->resize_lock_aspect);
+    rubraview_panel_add_choice(&app->panel, PANEL_RESIZE_FILTER, TU8("  Filter"), (int32_t)e->resize_filter, 4);
+    rubraview_panel_add_toggle(&app->panel, PANEL_RESIZE_LINEAR, TU8("  In linear light"), e->resize_linear);
+    rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_SHARPEN, TU8("  Sharpen after"), e->resize_sharpen, 0.0, 100.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_DPI, TU8("  DPI (cm, in)"), e->resize_dpi > 0.0 ? e->resize_dpi : 300.0, 72.0, 1200.0, 1.0);
+    rubraview_panel_add_button(&app->panel, PANEL_RESIZE_APPLY, TU8("Resize"));
+    rubraview_panel_add_separator(&app->panel);
+    rubraview_panel_add_button(&app->panel, PANEL_UNDO, TU8("Undo (Ctrl+Z)"));
+    rubraview_panel_add_button(&app->panel, PANEL_REDO, TU8("Redo (Ctrl+Y)"));
+    rubraview_panel_add_button(&app->panel, PANEL_STEPS, TU8("Undo list..."));
+    rubraview_panel_add_button(&app->panel, PANEL_RESET, TU8("Reset: back to the picture as it was"));
+    rubraview_panel_add_separator(&app->panel);
+    /* D-88: inside an archive, Save writes the page over in the archive. */
+    rubraview_panel_add_button(&app->panel, PANEL_SAVE_ORIGINAL, on_archive_page(app) ? TU8("Save over the page") : TU8("Save (over the original)"));
     rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, TU8("Save a copy"));
-    /* D-88: inside an archive the copy is a new entry beside the page, and the page itself can be saved over. */
-    if (on_archive_page(app)) rubraview_panel_add_button(&app->panel, PANEL_SAVE_OVER, TU8("Save over the page"));
 
     app->panel.open = true;
     panel_relayout(app);
 }
 
-/* §3.13's workbench. Every row's range comes from the edit session, so
-   the panel cannot offer a value the commit layer would refuse. */
+/* §3.13's workbench, and the owner's edit: the steps start empty over the
+   picture as it is; the values are the next step's. */
 static void panel_open_edit(app_state_t *app) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
 
     app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
-    g_edit_page_two = false;
+    rubraview_edit_steps_begin(&app->edit_steps, real_w(&app->pages[page]), real_h(&app->pages[page]));
+    app->sel_shape = RUBRAVIEW_AREA_RECT;
+    app->sel_feather = 0;
+    app->edit_rev++;
+    app->panel.open = false;
     panel_build_edit(app);
     edit_preview_open(app);
+}
+
+/* The effects' names in the language in use (effects.c keeps them in English). */
+static const char *effect_word(int32_t e) {
+    switch (e) {
+        case RUBRAVIEW_EFFECT_NONE: return T("none");
+        case RUBRAVIEW_EFFECT_GRAYSCALE: return T("Grey");
+        case RUBRAVIEW_EFFECT_SEPIA: return T("Sepia");
+        case RUBRAVIEW_EFFECT_NEGATIVE: return T("Negative");
+        case RUBRAVIEW_EFFECT_SOLARIZE: return T("Solarize");
+        case RUBRAVIEW_EFFECT_POSTERIZE: return T("Posterize");
+        case RUBRAVIEW_EFFECT_EMBOSS: return T("Emboss");
+        case RUBRAVIEW_EFFECT_EDGES: return T("Edges");
+        case RUBRAVIEW_EFFECT_MEDIAN: return T("Median (noise out)");
+        case RUBRAVIEW_EFFECT_OIL: return T("Oil paint");
+        case RUBRAVIEW_EFFECT_PIXELIZE: return T("Pixelize");
+        case RUBRAVIEW_EFFECT_NOISE: return T("Noise");
+        case RUBRAVIEW_EFFECT_VIGNETTE: return T("Vignette");
+        case RUBRAVIEW_EFFECT_SWIRL: return T("Swirl");
+        case RUBRAVIEW_EFFECT_RADIAL_BLUR: return T("Radial blur");
+        case RUBRAVIEW_EFFECT_ZOOM_BLUR: return T("Zoom blur");
+        case RUBRAVIEW_EFFECT_WAVE: return T("Wave");
+        case RUBRAVIEW_EFFECT_RED_EYE: return T("Red eye reduction");
+        case RUBRAVIEW_EFFECT_CHROMATIC: return T("Colour fringe fix");
+        case RUBRAVIEW_EFFECT_BUTTON_3D: return T("3D button");
+        case RUBRAVIEW_EFFECT_FRAGMENT: return T("Fragment");
+        case RUBRAVIEW_EFFECT_EXPLOSION: return T("Explosion");
+        default: return NULL;
+    }
+}
+
+/* RV-128 */
+static const char *resize_preset_word(int32_t i) {
+    switch ((rubraview_resize_preset_t)i) {
+        case RUBRAVIEW_RESIZE_PRESET_NONE:      return T("(choose)");
+        case RUBRAVIEW_RESIZE_PRESET_HALF:      return T("half");
+        case RUBRAVIEW_RESIZE_PRESET_DOUBLE:    return T("double");
+        case RUBRAVIEW_RESIZE_PRESET_SCREEN:    return T("fit the screen");
+        case RUBRAVIEW_RESIZE_PRESET_640:       return "640 x 480";
+        case RUBRAVIEW_RESIZE_PRESET_800:       return "800 x 600";
+        case RUBRAVIEW_RESIZE_PRESET_1024:      return "1024 x 768";
+        case RUBRAVIEW_RESIZE_PRESET_720P:      return "1280 x 720 (HD)";
+        case RUBRAVIEW_RESIZE_PRESET_1080P:     return "1920 x 1080 (Full HD)";
+        case RUBRAVIEW_RESIZE_PRESET_1440P:     return "2560 x 1440 (QHD)";
+        case RUBRAVIEW_RESIZE_PRESET_4K:        return "3840 x 2160 (4K)";
+        case RUBRAVIEW_RESIZE_PRESET_8K:        return "7680 x 4320 (8K)";
+        case RUBRAVIEW_RESIZE_PRESET_LONG_1024: return T("long side 1024");
+        case RUBRAVIEW_RESIZE_PRESET_LONG_2048: return T("long side 2048");
+        case RUBRAVIEW_RESIZE_PRESET_MP_2:      return T("2 megapixels");
+        case RUBRAVIEW_RESIZE_PRESET_MP_8:      return T("8 megapixels");
+        case RUBRAVIEW_RESIZE_PRESET_MP_12:     return T("12 megapixels");
+        default: return NULL;
+    }
 }
 
 /* What a row's value is called: a choice's word, or a number worth reading. */
@@ -11378,6 +12043,37 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     const char *word = NULL;
     switch (row->id) {
         case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
+        case PANEL_EFFECT:       word = effect_word(i); break;
+        case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
+        case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
+        /* RV-129: the batch window */
+        case PANEL_BATCH_SIZE_BY: {
+            const char *const BY[] = { T("as it is"), T("percent"), T("long side"), T("short side"), T("width"), T("height"), T("fit in a box"), T("megapixels") };
+            word = i >= 0 && i < 8 ? BY[i] : NULL;
+            break;
+        }
+        case PANEL_BATCH_FILTER:  word = i == 0 ? T("nearest (pixel art)") : i == 1 ? T("bilinear") : i == 2 ? T("bicubic") : i == 3 ? T("Lanczos-3 (sharpest)") : NULL; break;
+        case PANEL_BATCH_FORMAT:  word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
+        case PANEL_BATCH_ROTATE: {
+            const char *const TURN[] = { T("no"), T("a quarter right"), T("half round"), T("a quarter left"), T("as its EXIF says") };
+            word = i >= 0 && i < 5 ? TURN[i] : NULL;
+            break;
+        }
+        case PANEL_BATCH_FLIP:    word = i == 0 ? T("no") : i == 1 ? T("left to right") : i == 2 ? T("upside down") : NULL; break;
+        case PANEL_BATCH_EFFECT:  word = i == 0 ? T("none") : effect_word(i); break;
+        case PANEL_BATCH_FRAME_COLOUR: word = i == 0 ? T("white") : i == 1 ? T("black") : i == 2 ? T("grey") : NULL; break;
+        case PANEL_BATCH_MARK_CORNER: {
+            const char *const AT[] = { T("bottom right"), T("bottom left"), T("top right"), T("top left"), T("centre") };
+            word = i >= 0 && i < 5 ? AT[i] : NULL;
+            break;
+        }
+        case PANEL_BATCH_EXISTS:  word = i == 0 ? T("replace it") : i == 1 ? T("leave it, skip") : i == 2 ? T("a new name (-1, -2...)") : NULL; break;
+        case PANEL_BATCH_RESIZE:  snprintf(buffer, size, "%g", row->value); return cstr(buffer);
+        case PANEL_BATCH_BOX_H: case PANEL_BATCH_SHARPEN: case PANEL_BATCH_BORDER: case PANEL_BATCH_MARK_OPACITY:
+        case PANEL_BATCH_QUALITY: case PANEL_BATCH_START: case PANEL_BATCH_EFFECT_AMOUNT:
+            snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_RESIZE_FILTER: word = i == 0 ? T("nearest (pixel art)") : i == 1 ? T("bilinear") : i == 2 ? T("bicubic") : i == 3 ? T("Lanczos-3 (sharpest)") : NULL; break;
+        case PANEL_RESIZE_SHARPEN: case PANEL_RESIZE_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_BLUR_KIND:    word = i >= 0 && i < 2 ? BLUR[i] : NULL; break;
         case PANEL_SHARPEN_KIND: word = i >= 0 && i < 2 ? SHARP[i] : NULL; break;
         case PANEL_FORMAT:       word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
@@ -11440,31 +12136,394 @@ static void panel_open_export(app_state_t *app) {
     panel_relayout(app);
 }
 
+/* ---- RV-129: the batch window (owner, 2026-10-17: "배치 처리 ... 그 이상") ----
+   Its choices become the run's command line, one argument a token; the same
+   tokens, a line each, are what is remembered (batch.last) and saved to a
+   file, and they are read back through the command line's own parser. */
+
+typedef struct batch_tokens {
+    const char *v[64];
+    size_t      n;
+    char        store[8192];
+    size_t      used;
+} batch_tokens_t;
+
+static void batch_token(batch_tokens_t *tk, const char *format, ...) {
+    if (tk->n >= sizeof(tk->v) / sizeof(tk->v[0]) || tk->used >= sizeof(tk->store)) return;
+    va_list ap;
+    va_start(ap, format);
+    int n = vsnprintf(tk->store + tk->used, sizeof(tk->store) - tk->used, format, ap);
+    va_end(ap);
+    if (n <= 0 || (size_t)n >= sizeof(tk->store) - tk->used) return;
+    tk->v[tk->n++] = tk->store + tk->used;
+    tk->used += (size_t)n + 1;
+}
+
+static const char *const BATCH_FILTER_WORDS[4] = { "nearest", "bilinear", "bicubic", "lanczos3" };
+static const uint32_t BATCH_FRAME_RGB[3] = { 0xFFFFFF, 0x000000, 0x808080 };
+
+/* Everything chosen, as the run's options (without the input, --batch, --pause). */
+static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
+    tk->n = 0; tk->used = 0;
+    double v = b->size_value;
+    switch (b->size_by) {
+        case 1: if (fabs(v - 100.0) > 0.01) batch_token(tk, "--resize=%g%%", v); break;
+        case 2: batch_token(tk, "--resize=l%d", (int)lround(v)); break;
+        case 3: batch_token(tk, "--resize=s%d", (int)lround(v)); break;
+        case 4: batch_token(tk, "--resize=w%d", (int)lround(v)); break;
+        case 5: batch_token(tk, "--resize=h%d", (int)lround(v)); break;
+        case 6: batch_token(tk, "--resize=%dx%d", (int)lround(v), (int)lround(b->box_h)); break;
+        case 7: batch_token(tk, "--resize=%gmp", v); break;
+        default: break;
+    }
+    if (tk->n > 0) {
+        if (b->filter >= 0 && b->filter <= 3) batch_token(tk, "--filter=%s", BATCH_FILTER_WORDS[b->filter]);
+        if (b->linear) batch_token(tk, "--linear");
+        if (b->no_enlarge) batch_token(tk, "--no-enlarge");
+    }
+    if (b->sharpen > 0.5) batch_token(tk, "--sharpen=%d", (int)lround(b->sharpen));
+    if (b->rotate >= 1 && b->rotate <= 3) batch_token(tk, "--rotate=%d", b->rotate * 90);
+    if (b->rotate == 4) batch_token(tk, "--rotate=exif");
+    if (b->flip == 1) batch_token(tk, "--flip=h");
+    if (b->flip == 2) batch_token(tk, "--flip=v");
+    if (b->crop[0]) batch_token(tk, "--crop=%s", b->crop);
+    if (b->autocrop) batch_token(tk, "--autocrop");
+    if (b->auto_colour) batch_token(tk, "--auto-colour");
+    if (b->grayscale) batch_token(tk, "--grayscale");
+    if (b->negative) batch_token(tk, "--negative");
+    if (b->effect > 0 && b->effect < RUBRAVIEW_EFFECT_COUNT)
+        batch_token(tk, "--effect=%s:%g", rubraview_effect_key((rubraview_effect_t)b->effect), b->effect_amount);
+    if (b->canvas[0]) batch_token(tk, "--canvas=%s,%06X", b->canvas, (unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]);
+    if (b->border > 0.5) batch_token(tk, "--border=%d,%06X", (int)lround(b->border), (unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]);
+    if (b->mark[0]) batch_token(tk, "--watermark=%s,%s,%d", b->mark, (const char *[]){ "br", "bl", "tr", "tl", "c" }[b->mark_corner % 5],
+                                (int)lround(b->mark_opacity));
+    if (b->format > 0 && b->format <= RUBRAVIEW_EXPORT_ICO) {
+        u8str_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
+        batch_token(tk, "--format=%.*s", (int)ext.len, ext.ptr);
+    }
+    if (b->quality >= 1.0 && fabs(b->quality - 90.0) > 0.5) batch_token(tk, "--quality=%d", (int)lround(b->quality));
+    if (b->privacy) batch_token(tk, "--privacy-clean");
+    if (b->name[0] && strcmp(b->name, "{name}.{ext}") != 0) batch_token(tk, "--name=%s", b->name);
+    if (b->start > 1.5) batch_token(tk, "--start=%d", (int)lround(b->start));
+    if (b->replace[0] && strchr(b->replace, ',') && b->replace[0] != ',') batch_token(tk, "--replace=%s", b->replace);
+    if (b->exists == 1) batch_token(tk, "--exists=skip");
+    if (b->exists == 2) batch_token(tk, "--exists=number");
+    if (b->keep_dates) batch_token(tk, "--keep-dates");
+    if (b->recursive) batch_token(tk, "--recursive");
+    if (b->subfolders) batch_token(tk, "--subfolders");
+    if (b->out[0]) batch_token(tk, "--out=%s", b->out);
+}
+
+static void batch_defaults(struct batch_ui *b) {
+    *b = (struct batch_ui){ .loaded = true, .size_by = 0, .size_value = 100.0, .box_h = 1080.0, .filter = 3, .effect_amount = 0.0,
+                            .mark_corner = 0, .mark_opacity = 50.0, .quality = 90.0, .start = 1.0 };
+    snprintf(b->name, sizeof(b->name), "%s", "{name}.{ext}");
+}
+
+/* The tokens (a line each) read back into the choices; false when they do not parse. */
+static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) {
+    const char *argv[72];
+    int argc = 0;
+    argv[argc++] = "rubraview";
+    argv[argc++] = "--batch";
+    for (size_t i = 0; i < text.len && argc < 70;) {
+        size_t e = i;
+        while (e < text.len && text.ptr[e] != '\n' && text.ptr[e] != '\r') ++e;
+        if (e > i) {
+            u8str_t line = app_keep(app, (u8str_t){ .ptr = text.ptr + i, .len = e - i });
+            argv[argc++] = line.ptr;
+        }
+        i = e + 1;
+    }
+    argv[argc++] = "in";
+    static rubraview_cli_result_t r;
+    rubraview_cli_parse(&r, app->arena, argc, argv);
+    if (r.err != RUBRAVIEW_CLI_OK) return false;
+    batch_defaults(b);
+    for (size_t i = 0; i < r.job.action_count; ++i) {
+        const rubraview_batch_action_t *a = &r.actions[i];
+        if (a->kind == RUBRAVIEW_BATCH_RESIZE) {
+            static const int32_t BY[] = { 1, 6, 4, 5, 2, 3, 7 };   /* the core's modes in the window's order */
+            b->size_by = (int)a->params.resize.mode < 7 ? BY[a->params.resize.mode] : 0;
+            b->size_value = a->params.resize.value_a;
+            b->box_h = a->params.resize.mode == RUBRAVIEW_RESIZE_BOUNDING_BOX ? a->params.resize.value_b : b->box_h;
+            b->filter = (int32_t)a->params.resize.filter;
+            b->linear = a->params.resize.linear;
+            b->no_enlarge = a->params.resize.no_enlarge;
+            if (a->params.resize.value_a <= 0.0) b->size_by = 0;
+        } else if (a->kind == RUBRAVIEW_BATCH_ORIENT) {
+            const rubraview_batch_orient_params_t *o = &a->params.orient;
+            b->rotate = o->use_exif_auto_orient ? 4 : o->rotate_degrees / 90;
+            b->flip = o->flip_horizontal ? 1 : o->flip_vertical ? 2 : 0;
+        } else if (a->kind == RUBRAVIEW_BATCH_COLOR_ADJUST) {
+            b->grayscale = a->params.color.grayscale;
+            if (a->params.color.has_unsharp) b->sharpen = a->params.color.amount * 100.0;
+        } else if (a->kind == RUBRAVIEW_BATCH_PRIVACY_SCRUB) {
+            b->privacy = true;
+        } else if (a->kind == RUBRAVIEW_BATCH_EXTRA) {
+            const rubraview_batch_extra_params_t *x = &a->params.extra;
+            if (x->crop) snprintf(b->crop, sizeof(b->crop), "%d,%d,%d,%d", (int)x->crop_x, (int)x->crop_y, (int)x->crop_w, (int)x->crop_h);
+            b->autocrop = x->autocrop; b->auto_colour = x->auto_colour; b->negative = x->negative;
+            b->effect = x->effect; b->effect_amount = x->effect_amount;
+            if (x->canvas_w > 0) snprintf(b->canvas, sizeof(b->canvas), "%dx%d", (int)x->canvas_w, (int)x->canvas_h);
+            b->border = x->border_px;
+            uint32_t rgb = x->border_px > 0 ? x->border_rgb : x->canvas_rgb;
+            b->frame_colour = rgb == 0 ? 1 : rgb == 0x808080 ? 2 : 0;
+            if (x->watermark.len > 0) snprintf(b->mark, sizeof(b->mark), "%.*s", (int)x->watermark.len, x->watermark.ptr);
+            b->mark_corner = (int32_t)x->watermark_corner; b->mark_opacity = x->watermark_opacity;
+        } else if (a->kind == RUBRAVIEW_BATCH_CONVERT) {
+            b->format = (int32_t)r.export_options.format;
+        }
+    }
+    if (r.export_options.jpeg_quality > 0) b->quality = r.export_options.jpeg_quality;
+    if (r.job.naming_pattern.len > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.len, r.job.naming_pattern.ptr);
+    b->start = r.job.counter_start > 0 ? r.job.counter_start : 1;
+    if (r.job.replace_from.len > 0)
+        snprintf(b->replace, sizeof(b->replace), "%.*s,%.*s", (int)r.job.replace_from.len, r.job.replace_from.ptr, (int)r.job.replace_to.len, r.job.replace_to.ptr);
+    b->exists = r.exists; b->keep_dates = r.keep_dates; b->recursive = r.recursive; b->subfolders = r.subfolders;
+    if (r.output_dir.len > 0) snprintf(b->out, sizeof(b->out), "%.*s", (int)r.output_dir.len, r.output_dir.ptr);
+    return true;
+}
+
+/* The tokens as text, a line each. */
+static u8str_t batch_text(app_state_t *app) {
+    batch_tokens_t tk;
+    batch_tokens(&app->batch, &tk);
+    char out[8192];
+    size_t at = 0;
+    for (size_t i = 0; i < tk.n; ++i) {
+        int n = snprintf(out + at, sizeof(out) - at, "%s\n", tk.v[i]);
+        if (n <= 0 || (size_t)n >= sizeof(out) - at) break;
+        at += (size_t)n;
+    }
+    return app_keep(app, (u8str_t){ .ptr = out, .len = at });
+}
+
+static u8str_t batch_row_label(char *buf, size_t cap, const char *what, const char *value, const char *empty) {
+    int n = snprintf(buf, cap, "%s: %s...", what, value && value[0] ? value : empty);
+    return (u8str_t){ .ptr = buf, .len = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
+}
+
 static void panel_open_batch(app_state_t *app) {
+    struct batch_ui *b = &app->batch;
+    if (!b->loaded) {
+        batch_defaults(b);
+        u8str_t last = rubraview_settings_get_text(&app->settings, U8("batch"), U8("last"));
+        if (last.len > 0) {   /* stored with \n turned to | (settings.ini is a line a key) */
+            char text[4096];
+            size_t n = last.len < sizeof(text) ? last.len : sizeof(text);
+            for (size_t i = 0; i < n; ++i) text[i] = last.ptr[i] == '|' ? '\n' : last.ptr[i];
+            if (!batch_from_text(app, b, (u8str_t){ .ptr = text, .len = n })) batch_defaults(b);
+        }
+    }
     double dpi = rubraview_pal_window_dpi_scale(app->window);
+    bool placed = app->panel.placed && app->panel_is_batch;
+    double px = app->panel.place_x, py = app->panel.place_y;
     app->panel = rubraview_panel_create(TU8("Batch"), dpi);
+    if (placed) { app->panel.placed = true; app->panel.place_x = px; app->panel.place_y = py; }
     app->panel_is_export = false;
     app->panel_is_batch = true;
     app->panel_is_print = false;
     app->panel_is_convert = false;
+    rubraview_panel_t *pn = &app->panel;
+    static char labels[8][1100];
 
-    rubraview_panel_add_slider(&app->panel, PANEL_BATCH_RESIZE, TU8("Resize %"), 100.0, 10.0, 500.0, 5.0);
-    rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FILTER, TU8("Filter"), 3, 4);
-    rubraview_panel_add_choice(&app->panel, PANEL_BATCH_FORMAT, TU8("Format"), 0, 8);
-    rubraview_panel_add_toggle(&app->panel, PANEL_BATCH_GRAY, TU8("Grayscale"), false);
-    rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, TU8("Privacy clean"), false);
-    rubraview_panel_add_separator(&app->panel);
+    /* The size */
+    rubraview_panel_add_choice(pn, PANEL_BATCH_SIZE_BY, TU8("Size"), b->size_by, 8);
+    if (b->size_by > 0) {
+        double lo = 1, hi = 16000, step = 1;
+        if (b->size_by == 1) { lo = 1; hi = 1000; }
+        if (b->size_by == 7) { lo = 0.1; hi = 200; step = 0.1; }
+        rubraview_panel_add_slider(pn, PANEL_BATCH_RESIZE, b->size_by == 6 ? TU8("  width") : TU8("  value"), b->size_value, lo, hi, step);
+        if (b->size_by == 6) rubraview_panel_add_slider(pn, PANEL_BATCH_BOX_H, TU8("  height"), b->box_h, 1, 16000, 1);
+        rubraview_panel_add_choice(pn, PANEL_BATCH_FILTER, TU8("  Filter"), b->filter, 4);
+        rubraview_panel_add_toggle(pn, PANEL_BATCH_LINEAR, TU8("  In linear light"), b->linear);
+        rubraview_panel_add_toggle(pn, PANEL_BATCH_NO_ENLARGE, TU8("  Never enlarge"), b->no_enlarge);
+    }
+    rubraview_panel_add_slider(pn, PANEL_BATCH_SHARPEN, TU8("Sharpen"), b->sharpen, 0, 300, 5);
+    rubraview_panel_add_separator(pn);
+    /* Turning and cutting */
+    rubraview_panel_add_choice(pn, PANEL_BATCH_ROTATE, TU8("Turn"), b->rotate, 5);
+    rubraview_panel_add_choice(pn, PANEL_BATCH_FLIP, TU8("Mirror"), b->flip, 3);
+    rubraview_panel_add_button(pn, PANEL_BATCH_CROP, batch_row_label(labels[0], sizeof(labels[0]), T("Crop X,Y,W,H"), b->crop, T("none")));
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_AUTOCROP, TU8("Cut plain borders"), b->autocrop);
+    rubraview_panel_add_separator(pn);
+    /* Colour and effects */
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_AUTOCOLOUR, TU8("Automatic colour"), b->auto_colour);
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_GRAY, TU8("Grayscale"), b->grayscale);
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_NEGATIVE, TU8("Negative"), b->negative);
+    rubraview_panel_add_choice(pn, PANEL_BATCH_EFFECT, TU8("Effect"), b->effect, RUBRAVIEW_EFFECT_COUNT);
+    if (b->effect > 0) {
+        double lo = 0, hi = 1;
+        rubraview_effect_range((rubraview_effect_t)b->effect, &lo, &hi, NULL);
+        rubraview_panel_add_slider(pn, PANEL_BATCH_EFFECT_AMOUNT, TU8("  amount"), b->effect_amount, lo, hi, 1);
+    }
+    rubraview_panel_add_separator(pn);
+    /* Frame, canvas, watermark */
+    rubraview_panel_add_button(pn, PANEL_BATCH_CANVAS, batch_row_label(labels[1], sizeof(labels[1]), T("Canvas WxH"), b->canvas, T("none")));
+    rubraview_panel_add_slider(pn, PANEL_BATCH_BORDER, TU8("Border px"), b->border, 0, 500, 1);
+    rubraview_panel_add_choice(pn, PANEL_BATCH_FRAME_COLOUR, TU8("  their colour"), b->frame_colour, 3);
+    {
+        u8str_t mark = cstr(b->mark);
+        u8str_t base = rubraview_path_basename(mark);
+        char shown[300];
+        snprintf(shown, sizeof(shown), "%.*s", (int)(base.len < 200 ? base.len : 200), base.ptr);
+        rubraview_panel_add_button(pn, PANEL_BATCH_MARK, batch_row_label(labels[2], sizeof(labels[2]), T("Watermark"), shown, T("none (choose a picture)")));
+    }
+    if (b->mark[0]) {
+        rubraview_panel_add_choice(pn, PANEL_BATCH_MARK_CORNER, TU8("  where"), b->mark_corner, 5);
+        rubraview_panel_add_slider(pn, PANEL_BATCH_MARK_OPACITY, TU8("  opacity %"), b->mark_opacity, 1, 100, 1);
+    }
+    rubraview_panel_add_separator(pn);
+    /* What is written */
+    rubraview_panel_add_choice(pn, PANEL_BATCH_FORMAT, TU8("Format"), b->format, 8);
+    rubraview_panel_add_slider(pn, PANEL_BATCH_QUALITY, TU8("  quality"), b->quality, 1, 100, 1);
+    rubraview_panel_add_toggle(pn, PANEL_PRIVACY, TU8("Privacy clean"), b->privacy);
+    rubraview_panel_add_separator(pn);
+    /* Names and places */
+    rubraview_panel_add_button(pn, PANEL_BATCH_NAME, batch_row_label(labels[3], sizeof(labels[3]), T("Names"), b->name, "{name}.{ext}"));
+    rubraview_panel_add_slider(pn, PANEL_BATCH_START, TU8("  {n} from"), b->start, 0, 99999, 1);
+    rubraview_panel_add_button(pn, PANEL_BATCH_REPLACE, batch_row_label(labels[4], sizeof(labels[4]), T("Replace in names (from,to)"), b->replace, T("nothing")));
+    rubraview_panel_add_choice(pn, PANEL_BATCH_EXISTS, TU8("A name already there"), b->exists, 3);
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_KEEP_DATES, TU8("Keep the files' dates"), b->keep_dates);
+    rubraview_panel_add_toggle(pn, PANEL_BATCH_RECURSIVE, TU8("Folders inside too"), b->recursive);
+    if (b->recursive) rubraview_panel_add_toggle(pn, PANEL_BATCH_SUBFOLDERS, TU8("  the same folders in the output"), b->subfolders);
+    rubraview_panel_add_button(pn, PANEL_BATCH_OUT, batch_row_label(labels[5], sizeof(labels[5]), T("Into"), b->out, T("rubraview-out beside them")));
+    rubraview_panel_add_separator(pn);
+    rubraview_panel_add_button(pn, PANEL_BATCH_TEST, TU8("Try the names on the first files"));
+    rubraview_panel_add_button(pn, PANEL_BATCH_SAVE, TU8("Save these choices..."));
+    rubraview_panel_add_button(pn, PANEL_BATCH_LOAD, TU8("Load choices..."));
     if (app->batch_list_count > 0) {
         /* D-86: "Convert..." from Explorer: these files, not the folder being read. */
-        static char label[64];
-        snprintf(label, sizeof(label), T("Run on the %zu chosen file%s"), app->batch_list_count, app->batch_list_count == 1 ? "" : TC("plural", "s"));
-        rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, cstr(label));
+        snprintf(labels[6], sizeof(labels[6]), T("Run on the %zu chosen file%s"), app->batch_list_count, app->batch_list_count == 1 ? "" : TC("plural", "s"));
+        rubraview_panel_add_button(pn, PANEL_BATCH_RUN, cstr(labels[6]));
     } else {
-        rubraview_panel_add_button(&app->panel, PANEL_BATCH_RUN, TU8("Run on this folder"));
+        rubraview_panel_add_button(pn, PANEL_BATCH_RUN, TU8("Run on this folder"));
     }
 
     app->panel.open = true;
     panel_relayout(app);
+}
+
+/* A row whose value is text: typed in the rename box. */
+static void batch_type_begin(app_state_t *app, int32_t id) {
+    const char *now = id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
+                    : id == PANEL_BATCH_NAME ? app->batch.name : id == PANEL_BATCH_REPLACE ? app->batch.replace : app->batch.out;
+    if (app->rename_active) rename_end(app);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, cstr(now));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_composing_length = 0;
+    app->batch_typing = id;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, id == PANEL_BATCH_NAME ? TU8("{name} {ext} {n} {n:3} {parent} {date} {w} {h}, then Enter (empty: as it was)")
+               : id == PANEL_BATCH_CROP ? TU8("X,Y,W,H in pixels, then Enter (empty: no crop)")
+               : id == PANEL_BATCH_CANVAS ? TU8("width x height, e.g. 1920x1080, then Enter (empty: none)")
+               : id == PANEL_BATCH_REPLACE ? TU8("what,with: IMG_,photo-  then Enter (empty: nothing)")
+               : TU8("a folder, then Enter (empty: rubraview-out beside the files)"));
+}
+
+static void batch_typed(app_state_t *app) {
+    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    int32_t id = app->batch_typing;
+    char *dst = id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
+              : id == PANEL_BATCH_NAME ? app->batch.name : id == PANEL_BATCH_REPLACE ? app->batch.replace : app->batch.out;
+    size_t cap = id == PANEL_BATCH_CROP ? sizeof(app->batch.crop) : id == PANEL_BATCH_CANVAS ? sizeof(app->batch.canvas)
+               : id == PANEL_BATCH_NAME ? sizeof(app->batch.name) : id == PANEL_BATCH_REPLACE ? sizeof(app->batch.replace) : sizeof(app->batch.out);
+    char was[1024];
+    snprintf(was, sizeof(was), "%s", dst);
+    size_t n = text.len < cap - 1 ? text.len : cap - 1;
+    memcpy(dst, text.ptr, n);
+    dst[n] = '\0';
+    if (id == PANEL_BATCH_NAME && n == 0) snprintf(dst, cap, "%s", "{name}.{ext}");
+    app->batch_typing = 0;
+    rename_end(app);
+    /* What the run's parser would refuse is refused here, with the word for why. */
+    batch_tokens_t tk;
+    batch_tokens(&app->batch, &tk);
+    const char *argv[70];
+    int argc = 0;
+    argv[argc++] = "rubraview"; argv[argc++] = "--batch";
+    for (size_t i = 0; i < tk.n && argc < 68; ++i) argv[argc++] = tk.v[i];
+    argv[argc++] = "in";
+    static rubraview_cli_result_t r;
+    rubraview_cli_parse(&r, app->arena, argc, argv);
+    if (r.err != RUBRAVIEW_CLI_OK) {
+        snprintf(dst, cap, "%s", was);
+        osd_say(app, TU8("that is not a value this takes; left as it was"));
+    }
+    panel_open_batch(app);
+}
+
+/* The first files' names as the run would write them. */
+static void batch_try_names(app_state_t *app) {
+    batch_tokens_t tk;
+    batch_tokens(&app->batch, &tk);
+    const char *argv[70];
+    int argc = 0;
+    argv[argc++] = "rubraview"; argv[argc++] = "--batch";
+    for (size_t i = 0; i < tk.n && argc < 68; ++i) argv[argc++] = tk.v[i];
+    argv[argc++] = "in";
+    static rubraview_cli_result_t r;
+    rubraview_cli_parse(&r, app->arena, argc, argv);
+    if (r.err != RUBRAVIEW_CLI_OK) { osd_say(app, TU8("the choices do not make a run")); return; }
+    rubraview_batch_input_t in[3];
+    size_t count = 0;
+    for (size_t i = 0; i < app->batch_list_count && count < 3; ++i) in[count++] = (rubraview_batch_input_t){ app->batch_list[i], 1 };
+    for (size_t i = 0; app->batch_list_count == 0 && i < page_count(app) && count < 3; ++i)
+        in[count++] = (rubraview_batch_input_t){ app->source.pages[i].path, 1 };
+    if (count == 0) { osd_say(app, TU8("no files to try the names on")); return; }
+    char said[sizeof(app->notice)];
+    size_t at = 0;
+    struct names_ctx { char *said; size_t *at; size_t cap; } nc = { said, &at, sizeof(said) };
+    said[0] = '\0';
+    void *mem = malloc(1u << 20);
+    if (!mem) return;
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = 1u << 20 });
+    for (size_t i = 0; i < count; ++i) {
+        proven_arena_reset(&scratch);
+        u8str_t name = rubraview_path_basename(in[i].path);
+        u8str_t stem = rubraview_batch_replace_all(&scratch, rubraview_path_stem(name), r.job.replace_from, r.job.replace_to);
+        u8str_t ext = rubraview_path_ext(name);
+        if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
+        if (r.export_options.format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) ext = rubraview_export_extension(r.export_options.format);
+        u8str_t out = rubraview_batch_format_name_ex(&scratch, r.job.naming_pattern, stem, ext, 0, 0, U8(""),
+                                                     (int64_t)(r.job.counter_start > 0 ? r.job.counter_start : 1) + (int64_t)i,
+                                                     rubraview_path_basename(rubraview_path_dirname(in[i].path)));
+        int n = snprintf(nc.said + *nc.at, nc.cap - *nc.at, "%s%.*s > %.*s", i ? ";  " : "", (int)(name.len < 60 ? name.len : 60), name.ptr,
+                         (int)(out.len < 60 ? out.len : 60), out.ptr);
+        if (n > 0 && (size_t)n < nc.cap - *nc.at) *nc.at += (size_t)n;
+    }
+    free(mem);
+    osd_say(app, (u8str_t){ .ptr = said, .len = at });
+    app->notice_seconds = 8.0;
+}
+
+static void batch_save_or_load(app_state_t *app, bool saving) {
+    static const rubraview_file_filter_t FILTERS[] = { { "Batch choices (*.rvbatch)", "*.rvbatch" } };
+    rubraview_file_dialog_opts_t opts = {
+        .title = saving ? T("Save the batch choices") : T("Load batch choices"), .filters = FILTERS, .filter_count = 1,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
+    };
+    rubraview_file_dialog_result_t picked = saving ? rubraview_pal_file_dialog_save(app->arena, &opts) : rubraview_pal_file_dialog_open(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    u8str_t path = picked.paths[0];
+    if (saving) {
+        if (!rubraview_path_has_ext(rubraview_path_basename(path), ".rvbatch")) {
+            char with[1100];
+            int n = snprintf(with, sizeof(with), "%.*s.rvbatch", (int)path.len, path.ptr);
+            if (n > 0 && (size_t)n < sizeof(with)) path = app_keep(app, (u8str_t){ .ptr = with, .len = (size_t)n });
+        }
+        osd_say(app, rubraview_pal_fs_write_file(path, batch_text(app)) ? TU8("the choices were saved") : TU8("could not write the file"));
+        return;
+    }
+    u8str_t text = rubraview_pal_fs_read_file(app->arena, path, 64u * 1024u);
+    struct batch_ui b = app->batch;
+    if (text.len == 0 || !batch_from_text(app, &b, text)) { osd_say(app, TU8("that file holds no batch choices this version takes")); return; }
+    app->batch = b;
+    osd_say(app, TU8("the choices were loaded"));
+    panel_open_batch(app);
 }
 
 /* D-87: how the pictures are printed, chosen when printing. The choices
@@ -12085,7 +13144,35 @@ static int save_job_work(save_job_t *job) {
     int result = SAVE_OK;
     rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, NULL, 0, true);
     if (!rubraview_pixbuf_is_valid(&pixels)) result = SAVE_UNREADABLE;
-    if (result == SAVE_OK && job->apply_edit) {
+    void *steps_mem = NULL;
+    if (result == SAVE_OK && job->apply_edit && job->steps.cursor > 0) {
+        /* The owner's edit: each step from one buffer into the other, the
+           one before it given back as the next is made. */
+        size_t biggest = src_bytes;
+        for (size_t i = 1; i <= job->steps.cursor; ++i) {
+            int32_t sw = 0, sh = 0;
+            rubraview_edit_steps_size(&job->steps, i, &sw, &sh);
+            size_t b = (size_t)sw * (size_t)sh * 4u;
+            if (b > biggest) biggest = b;
+        }
+        size_t half = biggest * 6u + (16u << 20);
+        steps_mem = malloc(half * 2u);
+        if (!steps_mem) {
+            result = SAVE_NO_MEMORY;
+        } else {
+            proven_arena_t lanes[2] = {
+                proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)steps_mem, .size = half }),
+                proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)steps_mem + half, .size = half }),
+            };
+            for (size_t i = 0; i < job->steps.cursor && result == SAVE_OK; ++i) {
+                proven_arena_t *lane = &lanes[i % 2u];
+                proven_arena_reset(lane);
+                rubraview_pixbuf_t next = rubraview_edit_step_apply(lane, &job->steps.steps[i], &pixels, 1.0);
+                if (rubraview_pixbuf_is_valid(&next)) pixels = next; else result = SAVE_EDIT_FAILED;
+            }
+        }
+    }
+    if (result == SAVE_OK && job->apply_edit && !rubraview_edit_is_neutral(&job->edit)) {
         rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &job->edit, &pixels);
         if (rubraview_pixbuf_is_valid(&edited)) pixels = edited; else result = SAVE_EDIT_FAILED;
     }
@@ -12094,6 +13181,7 @@ static int save_job_work(save_job_t *job) {
         if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = job->source_format;
         if (!rubraview_pal_image_save(out_path, &pixels, &options)) result = SAVE_UNWRITABLE;
     }
+    free(steps_mem);
     free(work_mem);
     return result;
 }
@@ -12167,6 +13255,9 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
     memcpy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.len);
     if (name.len) memcpy(job->arc_name, name.ptr, name.len);
     job->edit = app->edit;
+    job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
+    job->edit.resize_width = job->edit.resize_height = 0;
+    job->steps = app->edit_steps;
     job->apply_edit = true;
     job->options = options;
     job->source_format = source_format;
@@ -12198,7 +13289,8 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
 
     rubraview_export_options_t options = app->export_options;
     rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
-    bool pixels_change = apply_edit && !rubraview_edit_is_neutral(&app->edit);
+    rubraview_edit_step_t pending_now = edit_pending(app);
+    bool pixels_change = apply_edit && (rubraview_edit_step_does_something(&pending_now) || app->edit_steps.cursor > 0);
 
     u8str_t stem = rubraview_path_stem(rubraview_path_basename(source));
     rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
@@ -12226,6 +13318,9 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
     memcpy(job->source, source.ptr, source.len);
     memcpy(job->out, out_path.ptr, out_path.len);
     job->edit = app->edit;
+    job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
+    job->edit.resize_width = job->edit.resize_height = 0;
+    if (apply_edit) job->steps = app->edit_steps;
     job->apply_edit = apply_edit;
     job->options = options;
     job->source_format = source_format;
@@ -12277,9 +13372,81 @@ static void save_job_poll(app_state_t *app, bool wait) {
         free(job);
         return;
     }
+    if (job->over_original && job->result == SAVE_OK) {
+        /* The owner's edit: the written file takes the original's place; the original goes to the Recycle Bin. */
+        bool moved = rubraview_pal_fs_recycle(cstr(job->source)) && rubraview_pal_fs_move(cstr(job->out), cstr(job->source));
+        if (!moved) (void)rubraview_pal_fs_delete(cstr(job->out));
+        if (!wait) {
+            osd_say(app, moved ? TU8("saved over the original (the old file is in the Recycle Bin)")
+                               : TU8("not saved: the original could not be replaced"));
+            if (moved) {
+                /* The page is read again as it is now, and the edit starts over on it. */
+                int32_t page = current_page_index(app);
+                if (page >= 0 && (size_t)page < page_count(app) && rubraview_path_same(app->source.pages[page].path, cstr(job->source))) {
+                    if (edit_panel_open(app)) panel_close(app);
+                    unload_all_pages(app);   /* read again from the file as it is now */
+                    app->needs_relayout = true;
+                }
+            }
+        }
+        free(job);
+        app->save_job = NULL;
+        return;
+    }
+    if (job->over_original) (void)rubraview_pal_fs_delete(cstr(job->out));
     if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
     free(job);
     app->save_job = NULL;
+}
+
+/* The owner's edit: Save writes over the original, asked first by a second
+   press within a few seconds; the copy is made beside it under another name
+   in the original's own format, then takes its place. */
+static void edit_save_over(app_state_t *app) {
+    static double asked_at = -100.0;
+    double now = rubraview_pal_time_now_seconds();
+    int32_t page = current_page_index(app);
+    if (page < 0) return;
+    u8str_t source = app->source.pages[page].path;
+    if (source.len == 0) return;
+    rubraview_edit_step_t pending = edit_pending(app);
+    if (app->edit_steps.cursor == 0 && !rubraview_edit_step_does_something(&pending)) { osd_say(app, TU8("nothing to save: no step was made")); return; }
+    if (now - asked_at > 4.0) {
+        asked_at = now;
+        osd_say(app, TU8("press Save again to write over the original (the old file goes to the Recycle Bin)"));
+        return;
+    }
+    asked_at = -100.0;
+    if (app->save_job) { osd_say(app, TU8("still saving the last copy")); return; }
+    rubraview_export_options_t options = app->export_options;
+    options.format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
+    rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
+    u8str_t stem = rubraview_path_stem(rubraview_path_basename(source));
+    u8str_t ext = rubraview_export_extension(source_format);
+    u8str_t name = rubraview_batch_format_name(app->arena, U8("{name}.rvsaving.{ext}"), stem, ext, 0, 0, U8(""));
+    u8str_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
+    if (out_path.len == 0 || w <= 0 || h <= 0) { osd_say(app, TU8("not saved: the page is not read yet")); return; }
+    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
+    if (!job || source.len >= sizeof(job->source) || out_path.len >= sizeof(job->out)) { free(job); osd_say(app, TU8("not saved: not enough memory")); return; }
+    memcpy(job->source, source.ptr, source.len);
+    memcpy(job->out, out_path.ptr, out_path.len);
+    job->edit = app->edit;
+    job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
+    job->edit.resize_width = job->edit.resize_height = 0;
+    job->steps = app->edit_steps;
+    job->apply_edit = true;
+    job->over_original = true;
+    job->options = options;
+    job->source_format = source_format;
+    job->route = rubraview_export_plan(&options, source_format, true);
+    job->width = w;
+    job->height = h;
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
+    if (!job->thread) { free(job); osd_say(app, TU8("not saved: could not start")); return; }
+    app->save_job = job;
+    osd_say(app, TU8("saving over the original..."));
 }
 
 /* Turns a panel row back into the thing it stands for. Keeping this in
@@ -12331,8 +13498,51 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         return;
     }
 
-    if (app->panel_is_batch) {
-        if (row->id == PANEL_PRIVACY) app->export_options.privacy_clean = v > 0.5;
+    if (app->panel_is_batch) {   /* RV-129 */
+        struct batch_ui *b = &app->batch;
+        bool again = false;
+        switch (row->id) {
+            case PANEL_BATCH_SIZE_BY: {
+                b->size_by = (int32_t)v; again = true;
+                static const double START[8] = { 100, 50, 1920, 1080, 1920, 1080, 1920, 2 };
+                b->size_value = START[b->size_by & 7];
+                break;
+            }
+            case PANEL_BATCH_RESIZE:        b->size_value = v; break;
+            case PANEL_BATCH_BOX_H:         b->box_h = v; break;
+            case PANEL_BATCH_FILTER:        b->filter = (int32_t)v; break;
+            case PANEL_BATCH_LINEAR:        b->linear = v > 0.5; break;
+            case PANEL_BATCH_NO_ENLARGE:    b->no_enlarge = v > 0.5; break;
+            case PANEL_BATCH_SHARPEN:       b->sharpen = v; break;
+            case PANEL_BATCH_ROTATE:        b->rotate = (int32_t)v; break;
+            case PANEL_BATCH_FLIP:          b->flip = (int32_t)v; break;
+            case PANEL_BATCH_AUTOCROP:      b->autocrop = v > 0.5; break;
+            case PANEL_BATCH_AUTOCOLOUR:    b->auto_colour = v > 0.5; break;
+            case PANEL_BATCH_GRAY:          b->grayscale = v > 0.5; break;
+            case PANEL_BATCH_NEGATIVE:      b->negative = v > 0.5; break;
+            case PANEL_BATCH_EFFECT: {
+                b->effect = (int32_t)v; again = true;
+                double start = 0;
+                rubraview_effect_range((rubraview_effect_t)b->effect, NULL, NULL, &start);
+                b->effect_amount = start;
+                break;
+            }
+            case PANEL_BATCH_EFFECT_AMOUNT: b->effect_amount = v; break;
+            case PANEL_BATCH_BORDER:        b->border = v; break;
+            case PANEL_BATCH_FRAME_COLOUR:  b->frame_colour = (int32_t)v; break;
+            case PANEL_BATCH_MARK_CORNER:   b->mark_corner = (int32_t)v; break;
+            case PANEL_BATCH_MARK_OPACITY:  b->mark_opacity = v; break;
+            case PANEL_BATCH_FORMAT:        b->format = (int32_t)v; break;
+            case PANEL_BATCH_QUALITY:       b->quality = v; break;
+            case PANEL_PRIVACY:             b->privacy = v > 0.5; app->export_options.privacy_clean = b->privacy; break;
+            case PANEL_BATCH_START:         b->start = v; break;
+            case PANEL_BATCH_EXISTS:        b->exists = (int32_t)v; break;
+            case PANEL_BATCH_KEEP_DATES:    b->keep_dates = v > 0.5; break;
+            case PANEL_BATCH_RECURSIVE:     b->recursive = v > 0.5; again = true; break;
+            case PANEL_BATCH_SUBFOLDERS:    b->subfolders = v > 0.5; break;
+            default: break;
+        }
+        if (again) panel_open_batch(app);
         return;
     }
 
@@ -12343,6 +13553,19 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         case PANEL_SATURATION:  rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SATURATION, (float)v); break;
         case PANEL_TEMPERATURE: rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_TEMPERATURE, (float)v); break;
         case PANEL_TINT:        rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_TINT, (float)v); break;
+        case PANEL_BAL_R:       app->edit.params.balance_r = (float)v; break;
+        case PANEL_BAL_G:       app->edit.params.balance_g = (float)v; break;
+        case PANEL_BAL_B:       app->edit.params.balance_b = (float)v; break;
+        case PANEL_EFFECT: {
+            app->effect_choice = (int32_t)v;
+            double start = 0.0;
+            rubraview_effect_range((rubraview_effect_t)app->effect_choice, NULL, NULL, &start);
+            app->effect_amount = start;
+            panel_build_edit(app);   /* the amount's range is the effect's */
+            break;
+        }
+        case PANEL_EFFECT_AMOUNT: app->effect_amount = v; break;
+        case PANEL_COMPARE:     app->edit_compare = v > 0.5; break;
         case PANEL_GAMMA:       rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_MIDTONE_GAMMA, (float)v); break;
         case PANEL_BLUR:        rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BLUR_SIGMA, (float)v); break;
         case PANEL_SHARPEN:     rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SHARPEN_AMOUNT, (float)v); break;
@@ -12358,10 +13581,44 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         case PANEL_SHARPEN_KIND: app->edit.sharpen_laplacian = v > 0.5; break;
         case PANEL_SHARPEN_RADIUS: rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_SHARPEN_RADIUS, (float)v); break;
         case PANEL_SHARPEN_THRESHOLD: app->edit.sharpen_threshold = (uint8_t)(v < 0.0 ? 0.0 : v > 255.0 ? 255.0 : v); break;
+        case PANEL_RESIZE_PRESET: {
+            int32_t w = 0, h = 0, sw = 0, sh = 0;
+            (void)rubraview_pal_window_monitor_size(app->window, &sw, &sh);
+            if (rubraview_resize_preset_size((rubraview_resize_preset_t)(int32_t)v, app->edit.image_width, app->edit.image_height,
+                                             sw, sh, app->edit.resize_lock_aspect, &w, &h)) {
+                app->edit.resize_width = w;
+                app->edit.resize_height = h;
+                rubraview_panel_set_value(&app->panel, PANEL_RESIZE, 100.0 * (double)w / (double)app->edit.image_width);
+            }
+            int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
+            if (k >= 0) app->panel.rows[k].label = px_button_label(app);
+            break;
+        }
+        case PANEL_RESIZE_LOCK:
+            app->edit.resize_lock_aspect = v > 0.5;
+            if (app->edit.resize_lock_aspect && app->edit.resize_width > 0) {   /* the height follows the width again */
+                int32_t w = 0, h = 0;
+                rubraview_edit_session_t whole = edit_whole(app);
+                if (rubraview_edit_resize_pair(&whole, app->edit.resize_width, true, &w, &h)) { app->edit.resize_width = w; app->edit.resize_height = h; }
+                int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
+                if (k >= 0) app->panel.rows[k].label = px_button_label(app);
+            }
+            break;
+        case PANEL_RESIZE_FILTER:  app->edit.resize_filter = (rubraview_resample_filter_t)(int32_t)v; break;
+        case PANEL_RESIZE_LINEAR:  app->edit.resize_linear = v > 0.5; break;
+        case PANEL_RESIZE_SHARPEN: app->edit.resize_sharpen = (float)v; break;
+        case PANEL_RESIZE_DPI: {
+            app->edit.resize_dpi = v;
+            int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
+            if (k >= 0) app->panel.rows[k].label = px_button_label(app);
+            break;
+        }
         case PANEL_RESIZE: {
-            /* A hundred is the size as it is; the size is of what the cut leaves. */
+            /* A hundred is the size as it is; the size is of the whole picture (RV-128: whatever is selected). */
             int32_t w = 0, h = 0;
-            if (lround(v) == 100 || !rubraview_edit_resize_percent(&app->edit, v, &w, &h)) {
+            rubraview_edit_session_t whole = edit_whole(app);
+            rubraview_panel_set_value(&app->panel, PANEL_RESIZE_PRESET, 0.0);
+            if (lround(v) == 100 || !rubraview_edit_resize_percent(&whole, v, &w, &h)) {
                 app->edit.resize_width = app->edit.resize_height = 0;
             } else {
                 rubraview_edit_set_resize(&app->edit, w, h, true);
@@ -12374,14 +13631,34 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
     }
     /* The preview is of the tones, the blur and the sharpening: any of them changing draws it again. */
     app->edit_shown_valid = false;
+    app->edit_rev++;
 }
 
 static void panel_button(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->panel.row_count) return;
     switch (app->panel.rows[index].id) {
         case PANEL_RESET:
+            /* Everything since the panel opened: the steps, the values, the selection. */
+            rubraview_edit_steps_reset(&app->edit_steps);
             rubraview_edit_reset(&app->edit);
-            panel_open_edit(app);   /* rebuild the rows at their neutral values */
+            edit_values_fresh(app);
+            app->edit.crop_active = false;
+            edit_steps_changed(app);
+            osd_say(app, TU8("back to the picture as it was"));
+            break;
+        case PANEL_APPLY_SEL:    (void)edit_apply_pending(app, true); break;
+        case PANEL_EFFECT_APPLY: edit_effect_apply(app); break;
+        case PANEL_AUTO_COLOUR:  edit_auto_colour(app); break;
+        case PANEL_CROP_SEL:     edit_crop_to_selection(app); break;
+        case PANEL_RESIZE_APPLY: edit_resize_apply(app); break;
+        case PANEL_UNDO:         edit_undo(app, false); break;
+        case PANEL_REDO:         edit_undo(app, true); break;
+        case PANEL_STEPS:        edit_steps_toggle(app); break;
+        case PANEL_SEL_BOX:      edit_sel_toggle(app); break;
+        case PANEL_SAVE_ORIGINAL:
+            (void)edit_apply_pending(app, false);
+            if (on_archive_page(app)) panel_write_archive_page(app, true);
+            else edit_save_over(app);
             break;
         case PANEL_EDIT_PAGE:
             g_edit_page_two = !g_edit_page_two;
@@ -12412,11 +13689,14 @@ static void panel_button(app_state_t *app, int32_t index) {
             rubraview_edit_crop_set_ratio(&app->edit, RUBRAVIEW_CROP_FREE);
             rubraview_edit_crop_drag(&app->edit, (int32_t)floor(x * sx), (int32_t)floor(y * sy),
                                      (int32_t)ceil((x + w) * sx), (int32_t)ceil((y + h) * sy));
+            app->edit_rev++;
             panel_build_edit(app);
-            osd_say(app, TU8("the margins are marked: Save a copy cuts them"));
+            edit_sel_sync(app);
+            osd_say(app, TU8("the inside of the margins is selected: Crop to the selection cuts them"));
             break;
         }
         case PANEL_SAVE_COPY:
+            (void)edit_apply_pending(app, false);
             panel_write_current(app, true);
             panel_close(app);
             break;
@@ -12427,6 +13707,24 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_EXPORT_NOW:
             panel_write_current(app, false);
             panel_close(app);
+            break;
+        case PANEL_BATCH_CROP: case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT:
+            batch_type_begin(app, app->panel.rows[index].id);
+            break;
+        case PANEL_BATCH_TEST: batch_try_names(app); break;
+        case PANEL_BATCH_SAVE: batch_save_or_load(app, true); break;
+        case PANEL_BATCH_LOAD: batch_save_or_load(app, false); break;
+        case PANEL_BATCH_MARK:
+            if (app->batch.mark[0]) { app->batch.mark[0] = '\0'; panel_open_batch(app); break; }   /* pressed again: none */
+            {
+                static const rubraview_file_filter_t FILTERS[] = { { "Pictures (*.png;*.webp;*.gif;*.jpg)", "*.png;*.webp;*.gif;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff" } };
+                rubraview_file_dialog_opts_t opts = { .title = T("A picture to lay over each one"), .filters = FILTERS, .filter_count = 1,
+                                                      .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
+                rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+                if (picked.accepted && picked.count > 0)
+                    snprintf(app->batch.mark, sizeof(app->batch.mark), "%.*s", (int)picked.paths[0].len, picked.paths[0].ptr);
+                panel_open_batch(app);
+            }
             break;
         case PANEL_BATCH_RUN:
             /* The dialog builds the same job the command line builds,
@@ -12453,6 +13751,79 @@ static void panel_button(app_state_t *app, int32_t index) {
     }
 }
 
+/* The owner's edit: a slider's name pressed asks for its value, typed. */
+static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32_t which, double px, double py) {
+    int32_t index = rubraview_panel_row_at(panel, px, py);
+    if (index < 0 || panel->rows[index].kind != RUBRAVIEW_ROW_SLIDER) return false;
+    rubraview_rect_t c = rubraview_panel_control_rect(panel, (size_t)index);
+    if (px >= c.x) return false;
+    if (app->rename_active) rename_end(app);
+    char now[32];
+    const rubraview_panel_row_t *row = &panel->rows[index];
+    int n = snprintf(now, sizeof(now), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, (u8str_t){ .ptr = now, .len = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_value = true;
+    app->rename_composing_length = 0;
+    app->typed_panel = which;
+    app->typed_id = row->id;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, TU8("type the value, then Enter (Esc leaves it)"));
+    return true;
+}
+
+static void edit_value_typed(app_state_t *app) {
+    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    char buf[48];
+    size_t n = text.len < sizeof(buf) - 1 ? text.len : sizeof(buf) - 1;
+    memcpy(buf, text.ptr, n);
+    buf[n] = '\0';
+    for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
+    char *end = NULL;
+    double v = strtod(buf, &end);
+    int32_t which = app->typed_panel, id = app->typed_id;
+    rename_end(app);
+    if (!end || end == buf) { osd_say(app, TU8("that is not a number")); return; }
+    rubraview_panel_t *panel = which == 2 ? &app->sel_panel : &app->panel;
+    rubraview_panel_set_value(panel, id, v);
+    int32_t index = rubraview_panel_find(panel, id);
+    if (which == 2) edit_sel_apply_row(app, index); else panel_apply_row(app, index);
+}
+
+/* The two boxes beside the edit: the selection's numbers and the undo list. */
+static bool edit_side_press(app_state_t *app, double px, double py) {
+    if (!edit_panel_open(app)) return false;
+    rubraview_panel_t *boxes[2] = { &app->steps_panel, &app->sel_panel };
+    for (int b = 0; b < 2; ++b) {
+        rubraview_panel_t *box = boxes[b];
+        if (!box->open || !rubraview_rect_contains(box->bounds, px, py)) continue;
+        if (rubraview_panel_title_hit(box, px, py)) { rubraview_panel_move_begin(box, px, py); return true; }
+        if (box == &app->sel_panel && edit_type_value_at(app, box, 2, px, py)) return true;
+        int32_t row = -1;
+        rubraview_panel_event_t ev = rubraview_panel_press(box, px, py, &row);
+        if (ev == RUBRAVIEW_PANEL_CLOSE) { box->open = false; return true; }
+        if (row < 0) return true;
+        int32_t id = box->rows[row].id;
+        if (box == &app->steps_panel && id >= PANEL_STEP_FIRST) {
+            if (rubraview_edit_steps_go(&app->edit_steps, (size_t)(id - PANEL_STEP_FIRST))) edit_steps_changed(app);
+        } else if (ev == RUBRAVIEW_PANEL_VALUE_CHANGED) {
+            edit_sel_apply_row(app, row);
+        } else if (ev == RUBRAVIEW_PANEL_BUTTON_PRESSED && id == PANEL_SEL_ALL) {
+            app->edit.crop_active = false;
+            app->edit_rev++;
+            app->edit_shown_valid = false;
+            panel_build_edit(app);
+            edit_sel_sync(app);
+        } else if (ev == RUBRAVIEW_PANEL_BUTTON_PRESSED && id == PANEL_SEL_TYPE) {
+            px_edit_begin_crop(app);
+        }
+        return true;
+    }
+    return false;
+}
+
 static bool panel_handle_press(app_state_t *app, double px, double py) {
     if (!app->panel.open) return false;
 
@@ -12461,6 +13832,10 @@ static bool panel_handle_press(app_state_t *app, double px, double py) {
        the moment a point was grabbed. It is asked first. */
     if (curve_widget_press(app, px, py, false)) return true;
 
+    /* The owner's edit: taken by its title, it moves. */
+    if (rubraview_panel_title_hit(&app->panel, px, py)) { rubraview_panel_move_begin(&app->panel, px, py); return true; }
+    /* A value's name (left of its slider) is pressed: the value is typed. */
+    if ((edit_panel_open(app) || app->panel_is_batch) && edit_type_value_at(app, &app->panel, 1, px, py)) return true;
     int32_t row = -1;
     rubraview_panel_event_t event = rubraview_panel_press(&app->panel, px, py, &row);
     if (event == RUBRAVIEW_PANEL_CLOSE) {   /* its X (owner, 2026-10-15) */
@@ -12476,7 +13851,9 @@ static bool panel_handle_press(app_state_t *app, double px, double py) {
         return true;
     }
     /* A click outside the panel closes it, which is the same rule the
-       menu box follows (§3.6.2). */
+       menu box follows (§3.6.2) — not the edit's, whose selection is
+       drawn outside it. */
+    if (edit_panel_open(app) && !rubraview_rect_contains(app->panel.bounds, px, py)) return false;
     if (!rubraview_rect_contains(app->panel.bounds, px, py)) {
         panel_close(app);
         return true;
@@ -12487,10 +13864,20 @@ static bool panel_handle_press(app_state_t *app, double px, double py) {
 
 /* Draws whichever of the three panels is open. The model decided every
    rectangle; this only fills them. */
+static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
 static void draw_panel(app_state_t *app) {
-    if (!app->panel.open) return;
+    if (app->panel.open) draw_panel_of(app, &app->panel, edit_panel_open(app));
+    /* The owner's edit: the selection's numbers and the undo list, each a box of its own. */
+    if (edit_panel_open(app) && app->sel_panel.open) draw_panel_of(app, &app->sel_panel, true);
+    if (edit_panel_open(app) && app->steps_panel.open) draw_panel_of(app, &app->steps_panel, false);
+    /* RV-133: the classify window says what the page on screen is set aside for */
+    if (app->classify_panel.open) {
+        if (app->classify_shown_page != current_page_index(app)) classify_build(app);
+        draw_panel_of(app, &app->classify_panel, false);
+    }
+}
 
-    const rubraview_panel_t *panel = &app->panel;
+static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers) {
     rubraview_pal_rect_t body = { panel->bounds.x, panel->bounds.y,
                                   panel->bounds.width, panel->bounds.height };
     rubraview_pal_render_fill_rect(app->renderer, body, COLOR_BOX_FILL, 3.0);
@@ -12515,7 +13902,7 @@ static void draw_panel(app_state_t *app) {
     for (size_t i = 0; i < panel->row_count; ++i) {
         const rubraview_panel_row_t *row = &panel->rows[i];
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
-        if (r.y + r.height > panel->bounds.y + panel->bounds.height) break;  /* clipped away */
+        if (r.width <= 0.0) continue;  /* scrolled out of the box */
 
         if (row->kind == RUBRAVIEW_ROW_SEPARATOR) {
             rubraview_pal_rect_t rule = { r.x, r.y + r.height * 0.5, r.width, 1.0 };
@@ -12546,7 +13933,14 @@ static void draw_panel(app_state_t *app) {
             rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
                                             c.height * 0.4, c.height };
             rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
-            if (!app->panel_is_print && !app->panel_is_convert &&
+            if (numbers) {
+                /* The owner's edit: every value as a number, typed by pressing its name. */
+                char number[24];
+                int k = snprintf(number, sizeof(number), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
+                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding * 0.5, r.height };
+                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = number, .len = (size_t)k }, at,
+                                                          text_size * 0.9, 0xFFB8D0F0u, RUBRAVIEW_TEXT_RIGHT);
+            } else if (!app->panel_is_print && !app->panel_is_convert &&
                 (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
                 char number[16];
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
@@ -13572,6 +14966,11 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
 }
 
 static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
+    {
+        /* The setting the focus was last on: "this setting" is pressed with the focus on the button. */
+        const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
+        if (node && node->kind == RUBRAVIEW_NODE_SETTING) app->settings_last_setting = node->setting;
+    }
     switch (event) {
         case RUBRAVIEW_SEVENT_NONE:
             return;
@@ -13602,6 +15001,27 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             settings_took_effect(app);
             settings_say(app, T("every setting and key is at its default (Revert undoes this)"));
             break;
+        case RUBRAVIEW_SEVENT_DEFAULTS_PAGE: {
+            /* The owner (2026-10-17): this page only; on Keys, the keys. */
+            rubraview_settings_reset_page(&app->settings, (rubraview_settings_tab_t)app->settings_view.page);
+            if (app->settings_view.page == RUBRAVIEW_TAB_KEYS) {
+                app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
+                rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+                app->key_capture = 0;
+            }
+            skip_dirs_table_rows(app);
+            settings_took_effect(app);
+            settings_say(app, T("this page is at its defaults (Revert undoes this)"));
+            break;
+        }
+        case RUBRAVIEW_SEVENT_DEFAULTS_ONE: {
+            if (app->settings_last_setting < 0) { settings_say(app, T("put the focus on a setting first (the arrows, or a click on it)")); break; }
+            const rubraview_setting_def_t *def = &rubraview_settings_document()->defs[app->settings_last_setting];
+            rubraview_settings_reset_one(&app->settings, def->section, def->key);
+            settings_took_effect(app);
+            settings_say(app, T("that setting is at its default (Revert undoes this)"));
+            break;
+        }
         case RUBRAVIEW_SEVENT_CLOSE:
             settings_close(app);
             return;
@@ -13662,6 +15082,18 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             if (event == RUBRAVIEW_SEVENT_CLEAR_TEXT) {
                 rubraview_settings_set_text(&app->settings, def->section, def->key, U8(""));
                 settings_say(app, "cleared");
+                break;
+            }
+            /* The owner (2026-10-17): a font is chosen in Windows' own font dialog. */
+            if ((rubraview_u8_eq_lit(def->section, "video") && rubraview_u8_eq_lit(def->key, "subtitle_font")) ||
+                (rubraview_u8_eq_lit(def->section, "text") && rubraview_u8_eq_lit(def->key, "font"))) {
+                char face[128];
+                if (rubraview_pal_choose_font(rubraview_pal_window_native_handle(app->settings_window),
+                                              rubraview_settings_get_text(&app->settings, def->section, def->key), face, sizeof(face))) {
+                    rubraview_settings_set_text(&app->settings, def->section, def->key, app_keep(app, cstr(face)));
+                    settings_took_effect(app);
+                    settings_say(app, T("font chosen"));
+                }
                 break;
             }
             settings_path_begin(app, def);   /* typed, pasted, copied, or browsed with Ctrl+O */
@@ -14008,7 +15440,7 @@ static size_t settings_pump(app_state_t *app) {
     size_t handled = 0;
     rubraview_window_event_t event;
     /* the keys page: a row rested on says what its action does */
-    if (app->settings_open && app->settings_tip_row > 0 && !app->settings_tip_shown &&
+    if (app->settings_open && (app->settings_tip_row > 0 || app->settings_tip_help >= 0) && !app->settings_tip_shown &&
         rubraview_pal_time_now_seconds() - app->settings_tip_since >= 0.6) {
         app->settings_tip_shown = true;
         app->settings_dirty = true;
@@ -14113,8 +15545,22 @@ static size_t settings_pump(app_state_t *app) {
                 /* Only the keys' rows say what an action does; the folders' rows are not actions. */
                 if (tip > 0 && rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), tip) ==
                                    (int32_t)(event.mouse.y / app->settings_cell_h)) tip = -1;
-                if (tip != app->settings_tip_row) {
+                /* The owner (2026-10-17): resting on a setting's name shows its fuller explanation. */
+                int32_t help = -1;
+                if (tip <= 0) {
+                    int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w), rr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                    if (c >= view->content_col && c < view->content_col + view->label_cols) {
+                        for (size_t i = 0; i < view->line_count; ++i) {
+                            if (view->lines[i].kind != RUBRAVIEW_LINE_SETTING || rubraview_settings_view_screen_row(view, i) != rr) continue;
+                            const rubraview_settings_node_t *node = &view->doc->nodes[view->lines[i].node];
+                            if (view->doc->defs[node->setting].help.len > 0) help = node->setting;
+                            break;
+                        }
+                    }
+                }
+                if (tip != app->settings_tip_row || help != app->settings_tip_help) {
                     if (app->settings_tip_shown) app->settings_dirty = true;
+                    app->settings_tip_help = help;
                     app->settings_tip_row = tip;
                     app->settings_tip_since = rubraview_pal_time_now_seconds();
                     app->settings_tip_shown = false;
@@ -14452,8 +15898,13 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_add(a, &info, T("Format"), carried ? cstr(own) : (u8str_t){ d.format, strlen(d.format) });
                 rubraview_info_addf(a, &info, T("Pixels"), T("%d x %d (%.1f megapixels)"), d.width, d.height,
                                     (double)d.width * (double)d.height / 1e6);
+                rubraview_info_add(a, &info, T("Aspect ratio"), (u8str_t){ b, rubraview_info_aspect(b, sizeof(b), d.width, d.height) });
                 if (!carried) rubraview_info_add(a, &info, T("Pixel format"), (u8str_t){ d.pixels, strlen(d.pixels) });
-                if (d.dpi_x > 0.0) rubraview_info_addf(a, &info, T("Resolution"), T("%.0f x %.0f dpi"), d.dpi_x, d.dpi_y);
+                if (d.dpi_x > 0.0) {
+                    rubraview_info_addf(a, &info, T("Resolution"), T("%.0f x %.0f dpi"), d.dpi_x, d.dpi_y);
+                    rubraview_info_add(a, &info, T("Print size"),
+                                       (u8str_t){ b, rubraview_info_print_size(b, sizeof(b), d.width, d.height, d.dpi_x, d.dpi_y) });
+                }
                 if (d.frames > 1) rubraview_info_addf(a, &info, T("Frames"), "%u", (unsigned)d.frames);
                 rubraview_info_add(a, &info, T("Colour profile"), d.color_profile ? TU8("embedded") : TU8("none"));
             } else if (in_archive && !bytes) {
@@ -14462,6 +15913,30 @@ static void info_gather(app_state_t *app) {
             const app_page_t *page = &app->pages[index];
             if (page->loaded && page->reduced) {
                 rubraview_info_addf(a, &info, T("On screen"), T("reduced to %d x %d (the graphics card's limit)"), page->width, page->height);
+            }
+            if (page->loaded && page->width > 0 && page->height > 0) {
+                rubraview_info_add(a, &info, T("In memory"),
+                                   (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), (uint64_t)page->width * (uint64_t)page->height * 4u) });
+            }
+            /* RV-130: read once more, timed, and its colours counted: a
+               picture up to 24 megapixels, so turning pages with the window
+               open stays quick. */
+            if (bytes && described && d.frames <= 1 && d.width > 0 && d.height > 0 &&
+                (double)d.width * (double)d.height <= 24e6) {
+                size_t need = (size_t)d.width * (size_t)d.height * 4u + (4u << 20);
+                void *work = malloc(need);
+                if (work) {
+                    proven_arena_t wa = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work, .size = need });
+                    double t0 = rubraview_pal_time_now_seconds();
+                    rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&wa, in_archive ? U8("") : path, bytes, size, false);
+                    double ms = (rubraview_pal_time_now_seconds() - t0) * 1000.0;
+                    if (px.pixels) {
+                        rubraview_info_addf(a, &info, T("Decoded in"), T("%.0f ms"), ms);
+                        uint32_t colours = rubraview_info_unique_colours(&wa, &px);
+                        if (colours) rubraview_info_addf(a, &info, T("Unique colours"), "%u", (unsigned)colours);
+                    }
+                    free(work);
+                }
             }
             if (bytes) {
                 /* How much the file's way of storing saved. */
@@ -14479,6 +15954,8 @@ static void info_gather(app_state_t *app) {
                 rubraview_exif_info_t exif;
                 if (rubraview_exif_read(bytes, size, &exif)) rubraview_info_add_exif(a, &info, &exif);
                 else rubraview_info_add(a, &info, T("EXIF"), TU8("none in this file"));
+                static rubraview_iptc_info_t iptc;
+                if (rubraview_iptc_read(bytes, size, &iptc)) rubraview_info_add_iptc(a, &info, &iptc);
             }
             free(mem);
             rubraview_pal_fs_unmap(&map);
@@ -17101,6 +18578,27 @@ static void draw_settings_window(app_state_t *app) {
                                            box, fs, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
     }
+    if (app->settings_tip_shown && app->settings_tip_row <= 0 && app->settings_tip_help >= 0 &&
+        (size_t)app->settings_tip_help < rubraview_settings_document()->def_count) {
+        /* A setting's fuller explanation, wrapped, under the pointer. */
+        u8str_t help = rubraview_tr_u8(rubraview_settings_document()->defs[app->settings_tip_help].help);
+        int32_t ww = 0, wh = 0;
+        rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
+        double tw = cw * 56.0;
+        if (tw > (double)ww - 8.0) tw = (double)ww - 8.0;
+        double mw = 0.0, mh = 0.0;
+        if (!rubraview_pal_render_measure_text_wrapped(r, help, fs, tw - cw * 2.0, &mw, &mh)) mh = ch * 3.0;
+        double th = mh + ch;
+        double x = app->settings_tip_x + cw, y = app->settings_tip_y + ch * 1.2;
+        if (x + tw > (double)ww) x = (double)ww - tw - 2.0;
+        if (y + th > (double)wh) y = app->settings_tip_y - th - ch * 0.4;
+        if (x < 0.0) x = 0.0;
+        if (y < 0.0) y = 0.0;
+        rubraview_pal_rect_t box = { x, y, tw, th };
+        rubraview_pal_render_fill_rect(r, box, 0xF0303030u, 3.0);
+        rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(r, help, (rubraview_pal_rect_t){ x + cw, y, tw - cw * 2.0, th }, fs, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }
 
@@ -17159,10 +18657,32 @@ static bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, d
    (normalising, the ratio lock, staying inside the image) is
    rubraview_edit_crop_drag's; this turns client pixels into image
    pixels and back, and draws what the model then holds. */
-static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x, int32_t *out_y) {
+/* The owner's edit: where the picture as the steps left it is on screen —
+   the page's own place, or, after a crop or a resize, that shape fitted
+   into it. */
+static bool edit_view_rect(app_state_t *app, rubraview_pal_rect_t *out, double *out_scale, bool *changed) {
     rubraview_pal_rect_t rect;
     double scale = 1.0;
     if (!page_screen_rect(app, &rect, &scale) || scale <= 0.0) return false;
+    int32_t cw = 0, ch = 0;
+    edit_cur_size(app, &cw, &ch);
+    if (changed) *changed = false;
+    if (cw > 0 && ch > 0 && (cw != app->edit_steps.width || ch != app->edit_steps.height)) {
+        double s = rect.width / cw < rect.height / ch ? rect.width / cw : rect.height / ch;
+        rubraview_pal_rect_t fit = { rect.x + (rect.width - cw * s) * 0.5, rect.y + (rect.height - ch * s) * 0.5, cw * s, ch * s };
+        if (changed) *changed = true;
+        rect = fit;
+        scale = s;
+    }
+    *out = rect;
+    *out_scale = scale;
+    return true;
+}
+
+static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x, int32_t *out_y) {
+    rubraview_pal_rect_t rect;
+    double scale = 1.0;
+    if (!edit_view_rect(app, &rect, &scale, NULL) || scale <= 0.0) return false;
     double ix = (px - rect.x) / scale;
     double iy = (py - rect.y) / scale;
     if (ix < 0.0) ix = 0.0;
@@ -17286,31 +18806,44 @@ static void edit_preview_update(app_state_t *app) {
     }
     if (!app->edit_work_mem) return;
     if (current_page_index(app) != app->edit_page) { edit_preview_close(app); return; }
-    if (app->edit_shown_valid &&
+    if (app->edit_shown_valid && app->edit_shown_rev == app->edit_rev &&
         memcmp(&app->edit_shown_params, &app->edit.params, sizeof(app->edit.params)) == 0 &&
         memcmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0 &&
         edit_extras_same(&app->edit_shown_session, &app->edit)) {
         return;
     }
     app->edit_shown_session = app->edit;
+    app->edit_shown_rev = app->edit_rev;
     app->edit_shown_params = app->edit.params;
     memcpy(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves));
     app->edit_shown_valid = true;
 
+    /* The owner's edit: the steps in force, then the step being made on its area,
+       on the small copy; room for each step's buffers. */
+    size_t small_bytes = (size_t)app->edit_small.width * (size_t)app->edit_small.height * 4u;
+    size_t need = small_bytes * (10u + 4u * app->edit_steps.cursor) + (8u << 20);
+    if (need > app->edit_work_bytes) {
+        void *more = realloc(app->edit_work_mem, need);
+        if (!more) return;
+        app->edit_work_mem = more;
+        app->edit_work_bytes = need;
+    }
     proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->edit_work_mem,
                                                                   .size = app->edit_work_bytes });
-    rubraview_edit_session_t session = app->edit;
-    session.crop_active = false;
-    session.resize_width = session.resize_height = 0;
-    /* RV-108: a radius is in the picture's pixels; the small copy has fewer. */
-    if (session.image_width > 0) {
-        float ratio = (float)app->edit_small.width / (float)session.image_width;
-        if (session.blur_sigma > 0.0f) { session.blur_sigma *= ratio; if (session.blur_sigma < 0.3f) session.blur_sigma = 0.3f; }
-        session.sharpen_radius *= ratio;
-        if (session.sharpen_radius < 0.5f) session.sharpen_radius = 0.5f;
-    }
-    rubraview_pixbuf_t edited = rubraview_edit_commit(&work, &session, &app->edit_small);
+    double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
+    rubraview_pixbuf_t edited = rubraview_edit_steps_apply(&work, &app->edit_steps, &app->edit_small, ratio);
     if (!rubraview_pixbuf_is_valid(&edited)) return;
+    rubraview_edit_step_t pending = edit_pending(app);
+    if (rubraview_edit_step_does_something(&pending)) {
+        rubraview_pixbuf_t next = rubraview_edit_step_apply(&work, &pending, &edited, ratio);
+        if (rubraview_pixbuf_is_valid(&next)) edited = next;
+    }
+    rubraview_edit_step_t effect = { .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount };
+    if (rubraview_edit_step_does_something(&effect)) {
+        rubraview_pixbuf_t next = rubraview_edit_step_apply(&work, &effect, &edited, ratio);
+        if (rubraview_pixbuf_is_valid(&next)) edited = next;
+    }
+    if (app->edit_compare) edited = rubraview_pixbuf_clone(&work, &app->edit_small);   /* the original, to compare */
     rubraview_histogram_compute(&edited, app->edit_hist[0], app->edit_hist[1], app->edit_hist[2], app->edit_hist[3]);
     app->edit_hist_ok = true;
     rubraview_pixbuf_t bgra = edited.format == RUBRAVIEW_PIXFMT_BGRA8
@@ -17329,9 +18862,13 @@ static void edit_preview_update(app_state_t *app) {
 static void draw_edit_preview(app_state_t *app) {
     if (!edit_panel_open(app) || !app->edit_preview || !app->edit_small_mem ||
         app->edit_page != current_page_index(app)) return;
-    rubraview_pal_rect_t rect;
-    double scale = 1.0;
-    if (!page_screen_rect(app, &rect, &scale) || app->edit_preview_w <= 0 || app->edit_preview_h <= 0) return;
+    rubraview_pal_rect_t rect, page_rect;
+    double scale = 1.0, page_scale = 1.0;
+    bool changed = false;
+    if (!edit_view_rect(app, &rect, &scale, &changed) || app->edit_preview_w <= 0 || app->edit_preview_h <= 0) return;
+    if (app->edit_compare && page_screen_rect(app, &page_rect, &page_scale)) { rect = page_rect; changed = false; }   /* the original in its own place */
+    /* Cropped or resized: the page as it was is covered, the result fitted in its place. */
+    if (changed && page_screen_rect(app, &page_rect, &page_scale)) rubraview_pal_render_fill_rect(app->renderer, page_rect, COLOR_CANVAS, 0.0);
     rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
         rubraview_mat3x2_scale(rect.width / (double)app->edit_preview_w, rect.height / (double)app->edit_preview_h),
         rubraview_mat3x2_translate(rect.x, rect.y));
@@ -17365,49 +18902,119 @@ static void draw_edit_histogram(app_state_t *app, rubraview_pal_rect_t box) {
     }
 }
 
+/* The owner's edit: the selection, on the picture — a rectangle or an
+   ellipse, the rest a little dimmed, eight handles to size it by, its
+   corner and size written by it. */
+static void sel_handles(double x, double y, double w, double h, double out[8][2]) {
+    const double pts[8][2] = { { x, y }, { x + w * 0.5, y }, { x + w, y }, { x + w, y + h * 0.5 },
+                               { x + w, y + h }, { x + w * 0.5, y + h }, { x, y + h }, { x, y + h * 0.5 } };
+    memcpy(out, pts, sizeof(pts));
+}
+
+static bool sel_screen_rect(app_state_t *app, double *x, double *y, double *w, double *h) {
+    rubraview_pal_rect_t rect;
+    double scale = 1.0;
+    if (!app->edit.crop_active || !edit_view_rect(app, &rect, &scale, NULL)) return false;
+    const rubraview_crop_rect_t *c = &app->edit.crop;
+    *x = rect.x + c->x * scale; *y = rect.y + c->y * scale;
+    *w = c->width * scale; *h = c->height * scale;
+    return *w > 0.0 && *h > 0.0;
+}
+
 static void draw_crop_overlay(app_state_t *app) {
     if (!edit_panel_open(app) || !app->edit.crop_active) return;
     rubraview_pal_rect_t rect;
     double scale = 1.0;
-    if (!page_screen_rect(app, &rect, &scale)) return;
-
-    rubraview_crop_rect_t c = app->edit.crop;
-    double x = rect.x + (double)c.x * scale, y = rect.y + (double)c.y * scale;
-    double w = (double)c.width * scale, h = (double)c.height * scale;
-    if (w <= 0.0 || h <= 0.0) return;
-
-    /* What is being cut away is dimmed, which is the part a reader
-       actually looks at when judging a crop. */
-    const uint32_t shade = 0x80000000u;
-    rubraview_pal_render_fill_rect(app->renderer,
-        (rubraview_pal_rect_t){ rect.x, rect.y, rect.width, y - rect.y }, shade, 0.0);
-    rubraview_pal_render_fill_rect(app->renderer,
-        (rubraview_pal_rect_t){ rect.x, y + h, rect.width, rect.y + rect.height - (y + h) }, shade, 0.0);
-    rubraview_pal_render_fill_rect(app->renderer,
-        (rubraview_pal_rect_t){ rect.x, y, x - rect.x, h }, shade, 0.0);
-    rubraview_pal_render_fill_rect(app->renderer,
-        (rubraview_pal_rect_t){ x + w, y, rect.x + rect.width - (x + w), h }, shade, 0.0);
-
-    rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ x, y, w, h }, 0xFFFFFFFFu, 1.0, 0.0);
-
+    if (!edit_view_rect(app, &rect, &scale, NULL)) return;
+    double x, y, w, h;
+    if (!sel_screen_rect(app, &x, &y, &w, &h)) return;
+    const rubraview_crop_rect_t c = app->edit.crop;
+    const uint32_t shade = 0x50000000u;
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ rect.x, rect.y, rect.width, y - rect.y }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ rect.x, y + h, rect.width, rect.y + rect.height - (y + h) }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ rect.x, y, x - rect.x, h }, shade, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ x + w, y, rect.x + rect.width - (x + w), h }, shade, 0.0);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    double grip = 10.0 * dpi;
-    const double corners[4][2] = { { x, y }, { x + w - grip, y }, { x, y + h - grip }, { x + w - grip, y + h - grip } };
-    for (size_t i = 0; i < 4; ++i) {
-        rubraview_pal_render_fill_rect(app->renderer,
-            (rubraview_pal_rect_t){ corners[i][0], corners[i][1], grip, grip }, 0xFFFFFFFFu, 0.0);
+    if (app->sel_shape == RUBRAVIEW_AREA_ELLIPSE) {
+        /* An ellipse as dots round it, its box faint. */
+        rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ x, y, w, h }, 0x60FFFFFFu, 1.0, 0.0);
+        int steps = 180;
+        for (int k = 0; k < steps; ++k) {
+            double a = 6.283185307179586 * k / steps;
+            double ex = x + w * 0.5 + cos(a) * w * 0.5, ey = y + h * 0.5 + sin(a) * h * 0.5;
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ ex - 1.0 * dpi, ey - 1.0 * dpi, 2.0 * dpi, 2.0 * dpi },
+                                           (k / 3) % 2 ? 0xFF000000u : 0xFFFFFFFFu, 0.0);
+        }
+    } else {
+        rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ x, y, w, h }, 0xFFFFFFFFu, 1.0, 0.0);
+        rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ x - 1.0, y - 1.0, w + 2.0, h + 2.0 }, 0x80000000u, 1.0, 0.0);
     }
-
+    double hs[8][2];
+    sel_handles(x, y, w, h, hs);
+    double grip = 9.0 * dpi;
+    for (int i = 0; i < 8; ++i) {
+        rubraview_pal_rect_t g = { hs[i][0] - grip * 0.5, hs[i][1] - grip * 0.5, grip, grip };
+        rubraview_pal_render_fill_rect(app->renderer, g, 0xFFFFFFFFu, 0.0);
+        rubraview_pal_render_stroke_rect(app->renderer, g, 0xFF000000u, 1.0, 0.0);
+    }
     char line[96];
-    size_t pos = 0;
-    line[0] = '\0';
-    append_number(line, sizeof(line), &pos, (size_t)(c.width < 0 ? 0 : c.width));
-    append_text(line, sizeof(line), &pos, " x ");
-    append_number(line, sizeof(line), &pos, (size_t)(c.height < 0 ? 0 : c.height));
-    rubraview_pal_rect_t label = { x, y - 22.0 * dpi, 160.0 * dpi, 20.0 * dpi };
+    int n = snprintf(line, sizeof(line), "%d, %d   %d x %d", (int)c.x, (int)c.y, (int)c.width, (int)c.height);
+    rubraview_pal_rect_t label = { x, y - 22.0 * dpi, 200.0 * dpi, 20.0 * dpi };
     if (label.y < rect.y) label.y = y + 2.0 * dpi;
     rubraview_pal_render_fill_rect(app->renderer, label, 0xC0000000u, 0.0);
-    rubraview_pal_render_draw_text(app->renderer, cstr(line), label, 13.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n }, label, 13.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* What a press on the selection takes: a handle (3..10), the inside to move it (2), or nothing (0). */
+static int32_t sel_hit(app_state_t *app, double px, double py) {
+    double x, y, w, h;
+    if (!edit_panel_open(app) || !sel_screen_rect(app, &x, &y, &w, &h)) return 0;
+    double dpi = rubraview_pal_window_dpi_scale(app->window), reach = 8.0 * dpi;
+    double hs[8][2];
+    sel_handles(x, y, w, h, hs);
+    for (int i = 0; i < 8; ++i) if (fabs(px - hs[i][0]) <= reach && fabs(py - hs[i][1]) <= reach) return 3 + i;
+    if (px > x && px < x + w && py > y && py < y + h) return 2;
+    return 0;
+}
+
+/* A drag of the selection: moved whole, or sized by the handle taken (the opposite side stays). */
+static void sel_drag_to(app_state_t *app, int32_t ix, int32_t iy) {
+    rubraview_crop_rect_t r = app->sel_grab_rect;
+    int32_t dx = ix - app->sel_grab_x, dy = iy - app->sel_grab_y;
+    int32_t w = app->edit.image_width, h = app->edit.image_height;
+    if (app->sel_grab == 2) {
+        r.x += dx; r.y += dy;
+        if (r.x < 0) r.x = 0;
+        if (r.y < 0) r.y = 0;
+        if (r.x + r.width > w) r.x = w - r.width;
+        if (r.y + r.height > h) r.y = h - r.height;
+        (void)rubraview_edit_crop_set(&app->edit, r.x, r.y, r.width, r.height);
+    } else {
+        int k = app->sel_grab - 3;   /* 0 top-left, then clockwise */
+        int32_t x0 = r.x, y0 = r.y, x1 = r.x + r.width, y1 = r.y + r.height;
+        bool left = k == 0 || k == 6 || k == 7, right = k == 2 || k == 3 || k == 4;
+        bool top = k == 0 || k == 1 || k == 2, bottom = k == 4 || k == 5 || k == 6;
+        if (left) x0 += dx;
+        if (right) x1 += dx;
+        if (top) y0 += dy;
+        if (bottom) y1 += dy;
+        if (app->edit.crop_ratio != RUBRAVIEW_CROP_FREE && (k == 0 || k == 2 || k == 4 || k == 6)) {
+            /* A corner with a ratio: drawn again from the opposite corner, the ratio kept. */
+            int32_t ax = left ? r.x + r.width : r.x, ay = top ? r.y + r.height : r.y;
+            rubraview_edit_crop_drag(&app->edit, ax, ay, left ? x0 : x1, top ? y0 : y1);
+        } else {
+            if (x1 < x0 + 1) { int32_t s = x0; x0 = x1 - 1 < 0 ? 0 : x1 - 1; if (x0 == s) x1 = x0 + 1; }
+            if (y1 < y0 + 1) { int32_t s = y0; y0 = y1 - 1 < 0 ? 0 : y1 - 1; if (y0 == s) y1 = y0 + 1; }
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > w) x1 = w;
+            if (y1 > h) y1 = h;
+            if (x1 > x0 && y1 > y0) (void)rubraview_edit_crop_set(&app->edit, x0, y0, x1 - x0, y1 - y0);
+        }
+    }
+    app->edit.crop_active = true;
+    app->edit_rev++;
+    app->edit_shown_valid = false;
 }
 
 /* §3.13's curve widget. The model is already there and tested — points
@@ -18422,6 +20029,7 @@ static void tick_timers(app_state_t *app, double dt) {
         tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     rubraview_box_pointer(&app->toolbox, &box_metrics, app->pointer_x, app->pointer_y);
     rubraview_box_pointer(&app->menubox, &box_metrics, app->pointer_x, app->pointer_y);
+    char hint_scratch[320];
     {
         /* RV-116: resting on a box's anchor, pin, grip or seek bar says what they do */
         rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
@@ -18441,7 +20049,7 @@ static void tick_timers(app_state_t *app, double dt) {
             }
             if (hint.len == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
                 const char *said = rubraview_action_hint(app->toolbox_tiles[tile].action);
-                if (said) hint = cstr(said);
+                hint = hint_with_keys(app, app->toolbox_tiles[tile].action, said, hint_scratch, sizeof(hint_scratch));
             }
         }
         if (hint.len == 0 && app->pointer_inside && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->ctx_open) {
@@ -18449,10 +20057,14 @@ static void tick_timers(app_state_t *app, double dt) {
             int32_t tile = rubraview_box_tile_at(&app->menubox, &base, app->pointer_x, app->pointer_y);
             const rubraview_menu_item_t *item = tile >= 0 ? rubraview_menu_item_at(&app->menu, tile) : NULL;
             const char *said = item ? rubraview_action_hint(item->action) : NULL;
-            if (said) hint = cstr(said);
+            if (item) hint = hint_with_keys(app, item->action, said, hint_scratch, sizeof(hint_scratch));
         }
-        if (hint.ptr != app->hint.ptr) {
-            app->hint = hint;
+        /* Kept in the app's own buffer, so it is the same text however it was made. */
+        if (hint.len >= sizeof(app->hint_text)) hint.len = sizeof(app->hint_text) - 1;
+        if (hint.len != app->hint.len || memcmp(hint.ptr, app->hint_text, hint.len) != 0) {
+            memmove(app->hint_text, hint.ptr, hint.len);
+            app->hint_text[hint.len] = '\0';
+            app->hint = (u8str_t){ .ptr = app->hint_text, .len = hint.len };
             app->hint_since = rubraview_pal_time_now_seconds();
         }
     }
@@ -19487,12 +21099,20 @@ static void console_line(const char *text) {
     WriteFile(out, "\r\n", 2, &written, NULL);
 }
 
+/* Defined with run_batch below (D-86); --subfolders reads them. */
+static const u8str_t *g_launch_paths;
+static size_t         g_launch_count;
+
 typedef struct batch_ctx {
     const rubraview_cli_result_t *cli;
     u8str_t output_dir;
     size_t written;
     proven_job_sys_t *jobs;   /* RV-067's pool for resizes on the CPU; NULL on one core */
     size_t workers;
+    /* RV-129: the watermark, read once for the run */
+    rubraview_pixbuf_t mark;
+    bool mark_tried;
+    void *mark_memory;
 } batch_ctx_t;
 
 static rubraview_orientation_t orientation_from_action(const rubraview_batch_orient_params_t *o) {
@@ -19519,32 +21139,9 @@ static rubraview_jpegtran_op_t jpegtran_op_for(const rubraview_batch_orient_para
 
 static int32_t resize_target(const rubraview_batch_resize_params_t *r,
                              int32_t src_w, int32_t src_h, int32_t *out_h) {
-    double w = src_w, h = src_h;
-    switch (r->mode) {
-        case RUBRAVIEW_RESIZE_PERCENT:
-            w = src_w * r->value_a / 100.0;
-            h = src_h * r->value_a / 100.0;
-            break;
-        case RUBRAVIEW_RESIZE_BOUNDING_BOX: {
-            double sx = r->value_a / (double)src_w;
-            double sy = r->value_b / (double)src_h;
-            double scale = sx < sy ? sx : sy;
-            if (scale > 1.0) scale = 1.0;   /* a bounding box shrinks; it does not enlarge */
-            w = src_w * scale;
-            h = src_h * scale;
-            break;
-        }
-        case RUBRAVIEW_RESIZE_FIXED_WIDTH:
-            w = r->value_a;
-            h = src_h * (r->value_a / (double)src_w);
-            break;
-        case RUBRAVIEW_RESIZE_FIXED_HEIGHT:
-            h = r->value_a;
-            w = src_w * (r->value_a / (double)src_h);
-            break;
-    }
-    *out_h = (int32_t)(h + 0.5) > 0 ? (int32_t)(h + 0.5) : 1;
-    return (int32_t)(w + 0.5) > 0 ? (int32_t)(w + 0.5) : 1;
+    int32_t w = 0;
+    rubraview_batch_resize_target(r, src_w, src_h, &w, out_h);   /* RV-129: the core's, with the long side, megapixels, no enlarging */
+    return w;
 }
 
 /* One line on the run's console naming the file and what went wrong: a
@@ -19555,15 +21152,44 @@ static void batch_say(u8str_t path, const char *why) {
     if (n > 0) console_line(line);
 }
 
+/* RV-129: --keep-dates: the file written takes its source's modified time. */
+static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, u8str_t source, u8str_t written) {
+    if (!bc->cli->keep_dates) return;
+    rubraview_fs_entry_t e;
+    if (!rubraview_pal_fs_stat(arena, source, &e) || !rubraview_pal_fs_set_mtime(written, e.mtime)) batch_say(written, "its date could not be set");
+}
+
 /* Decode, turn, resize, adjust, save. A step that cannot be done fails the
    file: writing it without the step would say it was done. */
 static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview_batch_input_t *input,
                          u8str_t out_path, const rubraview_batch_orient_params_t *orient,
                          const rubraview_batch_resize_params_t *resize, const rubraview_batch_color_params_t *color,
+                         const rubraview_batch_extra_params_t *extra,
                          rubraview_export_options_t options, rubraview_export_format_t source_format) {
     rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, NULL, 0,
                                                                 orient && orient->use_exif_auto_orient);
     if (!rubraview_pixbuf_is_valid(&pixels)) { batch_say(input->path, "could not be read"); return false; }
+
+    /* RV-129: the cut first, on the picture as it was read */
+    if (extra && extra->crop) {
+        int32_t x = extra->crop_x < pixels.width - 1 ? extra->crop_x : pixels.width - 1;
+        int32_t y = extra->crop_y < pixels.height - 1 ? extra->crop_y : pixels.height - 1;
+        int32_t w = extra->crop_w < pixels.width - x ? extra->crop_w : pixels.width - x;
+        int32_t h = extra->crop_h < pixels.height - y ? extra->crop_h : pixels.height - y;
+        rubraview_pixbuf_t cut = rubraview_pixbuf_crop(arena, &pixels, x, y, w, h);
+        if (!rubraview_pixbuf_is_valid(&cut)) { batch_say(input->path, "could not be cropped"); return false; }
+        pixels = cut;
+    }
+    if (extra && extra->autocrop) {
+        int32_t x = 0, y = 0, w = 0, h = 0;
+        bool found = (rubraview_filter_autotrim_rect(&pixels, 245, true, &x, &y, &w, &h) && (w < pixels.width || h < pixels.height)) ||
+                     (rubraview_filter_autotrim_rect(&pixels, 15, false, &x, &y, &w, &h) && (w < pixels.width || h < pixels.height));
+        if (found && w >= 2 && h >= 2) {
+            rubraview_pixbuf_t cut = rubraview_pixbuf_crop(arena, &pixels, x, y, w, h);
+            if (!rubraview_pixbuf_is_valid(&cut)) { batch_say(input->path, "could not be cropped"); return false; }
+            pixels = cut;
+        }
+    }
 
     if (orient && !orient->use_exif_auto_orient) {
         rubraview_orientation_t o = orientation_from_action(orient);
@@ -19578,8 +21204,9 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         if (target_w != pixels.width || target_h != pixels.height) {
             /* The card when D-38 installed it and the picture is worth it;
                otherwise every core (RV-067), the same bytes as one. */
-            rubraview_pixbuf_t scaled = rubraview_pixbuf_resample_mt(arena, bc->jobs, bc->workers, &pixels,
-                                                                     target_w, target_h, resize->filter, 0);
+            rubraview_pixbuf_t scaled = resize->linear   /* RV-128: in linear light, on one core */
+                ? rubraview_pixbuf_resample_linear(arena, &pixels, target_w, target_h, resize->filter)
+                : rubraview_pixbuf_resample_mt(arena, bc->jobs, bc->workers, &pixels, target_w, target_h, resize->filter, 0);
             if (!rubraview_pixbuf_is_valid(&scaled)) { batch_say(input->path, "could not be resized"); return false; }
             pixels = scaled;
         }
@@ -19597,6 +21224,62 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
                                                                      color->amount, color->threshold);
             if (!rubraview_pixbuf_is_valid(&sharp)) { batch_say(input->path, "could not be sharpened"); return false; }
             pixels = sharp;
+        }
+    }
+
+    if (extra) {   /* RV-129 */
+        if (extra->auto_colour) {
+            rubraview_edit_session_t s = rubraview_edit_begin(pixels.width, pixels.height);
+            rubraview_edit_auto_colour(&s, &pixels);
+            rubraview_pixbuf_t fixed = rubraview_edit_commit(arena, &s, &pixels);
+            if (!rubraview_pixbuf_is_valid(&fixed)) { batch_say(input->path, "the colours could not be corrected"); return false; }
+            pixels = fixed;
+        }
+        if (extra->negative || extra->effect > 0) {
+            rubraview_effect_t list[2] = { extra->negative ? RUBRAVIEW_EFFECT_NEGATIVE : RUBRAVIEW_EFFECT_NONE, (rubraview_effect_t)extra->effect };
+            for (int k = 0; k < 2; ++k) {
+                if (list[k] <= RUBRAVIEW_EFFECT_NONE) continue;
+                double amount = k == 0 ? 1.0 : extra->effect_amount;
+                rubraview_pixbuf_t done = rubraview_effect_apply(arena, &pixels, list[k], amount);
+                if (!rubraview_pixbuf_is_valid(&done)) { batch_say(input->path, "the effect could not be applied"); return false; }
+                pixels = done;
+            }
+        }
+        if (extra->canvas_w > 0 && extra->canvas_h > 0) {
+            rubraview_pixbuf_t placed = rubraview_batch_canvas(arena, &pixels, extra->canvas_w, extra->canvas_h, extra->canvas_rgb);
+            if (!rubraview_pixbuf_is_valid(&placed)) { batch_say(input->path, "the canvas could not be made"); return false; }
+            pixels = placed;
+        }
+        if (extra->border_px > 0) {
+            rubraview_pixbuf_t framed = rubraview_batch_border(arena, &pixels, extra->border_px, extra->border_rgb);
+            if (!rubraview_pixbuf_is_valid(&framed)) { batch_say(input->path, "the border could not be made"); return false; }
+            pixels = framed;
+        }
+        if (extra->watermark.len > 0) {
+            if (!bc->mark_tried) {   /* read once, into memory of its own that outlives every file's */
+                bc->mark_tried = true;
+                size_t room = 64u << 20;
+                bc->mark_memory = malloc(room);
+                if (bc->mark_memory) {
+                    proven_arena_t ma = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)bc->mark_memory, .size = room });
+                    bc->mark = rubraview_pal_image_read_pixels_within(&ma, extra->watermark, NULL, 0, true, 2048, 2048);
+                }
+                if (!rubraview_pixbuf_is_valid(&bc->mark)) batch_say(extra->watermark, "the watermark could not be read");
+            }
+            rubraview_pixbuf_t mark = bc->mark;
+            if (!rubraview_pixbuf_is_valid(&mark)) return false;
+            if (mark.format != pixels.format) {   /* the same byte order as the picture */
+                mark = rubraview_pixbuf_crop(arena, &bc->mark, 0, 0, bc->mark.width, bc->mark.height);
+                if (!rubraview_pixbuf_is_valid(&mark)) return false;
+                for (int32_t y = 0; y < mark.height; ++y) {
+                    uint8_t *q = mark.pixels + (size_t)y * (size_t)mark.stride;
+                    for (int32_t x = 0; x < mark.width; ++x, q += 4) { uint8_t r = q[0]; q[0] = q[2]; q[2] = r; }
+                }
+                mark.format = pixels.format;
+            }
+            if (!rubraview_batch_watermark(arena, &pixels, &mark, extra->watermark_corner, extra->watermark_opacity)) {
+                batch_say(input->path, "the watermark could not be laid on"); return false;
+            }
         }
     }
 
@@ -19630,14 +21313,37 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             }
         }
     }
+    /* RV-129: --subfolders keeps where under the input the file was */
+    if (bc->cli->subfolders && bc->output_dir.len > 0) {
+        u8str_t here = rubraview_path_dirname(input->path);
+        for (size_t r = 0; r < g_launch_count; ++r) {
+            u8str_t root = g_launch_paths[r];
+            if (here.len > root.len + 1 && memcmp(here.ptr, root.ptr, root.len) == 0 && (here.ptr[root.len] == '\\' || here.ptr[root.len] == '/')) {
+                out_dir = rubraview_path_join(arena, out_dir, (u8str_t){ .ptr = here.ptr + root.len + 1, .len = here.len - root.len - 1 });
+                if (out_dir.len == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
+                    batch_say(input->path, "its folder under the output could not be made");
+                    return false;
+                }
+                break;
+            }
+        }
+    }
     u8str_t out_path = rubraview_path_join(arena, out_dir, output_name);
     if (out_path.len == 0) return false;
+    /* RV-129: --exists: replace it (as before), leave it, or take the next free name */
+    if (bc->cli->exists != 0 && rubraview_pal_fs_exists(out_path)) {
+        if (bc->cli->exists == 1) { batch_say(out_path, "is there already: left as it is"); return true; }
+        out_path = rubraview_filing_target(arena, out_dir, output_name, filing_exists, NULL);
+        if (out_path.len == 0) { batch_say(input->path, "no free name left beside it"); return false; }
+    }
 
     const rubraview_batch_orient_params_t *orient = NULL;
     const rubraview_batch_resize_params_t *resize = NULL;
     const rubraview_batch_color_params_t *color = NULL;
+    const rubraview_batch_extra_params_t *extra = NULL;
     for (size_t i = 0; i < job->action_count; ++i) {
         switch (job->actions[i].kind) {
+            case RUBRAVIEW_BATCH_EXTRA: extra = &job->actions[i].params.extra; break;
             case RUBRAVIEW_BATCH_ORIENT: orient = &job->actions[i].params.orient; break;
             case RUBRAVIEW_BATCH_RESIZE: resize = &job->actions[i].params.resize; break;
             case RUBRAVIEW_BATCH_COLOR_ADJUST: color = &job->actions[i].params.color; break;
@@ -19653,7 +21359,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
        libjpeg-turbo is vendored. */
     if (source_format == RUBRAVIEW_EXPORT_JPEG &&
         (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE || options.format == RUBRAVIEW_EXPORT_JPEG) &&
-        !resize && !color) {
+        !resize && !color && !extra) {
         rubraview_jpegtran_op_t op = orient ? jpegtran_op_for(orient) : RUBRAVIEW_JPEGTRAN_NONE;
         bool lossless_possible = !orient || !orient->use_exif_auto_orient;
 
@@ -19666,6 +21372,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
                 if (turned.err == RUBRAVIEW_JPEGTRAN_OK) {
                     if (rubraview_pal_fs_write_file(out_path, turned.data)) {
                         bc->written++;
+                        batch_keep_date(arena, bc, input->path, out_path);
                         return true;
                     }
                     return false;
@@ -19688,6 +21395,13 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         if ((int64_t)tw2 * th2 > (int64_t)tw * th) { tw = tw2; th = th2; }
         size_t need = rubraview_batch_work_bytes(sw, sh, tw, th, orient != NULL, resize != NULL,
                                                  color && color->has_unsharp);
+        if (extra && need != SIZE_MAX) {   /* RV-129: the extra steps make whole copies, a frame or a canvas a larger one */
+            int64_t big = (int64_t)(tw > sw ? tw : sw) * (int64_t)(th > sh ? th : sh);
+            int64_t framed = (int64_t)(tw + 2 * extra->border_px + extra->canvas_w) * (int64_t)(th + 2 * extra->border_px + extra->canvas_h);
+            if (framed > big) big = framed;
+            need += (size_t)big * 4u * 4u + (8u << 20);
+        }
+        if (resize && resize->linear && need != SIZE_MAX) need += (size_t)tw * (size_t)sh * 16u + (size_t)tw * (size_t)th * 4u;
         size_t room = arena->backing.size > arena->offset ? (size_t)(arena->backing.size - arena->offset) : 0;
         if (need > room) {
             own = need == SIZE_MAX ? NULL : malloc(need);
@@ -19698,12 +21412,13 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
     }
     /* RV-109: an animation that is only changed to WebP keeps moving. */
     rubraview_export_format_t to = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
-    int moved = to == RUBRAVIEW_EXPORT_WEBP && !orient && !resize && !color
+    int moved = to == RUBRAVIEW_EXPORT_WEBP && !orient && !resize && !color && !extra
               ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options) : 0;
     bool ok = false;
     if (moved > 0) { ok = true; bc->written++; }
     else if (moved < 0) batch_say(input->path, "the animation could not be written");
-    else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, options, source_format);
+    else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, extra, options, source_format);
+    if (ok) batch_keep_date(arena, bc, input->path, out_path);
     free(own);
     return ok;
 }
@@ -19762,14 +21477,9 @@ static void append_text(char *buf, size_t cap, size_t *pos, const char *text) {
 
    Two things are decided here rather than asked: the run is over the
    folder being read, and it writes into a `rubraview-out` folder beside
-   those pictures, so pressing Run can never overwrite an original. */
-static double panel_value_of(const rubraview_panel_t *panel, int32_t id, double fallback) {
-    for (size_t i = 0; i < panel->row_count; ++i) {
-        if (panel->rows[i].id == id) return panel->rows[i].value;
-    }
-    return fallback;
-}
-
+   those pictures, so pressing Run can never overwrite an original.
+   RV-129: a folder may be typed instead; the pictures' own folder is then
+   refused while a name already there would be replaced. */
 /* Appends `text`, in quotes when it holds a space, so a folder with one
    in its name survives the command line. */
 static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text) {
@@ -19849,70 +21559,53 @@ static void panel_run_batch(app_state_t *app) {
         return;
     }
 
-    double percent = panel_value_of(&app->panel, PANEL_BATCH_RESIZE, 100.0);
-    int32_t filter = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FILTER, 3.0);
-    int32_t format = (int32_t)panel_value_of(&app->panel, PANEL_BATCH_FORMAT, 0.0);
-    bool grayscale = panel_value_of(&app->panel, PANEL_BATCH_GRAY, 0.0) > 0.5;
-    bool privacy = panel_value_of(&app->panel, PANEL_PRIVACY, 0.0) > 0.5;
-    bool resizing = percent < 99.99 || percent > 100.01;
-
-    if (!resizing && !grayscale && !privacy && format <= 0) {
-        osd_say(app, TU8("nothing to do: choose a size, a format, grayscale or privacy clean"));
+    /* RV-129: the window's choices, as the tokens the run is given */
+    batch_tokens_t tk;
+    batch_tokens(&app->batch, &tk);
+    bool any_step = false;
+    for (size_t i = 0; i < tk.n; ++i) {
+        const char *k = tk.v[i];
+        if (strncmp(k, "--name=", 7) && strncmp(k, "--start=", 8) && strncmp(k, "--replace=", 10) && strncmp(k, "--exists=", 9) &&
+            strncmp(k, "--out=", 6) && strcmp(k, "--keep-dates") && strcmp(k, "--recursive") && strcmp(k, "--subfolders")) any_step = true;
+    }
+    bool renaming = (app->batch.name[0] && strcmp(app->batch.name, "{name}.{ext}") != 0) || app->batch.replace[0];
+    if (!any_step && !renaming) {
+        osd_say(app, TU8("nothing to do: choose a size, a step, a format, or new names"));
         return;
     }
+    /* Remembered for the next time (settings.ini holds a key a line: | between them) */
+    {
+        u8str_t text = batch_text(app);
+        char kept[4096];
+        size_t n = text.len < sizeof(kept) ? text.len : sizeof(kept);
+        for (size_t i = 0; i < n; ++i) kept[i] = text.ptr[i] == '\n' ? '|' : text.ptr[i];
+        while (n > 0 && kept[n - 1] == '|') --n;
+        rubraview_settings_set_text(&app->settings, U8("batch"), U8("last"), app_keep(app, (u8str_t){ .ptr = kept, .len = n }));
+    }
 
-    /* Chosen files: beside the first of them. */
+    /* Chosen files: beside the first of them; a folder of its own when one was typed. */
     u8str_t beside = on_list ? rubraview_path_dirname(app->batch_list[0]) : app->source_dir;
-    u8str_t out_dir = rubraview_path_join(app->arena, beside, U8("rubraview-out"));
-    if (out_dir.len == 0 || !rubraview_pal_fs_make_dirs(out_dir)) {
-        osd_say(app, TU8("could not make the rubraview-out folder"));
+    u8str_t out_dir = app->batch.out[0] ? cstr(app->batch.out) : rubraview_path_join(app->arena, beside, U8("rubraview-out"));
+    if (out_dir.len == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
+        osd_say(app, TU8("could not make the output folder"));
+        return;
+    }
+    if (app->batch.exists == 0 && rubraview_path_same(out_dir, beside)) {
+        osd_say(app, TU8("into the pictures' own folder, a name already there must be skipped or numbered, never replaced"));
         return;
     }
 
-    static const char *const FILTER_NAMES[4] = { "nearest", "bilinear", "bicubic", "lanczos3" };
-    char line[4096];
+    char line[8192];
     size_t pos = 0;
     line[0] = '\0';
     append_arg(line, sizeof(line), &pos, exe);
     append_arg_cstr(line, sizeof(line), &pos, "--batch");
     append_arg_cstr(line, sizeof(line), &pos, "--pause");
-    if (resizing) {
-        char resize_arg[32];
-        size_t rp = 0;
-        resize_arg[0] = '\0';
-        append_text(resize_arg, sizeof(resize_arg), &rp, "--resize=");
-        append_number(resize_arg, sizeof(resize_arg), &rp, (size_t)(percent + 0.5));
-        append_text(resize_arg, sizeof(resize_arg), &rp, "%");
-        append_arg_cstr(line, sizeof(line), &pos, resize_arg);
-        if (filter >= 0 && filter <= 3) {
-            char filter_arg[32];
-            size_t fp = 0;
-            filter_arg[0] = '\0';
-            append_text(filter_arg, sizeof(filter_arg), &fp, "--filter=");
-            append_text(filter_arg, sizeof(filter_arg), &fp, FILTER_NAMES[filter]);
-            append_arg_cstr(line, sizeof(line), &pos, filter_arg);
-        }
-    }
-    if (grayscale) append_arg_cstr(line, sizeof(line), &pos, "--grayscale");
-    if (privacy) append_arg_cstr(line, sizeof(line), &pos, "--privacy-clean");
-    if (format > 0 && format <= RUBRAVIEW_EXPORT_ICO) {
-        u8str_t ext = rubraview_export_extension((rubraview_export_format_t)format);
-        char format_arg[32];
-        size_t gp = 0;
-        format_arg[0] = '\0';
-        append_text(format_arg, sizeof(format_arg), &gp, "--format=");
-        for (size_t i = 0; i < ext.len && gp + 1 < sizeof(format_arg); ++i) format_arg[gp++] = ext.ptr[i];
-        format_arg[gp] = '\0';
-        append_arg_cstr(line, sizeof(line), &pos, format_arg);
-    }
+    for (size_t i = 0; i < tk.n; ++i) if (strncmp(tk.v[i], "--out=", 6) != 0) append_arg_cstr(line, sizeof(line), &pos, tk.v[i]);
     {
-        char out_arg[1024];
-        size_t op = 0;
-        out_arg[0] = '\0';
-        append_text(out_arg, sizeof(out_arg), &op, "--out=");
-        for (size_t i = 0; i < out_dir.len && op + 1 < sizeof(out_arg); ++i) out_arg[op++] = out_dir.ptr[i];
-        out_arg[op] = '\0';
-        append_arg_cstr(line, sizeof(line), &pos, out_arg);
+        char out_arg[1100];
+        int n = snprintf(out_arg, sizeof(out_arg), "--out=%.*s", (int)out_dir.len, out_dir.ptr);
+        if (n > 0 && (size_t)n < sizeof(out_arg)) append_arg_cstr(line, sizeof(line), &pos, out_arg);
     }
     if (on_list) {
         u8str_t list = batch_list_file(app);
@@ -19996,6 +21689,13 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         return 1;
     }
 
+    /* --out= names a folder that may not be there yet: made first, or every file would fail
+       to be written (the window made its rubraview-out itself; the command line did not). */
+    if (cli->output_dir.len > 0 && !rubraview_pal_fs_make_dirs(cli->output_dir) && !rubraview_pal_fs_exists(cli->output_dir)) {
+        console_line("rubraview: the --out folder could not be made");
+        return 1;
+    }
+
     /* §3.11: one arena for the work, reset between files, so a run over
        ten thousand files uses what one file needs. */
     void *work_memory = malloc(BATCH_WORK_ARENA_BYTES);
@@ -20020,6 +21720,7 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
                                                           U8(""), batch_process, &ctx, NULL, 0);
     rubraview_pal_gpu_resample_stop();
     if (ctx.jobs) { proven_job_system_close(ctx.jobs); proven_job_system_destroy(ctx.jobs); }
+    free(ctx.mark_memory);
     free(work_memory);
 
     char line[160];
@@ -21128,6 +22829,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     menu_rebuild(&app);   /* §3.6.2, RFC-0002 §5: the tree from the boxes' document */
     g_caption_app = &app;
     app.transition = rubraview_transition_create(RUBRAVIEW_TRANSITION_CROSSFADE, 0.25);
+    app.settings_last_setting = -1;
+    app.settings_tip_help = -1;
     app.cursor = rubraview_cursor_hide_create(1.5);      /* §3.2.5 */
     app.filmstrip = rubraview_filmstrip_create(0, FILMSTRIP_THUMB * dpi, (double)win_w);
 
@@ -21257,8 +22960,33 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         app.pointer_y = event.mouse.y;
                         break;
                     }
+                    if (app.sel_grab) {
+                        int32_t ix = 0, iy = 0;
+                        if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
+                            sel_drag_to(&app, ix, iy);
+                            edit_sel_sync(&app);
+                        }
+                        app.pointer_x = event.mouse.x;
+                        app.pointer_y = event.mouse.y;
+                        break;
+                    }
+                    {
+                        /* A box taken by its title follows the pointer. */
+                        rubraview_panel_t *moving = app.panel.moving ? &app.panel : app.sel_panel.moving ? &app.sel_panel
+                                                  : app.steps_panel.moving ? &app.steps_panel
+                                                  : app.classify_panel.moving ? &app.classify_panel : NULL;
+                        if (moving) {
+                            int32_t ww = 0, wh = 0;
+                            rubraview_pal_window_get_size(app.window, &ww, &wh);
+                            rubraview_panel_move_to(moving, event.mouse.x, event.mouse.y, (double)ww, (double)wh);
+                            app.pointer_x = event.mouse.x;
+                            app.pointer_y = event.mouse.y;
+                            break;
+                        }
+                    }
                     if (app.crop_dragging) {
                         int32_t ix = 0, iy = 0;
+                        app.edit_rev++;
                         if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
                             rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0, ix, iy);
                             crop_shown_again(&app);
@@ -21483,6 +23211,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                        is the crop rectangle. It is asked before the panel,
                        whose "a click outside closes it" rule would otherwise
                        shut the workbench at the first press on the picture. */
+                    /* The owner's edit: the boxes beside it, then the selection's handles and inside. */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && classify_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_side_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
+                        !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y)) {
+                        int32_t hit = sel_hit(&app, event.mouse.x, event.mouse.y);
+                        if (hit && crop_point_to_image(&app, event.mouse.x, event.mouse.y, &app.sel_grab_x, &app.sel_grab_y)) {
+                            app.sel_grab = hit;
+                            app.sel_grab_rect = app.edit.crop;
+                            break;
+                        }
+                    }
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
                         !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y) &&
                         !point_in_curve_widget(&app, event.mouse.x, event.mouse.y) &&
@@ -21583,8 +23323,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     app.curve_dragging = -1;
+                    rubraview_panel_release(&app.sel_panel);
+                    rubraview_panel_release(&app.steps_panel);
+                    rubraview_panel_release(&app.classify_panel);
+                    app.panel.moving = false;
+                    if (app.sel_grab) {
+                        app.sel_grab = 0;
+                        if (edit_panel_open(&app)) panel_build_edit(&app);   /* "Apply to the selection" */
+                        break;
+                    }
                     if (app.crop_dragging) {
                         app.crop_dragging = false;
+                        app.edit_rev++;
                         int32_t ix = 0, iy = 0;
                         if (crop_point_to_image(&app, event.mouse.x, event.mouse.y, &ix, &iy)) {
                             rubraview_edit_crop_drag(&app.edit, app.crop_drag_x0, app.crop_drag_y0, ix, iy);
@@ -21595,6 +23345,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             app.edit.crop_active = false;
                         }
                         crop_shown_again(&app);
+                        if (edit_panel_open(&app)) panel_build_edit(&app);
+                        edit_sel_sync(&app);
                         break;
                     }
                     if (app.pagebar_dragging && !app.pagebar_detached) {
@@ -21613,6 +23365,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
                     if (box_wheel_opacity(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta, event.mouse.modifiers)) break;
+                    {
+                        /* The owner's edit: a box taller than the window scrolls. */
+                        rubraview_panel_t *boxes[4] = { &app.classify_panel, &app.steps_panel, &app.sel_panel, &app.panel };
+                        bool took = false;
+                        for (int b = 0; b < 4 && !took; ++b) {
+                            if (!boxes[b]->open || !rubraview_rect_contains(boxes[b]->bounds, event.mouse.x, event.mouse.y)) continue;
+                            rubraview_panel_scroll_by(boxes[b], -event.mouse.wheel_delta * boxes[b]->row_height * 3.0);
+                            took = true;
+                        }
+                        if (took) break;
+                    }
                     if (app.eqwin.open && eqwin_wheel(&app, event.mouse.x, event.mouse.y, event.mouse.wheel_delta)) break;
                     if (app.listwin.open && rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y)) {
                         rubraview_listwin_scroll(&app.listwin, event.mouse.wheel_delta > 0 ? -3 : 3, page_count(&app));

@@ -92,6 +92,9 @@ bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping);
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
 bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
 
+/** RV-129: give a file the modified time `mtime` (seconds since the Unix epoch); false when it cannot. */
+bool rubraview_pal_fs_set_mtime(u8str_t path, int64_t mtime);
+
 bool rubraview_pal_fs_exists(u8str_t path);
 
 /**

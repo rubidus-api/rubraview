@@ -1473,3 +1473,25 @@ Do not store credentials, private infrastructure details, personal data, private
   - Registering for every user while a Store copy is there writes the classic menu and takes this copy's Windows 11 package off (`RUBRAVIEW_SHELL_MENU_CLASSIC_STORE`; exit code 5, which the installer's run counts as done): the Store's menu is the one.
   - rubrapack was asked (2026-10-17) for a list-file fallback in its menu DLL (the 32K limit of D-153) and for help at install time (a warning in the MSI, a menu item hidden by a marker); its answer decides what follows.
 - Consequences: an MSI copy registered before a Store copy came keeps its Windows 11 menu until it is registered again or removed; the reader is told. A zip copy is not found by the others.
+
+## 2026-10-17: D-155 Edit as steps; effects, colour, resize, information, batch, classify, settings explained
+
+- Status: Accepted (owner 2026-10-17, plan `edit-selection` confirmed: rectangle and ellipse, a hard edge with an optional feather, the old file to the Recycle Bin, archives written again; then, the same day: resize, batch and colour after IrfanView's screens "그대로 배끼지 말고", effects "MIT로 구현하기 적절한 알고리즘", EXIF as far as IrfanView's page, image classification, settings tooltips and three Defaults, a font from Windows' own dialog — option A, the face only).
+- Context: Edit was a set of sliders over the whole picture with one crop; the information window, the resize and the batch had less than IrfanView's; curation moved one file a key; some settings needed explaining.
+- Decision:
+  - Edit is a list of steps (`rubraview_edit_steps_t`), each on an area (all, a rectangle or an ellipse with a feather), applied in order for the preview (scaled) and the save (whole); undo / redo / reset until saved.
+  - Effects, colour balance, automatic colour, the linear-light resampler and the batch's frames and watermark are our own code in core (MIT), tested on the host.
+  - The batch window's choices are the run's command line (one option a token), so what is remembered, saved and run is one thing, read back by the same parser.
+  - Classification sets files aside in memory and moves them at once on Copy all / Move all.
+  - Settings help is text in the settings document (`help` lines), translated like the rest.
+- Consequences: the preview of a pixel-sized effect or a feather is scaled to the preview's size; undo after a classification reaches the last 64 files; no text overlay in the batch (the PAL draws text on the screen only); DPI is not written into a resized file.
+
+## 2026-10-17: D-156 Two copies, settled with rubrapack 0.48.0
+
+- Status: Accepted (owner 2026-10-17: "둘 다 예" — the Store's identity in the public MSI, and Developer Mode on the VM to test the Store's package).
+- Context: D-154 asked rubrapack for a list-file fallback and for help at install time; rubrapack 0.48.0 has `[menu.*] list`, `[menu.*] hide-when`, `[other-copy.ID]`.
+- Decision:
+  - The Store's seven items carry `list = "--paths-temp --paths-from=%L"` (a selection past 32K characters goes in a file the program reads and deletes) and `hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"`.
+  - The program writes that value when its own Windows 11 menu package is registered (for every user) and deletes the key when it takes the package off; the MSI deletes the key at removal (`[registry.MenuMarkerGone] remove = true, on = "uninstall"`).
+  - The MSI asks before a first install when the Store's copy is there (`[other-copy.Store]`, warn). The identity is given at build time from `RUBRAVIEW_STORE_IDENTITY` (`scripts/package.sh`, as `package-store.sh`); without it the table is left out and the build says so. The repository holds no identity.
+- Consequences: one Windows 11 menu in every order seen on the VM (2026-10-17, Windows 11 26200, Korean, the Store package signed by a test certificate in its publisher's name): the MSI's registered first, then the Store's added — one entry, the MSI's; the MSI removed — the marker gone, the Store's entry shows; the MSI installed beside the Store's copy — the installer found it ("other copy Store is installed ... going on without a window" under `/qn`), and its registration, run as SYSTEM, cannot see a user's Store package, so it registers the MSI's menu and the marker hides the Store's: one entry again. From Settings, run as the user, D-154's step-aside still applies. The MSI built with the identity carries the Store's name and publisher.

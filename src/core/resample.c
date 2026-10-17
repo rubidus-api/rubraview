@@ -525,3 +525,108 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
     free(xi); free(xw); free(yi); free(yw); free(rows); free(up); free(blur); free(tmp);
     return ok;
 }
+
+/* ---- RV-128: in linear light, the kernel widened to the reduction ----
+ *
+ * The 8-bit passes above mix sRGB values, which darkens fine light detail
+ * as it shrinks, and keep their taps fixed, which lets a large reduction
+ * alias. This one turns each pixel to linear light first (alpha
+ * premultiplied, so a transparent edge leaves no halo), widens the kernel
+ * by the reduction, and turns back to sRGB at the end. Float in between. */
+
+static float tri_weight(float x) { x = fabsf(x); return x < 1.0f ? 1.0f - x : 0.0f; }
+
+typedef struct { int32_t first, count; } contrib_t;
+
+/* Each destination position's source run and its normalised weights. */
+static bool linear_axis(proven_arena_t *arena, rubraview_resample_filter_t filter, int32_t src_len, int32_t dst_len,
+                        contrib_t **out_c, float **out_w, int32_t *out_taps) {
+    float support = filter == RUBRAVIEW_FILTER_BILINEAR ? 1.0f : filter == RUBRAVIEW_FILTER_BICUBIC ? 2.0f : 3.0f;
+    float (*weight)(float) = filter == RUBRAVIEW_FILTER_BILINEAR ? tri_weight : filter == RUBRAVIEW_FILTER_BICUBIC ? bicubic_weight : lanczos3_weight;
+    float scale = (float)src_len / (float)dst_len, widen = scale > 1.0f ? scale : 1.0f;
+    float reach = support * widen;
+    int32_t taps = (int32_t)ceilf(reach) * 2 + 1;
+    proven_result_mem_mut_t rc = rubraview_arena_alloc_array(arena, (size_t)dst_len, sizeof(contrib_t));
+    proven_result_mem_mut_t rw = rubraview_arena_alloc_array(arena, (size_t)dst_len * (size_t)taps, sizeof(float));
+    if (!proven_is_ok(rc.err) || !proven_is_ok(rw.err)) return false;
+    contrib_t *c = (contrib_t*)(void*)rc.value.ptr;
+    float *w = (float*)(void*)rw.value.ptr;
+    for (int32_t k = 0; k < dst_len; ++k) {
+        float centre = ((float)k + 0.5f) * scale;
+        int32_t lo = (int32_t)floorf(centre - reach), hi = (int32_t)ceilf(centre + reach);
+        if (lo < 0) lo = 0;
+        if (hi > src_len) hi = src_len;
+        if (hi - lo > taps) hi = lo + taps;
+        float *wk = w + (size_t)k * (size_t)taps, total = 0.0f;
+        for (int32_t i = lo; i < hi; ++i) { wk[i - lo] = weight(((float)i + 0.5f - centre) / widen); total += wk[i - lo]; }
+        if (total == 0.0f) {   /* nothing in reach (a tiny source): the nearest */
+            lo = clamp_coord((int32_t)centre, src_len); hi = lo + 1; wk[0] = 1.0f; total = 1.0f;
+        }
+        for (int32_t i = 0; i < hi - lo; ++i) wk[i] /= total;
+        c[k] = (contrib_t){ lo, hi - lo };
+    }
+    *out_c = c; *out_w = w; *out_taps = taps;
+    return true;
+}
+
+static float srgb_to_linear(float v) { return v <= 0.04045f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f); }
+static float linear_to_srgb(float v) { return v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f; }
+
+rubraview_pixbuf_t rubraview_pixbuf_resample_linear(proven_arena_t *arena, const rubraview_pixbuf_t *src,
+                                                    int32_t dst_width, int32_t dst_height,
+                                                    rubraview_resample_filter_t filter) {
+    rubraview_pixbuf_t none = {0};
+    if (!arena || !src || !src->pixels || dst_width <= 0 || dst_height <= 0 ||
+        (src->format != RUBRAVIEW_PIXFMT_RGBA8 && src->format != RUBRAVIEW_PIXFMT_BGRA8)) return none;
+    if (filter == RUBRAVIEW_FILTER_NEAREST) return rubraview_pixbuf_resample(arena, src, dst_width, dst_height, filter);
+    int32_t sw = src->width, sh = src->height;
+    contrib_t *cx, *cy;
+    float *wx, *wy;
+    int32_t tx, ty;
+    if (!linear_axis(arena, filter, sw, dst_width, &cx, &wx, &tx) || !linear_axis(arena, filter, sh, dst_height, &cy, &wy, &ty)) return none;
+    /* Made each call (the save job and the preview may run at once): a few thousand powf. */
+    float to_lin[256];
+    uint8_t to_srgb[4096];
+    for (int i = 0; i < 256; ++i) to_lin[i] = srgb_to_linear((float)i / 255.0f);
+    for (int i = 0; i < 4096; ++i) to_srgb[i] = (uint8_t)lroundf(linear_to_srgb((float)i / 4095.0f) * 255.0f);
+    /* 1. across: each source row to dst_width premultiplied linear pixels */
+    proven_result_mem_mut_t rt = rubraview_arena_alloc_array(arena, (size_t)dst_width * (size_t)sh * 4u, sizeof(float));
+    if (!proven_is_ok(rt.err)) return none;
+    float *mid = (float*)(void*)rt.value.ptr;
+    for (int32_t y = 0; y < sh; ++y) {
+        const uint8_t *row = src->pixels + (size_t)y * (size_t)src->stride;
+        float *out = mid + (size_t)y * (size_t)dst_width * 4u;
+        for (int32_t x = 0; x < dst_width; ++x) {
+            const float *w = wx + (size_t)x * (size_t)tx;
+            float acc[4] = { 0, 0, 0, 0 };
+            for (int32_t j = 0; j < cx[x].count; ++j) {
+                const uint8_t *p = row + (size_t)(cx[x].first + j) * 4u;
+                float a = (float)p[3] / 255.0f, wa = w[j] * a;
+                acc[0] += wa * to_lin[p[0]]; acc[1] += wa * to_lin[p[1]]; acc[2] += wa * to_lin[p[2]]; acc[3] += w[j] * a;
+            }
+            memcpy(out + (size_t)x * 4u, acc, sizeof(acc));
+        }
+    }
+    /* 2. down, then back to sRGB, alpha divided out */
+    rubraview_pixbuf_t dst = rubraview_pixbuf_create(arena, dst_width, dst_height, src->format);
+    if (!dst.pixels) return none;
+    for (int32_t y = 0; y < dst_height; ++y) {
+        const float *w = wy + (size_t)y * (size_t)ty;
+        uint8_t *o = dst.pixels + (size_t)y * (size_t)dst.stride;
+        for (int32_t x = 0; x < dst_width; ++x) {
+            float acc[4] = { 0, 0, 0, 0 };
+            for (int32_t j = 0; j < cy[y].count; ++j) {
+                const float *p = mid + ((size_t)(cy[y].first + j) * (size_t)dst_width + (size_t)x) * 4u;
+                for (int c = 0; c < 4; ++c) acc[c] += w[j] * p[c];
+            }
+            float a = acc[3] < 0.0f ? 0.0f : acc[3] > 1.0f ? 1.0f : acc[3];
+            for (int c = 0; c < 3; ++c) {
+                float v = a > 1e-6f ? acc[c] / a : 0.0f;
+                v = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+                o[(size_t)x * 4u + (size_t)c] = to_srgb[(int)lroundf(v * 4095.0f)];
+            }
+            o[(size_t)x * 4u + 3] = (uint8_t)lroundf(a * 255.0f);
+        }
+    }
+    return dst;
+}

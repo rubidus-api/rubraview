@@ -54,7 +54,38 @@ typedef struct rubraview_exif_info {
     char     gps_time[32];                                /* "2024-05-01 04:22:07 UTC" */
     bool     has_direction; double direction; char direction_ref;   /* degrees; 'T' true or 'M' magnetic north */
     bool     has_speed;     double speed; char speed_ref;           /* 'K' km/h, 'M' mph, 'N' knots */
+    /* RV-130 (owner, 2026-10-17, after IrfanView's EXIF page): the rest a
+       camera commonly writes. A word-valued tag that may be 0 is kept +1,
+       so 0 still means not given. */
+    char     exif_version[8];                             /* "2.31" */
+    bool     has_resolution; double x_resolution, y_resolution; uint16_t resolution_unit;   /* 2 inch, 3 cm */
+    bool     has_max_aperture; double max_aperture;      /* as an f-number */
+    bool     has_subject_distance; double subject_distance_m;   /* < 0: infinity */
+    bool     has_brightness; double brightness;          /* APEX */
+    uint16_t light_source;                                /* +1 */
+    uint16_t contrast, saturation, sharpness, gain_control, distance_range, custom_rendered;   /* +1 */
+    uint16_t sensing_method, file_source;                 /* as written; 0 not given */
+    char     unique_id[40], owner[64], user_comment[128];
+    bool     has_lens_spec; double lens_spec[4];          /* shortest, longest mm; f at each */
+    char     gps_datum[24];
 } rubraview_exif_info_t;
+
+/**
+ * What a picture's IPTC block says (RV-130): the record-2 fields a photo
+ * agency or an editor writes. Read from a JPEG's Photoshop APP13 block
+ * (resource 0x0404) or a TIFF's tag 33723. Text is UTF-8: a block that
+ * does not say UTF-8 and is not valid UTF-8 is read as Latin-1.
+ */
+typedef struct rubraview_iptc_info {
+    bool found;
+    char title[96], headline[160], caption[512], keywords[384], category[16];
+    char byline[96], byline_title[96], writer[96], credit[96], source[96], copyright[160];
+    char city[64], sublocation[64], state[64], country[64], country_code[8];
+    char date_created[24], instructions[256], job_id[64];
+} rubraview_iptc_info_t;
+
+/** False, with `found` false, when the file holds no IPTC block. */
+bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t *out);
 
 /**
  * Read the EXIF block of a JPEG (APP1), a TIFF (the file is the block), a

@@ -109,19 +109,60 @@ void rubraview_panel_layout(rubraview_panel_t *panel, double window_width, doubl
 
     panel->bounds.height = height;
     if (panel->bounds.width > window_width) panel->bounds.width = window_width;
+    panel->content_height = content;
 
-    panel->bounds.x = window_width - panel->bounds.width - panel->padding;
-    if (panel->bounds.x < 0.0) panel->bounds.x = 0.0;
-    panel->bounds.y = (window_height - height) * 0.5;
-    if (panel->bounds.y < 0.0) panel->bounds.y = 0.0;
+    if (panel->placed) {
+        /* Where the reader put it, kept inside the window. */
+        panel->bounds.x = clampd(panel->place_x, 0.0, window_width - panel->bounds.width > 0.0 ? window_width - panel->bounds.width : 0.0);
+        panel->bounds.y = clampd(panel->place_y, 0.0, window_height - height > 0.0 ? window_height - height : 0.0);
+    } else {
+        panel->bounds.x = window_width - panel->bounds.width - panel->padding;
+        if (panel->bounds.x < 0.0) panel->bounds.x = 0.0;
+        panel->bounds.y = (window_height - height) * 0.5;
+        if (panel->bounds.y < 0.0) panel->bounds.y = 0.0;
+    }
+    double room = height - title_height - panel->padding * 2.0;
+    panel->scroll = clampd(panel->scroll, 0.0, content - room > 0.0 ? content - room : 0.0);
+}
+
+bool rubraview_panel_title_hit(const rubraview_panel_t *panel, double px, double py) {
+    if (!panel || !panel->open || !rubraview_rect_contains(panel->bounds, px, py)) return false;
+    if (rubraview_rect_contains(rubraview_panel_close_rect(panel), px, py)) return false;
+    return py < panel->bounds.y + panel->padding + panel->row_height;
+}
+
+void rubraview_panel_move_begin(rubraview_panel_t *panel, double px, double py) {
+    if (!panel) return;
+    panel->moving = true;
+    panel->grab_x = px - panel->bounds.x;
+    panel->grab_y = py - panel->bounds.y;
+}
+
+void rubraview_panel_move_to(rubraview_panel_t *panel, double px, double py, double window_width, double window_height) {
+    if (!panel || !panel->moving) return;
+    panel->placed = true;
+    panel->place_x = px - panel->grab_x;
+    panel->place_y = py - panel->grab_y;
+    rubraview_panel_layout(panel, window_width, window_height);
+}
+
+void rubraview_panel_scroll_by(rubraview_panel_t *panel, double dy) {
+    if (!panel) return;
+    double room = panel->bounds.height - panel->row_height - panel->padding * 2.0;
+    double most = panel->content_height - room;
+    panel->scroll = clampd(panel->scroll + dy, 0.0, most > 0.0 ? most : 0.0);
 }
 
 rubraview_rect_t rubraview_panel_row_rect(const rubraview_panel_t *panel, size_t index) {
     rubraview_rect_t empty = {0};
     if (!panel || index >= panel->row_count) return empty;
 
-    double y = panel->bounds.y + panel->padding + panel->row_height; /* below the title */
+    double top = panel->bounds.y + panel->padding + panel->row_height; /* below the title */
+    double y = top - panel->scroll;
     for (size_t i = 0; i < index; ++i) y += row_extent(panel, &panel->rows[i]);
+    /* Scrolled out of the panel: no row there (nothing drawn, nothing hit). */
+    double h = row_extent(panel, &panel->rows[index]);
+    if (y < top - 0.5 || y + h > panel->bounds.y + panel->bounds.height - panel->padding + 0.5) return empty;
 
     return (rubraview_rect_t){
         .x = panel->bounds.x + panel->padding,
@@ -247,7 +288,7 @@ rubraview_panel_event_t rubraview_panel_drag(rubraview_panel_t *panel, double px
 }
 
 void rubraview_panel_release(rubraview_panel_t *panel) {
-    if (panel) panel->active_row = -1;
+    if (panel) { panel->active_row = -1; panel->moving = false; }
 }
 
 double rubraview_panel_fill_fraction(const rubraview_panel_t *panel, size_t index) {

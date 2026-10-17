@@ -83,6 +83,8 @@ typedef struct rubraview_setting_def {
      * holds the first box's caption, its `label` the second's.
      */
     uint16_t pair;
+    /** The owner (2026-10-17): a fuller explanation, the tooltip on its name (`help` lines). */
+    u8str_t help;
 } rubraview_setting_def_t;
 
 /** The whole schema, and how many entries it has. */
@@ -149,6 +151,9 @@ void rubraview_settings_set_text(rubraview_settings_t *settings, u8str_t section
 
 /** §3.22.1's Reset to Defaults. */
 void rubraview_settings_reset(rubraview_settings_t *settings);
+/** The owner (2026-10-17): the defaults for one page's settings only, or one setting (and the box beside it, RV-120). */
+void rubraview_settings_reset_page(rubraview_settings_t *settings, rubraview_settings_tab_t tab);
+void rubraview_settings_reset_one(rubraview_settings_t *settings, u8str_t section, u8str_t key);
 
 /** Whether anything differs from what was loaded — the Apply button's state. */
 bool rubraview_settings_differs(const rubraview_settings_t *a, const rubraview_settings_t *b);

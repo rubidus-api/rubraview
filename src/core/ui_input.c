@@ -150,3 +150,12 @@ double rubraview_pan_key_delta(double view_extent, double start, double extent, 
     double by = room < step ? room : step;
     return direction > 0 ? -by : by;
 }
+
+double rubraview_pan_key_delta_small(double view_extent, double start, double extent, int direction, double step) {
+    if (!(extent < view_extent) || !(step > 0.0) || direction == 0) return 0.0;
+    double room = direction > 0 ? view_extent - (start + extent)   /* free space past it */
+                                : start;                           /* free space before it */
+    if (!(room > 0.0)) return 0.0;
+    double by = room < step ? room : step;
+    return direction > 0 ? by : -by;
+}

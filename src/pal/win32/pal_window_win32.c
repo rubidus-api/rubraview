@@ -1671,3 +1671,12 @@ bool rubraview_pal_shell_open_web(const char *https_url) {
 }
 
 #endif /* _WIN32 */
+
+bool rubraview_pal_window_monitor_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height) {
+    if (!window || !window->hwnd || !out_width || !out_height) return false;
+    MONITORINFO mi = { .cbSize = sizeof(mi) };
+    if (!GetMonitorInfoW(MonitorFromWindow(window->hwnd, MONITOR_DEFAULTTONEAREST), &mi)) return false;
+    *out_width = (int32_t)(mi.rcMonitor.right - mi.rcMonitor.left);
+    *out_height = (int32_t)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+    return *out_width > 0 && *out_height > 0;
+}

@@ -2,6 +2,7 @@
 #define COBJMACROS
 #include <windows.h>
 #include <shobjidl.h>
+#include <commdlg.h>
 #include <stdbool.h>
 #include "rubraview/pal/pal_file_dialog.h"
 
@@ -188,3 +189,21 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_aren
     return rubraview_pal_file_dialog_open(arena, &folder_opts);
 }
 #endif /* _WIN32 */
+
+bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char *out, size_t cap) {
+    if (!out || cap == 0) return false;
+    out[0] = '\0';
+    LOGFONTW lf = { .lfHeight = -24, .lfWeight = FW_NORMAL, .lfCharSet = DEFAULT_CHARSET };
+    if (current.len > 0) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, current.ptr, (int)current.len, lf.lfFaceName, LF_FACESIZE - 1);
+        lf.lfFaceName[n > 0 ? n : 0] = L'\0';
+    }
+    /* The face only: the size and the colour have settings of their own. */
+    CHOOSEFONTW cf = { .lStructSize = sizeof(cf), .hwndOwner = (HWND)parent_window_handle, .lpLogFont = &lf,
+                       .Flags = CF_SCREENFONTS | CF_NOSIZESEL | CF_NOSTYLESEL | CF_NOSCRIPTSEL | CF_FORCEFONTEXIST |
+                                (current.len > 0 ? CF_INITTOLOGFONTSTRUCT : 0) };
+    if (!ChooseFontW(&cf) || lf.lfFaceName[0] == L'\0') return false;
+    int n = WideCharToMultiByte(CP_UTF8, 0, lf.lfFaceName, -1, out, (int)cap, NULL, NULL);
+    if (n <= 0) { out[0] = '\0'; return false; }
+    return true;
+}

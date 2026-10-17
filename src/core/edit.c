@@ -1,5 +1,6 @@
 #include "rubraview/edit.h"
 #include "rubraview/filter.h"
+#include "rubraview/effects.h"
 #include <string.h>
 #include <math.h>
 
@@ -48,6 +49,7 @@ bool rubraview_edit_is_neutral(const rubraview_edit_session_t *session) {
 
     if (p->exposure_ev != 0.0f || p->brightness != 0.0f || p->contrast != 0.0f ||
         p->saturation != 0.0f || p->temperature != 0.0f || p->tint != 0.0f) return false;
+    if (p->balance_r != 0.0f || p->balance_g != 0.0f || p->balance_b != 0.0f) return false;
     if (p->black_point != 0 || p->white_point != 255 || p->midtone_gamma != 1.0f) return false;
     if (session->crop_active) return false;
     if (session->resize_width != 0 || session->resize_height != 0) return false;
@@ -297,6 +299,96 @@ void rubraview_edit_crop_set_ratio(rubraview_edit_session_t *session, rubraview_
 
 /* ---- resize ---- */
 
+/* ---- RV-128: sizes by name, and lengths in any unit ---- */
+
+static bool fit_box(int32_t w, int32_t h, double bw, double bh, bool keep, int32_t *ow, int32_t *oh) {
+    if (bw < 1 || bh < 1) return false;
+    if (!keep) { *ow = (int32_t)lround(bw); *oh = (int32_t)lround(bh); return true; }
+    double s = bw / w < bh / h ? bw / w : bh / h;
+    *ow = (int32_t)lround(w * s); *oh = (int32_t)lround(h * s);
+    if (*ow < 1) *ow = 1;
+    if (*oh < 1) *oh = 1;
+    return true;
+}
+
+bool rubraview_resize_preset_size(rubraview_resize_preset_t preset, int32_t w, int32_t h,
+                                  int32_t screen_w, int32_t screen_h, bool keep,
+                                  int32_t *ow, int32_t *oh) {
+    if (!ow || !oh || w <= 0 || h <= 0) return false;
+    static const int32_t BOX[][2] = { {640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160}, {7680, 4320} };
+    bool portrait = h > w;
+    int32_t r_w = 0, r_h = 0;
+    bool ok;
+    switch (preset) {
+        case RUBRAVIEW_RESIZE_PRESET_HALF:   r_w = (int32_t)lround(w / 2.0); r_h = (int32_t)lround(h / 2.0); ok = true; break;
+        case RUBRAVIEW_RESIZE_PRESET_DOUBLE: r_w = w * 2; r_h = h * 2; ok = true; break;
+        case RUBRAVIEW_RESIZE_PRESET_SCREEN: ok = fit_box(w, h, screen_w, screen_h, true, &r_w, &r_h); break;   /* the screen as it stands */
+        case RUBRAVIEW_RESIZE_PRESET_LONG_1024: case RUBRAVIEW_RESIZE_PRESET_LONG_2048: {
+            double l = preset == RUBRAVIEW_RESIZE_PRESET_LONG_1024 ? 1024.0 : 2048.0;
+            ok = fit_box(w, h, l, l, true, &r_w, &r_h);
+            break;
+        }
+        case RUBRAVIEW_RESIZE_PRESET_MP_2: case RUBRAVIEW_RESIZE_PRESET_MP_8: case RUBRAVIEW_RESIZE_PRESET_MP_12: {
+            double mp = preset == RUBRAVIEW_RESIZE_PRESET_MP_2 ? 2e6 : preset == RUBRAVIEW_RESIZE_PRESET_MP_8 ? 8e6 : 12e6;
+            double s = sqrt(mp / ((double)w * (double)h));
+            r_w = (int32_t)lround(w * s); r_h = (int32_t)lround(h * s);
+            ok = r_w >= 1 && r_h >= 1;
+            break;
+        }
+        default: {
+            int32_t i = (int32_t)preset - (int32_t)RUBRAVIEW_RESIZE_PRESET_640;
+            if (i < 0 || i >= (int32_t)(sizeof(BOX) / sizeof(BOX[0]))) return false;
+            double bw = BOX[i][portrait ? 1 : 0], bh = BOX[i][portrait ? 0 : 1];
+            ok = fit_box(w, h, bw, bh, keep, &r_w, &r_h);
+            break;
+        }
+    }
+    if (!ok || r_w < 1 || r_h < 1 || r_w > 65535 || r_h > 65535) return false;
+    *ow = r_w; *oh = r_h;
+    return true;
+}
+
+bool rubraview_resize_parse_length(u8str_t text, int32_t whole_px, double dpi, int32_t *out_px) {
+    if (!out_px || !text.ptr) return false;
+    size_t i = 0, n = text.len;
+    while (i < n && text.ptr[i] == ' ') ++i;
+    double v = 0.0, place = 0.0;
+    bool digits = false;
+    for (; i < n; ++i) {
+        char c = text.ptr[i];
+        if (c >= '0' && c <= '9') {
+            digits = true;
+            if (place > 0.0) { v += (c - '0') * place; place /= 10.0; }
+            else v = v * 10.0 + (c - '0');
+            if (v > 1e7) return false;
+        } else if ((c == '.' || c == ',') && place == 0.0) place = 0.1;
+        else break;
+    }
+    if (!digits) return false;
+    while (i < n && text.ptr[i] == ' ') ++i;
+    char unit[4] = {0};
+    size_t u = 0;
+    for (; i < n && u < 3; ++i) {
+        char c = text.ptr[i];
+        if (c == ' ') break;
+        unit[u++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    }
+    while (i < n && text.ptr[i] == ' ') ++i;
+    if (i < n) return false;
+    if (dpi <= 0.0) dpi = 300.0;
+    double px;
+    if (u == 0 || strcmp(unit, "px") == 0) px = v;
+    else if (strcmp(unit, "%") == 0) { if (whole_px <= 0) return false; px = whole_px * v / 100.0; }
+    else if (strcmp(unit, "cm") == 0) px = v / 2.54 * dpi;
+    else if (strcmp(unit, "mm") == 0) px = v / 25.4 * dpi;
+    else if (strcmp(unit, "in") == 0 || strcmp(unit, "\"") == 0) px = v * dpi;
+    else return false;
+    long r = lround(px);
+    if (r < 1 || r > 65535) return false;
+    *out_px = (int32_t)r;
+    return true;
+}
+
 void rubraview_edit_set_resize(rubraview_edit_session_t *session, int32_t width, int32_t height, bool from_width) {
     if (!session) return;
 
@@ -409,7 +501,7 @@ static void build_white_balance(const rubraview_edit_params_t *p,
 
     for (int i = 0; i < 256; ++i) {
         double base = (double)i + bright;
-        double r = base * gain_r, g = base * gain_g, b = base * gain_b;
+        double r = base * gain_r + p->balance_r * 1.28, g = base * gain_g + p->balance_g * 1.28, b = base * gain_b + p->balance_b * 1.28;
         lut_r[i] = (uint8_t)clampf((float)r, 0.0f, 255.0f);
         lut_g[i] = (uint8_t)clampf((float)g, 0.0f, 255.0f);
         lut_b[i] = (uint8_t)clampf((float)b, 0.0f, 255.0f);
@@ -512,4 +604,245 @@ rubraview_pixbuf_t rubraview_edit_commit(proven_arena_t *arena,
     }
 
     return work;
+}
+
+/* ---- the owner's edit, 2026-10-17: steps on a selection ---- */
+
+void rubraview_edit_steps_begin(rubraview_edit_steps_t *steps, int32_t width, int32_t height) {
+    if (!steps) return;
+    memset(steps, 0, sizeof(*steps));
+    steps->width = width;
+    steps->height = height;
+}
+
+bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step) {
+    if (!step) return false;
+    switch (step->kind) {
+        case RUBRAVIEW_STEP_ADJUST: {
+            rubraview_edit_session_t v = step->values;
+            v.crop_active = false;
+            v.resize_width = v.resize_height = 0;
+            return !rubraview_edit_is_neutral(&v);
+        }
+        case RUBRAVIEW_STEP_CROP:
+            return step->area.rect.width > 0 && step->area.rect.height > 0;
+        case RUBRAVIEW_STEP_RESIZE:
+            return step->values.resize_width > 0 && step->values.resize_height > 0;
+        case RUBRAVIEW_STEP_EFFECT:
+            return step->effect > RUBRAVIEW_EFFECT_NONE && step->effect < RUBRAVIEW_EFFECT_COUNT;
+    }
+    return false;
+}
+
+bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step) {
+    if (!steps || !rubraview_edit_step_does_something(step) || steps->cursor >= RUBRAVIEW_EDIT_MAX_STEPS) return false;
+    steps->steps[steps->cursor++] = *step;
+    steps->count = steps->cursor;
+    return true;
+}
+
+bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps) {
+    if (!steps || steps->cursor == 0) return false;
+    steps->cursor--;
+    return true;
+}
+
+bool rubraview_edit_steps_redo(rubraview_edit_steps_t *steps) {
+    if (!steps || steps->cursor >= steps->count) return false;
+    steps->cursor++;
+    return true;
+}
+
+bool rubraview_edit_steps_go(rubraview_edit_steps_t *steps, size_t cursor) {
+    if (!steps || cursor > steps->count) return false;
+    steps->cursor = cursor;
+    return true;
+}
+
+void rubraview_edit_steps_reset(rubraview_edit_steps_t *steps) {
+    if (steps) steps->count = steps->cursor = 0;
+}
+
+void rubraview_edit_steps_size(const rubraview_edit_steps_t *steps, size_t upto, int32_t *width, int32_t *height) {
+    int32_t w = steps ? steps->width : 0, h = steps ? steps->height : 0;
+    for (size_t i = 0; steps && i < upto && i < steps->count; ++i) {
+        const rubraview_edit_step_t *s = &steps->steps[i];
+        if (s->kind == RUBRAVIEW_STEP_CROP) {
+            rubraview_crop_rect_t r = s->area.rect;
+            if (r.x < 0) { r.width += r.x; r.x = 0; }
+            if (r.y < 0) { r.height += r.y; r.y = 0; }
+            if (r.x + r.width > w) r.width = w - r.x;
+            if (r.y + r.height > h) r.height = h - r.y;
+            if (r.width > 0 && r.height > 0) { w = r.width; h = r.height; }
+        } else if (s->kind == RUBRAVIEW_STEP_RESIZE && s->values.resize_width > 0 && s->values.resize_height > 0) {
+            w = s->values.resize_width;
+            h = s->values.resize_height;
+        }
+    }
+    if (width) *width = w;
+    if (height) *height = h;
+}
+
+float rubraview_edit_area_weight(const rubraview_edit_area_t *area, int32_t x, int32_t y) {
+    if (!area || area->shape == RUBRAVIEW_AREA_ALL) return 1.0f;
+    const rubraview_crop_rect_t *r = &area->rect;
+    if (r->width <= 0 || r->height <= 0) return 0.0f;
+    double px = x + 0.5, py = y + 0.5, d;
+    if (area->shape == RUBRAVIEW_AREA_RECT) {
+        double a = px - r->x, b = r->x + r->width - px, c = py - r->y, e = r->y + r->height - py;
+        d = a < b ? a : b;
+        if (c < d) d = c;
+        if (e < d) d = e;
+    } else {
+        double rx = r->width * 0.5, ry = r->height * 0.5;
+        double nx = (px - (r->x + rx)) / rx, ny = (py - (r->y + ry)) / ry;
+        d = (1.0 - sqrt(nx * nx + ny * ny)) * (rx < ry ? rx : ry);
+    }
+    if (area->feather <= 0) return d >= 0.0 ? 1.0f : 0.0f;
+    double w = 0.5 + d / (double)area->feather;   /* the feather straddles the edge */
+    return (float)(w < 0.0 ? 0.0 : w > 1.0 ? 1.0 : w);
+}
+
+static int32_t clamp_i(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubraview_edit_step_t *step,
+                                             const rubraview_pixbuf_t *src, double scale) {
+    rubraview_pixbuf_t empty = {0};
+    if (!arena || !step || !rubraview_pixbuf_is_valid(src)) return empty;
+    if (scale <= 0.0) scale = 1.0;
+    rubraview_edit_area_t area = step->area;
+    area.rect.x = (int32_t)lround(area.rect.x * scale);
+    area.rect.y = (int32_t)lround(area.rect.y * scale);
+    area.rect.width = (int32_t)lround(area.rect.width * scale);
+    area.rect.height = (int32_t)lround(area.rect.height * scale);
+    area.feather = (int32_t)lround(area.feather * scale);
+
+    if (step->kind == RUBRAVIEW_STEP_CROP) {
+        int32_t x = clamp_i(area.rect.x, 0, src->width - 1), y = clamp_i(area.rect.y, 0, src->height - 1);
+        int32_t w = clamp_i(area.rect.x + area.rect.width, x + 1, src->width) - x;
+        int32_t h = clamp_i(area.rect.y + area.rect.height, y + 1, src->height) - y;
+        return rubraview_pixbuf_crop(arena, src, x, y, w, h);
+    }
+    if (step->kind == RUBRAVIEW_STEP_RESIZE) {
+        int32_t w = (int32_t)lround(step->values.resize_width * scale), h = (int32_t)lround(step->values.resize_height * scale);
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
+        rubraview_pixbuf_t out = step->values.resize_linear
+            ? rubraview_pixbuf_resample_linear(arena, src, w, h, step->values.resize_filter)
+            : rubraview_pixbuf_resample(arena, src, w, h, step->values.resize_filter);
+        /* RV-128: a reduction softens; a light unsharp mask after it, if asked. */
+        if (out.pixels && step->values.resize_sharpen > 0.0f) {
+            rubraview_pixbuf_t sharp = rubraview_filter_unsharp_mask(arena, &out, 0.6f, step->values.resize_sharpen / 100.0f * 1.5f, 2);
+            if (sharp.pixels) out = sharp;
+        }
+        return out;
+    }
+
+    rubraview_edit_session_t v = step->values;
+    v.crop_active = false;
+    v.resize_width = v.resize_height = 0;
+    v.blur_sigma = v.blur_sigma > 0.0f ? (float)(v.blur_sigma * scale) : 0.0f;
+    if (v.blur_sigma > 0.0f && v.blur_sigma < 0.3f) v.blur_sigma = 0.3f;
+    v.sharpen_radius = (float)(v.sharpen_radius * scale);
+    if (v.sharpen_radius < 0.5f) v.sharpen_radius = 0.5f;
+    bool effect = step->kind == RUBRAVIEW_STEP_EFFECT;
+    double amount = step->amount;
+    if (effect && rubraview_effect_amount_is_pixels((rubraview_effect_t)step->effect)) {
+        amount *= scale;
+        double lo = 0.0;
+        rubraview_effect_range((rubraview_effect_t)step->effect, &lo, NULL, NULL);
+        if (fabs(amount) < fabs(lo) || (lo > 0.0 && amount < lo)) amount = amount < 0.0 ? -fabs(lo) : lo;
+    }
+    if (area.shape == RUBRAVIEW_AREA_ALL) {
+        return effect ? rubraview_effect_apply(arena, src, (rubraview_effect_t)step->effect, amount)
+                      : rubraview_edit_commit(arena, &v, src);
+    }
+
+    /* Only what the area touches is worked on, with a margin for the blur. */
+    int32_t margin = area.feather + (int32_t)ceil(v.blur_sigma * 3.0f + v.sharpen_radius * 3.0f) + 2 +
+                     (effect ? (int32_t)ceil(fabs(amount)) + 2 : 0);
+    int32_t x0 = clamp_i(area.rect.x - margin, 0, src->width), y0 = clamp_i(area.rect.y - margin, 0, src->height);
+    int32_t x1 = clamp_i(area.rect.x + area.rect.width + margin, 0, src->width);
+    int32_t y1 = clamp_i(area.rect.y + area.rect.height + margin, 0, src->height);
+    rubraview_pixbuf_t out = rubraview_pixbuf_clone(arena, src);
+    if (!rubraview_pixbuf_is_valid(&out) || x1 <= x0 || y1 <= y0) return out;
+    rubraview_pixbuf_t piece = rubraview_pixbuf_crop(arena, src, x0, y0, x1 - x0, y1 - y0);
+    rubraview_pixbuf_t done = !rubraview_pixbuf_is_valid(&piece) ? empty
+        : effect ? rubraview_effect_apply(arena, &piece, (rubraview_effect_t)step->effect, amount)
+                 : rubraview_edit_commit(arena, &v, &piece);
+    if (!rubraview_pixbuf_is_valid(&done) || done.width != piece.width || done.height != piece.height) return out;
+    for (int32_t y = y0; y < y1; ++y) {
+        uint8_t *o = out.pixels + (size_t)y * (size_t)out.stride;
+        const uint8_t *a = done.pixels + (size_t)(y - y0) * (size_t)done.stride;
+        for (int32_t x = x0; x < x1; ++x) {
+            float w = rubraview_edit_area_weight(&area, x, y);
+            if (w <= 0.0f) continue;
+            uint8_t *p = o + (size_t)x * 4u;
+            const uint8_t *q = a + (size_t)(x - x0) * 4u;
+            for (int c = 0; c < 4; ++c) p[c] = (uint8_t)lroundf(p[c] + (q[c] - p[c]) * w);
+        }
+    }
+    return out;
+}
+
+rubraview_pixbuf_t rubraview_edit_steps_apply(proven_arena_t *arena, const rubraview_edit_steps_t *steps,
+                                              const rubraview_pixbuf_t *src, double scale) {
+    rubraview_pixbuf_t empty = {0};
+    if (!arena || !steps || !rubraview_pixbuf_is_valid(src)) return empty;
+    rubraview_pixbuf_t work = rubraview_pixbuf_clone(arena, src);
+    for (size_t i = 0; i < steps->cursor && i < steps->count && rubraview_pixbuf_is_valid(&work); ++i) {
+        rubraview_pixbuf_t next = rubraview_edit_step_apply(arena, &steps->steps[i], &work, scale);
+        if (rubraview_pixbuf_is_valid(&next)) work = next;
+    }
+    return work;
+}
+
+void rubraview_edit_auto_colour(rubraview_edit_session_t *session, const rubraview_pixbuf_t *image) {
+    if (!session || !rubraview_pixbuf_is_valid(image)) return;
+    if (image->format != RUBRAVIEW_PIXFMT_RGBA8 && image->format != RUBRAVIEW_PIXFMT_BGRA8) return;
+    uint32_t hist[3][256];
+    memset(hist, 0, sizeof(hist));
+    bool bgra = image->format == RUBRAVIEW_PIXFMT_BGRA8;
+    uint64_t total = 0;
+    for (int32_t y = 0; y < image->height; ++y) {
+        const uint8_t *row = image->pixels + (size_t)y * (size_t)image->stride;
+        for (int32_t x = 0; x < image->width; ++x) {
+            const uint8_t *p = row + (size_t)x * 4u;
+            if (p[3] < 16) continue;   /* see-through pixels say nothing of the colour */
+            hist[0][bgra ? p[2] : p[0]]++;
+            hist[1][p[1]]++;
+            hist[2][bgra ? p[0] : p[2]]++;
+            total++;
+        }
+    }
+    if (total == 0) return;
+    static const rubraview_edit_channel_t CH[3] = { RUBRAVIEW_EDIT_CHANNEL_RED, RUBRAVIEW_EDIT_CHANNEL_GREEN, RUBRAVIEW_EDIT_CHANNEL_BLUE };
+    double mean_after[3];
+    for (int c = 0; c < 3; ++c) {
+        uint64_t cut = total / 200u, seen = 0;   /* 0.5 % at each end */
+        int lo = 0, hi = 255;
+        for (int i = 0; i < 256; ++i) { seen += hist[c][i]; if (seen > cut) { lo = i; break; } }
+        seen = 0;
+        for (int i = 255; i >= 0; --i) { seen += hist[c][i]; if (seen > cut) { hi = i; break; } }
+        if (hi - lo < 16) { lo = 0; hi = 255; }   /* nearly flat: left as it is */
+        rubraview_edit_curve_t *curve = &session->curves[CH[c]];
+        curve->point_count = 2;
+        curve->points[0] = (rubraview_curve_point_t){ (float)lo, 0.0f };
+        curve->points[1] = (rubraview_curve_point_t){ (float)hi, 255.0f };
+        /* the channel's mean once stretched */
+        double sum = 0.0;
+        for (int i = 0; i < 256; ++i) {
+            double v = i <= lo ? 0.0 : i >= hi ? 255.0 : (double)(i - lo) * 255.0 / (double)(hi - lo);
+            sum += v * hist[c][i];
+        }
+        mean_after[c] = sum / (double)total;
+    }
+    /* Grey world, halfway: each channel's mean moved half the way to the three's. */
+    double grey = (mean_after[0] + mean_after[1] + mean_after[2]) / 3.0;
+    float *bal[3] = { &session->params.balance_r, &session->params.balance_g, &session->params.balance_b };
+    for (int c = 0; c < 3; ++c) {
+        double shift = (grey - mean_after[c]) * 0.5 / 1.28;
+        *bal[c] = (float)(shift < -100.0 ? -100.0 : shift > 100.0 ? 100.0 : shift);
+    }
+    session->dirty = true;
 }

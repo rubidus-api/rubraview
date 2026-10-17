@@ -41,6 +41,11 @@
 #define MENU_CONFIG     L"Software\\Rubraview\\Menu"
 #define MENU_CLASS_KEY  MENU_CONFIG L"\\{" WIDE(RUBRAVIEW_MENU_CLSID) L"}"
 #define PACKAGE_VALUE   L"MenuPackage"     /* the full name of the package registered, for its removal */
+/* RV-124: while this value is there the Store's copy hides its Windows 11 items
+   (rubrapack `hide-when`), so one computer shows one Rubraview there. A key of
+   its own: the installer deletes it whole when it removes the program. */
+#define MARKER_KEY      L"Software\\Rubraview\\Win11Menu"
+#define MARKER_VALUE    L"Registered"
 #define PACKAGE_FAMILY  WIDE(RUBRAVIEW_MENU_PACKAGE_NAME) L"_" WIDE(RUBRAVIEW_MENU_PACKAGE_PUBLISHER_ID)
 
 static bool set_string(HKEY root, const WCHAR *subkey, const WCHAR *name, const WCHAR *value) {
@@ -269,6 +274,7 @@ bool rubraview_pal_shell_menu_parts_present(void) {
 /* The package registered before, by the name kept when it was. */
 static void package_remove(void) {
     WCHAR full[256];
+    RegDeleteKeyW(HKEY_LOCAL_MACHINE, MARKER_KEY);   /* first: no package recorded leaves no marker either */
     if (!get_string(HKEY_LOCAL_MACHINE, MENU_ROOT, PACKAGE_VALUE, full, 256)) return;
     appx_job_t job = { .full_name = full, .family = PACKAGE_FAMILY, .machine = true, .remove = true };
     (void)appx_run(&job);
@@ -293,6 +299,7 @@ static bool package_add(void) {
 
     wsprintfW(full, L"%ls_%d.%d.%d.0_x64__%ls", WIDE(RUBRAVIEW_MENU_PACKAGE_NAME), RUBRAVIEW_VERSION_MAJOR,
               RUBRAVIEW_VERSION_MINOR, RUBRAVIEW_VERSION_PATCH, WIDE(RUBRAVIEW_MENU_PACKAGE_PUBLISHER_ID));
+    (void)set_string(HKEY_LOCAL_MACHINE, MARKER_KEY, MARKER_VALUE, L"1");
     return set_string(HKEY_LOCAL_MACHINE, MENU_ROOT, PACKAGE_VALUE, full);
 }
 

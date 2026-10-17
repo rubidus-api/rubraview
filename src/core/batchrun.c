@@ -1,4 +1,5 @@
 #include "rubraview/batchrun.h"
+#include "rubraview/effects.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
@@ -73,6 +74,23 @@ static bool parse_resize(u8str_t value, rubraview_batch_resize_params_t *out) {
         return true;
     }
 
+    /* RV-129: "l1920" the long side, "s1080" the short one, "2mp" (or "2.5mp") megapixels */
+    if (value.len > 2 && (value.ptr[value.len - 1] == 'p' || value.ptr[value.len - 1] == 'P') &&
+        (value.ptr[value.len - 2] == 'm' || value.ptr[value.len - 2] == 'M')) {
+        double mp = 0.0;
+        if (!parse_double((u8str_t){ .ptr = value.ptr, .len = value.len - 2 }, &mp) || mp <= 0.0 || mp > 4000.0) return false;
+        out->mode = RUBRAVIEW_RESIZE_MEGAPIXELS;
+        out->value_a = mp;
+        return true;
+    }
+    if (value.len > 1 && (value.ptr[0] == 'l' || value.ptr[0] == 's')) {
+        long n = 0;
+        if (!parse_int((u8str_t){ .ptr = value.ptr + 1, .len = value.len - 1 }, &n) || n <= 0 || n > 65535) return false;
+        out->mode = value.ptr[0] == 'l' ? RUBRAVIEW_RESIZE_LONG_SIDE : RUBRAVIEW_RESIZE_SHORT_SIDE;
+        out->value_a = (double)n;
+        return true;
+    }
+
     /* "w1920" / "h1080" */
     if (value.len > 1 && (value.ptr[0] == 'w' || value.ptr[0] == 'h')) {
         long n = 0;
@@ -92,6 +110,106 @@ static bool parse_resize(u8str_t value, rubraview_batch_resize_params_t *out) {
         out->mode = RUBRAVIEW_RESIZE_BOUNDING_BOX;
         out->value_a = (double)w;
         out->value_b = (double)h;
+        return true;
+    }
+    return false;
+}
+
+/* ---- RV-129: the extra steps ---- */
+
+/* "RRGGBB" (a # in front allowed) */
+static bool parse_rgb(u8str_t v, uint32_t *out) {
+    if (v.len > 0 && v.ptr[0] == '#') { v.ptr++; v.len--; }
+    if (v.len != 6) return false;
+    uint32_t c = 0;
+    for (size_t i = 0; i < 6; ++i) {
+        char ch = v.ptr[i];
+        int d = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+        if (d < 0) return false;
+        c = c << 4 | (uint32_t)d;
+    }
+    *out = c;
+    return true;
+}
+
+/* The comma-separated pieces of `v`, at most `cap`; how many there were. */
+static size_t split_commas(u8str_t v, u8str_t *parts, size_t cap) {
+    size_t n = 0, start = 0;
+    for (size_t i = 0; i <= v.len; ++i) {
+        if (i < v.len && v.ptr[i] != ',') continue;
+        if (n < cap) parts[n] = (u8str_t){ .ptr = v.ptr + start, .len = i - start };
+        ++n;
+        start = i + 1;
+    }
+    return n;
+}
+
+static bool parse_extra(u8str_t arg, u8str_t value, rubraview_batch_extra_params_t *x) {
+    u8str_t p[4];
+    long a = 0, b = 0, c = 0, d = 0;
+    if (rubraview_u8_eq_lit(arg, "--autocrop")) { x->autocrop = true; return true; }
+    if (rubraview_u8_eq_lit(arg, "--auto-colour")) { x->auto_colour = true; return true; }
+    if (rubraview_u8_eq_lit(arg, "--negative")) { x->negative = true; return true; }
+    if (starts_with(arg, "--crop=", &value)) {   /* X,Y,W,H */
+        if (split_commas(value, p, 4) != 4 || !parse_int(p[0], &a) || !parse_int(p[1], &b) || !parse_int(p[2], &c) || !parse_int(p[3], &d) ||
+            a < 0 || b < 0 || c < 1 || d < 1 || c > 65535 || d > 65535) return false;
+        x->crop = true; x->crop_x = (int32_t)a; x->crop_y = (int32_t)b; x->crop_w = (int32_t)c; x->crop_h = (int32_t)d;
+        return true;
+    }
+    if (starts_with(arg, "--effect=", &value)) {   /* NAME or NAME:AMOUNT, the name as the edit window says it, lower case */
+        size_t k = 0;
+        while (k < value.len && value.ptr[k] != ':') ++k;
+        u8str_t name = { .ptr = value.ptr, .len = k };
+        for (int e = 1; e < RUBRAVIEW_EFFECT_COUNT; ++e) {
+            const char *n = rubraview_effect_key((rubraview_effect_t)e);
+            if (!rubraview_u8_eq_lit(name, n)) continue;
+            double lo = 0, hi = 0, start = 0;
+            rubraview_effect_range((rubraview_effect_t)e, &lo, &hi, &start);
+            double amount = start;
+            if (k < value.len && (!parse_double((u8str_t){ .ptr = value.ptr + k + 1, .len = value.len - k - 1 }, &amount) || amount < lo || amount > hi)) return false;
+            x->effect = e;
+            x->effect_amount = amount;
+            return true;
+        }
+        return false;
+    }
+    if (starts_with(arg, "--border=", &value)) {   /* PX or PX,RRGGBB (white) */
+        size_t n = split_commas(value, p, 2);
+        x->border_rgb = 0xFFFFFF;
+        if (n < 1 || n > 2 || !parse_int(p[0], &a) || a < 1 || a > 10000 || (n == 2 && !parse_rgb(p[1], &x->border_rgb))) return false;
+        x->border_px = (int32_t)a;
+        return true;
+    }
+    if (starts_with(arg, "--canvas=", &value)) {   /* WxH or WxH,RRGGBB (black) */
+        size_t n = split_commas(value, p, 2);
+        x->canvas_rgb = 0;
+        size_t k = 0;
+        while (k < p[0].len && p[0].ptr[k] != 'x' && p[0].ptr[k] != 'X') ++k;
+        if (n < 1 || n > 2 || k == p[0].len || !parse_int((u8str_t){ p[0].ptr, k }, &a) || !parse_int((u8str_t){ p[0].ptr + k + 1, p[0].len - k - 1 }, &b) ||
+            a < 1 || b < 1 || a > 65535 || b > 65535 || (n == 2 && !parse_rgb(p[1], &x->canvas_rgb))) return false;
+        x->canvas_w = (int32_t)a; x->canvas_h = (int32_t)b;
+        return true;
+    }
+    if (starts_with(arg, "--watermark=", &value)) {   /* FILE or FILE,CORNER or FILE,CORNER,OPACITY; the file's own commas: the last two pieces only are read */
+        static const char *const CORNERS[] = { "br", "bl", "tr", "tl", "c" };
+        u8str_t file = value;
+        x->watermark_corner = RUBRAVIEW_CORNER_BOTTOM_RIGHT;
+        x->watermark_opacity = 50;
+        for (int piece = 0; piece < 2; ++piece) {
+            size_t k = file.len;
+            while (k > 0 && file.ptr[k - 1] != ',') --k;
+            if (k == 0) break;
+            u8str_t tail = { .ptr = file.ptr + k, .len = file.len - k };
+            int corner = -1;
+            for (int i = 0; i < 5; ++i) if (rubraview_u8_eq_lit(tail, CORNERS[i])) corner = i;
+            long o = 0;
+            if (corner >= 0) x->watermark_corner = (rubraview_batch_corner_t)corner;
+            else if (parse_int(tail, &o) && o >= 1 && o <= 100) x->watermark_opacity = (int32_t)o;
+            else break;
+            file.len = k - 1;
+        }
+        if (file.len == 0) return false;
+        x->watermark = file;
         return true;
     }
     return false;
@@ -349,6 +467,48 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
 
+        /* ---- RV-129 ---- */
+        if (rubraview_u8_eq_lit(arg, "--no-enlarge") || rubraview_u8_eq_lit(arg, "--linear")) {
+            rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_RESIZE);
+            if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            if (arg.ptr[2] == 'n') a->params.resize.no_enlarge = true; else a->params.resize.linear = true;
+            continue;
+        }
+        if (starts_with(arg, "--crop=", &value) || rubraview_u8_eq_lit(arg, "--autocrop") || rubraview_u8_eq_lit(arg, "--auto-colour") ||
+            rubraview_u8_eq_lit(arg, "--negative") || starts_with(arg, "--effect=", &value) || starts_with(arg, "--border=", &value) ||
+            starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value)) {
+            rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_EXTRA);
+            if (!a) { result.err = RUBRAVIEW_CLI_ERR_TOO_MANY_ACTIONS; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            if (!parse_extra(arg, value, &a->params.extra)) {
+                result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
+            }
+            continue;
+        }
+        if (starts_with(arg, "--start=", &value)) {
+            long n = 0;
+            if (!parse_int(value, &n) || n < 0 || n > 999999999) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.job.counter_start = (int32_t)n;
+            continue;
+        }
+        if (starts_with(arg, "--replace=", &value)) {
+            /* FROM,TO: the first comma divides them; TO may be empty */
+            size_t k = 0;
+            while (k < value.len && value.ptr[k] != ',') ++k;
+            if (k == 0 || k == value.len) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.job.replace_from = (u8str_t){ .ptr = value.ptr, .len = k };
+            result.job.replace_to = (u8str_t){ .ptr = value.ptr + k + 1, .len = value.len - k - 1 };
+            continue;
+        }
+        if (starts_with(arg, "--exists=", &value)) {
+            if (rubraview_u8_eq_lit(value, "replace")) result.exists = 0;
+            else if (rubraview_u8_eq_lit(value, "skip")) result.exists = 1;
+            else if (rubraview_u8_eq_lit(value, "number")) result.exists = 2;
+            else { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            continue;
+        }
+        if (rubraview_u8_eq_lit(arg, "--keep-dates")) { result.keep_dates = true; continue; }
+        if (rubraview_u8_eq_lit(arg, "--subfolders")) { result.subfolders = true; continue; }
+
         if (starts_with(arg, "--include=", &value)) { result.job.include_pattern = value; continue; }
         if (starts_with(arg, "--exclude=", &value)) { result.job.exclude_pattern = value; continue; }
         if (starts_with(arg, "--name=", &value)) { result.job.naming_pattern = value; continue; }
@@ -439,7 +599,11 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
             }
         }
 
-        item.output_name = rubraview_batch_format_name(arena, job->naming_pattern, stem, ext, 0, 0, date_str);
+        /* RV-129: the stem's words replaced, the counter, the folder's name */
+        stem = rubraview_batch_replace_all(arena, stem, job->replace_from, job->replace_to);
+        int64_t counter = (int64_t)(job->counter_start > 0 ? job->counter_start : 1) + (int64_t)(report.processed + report.failed);
+        u8str_t parent = rubraview_path_basename(rubraview_path_dirname(input->path));
+        item.output_name = rubraview_batch_format_name_ex(arena, job->naming_pattern, stem, ext, 0, 0, date_str, counter, parent);
 
         bool ok = process ? process(arena, job, input, item.output_name, ctx) : true;
         item.status = ok ? RUBRAVIEW_BATCH_STATUS_OK : RUBRAVIEW_BATCH_STATUS_FAILED;

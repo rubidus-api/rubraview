@@ -396,7 +396,8 @@ int32_t rubraview_settings_view_screen_row(const rubraview_settings_view_t *view
     return TITLE_ROWS + row;
 }
 
-static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"), N_("[ Defaults ]"), N_("[ Close ]") };
+static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"), N_("[ Defaults: all ]"), N_("[ this page ]"),
+                                                                  N_("[ this setting ]"), N_("[ Close ]") };
 
 u8str_t rubraview_settings_button_text(rubraview_settings_button_t button) {
     if (button < 0 || button >= RUBRAVIEW_BUTTON_COUNT) return (u8str_t){ .ptr = "", .len = 0 };
@@ -547,6 +548,8 @@ static rubraview_settings_event_t press_button(rubraview_settings_button_t butto
     switch (button) {
         case RUBRAVIEW_BUTTON_REVERT:   return RUBRAVIEW_SEVENT_REVERT;
         case RUBRAVIEW_BUTTON_DEFAULTS: return RUBRAVIEW_SEVENT_DEFAULTS;
+        case RUBRAVIEW_BUTTON_DEFAULTS_PAGE: return RUBRAVIEW_SEVENT_DEFAULTS_PAGE;
+        case RUBRAVIEW_BUTTON_DEFAULTS_ONE: return RUBRAVIEW_SEVENT_DEFAULTS_ONE;
         case RUBRAVIEW_BUTTON_CLOSE:    return RUBRAVIEW_SEVENT_CLOSE;
         default:                        return RUBRAVIEW_SEVENT_NONE;
     }

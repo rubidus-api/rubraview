@@ -54,7 +54,9 @@ typedef struct rubraview_settings_line {
 typedef enum rubraview_settings_button {
     RUBRAVIEW_BUTTON_NONE = -1,
     RUBRAVIEW_BUTTON_REVERT = 0,    /* back to what the file held when the window opened */
-    RUBRAVIEW_BUTTON_DEFAULTS,
+    RUBRAVIEW_BUTTON_DEFAULTS,      /* every setting (owner, 2026-10-17: three ways) */
+    RUBRAVIEW_BUTTON_DEFAULTS_PAGE, /* the page's */
+    RUBRAVIEW_BUTTON_DEFAULTS_ONE,  /* the setting the focus is on */
     RUBRAVIEW_BUTTON_CLOSE,         /* the file is written as the window closes */
     RUBRAVIEW_BUTTON_COUNT,
 } rubraview_settings_button_t;
@@ -146,6 +148,8 @@ typedef enum rubraview_settings_event {
     RUBRAVIEW_SEVENT_TABLE_CLEAR,/* Delete on a table row: take its last value off */
     RUBRAVIEW_SEVENT_REVERT,
     RUBRAVIEW_SEVENT_DEFAULTS,
+    RUBRAVIEW_SEVENT_DEFAULTS_PAGE,
+    RUBRAVIEW_SEVENT_DEFAULTS_ONE,
     RUBRAVIEW_SEVENT_CLOSE,
 } rubraview_settings_event_t;
 

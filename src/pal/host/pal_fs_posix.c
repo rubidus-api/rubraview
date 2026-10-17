@@ -346,3 +346,12 @@ char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t code
     if (out_len) *out_len = size;
     return out;
 }
+
+bool rubraview_pal_fs_set_mtime(u8str_t path, int64_t mtime) {
+    char z[4096];
+    if (path.len == 0 || path.len >= sizeof(z)) return false;
+    memcpy(z, path.ptr, path.len);
+    z[path.len] = '\0';
+    struct timespec times[2] = { { .tv_nsec = UTIME_OMIT }, { .tv_sec = (time_t)mtime, .tv_nsec = 0 } };
+    return utimensat(AT_FDCWD, z, times, 0) == 0;
+}

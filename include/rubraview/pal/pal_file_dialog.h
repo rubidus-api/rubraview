@@ -47,6 +47,13 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_save(proven_arena_t *ar
  */
 rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts);
 
+/**
+ * The owner (2026-10-17): Windows' own font dialog, `current` chosen in it.
+ * The face name picked is written to `out` (UTF-8, NUL-terminated); false
+ * when the dialog was cancelled or there is none on this platform.
+ */
+bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

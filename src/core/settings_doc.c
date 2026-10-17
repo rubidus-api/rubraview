@@ -310,6 +310,22 @@ static bool one_line(parser_t *p, u8str_t line) {
             .kind = RUBRAVIEW_NODE_INFO, .page = p->page, .text = t[1].text, .name = t[2].text,
         });
     }
+    if (word_is(t[0], "help")) {
+        /* help section.key "a fuller explanation": the tooltip on that setting's name. */
+        u8str_t section, key;
+        if (n != 3 || t[1].kind != TOKEN_WORD || t[2].kind != TOKEN_QUOTED || !place(t[1].text, &section, &key)) {
+            return fail(p, "help needs section.key and its \"text\"");
+        }
+        for (size_t i = 0; i < p->doc.def_count; ++i) {
+            rubraview_setting_def_t *d = &p->doc.defs[i];
+            if (d->section.len == section.len && d->key.len == key.len && memcmp(d->section.ptr, section.ptr, section.len) == 0 &&
+                memcmp(d->key.ptr, key.ptr, key.len) == 0) {
+                d->help = t[2].text;
+                return true;
+            }
+        }
+        return fail(p, "help for a setting that is not on a page before it");
+    }
     if (word_is(t[0], "note")) {
         if (n != 2 || t[1].kind != TOKEN_QUOTED) return fail(p, "note needs its \"text\"");
         return add_node(p, (rubraview_settings_node_t){ .kind = RUBRAVIEW_NODE_NOTE, .page = p->page, .text = t[1].text });

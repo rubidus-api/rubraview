@@ -115,6 +115,13 @@ const char *rubraview_fit_tile_hint(rubraview_fit_mode_t fit);
  */
 double rubraview_pan_key_delta(double view_extent, double start, double extent, int direction, double step);
 
+/**
+ * The owner (2026-10-17): a picture zoomed out, smaller than the window,
+ * is moved by the arrow keys the way they point, a step a press, and no
+ * further than the window's edge. 0 when it is not smaller, or already there.
+ */
+double rubraview_pan_key_delta_small(double view_extent, double start, double extent, int direction, double step);
+
 #ifdef __cplusplus
 }
 #endif

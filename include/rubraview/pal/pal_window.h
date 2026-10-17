@@ -325,6 +325,9 @@ void rubraview_pal_window_set_visible(rubraview_window_t *window, bool visible);
 /** §4.2: DPI / 96.0 for the monitor the window is currently on. */
 double rubraview_pal_window_dpi_scale(const rubraview_window_t *window);
 
+/** RV-128: the whole monitor the window is on, in pixels; false when not known. */
+bool rubraview_pal_window_monitor_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height);
+
 /**
  * The platform's native handle (HWND on Win32), passed opaquely to the
  * render PAL. The application never dereferences it.

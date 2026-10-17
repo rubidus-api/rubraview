@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.5.1** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.1/rubraview-v1.5.1.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.1/rubraview-v1.5.1.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.6.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.6.0/rubraview-v1.6.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.6.0/rubraview-v1.6.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -30,8 +30,11 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **AVIF Without A Codec To Install**: a built-in decoder (libavif + dav1d) reads AVIF stills and animations with their transparency; JPEG XL opens where Windows has a codec for it, or with FFmpeg's DLLs beside the program (a moving one plays through FFmpeg). BigTIFF under 4 GB opens as any TIFF.
 - **WebP Written Without A Codec To Install**: Export and `--batch --format=webp` write lossy or lossless WebP with the built-in libwebp; an animated GIF, PNG or WebP becomes an animated WebP.
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
-- **Image Enhancement & Post-Processing**: Real-time adjustments for exposure, contrast, saturation, gamma, sharpening (unsharp mask), and gaussian blur, plus high-fidelity resampling (Nearest, Bilinear, Bicubic, Lanczos-3).
-- **Batch Processing Engine**: Multi-threaded batch converter and resizer accessible via UI dialog and headless CLI.
+- **Edit As Steps On A Selection**: a rectangle or an ellipse (with a soft edge) dragged, sized and typed; tones, colour balance, automatic colour, 21 effects, crop and resize as steps on it, undone and redone until saved; save over the original (to the Recycle Bin) or a copy.
+- **Resize Your Way**: percent, pixels, or a length in cm, mm or inches at a DPI; HD to 8K, long side, megapixels; in linear light; sharpen after (Nearest, Bilinear, Bicubic, Lanczos-3).
+- **Batch Processing Engine**: multi-threaded, from a window or the command line: sizes, crop, cut borders, automatic colour, any effect, canvas, border, watermark, names with counters and replacing, dates kept; the choices tried, remembered, saved and loaded.
+- **Classify**: the nine sorting folders in a window; set pictures aside, then copy or move them all at once.
+- **Everything About A Picture**: EXIF in full and IPTC, aspect ratio, print size, unique colours, decode time.
 - **Text Files, For Reading**: `.txt`, `.log`, `.nfo` and `.md` open as text, in Korean, Japanese and Chinese encodings guessed or chosen; line breaks as they are, all in one run, blank lines dropped, or joined into paragraphs; indents kept or removed; auto-scroll whose speed changes while it runs; the size and the line spacing a key or a wheel away; find, select and copy.
 - **In Your Language**: English, Korean, Japanese, Chinese (simplified and traditional) and Persian, following Windows or chosen in Settings › General › Language; a language is a text file in the `lang` folder beside the program, so one can be corrected or added without building anything.
 - **Pure C23 Architecture**: Built upon vendored `proven_c_lib` arenas, string slices, and dynamic arrays with zero heap fragmentation.
@@ -82,6 +85,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
 | `F7` | Move the file on screen to the folder set for it |
 | `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |

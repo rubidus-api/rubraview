@@ -195,6 +195,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_subtitle_window", 0xE8BD },  /* Message: the subtitles as a list (RV-115) */
         { "extract_subtitles", 0xE8DE },     /* MoveToFolder: a film's own subtitles written beside it */
         { "copy_to_folder", 0xE8C8 },        /* Copy */
+        { "toggle_classify", 0xE8EC },       /* Tag */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
     };
     if (!f) return 0;

@@ -31,6 +31,15 @@ rubraview_pixbuf_t rubraview_pixbuf_resample(proven_arena_t *arena,
                                rubraview_resample_filter_t filter);
 
 /**
+ * RV-128: the same in linear light (gamma-correct), alpha premultiplied,
+ * the kernel widened by the reduction so a large one does not alias.
+ * RGBA8 or BGRA8; nearest is the ordinary resample.
+ */
+rubraview_pixbuf_t rubraview_pixbuf_resample_linear(proven_arena_t *arena, const rubraview_pixbuf_t *src,
+                                                    int32_t dst_width, int32_t dst_height,
+                                                    rubraview_resample_filter_t filter);
+
+/**
  * Resample only the destination rows `[y0, y1)`, into a destination the
  * caller already allocated. The scale is taken from the destination's
  * full size, so bands computed separately join up exactly as if they had

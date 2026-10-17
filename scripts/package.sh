@@ -86,8 +86,24 @@ rubrapack=${RUBRAPACK:-rubrapack}
 msi="dist/rubraview-v$version.msi"
 rm -f "$msi"
 if command -v "$rubrapack" >/dev/null 2>&1; then
-  "$rubrapack" build resources/distribution/rubraview.toml -o "$msi" \
-      -D "VERSION=$version" -D "STAGE=../../$out"
+  # RV-124 (owner, 2026-10-17): the installer looks for the Store's copy
+  # before a first install ([other-copy.Store]). Its identity is not kept
+  # in this repository: RUBRAVIEW_STORE_IDENTITY names the file it is in,
+  # as for package-store.sh. Without it the table is left out, and said.
+  toml=resources/distribution/rubraview.toml
+  if [ -n "${RUBRAVIEW_STORE_IDENTITY:-}" ] && [ -r "$RUBRAVIEW_STORE_IDENTITY" ]; then
+    store_name=$(tr -d '\r' < "$RUBRAVIEW_STORE_IDENTITY" | awk -F '\t' '$1 == "Package/Identity/Name" { print $2; exit }')
+    store_publisher=$(tr -d '\r' < "$RUBRAVIEW_STORE_IDENTITY" | awk -F '\t' '$1 == "Package/Identity/Publisher" { print $2; exit }')
+    [ -n "$store_name" ] && [ -n "$store_publisher" ] || { printf '%s\n' "package: the identity file lacks the name or the publisher" >&2; exit 1; }
+    "$rubrapack" build "$toml" -o "$msi" \
+        -D "VERSION=$version" -D "STAGE=../../$out" -D "STORE_NAME=$store_name" -D "STORE_PUBLISHER=$store_publisher"
+  else
+    printf '%s\n' "package: RUBRAVIEW_STORE_IDENTITY not set: this .msi does NOT look for the Store's copy" >&2
+    plain=resources/distribution/.rubraview-no-store.toml
+    awk '/^\[other-copy\./ { skip = 1; next } /^\[/ { skip = 0 } !skip' "$toml" > "$plain"
+    "$rubrapack" build "$plain" -o "$msi" -D "VERSION=$version" -D "STAGE=../../$out"
+    rm -f "$plain"
+  fi
   "$rubrapack" lint "$msi"
   # An upgrade is checked against the newest installer already here.
   previous=$(ls -1 dist/rubraview-v*.msi 2>/dev/null | grep -v -F "$msi" | sort -V | tail -n 1 || true)

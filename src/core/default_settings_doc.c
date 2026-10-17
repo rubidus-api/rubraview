@@ -140,7 +140,7 @@ static const char *const PARTS[] = {
 "  choice viewer.animation_end     \"When an animation ends\"  loop | once | next = loop wired\n"
 "  toggle viewer.pixel_grid        \"Pixel grid past 400%\"    = false wired\n"
 "  toggle viewer.whole_zoom        \"Enlarge by whole steps only\" = false wired\n"
-"  choice viewer.transition        \"Turning a page\"          cut | fade | slide | zoom = fade wired\n"
+"  choice viewer.transition        \"Turning a page\"          cut | fade | slide | zoom | dissolve = fade wired\n"
 "  section \"Shape\"\n"
 "  int    viewer.aspect_width      \"Custom shape, width\"     1..10000 step 1 = 235 wired\n"
 "  int    viewer.aspect_height     \"Custom shape, height\"    1..10000 step 1 = 100 wired\n"
@@ -192,6 +192,7 @@ static const char *const PARTS[] = {
 "  path   curation.copy_dir        \"Copy to (F6)\"            wired\n"
 "  path   curation.move_dir        \"Move to (F7)\"            wired\n"
 "  path   curation.other_dir       \"Another folder\"          hidden wired\n"
+"  path   batch.last               \"Batch choices\"           hidden wired\n"
 "  note \"F6 copies the file on screen to the first folder and F7 moves it to the second; a page inside an archive can only be copied. A name already there gets -1, -2, ... added.\"\n"
 "  section \"Number keys send the file to\"\n"
 "  choice curation.curation_mode   \"Number keys\"             move | copy = move wired\n"
@@ -347,9 +348,51 @@ static const char *const PARTS[] = {
 "  action keys.export              \"Export keys to a file\"\n"
 "  action keys.import              \"Import keys from a file\"\n"
 "  table  keymap\n",
+/* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
+"help general.single_instance \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"
+"help general.explorer_open \"What the open window does with a file sent from Explorer: add it to the list being viewed, open its whole folder instead, or show only that file.\"\n"
+"help general.first_with_folder \"On: the first file opened brings the other pictures of its folder with it, so the arrows go through the folder. Off: only that file is opened.\"\n"
+"help general.native_dialog \"On: Ctrl+O opens Windows' own Open dialog. Off: it opens Rubraview's own file screen with thumbnails, Recent and favourites.\"\n"
+"help general.titlebar_trigger_px \"With the frameless window: how close to the top edge the pointer must come before the title bar slides down.\"\n"
+"help viewer.fit_mode \"How a picture is sized when it is opened: fitted to the window, to its width or height, at its real size, and so on. Keys 1 to 6 change it on the page.\"\n"
+"help viewer.layout \"One page at a time, two side by side (a book or a comic, left to right or right to left), or a long strip for webtoons.\"\n"
+"help viewer.gutter_px \"The gap between the two pages of a spread, in pixels.\"\n"
+"help viewer.portrait_collapse \"On: when the window is taller than wide, two-page layouts show one page at a time, so the pages are not tiny.\"\n"
+"help viewer.interpolation \"How a picture is smoothed when it is shown larger or smaller than it is: sharper filters keep detail, softer ones avoid jagged edges.\"\n"
+"help viewer.enlarge \"How a picture smaller than the window is enlarged: smooth blends its pixels, sharp keeps every pixel a crisp square (for pixel art and screenshots).\"\n"
+"help viewer.pixel_grid \"Zoomed past 400 %, a thin grid shows each pixel's edges: for pixel art and close checks.\"\n"
+"help viewer.whole_zoom \"On: a small drawing is enlarged only by whole steps (x2, x3...), so every pixel stays the same size and nothing is blurred.\"\n"
+"help viewer.transition \"How one page gives way to the next: a cut, a fade, a slide, a zoom, or a dissolve (the new page laid over the old one, nothing dims in between).\"\n"
+"help files.at_ends \"Past the last or before the first file: say so and stay, go on to the next or previous folder or archive, or go round to the other end.\"\n"
+"help files.pattern \"Only files whose names match these patterns are listed, ; between them: *.png;IMG_*. Empty lists every file the viewer opens.\"\n"
+"help files.archive_codepage \"How file names inside old ZIP archives are read when they are not in Unicode: choose the language they were made in if the names look broken.\"\n"
+"help files.comicinfo \"On: a comic archive's ComicInfo.xml is read: its title, its page order and right-to-left reading are used.\"\n"
+"help files.reading_history \"On: the page reached in each folder, archive or text file is written down, and offered again the next time it is opened.\"\n"
+"help curation.curation_mode \"What the number keys 1 to 9 do with the file on screen: copy it or move it to the folder set for that number below.\"\n",
+"help audio.at_end \"When a song or a film ends: stop, go on to the next file, repeat this one, repeat them all, or play them shuffled.\"\n"
+"help audio.gapless \"On: one song runs into the next with no silence between them, as live albums need.\"\n"
+"help audio.crossfade_seconds \"How many seconds one song fades out while the next fades in. 0 is no crossfade.\"\n"
+"help audio.replaygain \"Uses the loudness written in a song's tags (ReplayGain) so songs from different albums play at about the same volume.\"\n"
+"help audio.night_mode \"Quiet parts louder and loud parts quieter (dynamic range compression), for listening at night without waking anyone.\"\n"
+"help audio.wasapi_latency_ms \"How far ahead sound is prepared. Lower answers faster; raise it if the sound crackles or stutters.\"\n"
+"help audio.bgm_pause_on_video \"On: background music pauses while a film with its own sound plays, and goes on after it.\"\n"
+"help video.decoder \"Which decoder tries a film first: Windows' own (Media Foundation) or FFmpeg, when its DLLs are there. The other is tried if the first cannot.\"\n"
+"help video.hardware_decode \"Lets the graphics card decode films, which saves the processor. Off if films show wrong colours or freeze on this computer.\"\n"
+"help video.subtitle_fit \"A subtitle too long for its box: the box grows to hold it, or the letters shrink until it fits.\"\n"
+"help video.ab_step_seconds \"How much the A and B points of a repeat move with each press of their buttons or keys.\"\n"
+"help video.audio_language \"The sound track chosen first when a film has several: a language code as films name it, kor, eng, jpn.\"\n"
+"help text.breaks \"keep: the file's breaks. one_line: all in one run. no_blank: blank lines dropped. paragraphs: lines joined, a paragraph ending where a line ends a sentence and more breaks than usual follow.\"\n"
+"help text.width \"The column is at most this many characters wide, centred, which is easier to read on a wide screen. 0 uses the window's width.\"\n"
+"help text.encoding \"auto guesses each file's encoding. Choose one here only if every file you read is in it; E on the page changes it for one file.\"\n"
+"help display.color_management \"On: a picture's embedded colour profile (ICC) is used, so photos from cameras and phones show their true colours.\"\n"
+"help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
+"help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
+"help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
+"help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"
+"help keys.use_keymap_file \"On: the keys come from keymap.ini, which the Keys page edits. Off: the built-in keys are used whatever the file says.\"\n",
 };
 
-static char g_document[24576];
+static char g_document[32768];
 static size_t g_document_len;
 
 u8str_t rubraview_default_settings_document(void) {

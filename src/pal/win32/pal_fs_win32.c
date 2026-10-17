@@ -772,3 +772,18 @@ char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t code
     free(wide);
     return out;
 }
+
+bool rubraview_pal_fs_set_mtime(u8str_t path, int64_t mtime) {
+    uint8_t mem[8192];
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = sizeof(mem) });
+    u8str_t path_z = arena_dup(&arena, path.ptr, path.len);
+    WCHAR *wide = path_z.len ? utf8_to_wide(&arena, path_z) : NULL;
+    if (!wide) return false;
+    HANDLE h = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    ULARGE_INTEGER u = { .QuadPart = (ULONGLONG)(mtime + 11644473600LL) * 10000000ULL };   /* 1601 to 1970, in 100 ns */
+    FILETIME ft = { .dwLowDateTime = u.LowPart, .dwHighDateTime = u.HighPart };
+    BOOL ok = SetFileTime(h, NULL, NULL, &ft);
+    CloseHandle(h);
+    return ok != 0;
+}

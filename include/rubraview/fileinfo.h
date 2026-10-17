@@ -35,6 +35,9 @@ void rubraview_info_addf(proven_arena_t *arena, rubraview_info_t *info, const ch
 /* Everything an EXIF block says, a line each, in words. */
 void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, const rubraview_exif_info_t *exif);
 
+/* RV-130: what an IPTC block says, under its own heading. */
+void rubraview_info_add_iptc(proven_arena_t *arena, rubraview_info_t *info, const rubraview_iptc_info_t *iptc);
+
 /* The rows: a heading as it is, a pair as two spaces, the label padded to
    `label_cols`, then the value. Returns how many (at most `capacity`). */
 size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, int32_t label_cols,
@@ -46,6 +49,14 @@ size_t rubraview_info_exposure(char *buf, size_t cap, uint32_t num, uint32_t den
 size_t rubraview_info_gps(char *buf, size_t cap, double latitude, double longitude);/* 37°33'59.4"N 126°58'40.8"E */
 size_t rubraview_info_duration(char *buf, size_t cap, double seconds);              /* "1:23:45.678", "0:10.000" */
 size_t rubraview_info_fourcc(char *buf, size_t cap, uint32_t fourcc);               /* "H264", or "0x00000055" */
+/* RV-130 */
+size_t rubraview_info_aspect(char *buf, size_t cap, int32_t width, int32_t height); /* "4:3 (1.333)", "1.778 (about 16:9)" */
+size_t rubraview_info_print_size(char *buf, size_t cap, int32_t width, int32_t height,
+                                 double dpi_x, double dpi_y);                       /* "21.0 x 29.7 cm (8.27 x 11.69 in)" */
+
+/* How many different colours (RGB, alpha left out) an RGBA8 or BGRA8
+   picture holds: a 2 MB bit set from `arena`. 0 when it cannot count. */
+uint32_t rubraview_info_unique_colours(proven_arena_t *arena, const rubraview_pixbuf_t *pixels);
 
 /* A container that gives no four-letter code for a stream (Matroska gives
    0), or one that is not letters: the code is made of the codec's name,

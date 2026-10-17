@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.5.1** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.1/rubraview-v1.5.1.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.1/rubraview-v1.5.1.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.6.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.6.0/rubraview-v1.6.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.6.0/rubraview-v1.6.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -30,8 +30,11 @@
 - **코덱 설치 없이 AVIF 읽기**: 내장 디코더(libavif + dav1d)가 AVIF 정지 그림과 움직이는 그림을 투명도까지 읽습니다. JPEG XL 은 Windows 에 그 코덱이 설치돼 있거나 FFmpeg DLL 을 프로그램 옆에 두면 열립니다. 움직이는 JPEG XL 은 FFmpeg 으로 재생됩니다. 4 GB 미만의 BigTIFF 도 일반 TIFF 처럼 열립니다.
 - **코덱 설치 없이 WebP 쓰기**: 내보내기와 `--batch --format=webp` 가 내장 libwebp 로 손실·무손실 WebP 를 씁니다. 움직이는 GIF·PNG·WebP 는 움직이는 WebP 가 됩니다.
 - **동영상 재생**: 분리된 PAL 을 통한 FFmpeg(`libavcodec`/`libavformat`) 연결로 재생, 한 프레임씩 이동, 정지 화면 저장.
-- **보정과 후처리**: 노출·대비·채도·감마·언샤프 마스크·가우시안 흐림을 실시간으로, 리샘플링은 Nearest·Bilinear·Bicubic·Lanczos-3.
-- **일괄 처리**: 여러 스레드로 도는 변환·크기 조정기. 창에서도, 창 없이 명령줄에서도 씁니다.
+- **선택 영역 위의 단계로 편집**: 사각형이나 타원(부드러운 가장자리)을 끌고, 크기를 바꾸고, 숫자로 입력합니다. 톤·색 균형·자동 색 보정·효과 21가지·자르기·크기 조정이 그 위의 단계가 되어 저장 전까지 실행 취소·다시 실행됩니다. 원본에 저장(옛 파일은 휴지통)과 사본 저장이 따로 있습니다.
+- **원하는 대로 크기 조정**: 퍼센트, 픽셀, 또는 DPI 기준 cm·mm·인치 길이. HD~8K, 긴 변, 메가픽셀. 선형 광으로 줄이기, 이후 선명하게(Nearest·Bilinear·Bicubic·Lanczos-3).
+- **일괄 처리**: 여러 스레드로, 창에서도 명령줄에서도. 크기, 자르기, 여백 자르기, 자동 색 보정, 모든 효과, 캔버스, 테두리, 워터마크, 번호·바꾸기가 있는 이름, 날짜 유지. 선택을 시험하고, 기억하고, 저장하고, 불러옵니다.
+- **분류**: 아홉 분류 폴더를 창에 띄우고, 그림을 폴더별로 예약한 뒤 한꺼번에 복사하거나 옮깁니다.
+- **그림의 모든 것**: EXIF 전체와 IPTC, 가로세로 비율, 인쇄 크기, 고유 색 수, 디코딩 시간.
 - **읽기 좋은 텍스트 파일**: `.txt`, `.log`, `.nfo`, `.md` 를 텍스트로 엽니다. 한국어·일본어·중국어 인코딩을 추측하거나 고를 수 있고, 개행은 그대로 / 한 줄로 이어서 / 빈 줄만 없애기 / 문단 단위 중에서 고릅니다. 들여쓰기를 지우거나 둘 수 있고, 자동 스크롤은 도는 중에도 속도를 바꿉니다. 글자 크기와 행간은 키나 휠 하나로 바꾸고, 찾기·선택·복사가 됩니다.
 - **여러 언어**: 영어, 한국어, 일본어, 중국어(간체·번체), 페르시아어. Windows 언어를 따르거나 설정 › General › Language에서 고릅니다. 언어는 프로그램 옆 `lang` 폴더의 텍스트 파일이라, 빌드하지 않고도 고치거나 더할 수 있습니다.
 - **순수 C23**: 벤더링한 `proven_c_lib` 의 아레나·문자열 조각·동적 배열 위에서, 힙 파편화 없이.
@@ -81,6 +84,7 @@
 | `Ctrl+P` | 화면의 그림 인쇄: 회전·크기·배율·위치·여백·한 면의 장수를 고르는 패널, 이어서 시스템 인쇄 창 |
 | `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
 | `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
+| `K` | 분류: 아홉 폴더를 창에 띄우고 그림을 폴더별로 예약한 뒤 한꺼번에 복사하거나 옮기기 |
 | `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
 | `Shift+F6` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 복사(없는 폴더는 새로 만듦) |
 | `Shift+F7` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 이동(없는 폴더는 새로 만듦) |

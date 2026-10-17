@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.5.1.exe              the viewer, as built
-dist/rubraview-v1.5.1/                 the release bundle
-dist/rubraview-v1.5.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.6.0.exe              the viewer, as built
+dist/rubraview-v1.6.0/                 the release bundle
+dist/rubraview-v1.6.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -321,35 +321,39 @@ through its pages, and opens an `.ico` at its largest layer.
 
 ## Adjusting a picture
 
-`E` opens the adjust panel. Drag a slider, and the picture follows.
-The curve box shows the picture's histogram behind the curve; its
-corner button (**RGB >**) picks which curve you edit — click for the
-next of RGB, Red, Green, Blue and Luma, right-click for the one before.
-Nothing is written until you press **Save a copy**, which writes
-`<name>_edit.<ext>` beside the original and leaves the original alone;
-a line at the top says whether it was saved.
+`E` opens Edit, one window for everything that changes the picture.
+Drag a slider and the picture follows; press a slider's name to type its
+value. The curve box shows the histogram behind the curve; its corner
+button (**RGB >**) picks which curve you edit.
 
-The panel has a second page, **Sharpness, cut and size >** (and **<
-Tones** back): **Blur** and its kind (soft, or flat); **Sharpen** and its
-kind — the unsharp mask, with a **radius** and a **threshold** under which
-it leaves grain alone, or the harsher Laplacian; **Crop ratio**; **Trim
-plain margins**, which finds a scan's white (or black) border and marks
-the cut; **Resize %**, the size the copy is saved at; and under it the
-size in pixels (**Size: 1000 x 1500 px...**): press it and type the width
-or the height — the other follows the picture's shape — `Tab` for the
-other, `Enter` to keep it. Every slider shows on the picture at once,
-the blur and the sharpening as well as the tones. Each panel — Adjust,
-Export, Batch, Print, Convert — closes with the `X` at its top right, a
-click outside it, or `Esc`.
+**A selection first.** Drag on the picture to mark a part of it — a
+rectangle, or an ellipse (**Shape** in the selection's box), with a soft
+edge if you give it a **Feather**. Drag inside it to move it, drag one of
+its eight handles to size it, or type X, Y, W and H in the selection's
+box, which you can move by its title. With a selection, what you do next
+is done to it alone; without one, to the whole picture.
 
-With the panel open, dragging over the picture marks a rectangle to cut
-to; **Crop ratio** keeps it free, square, 4:3, 16:9 or the picture's own
-shape. A click without a drag lets the rectangle go. To type it instead,
-press **Crop: ... px...** under Crop ratio: X and Y are the top left
-corner and W and H the size, in the picture's pixels; `Tab` or a click
-moves between them, `Enter` cuts (a size running past the edge stops at
-it, and the ratio becomes free), `Esc` or the `X` leaves. A drag on the
-picture while the box is open fills its numbers.
+**Then a change.** The tones, **Colour balance** (red, green, blue),
+**Automatic colour** (each channel stretched, a colour cast drawn in),
+an **Effect** with its amount (21 of them: grey, sepia, negative, oil
+paint, emboss, edges, pixelize, swirl, red eye, and more), **Crop to the
+selection**, **Resize**. Each is a step: `Ctrl+Z` undoes it, `Ctrl+Y`
+does it again, and the undo list (its own movable box, closed by its `X`)
+goes back to any of them. **Reset** goes back to the picture as it was.
+**Show the original** compares.
+
+**Resize.** **Resize %**, or **or a size**: half, double, fit the screen,
+640x480 to 8K (turned to the picture's way), the long side, or megapixels.
+**Size: ... px (... cm)...** types it: a number is pixels, and a unit
+makes it a length — `21cm`, `210mm`, `8.5in`, `50%` — at **DPI for cm and
+in**. **Keep the shape**, the **Filter**, **In linear light** (truer when
+shrinking: fine light detail does not darken) and **Sharpen after**. A
+resize is always of the whole picture.
+
+**Saving.** **Save a copy** writes `<name>_edit.<ext>` beside the
+original. **Save over the original** asks for a second press, then puts
+the old file in the Recycle Bin. A page inside an archive is written back
+into the archive.
 
 `Ctrl+E` opens Export: pick a format, and the panel shows what that format
 has: JPEG its quality and progressive; PNG its level and colours; WebP its
@@ -500,6 +504,18 @@ file is in the Recycle Bin.
 that undo for File Explorer. Restore it from the recycle bin instead.
 Moves, copies and renames do undo properly.
 
+### Classifying
+
+`K` (or File › This file › Classify...) opens a window of the nine
+folders the number keys have, each with how many pictures are set aside
+for it. Click a folder, or press its digit, and the picture on screen is
+set aside for it — nothing moves yet — and the next one comes. Look
+through them all, then press **Copy all set aside** or **Move all set
+aside**: every one goes to its folder at once, a name already there never
+replaced (`name-1.jpg`). `Ctrl+Z` undoes them one by one, the last 64.
+**This one goes to ...** takes the picture on screen off the list;
+**Forget what is set aside** empties it.
+
 ## Converting a lot of files at once
 
 ```
@@ -510,9 +526,14 @@ No window opens. It prints how many files it converted, skipped and
 failed.
 
 `Ctrl+B` does the same thing from the viewer, over the folder you are
-reading: choose a size, a format, grayscale or privacy clean, then **Run on
-this folder**. The results go into a `rubraview-out` folder beside those
-pictures, so a run never overwrites an original.
+reading: the window has every option below. **Try the names on the first
+files** shows what the first three would be called. **Save these
+choices...** writes them to a `.rvbatch` file (an option a line) and
+**Load choices...** reads one back; the last ones used come back by
+themselves. Then **Run on this folder**. The results go into a
+`rubraview-out` folder beside those pictures unless you type another in
+**Into**; into the pictures' own folder a name already there is never
+replaced.
 
 The run gets a window of its own and is a separate program: you can go on
 reading, close the viewer, or have it hang, and the conversion carries on.
@@ -537,6 +558,16 @@ waits for a key before it closes.
 | `--name={name}_thumb.{ext}` | What to call the results |
 | `--out=DIR` | Where to put them |
 | `--recursive` | Include subfolders |
+
+| `--resize=l1920` `--resize=s1080` `--resize=2.5mp` | The long side, the short side, megapixels |
+| `--no-enlarge`, `--linear` | Leave a smaller picture its size; resize in linear light |
+| `--crop=X,Y,W,H`, `--autocrop` | Cut to a rectangle; cut off a plain border |
+| `--auto-colour`, `--negative`, `--effect=oil:4` | Correct the colours; a negative; any effect of Edit (its name in lower case, `radial-blur`, `red-eye`) |
+| `--canvas=1920x1080,000000`, `--border=8,FFFFFF` | Centred on a canvas; a frame round it |
+| `--watermark=FILE,br,50` | A picture laid over each, at a corner (`br` `bl` `tr` `tl` `c`), at an opacity |
+| `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name |
+| `--exists=replace\|skip\|number` | A name already there: replaced (as before), left, or the next free `name-1` |
+| `--keep-dates`, `--subfolders` | The results take their pictures' dates; with `--recursive`, the same folders under `--out` |
 
 A misspelled option stops the run before anything is converted.
 
@@ -909,6 +940,15 @@ it was: the place in degrees and minutes, the same in decimal degrees for a
 map's search box, the altitude, the direction the camera faced and the GPS
 time. A picture without any says so. `I` again or `Esc` closes it.
 
+For a picture it also gives the aspect ratio, the size it prints at
+its DPI, how much memory it takes on screen, how long it took to decode
+and how many different colours it has (up to 24 megapixels); and the
+rest of what a camera writes — the flash in full, the widest aperture and
+the lens's range, the light source, contrast, saturation and sharpness,
+the subject's distance, the owner, a comment, the EXIF version — and an
+IPTC block's title, headline, caption, keywords, credit, place and
+copyright, as photo agencies write them.
+
 It also says all the file tells of how it was made. For a film or a song,
 each stream in the file has its own block: the codec in words, its profile
 and level, the frame and the shape of a pixel, the frame rate, whether it
@@ -936,6 +976,14 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 `Alt` + arrows move it.
 
 ## Settings
+
+
+Rest the pointer on a setting's name and a fuller explanation comes up
+for the harder ones. **Defaults** puts back every setting, **this page**
+only the page you are on, **this setting** only the one with the focus;
+**Revert** undoes any of them. **Subtitle font** and the text viewer's
+**Font** open Windows' own font dialog: pick a face (its size has a
+setting of its own).
 
 `F10` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says
@@ -965,7 +1013,8 @@ filename code page, the memory cap). Some worth knowing:
   `B` changes), the gap between two pages, how much one zoom step is, and
   whether a narrow window shows one page at a time.
 - **Viewer** also has **Turning a page** — a cut, a fade (as it comes), a
-  slide or a zoom — and **Enlarge by whole steps only**: a small drawing
+  slide, a zoom, or a dissolve (the new page laid over the old one, only
+  its opacity rising, so nothing dims in between) — and **Enlarge by whole steps only**: a small drawing
   is then shown at twice, three times ... its size, never in between, so
   every pixel of it is as wide as the next.
 - **Files** — **Sort by** orders a folder (by name as text, as Explorer
@@ -1148,6 +1197,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
 | `F7` | Move the file on screen to the folder set for it |
 | `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |

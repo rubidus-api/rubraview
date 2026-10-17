@@ -342,3 +342,26 @@ size_t rubraview_keymap_conflicts(const rubraview_keymap_t *keymap,
     }
     return found;
 }
+
+static void reset_where(rubraview_settings_t *settings, int32_t tab, const rubraview_setting_def_t *only) {
+    if (!settings) return;
+    size_t count = 0;
+    const rubraview_setting_def_t *schema = rubraview_settings_schema(&count);
+    rubraview_settings_t fresh = rubraview_settings_defaults();
+    for (size_t i = 0; i < count && i < RUBRAVIEW_SETTINGS_MAX; ++i) {
+        const rubraview_setting_def_t *d = &schema[i];
+        bool mine = only ? (d == only || (only->pair != 0 && d == &schema[only->pair])) : (int32_t)d->tab == tab;
+        if (!mine) continue;
+        if (d->type == RUBRAVIEW_SETTING_PATH) rubraview_settings_set_text(settings, d->section, d->key, fresh.texts[i]);
+        else rubraview_settings_set(settings, d->section, d->key, fresh.values[i]);
+    }
+}
+
+void rubraview_settings_reset_page(rubraview_settings_t *settings, rubraview_settings_tab_t tab) {
+    reset_where(settings, (int32_t)tab, NULL);
+}
+
+void rubraview_settings_reset_one(rubraview_settings_t *settings, u8str_t section, u8str_t key) {
+    const rubraview_setting_def_t *d = rubraview_settings_find(section, key);
+    if (d) reset_where(settings, -1, d);
+}

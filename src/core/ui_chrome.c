@@ -318,6 +318,11 @@ void rubraview_transition_poses(rubraview_transition_kind_t kind, double progres
             in.scale = 0.92 + 0.08 * p;
             in.opacity = p;
             break;
+        case RUBRAVIEW_TRANSITION_DISSOLVE:
+            /* The old page stays whole underneath: nothing dims between the two. */
+            out.opacity = p < 1.0 ? 1.0 : 0.0;
+            in.opacity = p;
+            break;
         case RUBRAVIEW_TRANSITION_CUT:
         default:
             break;

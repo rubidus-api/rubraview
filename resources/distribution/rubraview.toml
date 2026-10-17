@@ -23,6 +23,9 @@ ui = "installdir"
 [define]
 VERSION = "0.0.0"
 STAGE = "../../dist/rubraview-v0.0.0"
+# The Store's identity, given by scripts/package.sh from RUBRAVIEW_STORE_IDENTITY (never written here).
+STORE_NAME = ""
+STORE_PUBLISHER = ""
 
 [ui]
 languages = ["ko"]
@@ -89,3 +92,21 @@ target = "file:App"
 run = "file:App"
 do = "--register-shell --all-users --setup"
 undo = "--unregister-shell --all-users --setup"
+
+# RV-124 (owner, 2026-10-17): the Store's copy already on this computer is
+# asked about before a first install - two copies mean two of everything in
+# Explorer. Yes installs anyway; the program then leaves Windows 11's menu to
+# the Store's (D-154).
+[other-copy.Store]
+msix = "$(STORE_NAME)"
+publisher = "$(STORE_PUBLISHER)"
+action = "warn"
+
+# The program writes this key while its Windows 11 menu is registered, and the
+# Store's copy hides its own items while it is there (hide-when). The program
+# deletes it when it unregisters; this deletes it at removal if it did not.
+[registry.MenuMarkerGone]
+root = "HKLM"
+key = "Software\\Rubraview\\Win11Menu"
+remove = true
+on = "uninstall"

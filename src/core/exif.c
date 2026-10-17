@@ -1,4 +1,6 @@
 #include "rubraview/exif.h"
+#include "rubraview/utf8.h"
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -285,6 +287,72 @@ static bool entry_degrees(const tiff_ctx_t *t, size_t entry, double *out) {
     return true;
 }
 
+/* ExifVersion: four ASCII digits, "0231" -> "2.31". */
+static void entry_version(const tiff_ctx_t *t, size_t entry, char *dst, size_t cap) {
+    uint16_t type; uint32_t count; size_t at, bytes;
+    dst[0] = '\0';
+    if (!entry_value(t, entry, &type, &count, &at, &bytes) || bytes != 4 || cap < 6) return;
+    const uint8_t *d = t->base + at;
+    for (int i = 0; i < 4; ++i) if (d[i] < '0' || d[i] > '9') return;
+    int major = (d[0] - '0') * 10 + (d[1] - '0');
+    snprintf(dst, cap, "%d.%c%c", major, d[2], d[3]);
+    if (d[3] == '0' && dst[strlen(dst) - 2] != '.') dst[strlen(dst) - 1] = '\0';   /* "2.30" -> "2.3" */
+}
+
+/* Bytes as UTF-8 text in dst: kept when they are UTF-8, read as Latin-1
+   when not; control characters become spaces, the end trimmed. */
+static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
+    size_t pos = 0;
+    if (cap == 0) return;
+    while (n > 0 && s[n - 1] == 0) --n;
+    bool utf8 = rubraview_utf8_validate((u8str_t){ (const char*)s, n });
+    for (size_t i = 0; i < n;) {
+        uint32_t cp;
+        size_t used = 1;
+        if (utf8) cp = rubraview_utf8_decode(s + i, n - i, &used);
+        else cp = s[i];
+        if (cp == 0) break;
+        if (cp < 0x20 || cp == 0x7F) cp = ' ';
+        if (rubraview_utf8_encode(cp, (uint8_t*)dst, cap - 1, &pos) == 0) break;
+        i += used;
+    }
+    while (pos > 0 && dst[pos - 1] == ' ') --pos;
+    size_t lead = 0;
+    while (lead < pos && dst[lead] == ' ') ++lead;
+    if (lead) memmove(dst, dst + lead, pos - lead);
+    dst[pos - lead] = '\0';
+}
+
+/* UserComment: an 8-byte charset name, then the text. UNICODE is UTF-16
+   in the block's byte order; ASCII and an undefined charset are read as
+   UTF-8 or Latin-1; JIS is left out (no JIS table here). */
+static void entry_comment(const tiff_ctx_t *t, size_t entry, char *dst, size_t cap) {
+    uint16_t type; uint32_t count; size_t at, bytes;
+    dst[0] = '\0';
+    if (!entry_value(t, entry, &type, &count, &at, &bytes) || bytes <= 8) return;
+    const uint8_t *head = t->base + at, *d = head + 8;
+    size_t n = bytes - 8;
+    if (memcmp(head, "JIS", 3) == 0) return;
+    if (memcmp(head, "UNICODE", 7) == 0) {
+        size_t pos = 0;
+        for (size_t i = 0; i + 1 < n;) {
+            uint32_t u = t->be ? ((uint32_t)d[i] << 8 | d[i + 1]) : ((uint32_t)d[i + 1] << 8 | d[i]);
+            i += 2;
+            if (u == 0) break;
+            if (u >= 0xD800 && u < 0xDC00 && i + 1 < n) {
+                uint32_t lo = t->be ? ((uint32_t)d[i] << 8 | d[i + 1]) : ((uint32_t)d[i + 1] << 8 | d[i]);
+                if (lo >= 0xDC00 && lo < 0xE000) { u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00); i += 2; }
+            }
+            if (u < 0x20) u = ' ';
+            if (rubraview_utf8_encode(u, (uint8_t*)dst, cap - 1, &pos) == 0) break;
+        }
+        while (pos > 0 && dst[pos - 1] == ' ') --pos;
+        dst[pos] = '\0';
+        return;
+    }
+    text_utf8(d, n, dst, cap);
+}
+
 enum { IFD_MAIN, IFD_EXIF, IFD_GPS };
 
 static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_info_t *x,
@@ -313,6 +381,9 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 0x010E: entry_text(t, e, x->description, sizeof(x->description)); break;
                 case 0x013B: entry_text(t, e, x->artist, sizeof(x->artist)); break;
                 case 0x8298: entry_text(t, e, x->copyright, sizeof(x->copyright)); break;
+                case 0x011A: if (entry_rational(t, e, 0, &v, NULL, NULL) && v > 0) { x->has_resolution = true; x->x_resolution = v; } break;
+                case 0x011B: if (entry_rational(t, e, 0, &v, NULL, NULL) && v > 0) x->y_resolution = v; break;
+                case 0x0128: x->resolution_unit = (uint16_t)entry_uint(t, e); break;
                 case 0x8769: if (exif_ifd) *exif_ifd = entry_uint(t, e); break;
                 case 0x8825: if (gps_ifd) *gps_ifd = entry_uint(t, e); break;
                 default: break;
@@ -343,6 +414,33 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 0xA406: x->scene_type = (uint16_t)(entry_uint(t, e) + 1); break;
                 case 0xA001: x->color_space = (uint16_t)entry_uint(t, e); break;
                 case 0xA404: if (entry_rational(t, e, 0, &v, NULL, NULL) && v > 0) { x->has_digital_zoom = true; x->digital_zoom = v; } break;
+                case 0x9000: entry_version(t, e, x->exif_version, sizeof(x->exif_version)); break;
+                case 0x9205:   /* APEX: f = 2^(v/2) */
+                    if (entry_rational(t, e, 0, &v, NULL, NULL) && v >= 0 && v < 32) { x->has_max_aperture = true; x->max_aperture = pow(2.0, v / 2.0); }
+                    break;
+                case 0x9206:
+                    if (entry_rational(t, e, 0, &v, &num, &den)) { x->has_subject_distance = true; x->subject_distance_m = num == 0xFFFFFFFFu ? -1.0 : v; }
+                    break;
+                case 0x9203: if (entry_rational(t, e, 0, &v, NULL, NULL)) { x->has_brightness = true; x->brightness = v; } break;
+                case 0x9208: x->light_source = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA408: x->contrast = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA409: x->saturation = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA40A: x->sharpness = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA407: x->gain_control = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA40C: x->distance_range = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA401: x->custom_rendered = (uint16_t)(entry_uint(t, e) + 1); break;
+                case 0xA217: x->sensing_method = (uint16_t)entry_uint(t, e); break;
+                case 0xA300: x->file_source = (uint16_t)entry_uint(t, e); break;
+                case 0xA420: entry_text(t, e, x->unique_id, sizeof(x->unique_id)); break;
+                case 0xA430: entry_text(t, e, x->owner, sizeof(x->owner)); break;
+                case 0x9286: entry_comment(t, e, x->user_comment, sizeof(x->user_comment)); break;
+                case 0xA432:
+                    x->has_lens_spec = entry_rational(t, e, 0, &x->lens_spec[0], NULL, NULL);
+                    if (x->has_lens_spec) {
+                        for (uint32_t k = 1; k < 4; ++k) if (!entry_rational(t, e, k, &x->lens_spec[k], NULL, NULL)) x->lens_spec[k] = 0;
+                        if (x->lens_spec[0] <= 0) x->has_lens_spec = false;
+                    }
+                    break;
                 default: break;
             }
         } else {
@@ -368,6 +466,7 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                 case 16: entry_text(t, e, ref, sizeof(ref)); x->direction_ref = ref[0]; break;
                 case 17: if (entry_rational(t, e, 0, &v, NULL, NULL) && v >= 0 && v <= 360) { x->has_direction = true; x->direction = v; } break;
                 case 29: entry_date(t, e, gps_day, sizeof(gps_day)); break;
+                case 18: entry_text(t, e, x->gps_datum, sizeof(x->gps_datum)); break;
                 default: break;
             }
         }
@@ -471,6 +570,132 @@ bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t
     for (size_t i = 0; i + 10 <= window; ++i) {
         if (starts_exif(data + i, window - i) && (data[i + 6] == 'I' || data[i + 6] == 'M')) {
             return parse_tiff_block(data + i + 6, size - i - 6, out);
+        }
+    }
+    return false;
+}
+
+/* ---- IPTC (RV-130) ---- */
+
+/* One record-2 dataset into its field; keywords are joined. */
+static void iptc_put(rubraview_iptc_info_t *x, uint8_t dataset, const uint8_t *d, size_t n) {
+    char text[512];
+    text_utf8(d, n, text, sizeof(text));
+    if (!text[0]) return;
+    char *dst = NULL;
+    size_t cap = 0;
+#define IPTC_FIELD(id, f) case id: dst = x->f; cap = sizeof(x->f); break
+    switch (dataset) {
+        IPTC_FIELD(5, title);       IPTC_FIELD(15, category);    IPTC_FIELD(40, instructions);
+        IPTC_FIELD(80, byline);     IPTC_FIELD(85, byline_title); IPTC_FIELD(90, city);
+        IPTC_FIELD(92, sublocation); IPTC_FIELD(95, state);      IPTC_FIELD(100, country_code);
+        IPTC_FIELD(101, country);   IPTC_FIELD(103, job_id);     IPTC_FIELD(105, headline);
+        IPTC_FIELD(110, credit);    IPTC_FIELD(115, source);     IPTC_FIELD(116, copyright);
+        IPTC_FIELD(120, caption);   IPTC_FIELD(122, writer);
+        case 25: {   /* keywords repeat: "a, b, c" */
+            size_t have = strlen(x->keywords), add = strlen(text);
+            if (have + (have ? 2 : 0) + add + 1 > sizeof(x->keywords)) return;
+            if (have) { memcpy(x->keywords + have, ", ", 2); have += 2; }
+            memcpy(x->keywords + have, text, add + 1);
+            return;
+        }
+        case 55:     /* CCYYMMDD */
+            if (strlen(text) == 8) snprintf(x->date_created, sizeof(x->date_created), "%.4s-%.2s-%.2s", text, text + 4, text + 6);
+            return;
+        case 60: {   /* HHMMSS and a zone: after the date */
+            size_t have = strlen(x->date_created);
+            if (have == 10 && strlen(text) >= 6) snprintf(x->date_created + have, sizeof(x->date_created) - have, " %.2s:%.2s:%.2s", text, text + 2, text + 4);
+            return;
+        }
+        default: return;
+    }
+#undef IPTC_FIELD
+    snprintf(dst, cap, "%s", text);
+}
+
+/* The IIM datasets: 0x1C, record, dataset, length (extended when its top bit is set). */
+static bool iptc_parse(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
+    size_t pos = 0;
+    bool any = false;
+    while (pos + 5 <= n && d[pos] == 0x1C) {
+        uint8_t record = d[pos + 1], dataset = d[pos + 2];
+        size_t len = rd_be16(d + pos + 3);
+        pos += 5;
+        if (len & 0x8000u) {
+            size_t k = len & 0x7FFFu;
+            if (k == 0 || k > 4 || k > n - pos) return any;
+            len = 0;
+            for (size_t i = 0; i < k; ++i) len = (len << 8) | d[pos + i];
+            pos += k;
+        }
+        if (len > n - pos) return any;
+        if (record == 2 && dataset != 0) { iptc_put(x, dataset, d + pos, len); any = true; }
+        pos += len;
+    }
+    return any;
+}
+
+/* Photoshop's image resources ("8BIM", id, a Pascal name padded to even,
+   size, data padded to even): the IIM is resource 0x0404. */
+static bool iptc_from_resources(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
+    size_t pos = 0;
+    while (pos + 12 <= n && memcmp(d + pos, "8BIM", 4) == 0) {
+        uint16_t id = rd_be16(d + pos + 4);
+        size_t name = 1u + d[pos + 6];
+        name += name & 1u;
+        size_t at = pos + 6 + name;
+        if (at + 4 > n) return false;
+        size_t size = rd_be32(d + at);
+        at += 4;
+        if (size > n - at) return false;
+        if (id == 0x0404) return iptc_parse(d + at, size, x);
+        pos = at + size + (size & 1u);
+    }
+    return false;
+}
+
+/* A TIFF IFD0 entry's bytes: IPTC (33723) or Photoshop's resources (34377). */
+static bool tiff_tag_bytes(const uint8_t *base, size_t len, uint16_t want, const uint8_t **out, size_t *out_len) {
+    if (len < 8) return false;
+    tiff_ctx_t t = { .base = base, .len = len, .be = base[0] == 'M' };
+    uint32_t ifd0;
+    uint16_t n;
+    if (!tiff_read_u32(base, len, 4, t.be, &ifd0) || ifd0 < 8 || !tiff_read_u16(base, len, ifd0, t.be, &n) || n > 1000) return false;
+    for (uint16_t i = 0; i < n; ++i) {
+        size_t e = (size_t)ifd0 + 2 + (size_t)i * 12;
+        uint16_t tag, type; uint32_t count; size_t at, bytes;
+        if (!tiff_read_u16(base, len, e, t.be, &tag)) return false;
+        if (tag == want && entry_value(&t, e, &type, &count, &at, &bytes)) { *out = base + at; *out_len = bytes; return true; }
+    }
+    return false;
+}
+
+bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    if (!data || size < 8) return false;
+    if (data[0] == 0xFF && data[1] == JPEG_MARKER_SOI) {
+        jpeg_marker_iter_t it = { .data = data, .size = size, .pos = 2 };
+        static const char PS[] = "Photoshop 3.0";
+        for (;;) {
+            jpeg_marker_t m = jpeg_next_marker(&it);
+            if (!m.ok || m.code == JPEG_MARKER_SOS || m.code == JPEG_MARKER_EOI) break;
+            if (m.code == JPEG_MARKER_APP13 && m.has_length && m.payload_len > sizeof(PS) &&
+                memcmp(data + m.payload_start, PS, sizeof(PS)) == 0 &&
+                iptc_from_resources(data + m.payload_start + sizeof(PS), m.payload_len - sizeof(PS), out)) {
+                out->found = true;
+                return true;
+            }
+        }
+        return false;
+    }
+    if ((data[0] == 'I' && data[1] == 'I' && data[2] == 42 && data[3] == 0) ||
+        (data[0] == 'M' && data[1] == 'M' && data[2] == 0 && data[3] == 42)) {
+        const uint8_t *b; size_t n;
+        if ((tiff_tag_bytes(data, size, 0x83BB, &b, &n) && iptc_parse(b, n, out)) ||
+            (tiff_tag_bytes(data, size, 0x8649, &b, &n) && iptc_from_resources(b, n, out))) {
+            out->found = true;
+            return true;
         }
     }
     return false;

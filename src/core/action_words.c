@@ -159,6 +159,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "text_top", "Text: to its start" },
     { "text_wrap", "Text: wrap lines to the window, or not" },
     { "toggle_always_on_top", "Always on top of other windows" },
+    { "toggle_classify", "Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once" },
     { "toggle_file_list", "The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one" },
     { "toggle_filmstrip", "Filmstrip" },
     { "toggle_fit_lock", "Keep the fit for the next files" },

@@ -41,6 +41,8 @@ typedef struct rubraview_edit_params {
     uint8_t black_point;  /* levels, 0 .. 254 */
     uint8_t white_point;  /* levels, 1 .. 255; always above black_point */
     float   midtone_gamma;/* 0.1 .. 10.0, 1.0 neutral */
+    /* The owner's colour corrections (2026-10-17): each channel moved on its own. */
+    float   balance_r, balance_g, balance_b;   /* -100 .. +100 levels-ish, 0 neutral */
 } rubraview_edit_params_t;
 
 typedef enum rubraview_edit_channel {
@@ -87,6 +89,10 @@ typedef struct rubraview_edit_session {
     int32_t resize_width, resize_height;
     bool    resize_lock_aspect;
     rubraview_resample_filter_t resize_filter;
+    /* RV-128 (owner, 2026-10-17: beyond IrfanView's resize) */
+    bool    resize_linear;       /* resampled in linear light (gamma-correct) */
+    float   resize_sharpen;      /* 0 = off, else 1 .. 100: an unsharp mask after a reduction */
+    double  resize_dpi;          /* for sizes typed in cm, mm or inches; 0 = 300 */
 
     /* §3.13's spatial filters, applied on commit in this order. */
     float blur_sigma;        /* 0 = off, else 0.5 .. 50.0 */
@@ -217,6 +223,33 @@ bool rubraview_edit_resize_percent(const rubraview_edit_session_t *session, doub
 bool rubraview_edit_resize_pair(const rubraview_edit_session_t *session, int32_t typed, bool from_width,
                                 int32_t *out_width, int32_t *out_height);
 
+/* RV-128: sizes by name. Standard sizes turn to the picture's way (a
+   portrait picture fits 1080 x 1920); with the shape kept the picture fits
+   inside, otherwise it is stretched to the size. */
+typedef enum rubraview_resize_preset {
+    RUBRAVIEW_RESIZE_PRESET_NONE = 0,
+    RUBRAVIEW_RESIZE_PRESET_HALF, RUBRAVIEW_RESIZE_PRESET_DOUBLE, RUBRAVIEW_RESIZE_PRESET_SCREEN,
+    RUBRAVIEW_RESIZE_PRESET_640, RUBRAVIEW_RESIZE_PRESET_800, RUBRAVIEW_RESIZE_PRESET_1024,
+    RUBRAVIEW_RESIZE_PRESET_720P, RUBRAVIEW_RESIZE_PRESET_1080P, RUBRAVIEW_RESIZE_PRESET_1440P,
+    RUBRAVIEW_RESIZE_PRESET_4K, RUBRAVIEW_RESIZE_PRESET_8K,
+    RUBRAVIEW_RESIZE_PRESET_LONG_1024, RUBRAVIEW_RESIZE_PRESET_LONG_2048,
+    RUBRAVIEW_RESIZE_PRESET_MP_2, RUBRAVIEW_RESIZE_PRESET_MP_8, RUBRAVIEW_RESIZE_PRESET_MP_12,
+    RUBRAVIEW_RESIZE_PRESET_COUNT
+} rubraview_resize_preset_t;
+
+/** The size a preset gives a `width` x `height` picture; `screen_*` for SCREEN. False for none or a bad size. */
+bool rubraview_resize_preset_size(rubraview_resize_preset_t preset, int32_t width, int32_t height,
+                                  int32_t screen_width, int32_t screen_height, bool keep_shape,
+                                  int32_t *out_width, int32_t *out_height);
+
+/**
+ * RV-128: a length as typed into the size box — "1200", "1200px", "50%"
+ * (of `whole_px`), "21cm", "210 mm", "8.5in" or 8.5" at `dpi` (0 = 300);
+ * a comma works as the decimal point. False when it is not a length, or
+ * gives under 1 or over 65535 pixels.
+ */
+bool rubraview_resize_parse_length(u8str_t text, int32_t whole_px, double dpi, int32_t *out_px);
+
 /* ---- preview ---- */
 
 /**
@@ -246,6 +279,85 @@ void rubraview_edit_preview_size(const rubraview_edit_session_t *session,
 rubraview_pixbuf_t rubraview_edit_commit(proven_arena_t *arena,
                                          const rubraview_edit_session_t *session,
                                          const rubraview_pixbuf_t *src);
+
+/**
+ * The owner's automatic colour correction (2026-10-17; written here, MIT):
+ * each channel stretched between its 0.5th and 99.5th percentile (which
+ * takes a colour cast out with the haze), then the three channels' means
+ * drawn halfway together (the grey-world assumption). Written into the
+ * session's red, green and blue curves and its colour balance, so it can
+ * be seen, changed and undone like any other value.
+ */
+void rubraview_edit_auto_colour(rubraview_edit_session_t *session, const rubraview_pixbuf_t *image);
+
+/* ---- the owner's edit, 2026-10-17: steps on a selection ---- */
+
+/* An area of the picture an effect is put on: the whole of it, or a
+   rectangle or an ellipse, its edge hard or softened over `feather` pixels. */
+typedef enum rubraview_area_shape {
+    RUBRAVIEW_AREA_ALL = 0,
+    RUBRAVIEW_AREA_RECT,
+    RUBRAVIEW_AREA_ELLIPSE,
+} rubraview_area_shape_t;
+
+typedef struct rubraview_edit_area {
+    rubraview_area_shape_t shape;
+    rubraview_crop_rect_t  rect;      /* in the picture as the steps before left it */
+    int32_t                feather;   /* 0: a hard edge */
+} rubraview_edit_area_t;
+
+typedef enum rubraview_edit_step_kind {
+    RUBRAVIEW_STEP_ADJUST = 0,   /* the values' light, colour, levels, curves, blur and sharpening, on the area */
+    RUBRAVIEW_STEP_CROP,         /* to the area's rectangle */
+    RUBRAVIEW_STEP_RESIZE,       /* the whole picture to values.resize_width x resize_height */
+    RUBRAVIEW_STEP_EFFECT,       /* `effect` at `amount` (effects.h), on the area */
+} rubraview_edit_step_kind_t;
+
+typedef struct rubraview_edit_step {
+    rubraview_edit_step_kind_t kind;
+    rubraview_edit_area_t      area;
+    rubraview_edit_session_t   values;   /* what the step does (its crop and resize fields unused by ADJUST) */
+    int32_t                    effect;   /* EFFECT: a rubraview_effect_t */
+    double                     amount;
+} rubraview_edit_step_t;
+
+#define RUBRAVIEW_EDIT_MAX_STEPS 64
+
+/* The steps made, and how many of them are in force: undo moves `cursor`
+   back, redo forward, a new step drops those after it. */
+typedef struct rubraview_edit_steps {
+    rubraview_edit_step_t steps[RUBRAVIEW_EDIT_MAX_STEPS];
+    size_t  count, cursor;
+    int32_t width, height;   /* the picture before any step */
+} rubraview_edit_steps_t;
+
+void rubraview_edit_steps_begin(rubraview_edit_steps_t *steps, int32_t width, int32_t height);
+/** A new step after the ones in force; false when it does nothing or there is no room (the oldest is then kept). */
+bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step);
+bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps);
+bool rubraview_edit_steps_redo(rubraview_edit_steps_t *steps);
+/** To `cursor` steps in force (0 is the picture as it was); false past the end. */
+bool rubraview_edit_steps_go(rubraview_edit_steps_t *steps, size_t cursor);
+void rubraview_edit_steps_reset(rubraview_edit_steps_t *steps);
+/** The picture's size after the first `upto` steps. */
+void rubraview_edit_steps_size(const rubraview_edit_steps_t *steps, size_t upto, int32_t *width, int32_t *height);
+
+/** How much of an effect a pixel takes, 0..1, for an area (pixel centres). */
+float rubraview_edit_area_weight(const rubraview_edit_area_t *area, int32_t x, int32_t y);
+
+/**
+ * One step on `src` (RGBA8 or BGRA8), the result in `arena`. `scale` is
+ * how big `src` is against the picture the step was made on (1 for the
+ * picture itself, less for the preview): the area, the crop, the resize
+ * and the blur and sharpening radii are scaled by it.
+ */
+rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubraview_edit_step_t *step,
+                                             const rubraview_pixbuf_t *src, double scale);
+/** The steps in force, in order. */
+rubraview_pixbuf_t rubraview_edit_steps_apply(proven_arena_t *arena, const rubraview_edit_steps_t *steps,
+                                              const rubraview_pixbuf_t *src, double scale);
+/** Whether a step's values change anything. */
+bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step);
 
 #ifdef __cplusplus
 }

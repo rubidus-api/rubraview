@@ -158,6 +158,7 @@ typedef enum rubraview_transition_kind {
     RUBRAVIEW_TRANSITION_SLIDE_LEFT,
     RUBRAVIEW_TRANSITION_SLIDE_RIGHT,
     RUBRAVIEW_TRANSITION_ZOOM_FADE,
+    RUBRAVIEW_TRANSITION_DISSOLVE,   /* the new page laid over the old, only its opacity rising (owner, 2026-10-17) */
 } rubraview_transition_kind_t;
 
 typedef struct rubraview_transition {

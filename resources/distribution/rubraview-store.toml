@@ -261,6 +261,11 @@ target = "file:App"
 # every selected file, and --whole: nothing more is coming. Windows 11 puts
 # a package's items for one kind of file under one entry, the product's name.
 # The IDs sort in the menu's order: rubrapack lists the verbs by ID.
+# A selection too long for one command line (32K characters) goes in a
+# list file instead (rubrapack 0.48.0 `list`, RV-124): the menu DLL writes
+# one path a line under %TEMP%, and --paths-temp has the program delete it.
+# hide-when: while the installer's copy has its own Windows 11 menu (the
+# program writes that value then), these items step aside (RV-124).
 
 [menu.M1Open]
 on = [
@@ -274,6 +279,8 @@ text-ko = "열기"
 target = "file:App"
 args = "--open --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M2NewWindow]
 on = [
@@ -287,6 +294,8 @@ text-ko = "새 창에서 열기"
 target = "file:App"
 args = "--new-window --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M3OpenOnly]
 on = [
@@ -299,6 +308,8 @@ text-ko = "이것만 열기"
 target = "file:App"
 args = "--open-only --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M4Add]
 on = [
@@ -311,6 +322,8 @@ text-ko = "재생목록에 넣기"
 target = "file:App"
 args = "--add --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M5Browse]
 on = [
@@ -321,6 +334,7 @@ text-ko = "압축 파일 내부 보기"
 target = "file:App"
 args = "--browse --whole %*"
 multi = "single"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M6Convert]
 on = [
@@ -332,6 +346,8 @@ text-ko = "변환..."
 target = "file:App"
 args = "--convert --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 
 [menu.M7Print]
 on = [
@@ -343,3 +359,5 @@ text-ko = "인쇄..."
 target = "file:App"
 args = "--print --whole %*"
 multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"

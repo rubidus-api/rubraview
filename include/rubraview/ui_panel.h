@@ -43,7 +43,7 @@ typedef struct rubraview_panel_row {
     bool    enabled;
 } rubraview_panel_row_t;
 
-#define RUBRAVIEW_PANEL_MAX_ROWS 32
+#define RUBRAVIEW_PANEL_MAX_ROWS 64
 
 typedef struct rubraview_panel {
     u8str_t title;
@@ -58,6 +58,13 @@ typedef struct rubraview_panel {
     int32_t active_row;          /* the row being dragged, or -1 */
     int32_t hover_row;
     bool    open;
+    /* The owner's edit (2026-10-17): moved by its title, scrolled when taller than the window. */
+    bool    placed;              /* moved by the reader: `place_x/y` is where its top-left goes */
+    double  place_x, place_y;
+    bool    moving;              /* its title is held */
+    double  grab_x, grab_y;      /* where in the panel it was taken */
+    double  scroll;              /* how far its rows are scrolled up */
+    double  content_height;      /* its rows, all of them */
 } rubraview_panel_t;
 
 /**
@@ -125,6 +132,14 @@ int32_t rubraview_panel_find(const rubraview_panel_t *panel, int32_t id);
 
 /** Set a row's value from outside, clamped and stepped like a drag would be. */
 void rubraview_panel_set_value(rubraview_panel_t *panel, int32_t id, double value);
+
+/** The title row, less its X: where a press takes the panel to move it. */
+bool rubraview_panel_title_hit(const rubraview_panel_t *panel, double px, double py);
+/** Take it by the title at (px, py); move it there; let it go. */
+void rubraview_panel_move_begin(rubraview_panel_t *panel, double px, double py);
+void rubraview_panel_move_to(rubraview_panel_t *panel, double px, double py, double window_width, double window_height);
+/** Its rows scrolled by `dy` pixels (down for a positive one), kept within them. */
+void rubraview_panel_scroll_by(rubraview_panel_t *panel, double dy);
 
 #ifdef __cplusplus
 }
