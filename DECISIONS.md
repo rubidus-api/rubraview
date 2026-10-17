@@ -1455,3 +1455,10 @@ Do not store credentials, private infrastructure details, personal data, private
   - Keys in a `[text]` section consulted first on a text page; a `text` toolbox (Auto, Slower, Faster, A-, A+, Lines-, Lines+, Breaks, Indent, Word wrap, Find, Encoding) and right-click list; Settings › Text. Find reuses the typed box (`rename_is_find`).
   - The settings document holds 384 lines (was 256).
 - Consequences: no editing; files over 64 MB refused; the HKSCS rows read as Big5; a heading line with no sentence's end is joined to the paragraph after it in `paragraphs` (as the owner put it: "only when").
+
+## 2026-10-17: D-153 Windows 11's menu in the Store's package
+
+- Status: Accepted (made by the rubrapack session at the owner's request; shipped in 1.5.0).
+- Context: RV-113 (3), D-122: the Store's package had no Windows 11 right-click menu; the program's own menu DLL reads its items from a registry key the registration writes, which a package cannot use.
+- Decision: `resources/distribution/rubraview-store.toml` declares seven top-level `[menu.*]` items, M1Open to M7Print, as `MENU_ITEMS` in `src/core/shellreq.c` has them, each `on` the extensions of its kinds (`SHELL_GROUPS`), each running `<flag> --whole %*` (Browse for one file only). rubrapack puts its own `rubrapack_menu.dll` into the package (`desktop4:FileExplorerContextMenus`, a `SurrogateServer` class per item); rubraview's code is unchanged. `scripts/check-store.py` compares each item with `MENU_ITEMS` and `SHELL_GROUPS`. IDs are letters and digits only (an "_" made Windows refuse the package, 0x80080204).
+- Consequences: on the VM (Windows 11 26200, Korean, a test copy) each kind showed its own items in Korean under one entry, and Open on two pictures started one viewer with both. The real package's entry is "Rubraview", beside the MSI's own "Rubraview" sub-menu on a machine with both. Unlike rubraview's DLL, rubrapack's has no list-file fallback: a selection whose command line passes 32K characters does not start the viewer.
