@@ -13168,35 +13168,36 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
     settings_say(app, T("keys imported (Revert undoes this)"));
 }
 
-/* A copy that may take the place of an older one: written beside it under
-   another name first, so a failed copy leaves the old file whole. */
-static bool copy_over(app_state_t *app, u8str_t from, u8str_t to) {
-    u8str_t spare = rubraview_path_join(app->arena, rubraview_path_dirname(to),
-                                        rubraview_path_with_ext(app->arena, rubraview_path_basename(to), ".importing"));
-    (void)rubraview_pal_fs_delete(spare);
-    if (rubraview_pal_fs_copy(from, spare) && rubraview_pal_fs_replace(spare, to)) return true;
-    (void)rubraview_pal_fs_delete(spare);
-    return false;
-}
-
 /* Import (owner, 2026-10-17): the files copied where the program reads
    them, so nothing has to be put anywhere by hand: beside the program when
    that folder can be written (the zip), else into the settings folder's
-   `sub` (the Store's package, Program Files). 0 nothing copied, 1 beside,
-   2 the settings folder. */
+   `sub` (the Store's package, Program Files). All are copied first under
+   another name, and only when every one is there do they take their
+   names, so a copy that fails half way leaves nothing behind (RV-122).
+   0 nothing copied, 1 beside, 2 the settings folder. */
+static bool import_into(app_state_t *app, u8str_t place, const u8str_t *from, const u8str_t *names, size_t count) {
+    u8str_t to[16], spare[16];
+    if (count > 16 || place.len == 0 || !rubraview_pal_fs_make_dirs(place)) return false;
+    size_t done = 0;
+    for (; done < count; done++) {
+        to[done] = rubraview_path_join(app->arena, place, names[done]);
+        spare[done] = rubraview_path_with_ext(app->arena, to[done], ".importing");
+        (void)rubraview_pal_fs_delete(spare[done]);
+        if (!rubraview_pal_fs_copy(from[done], spare[done])) break;
+    }
+    bool whole = done == count;
+    for (size_t i = 0; i < done; i++) {
+        if (whole) whole = rubraview_pal_fs_replace(spare[i], to[i]);
+        else (void)rubraview_pal_fs_delete(spare[i]);
+    }
+    return whole;
+}
+
 static int import_files(app_state_t *app, const u8str_t *from, const u8str_t *names, size_t count, const char *sub,
                         bool beside_in_sub) {
-    u8str_t places[2] = {
-        beside_in_sub ? rubraview_path_join(app->arena, app->config_beside, cstr(sub)) : app->config_beside,
-        imported_folder(app, sub),
-    };
-    for (int p = 0; p < 2; p++) {
-        if (places[p].len == 0 || !rubraview_pal_fs_make_dirs(places[p])) continue;
-        size_t done = 0;
-        while (done < count && copy_over(app, from[done], rubraview_path_join(app->arena, places[p], names[done]))) done++;
-        if (done == count) return p + 1;
-    }
-    return 0;
+    u8str_t beside = beside_in_sub ? rubraview_path_join(app->arena, app->config_beside, cstr(sub)) : app->config_beside;
+    if (import_into(app, beside, from, names, count)) return 1;
+    return import_into(app, imported_folder(app, sub), from, names, count) ? 2 : 0;
 }
 
 static void ffmpeg_import(app_state_t *app) {
@@ -13260,6 +13261,15 @@ static void lang_import(app_state_t *app) {
         return;
     }
     int where = import_files(app, from, names, count, "lang", true);
+    /* The settings folder's lang\ is read first (lang_apply): an older pack
+       of the same name there would hide the one put beside the program. */
+    if (where == 1) {
+        u8str_t own = imported_folder(app, "lang");
+        u8str_t beside = rubraview_path_join(app->arena, app->config_beside, U8("lang"));
+        for (size_t i = 0; own.len > 0 && !rubraview_u8_eq(own, beside) && i < count; i++) {
+            if (rubraview_pal_fs_exists(rubraview_path_join(app->arena, own, names[i]))) (void)import_into(app, own, &from[i], &names[i], 1);
+        }
+    }
     snprintf(g_lang_code, sizeof(g_lang_code), "?");   /* read again, the one in use too */
     lang_apply(app);
     settings_say(app, where == 0 ? T("the language packs could not be copied")
@@ -19263,12 +19273,23 @@ static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
    rubraview what it actually does with one file. */
 static int probe_media_file(proven_arena_t *arena, u8str_t path) {
     char line[512];
+    /* Where the viewer itself would look (RV-122): the imported copy in the
+       settings folder, and the folder settings.ini names. */
+    u8str_t chosen = U8(""), exe = rubraview_pal_process_executable(arena);
+    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
+    char appdata[1024];
+    DWORD got = GetEnvironmentVariableA("APPDATA", appdata, (DWORD)sizeof(appdata));
+    rubraview_config_mode_t mode = rubraview_config_mode_for(rubraview_pal_fs_exists(rubraview_path_join(arena, beside, U8("settings.ini"))));
+    u8str_t settings = rubraview_config_path(arena, mode, beside,
+                                             got > 0 && got < sizeof(appdata) ? (u8str_t){ .ptr = appdata, .len = got } : U8("."),
+                                             U8("settings.ini"));
     u8str_t ini = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
     if (ini.len > 0) {
         rubraview_ini_doc_t doc = rubraview_ini_parse(arena, ini);
         const u8str_t *dir = rubraview_ini_get(&doc, U8("video"), U8("ffmpeg_dir"));
-        if (dir) rubraview_pal_ffmpeg_set_folders(U8(""), rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir)));
+        if (dir) chosen = rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir));
     }
+    rubraview_pal_ffmpeg_set_folders(rubraview_path_join(arena, rubraview_path_dirname(settings), U8("ffmpeg")), chosen);
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
