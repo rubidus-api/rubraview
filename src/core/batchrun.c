@@ -146,6 +146,13 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (rubraview_u8_eq_lit(arg, "--all-users")) { result.shell_all_users = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--wipe-shell")) { result.wipe_shell = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--setup")) { result.shell_setup = true; continue; }
+        if (starts_with(arg, "--menu-types=", &value)) {
+            result.shell_menu_types = rubraview_shell_selection_parse(arena, value);
+            if (result.shell_menu_types.len == 0) {
+                result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
+            }
+            continue;
+        }
         if (starts_with(arg, "--types=", &value)) {
             result.shell_types = rubraview_shell_selection_parse(arena, value);
             if (result.shell_types.len == 0) {

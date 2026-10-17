@@ -9,6 +9,11 @@ bool rubraview_pal_process_ui_language(char *buf, size_t cap) {
     return false;
 }
 
+bool rubraview_pal_process_packaged(char *family, size_t cap) {
+    if (family && cap > 0) family[0] = '\0';
+    return false;
+}
+
 u8str_t rubraview_pal_process_executable(proven_arena_t *arena) {
     (void)arena;
     return (u8str_t){0};

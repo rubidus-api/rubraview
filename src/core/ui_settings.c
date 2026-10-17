@@ -452,6 +452,26 @@ static rubraview_settings_event_t nudge(rubraview_settings_view_t *view, rubravi
     return settings->revision_total != before ? RUBRAVIEW_SEVENT_CHANGED : RUBRAVIEW_SEVENT_NONE;
 }
 
+/* RV-120: the def a row's toggle box `part` stands for: the row's own, or
+   the pair drawn as its second box. */
+static const rubraview_setting_def_t *part_def(const rubraview_settings_view_t *view, const rubraview_setting_def_t *def,
+                                               int32_t part) {
+    return def && def->pair != 0 && part == 1 ? &view->doc->defs[def->pair] : def;
+}
+
+static rubraview_settings_event_t flip(rubraview_settings_t *settings, const rubraview_setting_def_t *def) {
+    uint32_t before = settings->revision_total;
+    double value = rubraview_settings_get(settings, def->section, def->key);
+    rubraview_settings_set(settings, def->section, def->key, value > 0.5 ? 0.0 : 1.0);
+    return settings->revision_total != before ? RUBRAVIEW_SEVENT_CHANGED : RUBRAVIEW_SEVENT_NONE;
+}
+
+/* Where a row of two boxes puts its second box: ">[x] first  >[x] second". */
+static int32_t pair_column(const rubraview_settings_view_t *view, const rubraview_setting_def_t *def) {
+    const rubraview_setting_def_t *second = &view->doc->defs[def->pair];
+    return view->content_col + view->label_cols + 1 + 4 + cells_of(tr(second->unit)) + 2;
+}
+
 /* The slider's inner cells, for a number line: first column and count. */
 static void slider_cells(const rubraview_settings_view_t *view, const rubraview_setting_def_t *def,
                          int32_t *out_col, int32_t *out_cells) {
@@ -577,6 +597,12 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
             if (view->focus_line < 0) return RUBRAVIEW_SEVENT_NONE;
             const rubraview_setting_def_t *def = def_of(view, (size_t)view->focus_line);
             if (!def || def->type == RUBRAVIEW_SETTING_PATH) return RUBRAVIEW_SEVENT_NONE;
+            if (def->pair != 0) {
+                int32_t part = direction < 0 ? 0 : 1;
+                if (part == view->focus_part) return RUBRAVIEW_SEVENT_NONE;
+                view->focus_part = part;
+                return RUBRAVIEW_SEVENT_MOVED;
+            }
             return nudge(view, settings, (size_t)view->focus_line, direction, 1.0, false);
         }
         case RUBRAVIEW_SKEY_PAGE_UP:
@@ -590,6 +616,10 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
             if (view->focus_line < 0) return RUBRAVIEW_SEVENT_NONE;
             if (view->lines[view->focus_line].kind == RUBRAVIEW_LINE_ACTION) return RUBRAVIEW_SEVENT_ACTION;
             if (view->lines[view->focus_line].kind == RUBRAVIEW_LINE_TABLE) return RUBRAVIEW_SEVENT_TABLE_EDIT;
+            {
+                const rubraview_setting_def_t *def = def_of(view, (size_t)view->focus_line);
+                if (def && def->pair != 0) return flip(settings, part_def(view, def, view->focus_part));
+            }
             return nudge(view, settings, (size_t)view->focus_line, +1, 1.0, true);
     }
     return RUBRAVIEW_SEVENT_NONE;
@@ -651,6 +681,11 @@ rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view
         if (col < view->content_col + view->label_cols) return moved ? RUBRAVIEW_SEVENT_MOVED : RUBRAVIEW_SEVENT_NONE;
 
         const rubraview_setting_def_t *def = def_of(view, i);
+        if (def->pair != 0) {
+            /* The box under the pointer, and the focus goes with it. */
+            view->focus_part = col >= pair_column(view, def) - 1 ? 1 : 0;
+            return flip(settings, part_def(view, def, view->focus_part));
+        }
         switch (def->type) {
             case RUBRAVIEW_SETTING_BOOL:
                 return nudge(view, settings, i, +1, 1.0, true);
@@ -769,6 +804,21 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             int32_t room = width - view->label_cols;
             double value = settings ? rubraview_settings_get(settings, def->section, def->key) : def->default_value;
 
+            if (def->pair != 0) {
+                /* RV-120: two boxes, each with its caption; ">" before the one the keys work on. */
+                const rubraview_setting_def_t *second = &view->doc->defs[def->pair];
+                double other = settings ? rubraview_settings_get(settings, second->section, second->key) : second->default_value;
+                bool focused = view->focus_line == (int32_t)line && view->focus_button == RUBRAVIEW_BUTTON_NONE;
+                int32_t start = w.cells;
+                put_bytes(&w, focused && view->focus_part == 0 ? ">" : " ", 1, 1);
+                put_bytes(&w, value > 0.5 ? "[x] " : "[ ] ", 4, 4);
+                put_text(&w, tr(second->unit), room - (w.cells - start));
+                pad_to(&w, view->label_cols + 1 + 4 + cells_of(tr(second->unit)) + 1);
+                put_bytes(&w, focused && view->focus_part == 1 ? ">" : " ", 1, 1);
+                put_bytes(&w, other > 0.5 ? "[x] " : "[ ] ", 4, 4);
+                put_text(&w, tr(second->label), room - (w.cells - start));
+                break;
+            }
             switch (def->type) {
                 case RUBRAVIEW_SETTING_BOOL:
                     put_text(&w, value > 0.5 ? TU8("[x] on") : TU8("[ ] off"), room);

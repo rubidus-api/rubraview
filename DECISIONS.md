@@ -1429,3 +1429,15 @@ Do not store credentials, private infrastructure details, personal data, private
   - Settings › General › **Import language packs...** copies chosen packs, only ones named as a language this build offers and that read, to `lang` beside the program or the settings folder's `lang` (already read first), and reloads the language. No folder setting for packs (the owner).
   - A failed FFmpeg load is no longer final for the run: the places are looked in again when they are given again (a setting changed, Import), so Import works without a restart while none is loaded. One that loaded holds for the run.
 - Consequences: the user's own folder is trusted as the user's own settings file is. Messages about a missing FFmpeg point at Settings › Video › Import instead of "beside rubraview". A deny-write ACL on the program's own file stops the viewer opening at all (seen with 1.2.0 too); Program Files' ordinary permissions do not.
+
+## 2026-10-17: D-151 Open with and the right-click menu chosen per extension; the Store's copy knows itself
+
+- Status: Accepted (owner 2026-10-17: "다 추천대로 진행." — RFC-0005's answers, RV-113 (2)).
+- Context: each extension had one switch for both parts (D-86), and the owner asked for Open with and the menu to be chosen apart (RFC-0005 §9). The Store's copy offered a registration that writes into its package's own registry, which Explorer never reads (D-122).
+- Decision:
+  - `shell.ext_<ext>` keeps meaning Open with; `shell.menu_<ext>` is new. A settings file without it starts the menu box as that extension's Open with box was. The two switches over all stay and take their column back when off; a column with nothing ticked is that part taken back.
+  - The settings document's `pair` line puts a second toggle in the row before it (`pair shell.menu_jpg "Open with" "Right-click menu" = true wired`): a hidden setting the first one points at (`rubraview_setting_def_t.pair`). Left and right choose the box, Space ticks it, a click ticks the one under it; the box chosen stays from row to row.
+  - Registration takes two lists: the file types for the Open with column, the classic menu and Windows 11's menu (its "On" list, already read by `rubraview_menu.dll`) for the menu column. As an administrator: `--menu-types=` beside `--types=`. The menu DLL is not changed.
+  - `rubraview_pal_process_packaged` (GetCurrentPackageFamilyName): run from a package, Settings › Explorer shows **This copy** as the Store's, the Register / Remove / Remove everything rows say Windows has the types from the package instead of writing anything, and Settings › General shows the settings file in the package's LocalCache when it is there.
+  - The settings store holds 224 values (was 160): 191 now.
+- Consequences: RFC-0005 is accepted with every proposal (its §12); its text viewer (§1–§8, RV-121) is next. Windows 11's menu in the Store package (RV-113 (3)) needs no change in rubrapack, which has `[msix-extension] kind = "context-menu"`; it is still to do.

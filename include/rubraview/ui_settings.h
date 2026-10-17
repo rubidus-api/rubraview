@@ -72,6 +72,7 @@ typedef struct rubraview_settings_view {
     int32_t page;
     int32_t focus_line;              /* index into `lines`, or -1 when a button has focus */
     int32_t focus_button;            /* a button, or RUBRAVIEW_BUTTON_NONE */
+    int32_t focus_part;              /* RV-120: on a row of two boxes, 0 the first, 1 the second; kept from row to row */
     int32_t scroll;                  /* the first content row shown */
     int32_t dragging_line;           /* a number being dragged, or -1 */
     int32_t table_rows;              /* how tall a `table` line is, in rows (the key bindings) */

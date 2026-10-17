@@ -75,6 +75,13 @@ typedef struct rubraview_setting_def {
      * folders kept out of Recent, as many as wanted).
      */
     bool hidden;
+    /**
+     * RV-120: a toggle drawn as the second box of the toggle row before it
+     * (`pair` in the document): that row's def holds this one's index here
+     * (0 for none: the first def is never a pair). The pair's own `unit`
+     * holds the first box's caption, its `label` the second's.
+     */
+    uint16_t pair;
 } rubraview_setting_def_t;
 
 /** The whole schema, and how many entries it has. */
@@ -92,7 +99,7 @@ u8str_t rubraview_settings_tab_name(rubraview_settings_tab_t tab);
 
 /* ---- values ---- */
 
-#define RUBRAVIEW_SETTINGS_MAX 160
+#define RUBRAVIEW_SETTINGS_MAX 224
 
 typedef struct rubraview_settings {
     double   values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */

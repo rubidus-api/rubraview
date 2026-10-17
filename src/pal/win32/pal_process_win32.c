@@ -61,3 +61,19 @@ bool rubraview_pal_process_start(u8str_t command_line) {
     return start_process(command_line, 0);
 }
 #endif /* _WIN32 */
+
+/* GetCurrentPackageFamilyName is in kernel32 from Windows 8; looked up by
+   name so nothing more is linked. APPMODEL_ERROR_NO_PACKAGE (15700) when
+   the program was not started from a package. */
+bool rubraview_pal_process_packaged(char *family, size_t cap) {
+    typedef LONG (WINAPI *family_fn)(UINT32 *, PWSTR);
+    if (family && cap > 0) family[0] = '\0';
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    family_fn get = kernel ? (family_fn)(void *)GetProcAddress(kernel, "GetCurrentPackageFamilyName") : NULL;
+    if (!get) return false;
+    WCHAR name[256];
+    UINT32 length = 256;
+    if (get(&length, name) != ERROR_SUCCESS) return false;
+    if (family && cap > 0 && WideCharToMultiByte(CP_UTF8, 0, name, -1, family, (int)cap, NULL, NULL) <= 0) family[0] = '\0';
+    return true;
+}

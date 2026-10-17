@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.3.1.exe              the viewer, as built
-dist/rubraview-v1.3.1/                 the release bundle
-dist/rubraview-v1.3.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.4.0.exe              the viewer, as built
+dist/rubraview-v1.4.0/                 the release bundle
+dist/rubraview-v1.4.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -86,10 +86,16 @@ empties it (tap it twice: it asks first).
 
 **Settings (`F10`) › Explorer** decides what Windows is given. Two
 switches say what — **Open by double click (file types)** and
-**Right-click menu** — and under them every extension has a switch of its
-own, by kind: pictures, comics, video, music, and the plain archives (ZIP,
-7z, RAR, ALZ, EGG), which get the menu only and are never made
-Rubraview's to open by double click.
+**Right-click menu** — and under them every extension has two boxes of
+its own, **Open with** (double click) and **Right-click menu**, by kind:
+pictures, comics, video, music, and the plain archives (ZIP, 7z, RAR, ALZ,
+EGG), which get the menu only and are never made Rubraview's to open by
+double click. `←` and `→` go from one box to the other, `Space` ticks the
+one marked `>`, and the mark stays in its column going up and down.
+
+The Microsoft Store's copy says so at the top of the page (**This copy**):
+Windows has its file types from the package, so the Register and Remove
+rows do nothing there; choose Rubraview in **Open Windows' Default apps**.
 
 **Register for this user** makes Windows match the switches: what is on is
 written, and what Rubraview wrote earlier on an extension now switched off

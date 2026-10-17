@@ -33,6 +33,7 @@ typedef struct parser {
     rubraview_settings_doc_t doc;
     int32_t page;                 /* the page lines are going on; -1 before the first */
     uint32_t line;
+    bool pairing;                 /* RV-120: the setting being read is a `pair` */
 } parser_t;
 
 static bool fail(parser_t *p, const char *message) {
@@ -237,6 +238,20 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
     }
     if (!have_default && type != RUBRAVIEW_SETTING_PATH) return fail(p, "a setting needs `= default`");
 
+    if (p->pairing) {
+        /* The second box of the toggle row just before: no row of its own. */
+        if (type != RUBRAVIEW_SETTING_BOOL) return fail(p, "a pair is a toggle");
+        if (p->doc.node_count == 0) return fail(p, "a pair needs a toggle before it");
+        rubraview_settings_node_t *lead = &p->doc.nodes[p->doc.node_count - 1];
+        if (lead->kind != RUBRAVIEW_NODE_SETTING || lead->page != p->page) return fail(p, "a pair needs a toggle before it");
+        rubraview_setting_def_t *first = &p->doc.defs[lead->setting];
+        if (first->type != RUBRAVIEW_SETTING_BOOL || first->pair != 0) return fail(p, "a pair needs a toggle before it");
+        size_t index = p->doc.def_count++;
+        def.hidden = true;
+        p->doc.defs[index] = def;
+        first->pair = (uint16_t)index;
+        return true;
+    }
     size_t index = p->doc.def_count++;
     p->doc.defs[index] = def;
     if (def.hidden) return true;   /* in the schema, saved, but not a row: a table shows it */
@@ -269,6 +284,21 @@ static bool one_line(parser_t *p, u8str_t line) {
         return add_node(p, (rubraview_settings_node_t){ .kind = RUBRAVIEW_NODE_SECTION, .page = p->page, .text = t[1].text });
     }
     if (word_is(t[0], "toggle")) return setting(p, t, n, RUBRAVIEW_SETTING_BOOL);
+    if (word_is(t[0], "pair")) {
+        /* pair section.key "first box" "second box" = default [wired]: the
+           first caption goes to the pair's unit, the rest reads as a toggle. */
+        if (n < 4 || t[2].kind != TOKEN_QUOTED || t[3].kind != TOKEN_QUOTED) {
+            return fail(p, "a pair needs section.key and two \"captions\"");
+        }
+        token_t shifted[MAX_TOKENS];
+        int m = 0;
+        for (int k = 0; k < n; ++k) if (k != 2) shifted[m++] = t[k];
+        p->pairing = true;
+        bool ok = setting(p, shifted, m, RUBRAVIEW_SETTING_BOOL);
+        p->pairing = false;
+        if (ok) p->doc.defs[p->doc.def_count - 1].unit = t[2].text;
+        return ok;
+    }
     if (word_is(t[0], "choice")) return setting(p, t, n, RUBRAVIEW_SETTING_CHOICE);
     if (word_is(t[0], "int"))    return setting(p, t, n, RUBRAVIEW_SETTING_INT);
     if (word_is(t[0], "float"))  return setting(p, t, n, RUBRAVIEW_SETTING_FLOAT);

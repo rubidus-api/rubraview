@@ -24,6 +24,13 @@ bool rubraview_pal_process_ui_language(char *buf, size_t cap);
 u8str_t rubraview_pal_process_executable(proven_arena_t *arena);
 
 /**
+ * RV-113 (2): whether this copy runs from an MSIX package (the Microsoft
+ * Store's). Its family name ("Publisher.Name_hash") goes into `family`
+ * when there is room; "" otherwise.
+ */
+bool rubraview_pal_process_packaged(char *family, size_t cap);
+
+/**
  * Start `command_line` as a separate process with a console window of its
  * own, not waited for. The first token must be the executable, quoted if
  * it holds spaces. False when the process could not be started.

@@ -51,6 +51,7 @@ typedef struct rubraview_cli_result {
     bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
     bool                shell_setup;       /* --setup: run by the installer (D-90): see rubraview_shell_setup_exit */
     u8str_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */
+    u8str_t             shell_menu_types;  /* --menu-types=...: the menu's own, when it differs (RV-120); empty: as --types */
     bool                shell_no_types;    /* --no-types: leave the file types (double click) alone */
     bool                shell_no_menu;     /* --no-menu: leave the right-click menu alone */
     bool                shell_remove_types; /* --remove-types: take the file types back while registering the rest */

@@ -861,6 +861,8 @@ typedef struct app_state {
     bool                     share_failed;     /* the file could not be written: not tried again until something changes */
     u8str_t                  settings_path;
     u8str_t                  config_beside;   /* the executable's own folder: portable mode's home */
+    bool                     packaged;        /* RV-113 (2): run from the Store's MSIX */
+    char                     package_family[160];
     u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
        from the settings document. */
@@ -1087,6 +1089,7 @@ static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
 static void skip_dirs_take_old(app_state_t *app);
+static void shell_menu_take_old(app_state_t *app, u8str_t text);
 static void target_begin(app_state_t *app, bool moving, bool from_picker);
 static void target_commit(app_state_t *app);
 static void target_browse(app_state_t *app);
@@ -12551,6 +12554,7 @@ static void settings_read_file(app_state_t *app) {
     app->config_mode = rubraview_config_mode_for(portable_ini.len > 0 &&
                                                  rubraview_pal_fs_exists(portable_ini));
     app->config_beside = beside;
+    app->packaged = rubraview_pal_process_packaged(app->package_family, sizeof(app->package_family));
 
     u8str_t appdata = U8(".");
 #ifdef _WIN32
@@ -12567,6 +12571,7 @@ static void settings_read_file(app_state_t *app) {
 
     u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
+    shell_menu_take_old(app, text);
     app->settings_saved = app->settings;
     skip_dirs_take_old(app);
 }
@@ -12584,11 +12589,29 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
     app_state_t *app = (app_state_t*)user;
     int n = 0;
     if (rubraview_u8_eq_lit(source, "config.path")) {
-        n = snprintf(buffer, capacity, "%.*s%s", (int)app->settings_path.len, app->settings_path.ptr,
+        u8str_t shown = app->settings_path;
+        char real[1024];
+        if (app->packaged && app->package_family[0]) {
+            /* RV-113 (2): a packaged program's AppData is its package's
+               LocalCache; the path it uses is not the one Explorer shows. */
+            char local[512];
+            DWORD got = GetEnvironmentVariableA("LOCALAPPDATA", local, (DWORD)sizeof(local));
+            if (got > 0 && got < sizeof(local)) {
+                int m = snprintf(real, sizeof(real), "%s\\Packages\\%s\\LocalCache\\Roaming\\Rubraview\\settings.ini", local, app->package_family);
+                u8str_t candidate = { .ptr = real, .len = m > 0 && (size_t)m < sizeof(real) ? (size_t)m : 0 };
+                if (candidate.len > 0 && rubraview_pal_fs_exists(candidate)) shown = candidate;
+            }
+        }
+        n = snprintf(buffer, capacity, "%.*s%s", (int)shown.len, shown.ptr,
                      app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("  (portable)") : "");
         /* The folder comes from Windows with backslashes and the file name is
            joined with '/': shown with Windows' own separator throughout. */
         for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
+    } else if (rubraview_u8_eq_lit(source, "app.kind")) {
+        n = snprintf(buffer, capacity, "%s",
+                     app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
+                     : app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("portable: the settings beside it")
+                     : T("from the zip or the installer: register below"));
     } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
         int place = rubraview_pal_ffmpeg_place();
         n = snprintf(buffer, capacity, "%s",
@@ -12628,6 +12651,22 @@ static void skip_dirs_table_rows(app_state_t *app) {
 }
 
 /* The eight folders of before go into the list, once, and are emptied in the file. */
+/* RV-120: a settings file from before each extension had its own menu box
+   has no shell.menu_<ext>; the menu box starts as that extension's Open
+   with box was, so registering again changes nothing by itself. */
+static void shell_menu_take_old(app_state_t *app, u8str_t text) {
+    rubraview_ini_doc_t ini = rubraview_ini_parse(app->arena, text);
+    size_t count = 0;
+    const rubraview_setting_def_t *schema = rubraview_settings_schema(&count);
+    for (size_t i = 0; i < count; ++i) {
+        const rubraview_setting_def_t *def = &schema[i];
+        if (def->pair == 0 || !rubraview_u8_eq_lit(def->section, "shell")) continue;
+        const rubraview_setting_def_t *menu = &schema[def->pair];
+        if (rubraview_ini_get(&ini, menu->section, menu->key)) continue;
+        rubraview_settings_set(&app->settings, menu->section, menu->key, rubraview_settings_get(&app->settings, def->section, def->key));
+    }
+}
+
 static void skip_dirs_take_old(app_state_t *app) {
     static const char *const OLD[8] = { "skip_dir_1", "skip_dir_2", "skip_dir_3", "skip_dir_4",
                                         "skip_dir_5", "skip_dir_6", "skip_dir_7", "skip_dir_8" };
@@ -13282,48 +13321,49 @@ static void settings_say(app_state_t *app, const char *text) {
     snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
 }
 
-/* Settings › Explorer (D-86): the extensions switched on, as the words
-   `--types=` takes. Each is read by its own name, so the settings check
+/* Settings › Explorer (D-86): the extensions switched on, for the file
+   types or (`menu`) for the right-click menu, as the words `--types=` takes. Each is read by its own name, so the settings check
    can see that every switch on the page is one the program reads. */
-static size_t shell_chosen_words(app_state_t *app, char *out, size_t cap) {
+static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t cap) {
     const rubraview_settings_t *st = &app->settings;
-    const struct { const char *ext; bool on; } CHOICES[] = {
-        { "jpg",  rubraview_settings_get(st, U8("shell"), U8("ext_jpg")) > 0.5 },
-        { "jpeg", rubraview_settings_get(st, U8("shell"), U8("ext_jpeg")) > 0.5 },
-        { "png",  rubraview_settings_get(st, U8("shell"), U8("ext_png")) > 0.5 },
-        { "apng", rubraview_settings_get(st, U8("shell"), U8("ext_apng")) > 0.5 },
-        { "gif",  rubraview_settings_get(st, U8("shell"), U8("ext_gif")) > 0.5 },
-        { "bmp",  rubraview_settings_get(st, U8("shell"), U8("ext_bmp")) > 0.5 },
-        { "tif",  rubraview_settings_get(st, U8("shell"), U8("ext_tif")) > 0.5 },
-        { "tiff", rubraview_settings_get(st, U8("shell"), U8("ext_tiff")) > 0.5 },
-        { "webp", rubraview_settings_get(st, U8("shell"), U8("ext_webp")) > 0.5 },
-        { "avif", rubraview_settings_get(st, U8("shell"), U8("ext_avif")) > 0.5 },
-        { "jxl",  rubraview_settings_get(st, U8("shell"), U8("ext_jxl")) > 0.5 },
-        { "ico",  rubraview_settings_get(st, U8("shell"), U8("ext_ico")) > 0.5 },
-        { "cbz",  rubraview_settings_get(st, U8("shell"), U8("ext_cbz")) > 0.5 },
-        { "cb7",  rubraview_settings_get(st, U8("shell"), U8("ext_cb7")) > 0.5 },
-        { "cbr",  rubraview_settings_get(st, U8("shell"), U8("ext_cbr")) > 0.5 },
-        { "mp4",  rubraview_settings_get(st, U8("shell"), U8("ext_mp4")) > 0.5 },
-        { "mkv",  rubraview_settings_get(st, U8("shell"), U8("ext_mkv")) > 0.5 },
-        { "webm", rubraview_settings_get(st, U8("shell"), U8("ext_webm")) > 0.5 },
-        { "avi",  rubraview_settings_get(st, U8("shell"), U8("ext_avi")) > 0.5 },
-        { "mov",  rubraview_settings_get(st, U8("shell"), U8("ext_mov")) > 0.5 },
-        { "mp3",  rubraview_settings_get(st, U8("shell"), U8("ext_mp3")) > 0.5 },
-        { "flac", rubraview_settings_get(st, U8("shell"), U8("ext_flac")) > 0.5 },
-        { "wav",  rubraview_settings_get(st, U8("shell"), U8("ext_wav")) > 0.5 },
-        { "ogg",  rubraview_settings_get(st, U8("shell"), U8("ext_ogg")) > 0.5 },
-        { "opus", rubraview_settings_get(st, U8("shell"), U8("ext_opus")) > 0.5 },
-        { "m4a",  rubraview_settings_get(st, U8("shell"), U8("ext_m4a")) > 0.5 },
-        { "zip",  rubraview_settings_get(st, U8("shell"), U8("ext_zip")) > 0.5 },
-        { "7z",   rubraview_settings_get(st, U8("shell"), U8("ext_7z")) > 0.5 },
-        { "rar",  rubraview_settings_get(st, U8("shell"), U8("ext_rar")) > 0.5 },
-        { "alz",  rubraview_settings_get(st, U8("shell"), U8("ext_alz")) > 0.5 },
-        { "egg",  rubraview_settings_get(st, U8("shell"), U8("ext_egg")) > 0.5 },
+    /* RV-120: each extension's two boxes, Open with and the right-click menu. */
+    const struct { const char *ext; bool types, menu; } CHOICES[] = {
+        { "jpg",  rubraview_settings_get(st, U8("shell"), U8("ext_jpg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_jpg")) > 0.5 },
+        { "jpeg", rubraview_settings_get(st, U8("shell"), U8("ext_jpeg")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_jpeg")) > 0.5 },
+        { "png",  rubraview_settings_get(st, U8("shell"), U8("ext_png")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_png")) > 0.5 },
+        { "apng", rubraview_settings_get(st, U8("shell"), U8("ext_apng")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_apng")) > 0.5 },
+        { "gif",  rubraview_settings_get(st, U8("shell"), U8("ext_gif")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_gif")) > 0.5 },
+        { "bmp",  rubraview_settings_get(st, U8("shell"), U8("ext_bmp")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_bmp")) > 0.5 },
+        { "tif",  rubraview_settings_get(st, U8("shell"), U8("ext_tif")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_tif")) > 0.5 },
+        { "tiff", rubraview_settings_get(st, U8("shell"), U8("ext_tiff")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_tiff")) > 0.5 },
+        { "webp", rubraview_settings_get(st, U8("shell"), U8("ext_webp")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_webp")) > 0.5 },
+        { "avif", rubraview_settings_get(st, U8("shell"), U8("ext_avif")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_avif")) > 0.5 },
+        { "jxl",  rubraview_settings_get(st, U8("shell"), U8("ext_jxl")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_jxl")) > 0.5 },
+        { "ico",  rubraview_settings_get(st, U8("shell"), U8("ext_ico")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_ico")) > 0.5 },
+        { "cbz",  rubraview_settings_get(st, U8("shell"), U8("ext_cbz")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cbz")) > 0.5 },
+        { "cb7",  rubraview_settings_get(st, U8("shell"), U8("ext_cb7")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cb7")) > 0.5 },
+        { "cbr",  rubraview_settings_get(st, U8("shell"), U8("ext_cbr")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cbr")) > 0.5 },
+        { "mp4",  rubraview_settings_get(st, U8("shell"), U8("ext_mp4")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mp4")) > 0.5 },
+        { "mkv",  rubraview_settings_get(st, U8("shell"), U8("ext_mkv")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mkv")) > 0.5 },
+        { "webm", rubraview_settings_get(st, U8("shell"), U8("ext_webm")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_webm")) > 0.5 },
+        { "avi",  rubraview_settings_get(st, U8("shell"), U8("ext_avi")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_avi")) > 0.5 },
+        { "mov",  rubraview_settings_get(st, U8("shell"), U8("ext_mov")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mov")) > 0.5 },
+        { "mp3",  rubraview_settings_get(st, U8("shell"), U8("ext_mp3")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mp3")) > 0.5 },
+        { "flac", rubraview_settings_get(st, U8("shell"), U8("ext_flac")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_flac")) > 0.5 },
+        { "wav",  rubraview_settings_get(st, U8("shell"), U8("ext_wav")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_wav")) > 0.5 },
+        { "ogg",  rubraview_settings_get(st, U8("shell"), U8("ext_ogg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_ogg")) > 0.5 },
+        { "opus", rubraview_settings_get(st, U8("shell"), U8("ext_opus")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_opus")) > 0.5 },
+        { "m4a",  rubraview_settings_get(st, U8("shell"), U8("ext_m4a")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_m4a")) > 0.5 },
+        { "zip",  rubraview_settings_get(st, U8("shell"), U8("ext_zip")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_zip")) > 0.5 },
+        { "7z",   rubraview_settings_get(st, U8("shell"), U8("ext_7z")) > 0.5,   rubraview_settings_get(st, U8("shell"), U8("menu_7z")) > 0.5 },
+        { "rar",  rubraview_settings_get(st, U8("shell"), U8("ext_rar")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_rar")) > 0.5 },
+        { "alz",  rubraview_settings_get(st, U8("shell"), U8("ext_alz")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_alz")) > 0.5 },
+        { "egg",  rubraview_settings_get(st, U8("shell"), U8("ext_egg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_egg")) > 0.5 },
     };
     size_t pos = 0;
     out[0] = '\0';
     for (size_t i = 0; i < sizeof(CHOICES) / sizeof(CHOICES[0]); ++i) {
-        if (!CHOICES[i].on) continue;
+        if (!(menu ? CHOICES[i].menu : CHOICES[i].types)) continue;
         if (pos > 0) append_text(out, cap, &pos, ",");
         append_text(out, cap, &pos, CHOICES[i].ext);
     }
@@ -13342,7 +13382,8 @@ typedef enum { SHELL_PART_LEAVE = 0, SHELL_PART_APPLY, SHELL_PART_REMOVE } shell
    extensions of `selection` (`;` between) and ours is taken off every
    other extension; a part removed loses everything of ours; a part left
    is not touched. */
-static int shell_apply(proven_arena_t *arena, u8str_t selection, shell_part_t types, shell_part_t menu, bool all_users) {
+static int shell_apply(proven_arena_t *arena, u8str_t selection, u8str_t menu_selection, shell_part_t types, shell_part_t menu,
+                       bool all_users) {
     bool ok = true;
     int code = SHELL_DONE;
     if (types != SHELL_PART_LEAVE) {
@@ -13354,7 +13395,7 @@ static int shell_apply(proven_arena_t *arena, u8str_t selection, shell_part_t ty
         if (list.len > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
     }
     if (menu == SHELL_PART_APPLY) {
-        switch (rubraview_pal_shell_menu_register(selection, all_users)) {
+        switch (rubraview_pal_shell_menu_register(menu_selection.len > 0 ? menu_selection : selection, all_users)) {
             case RUBRAVIEW_SHELL_MENU_FAILED: ok = false; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS: code = SHELL_DONE_NO_PARTS; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED: code = SHELL_DONE_REFUSED; break;
@@ -13401,20 +13442,25 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
     bool types = rubraview_settings_get(&app->settings, U8("shell"), U8("open_with")) > 0.5;
     bool menu = rubraview_settings_get(&app->settings, U8("shell"), U8("menu")) > 0.5;
 
-    char words[256];
-    size_t words_len = shell_chosen_words(app, words, sizeof(words));
-    if (adding && words_len == 0) { settings_say(app, T("switch on at least one extension first")); return; }
-    if (adding && !types && !menu) { settings_say(app, T("switch on the file types, the menu, or both first")); return; }
+    char words[256], menu_words[256];
+    size_t words_len = shell_chosen_words(app, false, words, sizeof(words));
+    size_t menu_len = shell_chosen_words(app, true, menu_words, sizeof(menu_words));
+    /* A column with no box ticked is that part taken back (RV-120). */
+    if (words_len == 0) types = false;
+    if (menu_len == 0) menu = false;
+    if (adding && !types && !menu) { settings_say(app, T("switch on at least one extension first")); return; }
 
     int code = SHELL_FAILED;
     if (!all) {
         /* The page's two switches: what is off is taken back. */
         code = adding ? shell_apply(app->arena, rubraview_shell_selection_parse(app->arena, (u8str_t){ .ptr = words, .len = words_len }),
+                                    rubraview_shell_selection_parse(app->arena, (u8str_t){ .ptr = menu_words, .len = menu_len }),
                                     types ? SHELL_PART_APPLY : SHELL_PART_REMOVE, menu ? SHELL_PART_APPLY : SHELL_PART_REMOVE, false)
                       : shell_remove(false);
     } else {
-        char args[512];
-        int n = adding ? snprintf(args, sizeof(args), "--register-shell --all-users --types=%s%s%s", words,
+        char args[768];
+        int n = adding ? snprintf(args, sizeof(args), "--register-shell --all-users --types=%s%s%s%s%s",
+                                  words_len > 0 ? words : menu_words, menu_len > 0 ? " --menu-types=" : "", menu_len > 0 ? menu_words : "",
                                   types ? "" : " --remove-types", menu ? "" : " --remove-menu")
                        : snprintf(args, sizeof(args), "--unregister-shell --all-users");
         if (n <= 0 || (size_t)n >= sizeof(args) ||
@@ -13543,7 +13589,14 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_ACTION: {
             const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
             if (!node) break;
-            if (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
+            if (app->packaged && (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
+                                  rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all") ||
+                                  rubraview_u8_eq_lit(node->name, "shell.wipe"))) {
+                /* RV-113 (2): what a packaged program registers goes to the
+                   package's own registry, which Explorer does not read; the
+                   package's manifest gave Windows its file types already. */
+                settings_say(app, T("the Store's copy: Windows has its file types from the package; choose Rubraview in Default apps"));
+            } else if (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
                 rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all")) {
                 shell_types_action(app, node->name);
             } else if (rubraview_u8_eq_lit(node->name, "shell.wipe")) {
@@ -20142,7 +20195,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     u8str_t selection = cli.shell_types.len > 0 ? cli.shell_types : rubraview_shell_extensions_all();
                     shell_part_t types = cli.shell_no_types ? SHELL_PART_LEAVE : cli.shell_remove_types ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
                     shell_part_t menu = cli.shell_no_menu ? SHELL_PART_LEAVE : cli.shell_remove_menu ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
-                    code = shell_apply(&arena, selection, types, menu, cli.shell_all_users);
+                    code = shell_apply(&arena, selection, cli.shell_menu_types, types, menu, cli.shell_all_users);
                 } else {
                     code = shell_remove(cli.shell_all_users);
                 }
