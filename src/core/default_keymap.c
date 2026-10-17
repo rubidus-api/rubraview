@@ -193,5 +193,34 @@ const char *rubraview_default_keymap(void) {
        so its sub-pages are stepped rather than played. */
     "[subpage]\n"
     "subpage_next = \"Period\"\n"
-    "subpage_prev = \"Comma\"\n";
+    "subpage_prev = \"Comma\"\n"
+    "\n"
+
+    /* RFC-0005: a text page's own keys, before the rest (owner, 2026-10-17:
+       auto-scroll first, its speed changed while it runs; the size and the
+       line spacing easy to change). While auto-scroll runs, Up and Down are
+       its speed too. */
+    "[text]\n"
+    "text_autoscroll = \"A\"\n"
+    "text_faster = \"Plus, Shift+Up\"\n"
+    "text_slower = \"Minus, Shift+Down\"\n"
+    "text_line_down = \"Down\"\n"
+    "text_line_up = \"Up\"\n"
+    "text_screen_down = \"PageDown, Space\"\n"
+    "text_screen_up = \"PageUp, Shift+Space\"\n"
+    "text_top = \"Home\"\n"
+    "text_bottom = \"End\"\n"
+    "text_bigger = \"Ctrl+Plus\"\n"
+    "text_smaller = \"Ctrl+Minus\"\n"
+    "text_spacing_more = \"BracketRight\"\n"
+    "text_spacing_less = \"BracketLeft\"\n"
+    "text_breaks = \"B\"\n"
+    "text_indent = \"Shift+B\"\n"
+    "text_wrap = \"W\"\n"
+    "text_find = \"Ctrl+F\"\n"
+    "text_find_next = \"F3\"\n"
+    "text_find_prev = \"Shift+F3\"\n"
+    "text_encoding = \"E\"\n"
+    "text_copy = \"Ctrl+C\"\n"
+    "text_select_all = \"Ctrl+A\"\n";
 }

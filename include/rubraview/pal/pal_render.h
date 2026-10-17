@@ -239,6 +239,39 @@ bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u
 bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
                                     double *out_width, double *out_height);
 
+/* ---- RFC-0005: a paragraph of a text file, laid out once and drawn often ---- */
+
+typedef struct rubraview_text_style {
+    u8str_t family;        /* "" for the program's face */
+    double  size;          /* in DIPs */
+    double  line_spacing;  /* a line's height as a multiple of the size (1.5 = 150 %) */
+    double  width;         /* the column's width: lines wrap there when `wrap` */
+    bool    wrap;
+} rubraview_text_style_t;
+
+typedef struct rubraview_text_block rubraview_text_block_t;
+
+/* A mark drawn under part of a block: a selection, a match. Byte offsets in the block's UTF-8. */
+typedef struct rubraview_text_mark {
+    size_t   start, len;
+    uint32_t argb;
+} rubraview_text_mark_t;
+
+/** `text` (UTF-8, one paragraph) laid out by DirectWrite; NULL when it cannot be. Kept across a lost device. */
+rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, u8str_t text,
+                                                      const rubraview_text_style_t *style);
+void rubraview_pal_text_block_free(rubraview_text_block_t *block);
+/** Its size as laid out: the widest line, and the height of all its lines. */
+void rubraview_pal_text_block_size(const rubraview_text_block_t *block, double *width, double *height);
+/** Draw it with its top-left at (x, y), the marks under it first. */
+void rubraview_pal_text_block_draw(rubraview_renderer_t *renderer, const rubraview_text_block_t *block,
+                                   double x, double y, uint32_t argb,
+                                   const rubraview_text_mark_t *marks, size_t mark_count);
+/** The byte offset nearest a point given from the block's top-left. */
+size_t rubraview_pal_text_block_hit(const rubraview_text_block_t *block, double x, double y);
+/** The top and height of the line that holds byte offset `at`. */
+bool rubraview_pal_text_block_line_of(const rubraview_text_block_t *block, size_t at, double *top, double *height);
+
 /** One line of fixed-width text, its top-left at (x, y), never wrapped. */
 bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t text,
                                          double x, double y, double font_size, uint32_t argb);

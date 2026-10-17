@@ -880,6 +880,148 @@ bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u
     return ok;
 }
 
+/* ---- RFC-0005: a text file's paragraphs ---- */
+
+struct rubraview_text_block {
+    IDWriteTextLayout *layout;
+    uint32_t *u8_of;     /* UTF-16 index -> UTF-8 offset, wide_len + 1 of them */
+    UINT32 wide_len;
+    size_t utf8_len;
+    double width, height;
+};
+
+static UINT32 block_u16(const rubraview_text_block_t *b, size_t u8) {
+    UINT32 lo = 0, hi = b->wide_len;
+    while (lo < hi) {
+        UINT32 mid = (lo + hi) / 2;
+        if (b->u8_of[mid] < u8) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
+rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, u8str_t text,
+                                                      const rubraview_text_style_t *style) {
+    if (!renderer || !renderer->dwrite || !style || text.len > 0x7FFFFFF0u) return NULL;
+    rubraview_text_block_t *b = (rubraview_text_block_t *)calloc(1, sizeof(*b));
+    if (!b) return NULL;
+    WCHAR *wide = (WCHAR *)malloc((text.len + 1) * sizeof(WCHAR));
+    b->u8_of = (uint32_t *)malloc((text.len + 2) * sizeof(uint32_t));
+    if (!wide || !b->u8_of) { free(wide); free(b->u8_of); free(b); return NULL; }
+    /* UTF-8 to UTF-16 by hand, keeping where each unit came from. */
+    const uint8_t *s = (const uint8_t *)text.ptr;
+    UINT32 w = 0;
+    for (size_t i = 0; i < text.len;) {
+        uint8_t c = s[i];
+        int n = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        if (i + (size_t)n > text.len) n = 1;
+        uint32_t cp = n == 1 ? c : c & (n == 2 ? 0x1F : n == 3 ? 0x0F : 0x07);
+        for (int k = 1; k < n; ++k) cp = (cp << 6) | (s[i + (size_t)k] & 0x3F);
+        if (cp >= 0x10000) {
+            cp -= 0x10000;
+            b->u8_of[w] = (uint32_t)i; wide[w++] = (WCHAR)(0xD800 + (cp >> 10));
+            b->u8_of[w] = (uint32_t)i; wide[w++] = (WCHAR)(0xDC00 + (cp & 0x3FF));
+        } else {
+            b->u8_of[w] = (uint32_t)i; wide[w++] = (WCHAR)cp;
+        }
+        i += (size_t)n;
+    }
+    b->u8_of[w] = (uint32_t)text.len;
+    b->wide_len = w;
+    b->utf8_len = text.len;
+
+    WCHAR family[64];
+    int fn = style->family.len > 0 ? MultiByteToWideChar(CP_UTF8, 0, style->family.ptr, (int)style->family.len, family, 63) : 0;
+    family[fn > 0 ? fn : 0] = 0;
+    double size = style->size > 1.0 ? style->size : 16.0;
+    IDWriteTextFormat *format = NULL;
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, family[0] ? family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
+                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, (FLOAT)size, L"", &format)) || !format) {
+        free(wide); free(b->u8_of); free(b);
+        return NULL;
+    }
+    double spacing = size * (style->line_spacing > 0.5 ? style->line_spacing : 1.5);
+    IDWriteTextFormat_SetLineSpacing(format, DWRITE_LINE_SPACING_METHOD_UNIFORM, (FLOAT)spacing, (FLOAT)(spacing * 0.5 + size * 0.4));
+    IDWriteTextFormat_SetWordWrapping(format, style->wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    double width = style->wrap && style->width > 8.0 ? style->width : 1.0e6;
+    /* An empty paragraph still takes a line. */
+    static const WCHAR space[] = L" ";
+    HRESULT hr = IDWriteFactory_CreateTextLayout(renderer->dwrite, w > 0 ? wide : space, w > 0 ? w : 1, format,
+                                                 (FLOAT)width, 1.0e7f, &b->layout);
+    IDWriteTextFormat_Release(format);
+    free(wide);
+    if (FAILED(hr) || !b->layout) { free(b->u8_of); free(b); return NULL; }
+    DWRITE_TEXT_METRICS m;
+    if (SUCCEEDED(IDWriteTextLayout_GetMetrics(b->layout, &m))) {
+        b->width = (double)m.widthIncludingTrailingWhitespace;
+        b->height = (double)m.height;
+    }
+    return b;
+}
+
+void rubraview_pal_text_block_free(rubraview_text_block_t *block) {
+    if (!block) return;
+    if (block->layout) IDWriteTextLayout_Release(block->layout);
+    free(block->u8_of);
+    free(block);
+}
+
+void rubraview_pal_text_block_size(const rubraview_text_block_t *block, double *width, double *height) {
+    if (width) *width = block ? block->width : 0.0;
+    if (height) *height = block ? block->height : 0.0;
+}
+
+void rubraview_pal_text_block_draw(rubraview_renderer_t *renderer, const rubraview_text_block_t *block,
+                                   double x, double y, uint32_t argb,
+                                   const rubraview_text_mark_t *marks, size_t mark_count) {
+    if (!renderer || !renderer->target || !block || !block->layout) return;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    set_identity(rt);
+    for (size_t k = 0; k < mark_count; ++k) {
+        if (marks[k].len == 0 || marks[k].start >= block->utf8_len) continue;
+        UINT32 a = block_u16(block, marks[k].start), e = block_u16(block, marks[k].start + marks[k].len);
+        if (e <= a) continue;
+        DWRITE_HIT_TEST_METRICS hits[64];
+        UINT32 count = 0;
+        if (FAILED(IDWriteTextLayout_HitTestTextRange(block->layout, a, e - a, (FLOAT)x, (FLOAT)y, hits, 64, &count))) continue;
+        ID2D1SolidColorBrush *mb = NULL;
+        D2D1_COLOR_F mc = argb_to_color(marks[k].argb);
+        if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &mc, NULL, &mb)) || !mb) continue;
+        for (UINT32 h = 0; h < count && h < 64; ++h) {
+            D2D1_RECT_F r = { hits[h].left, hits[h].top, hits[h].left + hits[h].width, hits[h].top + hits[h].height };
+            ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush*)mb);
+        }
+        ID2D1SolidColorBrush_Release(mb);
+    }
+    ID2D1SolidColorBrush *brush = NULL;
+    D2D1_COLOR_F color = argb_to_color(argb);
+    if (FAILED(ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush)) || !brush) return;
+    D2D1_POINT_2F origin = { (FLOAT)x, (FLOAT)y };
+    ID2D1RenderTarget_DrawTextLayout(rt, origin, (IDWriteTextLayout*)block->layout, (ID2D1Brush*)brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+    ID2D1SolidColorBrush_Release(brush);
+}
+
+size_t rubraview_pal_text_block_hit(const rubraview_text_block_t *block, double x, double y) {
+    if (!block || !block->layout || block->wide_len == 0) return 0;
+    BOOL trailing = FALSE, inside = FALSE;
+    DWRITE_HIT_TEST_METRICS m;
+    if (FAILED(IDWriteTextLayout_HitTestPoint(block->layout, (FLOAT)x, (FLOAT)y, &trailing, &inside, &m))) return 0;
+    UINT32 at = m.textPosition + (trailing ? m.length : 0);
+    if (at > block->wide_len) at = block->wide_len;
+    return block->u8_of[at];
+}
+
+bool rubraview_pal_text_block_line_of(const rubraview_text_block_t *block, size_t at, double *top, double *height) {
+    if (!block || !block->layout) return false;
+    FLOAT px = 0, py = 0;
+    DWRITE_HIT_TEST_METRICS m;
+    UINT32 u = block_u16(block, at);
+    if (u >= block->wide_len && block->wide_len > 0) u = block->wide_len - 1;
+    if (FAILED(IDWriteTextLayout_HitTestTextPosition(block->layout, u, FALSE, &px, &py, &m))) return false;
+    if (top) *top = (double)m.top;
+    if (height) *height = (double)m.height;
+    return true;
+}
+
 /* ---- fixed-width text for the settings window (§3.22, D-13) ---- */
 
 /* Consolas ships with every Windows since Vista. A character it has no

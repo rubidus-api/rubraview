@@ -113,6 +113,13 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
 u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id);
 
 /**
+ * RFC-0005 §2: a text file's bytes in a Windows code page, as UTF-8,
+ * malloc'd and NUL-terminated (a character that does not decode becomes
+ * U+FFFD). NULL when the code page is not on this machine or out of memory.
+ */
+char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t codepage, size_t *out_len);
+
+/**
  * The other way: UTF-8 text into a legacy code page's bytes (0 = the host's
  * active one). For a password an archive keeps in its maker's code page —
  * ALZip encrypts with the CP949 bytes of a Korean password, and the

@@ -5,6 +5,7 @@
 #include <wchar.h>
 #include <knownfolders.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "rubraview/lang.h"
 #include "rubraview/pal/pal_fs.h"
@@ -750,4 +751,24 @@ bool rubraview_pal_fs_make_dirs(u8str_t path) {
     }
 
     return CreateDirectoryW(wide, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t codepage, size_t *out_len) {
+    if (out_len) *out_len = 0;
+    if (size > 0x7FFFFFFFu) return NULL;
+    if (size == 0) { char *e = (char *)malloc(1); if (e) e[0] = '\0'; return e; }
+    int wide_len = MultiByteToWideChar(codepage, 0, (LPCCH)bytes, (int)size, NULL, 0);
+    if (wide_len <= 0) return NULL;
+    WCHAR *wide = (WCHAR *)malloc((size_t)wide_len * sizeof(WCHAR));
+    if (!wide) return NULL;
+    MultiByteToWideChar(codepage, 0, (LPCCH)bytes, (int)size, wide, wide_len);
+    int n = WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, NULL, 0, NULL, NULL);
+    char *out = n > 0 ? (char *)malloc((size_t)n + 1) : NULL;
+    if (out) {
+        WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, out, n, NULL, NULL);
+        out[n] = '\0';
+        if (out_len) *out_len = (size_t)n;
+    }
+    free(wide);
+    return out;
 }

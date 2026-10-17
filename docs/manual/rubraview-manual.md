@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.4.0.exe              the viewer, as built
-dist/rubraview-v1.4.0/                 the release bundle
-dist/rubraview-v1.4.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.5.0.exe              the viewer, as built
+dist/rubraview-v1.5.0/                 the release bundle
+dist/rubraview-v1.5.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -695,6 +695,55 @@ While it does:
 - The toolbox's **CC** button turns subtitles off and on. Tap it twice
   quickly, or hold it for half a second, and a list of the film's subtitles
   opens — tap the one you want (or **Off**).
+
+## Text files
+
+A `.txt`, `.log`, `.nfo` or `.md` file opens as text, in the same window and
+the same walk through the folder as pictures and films (`PageDown` at its end
+goes on to the next file). A text file inside a ZIP or a 7z opens the same way.
+Nothing is ever written to it.
+
+**Encodings.** UTF-8 and UTF-16 (with or without a byte order mark), Korean
+(CP949 / EUC-KR, ISO-2022-KR, Johab), Japanese (Shift_JIS, EUC-JP,
+ISO-2022-JP), Chinese (GBK / GB2312, GB18030, HZ, Big5, CNS 11643) and
+Western (CP1252, DOS's CP437 for `.nfo` art). Each file's encoding is
+guessed; the title bar says which it was read as. `E` reads it in the next
+one, and the one chosen by hand is kept for that file. Settings › Text ›
+Encoding can name one for every file instead. Files over 64 MB are not shown.
+
+**Line breaks**, four ways (`B` goes round them, or Settings › Text):
+
+| Way | What it does |
+|---|---|
+| As they are | every break of the file is a break; blank lines stay |
+| All in one run | no breaks at all: the whole text runs on |
+| Blank lines dropped | the empty lines go; the other breaks stay |
+| Paragraphs | lines are joined; a paragraph ends where a line ends a sentence (`.` `!` `?` `。` or a closing quote) **and** more line breaks follow it than usually do in the file. A file with only one break everywhere ends a paragraph where a sentence ends and the next line is indented, or, with no indents at all, wherever a line ends a sentence |
+
+Joined lines get a space between them, except between Chinese or Japanese
+characters, which are written without one. `Shift+B` removes the indents at
+the start of each line or paragraph, or keeps them.
+
+**Auto-scroll.** `A` starts and stops it. While it runs, `+` / `-`, the
+wheel, or `↑` / `↓` change its speed, in lines a minute, shown at the
+bottom right; a click stops it. It stops at the end.
+
+**Size and spacing.** `Ctrl+wheel` or `Ctrl+Plus` / `Ctrl+Minus` the size of
+the letters, `Alt+wheel` or `[` / `]` the space between lines. `W` wraps the
+lines to the window or lets long lines run on (`Shift+wheel` then moves
+sideways); the toolbox has the same, and **Word wrap** for the wrapping.
+Settings › Text also has the font, the side margins, a column at most so
+many characters wide, and the paper (dark, sepia, light, black).
+
+**Moving.** The wheel and `↑` / `↓` by lines, `PageUp` / `PageDown` / `Space`
+by screens, `Home` / `End` to the start and the end. The place read to is
+kept for each file, and the file opens there the next time.
+
+**Finding and copying.** `Ctrl+F` opens a box above the text: `Enter` or `F3`
+the next, `Shift+Enter` or `Shift+F3` the one before; letters' case and
+full-width forms are ignored, and the bar says which match of how many it
+is. Drag over the text to select it, `Ctrl+A` for all, `Ctrl+C` copies what
+is selected, as it is shown.
 
 ## The floating boxes
 

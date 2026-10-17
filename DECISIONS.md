@@ -1441,3 +1441,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - `rubraview_pal_process_packaged` (GetCurrentPackageFamilyName): run from a package, Settings › Explorer shows **This copy** as the Store's, the Register / Remove / Remove everything rows say Windows has the types from the package instead of writing anything, and Settings › General shows the settings file in the package's LocalCache when it is there.
   - The settings store holds 224 values (was 160): 191 now.
 - Consequences: RFC-0005 is accepted with every proposal (its §12); its text viewer (§1–§8, RV-121) is next. Windows 11's menu in the Store package (RV-113 (3)) needs no change in rubrapack, which has `[msix-extension] kind = "context-menu"`; it is still to do.
+
+## 2026-10-17: D-152 The text viewer
+
+- Status: Accepted (owner 2026-10-17: "텍스트뷰어부터 완전히 다 구현해 주세요" with the four ways of line breaks, the indents, auto-scroll whose speed changes while it runs, easy size and line spacing; "워드랩을 창 크기에 맞게 할 것인가 아닌가도 툴바에서 바로 조작할 수 있게요. 아이콘은 word wrap 으로 2줄로 표시"; RFC-0005 as proposed).
+- Context: RFC-0005 §1–§8, accepted with D-151; the owner then gave the line breaks as four ways instead of the RFC's three.
+- Decision:
+  - `.txt`, `.log`, `.nfo`, `.md` are pages (`TEXT_FILTER`), in a folder and in an archive; a text page is read by `text_open` (main.c) when it comes on screen, as a film is, never by WIC.
+  - `src/core/textenc.c`: the encodings of §2.1 and the guess of §2.2 — a mark, the 7-bit escapes, UTF-16 by its zeros, strict UTF-8, then CP949, Shift_JIS, EUC-JP, GBK, GB18030 and Big5 scored on the first 64 KB by where their characters fall (Hangul, kana, the hanzi rows each script uses most, their punctuation), a byte that is no character costing ten; within 5 % the reader's language wins; nothing scoring is CP1252 (CP437 for a `.nfo`). Decoding: UTF-8 and UTF-16 in core, the rest through `rubraview_pal_text_decode` (a code page). By hand (`E`) is kept per file in the history file (`path|encoding`).
+  - `src/core/textview.c`: the breaks — `keep`, `one_line` (laid out in pieces of about 4 KB cut after a sentence), `no_blank`, `paragraphs` (a sentence's end and a run of breaks longer than the file's commonest; else a sentence's end before an indented line; else any sentence's end) — and `trim_lead`; a space joins lines unless either side is Han, kana or CJK punctuation. Each paragraph keeps where it began in the file, so the place survives a change of breaks and is what is kept for the next time.
+  - Drawing: a paragraph is a DirectWrite layout (`rubraview_pal_text_block_*`), made when in view, freed past 400; heights are guessed until laid out; the view is held by its top paragraph and an offset, so heights found later do not move what is read.
+  - Auto-scroll moves by the time since the last pass, in quarter pixels, its speed in lines a minute (`text.autoscroll_speed`, 2–600); `A` starts and stops it; while it runs `+`/`-`, the wheel and the arrows are its speed; a click stops it.
+  - Keys in a `[text]` section consulted first on a text page; a `text` toolbox (Auto, Slower, Faster, A-, A+, Lines-, Lines+, Breaks, Indent, Word wrap, Find, Encoding) and right-click list; Settings › Text. Find reuses the typed box (`rename_is_find`).
+  - The settings document holds 384 lines (was 256).
+- Consequences: no editing; files over 64 MB refused; the HKSCS rows read as Big5; a heading line with no sentence's end is joined to the paragraph after it in `paragraphs` (as the owner put it: "only when").

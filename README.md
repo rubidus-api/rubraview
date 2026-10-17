@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.4.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.4.0/rubraview-v1.4.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.4.0/rubraview-v1.4.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.5.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.0/rubraview-v1.5.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.5.0/rubraview-v1.5.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -32,6 +32,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
 - **Image Enhancement & Post-Processing**: Real-time adjustments for exposure, contrast, saturation, gamma, sharpening (unsharp mask), and gaussian blur, plus high-fidelity resampling (Nearest, Bilinear, Bicubic, Lanczos-3).
 - **Batch Processing Engine**: Multi-threaded batch converter and resizer accessible via UI dialog and headless CLI.
+- **Text Files, For Reading**: `.txt`, `.log`, `.nfo` and `.md` open as text, in Korean, Japanese and Chinese encodings guessed or chosen; line breaks as they are, all in one run, blank lines dropped, or joined into paragraphs; indents kept or removed; auto-scroll whose speed changes while it runs; the size and the line spacing a key or a wheel away; find, select and copy.
 - **In Your Language**: English, Korean, Japanese, Chinese (simplified and traditional) and Persian, following Windows or chosen in Settings › General › Language; a language is a text file in the `lang` folder beside the program, so one can be corrected or added without building anything.
 - **Pure C23 Architecture**: Built upon vendored `proven_c_lib` arenas, string slices, and dynamic arrays with zero heap fragmentation.
 

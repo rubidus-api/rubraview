@@ -335,3 +335,14 @@ bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping) {
     (void)mapping;
     return false;   /* the host build has no drives that go away under it to guard */
 }
+
+/* The host decodes no code pages: the bytes as they are. */
+char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t codepage, size_t *out_len) {
+    (void)codepage;
+    char *out = (char *)malloc(size + 1);
+    if (!out) return NULL;
+    if (size) memcpy(out, bytes, size);
+    out[size] = '\0';
+    if (out_len) *out_len = size;
+    return out;
+}

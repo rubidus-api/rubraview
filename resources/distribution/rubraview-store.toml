@@ -13,7 +13,8 @@
 # rubraview_shell_extensions() in src/core/filemanage.c, in its four groups
 # (scripts/check-store.py compares the two lists). The archives (zip, 7z,
 # rar, alz, egg) are not made file types of ours, as everywhere else (D-86).
-# Windows 11's own right-click menu is not in this package yet (RV-113).
+# Windows 11's own right-click menu comes from the [menu.*] tables at the end
+# (RV-113 (3)): rubrapack puts its menu DLL into the package.
 # The package is not signed: the Store signs what it accepts.
 
 format = 1
@@ -253,3 +254,92 @@ extension = ".m4a"
 prog-id = "Rubraview.Music"
 description = "Music"
 target = "file:App"
+
+# Explorer's right-click menu (RV-113 (3)): the items of MENU_ITEMS in
+# src/core/shellreq.c, each on the extensions of its kinds (SHELL_GROUPS in
+# src/core/filemanage.c; scripts/check-store.py compares them). One run with
+# every selected file, and --whole: nothing more is coming. Windows 11 puts
+# a package's items for one kind of file under one entry, the product's name.
+# The IDs sort in the menu's order: rubrapack lists the verbs by ID.
+
+[menu.M1Open]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
+    ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
+    ".opus", ".m4a", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Open"
+text-ko = "열기"
+target = "file:App"
+args = "--open --whole %*"
+multi = "one"
+
+[menu.M2NewWindow]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
+    ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
+    ".opus", ".m4a", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Open in a new window"
+text-ko = "새 창에서 열기"
+target = "file:App"
+args = "--new-window --whole %*"
+multi = "one"
+
+[menu.M3OpenOnly]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
+    ".mov", ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a",
+]
+text = "Open these only"
+text-ko = "이것만 열기"
+target = "file:App"
+args = "--open-only --whole %*"
+multi = "one"
+
+[menu.M4Add]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
+    ".mov", ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a",
+]
+text = "Add to the list"
+text-ko = "재생목록에 넣기"
+target = "file:App"
+args = "--add --whole %*"
+multi = "one"
+
+[menu.M5Browse]
+on = [
+    ".cbz", ".cb7", ".cbr", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Browse the archive"
+text-ko = "압축 파일 내부 보기"
+target = "file:App"
+args = "--browse --whole %*"
+multi = "single"
+
+[menu.M6Convert]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico",
+]
+text = "Convert..."
+text-ko = "변환..."
+target = "file:App"
+args = "--convert --whole %*"
+multi = "one"
+
+[menu.M7Print]
+on = [
+    ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
+    ".webp", ".avif", ".jxl", ".ico",
+]
+text = "Print..."
+text-ko = "인쇄..."
+target = "file:App"
+args = "--print --whole %*"
+multi = "one"
