@@ -389,6 +389,10 @@ bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t c
     return false;
 }
 
+bool rubraview_thumb_folder_kept_out(u8str_t path, bool is_directory, const u8str_t *folders, size_t count) {
+    return is_directory && rubraview_recent_is_kept_out(path, folders, count);
+}
+
 size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity) {
     size_t n = 0, start = 0;
     for (size_t i = 0; i <= joined.len; ++i) {

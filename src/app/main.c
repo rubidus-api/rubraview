@@ -4145,13 +4145,14 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
 
 /* Each pass: take in what the thread has made, and ask for the tiles now
    on screen that have not been asked for. Nothing here waits. */
-/* The owner (2026-10-18): folders whose files show no thumbnail, and all
-   under them, typed as the folders kept out of Recent are. */
-static bool thumb_kept_out(const app_state_t *app, u8str_t path) {
+/* The owner (2026-10-18): folders that show no thumbnail, typed as the folders kept out of Recent
+   are. 1.20.0 ("그 폴더와 그 폴더의 하위 폴더 썸네일만 안 보이게"): only those folders' own tiles,
+   and the tiles of the folders in them; the files inside show theirs. */
+static bool thumb_kept_out(const app_state_t *app, u8str_t path, bool is_directory) {
     u8str_t dirs[64];
     size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("thumbs"), U8("skip_dirs")), dirs, 64);
     if (n > 64) n = 64;
-    return n > 0 && path.len > 0 && rubraview_recent_is_kept_out(path, dirs, n);
+    return n > 0 && path.len > 0 && rubraview_thumb_folder_kept_out(path, is_directory, dirs, n);
 }
 
 static void picker_thumbs_step(app_state_t *app) {
@@ -4195,7 +4196,6 @@ static void picker_thumbs_step(app_state_t *app) {
        for first and the first one last: they fill in from the top. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
     int book_reads = 0;
-    bool book_kept_out = app->picker_in_book && thumb_kept_out(app, app->source.archive_path);
     for (size_t k = visible.count; k-- > 0;) {
         size_t index = visible.first + k;
         if (index >= app->picker_thumb_count || index >= app->picker_listing.count) continue;
@@ -4206,7 +4206,7 @@ static void picker_thumbs_step(app_state_t *app) {
         /* A drive's first picture is not looked for: an empty reader or a
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
-        if (book_kept_out || (!app->picker_in_book && thumb_kept_out(app, entry->path))) { t->state = 2; continue; }
+        if (!app->picker_in_book && thumb_kept_out(app, entry->path, entry->is_directory)) { t->state = 2; continue; }
         if (app->picker_in_book) {
             /* A page in the book has no file to ask about: its bytes go to
                the thread instead (owner, 2026-09-29) — three a pass, so the
@@ -4343,7 +4343,6 @@ static void strip_step(app_state_t *app, double dt) {
         struct picker_thumb *t = &app->strip_cells[index];
         if (t->state != 0) continue;
         u8str_t path = app->source.pages[index].path;
-        if (thumb_kept_out(app, path.len > 0 ? path : app->source.archive_path)) { t->state = 2; continue; }
         if (path.len > 0) {
             t->state = rubraview_pal_thumbs_request(app->strip_thumbs, app->strip_generation, index, false, 1.0, path) ? 3 : 2;
             continue;
@@ -5107,6 +5106,7 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
         .toolbox_pinned = app->toolbox.pinned,
+        .titlebar_pinned = rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5,
         .toolbox_detached = app->toolbox.state == RUBRAVIEW_BOX_DETACHED,
         .fullscreen = rubraview_pal_window_is_fullscreen(app->window),
         .nearest = app->force_nearest,
@@ -6427,6 +6427,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
         settings_took_effect(app);
         osd_say(app, on ? TU8("no longer on top of other windows") : TU8("always on top of other windows"));
+    } else if (rubraview_u8_eq_lit(action, "toggle_titlebar_pin")) {
+        /* 1.20.0 (owner, 2026-10-18: "툴바에 상단 타이틀바 자체를 고정하는 pin"): the title bar stays */
+        bool on = rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5;
+        rubraview_settings_set(&app->settings, U8("general"), U8("titlebar_pinned"), on ? 0.0 : 1.0);
+        osd_say(app, on ? TU8("the title bar comes and goes") : TU8("the title bar stays"));
     } else if (rubraview_u8_eq_lit(action, "hide_boxes")) {
         /* D-110: asked again (a key), they come back as a click brings them. */
         chrome_hide(app, !app->chrome_hidden);
@@ -8009,6 +8014,7 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
         case RUBRAVIEW_TITLEBAR_MENU:       menu_from_bar(app); return true;
+        case RUBRAVIEW_TITLEBAR_OPEN:       handle_action(app, U8("open_picker")); return true;   /* 1.20.0 */
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window; the menu
                box below where the title bar comes (owner, 2026-10-15). */
@@ -10560,20 +10566,20 @@ static void draw_titlebar(app_state_t *app, double win_w) {
     rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
 
     int32_t page = current_page_index(app);
-    /* The menu's three lines at the left end (owner, 2026-10-15), lit while the menu is open. */
-    rubraview_rect_t mr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_MENU, win_w);
-    rubraview_pal_rect_t mb = { mr.x, mr.y, mr.width, mr.height };
+    /* 1.20.0 (owner, 2026-10-18: "타이틀바 좌측 상단의 메뉴는 완전히 없앱시다"): no menu button; Open at the left end */
     bool menu_open = app->menubox.headless && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED;
-    if (menu_open) rubraview_pal_render_fill_rect(app->renderer, mb, 0xFF2D4A6Eu, 0.0);
-    else if (rubraview_rect_contains(mr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, mb, COLOR_TILE_FILL, 0.0);
+    /* 1.20.0: Open, at the left end: a folder with its flap; its words and keys in the tooltip */
+    rubraview_rect_t orr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_OPEN, win_w);
     {
-        double lw = mr.width * 0.42, lh = fmax(1.0, mr.height * 0.055), lx = mr.x + (mr.width - lw) * 0.5;
-        for (int k = -1; k <= 1; ++k) {
-            rubraview_pal_rect_t line = { lx, mr.y + mr.height * 0.5 + k * mr.height * 0.18 - lh * 0.5, lw, lh };
-            rubraview_pal_render_fill_rect(app->renderer, line, COLOR_TEXT, 0.0);
-        }
+        rubraview_pal_rect_t ob = { orr.x, orr.y, orr.width, orr.height };
+        if (app->picker_open) rubraview_pal_render_fill_rect(app->renderer, ob, 0xFF2D4A6Eu, 0.0);
+        else if (rubraview_rect_contains(orr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, ob, COLOR_TILE_FILL, 0.0);
+        double fw = orr.width * 0.46, fh = orr.height * 0.32, fx = orr.x + (orr.width - fw) * 0.5, fy = orr.y + (orr.height - fh) * 0.5 + orr.height * 0.03;
+        double stroke = fmax(1.0, orr.height * 0.05);
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ fx, fy - fh * 0.22, fw * 0.42, fh * 0.3 }, COLOR_TEXT, fh * 0.08);   /* the tab */
+        rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ fx, fy, fw, fh }, COLOR_TEXT, stroke, fh * 0.08);
     }
-    rubraview_pal_rect_t title = { mr.width + 8.0, 0.0, win_w * 0.6, app->titlebar.height };
+    rubraview_pal_rect_t title = { orr.x + orr.width + 8.0, 0.0, win_w * 0.6, app->titlebar.height };
     if (menu_open) {
         char crumb[128];
         rubraview_pal_render_draw_text(app->renderer, rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb)), title,
@@ -10637,8 +10643,7 @@ static void draw_wheel_strip(app_state_t *app) {
                 int32_t w = 0, h = 0;
                 rubraview_pal_texture_size(tex, &w, &h);
                 tw = (double)w; th = (double)h;
-            } else if (app->pages[index].loaded && app->pages[index].texture &&   /* the page read already, unless its folder shows none */
-                       !thumb_kept_out(app, app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.archive_path)) {
+            } else if (app->pages[index].loaded && app->pages[index].texture) {   /* the page read already */
                 tex = app->pages[index].texture;
                 tw = (double)app->pages[index].width; th = (double)app->pages[index].height;
             }
@@ -22891,6 +22896,10 @@ static void tick_timers(app_state_t *app, double dt) {
         app->titlebar.shown = true;   /* the bar stays while its menu is open (owner, 2026-10-15) */
         app->titlebar.idle_seconds = 0.0;
     }
+    if (app->frameless && !app->chrome_hidden && rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5) {
+        app->titlebar.shown = true;   /* 1.20.0: pinned */
+        app->titlebar.idle_seconds = 0.0;
+    }
     rubraview_titlebar_tick(&app->titlebar, dt);
     rubraview_transition_tick(&app->transition, dt);
     animation_tick(app, dt);
@@ -22923,6 +22932,12 @@ static void tick_timers(app_state_t *app, double dt) {
             keys_of = rubraview_rect_contains(rubraview_box_pin_rect(&app->toolbox, &base), app->pointer_x, app->pointer_y) ? "toggle_toolbox_pin" : "toggle_toolbox";
         }
         if (hint.len > 0 && keys_of) hint = hint_with_keys(app, cstr(keys_of), hint.ptr, hint_scratch, sizeof(hint_scratch));
+        if (hint.len == 0 && free_pointer && app->titlebar.shown) {   /* 1.20.0: the title bar's Open */
+            int32_t bw = 0, bh = 0;
+            rubraview_pal_window_get_size(app->window, &bw, &bh);
+            if (rubraview_rect_contains(rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_OPEN, (double)bw), app->pointer_x, app->pointer_y))
+                hint = hint_with_keys(app, U8("open_picker"), T("Open a file"), hint_scratch, sizeof(hint_scratch));
+        }
         if (hint.len == 0 && app->pointer_inside && app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED &&
             app->toolbox.state != RUBRAVIEW_BOX_DETACHED && !app->ctx_open && !app->slidepop_open) {
             /* the layout's icon says which it is, as words, when the pointer rests on it (owner, 2026-10-14) */

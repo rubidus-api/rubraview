@@ -139,6 +139,14 @@ bool rubraview_path_is_within(u8str_t path, u8str_t folder);
 /** Whether `path` lies in any of `folders` (empty ones are skipped). */
 bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count);
 
+/**
+ * 1.20.0 (owner, 2026-10-18: "그 폴더와 그 폴더의 하위 폴더 썸네일만 안 보이게"): is a tile's
+ * thumbnail kept out by `thumbs.skip_dirs`? Only a folder's own tile is — one of those folders, or
+ * a folder inside one — as it is seen from the folder above it. The files in them, and an
+ * archive, show theirs.
+ */
+bool rubraview_thumb_folder_kept_out(u8str_t path, bool is_directory, const u8str_t *folders, size_t count);
+
 /*
  * The folders kept out of Recent, as many as wanted (owner, 2026-10-16):
  * one setting, the folders joined by '|', a character no Windows path holds.

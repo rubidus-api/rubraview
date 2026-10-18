@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.19.0.exe              the viewer, as built
-dist/rubraview-v1.19.0/                 the release bundle
-dist/rubraview-v1.19.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.20.0.exe              the viewer, as built
+dist/rubraview-v1.20.0/                 the release bundle
+dist/rubraview-v1.20.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -907,11 +907,15 @@ its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
 ## The floating boxes
 
-The menu opens from the three lines at the title bar's left end (or `Tab`):
-its tiles come under the bar, which stays while the menu is open; a choice,
-the three lines again, `Esc` or a click elsewhere folds it. (With Windows'
-own title bar — Settings > General > Frameless window off — the menu is an
-**M** box floating over the picture, as the toolbox is.) A small anchor,
+The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`). The
+menu opens with `Tab`, or **Menu...** at the end of a right click; a right
+click also has **Help** and **About Rubraview**. Its tiles come under the
+bar, which stays while the menu is open; a choice, `Esc` or a click
+elsewhere folds it. (With Windows' own title bar — Settings > General >
+Frameless window off — the menu is an **M** box floating over the
+picture, as the toolbox is.) The toolbox's last group has **Settings**,
+**Bar pin** (the title bar stays shown; Settings > General > Title bar)
+and **Info bar** (`Shift+I`). A small anchor,
 **T**, floats over the picture for the toolbox. The toolbox changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or previous
 archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
@@ -1185,10 +1189,10 @@ filename code page, the memory cap). Some worth knowing:
   `Enter` adds it. `Enter` on a folder in the list puts it in the same box
   to change (the row says it is being changed); `Esc` leaves it as it was.
   `Delete`, or a click on the **X** at the end of its row, takes a folder
-  off. **Folders shown without thumbnails** is a list of the same kind: the
-  files of a folder named there, and of every folder under it, are shown in
-  the open-file screen and the filmstrip as plain tiles with their names,
-  and no picture of them is made.
+  off. **Folders shown without thumbnails** is a list of the same kind: a
+  folder named there, and every folder under it, is shown from the folder
+  above as a plain tile with its name, and no picture of what is in it is
+  made. Inside it, its files show their own thumbnails as anywhere else.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
@@ -1478,6 +1482,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
 | Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
 | Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `Bar pin` | Keep the title bar shown |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | A file of a list, right-clicked: open it |
@@ -1485,6 +1490,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
+| Right click `About Rubraview`, Menu `About` | About Rubraview: the version and the licences of what it carries |
 | Right click `One page`, Menu `Single` | Layout: one page at a time |
 | Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
@@ -1524,6 +1530,5 @@ listed under a later heading only means that while that is on screen.
 | Menu `60%` | The floating boxes' opacity: 60% |
 | Menu `40%` | The floating boxes' opacity: 40% |
 | Menu `Change keys` | Settings, opened on its Keys page |
-| Menu `About` | About Rubraview: the version and the licences of what it carries |
 
 <!-- keys:end -->

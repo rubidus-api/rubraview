@@ -97,9 +97,11 @@ typedef enum rubraview_titlebar_button {
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_CLOSE,
-    /* At the bar's left end (owner, 2026-10-15): three lines, the menu
-       opened under the bar, which stays while it is open. */
+    /* Once at the bar's left end (owner, 2026-10-15), gone in 1.20.0 (owner, 2026-10-18:
+       "타이틀바 좌측 상단의 메뉴는 완전히 없앱시다"): no rectangle, never hit. */
     RUBRAVIEW_TITLEBAR_MENU,
+    /* At the bar's left end (owner, 2026-10-18: "파일 열기 아이콘을 툴바에 하나 추가"): the picker. */
+    RUBRAVIEW_TITLEBAR_OPEN,
     RUBRAVIEW_TITLEBAR_CAPTION, /* empty space: dragging here moves the window */
 } rubraview_titlebar_button_t;
 

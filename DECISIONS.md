@@ -1709,3 +1709,22 @@ Do not store credentials, private infrastructure details, personal data, private
   - a 1600x900 picture on A4 portrait is turned a quarter, as Auto says; landscape lays it flat; A5 landscape reads 210 x 148 mm;
   - Print gave a one-page PDF whose MediaBox is 595.32 x 419.52 pt, A5 landscape, with no Windows print dialog (only the PDF driver's own Save As).
   - Host: the preview's fit and the sheets a list takes.
+
+## 2026-10-18: D-170 Thumbnails kept off folders only; the title bar's Open; the toolbox's last group; Help and About on a right click
+
+- Status: Accepted (owner 2026-10-18):
+  - "썸네일 보이지 않게 하는 폴더는, 바깥에서 폴더에만 그렇게 하고 ... 그 폴더로 들어가면 그 안의 파일들은 썸네일이 보이게";
+  - "파일 열기 아이콘을 툴바에 하나 추가";
+  - "설정 아이콘을 툴바에 넣어주시고, 툴바에 상단 타이틀바 자체를 고정하는 pin ... Shift+I의 인포메이션 바 아이콘도 밑에 ... 타이틀바 좌측 상단의 메뉴는 완전히 없앱시다. 대신에 Help와 About는 우클릭 컨텍스트 메뉴에".
+- Decision:
+  - `rubraview_thumb_folder_kept_out(path, is_directory, ...)`: a folder's tile within a listed folder only. A book in it and the filmstrip's pages show theirs; the check on the strip and on a page already read is gone.
+  - Every toolbox already had Open (`open_picker`), so the "toolbar" taken for the first ask was the title bar: Open is its button at the left end, a folder drawn, its tooltip with its keys. With the second ask the menu button is gone; Open has the left end.
+  - `toggle_titlebar_pin`, new: `general.titlebar_pinned`, lit on its tile like the other toggles.
+  - Every toolbox but the slide show's ends in a group of Settings, Bar pin and Info bar (`toggle_osd`, Shift+I), the information bar last ("밑에"). The rule of 2026-10-15 that the toolbox not hold Settings gives way to this ask.
+  - Help (`toggle_help`) and About before Menu... in every context menu but the list rows'.
+  - The settings store holds 256 (it was full at 224).
+- Consequences: VM (2026-10-18):
+  - a listed folder's tile has no thumbnail and another's has; inside it, its files show theirs and its inner folder's tile has none;
+  - the title bar's folder, its tooltip "Open a file (O, Ctrl+O)", and the picker it opens;
+  - the toolbox's new group; Help and About on a right click;
+  - Bar pin keeps the bar while the pointer is away, and lets it go when pressed again.

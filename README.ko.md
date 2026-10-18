@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.19.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.19.0/rubraview-v1.19.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.19.0/rubraview-v1.19.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.20.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -202,6 +202,7 @@
 | 도구 상자 `Sub`, 오른쪽 클릭 `Subtitles on / off`, 메뉴 `On/off` | 자막 켜기/끄기 |
 | 도구 상자 `100%`, 메뉴 `Next zoom` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
 | 도구 상자 `Fit`, 메뉴 `Next fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 |
+| 도구 상자 `Bar pin` | 제목 표시줄 고정 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
 | 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
 | 오른쪽 클릭 `Open` | 목록의 파일 우클릭: 열기 |
@@ -209,6 +210,7 @@
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |
 | 오른쪽 클릭 `Take out of the list` | 목록의 파일 우클릭: 목록에서 빼기 (파일은 그대로) |
 | 오른쪽 클릭 `Delete the file...` | 목록의 파일 우클릭: 경고하고 확인한 뒤 휴지통으로 |
+| 오른쪽 클릭 `About Rubraview`, 메뉴 `About` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
 | 오른쪽 클릭 `One page`, 메뉴 `Single` | 보기 방식: 한 장씩 |
 | 오른쪽 클릭 `Two pages`, 메뉴 `Dual` | 보기 방식: 두 장 나란히 |
 | 오른쪽 클릭 `Book`, 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
@@ -248,7 +250,6 @@
 | 메뉴 `60%` | 떠 있는 상자 불투명도 60% |
 | 메뉴 `40%` | 떠 있는 상자 불투명도 40% |
 | 메뉴 `Change keys` | 설정을 단축키 쪽에서 열기 |
-| 메뉴 `About` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
 
 <!-- keys:end -->
 

@@ -177,6 +177,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "toggle_spread_detect", "Detect two-page spreads" },
     { "toggle_subtitle_window", "The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen" },
     { "toggle_subtitles", "Subtitles on or off" },
+    { "toggle_titlebar_pin", "Keep the title bar shown" },
     { "toggle_toolbox", "Open or close the toolbox" },
     { "toggle_toolbox_detach", "Give the toolbox a window of its own, or dock it" },
     { "toggle_toolbox_pin", "Pin the toolbox open" },

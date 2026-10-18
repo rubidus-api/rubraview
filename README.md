@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.19.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.19.0/rubraview-v1.19.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.19.0/rubraview-v1.19.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.20.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -203,6 +203,7 @@ ships with, so it cannot drift from them.
 | Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
 | Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
 | Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `Bar pin` | Keep the title bar shown |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | A file of a list, right-clicked: open it |
@@ -210,6 +211,7 @@ ships with, so it cannot drift from them.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
+| Right click `About Rubraview`, Menu `About` | About Rubraview: the version and the licences of what it carries |
 | Right click `One page`, Menu `Single` | Layout: one page at a time |
 | Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
@@ -249,7 +251,6 @@ ships with, so it cannot drift from them.
 | Menu `60%` | The floating boxes' opacity: 60% |
 | Menu `40%` | The floating boxes' opacity: 40% |
 | Menu `Change keys` | Settings, opened on its Keys page |
-| Menu `About` | About Rubraview: the version and the licences of what it carries |
 
 <!-- keys:end -->
 
