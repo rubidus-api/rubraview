@@ -310,6 +310,14 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             continue;
         }
         if (rubraview_u8_eq_lit(arg, "--new-instance")) { result.new_instance = true; continue; }
+        if (starts_with(arg, "--page=", &value)) {
+            long n = 0;
+            if (!parse_int(value, &n) || n < 1 || n > INT32_MAX) {
+                result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
+            }
+            result.start_page = (int32_t)n;
+            continue;
+        }
         if (rubraview_u8_eq_lit(arg, "--diag")) { result.diagnostics = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--version") || rubraview_u8_eq_lit(arg, "-v")) { result.show_version = true; continue; }
         if (rubraview_u8_eq_lit(arg, "--probe-media")) { result.probe_media = true; continue; }
@@ -411,6 +419,54 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             if (found < 0) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
             result.export_options.png_depth = (rubraview_png_depth_t)found;
             continue;
+        }
+
+        /* RV-140: more of what the writers take. */
+        {
+            static const char *const SUBSAMPLINGS[] = { "auto", "420", "422", "444" };
+            static const char *const PNG_FILTERS[] = { "level", "none", "sub", "up", "average", "paeth", "adaptive" };
+            static const char *const TIFFS[] = { "auto", "none", "lzw", "zip" };
+            static const char *const BMPS[] = { "32", "24", "8" };
+            static const struct { const char *flag; const char *const *words; int count; int which; } WORDS[] = {
+                { "--subsampling=", SUBSAMPLINGS, 4, 0 }, { "--png-filter=", PNG_FILTERS, 7, 1 },
+                { "--tiff=", TIFFS, 4, 2 }, { "--bmp=", BMPS, 3, 3 },
+            };
+            bool took = false, bad = false;
+            for (size_t k = 0; k < sizeof(WORDS) / sizeof(WORDS[0]) && !took; ++k) {
+                if (!starts_with(arg, WORDS[k].flag, &value)) continue;
+                took = true;
+                int found = -1;
+                for (int w = 0; w < WORDS[k].count && found < 0; ++w) if (rubraview_u8_eq_lit(value, WORDS[k].words[w])) found = w;
+                if (found < 0) { bad = true; break; }
+                switch (WORDS[k].which) {
+                    case 0: result.export_options.jpeg_subsampling = (rubraview_jpeg_subsampling_t)found; break;
+                    case 1: result.export_options.png_filter = (rubraview_png_filter_t)found; break;
+                    case 2: result.export_options.tiff_compression = (rubraview_tiff_compression_t)found; break;
+                    default: result.export_options.bmp_depth = (rubraview_bmp_depth_t)found; break;
+                }
+            }
+            static const struct { const char *flag; long lo, hi; int which; } NUMBERS[] = {
+                { "--restart=", 0, 64, 0 }, { "--colours=", 2, 256, 1 }, { "--near-lossless=", 0, 100, 2 }, { "--alpha-quality=", 0, 100, 3 },
+            };
+            for (size_t k = 0; k < sizeof(NUMBERS) / sizeof(NUMBERS[0]) && !took; ++k) {
+                if (!starts_with(arg, NUMBERS[k].flag, &value)) continue;
+                took = true;
+                long n = 0;
+                if (!parse_int(value, &n) || n < NUMBERS[k].lo || n > NUMBERS[k].hi) { bad = true; break; }
+                switch (NUMBERS[k].which) {
+                    case 0: result.export_options.jpeg_restart_rows = (int32_t)n; break;
+                    case 1: result.export_options.colours = (int32_t)n; break;
+                    case 2: result.export_options.webp_near_lossless = (int32_t)n; break;
+                    default: result.export_options.webp_alpha_quality = (int32_t)n; break;
+                }
+            }
+            if (bad) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            if (took) continue;
+            if (rubraview_u8_eq_lit(arg, "--grey-jpeg")) { result.export_options.jpeg_grey = true; continue; }
+            if (rubraview_u8_eq_lit(arg, "--optimise") || rubraview_u8_eq_lit(arg, "--optimize")) { result.export_options.jpeg_optimise = true; continue; }
+            if (rubraview_u8_eq_lit(arg, "--interlace")) { result.export_options.png_interlace = true; continue; }
+            if (rubraview_u8_eq_lit(arg, "--no-dither")) { result.export_options.dither = false; continue; }
+            if (rubraview_u8_eq_lit(arg, "--sharp-yuv")) { result.export_options.webp_sharp_yuv = true; continue; }
         }
 
         /* RV-109: how a WebP is written. */

@@ -63,6 +63,7 @@ typedef struct rubraview_cli_result {
     const u8str_t      *inputs;            /* every input path, in order (`input` is the last) */
     size_t              input_count;
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
+    int32_t             start_page;        /* --page=N: the viewer opens a book on its page N (1 the first); 0 when not given */
     bool                diagnostics;       /* --diag: report what the graphics device is and stop */
     bool                show_version;      /* --version: print the version and stop */
     bool                probe_media;       /* --probe-media: open the file with each media backend and report */

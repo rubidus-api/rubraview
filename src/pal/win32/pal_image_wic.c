@@ -1572,24 +1572,52 @@ static void apply_encoder_options(IPropertyBag2 *bag,
         value.fltVal = (float)options->jpeg_quality / 100.0f;
         IPropertyBag2_Write(bag, 1, &option, &value);
 
-        /* WIC's encoder writes baseline JPEG only; a progressive one is
-           made from its output afterwards (jpeg_make_progressive). */
+        /* RV-140: the colour's resolution against the brightness' (WIC numbers them as we do). */
+        if (options->jpeg_subsampling != RUBRAVIEW_JPEG_SUBSAMPLING_AUTO && !options->jpeg_grey) {
+            option.pstrName = (LPOLESTR)L"JpegYCrCbSubsampling";
+            VariantInit(&value);
+            value.vt = VT_UI1;
+            value.bVal = (BYTE)options->jpeg_subsampling;
+            IPropertyBag2_Write(bag, 1, &option, &value);
+        }
+
+        /* WIC's encoder writes baseline JPEG only; a progressive one, its
+           own tables or restart markers are made from its output afterwards
+           (jpeg_rewrite). */
     } else if (format == RUBRAVIEW_EXPORT_PNG) {
         /* WIC's PNG encoder has no compression *level*; what it exposes
            is the filter, and interlacing. Level 0 is taken as "do not
            spend time", which is what the filter choice controls. */
+        static const BYTE FILTERS[] = { 0, WICPngFilterNone, WICPngFilterSub, WICPngFilterUp,
+                                        WICPngFilterAverage, WICPngFilterPaeth, WICPngFilterAdaptive };
         option.pstrName = (LPOLESTR)L"FilterOption";
         VariantInit(&value);
         value.vt = VT_UI1;
-        value.bVal = options->png_compression == 0
-                       ? WICPngFilterNone : WICPngFilterAdaptive;
+        value.bVal = options->png_filter > RUBRAVIEW_PNG_FILTER_BY_LEVEL && options->png_filter <= RUBRAVIEW_PNG_FILTER_ADAPTIVE
+                       ? FILTERS[options->png_filter]
+                       : (options->png_compression == 0 ? WICPngFilterNone : WICPngFilterAdaptive);
         IPropertyBag2_Write(bag, 1, &option, &value);
+        if (options->png_interlace) {   /* RV-140: Adam7 */
+            option.pstrName = (LPOLESTR)L"InterlaceOption";
+            VariantInit(&value);
+            value.vt = VT_BOOL;
+            value.boolVal = VARIANT_TRUE;
+            IPropertyBag2_Write(bag, 1, &option, &value);
+        }
     } else if (format == RUBRAVIEW_EXPORT_TIFF) {
         option.pstrName = (LPOLESTR)L"CompressionQuality";
         VariantInit(&value);
         value.vt = VT_R4;
         value.fltVal = 1.0f;
         IPropertyBag2_Write(bag, 1, &option, &value);
+        if (options->tiff_compression != RUBRAVIEW_TIFF_AUTO) {   /* RV-140 */
+            option.pstrName = (LPOLESTR)L"TiffCompressionMethod";
+            VariantInit(&value);
+            value.vt = VT_UI1;
+            value.bVal = options->tiff_compression == RUBRAVIEW_TIFF_NONE ? WICTiffCompressionNone
+                       : options->tiff_compression == RUBRAVIEW_TIFF_LZW ? WICTiffCompressionLZW : WICTiffCompressionZIP;
+            IPropertyBag2_Write(bag, 1, &option, &value);
+        }
     }
 }
 
@@ -1639,29 +1667,56 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
     /* WIC picks the nearest pixel format the container supports; asking
        for one it cannot write and then insisting is how encoders fail. */
     WICPixelFormatGUID pixel_format = GUID_WICPixelFormat32bppBGRA;
-    if (format == RUBRAVIEW_EXPORT_JPEG || format == RUBRAVIEW_EXPORT_PNG) {
+    /* RV-140: a palette of the size asked for, and the smallest indexed depth that holds it. */
+    bool paletted = options && ((format == RUBRAVIEW_EXPORT_PNG && options->png_depth == RUBRAVIEW_PNG_PALETTE8) ||
+                                format == RUBRAVIEW_EXPORT_GIF ||
+                                (format == RUBRAVIEW_EXPORT_BMP && options->bmp_depth == RUBRAVIEW_BMP_8));
+    UINT colours = (UINT)rubraview_export_palette_size(options);
+    if (paletted) {
+        pixel_format = GUID_WICPixelFormat8bppIndexed;
+        if (format == RUBRAVIEW_EXPORT_PNG) {   /* PNG holds 1, 2 and 4 bits too; BMP's and GIF's writers keep to 8 */
+            if (colours <= 2) pixel_format = GUID_WICPixelFormat1bppIndexed;
+            else if (colours <= 4) pixel_format = GUID_WICPixelFormat2bppIndexed;
+            else if (colours <= 16) pixel_format = GUID_WICPixelFormat4bppIndexed;
+        }
+    } else if (format == RUBRAVIEW_EXPORT_JPEG || format == RUBRAVIEW_EXPORT_PNG) {
         if (options && format == RUBRAVIEW_EXPORT_PNG &&
-            (options->png_depth == RUBRAVIEW_PNG_RGB24 || options->png_depth == RUBRAVIEW_PNG_PALETTE8 ||
-             options->png_depth == RUBRAVIEW_PNG_GRAY8)) {
+            (options->png_depth == RUBRAVIEW_PNG_RGB24 || options->png_depth == RUBRAVIEW_PNG_GRAY8)) {
             pixel_format = options->png_depth == RUBRAVIEW_PNG_GRAY8
                              ? GUID_WICPixelFormat8bppGray
-                             : (options->png_depth == RUBRAVIEW_PNG_PALETTE8
-                                  ? GUID_WICPixelFormat8bppIndexed
-                                  : GUID_WICPixelFormat24bppBGR);
+                             : GUID_WICPixelFormat24bppBGR;
         } else if (format == RUBRAVIEW_EXPORT_JPEG) {
-            pixel_format = GUID_WICPixelFormat24bppBGR;  /* JPEG has no alpha */
+            /* JPEG has no alpha; RV-140: one channel when grey is asked for */
+            pixel_format = options && options->jpeg_grey ? GUID_WICPixelFormat8bppGray : GUID_WICPixelFormat24bppBGR;
         }
+    } else if (format == RUBRAVIEW_EXPORT_BMP && options && options->bmp_depth == RUBRAVIEW_BMP_24) {
+        pixel_format = GUID_WICPixelFormat24bppBGR;
     }
     IWICBitmapFrameEncode_SetPixelFormat(frame, &pixel_format);
     IWICBitmapFrameEncode_SetSize(frame, width, height);
     if (options && options->dpi > 0.0) IWICBitmapFrameEncode_SetResolution(frame, options->dpi, options->dpi);   /* RV-134 */
 
+    /* The palette made from the picture itself, of that size; the frame told it, and the converter maps to it. */
+    IWICPalette *palette = NULL;
+    bool indexed = IsEqualGUID(&pixel_format, &GUID_WICPixelFormat8bppIndexed) || IsEqualGUID(&pixel_format, &GUID_WICPixelFormat4bppIndexed) ||
+                   IsEqualGUID(&pixel_format, &GUID_WICPixelFormat2bppIndexed) || IsEqualGUID(&pixel_format, &GUID_WICPixelFormat1bppIndexed);
+    if (indexed && options && SUCCEEDED(IWICImagingFactory_CreatePalette(factory, &palette)) && palette) {
+        bool alpha = format != RUBRAVIEW_EXPORT_BMP;
+        if (FAILED(IWICPalette_InitializeFromBitmap(palette, source, colours, alpha ? TRUE : FALSE))) {
+            IWICPalette_Release(palette);
+            palette = NULL;
+        } else {
+            IWICBitmapFrameEncode_SetPalette(frame, palette);
+        }
+    }
+    WICBitmapDitherType dither = options && !options->dither && palette ? WICBitmapDitherTypeNone : WICBitmapDitherTypeErrorDiffusion;
+
     bool ok = false;
     IWICFormatConverter *converter = NULL;
     if (SUCCEEDED(IWICImagingFactory_CreateFormatConverter(factory, &converter)) && converter &&
         SUCCEEDED(IWICFormatConverter_Initialize(converter, source, &pixel_format,
-                                                 WICBitmapDitherTypeErrorDiffusion, NULL, 0.0,
-                                                 WICBitmapPaletteTypeMedianCut))) {
+                                                 dither, palette, 0.0,
+                                                 palette ? WICBitmapPaletteTypeCustom : WICBitmapPaletteTypeMedianCut))) {
         if (SUCCEEDED(IWICBitmapFrameEncode_WriteSource(frame, (IWICBitmapSource*)converter, NULL)) &&
             SUCCEEDED(IWICBitmapFrameEncode_Commit(frame))) {
             ok = true;
@@ -1669,6 +1724,7 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
     }
 
     if (converter) IWICFormatConverter_Release(converter);
+    if (palette) IWICPalette_Release(palette);
     if (scaler) IWICBitmapScaler_Release(scaler);
     IWICBitmap_Release(bitmap);
     IWICBitmapFrameEncode_Release(frame);
@@ -1719,9 +1775,10 @@ static bool save_frames(u8str_t path, const rubraview_pixbuf_t *pixels,
 }
 
 /* RV-108: the JPEG just written, rewritten as a progressive one — its
-   coefficients as they are. A file that cannot be read back or rewritten
-   is left as the baseline JPEG it is. */
-static void jpeg_make_progressive(u8str_t path) {
+   coefficients as they are (RV-140: and with its own tables, restart
+   markers). A file that cannot be read back or rewritten is left as the
+   baseline JPEG it is. */
+static void jpeg_rewrite(u8str_t path, const rubraview_export_options_t *options) {
     rubraview_fs_entry_t entry;
     size_t room = 64u * 1024u * 1024u;
     void *memory = malloc(room);
@@ -1730,7 +1787,9 @@ static void jpeg_make_progressive(u8str_t path) {
     if (rubraview_pal_fs_stat(&arena, path, &entry) && entry.size_bytes > 0 && entry.size_bytes < room / 4u) {
         u8str_t bytes = rubraview_pal_fs_read_file(&arena, path, (size_t)entry.size_bytes);
         if (bytes.len > 0) {
-            rubraview_jpegtran_result_t made = rubraview_jpegtran_progressive(&arena, (const uint8_t*)bytes.ptr, bytes.len);
+            rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, (const uint8_t*)bytes.ptr, bytes.len,
+                                                                          options->jpeg_progressive, options->jpeg_optimise,
+                                                                          options->jpeg_restart_rows);
             if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.len > 0) (void)rubraview_pal_fs_write_file(path, made.data);
         }
     }
@@ -1743,6 +1802,9 @@ static rubraview_webp_options_t webp_options_from(const rubraview_export_options
         .lossless = options->webp_lossless,
         .quality = options->webp_quality,
         .effort = options->webp_effort,
+        .near_lossless = options->webp_near_lossless,   /* RV-140 */
+        .alpha_quality = options->webp_alpha_quality,
+        .sharp_yuv = options->webp_sharp_yuv,
     };
 }
 
@@ -1824,7 +1886,8 @@ bool rubraview_pal_image_save(u8str_t path,
     if (format == RUBRAVIEW_EXPORT_WEBP) return save_webp(path, pixels, options);
 
     bool saved = save_frames(path, pixels, options, format, NULL, 0);
-    if (saved && format == RUBRAVIEW_EXPORT_JPEG && options->jpeg_progressive) jpeg_make_progressive(path);
+    if (saved && format == RUBRAVIEW_EXPORT_JPEG &&
+        (options->jpeg_progressive || options->jpeg_optimise || options->jpeg_restart_rows > 0)) jpeg_rewrite(path, options);
     return saved;
 }
 

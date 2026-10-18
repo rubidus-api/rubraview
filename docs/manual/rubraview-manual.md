@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.15.0.exe              the viewer, as built
-dist/rubraview-v1.15.0/                 the release bundle
-dist/rubraview-v1.15.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.16.0.exe              the viewer, as built
+dist/rubraview-v1.16.0/                 the release bundle
+dist/rubraview-v1.16.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -69,6 +69,8 @@ the settings say, and `--recursive` reads their subfolders too.
 
 For a window of its own, use the right-click menu's **Open in a new
 window**, or `--new-instance` / `--new-window` on the command line.
+`--page=N` opens a book (an archive) on its page N; the restart
+offered in Settings › Cache uses it to come back where you were.
 Several windows share the settings, the reading history, the recent
 files, the favourites and the boxes' places safely: a file is replaced
 whole, one viewer at a time, and a viewer that saves keeps what another
@@ -419,6 +421,22 @@ colours** writes a PNG with or without transparency, in 256 colours or in
 grey; **Progressive JPEG** writes one that a browser shows whole and
 coarse first.
 
+More, by format (1.16.0):
+
+- JPEG: **Colour subsampling** (4:2:0 is smallest, 4:4:4 keeps colour
+  edges sharpest), **Grey JPEG**, **Optimised tables** (a smaller file,
+  the same picture) and **Restart markers** (one every N rows of blocks,
+  so a damaged file loses less).
+- PNG: **PNG filter** and **Interlaced (Adam7)**. With **PNG colours** at
+  *a palette*, **Palette colours** (2 to 256, made from the picture; 16 or
+  fewer write a smaller 4-, 2- or 1-bit PNG) and **Dither**.
+- GIF: **Palette colours** and **Dither**.
+- BMP: **BMP bits** (32 with transparency, 24, or 8 with a palette).
+- TIFF: **TIFF compression** (none, LZW, ZIP).
+- WebP: lossy, **Alpha quality** and **Sharp colour edges**; lossless,
+  **Near-lossless** (100 is off; lower lets nearby values change for a
+  smaller file).
+
 AVIF pictures (`.avif`) are read by Rubraview itself, on any Windows —
 stills and animations, with their transparency, 10-bit ones shown as 8.
 JPEG XL (`.jxl`) is read by Windows, when a JPEG XL codec is installed
@@ -604,6 +622,11 @@ waits for a key before it closes.
 | `--progressive` | A progressive JPEG |
 | `--lossless`, `--effort=0..6` | A WebP with every pixel as it was; how hard to try for a small one (4 as it comes) |
 | `--png-depth=rgba\|rgb\|palette\|gray` | A PNG's colours |
+| `--subsampling=auto\|420\|422\|444`, `--grey-jpeg`, `--optimise`, `--restart=0..64` | A JPEG's colour subsampling, grey, optimised tables, restart markers |
+| `--png-filter=level\|none\|sub\|up\|average\|paeth\|adaptive`, `--interlace` | A PNG's filter; interlaced |
+| `--colours=2..256`, `--no-dither` | A palette's size (PNG's palette, GIF, BMP's 8 bits); flat colours, not dots |
+| `--tiff=auto\|none\|lzw\|zip`, `--bmp=32\|24\|8` | A TIFF's compression; a BMP's bits |
+| `--near-lossless=0..100`, `--alpha-quality=0..100`, `--sharp-yuv` | A WebP's near-lossless (lossless), alpha quality and sharp colour edges (lossy) |
 | `--rotate=90\|180\|270\|exif`, `--flip=h\|v` | Turn them |
 | `--grayscale`, `--exposure=`, `--contrast=`, `--sharpen=amount[,radius]` | Adjust them |
 | `--privacy-clean` | Strip GPS and camera details |
@@ -671,7 +694,9 @@ While it does:
   starts.
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
   `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
-  `.sup`) or from inside the film itself.
+  `.sup`) or from inside the film itself. In a SAMI file, `&nbsp;`,
+  `&amp;`, `&lt;`, `&#44032;` and the like show as the characters they
+  stand for; the file itself is written back as it was.
 - The sound can be shaped (Settings › Audio › Sound, the toolbox's **EQ**,
   **Night** and **Viz** buttons, or Playback › Sound): an equaliser with
   eight presets and a window of ten sliders of its own (**EQ bands**:
@@ -1158,7 +1183,8 @@ filename code page, the memory cap). Some worth knowing:
   **The program's memory** shows what the session keeps (and the most it
   kept), what the song playing carries, the windows open, what is read for
   a moment and all it holds; **Restart Rubraview where it is** writes the
-  settings and starts it again on the file or archive on screen. When its
+  settings and starts it again on the file or archive on screen, a book
+  on its page. When its
   memory is nearly used up, Rubraview offers that restart once (`Y` restarts,
   `N` carries on).
 - **Cache** — how much memory pages may take (up to 16 GB) and how many are

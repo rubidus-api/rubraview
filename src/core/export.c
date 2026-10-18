@@ -21,6 +21,14 @@ rubraview_export_options_t rubraview_export_defaults(void) {
            would be its own kind of surprise. §3.10 makes it an explicit
            toggle, so it starts unticked. */
         .privacy_clean = false,
+        .jpeg_subsampling = RUBRAVIEW_JPEG_SUBSAMPLING_AUTO,
+        .png_filter = RUBRAVIEW_PNG_FILTER_BY_LEVEL,
+        .colours = 256,
+        .dither = true,              /* as WIC's own palettes were made before */
+        .tiff_compression = RUBRAVIEW_TIFF_AUTO,
+        .bmp_depth = RUBRAVIEW_BMP_32,
+        .webp_near_lossless = 100,   /* off */
+        .webp_alpha_quality = 100,
     };
 }
 
@@ -37,6 +45,49 @@ void rubraview_export_clamp(rubraview_export_options_t *options) {
     if ((int)options->png_depth < 0 || (int)options->png_depth > RUBRAVIEW_PNG_GRAY8) {
         options->png_depth = RUBRAVIEW_PNG_RGBA32;
     }
+    /* RV-140 */
+    if ((int)options->jpeg_subsampling < 0 || (int)options->jpeg_subsampling > RUBRAVIEW_JPEG_SUBSAMPLING_444) {
+        options->jpeg_subsampling = RUBRAVIEW_JPEG_SUBSAMPLING_AUTO;
+    }
+    options->jpeg_restart_rows = clampi(options->jpeg_restart_rows, 0, 64);
+    if ((int)options->png_filter < 0 || (int)options->png_filter > RUBRAVIEW_PNG_FILTER_ADAPTIVE) {
+        options->png_filter = RUBRAVIEW_PNG_FILTER_BY_LEVEL;
+    }
+    options->colours = options->colours == 0 ? 256 : clampi(options->colours, 2, 256);
+    if ((int)options->tiff_compression < 0 || (int)options->tiff_compression > RUBRAVIEW_TIFF_ZIP) {
+        options->tiff_compression = RUBRAVIEW_TIFF_AUTO;
+    }
+    if ((int)options->bmp_depth < 0 || (int)options->bmp_depth > RUBRAVIEW_BMP_8) options->bmp_depth = RUBRAVIEW_BMP_32;
+    options->webp_near_lossless = clampi(options->webp_near_lossless, 0, 100);
+    options->webp_alpha_quality = clampi(options->webp_alpha_quality, 0, 100);
+}
+
+int32_t rubraview_export_palette_size(const rubraview_export_options_t *options) {
+    if (!options || options->colours == 0) return 256;
+    return clampi(options->colours, 2, 256);
+}
+
+uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t source_name) {
+    if (!o) return 0u;
+    uint32_t rows = rubraview_export_rows(o->format, source_name, o->webp_lossless);
+    rubraview_export_format_t format = o->format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
+                                         ? rubraview_export_format_for_name(source_name) : o->format;
+    switch (format) {
+        case RUBRAVIEW_EXPORT_JPEG: rows |= RUBRAVIEW_EXPORT_ROW_JPEG_MORE; break;
+        case RUBRAVIEW_EXPORT_PNG:
+            rows |= RUBRAVIEW_EXPORT_ROW_PNG_MORE;
+            if (o->png_depth == RUBRAVIEW_PNG_PALETTE8) rows |= RUBRAVIEW_EXPORT_ROW_COLOURS;
+            break;
+        case RUBRAVIEW_EXPORT_GIF:  rows |= RUBRAVIEW_EXPORT_ROW_COLOURS; break;
+        case RUBRAVIEW_EXPORT_BMP:
+            rows |= RUBRAVIEW_EXPORT_ROW_BMP;
+            if (o->bmp_depth == RUBRAVIEW_BMP_8) rows |= RUBRAVIEW_EXPORT_ROW_COLOURS;
+            break;
+        case RUBRAVIEW_EXPORT_TIFF: rows |= RUBRAVIEW_EXPORT_ROW_TIFF; break;
+        case RUBRAVIEW_EXPORT_WEBP: rows |= o->webp_lossless ? RUBRAVIEW_EXPORT_ROW_WEBP_NEAR : RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY; break;
+        default: break;
+    }
+    return rows;
 }
 
 u8str_t rubraview_export_extension(rubraview_export_format_t format) {

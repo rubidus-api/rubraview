@@ -179,6 +179,54 @@ void rubraview_block_pool_release(rubraview_block_pool_t *pool) {
     if (pool) rubraview_type_pool_release(&pool->items);
 }
 
+/* ---- two regions in turn ---- */
+
+bool rubraview_halves_init(rubraview_halves_t *h, const char *name, size_t chunk_bytes, size_t limit) {
+    if (!h) return false;
+    *h = (rubraview_halves_t){0};
+    if (!rubraview_region_init(&h->half[0], name, chunk_bytes, limit)) return false;
+    if (rubraview_region_init(&h->half[1], name, chunk_bytes, limit)) return true;
+    rubraview_region_release(&h->half[0]);
+    return false;
+}
+
+void rubraview_halves_release(rubraview_halves_t *h) {
+    if (!h) return;
+    rubraview_region_release(&h->half[0]);
+    rubraview_region_release(&h->half[1]);
+}
+
+proven_arena_t *rubraview_halves_live(rubraview_halves_t *h, size_t need) {
+    if (!h) return NULL;
+    rubraview_region_t *r = &h->half[h->live & 1];
+    return rubraview_region_ensure(r, need) ? &r->arena : NULL;
+}
+
+proven_arena_t *rubraview_halves_next(rubraview_halves_t *h, size_t need) {
+    if (!h) return NULL;
+    rubraview_region_t *r = &h->half[(h->live & 1) ^ 1];
+    rubraview_region_reset(r);
+    return rubraview_region_ensure(r, need) ? &r->arena : NULL;
+}
+
+void rubraview_halves_swap(rubraview_halves_t *h) {
+    if (h) h->live ^= 1;
+}
+
+void rubraview_halves_reset(rubraview_halves_t *h) {
+    if (!h) return;
+    rubraview_region_reset(&h->half[0]);
+    rubraview_region_reset(&h->half[1]);
+}
+
+size_t rubraview_halves_used(const rubraview_halves_t *h) {
+    return h ? rubraview_region_used(&h->half[0]) + rubraview_region_used(&h->half[1]) : 0;
+}
+
+size_t rubraview_halves_held(const rubraview_halves_t *h) {
+    return h ? h->half[0].held + h->half[1].held : 0;
+}
+
 /* ---- the program's memory ---- */
 
 #define MB (1024u * 1024u)
@@ -192,6 +240,8 @@ bool rubraview_mem_init(rubraview_mem_t *mem) {
               rubraview_region_init(&mem->bgm, "bgm", 4u * MB, 64u * MB) &&
               rubraview_region_init(&mem->recent[0], "recent", 256u * 1024u, 16u * MB) &&
               rubraview_region_init(&mem->recent[1], "recent", 256u * 1024u, 16u * MB) &&
+              rubraview_halves_init(&mem->settings, "settings", 256u * 1024u, 16u * MB) &&
+              rubraview_halves_init(&mem->subs, "subs", 4u * MB, 128u * MB) &&
               rubraview_block_pool_init(&mem->windows, 1u * MB, 8);
     for (int c = 0; ok && c < RUBRAVIEW_SCRATCH_CLASSES; ++c)
         ok = rubraview_block_pool_init(&mem->scratch[c], SCRATCH_BYTES[c], c < 2 ? 2 : 1);   /* the big ones are not kept many */
@@ -208,6 +258,8 @@ void rubraview_mem_release(rubraview_mem_t *mem) {
     rubraview_region_release(&mem->bgm);
     rubraview_region_release(&mem->recent[0]);
     rubraview_region_release(&mem->recent[1]);
+    rubraview_halves_release(&mem->settings);
+    rubraview_halves_release(&mem->subs);
     rubraview_block_pool_release(&mem->windows);
     for (int c = 0; c < RUBRAVIEW_SCRATCH_CLASSES; ++c) rubraview_block_pool_release(&mem->scratch[c]);
 }
@@ -266,11 +318,13 @@ rubraview_mem_stats_t rubraview_mem_stats(const rubraview_mem_t *mem) {
     s.media_used = rubraview_region_used(&mem->media);
     s.media_peak = mem->media.high_water > s.media_used ? mem->media.high_water : s.media_used;
     s.recent_used = rubraview_region_used(&mem->recent[mem->recent_live]);
+    s.settings_used = rubraview_halves_used(&mem->settings);
+    s.subs_used = rubraview_halves_used(&mem->subs);
     s.windows_live = mem->windows.items.live;
     s.windows_reused = mem->windows.items.reused;
     for (int c = 0; c < RUBRAVIEW_SCRATCH_CLASSES; ++c) s.scratch_live += mem->scratch[c].items.live * mem->scratch[c].block_bytes;
     s.scratch_live += mem->scratch_big;
-    s.total_held = mem->persist.held + mem->media.held + mem->bgm.held + mem->recent[0].held + mem->recent[1].held + pool_held(&mem->windows) + mem->scratch_big;
+    s.total_held = mem->persist.held + mem->media.held + mem->bgm.held + mem->recent[0].held + mem->recent[1].held + rubraview_halves_held(&mem->settings) + rubraview_halves_held(&mem->subs) + pool_held(&mem->windows) + mem->scratch_big;
     for (int c = 0; c < RUBRAVIEW_SCRATCH_CLASSES; ++c) s.total_held += pool_held(&mem->scratch[c]);
     return s;
 }

@@ -49,6 +49,26 @@ void rubraview_region_release(rubraview_region_t *region);
 /** The region as an allocator: alloc after ensure; free does nothing (it is an arena's). */
 proven_allocator_t rubraview_region_allocator(rubraview_region_t *region);
 
+/* ---- Two regions in turn: what is made anew is made in the idle one, which then becomes the one in use ---- */
+
+typedef struct rubraview_halves {
+    rubraview_region_t half[2];
+    int                live;
+} rubraview_halves_t;
+
+bool rubraview_halves_init(rubraview_halves_t *h, const char *name, size_t chunk_bytes, size_t limit);
+void rubraview_halves_release(rubraview_halves_t *h);
+/** The half in use, with room for `need`; NULL past its limit. */
+proven_arena_t *rubraview_halves_live(rubraview_halves_t *h, size_t need);
+/** The idle half, emptied (nobody holds what was in it), with room for `need`; NULL past its limit. */
+proven_arena_t *rubraview_halves_next(rubraview_halves_t *h, size_t need);
+/** The idle half made the one in use; the one before is emptied at the next `next`. */
+void rubraview_halves_swap(rubraview_halves_t *h);
+/** Both emptied: nothing made in either is held any more. */
+void rubraview_halves_reset(rubraview_halves_t *h);
+size_t rubraview_halves_used(const rubraview_halves_t *h);
+size_t rubraview_halves_held(const rubraview_halves_t *h);
+
 /* ---- A pool of one type: a stack of freed items in front of its base ---- */
 
 typedef struct rubraview_type_pool {
@@ -86,6 +106,8 @@ typedef struct rubraview_mem {
     rubraview_region_t     bgm;       /* what the background music's track carries; reset with its next */
     rubraview_region_t     recent[2]; /* the recent list in two halves, parsed into the idle one */
     int                    recent_live;
+    rubraview_halves_t     settings;  /* settings.ini as written and the folders read from it */
+    rubraview_halves_t     subs;      /* the subtitle of the film: read into one half, saved into the other */
     rubraview_block_pool_t windows;   /* a window and its renderer, one block each */
     rubraview_block_pool_t scratch[RUBRAVIEW_SCRATCH_CLASSES];
     size_t                 scratch_big;      /* bytes of larger scratch out now */
@@ -124,6 +146,7 @@ typedef struct rubraview_mem_stats {
     size_t persist_used, persist_held, persist_peak;
     size_t media_used, media_peak;
     size_t recent_used;
+    size_t settings_used, subs_used;
     size_t windows_live, windows_reused;
     size_t scratch_live;
     size_t total_held;

@@ -40,6 +40,38 @@ typedef enum rubraview_png_depth {
     RUBRAVIEW_PNG_GRAY8,
 } rubraview_png_depth_t;
 
+/* RV-140: as WIC numbers them (`WICJpegYCrCbSubsamplingOption`), 0 the writer's own (4:2:0). */
+typedef enum rubraview_jpeg_subsampling {
+    RUBRAVIEW_JPEG_SUBSAMPLING_AUTO = 0,
+    RUBRAVIEW_JPEG_SUBSAMPLING_420,
+    RUBRAVIEW_JPEG_SUBSAMPLING_422,
+    RUBRAVIEW_JPEG_SUBSAMPLING_444,
+} rubraview_jpeg_subsampling_t;
+
+/* RV-140: by the level (0 none, else adaptive), as before; or one of PNG's own. */
+typedef enum rubraview_png_filter {
+    RUBRAVIEW_PNG_FILTER_BY_LEVEL = 0,
+    RUBRAVIEW_PNG_FILTER_NONE,
+    RUBRAVIEW_PNG_FILTER_SUB,
+    RUBRAVIEW_PNG_FILTER_UP,
+    RUBRAVIEW_PNG_FILTER_AVERAGE,
+    RUBRAVIEW_PNG_FILTER_PAETH,
+    RUBRAVIEW_PNG_FILTER_ADAPTIVE,
+} rubraview_png_filter_t;
+
+typedef enum rubraview_tiff_compression {
+    RUBRAVIEW_TIFF_AUTO = 0,   /* the writer's own */
+    RUBRAVIEW_TIFF_NONE,
+    RUBRAVIEW_TIFF_LZW,
+    RUBRAVIEW_TIFF_ZIP,
+} rubraview_tiff_compression_t;
+
+typedef enum rubraview_bmp_depth {
+    RUBRAVIEW_BMP_32 = 0,      /* with its transparency, as before */
+    RUBRAVIEW_BMP_24,
+    RUBRAVIEW_BMP_8,           /* a palette of `colours` */
+} rubraview_bmp_depth_t;
+
 typedef struct rubraview_export_options {
     rubraview_export_format_t format;
 
@@ -59,6 +91,22 @@ typedef struct rubraview_export_options {
     bool    privacy_clean;     /* strip EXIF/GPS/XMP/IPTC */
 
     double  dpi;               /* RV-134: written into the file (JPEG, PNG, TIFF, BMP); 0 = as the writer does */
+
+    /* RV-140 (owner, 2026-10-18: "jpg나 png 혹은 기타 저장 옵션들에 대해 더 다양한 옵션"):
+       what the writers (WIC, libjpeg-turbo's jpegtran, libwebp) take already. */
+    rubraview_jpeg_subsampling_t jpeg_subsampling;
+    bool    jpeg_grey;          /* one channel: grey */
+    bool    jpeg_optimise;      /* Huffman tables made for this picture: smaller, as good */
+    int32_t jpeg_restart_rows;  /* 0, or a restart marker every N rows of blocks (1..64) */
+    rubraview_png_filter_t png_filter;
+    bool    png_interlace;      /* Adam7: shown coarse first while it loads */
+    int32_t colours;            /* a palette's size, 2..256 (PNG's palette, GIF, BMP's 8 bits); 0 = 256 */
+    bool    dither;             /* the colours left spread as dots, or the nearest flat (palettes) */
+    rubraview_tiff_compression_t tiff_compression;
+    rubraview_bmp_depth_t bmp_depth;
+    int32_t webp_near_lossless; /* 0..100, lossless only: 100 is off, lower lets nearby values change for a smaller file */
+    int32_t webp_alpha_quality; /* 0..100: how well the transparency is kept in a lossy WebP */
+    bool    webp_sharp_yuv;     /* a slower, sharper conversion of colour edges (lossy) */
 } rubraview_export_options_t;
 
 /** Every field at the specification's default. */
@@ -88,6 +136,14 @@ enum {
     RUBRAVIEW_EXPORT_ROW_PNG_DEPTH   = 1u << 3,   /* PNG */
     RUBRAVIEW_EXPORT_ROW_WEBP        = 1u << 4,   /* WebP: lossless and effort */
     RUBRAVIEW_EXPORT_ROW_PRIVACY     = 1u << 5,   /* a format that carries EXIF or XMP: JPEG, PNG, WebP, TIFF */
+    /* RV-140 */
+    RUBRAVIEW_EXPORT_ROW_JPEG_MORE   = 1u << 6,   /* JPEG: subsampling, grey, optimised tables, restart markers */
+    RUBRAVIEW_EXPORT_ROW_PNG_MORE    = 1u << 7,   /* PNG: filter, interlace */
+    RUBRAVIEW_EXPORT_ROW_COLOURS     = 1u << 8,   /* a palette: PNG's palette, GIF, BMP's 8 bits — its size and dithering */
+    RUBRAVIEW_EXPORT_ROW_TIFF        = 1u << 9,   /* TIFF: compression */
+    RUBRAVIEW_EXPORT_ROW_BMP         = 1u << 10,  /* BMP: bits */
+    RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY  = 1u << 11,  /* lossy WebP: alpha quality, sharp YUV */
+    RUBRAVIEW_EXPORT_ROW_WEBP_NEAR   = 1u << 12,  /* lossless WebP: near-lossless */
 };
 
 /**
@@ -95,6 +151,12 @@ enum {
  * for the format `source_name`'s extension names (none known: no rows).
  */
 uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_name, bool webp_lossless);
+
+/** RV-140: the rows for these options, the palette's only when one is written. */
+uint32_t rubraview_export_rows_of(const rubraview_export_options_t *options, u8str_t source_name);
+
+/** RV-140: the palette's size these options ask for, 2..256. */
+int32_t rubraview_export_palette_size(const rubraview_export_options_t *options);
 
 /** The sizes §3.10's multi-size ICO packs. Returns how many were written. */
 size_t rubraview_export_ico_sizes(int32_t *out_sizes, size_t capacity);

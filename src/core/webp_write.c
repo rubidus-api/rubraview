@@ -21,6 +21,10 @@ static bool config_for(const rubraview_webp_options_t *options, WebPConfig *conf
     if (options && options->lossless) {
         config->lossless = 1;
         config->exact = 0;   /* the colour under a wholly transparent pixel is not kept */
+        if (options->near_lossless >= 1 && options->near_lossless <= 99) config->near_lossless = options->near_lossless;
+    } else if (options) {
+        if (options->alpha_quality >= 1 && options->alpha_quality <= 100) config->alpha_quality = options->alpha_quality;
+        if (options->sharp_yuv) config->use_sharp_yuv = 1;
     }
     return WebPValidateConfig(config) != 0;
 }

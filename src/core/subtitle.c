@@ -140,6 +140,85 @@ static bool is_paragraph_tag(u8str_t rest) {
     return after == '>' || after == ' ' || after == '\t' || after == '\r' || after == '\n' || after == '/';
 }
 
+/* One of HTML's entities at `p` (owner, 2026-10-18: "&nbsp;같은 html
+   이스케이프 문자가 smi에 있으면 잘 처리"): the bytes it stands for in
+   `out` (four at most, never more than it took), and how many it took in
+   `*took`. Zero when it is not one that is known; it is then kept as
+   typed. The five HTML 4 kept without their `;` are read that way too. */
+static size_t html_entity(const char *p, size_t len, char out[4], size_t *took) {
+    if (len < 3 || p[0] != '&') return 0;
+    if (p[1] == '#') {
+        bool hex = len > 2 && (p[2] == 'x' || p[2] == 'X');
+        size_t i = hex ? 3 : 2, digits = 0;
+        uint32_t cp = 0;
+        for (; i < len && digits < 8; ++i, ++digits) {
+            char c = p[i];
+            uint32_t d;
+            if (c >= '0' && c <= '9') d = (uint32_t)(c - '0');
+            else if (hex && c >= 'a' && c <= 'f') d = (uint32_t)(c - 'a' + 10);
+            else if (hex && c >= 'A' && c <= 'F') d = (uint32_t)(c - 'A' + 10);
+            else break;
+            cp = cp * (hex ? 16u : 10u) + d;
+        }
+        if (digits == 0 || i >= len || p[i] != ';') return 0;
+        if (cp == 0 || cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) return 0;
+        *took = i + 1;
+        if (cp < 0x80u) { out[0] = (char)cp; return 1; }
+        if (cp < 0x800u) { out[0] = (char)(0xC0u | (cp >> 6)); out[1] = (char)(0x80u | (cp & 0x3Fu)); return 2; }
+        if (cp < 0x10000u) {
+            out[0] = (char)(0xE0u | (cp >> 12)); out[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+            out[2] = (char)(0x80u | (cp & 0x3Fu)); return 3;
+        }
+        out[0] = (char)(0xF0u | (cp >> 18)); out[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+        out[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu)); out[3] = (char)(0x80u | (cp & 0x3Fu));
+        return 4;
+    }
+    static const struct { const char *name; const char *bytes; bool bare; } NAMED[] = {
+        { "nbsp", "\xC2\xA0", true }, { "amp", "&", true }, { "lt", "<", true }, { "gt", ">", true },
+        { "quot", "\"", true }, { "apos", "'", false }, { "hellip", "\xE2\x80\xA6", false },
+        { "mdash", "\xE2\x80\x94", false }, { "ndash", "\xE2\x80\x93", false },
+        { "lsquo", "\xE2\x80\x98", false }, { "rsquo", "\xE2\x80\x99", false },
+        { "ldquo", "\xE2\x80\x9C", false }, { "rdquo", "\xE2\x80\x9D", false },
+        { "middot", "\xC2\xB7", false }, { "copy", "\xC2\xA9", false }, { "reg", "\xC2\xAE", false },
+        { "trade", "\xE2\x84\xA2", false }, { "deg", "\xC2\xB0", false }, { "times", "\xC3\x97", false },
+        { "laquo", "\xC2\xAB", false }, { "raquo", "\xC2\xBB", false }, { "bull", "\xE2\x80\xA2", false },
+        { "shy", "", false },
+    };
+    for (size_t k = 0; k < sizeof(NAMED) / sizeof(NAMED[0]); ++k) {
+        size_t n = strlen(NAMED[k].name);
+        if (len < 1 + n || !rubraview_u8_starts_with_ci((u8str_t){ .ptr = p + 1, .len = len - 1 }, NAMED[k].name)) continue;
+        size_t end = 1 + n;
+        if (end < len && p[end] == ';') end++;
+        else if (!NAMED[k].bare) continue;
+        else if (end < len && ((p[end] >= 'a' && p[end] <= 'z') || (p[end] >= 'A' && p[end] <= 'Z') || (p[end] >= '0' && p[end] <= '9'))) continue;
+        size_t b = strlen(NAMED[k].bytes);
+        memcpy(out, NAMED[k].bytes, b);
+        *took = end;
+        return b;
+    }
+    return 0;
+}
+
+/* Is a SAMI caption's body only `&nbsp;` (and tags and white space)? That
+   is its language saying "nothing now", not a caption. Asked of the file's
+   own text, before the entities are read: a caption of `&amp;` is words. */
+static bool smi_blank(u8str_t raw) {
+    bool nbsp = false;
+    for (size_t i = 0; i < raw.len; ++i) {
+        char c = raw.ptr[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+        if (c == '<') { while (i < raw.len && raw.ptr[i] != '>') i++; continue; }
+        if (c == '&' && rubraview_u8_starts_with_ci((u8str_t){ .ptr = raw.ptr + i + 1, .len = raw.len - i - 1 }, "nbsp")) {
+            i += 4;
+            if (i + 1 < raw.len && raw.ptr[i + 1] == ';') i++;
+            nbsp = true;
+            continue;
+        }
+        return false;
+    }
+    return nbsp;
+}
+
 /* `html`: SAMI is HTML, where the file's own line ends, tabs and runs of
    spaces are one space and only `<br>` — or a new `<p>` — starts a line
    (owner, 2026-10-11: captions stood a blank line apart, because the line
@@ -173,6 +252,21 @@ static u8str_t strip_markup_as(proven_arena_t *arena, u8str_t text, bool braces_
             if (written > 0 && out[written - 1] != '\n' && out[written - 1] != ' ') out[written++] = ' ';
             continue;
         }
+        if (html && text.ptr[i] == '&') {
+            char bytes[4];
+            size_t took = 0;
+            size_t n = html_entity(text.ptr + i, text.len - i, bytes, &took);
+            if (took > 0) {
+                /* a no-break space is kept, but not before the first words or a line's */
+                bool nbsp = n == 2 && (unsigned char)bytes[0] == 0xC2 && (unsigned char)bytes[1] == 0xA0;
+                if (!(nbsp && (written == 0 || out[written - 1] == '\n'))) {
+                    memcpy(out + written, bytes, n);
+                    written += n;
+                }
+                i += took - 1;
+                continue;
+            }
+        }
         if (braces_too && text.ptr[i] == '{') {
             while (i < text.len && text.ptr[i] != '}') i++;
             continue;
@@ -187,10 +281,16 @@ static u8str_t strip_markup_as(proven_arena_t *arena, u8str_t text, bool braces_
         out[written++] = text.ptr[i];
     }
 
-    /* Trailing blank space is common and never wanted. */
-    while (written > 0 && (out[written - 1] == '\n' || out[written - 1] == ' ' ||
-                           out[written - 1] == '\r' || out[written - 1] == '\t')) {
-        written--;
+    /* Trailing blank space is common and never wanted, a no-break one with it. */
+    for (;;) {
+        if (written > 0 && (out[written - 1] == '\n' || out[written - 1] == ' ' ||
+                            out[written - 1] == '\r' || out[written - 1] == '\t')) {
+            written--;
+        } else if (html && written > 1 && (unsigned char)out[written - 2] == 0xC2 && (unsigned char)out[written - 1] == 0xA0) {
+            written -= 2;
+        } else {
+            break;
+        }
     }
     out[written] = '\0';
     return (u8str_t){ .ptr = out, .len = written };
@@ -339,12 +439,12 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         if (open_at >= 0.0 && i > body_start) {
             u8str_t raw = { .ptr = text.ptr + body_start, .len = i - body_start };
             u8str_t body = strip_markup_as(arena, raw, false, true);
-            if (body.len > 0) {
-                /* SAMI marks an empty caption with `&nbsp;`, which means
-                   "nothing is showing now" rather than a caption. It is
-                   kept for now, with no text: it is where the caption
-                   before it ends. The blanks are dropped below. */
-                bool blank = body.len <= 6 && body.ptr[0] == '&';
+            /* SAMI marks an empty caption with `&nbsp;`, which means
+               "nothing is showing now" rather than a caption. It is
+               kept for now, with no text: it is where the caption
+               before it ends. The blanks are dropped below. */
+            bool blank = smi_blank(raw);
+            if (body.len > 0 || blank) {
                 rubraview_subtitle_cue_t cue = {
                     .start_seconds = open_at,
                     /* SAMI has no end time: a caption lasts until the
@@ -415,8 +515,8 @@ static void parse_smi(proven_arena_t *arena, u8str_t text, cue_buf_t *cues) {
         }
         u8str_t raw = { .ptr = text.ptr + body_start, .len = text.len - body_start };
         u8str_t body = strip_markup_as(arena, raw, false, true);
-        if (body.len > 0) {
-            bool blank = body.len <= 6 && body.ptr[0] == '&';
+        bool blank = smi_blank(raw);
+        if (body.len > 0 || blank) {
             rubraview_subtitle_cue_t cue = {
                 .start_seconds = open_at,
                 .end_seconds = open_at + 0.001,

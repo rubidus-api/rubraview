@@ -14,7 +14,11 @@
 #define SIZEOF_SIZE_T  8
 #endif
 
-#if defined(__GNUC__)
+/* __builtin_ctzl counts in a long, and jcphuff.c hands it a size_t: the two
+   are one size on Linux, but a long is 32 bits on 64-bit Windows, where the
+   upper half was lost and every progressive JPEG failed with "DCT coefficient
+   out of range" (found 2026-10-18, 1.16.0). Elsewhere the plain loop counts. */
+#if defined(__GNUC__) && defined(__SIZEOF_LONG__) && defined(__SIZEOF_SIZE_T__) && __SIZEOF_LONG__ == __SIZEOF_SIZE_T__
 #define HAVE_BUILTIN_CTZL
 #endif
 

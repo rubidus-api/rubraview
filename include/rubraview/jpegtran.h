@@ -104,6 +104,14 @@ rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *ar
 rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena,
                                                            const uint8_t *data, size_t size);
 
+/**
+ * RV-140: the same JPEG written again, its coefficients as they are and every
+ * marker kept: progressive or not, with Huffman tables optimised for it, and
+ * a restart marker every `restart_rows` rows of blocks (0: none). Lossless.
+ */
+rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, const uint8_t *data, size_t size,
+                                                       bool progressive, bool optimise, int32_t restart_rows);
+
 /** Read a JPEG's size and MCU geometry without decoding it. */
 bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
                               int32_t *out_width, int32_t *out_height,

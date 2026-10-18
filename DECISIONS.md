@@ -1603,3 +1603,34 @@ Do not store credentials, private infrastructure details, personal data, private
   - the restart offered by the test setting, Y: a new process on the same file, the old one gone.
   - No break in Settings, music, Edit or the restart.
   - The review's claim that the arena filled and failed was wrong (`arena_refill` moved on); the fault was growth that was never given back.
+
+## 2026-10-18: D-166 Memory left over from RFC-0006, SAMI entities, the restart's page, saving choices (RV-140)
+
+- Status: Accepted (owner 2026-10-18: "하지 않은 것들과 다음 선택지 모두 한번에 처리하고, &nbsp;같은 html 이스케이프 문자가 smi에 있으면 잘 처리 바라요"; the choices were the restart's page, RFC-0006 §6, and RV-140).
+- Decision:
+  - Memory (RFC-0006 §6):
+    - `rubraview_halves_t`, two regions in turn, for `settings` (settings.ini as written, and the curation folders read from it) and `subs`.
+    - The film's subtitle: read, edited and timed in the half in use; Save writes and reads back into the other, then swaps. Both are emptied when the subtitle is put away (another chosen, the film closed). A generation number keeps the subtitle box's layout and the list's rows from taking a new track at an old address for the old one.
+    - `tracks_prepare` lists the folder and looks into each subtitle file in scratch, keeping only the paths and languages' names.
+    - What is kept from scratch is copied before the block is given back: proven's pool writes its links into a block it takes back. Found on the VM, where every subtitle was lost.
+    - `settings_follow`'s own parse stays in `persist`: it runs only when another viewer writes.
+  - SAMI: `strip_markup_as` in HTML mode reads entities: the five of HTML 4 (also without `;`), `&apos;`, `&#N;` / `&#xH;` (not 0, surrogates or past U+10FFFF), and a dozen typographic ones. `&nbsp;` is U+00A0, not folded with spaces, dropped at the start of a line and the end. A caption is a blank by its source (only `&nbsp;`, tags and white space), so a caption of `&amp;` is words. The edit box and the file keep the file's own text.
+  - `--page=N` (1 the first), taken by the first thing opened, with no offer to resume, and only by a book: in a folder the file named is the page. `restart_now` adds it for a source that is not a folder and a page past the first.
+  - Room asked of `subs` by the data: a cue added or the offset folded, the cues once more and 1 MB; a line typed, 256 KB; a save, eight times the file and twice that. `settings`' half, 4 MB.
+  - RV-140, what WIC, jpegtran and libwebp take: see SPEC §10.
+    - JPEG's optimised tables and restart markers are a second, lossless pass with progressive (`rubraview_jpegtran_rewrite`).
+    - A palette is `IWICPalette_InitializeFromBitmap` of the size asked, with the converter's dither or none; a PNG takes the smallest indexed depth that holds it.
+  - Not done, said so (the writers do not take them, or they are their own work): a target file size; keeping EXIF / ICC / comments one by one; 16-bit and grey-with-alpha PNG; a transparent colour; TIFF CMYK; WebP presets; the batch window's own rows for these (the command line has them). A JPEG exported with only Privacy clean is cut, not encoded again (§3.10's strip), so its tables and restart markers stay as they were.
+  - `vendor/libjpeg-turbo/jconfigint.h` (our own hand-written file): `HAVE_BUILTIN_CTZL` only where `__SIZEOF_LONG__ == __SIZEOF_SIZE_T__`. On 64-bit Windows `__builtin_ctzl` cut jcphuff's 64-bit bitmaps to 32 bits, and every progressive JPEG failed ("DCT coefficient out of range"), since RV-108.
+- Consequences: seen on the VM (2026-10-18), all under full page heap (removed after):
+  - each new option written by `--batch` and read back from its bytes:
+    - PNG: 16 colours → 4 bits, Adam7, palette of 16; 2 → 1 bit; 256 → 8 bits, palette of 256;
+    - GIF: a local table of 32;
+    - BMP: 8 bits with 64 used; 24; 32;
+    - TIFF compression: 5, 8, 1;
+    - JPEG: one component for grey; sampling 22/21/11; optimised 25,555 → 23,920 B; DRI 40 and 80; SOF2 for progressive, also with 4:4:4 and restarts;
+    - WebP: lossless 35,070 B → near-lossless 40 23,116 B.
+  - SAMI with entities drawn as their characters.
+  - X ×3 and Save: `film.kor.old1.smi` kept, the times +1.5 s, the entities left as typed; the list made again.
+  - Six turns between two films with C and the subtitle window, Settings twice: responding.
+  - `--page=3` on page 3. The offered restart taken on page 4: a new process `--page=4` on page 4, the old one gone.

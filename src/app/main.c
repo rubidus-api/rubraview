@@ -602,6 +602,7 @@ typedef struct app_state {
     const void                *subs_for;           /* the track the rows were made for */
     size_t                     subs_for_count;
     const char                *subs_for_language;
+    uint32_t                subs_for_generation;   /* RFC-0006: the subtitle memory emptied since: another track at the same place */
     size_t                     subs_anchor;        /* the row last clicked */
     int32_t                    subs_hover, subs_now;
     double                     subs_scrolled_at;   /* the reader moved the list: it does not follow for a while */
@@ -733,6 +734,7 @@ typedef struct app_state {
     double                         sub_list_anchor_x, sub_list_anchor_y;
     bool                    resume_offer;   /* §3.17.1: the prompt is showing */
     int32_t                 resume_page;
+    int32_t                 launch_page;    /* --page=N (1 the first): taken by the first thing opened, 0 after */
 
     rubraview_layout_opts_t layout_opts;
     rubraview_layout_result_t layout;
@@ -2172,6 +2174,8 @@ static void osd_say(app_state_t *app, u8str_t text);
 
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
+static void subs_drop(app_state_t *app);
+static proven_arena_t *subs_arena(app_state_t *app, size_t need);
 static void music_clear(app_state_t *app);
 static void music_next_close(app_state_t *app);
 static bool bgm_adopt(app_state_t *app);
@@ -2217,7 +2221,10 @@ static void media_close(app_state_t *app) {
     app->media_ended = false;
     /* Otherwise the still page after a film would keep drawing its last
        line of dialogue. */
+    vobsub_clear(app);
+    pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
+    subs_drop(app);
     app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
     app->tracks = rubraview_tracks_create();
     app->subtitle_count = 0;
@@ -2273,6 +2280,27 @@ static proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, s
 
 static void scratch_end(app_state_t *app, rubraview_scratch_t *s) {
     if (app->mem && s->block) rubraview_scratch_give(app->mem, s);
+}
+
+/* RFC-0006: the film's subtitle — read, edited and saved — is in `subs`, emptied as
+   it is put away (another chosen, the film closed). The one in use has room for `need`. */
+static uint32_t g_subs_generation;   /* a new one for each emptying: what was drawn from the one before is not reused */
+
+static proven_arena_t *subs_arena(app_state_t *app, size_t need) {
+    proven_arena_t *a = app->mem ? rubraview_halves_live(&app->mem->subs, need) : NULL;
+    return a ? a : app->arena;   /* past its limit: the session's, as before */
+}
+
+/* Room for one change to the subtitle in use: its cues copied once (an added cue, the offset folded), and some. */
+static size_t subs_edit_room(const app_state_t *app) {
+    size_t cues = 0;
+    if (!rubraview_size_product(&cues, app->subtitle.count + 1u, sizeof(rubraview_subtitle_cue_t), 1u)) cues = 64u << 20;   /* past any file read */
+    return cues + (1u << 20);
+}
+
+static void subs_drop(app_state_t *app) {
+    if (app->mem) rubraview_halves_reset(&app->mem->subs);
+    g_subs_generation++;
 }
 
 /* The media region with room for `need` more (RFC-0006): a track's head, tags, words and sheet. */
@@ -2523,6 +2551,8 @@ static app_page_t *media_page_ready(app_state_t *app) {
 }
 
 #define SUBTITLE_MAX_BYTES (2u * 1024u * 1024u)
+/* What reading one takes at most: the text, its code page turned to UTF-8, the words and the cues (RFC-0006). */
+#define SUBTITLE_PARSE_BYTES (8u * SUBTITLE_MAX_BYTES)
 /* A DVD's index is text, its pictures are not: a feature film's worth of
    subpictures runs to a few tens of megabytes. */
 #define VOBSUB_MAX_IDX_BYTES (4u * 1024u * 1024u)
@@ -2609,8 +2639,15 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     app->subtitle_last = -1;
     if (app->media) rubraview_pal_media_tracks(app->media, &app->tracks);
 
+    /* RFC-0006: the folder listed and each file looked into, for the moment; what is
+       kept of them (their paths, their languages' names) goes to the session's memory. */
+    rubraview_scratch_t sc;
+    proven_arena_t *sa = scratch_begin(app, &sc, 4u << 20);
     rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
-    size_t found_count = subtitle_candidates(app->arena, video_path, found, SUBTITLE_MAX_CANDIDATES, NULL);
+    size_t found_count = subtitle_candidates(sa, video_path, found, SUBTITLE_MAX_CANDIDATES, NULL);
+    /* kept before the block goes back: a block given back holds the pool's own links */
+    for (size_t i = 0; i < found_count; ++i) found[i].path = app_keep(app, found[i].path);
+    scratch_end(app, &sc);
 
     /* One entry per track: a text file is one, a DVD index is one for
        each language it lists, so `C` walks them like any other track. */
@@ -2619,17 +2656,21 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
         size_t languages = 1;
         u8str_t tags[SUBTITLE_MAX_CANDIDATES];
         if (found[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
-            u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, found[i].path, VOBSUB_MAX_IDX_BYTES);
+            proven_arena_t *pa = scratch_begin(app, &sc, VOBSUB_MAX_IDX_BYTES + 1024u);
+            u8str_t idx_text = rubraview_pal_fs_read_file(pa, found[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (n > 0) languages = n;
+            scratch_end(app, &sc);
         } else if (found[i].format == RUBRAVIEW_SUBTITLE_PGS) {
             languages = 1;     /* one `.sup` is one language, and it is not text */
         } else {
             /* A SAMI file usually holds every language at once, a class
                each (owner, 2026-09-23); the others hold one. */
-            rubraview_subtitle_track_t peek = subtitle_read(app->arena, found[i], NULL);
+            proven_arena_t *pa = scratch_begin(app, &sc, SUBTITLE_PARSE_BYTES);
+            rubraview_subtitle_track_t peek = subtitle_read(pa, found[i], NULL);
             size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
             if (n > 1) languages = n;
+            scratch_end(app, &sc);
         }
         for (size_t k = 0; k < languages && app->subtitle_count < SUBTITLE_MAX_CANDIDATES; ++k) {
             app->subtitle_files[app->subtitle_count] = found[i];
@@ -2645,15 +2686,19 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
         size_t which = (size_t)app->subtitle_vobsub_stream[i];
         if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
             /* The index names its own languages; the file's name does not. */
-            u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
+            proven_arena_t *pa = scratch_begin(app, &sc, VOBSUB_MAX_IDX_BYTES + 1024u);
+            u8str_t idx_text = rubraview_pal_fs_read_file(pa, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
-            if (which < n) language = tags[which];
+            if (which < n) language = app_keep(app, tags[which]);
+            scratch_end(app, &sc);
         } else if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_PGS) {
             /* Its name is all there is to go on, which `language` already has. */
         } else if (which > 0 || app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_SMI) {
-            rubraview_subtitle_track_t peek = subtitle_read(app->arena, app->subtitle_files[i], NULL);
+            proven_arena_t *pa = scratch_begin(app, &sc, SUBTITLE_PARSE_BYTES);
+            rubraview_subtitle_track_t peek = subtitle_read(pa, app->subtitle_files[i], NULL);
             size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
-            if (which < n && tags[which].len > 0) language = tags[which];
+            if (which < n && tags[which].len > 0) language = app_keep(app, tags[which]);
+            scratch_end(app, &sc);
         }
         rubraview_track_t track = {
             .kind = RUBRAVIEW_TRACK_SUBTITLE,
@@ -2683,12 +2728,13 @@ static void vobsub_clear(app_state_t *app) {
 /* `movie.idx` names the index; its pictures are in `movie.sub` beside it. */
 static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
     vobsub_clear(app);
-    u8str_t idx_text = rubraview_pal_fs_read_file(app->arena, idx_path, VOBSUB_MAX_IDX_BYTES);
+    proven_arena_t *sa = subs_arena(app, 4u * VOBSUB_MAX_IDX_BYTES);
+    u8str_t idx_text = rubraview_pal_fs_read_file(sa, idx_path, VOBSUB_MAX_IDX_BYTES);
     if (idx_text.len == 0) return;
 
     /* The whole path, not just the name: the viewer is not always
        started in the film's folder. */
-    u8str_t sub_path = rubraview_path_with_ext(app->arena, idx_path, ".sub");
+    u8str_t sub_path = rubraview_path_with_ext(sa, idx_path, ".sub");
     if (sub_path.len == 0) return;
     app->vobsub_sub = map_subtitle_file(sub_path, &app->vobsub_map, VOBSUB_MAX_SUB_BYTES);
     if (app->vobsub_sub.len == 0) {
@@ -2700,7 +2746,7 @@ static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
         if (!proven_is_ok(mem.err)) return;
         app->vobsub_pixels = (uint8_t*)mem.value.ptr;
     }
-    app->vobsub = rubraview_vobsub_index(app->arena, idx_text, language);
+    app->vobsub = rubraview_vobsub_index(sa, idx_text, language);
 }
 
 /* `movie.sup` is the whole of it: no index, no second file. */
@@ -2726,7 +2772,7 @@ static void pgs_load(app_state_t *app, u8str_t sup_path) {
         if (!proven_is_ok(mem.err)) return;
         app->pgs_pixels = (uint8_t*)mem.value.ptr;
     }
-    app->pgs = rubraview_pgs_index(app->arena, (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.len);
+    app->pgs = rubraview_pgs_index(subs_arena(app, 16u << 20), (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.len);
 }
 
 /* The sync the reader set by hand for this film comes back — for a text
@@ -2744,6 +2790,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     vobsub_clear(app);
     pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
+    subs_drop(app);
     app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
     app->tracks.current_subtitle = -1;
     if (index < 0 || (size_t)index >= app->tracks.count) return;
@@ -2773,7 +2820,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
             subtitle_restore_offset(app);
             return;
         }
-        app->subtitle = subtitle_read(app->arena, app->subtitle_files[track->stream_index], NULL);
+        app->subtitle = subtitle_read(subs_arena(app, SUBTITLE_PARSE_BYTES), app->subtitle_files[track->stream_index], NULL);
         /* One file, several languages: show the one this track stands for. */
         u8str_t tags[SUBTITLE_MAX_CANDIDATES];
         size_t n = rubraview_subtitle_languages(&app->subtitle, tags, SUBTITLE_MAX_CANDIDATES);
@@ -2783,13 +2830,13 @@ static void subtitle_select(app_state_t *app, int32_t index) {
         /* §3.16.1 / D-12: a stream inside the file. Reading it walks the
            whole container once, so say what is happening first. */
         osd_say(app, TU8("reading the subtitles out of the file"));
-        u8str_t text = rubraview_pal_media_read_subtitle_stream(app->media, app->arena,
-                                                                track->stream_index);
+        proven_arena_t *sa = subs_arena(app, 2u * SUBTITLE_PARSE_BYTES);
+        u8str_t text = rubraview_pal_media_read_subtitle_stream(app->media, sa, track->stream_index);
         if (text.len == 0) {
             osd_say(app, TU8("this backend cannot read that subtitle stream"));
             return;
         }
-        app->subtitle = rubraview_subtitle_parse(app->arena, text, RUBRAVIEW_SUBTITLE_SRT);
+        app->subtitle = rubraview_subtitle_parse(sa, text, RUBRAVIEW_SUBTITLE_SRT);
     }
     if (app->subtitle.count == 0) return;
     /* A stream inside a file often has no name of its own, so the OSD
@@ -6828,6 +6875,13 @@ static void restart_now(app_state_t *app) {
     if (exe.len > 0) {
         append_arg(line, sizeof(line), &pos, exe);
         append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
+        /* A book (an archive) comes back on its page; a folder's file is named itself. */
+        int32_t page = current_page_index(app);
+        if (here.len > 0 && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && page > 0) {
+            char word[32];
+            snprintf(word, sizeof(word), "--page=%d", (int)page + 1);
+            append_arg_cstr(line, sizeof(line), &pos, word);
+        }
         if (here.len > 0) append_arg(line, sizeof(line), &pos, here);
     }
     if (exe.len == 0 || !rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) {
@@ -9151,6 +9205,7 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
         const rubraview_subtitle_cue_t *cue;
         const char *text;
         size_t text_len;
+        uint32_t generation;   /* RFC-0006: the subtitle's memory emptied since is another text at the same place */
         double win_w, win_h, font, limit;
         unsigned style;
         rubraview_subbox_place_t place;
@@ -9161,7 +9216,7 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     double limit = win_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
     rubraview_subbox_place_t place = subbox_place(app);
     const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
-    if (kept.valid && kept.cue == cue && kept.text == (cue ? cue->text.ptr : NULL) &&
+    if (kept.valid && kept.cue == cue && kept.generation == g_subs_generation && kept.text == (cue ? cue->text.ptr : NULL) &&
         kept.text_len == (cue ? cue->text.len : 0) && kept.win_w == win_w &&
         kept.win_h == win_h && kept.font == font && kept.limit == limit && kept.style == g_subtitle_style &&
         kept.place.x == place.x && kept.place.y == place.y && kept.place.width == place.width &&
@@ -9180,6 +9235,7 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     kept.cue = cue;
     kept.text = cue ? cue->text.ptr : NULL;
     kept.text_len = cue ? cue->text.len : 0;
+    kept.generation = g_subs_generation;
     kept.win_w = win_w; kept.win_h = win_h; kept.font = font; kept.limit = limit; kept.style = g_subtitle_style;
     kept.place = place;
     return kept.layout;
@@ -12276,6 +12332,9 @@ enum {
     PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
     PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_CROP_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
     PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
+    /* RV-140: Export's rows for what the writers take */
+    PANEL_JPEG_SUBSAMPLING, PANEL_JPEG_GREY, PANEL_JPEG_OPTIMISE, PANEL_JPEG_RESTART, PANEL_PNG_FILTER, PANEL_PNG_INTERLACE,
+    PANEL_COLOURS, PANEL_DITHER, PANEL_TIFF_COMPRESSION, PANEL_BMP_DEPTH, PANEL_WEBP_NEAR, PANEL_WEBP_ALPHA, PANEL_WEBP_SHARP,
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     /* RV-129 */
     PANEL_BATCH_SIZE_BY, PANEL_BATCH_BOX_H, PANEL_BATCH_LINEAR, PANEL_BATCH_NO_ENLARGE, PANEL_BATCH_SHARPEN,
@@ -13236,7 +13295,12 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     const char *const BLUR[] = { T("soft (Gaussian)"), T("flat (box)") };
     const char *const SHARP[] = { T("unsharp mask"), T("Laplacian") };
     const char *const FORMAT[] = { T("as the file"), T("JPEG"), T("PNG"), T("WebP"), T("GIF"), T("BMP"), T("TIFF"), T("ICO") };
-    const char *const DEPTH[] = { T("colour + alpha (32)"), T("colour (24)"), T("256 colours"), T("grey (8)") };
+    const char *const DEPTH[] = { T("colour + alpha (32)"), T("colour (24)"), T("a palette"), T("grey (8)") };
+    /* RV-140 */
+    const char *const SUBSAMPLING[] = { T("as the writer does (4:2:0)"), T("4:2:0 (smallest)"), T("4:2:2"), T("4:4:4 (sharpest colour)") };
+    const char *const PNG_FILTER[] = { T("by the level"), T("none"), T("sub"), T("up"), T("average"), T("Paeth"), T("adaptive") };
+    const char *const TIFF_COMP[] = { T("as the writer does"), T("none"), T("LZW"), T("ZIP (Deflate)") };
+    const char *const BMP_BITS[] = { T("32 bits (with alpha)"), T("24 bits"), T("8 bits (a palette)") };
     int32_t i = (int32_t)row->value;
     const char *word = NULL;
     switch (row->id) {
@@ -13289,6 +13353,17 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
         case PANEL_SHARPEN_KIND: word = i >= 0 && i < 2 ? SHARP[i] : NULL; break;
         case PANEL_FORMAT:       word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
         case PANEL_PNG_DEPTH:    word = i >= 0 && i < 4 ? DEPTH[i] : NULL; break;
+        case PANEL_JPEG_SUBSAMPLING: word = i >= 0 && i < 4 ? SUBSAMPLING[i] : NULL; break;
+        case PANEL_PNG_FILTER:   word = i >= 0 && i < 7 ? PNG_FILTER[i] : NULL; break;
+        case PANEL_TIFF_COMPRESSION: word = i >= 0 && i < 4 ? TIFF_COMP[i] : NULL; break;
+        case PANEL_BMP_DEPTH:    word = i >= 0 && i < 3 ? BMP_BITS[i] : NULL; break;
+        case PANEL_JPEG_RESTART:
+            if (i == 0) { word = T("none"); break; }
+            snprintf(buffer, size, T("every %d rows of blocks"), (int)i); return cstr(buffer);
+        case PANEL_COLOURS: case PANEL_WEBP_ALPHA: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_WEBP_NEAR:
+            if (i >= 100) { word = T("off"); break; }
+            snprintf(buffer, size, "%d", (int)i); return cstr(buffer);
         case PANEL_RESIZE:           snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_SHARPEN_THRESHOLD: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_SHARPEN_RADIUS:   snprintf(buffer, size, "%.1f", row->value); return cstr(buffer);
@@ -13311,13 +13386,21 @@ static void panel_open_export(app_state_t *app) {
     /* Only what the format chosen has use for (owner, 2026-10-15); "as the file" is the file's own. */
     int32_t page = current_page_index(app);
     u8str_t name = page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : U8("");
-    uint32_t rows = rubraview_export_rows(app->export_options.format, name, app->export_options.webp_lossless);
+    uint32_t rows = rubraview_export_rows_of(&app->export_options, name);   /* RV-140: the palette's rows only with one */
     if (rows & RUBRAVIEW_EXPORT_ROW_QUALITY) {
         rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, TU8("Quality"),
                                    (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
     }
     if (rows & RUBRAVIEW_EXPORT_ROW_PROGRESSIVE) {
         rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, TU8("Progressive JPEG"), app->export_options.jpeg_progressive);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_JPEG_MORE) {   /* RV-140 */
+        rubraview_panel_add_choice(&app->panel, PANEL_JPEG_SUBSAMPLING, TU8("Colour subsampling"),
+                                   (int32_t)app->export_options.jpeg_subsampling, 4);
+        rubraview_panel_add_toggle(&app->panel, PANEL_JPEG_GREY, TU8("Grey JPEG"), app->export_options.jpeg_grey);
+        rubraview_panel_add_toggle(&app->panel, PANEL_JPEG_OPTIMISE, TU8("Optimised tables (smaller)"), app->export_options.jpeg_optimise);
+        rubraview_panel_add_slider(&app->panel, PANEL_JPEG_RESTART, TU8("Restart markers"),
+                                   (double)app->export_options.jpeg_restart_rows, 0.0, 64.0, 1.0);
     }
     if (rows & RUBRAVIEW_EXPORT_ROW_PNG_LEVEL) {
         rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, TU8("PNG level"),
@@ -13327,11 +13410,36 @@ static void panel_open_export(app_state_t *app) {
     if (rows & RUBRAVIEW_EXPORT_ROW_PNG_DEPTH) {
         rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, TU8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
     }
+    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_MORE) {   /* RV-140 */
+        rubraview_panel_add_choice(&app->panel, PANEL_PNG_FILTER, TU8("PNG filter"), (int32_t)app->export_options.png_filter, 7);
+        rubraview_panel_add_toggle(&app->panel, PANEL_PNG_INTERLACE, TU8("Interlaced (Adam7)"), app->export_options.png_interlace);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_TIFF) {
+        rubraview_panel_add_choice(&app->panel, PANEL_TIFF_COMPRESSION, TU8("TIFF compression"),
+                                   (int32_t)app->export_options.tiff_compression, 4);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_BMP) {
+        rubraview_panel_add_choice(&app->panel, PANEL_BMP_DEPTH, TU8("BMP bits"), (int32_t)app->export_options.bmp_depth, 3);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_COLOURS) {
+        rubraview_panel_add_slider(&app->panel, PANEL_COLOURS, TU8("Palette colours"),
+                                   (double)rubraview_export_palette_size(&app->export_options), 2.0, 256.0, 1.0);
+        rubraview_panel_add_toggle(&app->panel, PANEL_DITHER, TU8("Dither"), app->export_options.dither);
+    }
     /* RV-109: WebP is written by the vendored libwebp. */
     if (rows & RUBRAVIEW_EXPORT_ROW_WEBP) {
         rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_LOSSLESS, TU8("WebP lossless"), app->export_options.webp_lossless);
         rubraview_panel_add_slider(&app->panel, PANEL_WEBP_EFFORT, TU8("WebP effort"),
                                    (double)app->export_options.webp_effort, 0.0, 6.0, 1.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_NEAR) {   /* RV-140 */
+        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_NEAR, TU8("Near-lossless"),
+                                   (double)app->export_options.webp_near_lossless, 0.0, 100.0, 1.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY) {
+        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_ALPHA, TU8("Alpha quality"),
+                                   (double)app->export_options.webp_alpha_quality, 0.0, 100.0, 1.0);
+        rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_SHARP, TU8("Sharp colour edges (slower)"), app->export_options.webp_sharp_yuv);
     }
     rubraview_panel_add_separator(&app->panel);
     /* §3.10 makes this an explicit tick, and it starts unticked: quietly
@@ -14703,11 +14811,27 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_WEBP_LOSSLESS: app->export_options.webp_lossless = v > 0.5; break;
             case PANEL_WEBP_EFFORT: app->export_options.webp_effort = (int32_t)v; break;
             case PANEL_PRIVACY:   app->export_options.privacy_clean = v > 0.5; break;
+            /* RV-140 */
+            case PANEL_JPEG_SUBSAMPLING: app->export_options.jpeg_subsampling = (rubraview_jpeg_subsampling_t)(int32_t)v; break;
+            case PANEL_JPEG_GREY:     app->export_options.jpeg_grey = v > 0.5; break;
+            case PANEL_JPEG_OPTIMISE: app->export_options.jpeg_optimise = v > 0.5; break;
+            case PANEL_JPEG_RESTART:  app->export_options.jpeg_restart_rows = (int32_t)lround(v); break;
+            case PANEL_PNG_FILTER:    app->export_options.png_filter = (rubraview_png_filter_t)(int32_t)v; break;
+            case PANEL_PNG_INTERLACE: app->export_options.png_interlace = v > 0.5; break;
+            case PANEL_COLOURS:       app->export_options.colours = (int32_t)lround(v); break;
+            case PANEL_DITHER:        app->export_options.dither = v > 0.5; break;
+            case PANEL_TIFF_COMPRESSION: app->export_options.tiff_compression = (rubraview_tiff_compression_t)(int32_t)v; break;
+            case PANEL_BMP_DEPTH:     app->export_options.bmp_depth = (rubraview_bmp_depth_t)(int32_t)v; break;
+            case PANEL_WEBP_NEAR:     app->export_options.webp_near_lossless = (int32_t)lround(v); break;
+            case PANEL_WEBP_ALPHA:    app->export_options.webp_alpha_quality = (int32_t)lround(v); break;
+            case PANEL_WEBP_SHARP:    app->export_options.webp_sharp_yuv = v > 0.5; break;
             default: break;
         }
         rubraview_export_clamp(&app->export_options);
-        /* Another format, or WebP's lossless: the rows that have use change with it. */
-        if (row->id == PANEL_FORMAT || row->id == PANEL_WEBP_LOSSLESS) panel_open_export(app);
+        /* Another format, WebP's lossless, a palette or not: the rows that have use change with it. */
+        if (row->id == PANEL_FORMAT || row->id == PANEL_WEBP_LOSSLESS || row->id == PANEL_PNG_DEPTH || row->id == PANEL_BMP_DEPTH) {
+            panel_open_export(app);
+        }
         return;
     }
 
@@ -15606,6 +15730,19 @@ static void settings_open(app_state_t *app) {
     app->settings_message[0] = '\0';
 }
 
+/* RFC-0006: settings.ini's text as written, and the folders read from it, in
+   turns: the idle half emptied and made, then swapped in. Without the halves,
+   the session's memory (as it was before). */
+static proven_arena_t *settings_half_next(app_state_t *app) {
+    /* the file parsed, every key set, and written out again: some times the 256 KB it may be */
+    proven_arena_t *a = app->mem ? rubraview_halves_next(&app->mem->settings, 4u << 20) : NULL;
+    return a ? a : app->arena;
+}
+
+static void settings_half_swap(app_state_t *app, proven_arena_t *half) {
+    if (app->mem && half != app->arena) rubraview_halves_swap(&app->mem->settings);
+}
+
 /* settings.ini is written when something in it changed: as the settings
    window closes (1a), before it opens again, and as the viewer quits —
    the volume and the boxes' opacity change outside the window (D-15). */
@@ -15614,13 +15751,15 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
     /* D-99: with several viewers open, only what this one changed goes over
        the file as it is now; what another changed meanwhile stays in it. */
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    /* RFC-0006: the file as it is and the merge, for the moment; the text written stays,
-       since the curation folders are read from it. */
+    /* RFC-0006: the file as it is and the merge, for the moment; the text written goes
+       into the idle half of `settings` with the curation folders read from it, and
+       that half becomes the one in use (the one before is emptied at the next write). */
     rubraview_scratch_t sc;
     proven_arena_t *sa = scratch_begin(app, &sc, 4u << 20);
+    proven_arena_t *half = settings_half_next(app);
     u8str_t existing = rubraview_pal_fs_read_file(sa, app->settings_path, 256u * 1024u);
     rubraview_settings_t merged = rubraview_settings_merge_changed(sa, &app->settings, &app->settings_saved, existing);
-    u8str_t text = rubraview_settings_save(app->arena, &merged, existing);
+    u8str_t text = rubraview_settings_save(half, &merged, existing);
     scratch_end(app, &sc);
     bool written = text.len > 0 && rubraview_pal_fs_write_file_atomic(app->settings_path, text);
     if (locked) rubraview_pal_config_unlock();
@@ -15629,7 +15768,8 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
         rubraview_pal_instance_tell_config_changed(false);   /* D-105: the other viewers read it now */
         /* §3.18.3's folders are read from the same file, so they follow
            at once rather than at the next launch. */
-        app->curation = rubraview_curation_parse(app->arena, text);
+        app->curation = rubraview_curation_parse(half, text);
+        settings_half_swap(app, half);
         if (say) osd_say(app, TU8("settings saved"));
     } else {
         app->share_failed = true;
@@ -15702,7 +15842,9 @@ static void settings_follow(app_state_t *app, int what) {
         app->settings_saved = loaded;
         if (changed) {
             app->share_seen_total = app->settings.revision_total;   /* nothing of this is ours to write */
-            app->curation = rubraview_curation_parse(app->arena, existing);
+            proven_arena_t *half = settings_half_next(app);
+            app->curation = rubraview_curation_parse(half, existing);
+            settings_half_swap(app, half);
             settings_took_effect(app);
             app->settings_dirty = true;
         }
@@ -19304,7 +19446,9 @@ static void subs_sync(app_state_t *app) {
     size_t of_count = kind == SUBS_TEXT ? app->subtitle.count : kind == SUBS_VOBSUB ? app->vobsub.count
                     : kind == SUBS_PGS ? app->pgs.count : 0;
     const char *language = kind == SUBS_TEXT ? app->subtitle.shown_language.ptr : NULL;
-    if (of == app->subs_for && of_count == app->subs_for_count && language == app->subs_for_language) return;
+    if (of == app->subs_for && of_count == app->subs_for_count && language == app->subs_for_language &&
+        app->subs_for_generation == g_subs_generation) return;
+    app->subs_for_generation = g_subs_generation;
     app->subs_for = of;
     app->subs_for_count = of_count;
     app->subs_for_language = language;
@@ -19743,9 +19887,9 @@ static void subs_edit_end(app_state_t *app, bool keep) {
         subs_rows_again(app, at);
         return;
     }
-    u8str_t was = rubraview_subtitle_cue_typed(app->arena, &app->subtitle, cue);
+    u8str_t was = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, cue);
     if (typed.len == was.len && memcmp(typed.ptr, was.ptr, typed.len) == 0) return;
-    if (!rubraview_subtitle_cue_retype(app->arena, &app->subtitle, cue, typed)) {
+    if (!rubraview_subtitle_cue_retype(subs_arena(app, 256u << 10), &app->subtitle, cue, typed)) {
         osd_say(app, TU8("a subtitle cannot be left with nothing to show"));
     }
 }
@@ -19753,7 +19897,7 @@ static void subs_edit_end(app_state_t *app, bool keep) {
 static void subs_edit_begin_as(app_state_t *app, size_t row, bool times) {
     if (subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
     subs_edit_end(app, true);
-    u8str_t typed = rubraview_subtitle_cue_typed(app->arena, &app->subtitle, app->subs_rows[row]);
+    u8str_t typed = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, app->subs_rows[row]);
     char clock[96];
     if (times) {   /* RV-115: the two times, to type over */
         const rubraview_subtitle_cue_t *c = &app->subtitle.cues[app->subs_rows[row]];
@@ -19791,7 +19935,7 @@ static void subs_add(app_state_t *app) {
     subs_edit_end(app, true);
     double at = app->media_position - app->subtitle.offset_seconds;
     if (!(at >= 0.0)) at = 0.0;
-    int32_t cue = rubraview_subtitle_cue_add(app->arena, &app->subtitle, at, at + 2.0, U8("..."));
+    int32_t cue = rubraview_subtitle_cue_add(subs_arena(app, subs_edit_room(app)), &app->subtitle, at, at + 2.0, U8("..."));
     if (cue < 0) { osd_say(app, TU8("a new subtitle is written like one already in the file, and there is none")); return; }
     subs_rows_again(app, cue);
     if (app->subs_anchor < app->subs_count) subs_edit_begin(app, app->subs_anchor);
@@ -19827,11 +19971,18 @@ static void subs_save(app_state_t *app) {
         return;
     }
     /* Z / X's offset goes into the times written, and is 0 after (RV-115). */
-    rubraview_subtitle_track_t folded = rubraview_subtitle_offset_folded(app->arena, &app->subtitle);
+    rubraview_subtitle_track_t folded = rubraview_subtitle_offset_folded(subs_arena(app, subs_edit_room(app)), &app->subtitle);
     if (folded.count == 0) { osd_say(app, TU8("not saved: no memory")); return; }
     const rubraview_subtitle_track_t *track = &folded;
+    /* RFC-0006: the file written and read back is made in the idle half of `subs`, which
+       then becomes the one in use; the half before (the track as it was, its edits) is
+       emptied at the next save. */
+    /* the file made, read back and re-encoded, and its cues parsed twice (as saved, and with a mark) */
+    size_t save_room = track->source.len * 8u + 2u * subs_edit_room(app);
+    proven_arena_t *to = app->mem ? rubraview_halves_next(&app->mem->subs, save_room) : NULL;
+    if (!to) to = app->arena;
     const char *why = NULL;
-    u8str_t next = rubraview_subtitle_patched(app->arena, track, &why);
+    u8str_t next = rubraview_subtitle_patched(to, track, &why);
     if (next.len == 0) {
         char line[160];
         int n = snprintf(line, sizeof(line), T("not saved: %s"), why ? why : T("the file could not be written again"));
@@ -19839,8 +19990,8 @@ static void subs_save(app_state_t *app) {
         return;
     }
     /* The file must still be what was read, and read back the same in its own encoding. */
-    u8str_t disk = rubraview_pal_fs_read_file(app->arena, track->source_path, SUBTITLE_MAX_BYTES);
-    u8str_t was = track->source_transcoded ? rubraview_pal_encode_codepage(app->arena, track->source, 0) : track->source;
+    u8str_t disk = rubraview_pal_fs_read_file(to, track->source_path, SUBTITLE_MAX_BYTES);
+    u8str_t was = track->source_transcoded ? rubraview_pal_encode_codepage(to, track->source, 0) : track->source;
     if (disk.len == 0 || was.len != disk.len || memcmp(was.ptr, disk.ptr, disk.len) != 0) {
         osd_say(app, track->source_transcoded && was.len == 0
                          ? TU8("not saved: the file does not read back the same in its encoding")
@@ -19850,7 +20001,7 @@ static void subs_save(app_state_t *app) {
     u8str_t bytes = next;
     bool now_utf8 = false;
     if (track->source_transcoded) {
-        bytes = rubraview_pal_encode_codepage(app->arena, next, 0);
+        bytes = rubraview_pal_encode_codepage(to, next, 0);
         if (bytes.len == 0) {
             /* RV-115: the file's code page has no such character — UTF-8 is offered, and a second Save takes it */
             double now = rubraview_pal_time_now_seconds();
@@ -19860,7 +20011,7 @@ static void subs_save(app_state_t *app) {
                 return;
             }
             app->subs_utf8_armed = 0.0;
-            proven_result_mem_mut_t res = proven_arena_alloc(app->arena, next.len + 4);
+            proven_result_mem_mut_t res = proven_arena_alloc(to, next.len + 4);
             if (!proven_is_ok(res.err)) { osd_say(app, TU8("not saved: no memory")); return; }
             char *with_bom = (char*)(void*)res.value.ptr;
             memcpy(with_bom, "\xEF\xBB\xBF", 3);   /* a mark players read as UTF-8 */
@@ -19871,7 +20022,7 @@ static void subs_save(app_state_t *app) {
     }
     u8str_t kept = { .ptr = "", .len = 0 };
     for (unsigned number = 1; number < 10000; ++number) {
-        u8str_t name = rubraview_subtitle_backup_path(app->arena, track->source_path, number);
+        u8str_t name = rubraview_subtitle_backup_path(to, track->source_path, number);
         if (name.len == 0) break;
         if (!rubraview_pal_fs_exists(name)) { kept = name; break; }
     }
@@ -19885,21 +20036,34 @@ static void subs_save(app_state_t *app) {
         return;
     }
     /* Read as saved: the places are the new file's, and nothing is changed. */
-    rubraview_subtitle_track_t fresh = rubraview_subtitle_parse(app->arena, next, track->format);
+    rubraview_subtitle_track_t fresh = rubraview_subtitle_parse(to, next, track->format);
+    /* the language shown is a name in the track before: kept with the new one */
+    u8str_t shown = { .ptr = "", .len = 0 };
+    if (track->shown_language.len > 0) {
+        proven_result_mem_mut_t res = proven_arena_alloc(to, track->shown_language.len + 1);
+        if (proven_is_ok(res.err)) {
+            memcpy(res.value.ptr, track->shown_language.ptr, track->shown_language.len);
+            ((char*)(void*)res.value.ptr)[track->shown_language.len] = '\0';
+            shown = (u8str_t){ .ptr = (const char*)(void*)res.value.ptr, .len = track->shown_language.len };
+        } else {
+            fresh.count = 0;   /* not read back whole: kept as it was (below) */
+        }
+    }
     if (fresh.count > 0) {
         fresh.offset_seconds = 0.0;
-        fresh.shown_language = track->shown_language;
+        fresh.shown_language = shown;
         fresh.source_path = track->source_path;
         fresh.source_transcoded = track->source_transcoded && !now_utf8;
         if (now_utf8) {   /* read as it is on the disk now: the mark first */
-            rubraview_subtitle_track_t marked = rubraview_subtitle_parse(app->arena, bytes, track->format);
+            rubraview_subtitle_track_t marked = rubraview_subtitle_parse(to, bytes, track->format);
             if (marked.count > 0) {
-                marked.shown_language = track->shown_language;
+                marked.shown_language = shown;
                 marked.source_path = track->source_path;
                 fresh = marked;
             }
         }
         app->subtitle = fresh;
+        if (app->mem && to != app->arena) { rubraview_halves_swap(&app->mem->subs); g_subs_generation++; }
     } else {
         app->subtitle = folded;   /* its times are the file's now */
         for (size_t i = 0; i < folded.count; ++i) folded.cues[i].time_changed = folded.cues[i].text_changed = false;
@@ -23316,6 +23480,14 @@ static void open_path(app_state_t *app, u8str_t path) {
             app->resume_offer = false;
         }
     }
+    /* --page=N (a restart asks for the page it was on): that page of a book, and no offer to resume; a folder's file is named itself. */
+    if (app->launch_page > 0) {
+        if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && (size_t)(app->launch_page - 1) < app->source.page_count) {
+            start_page = (size_t)(app->launch_page - 1);
+            app->resume_offer = false;
+        }
+        app->launch_page = 0;
+    }
 
     finish_open(app, start_page);
 }
@@ -24001,6 +24173,7 @@ static const u8str_t *g_launch_paths;
 static size_t         g_launch_count;
 static rubraview_shell_verb_t g_launch_verb;
 static bool           g_launch_whole;
+static int32_t        g_launch_page;   /* --page=N, for the first thing opened */
 
 static void launch_paths_gather(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     u8str_t text = { .ptr = "", .len = 0 };
@@ -25006,6 +25179,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
             launch_paths_gather(arena, &cli);
             g_launch_verb = cli.shell_verb;
+            g_launch_page = cli.start_page;
             /* RV-106: the order and the depth of this run's folders. */
             if (cli.sort_given) g_cli_sort = (int)cli.sort_mode;
             if (cli.descending_given) g_cli_descending = cli.descending ? 1 : 0;
@@ -25209,6 +25383,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     /* What this launch was given. A plain launch opens at once; what the
        menu asked is gathered with what the other launches of the same
        selection hand over (D-86). */
+    app.launch_page = g_launch_page;
     if (g_launch_count > 0) {
         shell_request_take(&app, g_launch_verb, g_launch_whole || g_launch_verb == RUBRAVIEW_SHELL_VERB_NONE,
                            g_launch_paths, g_launch_count);
