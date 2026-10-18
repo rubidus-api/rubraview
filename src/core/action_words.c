@@ -167,7 +167,6 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "toggle_help", "This help, in a window of its own" },
     { "toggle_info", "The file's information (size, pixels, codec, EXIF), text you can mark and copy" },
     { "toggle_layout", "Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left" },
-    { "toggle_menu", "Open or close the menu (under the title bar)" },
     { "toggle_miniplayer", "Mini player" },
     { "toggle_nearest", "Crisp scaling for pixel art" },
     { "toggle_osd", "Information bar" },

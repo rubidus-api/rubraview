@@ -586,6 +586,13 @@ typedef struct app_state {
     double                     ctx_x, ctx_y;
     const rubraview_toolbox_profile_t *ctx_list;
     int32_t                    ctx_focus;          /* the row the arrow keys are on, -1 */
+    /* 1.21.0 (owner, 2026-10-18: "우클릭 컨텍스트 메뉴의 '메뉴' 항목과 그 자체를 다 없애주세요 ... 다른 경로로
+       접근 불가능한 기능이 있다면 ... 우클릭 컨텍스트 메뉴 쪽으로"): the menu's tree is the right click's lower
+       rows, entered in place: the menu item shown (-1: the list itself), and the way back */
+    bool                       ctx_with_menu;
+    int32_t                    ctx_node;
+    int32_t                    ctx_stack[RUBRAVIEW_MENU_MAX_DEPTH];
+    int32_t                    ctx_depth;
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
     bool                       slidepop_open, slidepop_typing;
     u8str_t                    hint;               /* RV-116: what the box part under the pointer does */
@@ -1242,7 +1249,6 @@ static bool open_archive(app_state_t *app, u8str_t archive_path);
 static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 static void osd_say(app_state_t *app, u8str_t text);
-static void menu_from_bar(app_state_t *app);
 static void panel_build_edit(app_state_t *app);
 static void strip_follow(app_state_t *app, size_t page);
 static bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
@@ -6199,14 +6205,6 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->filmstrip.visible = !app->filmstrip.visible;
         int32_t page = current_page_index(app);
         if (page >= 0) strip_follow(app, (size_t)page);
-    } else if (rubraview_u8_eq_lit(action, "toggle_menu")) {
-        if (app->menubox.headless) {
-            menu_from_bar(app);
-        } else {
-            rubraview_box_click_anchor(&app->menubox);
-            menu_rebuild(app);
-            sync_menubox_tiles(app);
-        }
     } else if (rubraview_u8_eq_lit(action, "layout_single")) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_SINGLE, false);
     } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
@@ -7983,18 +7981,6 @@ static void chrome_hide(app_state_t *app, bool hide) {
     app->toolbox_window_drawn = 0.0;
 }
 
-/* The menu from the title bar's three lines (owner, 2026-10-15): it opens
-   under the bar, which stays while it is open, and folds on a second press,
-   on a choice, on Esc or on a click elsewhere. */
-static void menu_from_bar(app_state_t *app) {
-    rubraview_box_click_anchor(&app->menubox);
-    menu_rebuild(app);
-    sync_menubox_tiles(app);
-    if (app->menubox.state != RUBRAVIEW_BOX_COLLAPSED) {
-        app->titlebar.shown = true;
-        app->titlebar.idle_seconds = 0.0;
-    }
-}
 
 /* §3.21.3: the titlebar's controls take precedence while it is shown,
    over the viewer and over the picker alike. True when it took the click. */
@@ -8013,7 +7999,6 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
             return true;
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
-        case RUBRAVIEW_TITLEBAR_MENU:       menu_from_bar(app); return true;
         case RUBRAVIEW_TITLEBAR_OPEN:       handle_action(app, U8("open_picker")); return true;   /* 1.20.0 */
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             /* Both boxes back to their corners, inside the window; the menu
@@ -9368,7 +9353,70 @@ static void draw_sub_list(app_state_t *app) {
 
 /* ---- RV-116: the right-click list, and the slide show's settings ---- */
 
-#define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
+#define CTX_MAX (RUBRAVIEW_CONTEXT_MAX_ITEMS + MENU_MAX_TILES + 2)   /* the list and the menu's sections, or a section and Back */
+
+enum { CTX_ROW_ACTION = 0, CTX_ROW_SUB, CTX_ROW_BACK };
+typedef struct ctx_row { u8str_t caption, action; int32_t group, kind, node; } ctx_row_t;
+
+/* 1.21.0 (owner, 2026-10-18: "우클릭 메뉴에서, 툴바 버튼으로 호출 가능한 기능들은 빼 주세요"): is this action
+   a tile of the toolbox for what is on screen? Then the right click leaves it out. */
+static bool ctx_on_toolbox(const app_state_t *app, u8str_t action) {
+    if (action.len == 0) return false;
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    const rubraview_toolbox_profile_t *p = rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app)));
+    if (!p) return false;
+    for (int32_t i = 0; i < p->tile_count; ++i)
+        if (rubraview_u8_eq(doc->tiles[p->first_tile + i].action, action)) return true;
+    return false;
+}
+
+/* Has a menu item something the right click would show: an action not on the toolbox, or a section holding one? */
+static bool ctx_node_shows(const app_state_t *app, int32_t at, int depth) {
+    const rubraview_menu_tree_t *tree = &app->menu_tree;
+    if (at < 0 || (size_t)at >= tree->item_count || depth > RUBRAVIEW_MENU_MAX_DEPTH) return false;
+    const rubraview_menu_item_t *item = &tree->items[at];
+    if (item->child_count <= 0) return !ctx_on_toolbox(app, item->action);
+    for (int32_t c = 0; c < item->child_count; ++c) if (ctx_node_shows(app, item->first_child + c, depth + 1)) return true;
+    return false;
+}
+
+/* The rows on show: the list's, then (on the picture) a section a row for each of the menu's; or, in a
+   section, Back and its items, a section in it a row that opens it. On the picture, what the toolbox
+   has a tile for is left out, and a section left with nothing. */
+static size_t ctx_row_list(const app_state_t *app, ctx_row_t *rows) {
+    if (!app->ctx_list) return 0;
+    size_t n = 0;
+    const rubraview_menu_tree_t *tree = &app->menu_tree;
+    if (app->ctx_node >= 0 && (size_t)app->ctx_node < tree->item_count) {
+        const rubraview_menu_item_t *node = &tree->items[app->ctx_node];
+        rows[n++] = (ctx_row_t){ node->label, U8(""), 0, CTX_ROW_BACK, -1 };
+        for (int32_t c = 0; c < node->child_count && n < CTX_MAX; ++c) {
+            int32_t at = node->first_child + c;
+            if (at < 0 || (size_t)at >= tree->item_count) break;
+            const rubraview_menu_item_t *item = &tree->items[at];
+            if (!ctx_node_shows(app, at, 0)) continue;
+            rows[n++] = (ctx_row_t){ item->label, item->action, 1, item->child_count > 0 ? CTX_ROW_SUB : CTX_ROW_ACTION, at };
+        }
+        return n;
+    }
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    for (int32_t i = 0; i < app->ctx_list->tile_count && n < RUBRAVIEW_CONTEXT_MAX_ITEMS; ++i) {
+        const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + i];
+        if (app->ctx_with_menu && ctx_on_toolbox(app, item->action)) continue;
+        rows[n++] = (ctx_row_t){ item->caption, item->action, item->group, CTX_ROW_ACTION, -1 };
+    }
+    if (app->ctx_with_menu) {
+        int32_t group = n > 0 ? rows[n - 1].group + 1 : 0;
+        for (int32_t r = 0; r < tree->root_count && n < CTX_MAX; ++r) {
+            int32_t at = tree->root_first + r;
+            if (at < 0 || (size_t)at >= tree->item_count) break;
+            const rubraview_menu_item_t *item = &tree->items[at];
+            if (!ctx_node_shows(app, at, 0)) continue;
+            rows[n++] = (ctx_row_t){ item->label, item->action, group, item->child_count > 0 ? CTX_ROW_SUB : CTX_ROW_ACTION, at };
+        }
+    }
+    return n;
+}
 
 static rubraview_window_t *ctx_window(const app_state_t *app) {
     return app->ctx_in_files && app->files_window ? app->files_window : app->window;   /* RV-117: or over the file window's rows */
@@ -9381,25 +9429,63 @@ static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app) {
 
 /* The open list's rows: their groups, and whether each can act now. */
 static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
-    if (!app->ctx_list) return 0;
-    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    ctx_row_t rows[CTX_MAX];
+    size_t n = ctx_row_list(app, rows);
     rubraview_action_facts_t facts = action_facts(app);
-    size_t n = (size_t)app->ctx_list->tile_count;
-    if (n > CTX_MAX) n = CTX_MAX;
     for (size_t i = 0; i < n; ++i) {
-        const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + (int32_t)i];
-        groups[i] = item->group;
-        if (enabled) enabled[i] = rubraview_action_state(item->action, &facts).enabled;
+        groups[i] = rows[i].group;
+        if (enabled) enabled[i] = rows[i].kind != CTX_ROW_ACTION || rubraview_action_state(rows[i].action, &facts).enabled;
     }
     return n;
 }
 
-static rubraview_rect_t ctx_frame(const app_state_t *app, const int32_t *groups, size_t n) {
+/* 1.21.0: the list in one column; on the picture, the menu's sections in a second one beside it
+   (to the right, else to the left), so neither grows past the window. */
+typedef struct ctx_layout {
+    size_t n, split;               /* rows; the first in the second column (n: none) */
+    int32_t groups[CTX_MAX];
+    bool enabled[CTX_MAX];
+    rubraview_rect_t a, b;
+    rubraview_ctxmenu_metrics_t m;
+} ctx_layout_t;
+
+static void ctx_layout_make(const app_state_t *app, ctx_layout_t *L) {
+    L->n = ctx_rows(app, L->groups, L->enabled);
+    L->split = L->n;
+    if (app->ctx_node < 0 && app->ctx_with_menu && app->ctx_list) {
+        ctx_row_t rows[CTX_MAX];
+        size_t total = ctx_row_list(app, rows), own = 0;
+        while (own < total && rows[own].node < 0) own++;   /* the list's rows come first; the sections have their node */
+        if (own > 0 && own < L->n) L->split = own;   /* none of its own left: the sections alone, one column */
+    }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(ctx_window(app), &w, &h);
-    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
-    return rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &m, groups, n);
+    L->m = ctx_metrics(app);
+    L->a = rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &L->m, L->groups, L->split);
+    L->b = (rubraview_rect_t){0};
+    if (L->split < L->n) {
+        L->b = rubraview_ctxmenu_frame((double)w, (double)h, L->a.x + L->a.width, L->a.y, &L->m, L->groups + L->split, L->n - L->split);
+        if (L->b.x < L->a.x + L->a.width - 0.5) L->b.x = L->a.x - L->b.width >= 0.0 ? L->a.x - L->b.width : 0.0;
+    }
 }
+
+static rubraview_rect_t ctx_layout_row(const ctx_layout_t *L, size_t i) {
+    return i < L->split ? rubraview_ctxmenu_row(L->a, &L->m, L->groups, i)
+                        : rubraview_ctxmenu_row(L->b, &L->m, L->groups + L->split, i - L->split);
+}
+
+static int32_t ctx_layout_row_at(const ctx_layout_t *L, double x, double y) {
+    int32_t r = rubraview_ctxmenu_row_at(L->a, &L->m, L->groups, L->split, x, y);
+    if (r >= 0) return r;
+    if (L->split >= L->n) return -1;
+    r = rubraview_ctxmenu_row_at(L->b, &L->m, L->groups + L->split, L->n - L->split, x, y);
+    return r >= 0 ? r + (int32_t)L->split : -1;
+}
+
+static bool ctx_layout_contains(const ctx_layout_t *L, double x, double y) {
+    return rubraview_rect_contains(L->a, x, y) || (L->split < L->n && rubraview_rect_contains(L->b, x, y));
+}
+
 
 static rubraview_rect_t slidepop_frame(const app_state_t *app) {
     int32_t w = 0, h = 0;
@@ -9413,6 +9499,9 @@ static void ctx_close(app_state_t *app) {
     app->ctx_open = false;
     app->ctx_list = NULL;
     app->ctx_focus = -1;
+    app->ctx_with_menu = false;
+    app->ctx_node = -1;
+    app->ctx_depth = 0;
     rubraview_confirm_clear(&app->ctx_confirm);
 }
 
@@ -9440,54 +9529,89 @@ static void ctx_open_at(app_state_t *app, double x, double y) {
     app->ctx_list = list;
     app->ctx_x = x;
     app->ctx_y = y;
+    menu_rebuild(app);          /* the menu's tree for this moment: what it holds under the list */
+    app->ctx_with_menu = true;
 }
 
 /* A row chosen, by a click or Enter. Delete asks a second time, as the menu's does. */
+static void ctx_back(app_state_t *app) {
+    if (app->ctx_node < 0) return;
+    app->ctx_node = app->ctx_depth > 0 ? app->ctx_stack[--app->ctx_depth] : -1;
+    app->ctx_focus = -1;
+    rubraview_confirm_clear(&app->ctx_confirm);
+}
+
 static void ctx_choose(app_state_t *app, int32_t row) {
     int32_t groups[CTX_MAX];
     bool enabled[CTX_MAX];
     size_t n = ctx_rows(app, groups, enabled);
     if (row < 0 || (size_t)row >= n || !enabled[row]) return;
-    const rubraview_box_tile_t *item = &rubraview_boxes_document()->context_items[app->ctx_list->first_tile + row];
-    if (rubraview_u8_eq_lit(item->action, "delete_file") &&
-        !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
-        osd_say(app, TU8("click Delete again to move it to the recycle bin"));
+    ctx_row_t rows[CTX_MAX];
+    (void)ctx_row_list(app, rows);
+    if (rows[row].kind == CTX_ROW_BACK) { ctx_back(app); return; }
+    if (rows[row].kind == CTX_ROW_SUB) {   /* a section entered in place */
+        if (app->ctx_depth < RUBRAVIEW_MENU_MAX_DEPTH) app->ctx_stack[app->ctx_depth++] = app->ctx_node;
+        app->ctx_node = rows[row].node;
+        app->ctx_focus = -1;
+        rubraview_confirm_clear(&app->ctx_confirm);
         return;
     }
-    u8str_t action = item->action;
+    bool clears = rubraview_u8_eq_lit(rows[row].action, "recent_clear");
+    if ((clears || rubraview_u8_eq_lit(rows[row].action, "delete_file")) &&
+        !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
+        osd_say(app, clears ? TU8("click Clear again to empty the recent list") : TU8("click Delete again to move it to the recycle bin"));
+        return;
+    }
+    u8str_t action = rows[row].action;
     ctx_close(app);
     handle_action(app, action);
 }
 
 static void draw_ctxmenu_on(app_state_t *app, rubraview_renderer_t *r, double px, double py) {
     if (!app->ctx_open) return;
-    int32_t groups[CTX_MAX];
-    bool enabled[CTX_MAX];
-    size_t n = ctx_rows(app, groups, enabled);
+    ctx_layout_t L;
+    ctx_layout_make(app, &L);
+    size_t n = L.n;
     if (n == 0) return;
+    const int32_t *groups = L.groups;
+    const bool *enabled = L.enabled;
+    rubraview_ctxmenu_metrics_t m = L.m;
     double dpi = rubraview_pal_window_dpi_scale(ctx_window(app));
-    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
-    rubraview_rect_t f = ctx_frame(app, groups, n);
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
-    rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
-    int32_t hover = rubraview_ctxmenu_row_at(f, &m, groups, n, px, py);
+    for (int k = 0; k < 2; ++k) {
+        rubraview_rect_t f = k == 0 ? L.a : L.b;
+        if (k == 1 && L.split >= L.n) break;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
+    }
+    ctx_row_t rows[CTX_MAX];
+    (void)ctx_row_list(app, rows);
+    int32_t hover = ctx_layout_row_at(&L, px, py);
     if (hover < 0) hover = app->ctx_focus;
-    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     rubraview_action_facts_t facts = action_facts(app);
     double now = rubraview_pal_time_now_seconds();
     for (size_t i = 0; i < n; ++i) {
-        rubraview_rect_t row = rubraview_ctxmenu_row(f, &m, groups, i);
-        if (i > 0 && groups[i] != groups[i - 1]) {   /* the line between two groups */
+        rubraview_rect_t row = ctx_layout_row(&L, i);
+        rubraview_rect_t f = i < L.split ? L.a : L.b;
+        if (i > 0 && i != L.split && groups[i] != groups[i - 1]) {   /* the line between two groups */
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x + 8.0 * dpi, row.y - m.gap * 0.5 - 0.5 * dpi,
                                                                       f.width - 16.0 * dpi, 1.0 * dpi }, 0x40FFFFFFu, 0.0);
         }
         rubraview_pal_rect_t cell = { row.x + 4.0 * dpi, row.y + 1.0 * dpi, row.width - 8.0 * dpi, row.height - 2.0 * dpi };
         if ((int32_t)i == hover && enabled[i]) rubraview_pal_render_fill_rect(r, cell, 0x40FFFFFFu, 3.0 * dpi);
-        const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + (int32_t)i];
-        rubraview_action_state_t st = rubraview_action_state(item->action, &facts);
-        char scratch[96];
-        u8str_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now) ? TU8("Delete?")
-                     : rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, scratch, sizeof(scratch));
+        const ctx_row_t *item = &rows[i];
+        rubraview_action_state_t st = item->kind == CTX_ROW_ACTION ? rubraview_action_state(item->action, &facts)
+                                                                   : (rubraview_action_state_t){ .enabled = true, .mark = RUBRAVIEW_MARK_NONE };
+        char scratch[160];
+        u8str_t text;
+        if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
+            text = rubraview_u8_eq_lit(item->action, "recent_clear") ? TU8("Clear?") : TU8("Delete?");
+        } else if (item->kind == CTX_ROW_BACK) {   /* the section's own name, with the way back */
+            u8str_t name = rubraview_tr_ctx_u8("menu", item->caption);
+            int k = snprintf(scratch, sizeof(scratch), "\xE2\x97\x82 %.*s", (int)(name.len < 120 ? name.len : 120), name.ptr);
+            text = (u8str_t){ .ptr = scratch, .len = k > 0 ? (size_t)k : 0 };
+        } else {
+            text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), item->kind == CTX_ROW_SUB, st.mark, st.value, scratch, sizeof(scratch));
+        }
         rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi, enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
@@ -9637,13 +9761,11 @@ static bool popups_press(app_state_t *app, double x, double y, bool right) {
         return true;
     }
     if (!app->ctx_open) return false;
-    int32_t groups[CTX_MAX];
-    size_t n = ctx_rows(app, groups, NULL);
-    rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
-    rubraview_rect_t f = ctx_frame(app, groups, n);
+    ctx_layout_t L;
+    ctx_layout_make(app, &L);
     if (right) { ctx_close(app); return false; }
-    if (rubraview_rect_contains(f, x, y)) {
-        int32_t row = rubraview_ctxmenu_row_at(f, &m, groups, n, x, y);
+    if (ctx_layout_contains(&L, x, y)) {
+        int32_t row = ctx_layout_row_at(&L, x, y);
         if (row >= 0) ctx_choose(app, row);
         return true;
     }
@@ -9677,7 +9799,8 @@ static bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (key_is(combo, "Escape")) { ctx_close(app); return true; }
     if (key_is(combo, "Down")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, +1); return true; }
     if (key_is(combo, "Up")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, -1); return true; }
-    if (key_is(combo, "Enter")) { if (app->ctx_focus >= 0) ctx_choose(app, app->ctx_focus); return true; }
+    if (key_is(combo, "Enter") || key_is(combo, "Right")) { if (app->ctx_focus >= 0) ctx_choose(app, app->ctx_focus); return true; }
+    if (key_is(combo, "Left") || key_is(combo, "Backspace")) { ctx_back(app); return true; }   /* 1.21.0: out of a section */
     ctx_close(app);   /* any other key: it closes, and the key does what it does */
     return false;
 }
@@ -10682,7 +10805,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
     /* Floating boxes (§3.6); none while they are hidden (D-110). */
     toolbox_refresh(app);
     if (!app->chrome_hidden && app->toolbox.state != RUBRAVIEW_BOX_DETACHED) draw_box(app, &app->toolbox, &metrics, NULL, 0, NULL);
-    if (!app->chrome_hidden) draw_box(app, &app->menubox, &metrics, NULL, 0, &app->menu);
+    /* 1.21.0: the menu box is not drawn; its tree is the right click's lower rows */
 
     if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->menubox.headless) {
         char crumb[128];
@@ -22926,7 +23049,7 @@ static void tick_timers(app_state_t *app, double dt) {
         rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
         bool free_pointer = app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open;
         u8str_t hint = free_pointer ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
-        const char *keys_of = hint.len ? "toggle_menu" : NULL;   /* the owner (2026-10-18): every tooltip with its keys */
+        const char *keys_of = NULL;   /* the owner (2026-10-18): every tooltip with its keys; the menu box is gone (1.21.0) */
         if (hint.len == 0 && free_pointer) {
             hint = rubraview_box_hint(&app->toolbox, &base, app->pointer_x, app->pointer_y);
             keys_of = rubraview_rect_contains(rubraview_box_pin_rect(&app->toolbox, &base), app->pointer_x, app->pointer_y) ? "toggle_toolbox_pin" : "toggle_toolbox";
@@ -25860,7 +25983,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.toolbox.view_width = app.menubox.view_width = (double)view_w;
             app.toolbox.view_height = app.menubox.view_height = (double)view_h;
             /* With our own title bar the menu is its ☰'s, under the bar; with Windows' frame the M box stays. */
-            app.menubox.headless = app.frameless;
+            app.menubox.headless = true;   /* 1.21.0: no M box either; the menu lives in the right click */
             if (app.menubox.headless) {
                 app.menubox.anchor_x = 0.0;
                 app.menubox.anchor_y = app.titlebar.height;

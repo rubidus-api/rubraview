@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.20.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.20.0/rubraview-v1.20.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.21.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -52,7 +52,6 @@
 | 키 | 하는 일 |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | 전체 화면 |
-| `Tab` | 메뉴 열기/닫기 (타이틀바 아래) |
 | `T` | 도구 상자 열기/닫기 |
 | `Shift+T` | 도구 상자 고정 |
 | `Ctrl+T` | 도구 상자를 따로 창으로/되돌리기 |

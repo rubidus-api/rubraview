@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.20.0.exe              the viewer, as built
-dist/rubraview-v1.20.0/                 the release bundle
-dist/rubraview-v1.20.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.21.0.exe              the viewer, as built
+dist/rubraview-v1.21.0/                 the release bundle
+dist/rubraview-v1.21.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -286,8 +286,11 @@ clicked, for what is on screen. For a picture: Copy picture, Adjust
 picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
 Info; Rename, Copy to folder, Move to folder, Copy to another folder...,
 Move to another folder..., Show in Explorer,
-Delete (click it twice: it goes to the recycle bin); and Menu... for the
-menu box. A book or an archive has the next and previous archive and
+Delete (click it twice: it goes to the recycle bin); Help and About. What
+the toolbox on screen has a button for is left out of it. Beside it, a
+second column holds everything else Rubraview does, in sections — File,
+Edit, Go, View, Playback, Sound, Subtitles, Screen, Help: a section opens
+in its place, its first row (◂) goes back (or `Left`, `Backspace`). A book or an archive has the next and previous archive and
 the layouts; a film has play and stop, the subtitles, the sound track,
 normal speed, copying and saving the frame and full screen; a song has
 the previous and next file, what the end does, the equaliser and the
@@ -907,13 +910,9 @@ its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
 ## The floating boxes
 
-The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`). The
-menu opens with `Tab`, or **Menu...** at the end of a right click; a right
-click also has **Help** and **About Rubraview**. Its tiles come under the
-bar, which stays while the menu is open; a choice, `Esc` or a click
-elsewhere folds it. (With Windows' own title bar — Settings > General >
-Frameless window off — the menu is an **M** box floating over the
-picture, as the toolbox is.) The toolbox's last group has **Settings**,
+The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`).
+There is no menu of its own: what the toolbox does not have a button for
+is in the right click, in its sections. The toolbox's last group has **Settings**,
 **Bar pin** (the title bar stays shown; Settings > General > Title bar)
 and **Info bar** (`Shift+I`). A small anchor,
 **T**, floats over the picture for the toolbox. The toolbox changes with what is on screen — playing controls for a
@@ -1332,7 +1331,6 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `Tab` | Open or close the menu (under the title bar) |
 | `T` | Open or close the toolbox |
 | `Shift+T` | Pin the toolbox open |
 | `Ctrl+T` | Give the toolbox a window of its own, or dock it |

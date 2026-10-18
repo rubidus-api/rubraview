@@ -1728,3 +1728,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - the title bar's folder, its tooltip "Open a file (O, Ctrl+O)", and the picker it opens;
   - the toolbox's new group; Help and About on a right click;
   - Bar pin keeps the bar while the pointer is away, and lets it go when pressed again.
+
+## 2026-10-19: D-171 The menu folded into the right click
+
+- Status: Accepted (owner 2026-10-18):
+  - "우클릭 컨텍스트 메뉴의 '메뉴' 항목과 그 자체를 다 없애주세요. 혹시라도 그 메뉴 안의 하위 항목들 중에 다른 경로로 접근 불가능한 기능이 있다면 화면 위의 우클릭 컨텍스트 메뉴 쪽으로 옮겨 주세요";
+  - "우클릭 메뉴에서, 툴바 버튼으로 호출 가능한 기능들은 빼 주세요".
+- Decision:
+  - 79 of the menu's 144 items were on no tile and no right click, among them the archive names' code pages, four layouts, the screen shapes, playback speeds, the boxes' opacity and Change keys. Rather than pick some, the menu's whole tree, its `when` conditions kept, is the right click's second column. Each section opens in place, as the menu's did, and nothing is lost.
+  - Two columns, because a single one ran past a 900-pixel window.
+  - Left out of a right click: any action the toolbox on screen has a tile for, and a section with nothing left in it. The file list's row menu keeps its items.
+  - Gone: the menu box (now always headless, never drawn), `toggle_menu` and its `Tab`, Menu... in every context list, `menu_from_bar`. The menu's tree stays as data (`rubraview_boxes_menu`).
+- Consequences: VM (2026-10-19):
+  - a picture's right click: Copy picture, Fit to window, Real size, Rotate back, the file's own items, Help, About. Adjust, Rotate, Slide show and Info are on the toolbox and not there.
+  - Beside it File, Edit, Go, View, Screen, Help. View opens in place (◂ View, Layout, Fit, Zoom, Shape, Turn, Crisp, Grid), and ◂ goes back.
