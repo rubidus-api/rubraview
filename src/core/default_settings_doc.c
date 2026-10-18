@@ -362,6 +362,7 @@ static const char *const PARTS[] = {
 "  action cache.reset_history      \"Forget every reading place\"\n"
 "  section \"Privacy\"\n"
 "  toggle cache.privacy_clean      \"Always strip metadata on export\" = false wired\n"
+"  choice cache.keep_details       \"A picture's details when it is written again\" drop | in_file | or_txt = in_file wired\n"
 "\n",
 "page keys \"Keys\"\n"
 "  section \"Bindings\"\n"
@@ -410,6 +411,7 @@ static const char *const PARTS[] = {
 "help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
 "help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
+"help cache.keep_details \"Camera details, comments, XMP and IPTC, when Export, Edit or the batch writes a picture again: dropped; kept in the new file where its format has a place (JPEG, PNG, GIF, WebP; the rest in words in its comment); or that, and what the file cannot hold in a .txt of the same name beside it (photo.txt, then photo-1.txt). Never with the metadata stripped.\"\n"
 "help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"
 "help keys.use_keymap_file \"On: the keys come from keymap.ini, which the Keys page edits. Off: the built-in keys are used whatever the file says.\"\n",
 "help text.headings \"In paragraphs: a short line with no sentence's end and a blank line before and after it (Chapter 2) stays a paragraph of its own instead of joining the text after it.\"\n"

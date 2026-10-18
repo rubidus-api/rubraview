@@ -107,6 +107,16 @@ typedef struct rubraview_export_options {
     int32_t webp_near_lossless; /* 0..100, lossless only: 100 is off, lower lets nearby values change for a smaller file */
     int32_t webp_alpha_quality; /* 0..100: how well the transparency is kept in a lossy WebP */
     bool    webp_sharp_yuv;     /* a slower, sharper conversion of colour edges (lossy) */
+
+    /* 1.17.0 (owner, 2026-10-18): the source's details (EXIF, XMP, IPTC, comments) through a save that
+       writes the pixels again — rubraview_keep_details_t: 0 dropped, 1 in the file (as it comes),
+       2 in the file and what it cannot hold in a .txt beside it. Never with privacy_clean. */
+    int32_t keep_details;
+
+    /* 1.17.0, the rest of RV-140 that the writers take */
+    int32_t webp_preset;        /* 0 none, 1 picture, 2 photo, 3 drawing, 4 icon, 5 text (libwebp's own tunings) */
+    int32_t target_kb;          /* JPEG and lossy WebP: the file no larger than this many KB (the quality found for it); 0 off */
+    bool    tiff_cmyk;          /* a TIFF in CMYK, for print (WIC's plain conversion, no colour profile) */
 } rubraview_export_options_t;
 
 /** Every field at the specification's default. */
@@ -144,6 +154,7 @@ enum {
     RUBRAVIEW_EXPORT_ROW_BMP         = 1u << 10,  /* BMP: bits */
     RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY  = 1u << 11,  /* lossy WebP: alpha quality, sharp YUV */
     RUBRAVIEW_EXPORT_ROW_WEBP_NEAR   = 1u << 12,  /* lossless WebP: near-lossless */
+    RUBRAVIEW_EXPORT_ROW_TARGET      = 1u << 13,  /* JPEG and lossy WebP: a target size (1.17.0) */
 };
 
 /**
@@ -172,6 +183,12 @@ typedef enum rubraview_export_route {
     RUBRAVIEW_EXPORT_STRIP_ONLY,
     /** Nothing to do at all: copy the file unchanged. */
     RUBRAVIEW_EXPORT_COPY,
+    /**
+     * 1.17.0: a JPEG to a JPEG, nothing changed, but progressive, optimised
+     * tables or restart markers asked for: its coefficients written again
+     * (jpegtran), lossless; its markers kept unless privacy clean.
+     */
+    RUBRAVIEW_EXPORT_JPEG_LOSSLESS,
 } rubraview_export_route_t;
 
 /**

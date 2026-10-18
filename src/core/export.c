@@ -29,6 +29,7 @@ rubraview_export_options_t rubraview_export_defaults(void) {
         .bmp_depth = RUBRAVIEW_BMP_32,
         .webp_near_lossless = 100,   /* off */
         .webp_alpha_quality = 100,
+        .keep_details = 1,           /* in the file */
     };
 }
 
@@ -60,6 +61,9 @@ void rubraview_export_clamp(rubraview_export_options_t *options) {
     if ((int)options->bmp_depth < 0 || (int)options->bmp_depth > RUBRAVIEW_BMP_8) options->bmp_depth = RUBRAVIEW_BMP_32;
     options->webp_near_lossless = clampi(options->webp_near_lossless, 0, 100);
     options->webp_alpha_quality = clampi(options->webp_alpha_quality, 0, 100);
+    options->keep_details = clampi(options->keep_details, 0, 2);
+    options->webp_preset = clampi(options->webp_preset, 0, 5);
+    options->target_kb = clampi(options->target_kb, 0, 1000000);
 }
 
 int32_t rubraview_export_palette_size(const rubraview_export_options_t *options) {
@@ -73,7 +77,7 @@ uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t s
     rubraview_export_format_t format = o->format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
                                          ? rubraview_export_format_for_name(source_name) : o->format;
     switch (format) {
-        case RUBRAVIEW_EXPORT_JPEG: rows |= RUBRAVIEW_EXPORT_ROW_JPEG_MORE; break;
+        case RUBRAVIEW_EXPORT_JPEG: rows |= RUBRAVIEW_EXPORT_ROW_JPEG_MORE | RUBRAVIEW_EXPORT_ROW_TARGET; break;
         case RUBRAVIEW_EXPORT_PNG:
             rows |= RUBRAVIEW_EXPORT_ROW_PNG_MORE;
             if (o->png_depth == RUBRAVIEW_PNG_PALETTE8) rows |= RUBRAVIEW_EXPORT_ROW_COLOURS;
@@ -84,7 +88,9 @@ uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t s
             if (o->bmp_depth == RUBRAVIEW_BMP_8) rows |= RUBRAVIEW_EXPORT_ROW_COLOURS;
             break;
         case RUBRAVIEW_EXPORT_TIFF: rows |= RUBRAVIEW_EXPORT_ROW_TIFF; break;
-        case RUBRAVIEW_EXPORT_WEBP: rows |= o->webp_lossless ? RUBRAVIEW_EXPORT_ROW_WEBP_NEAR : RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY; break;
+        case RUBRAVIEW_EXPORT_WEBP:
+            rows |= o->webp_lossless ? RUBRAVIEW_EXPORT_ROW_WEBP_NEAR : (RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY | RUBRAVIEW_EXPORT_ROW_TARGET);
+            break;
         default: break;
     }
     return rows;
@@ -137,6 +143,34 @@ rubraview_export_route_t rubraview_export_plan(const rubraview_export_options_t 
     /* A different container always means encoding again. */
     if (target != source_format) return RUBRAVIEW_EXPORT_REENCODE;
     if (pixels_changed) return RUBRAVIEW_EXPORT_REENCODE;
+
+    /* 1.17.0: a choice the file would not show unless it were written again
+       (a copy used to drop it without a word): written again. A JPEG's scans,
+       tables and restart markers are rewritten from its coefficients, lossless. */
+    rubraview_export_options_t d = rubraview_export_defaults();
+    switch (target) {
+        case RUBRAVIEW_EXPORT_JPEG:
+            if (options->jpeg_grey || options->jpeg_subsampling != RUBRAVIEW_JPEG_SUBSAMPLING_AUTO || options->target_kb > 0) return RUBRAVIEW_EXPORT_REENCODE;
+            if (options->jpeg_progressive || options->jpeg_optimise || options->jpeg_restart_rows > 0) return RUBRAVIEW_EXPORT_JPEG_LOSSLESS;
+            break;
+        case RUBRAVIEW_EXPORT_PNG:
+            if (options->png_depth != d.png_depth || options->png_interlace || options->png_filter != d.png_filter ||
+                (options->png_depth == RUBRAVIEW_PNG_PALETTE8 && (options->colours != d.colours || options->dither != d.dither))) return RUBRAVIEW_EXPORT_REENCODE;
+            break;
+        case RUBRAVIEW_EXPORT_GIF:
+            if (options->colours != d.colours || options->dither != d.dither) return RUBRAVIEW_EXPORT_REENCODE;
+            break;
+        case RUBRAVIEW_EXPORT_WEBP:
+            if (options->target_kb > 0 && !options->webp_lossless) return RUBRAVIEW_EXPORT_REENCODE;
+            break;
+        case RUBRAVIEW_EXPORT_BMP:
+            if (options->bmp_depth != d.bmp_depth) return RUBRAVIEW_EXPORT_REENCODE;
+            break;
+        case RUBRAVIEW_EXPORT_TIFF:
+            if (options->tiff_compression != d.tiff_compression || options->tiff_cmyk) return RUBRAVIEW_EXPORT_REENCODE;
+            break;
+        default: break;
+    }
 
     if (!options->privacy_clean) return RUBRAVIEW_EXPORT_COPY;
 

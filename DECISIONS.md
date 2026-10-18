@@ -1634,3 +1634,43 @@ Do not store credentials, private infrastructure details, personal data, private
   - X ×3 and Save: `film.kor.old1.smi` kept, the times +1.5 s, the entities left as typed; the list made again.
   - Six turns between two films with C and the subtitle window, Settings twice: responding.
   - `--page=3` on page 3. The offered restart taken on page 4: a new process `--page=4` on page 4, the old one gone.
+
+## 2026-10-18: D-167 A picture's details kept through a save; the rest of the saving choices
+
+- Status: Accepted (owner 2026-10-18: "새 파일포맷으로 저장할 때 촬영정보나 주석 등의 파일 추가정보를 보존하여 담을 수 없다면 ... 결과 파일과 동일 이름의 txt 파일(이미 동일이름 파일이 있으면 뒤에 숫자 등을 늘려가면서 붙여서 새 파일로)로 정보를 보존하는 옵션 넣을것"; then "위의 작업 후 다른 남은 것들 다 추진 바람").
+- Decision:
+  - `src/core/keepinfo.c`, by bytes, host-tested. The writers write pixels only, so what the source carries is read and put in after the write:
+    - read: JPEG APP1 Exif / APP1 XMP / APP13 / COM; PNG eXIf / iTXt / tEXt / zTXt (compressed text not read: named, and copied whole to a PNG); GIF comment extensions; WebP EXIF and XMP chunks; EXIF and IPTC in words through the information window's own wording.
+    - put:
+      - JPEG: blocks after JFIF, comments as COM (cut at 65533 between characters).
+      - PNG: eXIf and iTXt after IHDR, CRCs made.
+      - WebP: VP8X made from a VP8 / VP8L header or flagged, EXIF and XMP at the end, the RIFF size set.
+      - GIF: a comment extension before the trailer.
+      - What has no block of its own goes in words into the comment.
+      - EXIF orientation set to 1: the pixels were turned upright before they were written.
+  - `cache.keep_details` drop | in_file (as it comes) | or_txt. Export's and the batch window's row; `--details=`.
+    - or_txt: what the file cannot hold, as `<name>.txt` beside the name it ends with (the original's, written over), `-1`, `-2`... when taken. UTF-8 with a BOM, CRLF.
+    - No `.txt` for an archive's page; nothing at all with privacy clean.
+  - In the file as it comes: re-encoding had dropped every photo's camera details without a word, against §3.10's own rule that metadata is not dropped unasked.
+  - Plan: a JPEG to a JPEG, nothing changed, but progressive / optimised tables / restart markers asked: `RUBRAVIEW_EXPORT_JPEG_LOSSLESS`, jpegtran from the coefficients, markers kept unless privacy clean (`rubraview_jpegtran_rewrite(..., keep_markers)`). The other formats' own choices, and a JPEG's grey, subsampling or target size, re-encode instead of a copy that ignored them.
+  - The rest of RV-140 that the writers take:
+    - target size: JPEG halves the quality range, eight tries at most; lossy WebP uses libwebp's `target_size` with six passes;
+    - WebP presets (`WebPConfigPreset`);
+    - TIFF CMYK (`GUID_WICPixelFormat32bppCMYK`, no profile).
+  - The batch window shows `export_more_rows` for its format and writes them as tokens. One function adds Export's rows and the batch window's, one applies them.
+  - Not done, with the reason:
+    - `settings_follow`'s parse stays in `persist`: `rubraview_settings_t` holds slices, and moving them means rehoming three copies at each turn. It is a few times settings.ini (tens of KB), only when another viewer writes.
+    - 16-bit PNG would only pad 8-bit pixels. Grey with alpha and a transparent colour are not among WIC's PNG formats.
+    - Keeping metadata kinds one by one: the three choices and privacy clean cover it for now.
+    - RV-138 (plug-ins) and RV-139 (JXL / AVIF saving): the owner said later.
+- Consequences: seen on the VM (2026-10-18):
+  - a 3000x2000 photo with EXIF (Canon EOS R5, GPS), XMP, IPTC and a Korean comment, through `--batch` with `--details=txt`:
+    - JPEG: APP0, APP1, APP1, APP13, COM;
+    - PNG: IHDR, eXIf, iTXt;
+    - WebP: VP8X, VP8, EXIF, XMP, the RIFF size right, and `photo.txt` for its comment and IPTC;
+    - GIF: a comment extension;
+    - BMP and TIFF into one folder: `photo.txt`, then `photo-1.txt`;
+    - `--details=drop` and privacy clean: none.
+  - Every file opens (System.Drawing). Read back with our reader: the JPEG's details equal the source's.
+  - Target: 217 KB free; 200 → 192 KB; 100 → 100 KB; 50 → 49 KB. CMYK TIFF: photometric 5.
+  - Export, the JPEG as a JPEG with Progressive ticked: SOF2, its APP1 / APP13 / COM kept, 105,816 → 42,759 B, decoded pixels identical.

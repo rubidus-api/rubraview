@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.16.0.exe              the viewer, as built
-dist/rubraview-v1.16.0/                 the release bundle
-dist/rubraview-v1.16.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.17.0.exe              the viewer, as built
+dist/rubraview-v1.17.0/                 the release bundle
+dist/rubraview-v1.17.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -435,7 +435,26 @@ More, by format (1.16.0):
 - TIFF: **TIFF compression** (none, LZW, ZIP).
 - WebP: lossy, **Alpha quality** and **Sharp colour edges**; lossless,
   **Near-lossless** (100 is off; lower lets nearby values change for a
-  smaller file).
+  smaller file); **WebP preset** (picture, photo, drawing, icon, text).
+- JPEG and lossy WebP: **File size at most** (KB): the best quality, up to
+  the one set, whose file fits.
+- TIFF: **CMYK (for print)**.
+
+**Camera details, comments** (also Settings › Cache): when a picture is
+written again — exported to another format, edited, or by the batch — what
+it said (camera and GPS details, XMP, IPTC captions and keywords,
+comments) is **kept in the file** where its format has a place: JPEG, PNG
+and WebP take the EXIF and XMP as they were (the orientation set to
+upright), JPEG its IPTC and comments, PNG and GIF the rest written in
+words in their comment. **In the file, or a .txt beside it** also writes
+what the new file cannot hold (a BMP, TIFF or ICO; a WebP's comments and
+IPTC) as a text file of the same name beside it (`photo.txt`, or
+`photo-1.txt` when that is taken). **Dropped** writes the pixels only.
+Privacy clean drops them all.
+
+A JPEG exported as a JPEG with nothing changed but **Progressive JPEG**,
+**Optimised tables** or **Restart markers** is rewritten without being
+encoded again: the picture is exactly the same.
 
 AVIF pictures (`.avif`) are read by Rubraview itself, on any Windows —
 stills and animations, with their transparency, 10-bit ones shown as 8.
@@ -627,6 +646,8 @@ waits for a key before it closes.
 | `--colours=2..256`, `--no-dither` | A palette's size (PNG's palette, GIF, BMP's 8 bits); flat colours, not dots |
 | `--tiff=auto\|none\|lzw\|zip`, `--bmp=32\|24\|8` | A TIFF's compression; a BMP's bits |
 | `--near-lossless=0..100`, `--alpha-quality=0..100`, `--sharp-yuv` | A WebP's near-lossless (lossless), alpha quality and sharp colour edges (lossy) |
+| `--webp-preset=none\|picture\|photo\|drawing\|icon\|text`, `--target-kb=N`, `--cmyk` | A WebP's preset; a JPEG's or lossy WebP's size at most N KB; a TIFF in CMYK |
+| `--details=drop\|file\|txt` | The source's camera details and comments: dropped, kept in the file (as it comes), or that and a `.txt` beside it for what the file cannot hold |
 | `--rotate=90\|180\|270\|exif`, `--flip=h\|v` | Turn them |
 | `--grayscale`, `--exposure=`, `--contrast=`, `--sharpen=amount[,radius]` | Adjust them |
 | `--privacy-clean` | Strip GPS and camera details |
@@ -1179,7 +1200,8 @@ filename code page, the memory cap). Some worth knowing:
 - **General › Open with Windows' own dialog** — `Ctrl+O` then opens
   Windows' dialog, not the picker.
 - **Cache** has **In use now** (pages and megabytes of the cap),
-  **Clear the picker's thumbnails**, and **Forget every reading place**.
+  **Clear the picker's thumbnails**, **Forget every reading place**, and
+  **A picture's details when it is written again** (see Export).
   **The program's memory** shows what the session keeps (and the most it
   kept), what the song playing carries, the windows open, what is read for
   a moment and all it holds; **Restart Rubraview where it is** writes the

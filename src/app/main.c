@@ -111,6 +111,7 @@
 #include "rubraview/pal/pal_process.h"
 #include "rubraview/version.h"
 #include "rubraview/export.h"
+#include "rubraview/keepinfo.h"
 #include "rubraview/jpegtran.h"
 #include "rubraview/comicinfo.h"
 #include "proven/job.h"
@@ -837,6 +838,7 @@ typedef struct app_state {
         int32_t format;
         double  quality;
         bool    privacy;
+        rubraview_export_options_t more;   /* the format's own choices and the details kept (RV-140, 1.17.0), as Export has them */
         char    name[256];
         double  start;
         char    replace[256];
@@ -2174,6 +2176,8 @@ static void osd_say(app_state_t *app, u8str_t text);
 
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
+static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubraview_export_format_t format,
+                        const rubraview_export_options_t *options);
 static void subs_drop(app_state_t *app);
 static proven_arena_t *subs_arena(app_state_t *app, size_t need);
 static void music_clear(app_state_t *app);
@@ -11313,8 +11317,9 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     char tmp[2048];
                     int n = snprintf(tmp, sizeof(tmp), "%.*s\\%.*s.rvsaving.%.*s", (int)dir.len, dir.ptr, (int)stem.len, stem.ptr, (int)ext.len, ext.ptr);
                     u8str_t out = { .ptr = tmp, .len = n > 0 && (size_t)n < sizeof(tmp) ? (size_t)n : 0 };
-                    ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.len > 0 && rubraview_pal_image_save(out, &px, &options) &&
-                         rubraview_pal_fs_recycle(path) && rubraview_pal_fs_replace(out, path);
+                    ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.len > 0 && rubraview_pal_image_save(out, &px, &options);
+                    if (ok) (void)details_keep(path, out, path, f, &options);   /* 1.17.0: read from the original before it goes */
+                    ok = ok && rubraview_pal_fs_recycle(path) && rubraview_pal_fs_replace(out, path);
                     if (!ok && out.len > 0 && rubraview_pal_fs_exists(out) && rubraview_pal_fs_exists(path)) (void)rubraview_pal_fs_recycle(out);
                 } else if (ok) {
                     /* in its own format when it can be written, else PNG */
@@ -11331,6 +11336,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                         ? rubraview_filing_target(names, rubraview_path_dirname(path), (u8str_t){ .ptr = name, .len = (size_t)n }, filing_exists, NULL)
                         : (u8str_t){ .ptr = "", .len = 0 };
                     ok = target.len > 0 && rubraview_pal_image_save(target, &px, &options);
+                    if (ok) (void)details_keep(path, target, target, f, &options);   /* 1.17.0 */
                 }
                 free(mem);
             }
@@ -12335,6 +12341,7 @@ enum {
     /* RV-140: Export's rows for what the writers take */
     PANEL_JPEG_SUBSAMPLING, PANEL_JPEG_GREY, PANEL_JPEG_OPTIMISE, PANEL_JPEG_RESTART, PANEL_PNG_FILTER, PANEL_PNG_INTERLACE,
     PANEL_COLOURS, PANEL_DITHER, PANEL_TIFF_COMPRESSION, PANEL_BMP_DEPTH, PANEL_WEBP_NEAR, PANEL_WEBP_ALPHA, PANEL_WEBP_SHARP,
+    PANEL_KEEP_DETAILS, PANEL_WEBP_PRESET, PANEL_TARGET_KB, PANEL_TIFF_CMYK,   /* 1.17.0 */
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     /* RV-129 */
     PANEL_BATCH_SIZE_BY, PANEL_BATCH_BOX_H, PANEL_BATCH_LINEAR, PANEL_BATCH_NO_ENLARGE, PANEL_BATCH_SHARPEN,
@@ -13301,6 +13308,8 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     const char *const PNG_FILTER[] = { T("by the level"), T("none"), T("sub"), T("up"), T("average"), T("Paeth"), T("adaptive") };
     const char *const TIFF_COMP[] = { T("as the writer does"), T("none"), T("LZW"), T("ZIP (Deflate)") };
     const char *const BMP_BITS[] = { T("32 bits (with alpha)"), T("24 bits"), T("8 bits (a palette)") };
+    const char *const KEEP[] = { T("dropped"), T("kept in the file"), T("in the file, or a .txt beside it") };
+    const char *const PRESET[] = { T("none"), T("picture"), T("photo"), T("drawing"), T("icon"), T("text") };
     int32_t i = (int32_t)row->value;
     const char *word = NULL;
     switch (row->id) {
@@ -13357,6 +13366,11 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
         case PANEL_PNG_FILTER:   word = i >= 0 && i < 7 ? PNG_FILTER[i] : NULL; break;
         case PANEL_TIFF_COMPRESSION: word = i >= 0 && i < 4 ? TIFF_COMP[i] : NULL; break;
         case PANEL_BMP_DEPTH:    word = i >= 0 && i < 3 ? BMP_BITS[i] : NULL; break;
+        case PANEL_KEEP_DETAILS: word = i >= 0 && i < 3 ? KEEP[i] : NULL; break;
+        case PANEL_WEBP_PRESET:  word = i >= 0 && i < 6 ? PRESET[i] : NULL; break;
+        case PANEL_TARGET_KB:
+            if (i <= 0) { word = T("off"); break; }
+            snprintf(buffer, size, T("at most %d KB"), (int)i); return cstr(buffer);
         case PANEL_JPEG_RESTART:
             if (i == 0) { word = T("none"); break; }
             snprintf(buffer, size, T("every %d rows of blocks"), (int)i); return cstr(buffer);
@@ -13372,6 +13386,93 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     if (word) { snprintf(buffer, size, "%s", word); return cstr(buffer); }
     snprintf(buffer, size, "[%d]", (int)i);
     return cstr(buffer);
+}
+
+/* A format's own choices (RV-108, RV-109, RV-140), for Export and the batch window alike. */
+static void export_more_rows(rubraview_panel_t *pn, const rubraview_export_options_t *o, uint32_t rows) {
+    if (rows & RUBRAVIEW_EXPORT_ROW_TARGET) {   /* 1.17.0: the quality found for a size */
+        rubraview_panel_add_slider(pn, PANEL_TARGET_KB, TU8("File size at most (KB, 0: off)"), (double)o->target_kb, 0.0, 20000.0, 10.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_PROGRESSIVE) {
+        rubraview_panel_add_toggle(pn, PANEL_PROGRESSIVE, TU8("Progressive JPEG"), o->jpeg_progressive);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_JPEG_MORE) {   /* RV-140 */
+        rubraview_panel_add_choice(pn, PANEL_JPEG_SUBSAMPLING, TU8("Colour subsampling"),
+                                   (int32_t)o->jpeg_subsampling, 4);
+        rubraview_panel_add_toggle(pn, PANEL_JPEG_GREY, TU8("Grey JPEG"), o->jpeg_grey);
+        rubraview_panel_add_toggle(pn, PANEL_JPEG_OPTIMISE, TU8("Optimised tables (smaller)"), o->jpeg_optimise);
+        rubraview_panel_add_slider(pn, PANEL_JPEG_RESTART, TU8("Restart markers"),
+                                   (double)o->jpeg_restart_rows, 0.0, 64.0, 1.0);
+    }
+    /* RV-108 (§3.10): the two choices the writer had and no row gave. */
+    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_DEPTH) {
+        rubraview_panel_add_choice(pn, PANEL_PNG_DEPTH, TU8("PNG colours"), (int32_t)o->png_depth, 4);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_MORE) {   /* RV-140 */
+        rubraview_panel_add_choice(pn, PANEL_PNG_FILTER, TU8("PNG filter"), (int32_t)o->png_filter, 7);
+        rubraview_panel_add_toggle(pn, PANEL_PNG_INTERLACE, TU8("Interlaced (Adam7)"), o->png_interlace);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_TIFF) {
+        rubraview_panel_add_choice(pn, PANEL_TIFF_COMPRESSION, TU8("TIFF compression"),
+                                   (int32_t)o->tiff_compression, 4);
+        rubraview_panel_add_toggle(pn, PANEL_TIFF_CMYK, TU8("CMYK (for print)"), o->tiff_cmyk);   /* 1.17.0 */
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_BMP) {
+        rubraview_panel_add_choice(pn, PANEL_BMP_DEPTH, TU8("BMP bits"), (int32_t)o->bmp_depth, 3);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_COLOURS) {
+        rubraview_panel_add_slider(pn, PANEL_COLOURS, TU8("Palette colours"),
+                                   (double)rubraview_export_palette_size(o), 2.0, 256.0, 1.0);
+        rubraview_panel_add_toggle(pn, PANEL_DITHER, TU8("Dither"), o->dither);
+    }
+    /* RV-109: WebP is written by the vendored libwebp. */
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP) {
+        rubraview_panel_add_toggle(pn, PANEL_WEBP_LOSSLESS, TU8("WebP lossless"), o->webp_lossless);
+        rubraview_panel_add_slider(pn, PANEL_WEBP_EFFORT, TU8("WebP effort"),
+                                   (double)o->webp_effort, 0.0, 6.0, 1.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP) {   /* 1.17.0 */
+        rubraview_panel_add_choice(pn, PANEL_WEBP_PRESET, TU8("WebP preset"), o->webp_preset, 6);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_NEAR) {   /* RV-140 */
+        rubraview_panel_add_slider(pn, PANEL_WEBP_NEAR, TU8("Near-lossless"),
+                                   (double)o->webp_near_lossless, 0.0, 100.0, 1.0);
+    }
+    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY) {
+        rubraview_panel_add_slider(pn, PANEL_WEBP_ALPHA, TU8("Alpha quality"),
+                                   (double)o->webp_alpha_quality, 0.0, 100.0, 1.0);
+        rubraview_panel_add_toggle(pn, PANEL_WEBP_SHARP, TU8("Sharp colour edges (slower)"), o->webp_sharp_yuv);
+    }
+}
+
+/* The same choices read back from a row; true when the rows that have use change with it. */
+static bool export_more_apply(rubraview_export_options_t *o, int32_t id, double v) {
+    switch (id) {
+        case PANEL_PNG_DEPTH:     o->png_depth = (rubraview_png_depth_t)(int32_t)v; return true;
+        case PANEL_PROGRESSIVE:   o->jpeg_progressive = v > 0.5; break;
+        case PANEL_WEBP_LOSSLESS: o->webp_lossless = v > 0.5; return true;
+        case PANEL_WEBP_EFFORT:   o->webp_effort = (int32_t)v; break;
+        case PANEL_JPEG_SUBSAMPLING: o->jpeg_subsampling = (rubraview_jpeg_subsampling_t)(int32_t)v; break;
+        case PANEL_JPEG_GREY:     o->jpeg_grey = v > 0.5; break;
+        case PANEL_JPEG_OPTIMISE: o->jpeg_optimise = v > 0.5; break;
+        case PANEL_JPEG_RESTART:  o->jpeg_restart_rows = (int32_t)lround(v); break;
+        case PANEL_PNG_FILTER:    o->png_filter = (rubraview_png_filter_t)(int32_t)v; break;
+        case PANEL_PNG_INTERLACE: o->png_interlace = v > 0.5; break;
+        case PANEL_COLOURS:       o->colours = (int32_t)lround(v); break;
+        case PANEL_DITHER:        o->dither = v > 0.5; break;
+        case PANEL_TIFF_COMPRESSION: o->tiff_compression = (rubraview_tiff_compression_t)(int32_t)v; break;
+        case PANEL_BMP_DEPTH:     o->bmp_depth = (rubraview_bmp_depth_t)(int32_t)v; return true;
+        case PANEL_WEBP_NEAR:     o->webp_near_lossless = (int32_t)lround(v); break;
+        case PANEL_WEBP_ALPHA:    o->webp_alpha_quality = (int32_t)lround(v); break;
+        case PANEL_WEBP_SHARP:    o->webp_sharp_yuv = v > 0.5; break;
+        case PANEL_KEEP_DETAILS:  o->keep_details = (int32_t)v; break;   /* 1.17.0 */
+        case PANEL_WEBP_PRESET:   o->webp_preset = (int32_t)v; break;
+        case PANEL_TARGET_KB:     o->target_kb = (int32_t)lround(v); break;
+        case PANEL_TIFF_CMYK:     o->tiff_cmyk = v > 0.5; break;
+        default: break;
+    }
+    rubraview_export_clamp(o);
+    return false;
 }
 
 static void panel_open_export(app_state_t *app) {
@@ -13391,59 +13492,19 @@ static void panel_open_export(app_state_t *app) {
         rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, TU8("Quality"),
                                    (double)app->export_options.jpeg_quality, 1.0, 100.0, 1.0);
     }
-    if (rows & RUBRAVIEW_EXPORT_ROW_PROGRESSIVE) {
-        rubraview_panel_add_toggle(&app->panel, PANEL_PROGRESSIVE, TU8("Progressive JPEG"), app->export_options.jpeg_progressive);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_JPEG_MORE) {   /* RV-140 */
-        rubraview_panel_add_choice(&app->panel, PANEL_JPEG_SUBSAMPLING, TU8("Colour subsampling"),
-                                   (int32_t)app->export_options.jpeg_subsampling, 4);
-        rubraview_panel_add_toggle(&app->panel, PANEL_JPEG_GREY, TU8("Grey JPEG"), app->export_options.jpeg_grey);
-        rubraview_panel_add_toggle(&app->panel, PANEL_JPEG_OPTIMISE, TU8("Optimised tables (smaller)"), app->export_options.jpeg_optimise);
-        rubraview_panel_add_slider(&app->panel, PANEL_JPEG_RESTART, TU8("Restart markers"),
-                                   (double)app->export_options.jpeg_restart_rows, 0.0, 64.0, 1.0);
-    }
     if (rows & RUBRAVIEW_EXPORT_ROW_PNG_LEVEL) {
         rubraview_panel_add_slider(&app->panel, PANEL_PNG_LEVEL, TU8("PNG level"),
                                    (double)app->export_options.png_compression, 0.0, 9.0, 1.0);
     }
-    /* RV-108 (§3.10): the two choices the writer had and no row gave. */
-    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_DEPTH) {
-        rubraview_panel_add_choice(&app->panel, PANEL_PNG_DEPTH, TU8("PNG colours"), (int32_t)app->export_options.png_depth, 4);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_PNG_MORE) {   /* RV-140 */
-        rubraview_panel_add_choice(&app->panel, PANEL_PNG_FILTER, TU8("PNG filter"), (int32_t)app->export_options.png_filter, 7);
-        rubraview_panel_add_toggle(&app->panel, PANEL_PNG_INTERLACE, TU8("Interlaced (Adam7)"), app->export_options.png_interlace);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_TIFF) {
-        rubraview_panel_add_choice(&app->panel, PANEL_TIFF_COMPRESSION, TU8("TIFF compression"),
-                                   (int32_t)app->export_options.tiff_compression, 4);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_BMP) {
-        rubraview_panel_add_choice(&app->panel, PANEL_BMP_DEPTH, TU8("BMP bits"), (int32_t)app->export_options.bmp_depth, 3);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_COLOURS) {
-        rubraview_panel_add_slider(&app->panel, PANEL_COLOURS, TU8("Palette colours"),
-                                   (double)rubraview_export_palette_size(&app->export_options), 2.0, 256.0, 1.0);
-        rubraview_panel_add_toggle(&app->panel, PANEL_DITHER, TU8("Dither"), app->export_options.dither);
-    }
-    /* RV-109: WebP is written by the vendored libwebp. */
-    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP) {
-        rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_LOSSLESS, TU8("WebP lossless"), app->export_options.webp_lossless);
-        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_EFFORT, TU8("WebP effort"),
-                                   (double)app->export_options.webp_effort, 0.0, 6.0, 1.0);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_NEAR) {   /* RV-140 */
-        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_NEAR, TU8("Near-lossless"),
-                                   (double)app->export_options.webp_near_lossless, 0.0, 100.0, 1.0);
-    }
-    if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY) {
-        rubraview_panel_add_slider(&app->panel, PANEL_WEBP_ALPHA, TU8("Alpha quality"),
-                                   (double)app->export_options.webp_alpha_quality, 0.0, 100.0, 1.0);
-        rubraview_panel_add_toggle(&app->panel, PANEL_WEBP_SHARP, TU8("Sharp colour edges (slower)"), app->export_options.webp_sharp_yuv);
-    }
+    export_more_rows(&app->panel, &app->export_options, rows);
     rubraview_panel_add_separator(&app->panel);
     /* §3.10 makes this an explicit tick, and it starts unticked: quietly
        discarding a photographer's metadata would be its own surprise. */
+    /* 1.17.0: the source's details through the pixels written again; not shown while they are stripped */
+    if (!app->export_options.privacy_clean) {
+        rubraview_panel_add_choice(&app->panel, PANEL_KEEP_DETAILS, TU8("Camera details, comments"),
+                                   app->export_options.keep_details, 3);
+    }
     if (rows & RUBRAVIEW_EXPORT_ROW_PRIVACY) {
         rubraview_panel_add_toggle(&app->panel, PANEL_PRIVACY, TU8("Privacy clean"),
                                    app->export_options.privacy_clean);
@@ -13527,6 +13588,34 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
         batch_token(tk, "--format=%.*s", (int)ext.len, ext.ptr);
     }
     if (b->quality >= 1.0 && fabs(b->quality - 90.0) > 0.5) batch_token(tk, "--quality=%d", (int)lround(b->quality));
+    {   /* RV-140, 1.17.0: what differs from how they come, in the command line's words */
+        const rubraview_export_options_t *o = &b->more, d = rubraview_export_defaults();
+        static const char *const DEPTHS[] = { "rgba", "rgb", "palette", "gray" }, *const SUBS[] = { "auto", "420", "422", "444" };
+        static const char *const FILTERS[] = { "level", "none", "sub", "up", "average", "paeth", "adaptive" };
+        static const char *const TIFFS[] = { "auto", "none", "lzw", "zip" }, *const BMPS[] = { "32", "24", "8" }, *const KEEP[] = { "drop", "file", "txt" };
+        if (o->jpeg_progressive) batch_token(tk, "--progressive");
+        if (o->png_depth != d.png_depth && (unsigned)o->png_depth < 4u) batch_token(tk, "--png-depth=%s", DEPTHS[o->png_depth]);
+        if (o->webp_lossless) batch_token(tk, "--lossless");
+        if (o->webp_effort != d.webp_effort) batch_token(tk, "--effort=%d", (int)o->webp_effort);
+        if (o->jpeg_subsampling != d.jpeg_subsampling && (unsigned)o->jpeg_subsampling < 4u) batch_token(tk, "--subsampling=%s", SUBS[o->jpeg_subsampling]);
+        if (o->jpeg_grey) batch_token(tk, "--grey-jpeg");
+        if (o->jpeg_optimise) batch_token(tk, "--optimise");
+        if (o->jpeg_restart_rows > 0) batch_token(tk, "--restart=%d", (int)o->jpeg_restart_rows);
+        if (o->png_filter != d.png_filter && (unsigned)o->png_filter < 7u) batch_token(tk, "--png-filter=%s", FILTERS[o->png_filter]);
+        if (o->png_interlace) batch_token(tk, "--interlace");
+        if (o->colours != d.colours) batch_token(tk, "--colours=%d", (int)o->colours);
+        if (!o->dither) batch_token(tk, "--no-dither");
+        if (o->tiff_compression != d.tiff_compression && (unsigned)o->tiff_compression < 4u) batch_token(tk, "--tiff=%s", TIFFS[o->tiff_compression]);
+        if (o->bmp_depth != d.bmp_depth && (unsigned)o->bmp_depth < 3u) batch_token(tk, "--bmp=%s", BMPS[o->bmp_depth]);
+        if (o->webp_near_lossless != d.webp_near_lossless) batch_token(tk, "--near-lossless=%d", (int)o->webp_near_lossless);
+        if (o->webp_alpha_quality != d.webp_alpha_quality) batch_token(tk, "--alpha-quality=%d", (int)o->webp_alpha_quality);
+        if (o->webp_sharp_yuv) batch_token(tk, "--sharp-yuv");
+        if (o->keep_details != d.keep_details && (unsigned)o->keep_details < 3u) batch_token(tk, "--details=%s", KEEP[o->keep_details]);
+        static const char *const PRESETS[] = { "none", "picture", "photo", "drawing", "icon", "text" };
+        if (o->webp_preset > 0 && o->webp_preset < 6) batch_token(tk, "--webp-preset=%s", PRESETS[o->webp_preset]);
+        if (o->target_kb > 0) batch_token(tk, "--target-kb=%d", (int)o->target_kb);
+        if (o->tiff_cmyk) batch_token(tk, "--cmyk");
+    }
     if (b->privacy) batch_token(tk, "--privacy-clean");
     if (b->name[0] && strcmp(b->name, "{name}.{ext}") != 0) batch_token(tk, "--name=%s", b->name);
     if (b->start > 1.5) batch_token(tk, "--start=%d", (int)lround(b->start));
@@ -13543,6 +13632,7 @@ static void batch_defaults(struct batch_ui *b) {
     *b = (struct batch_ui){ .loaded = true, .size_by = 0, .size_value = 100.0, .box_h = 1080.0, .filter = 3, .effect_amount = 0.0,
                             .mark_corner = 0, .mark_opacity = 50.0, .quality = 90.0, .start = 1.0, .text_size = 4.0 };
     snprintf(b->name, sizeof(b->name), "%s", "{name}.{ext}");
+    b->more = rubraview_export_defaults();
 }
 
 /* The tokens (a line each) read back into the choices; false when they do not parse. */
@@ -13607,6 +13697,7 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) 
     }
     if (r.export_options.jpeg_quality > 0) b->quality = r.export_options.jpeg_quality;
     b->dpi = r.export_options.dpi;
+    b->more = r.export_options;
     if (r.job.naming_pattern.len > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.len, r.job.naming_pattern.ptr);
     b->start = r.job.counter_start > 0 ? r.job.counter_start : 1;
     if (r.job.replace_from.len > 0)
@@ -13717,6 +13808,12 @@ static void panel_open_batch(app_state_t *app) {
     rubraview_panel_add_separator(pn);
     rubraview_panel_add_choice(pn, PANEL_BATCH_FORMAT, TU8("Format"), b->format, 8);
     rubraview_panel_add_slider(pn, PANEL_BATCH_QUALITY, TU8("  quality"), b->quality, 1, 100, 1);
+    {   /* RV-140: the format's own choices, as Export has them */
+        rubraview_export_options_t o = b->more;
+        o.format = (rubraview_export_format_t)b->format;
+        export_more_rows(pn, &o, rubraview_export_rows_of(&o, U8("")));
+    }
+    if (!b->privacy) rubraview_panel_add_choice(pn, PANEL_KEEP_DETAILS, TU8("Camera details, comments"), b->more.keep_details, 3);   /* 1.17.0 */
     rubraview_panel_add_toggle(pn, PANEL_PRIVACY, TU8("Privacy clean"), b->privacy);
     rubraview_panel_add_slider(pn, PANEL_BATCH_DPI, TU8("DPI written (0: as it is)"), b->dpi, 0, 1200, 1);
     rubraview_panel_add_separator(pn);
@@ -14427,11 +14524,69 @@ static u8str_t save_read_whole(u8str_t path, void **out_mem) {
     return rubraview_pal_fs_read_file(&arena, path, MAX_ARCHIVE_BYTES);
 }
 
+static bool details_path_taken(u8str_t path, void *ctx) { (void)ctx; return rubraview_pal_fs_exists(path); }
+
+/* 1.17.0 (owner, 2026-10-18): what `source` said (EXIF, XMP, IPTC, comments) put into `written`, a
+   picture just written as `format` with its pixels only, where that format has a place; and, asked
+   for, what it cannot hold in a .txt beside `named` (the name the file will have: an original
+   written over is written beside it first). Any thread: its own memory. `named` empty: no .txt
+   (a page going into an archive). Returns DETAILS_* for the caller to say. */
+enum { DETAILS_NONE = 0, DETAILS_IN_FILE, DETAILS_TXT, DETAILS_FAILED };
+
+static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubraview_export_format_t format,
+                        const rubraview_export_options_t *options) {
+    if (!options || options->privacy_clean || options->keep_details <= RUBRAVIEW_KEEP_DETAILS_DROP) return DETAILS_NONE;
+    void *src_mem = NULL, *out_mem = NULL;
+    u8str_t src = save_read_whole(source, &src_mem);
+    int said = DETAILS_NONE;
+    if (src.len > 0) {
+        u8str_t out = save_read_whole(written, &out_mem);
+        /* what is read, the file made again with the blocks, the words and the .txt */
+        size_t room = 0;
+        if (out.len > 0 && !PROVEN_CKD_ADD(&room, out.len, src.len) && !PROVEN_CKD_MUL(&room, room, (size_t)3) &&
+            !PROVEN_CKD_ADD(&room, room, (size_t)(8u << 20))) {
+            void *work_mem = malloc(room);
+            if (work_mem) {
+                proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
+                rubraview_details_src_t details;
+                if (rubraview_details_read(&work, (const uint8_t*)src.ptr, src.len, &details)) {
+                    rubraview_details_put_t put = rubraview_details_put(&work, format, out, &details);
+                    if (put.file.ptr != out.ptr) said = rubraview_pal_fs_write_file(written, put.file) ? DETAILS_IN_FILE : DETAILS_FAILED;
+                    if (!put.all_kept && said != DETAILS_FAILED && options->keep_details >= RUBRAVIEW_KEEP_DETAILS_OR_TXT && named.len > 0) {
+                        u8str_t txt_path = rubraview_details_txt_path(&work, named, details_path_taken, NULL);
+                        u8str_t txt = rubraview_details_txt(&work, &details, rubraview_path_basename(source));
+                        if (txt_path.len > 0 && txt.len > 0) {
+                            /* a mark that says UTF-8, for Notepad and the like */
+                            proven_result_mem_mut_t res = proven_arena_alloc(&work, txt.len + 3);
+                            if (proven_is_ok(res.err)) {
+                                memcpy(res.value.ptr, "\xEF\xBB\xBF", 3);
+                                memcpy(res.value.ptr + 3, txt.ptr, txt.len);
+                                said = rubraview_pal_fs_write_file(txt_path, (u8str_t){ .ptr = (const char*)res.value.ptr, .len = txt.len + 3 })
+                                           ? DETAILS_TXT : DETAILS_FAILED;
+                            }
+                        }
+                    }
+                }
+                free(work_mem);
+            }
+        }
+    }
+    free(out_mem);
+    free(src_mem);
+    return said;
+}
+
+/* The name the written file ends with: the original's, when it is written over; none for an archive's page. */
+static u8str_t save_job_named(const save_job_t *job) {
+    if (job->into_archive) return (u8str_t){ .ptr = "", .len = 0 };
+    return cstr(job->over_original ? job->source : job->out);
+}
+
 static int save_job_work(save_job_t *job) {
     u8str_t source = { .ptr = job->source, .len = strlen(job->source) };
     u8str_t out_path = { .ptr = job->out, .len = strlen(job->out) };
 
-    if (job->route == RUBRAVIEW_EXPORT_STRIP_ONLY || job->route == RUBRAVIEW_EXPORT_COPY) {
+    if (job->route == RUBRAVIEW_EXPORT_STRIP_ONLY || job->route == RUBRAVIEW_EXPORT_COPY || job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS) {
         void *mem = NULL;
         u8str_t bytes = save_read_whole(source, &mem);
         int result = SAVE_UNREADABLE;
@@ -14444,7 +14599,11 @@ static int save_job_work(save_job_t *job) {
             result = SAVE_NO_MEMORY;
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
-                rubraview_jpegtran_result_t stripped = rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.len);
+                /* 1.17.0: or its scans, tables and restarts written again, its markers kept unless privacy clean */
+                rubraview_jpegtran_result_t stripped = job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS
+                    ? rubraview_jpegtran_rewrite(&work, (const uint8_t*)bytes.ptr, bytes.len, job->options.jpeg_progressive,
+                                                 job->options.jpeg_optimise, job->options.jpeg_restart_rows, !job->options.privacy_clean)
+                    : rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.len);
                 result = stripped.err != RUBRAVIEW_JPEGTRAN_OK ? SAVE_UNREADABLE
                        : rubraview_pal_fs_write_file(out_path, stripped.data) ? SAVE_OK : SAVE_UNWRITABLE;
                 free(work_mem);
@@ -14461,6 +14620,7 @@ static int save_job_work(save_job_t *job) {
                                                                                               : job->options.format;
         if (to == RUBRAVIEW_EXPORT_WEBP && !job->apply_edit) {
             int moved = rubraview_pal_image_save_animation_webp(out_path, source, NULL, 0, &job->options);
+            if (moved > 0) (void)details_keep(source, out_path, save_job_named(job), RUBRAVIEW_EXPORT_WEBP, &job->options);
             if (moved != 0) return moved > 0 ? SAVE_OK : SAVE_UNWRITABLE;
         }
     }
@@ -14522,6 +14682,7 @@ static int save_job_work(save_job_t *job) {
         rubraview_export_options_t options = job->options;
         if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = job->source_format;
         if (!rubraview_pal_image_save(out_path, &pixels, &options)) result = SAVE_UNWRITABLE;
+        else (void)details_keep(source, out_path, save_job_named(job), options.format, &options);
     }
     free(steps_mem);
     free(work_mem);
@@ -14648,7 +14809,7 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
 
     int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
-    if (route != RUBRAVIEW_EXPORT_STRIP_ONLY && route != RUBRAVIEW_EXPORT_COPY && (w <= 0 || h <= 0)) {
+    if (route != RUBRAVIEW_EXPORT_STRIP_ONLY && route != RUBRAVIEW_EXPORT_COPY && route != RUBRAVIEW_EXPORT_JPEG_LOSSLESS && (w <= 0 || h <= 0)) {
         osd_say(app, TU8("not saved: the page is not read yet"));
         return;
     }
@@ -14806,30 +14967,13 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_QUALITY:   app->export_options.jpeg_quality = (int32_t)v;
                                   app->export_options.webp_quality = (int32_t)v; break;
             case PANEL_PNG_LEVEL: app->export_options.png_compression = (int32_t)v; break;
-            case PANEL_PNG_DEPTH: app->export_options.png_depth = (rubraview_png_depth_t)(int32_t)v; break;
-            case PANEL_PROGRESSIVE: app->export_options.jpeg_progressive = v > 0.5; break;
-            case PANEL_WEBP_LOSSLESS: app->export_options.webp_lossless = v > 0.5; break;
-            case PANEL_WEBP_EFFORT: app->export_options.webp_effort = (int32_t)v; break;
             case PANEL_PRIVACY:   app->export_options.privacy_clean = v > 0.5; break;
-            /* RV-140 */
-            case PANEL_JPEG_SUBSAMPLING: app->export_options.jpeg_subsampling = (rubraview_jpeg_subsampling_t)(int32_t)v; break;
-            case PANEL_JPEG_GREY:     app->export_options.jpeg_grey = v > 0.5; break;
-            case PANEL_JPEG_OPTIMISE: app->export_options.jpeg_optimise = v > 0.5; break;
-            case PANEL_JPEG_RESTART:  app->export_options.jpeg_restart_rows = (int32_t)lround(v); break;
-            case PANEL_PNG_FILTER:    app->export_options.png_filter = (rubraview_png_filter_t)(int32_t)v; break;
-            case PANEL_PNG_INTERLACE: app->export_options.png_interlace = v > 0.5; break;
-            case PANEL_COLOURS:       app->export_options.colours = (int32_t)lround(v); break;
-            case PANEL_DITHER:        app->export_options.dither = v > 0.5; break;
-            case PANEL_TIFF_COMPRESSION: app->export_options.tiff_compression = (rubraview_tiff_compression_t)(int32_t)v; break;
-            case PANEL_BMP_DEPTH:     app->export_options.bmp_depth = (rubraview_bmp_depth_t)(int32_t)v; break;
-            case PANEL_WEBP_NEAR:     app->export_options.webp_near_lossless = (int32_t)lround(v); break;
-            case PANEL_WEBP_ALPHA:    app->export_options.webp_alpha_quality = (int32_t)lround(v); break;
-            case PANEL_WEBP_SHARP:    app->export_options.webp_sharp_yuv = v > 0.5; break;
             default: break;
         }
+        bool rows_change = export_more_apply(&app->export_options, row->id, v);
         rubraview_export_clamp(&app->export_options);
         /* Another format, WebP's lossless, a palette or not: the rows that have use change with it. */
-        if (row->id == PANEL_FORMAT || row->id == PANEL_WEBP_LOSSLESS || row->id == PANEL_PNG_DEPTH || row->id == PANEL_BMP_DEPTH) {
+        if (rows_change || row->id == PANEL_FORMAT || row->id == PANEL_PRIVACY) {
             panel_open_export(app);
         }
         return;
@@ -14896,15 +15040,15 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_BATCH_TEXT_SIZE:     b->text_size = v; break;
             case PANEL_BATCH_TEXT_COLOUR:   b->text_colour = (int32_t)v; break;
             case PANEL_BATCH_DPI:           b->dpi = v; break;
-            case PANEL_BATCH_FORMAT:        b->format = (int32_t)v; break;
+            case PANEL_BATCH_FORMAT:        b->format = (int32_t)v; again = true; break;
             case PANEL_BATCH_QUALITY:       b->quality = v; break;
-            case PANEL_PRIVACY:             b->privacy = v > 0.5; app->export_options.privacy_clean = b->privacy; break;
+            case PANEL_PRIVACY:             b->privacy = v > 0.5; app->export_options.privacy_clean = b->privacy; again = true; break;
+            default: if (export_more_apply(&b->more, row->id, v)) again = true; break;
             case PANEL_BATCH_START:         b->start = v; break;
             case PANEL_BATCH_EXISTS:        b->exists = (int32_t)v; break;
             case PANEL_BATCH_KEEP_DATES:    b->keep_dates = v > 0.5; break;
             case PANEL_BATCH_RECURSIVE:     b->recursive = v > 0.5; again = true; break;
             case PANEL_BATCH_SUBFOLDERS:    b->subfolders = v > 0.5; break;
-            default: break;
         }
         if (again) panel_open_batch(app);
         return;
@@ -15954,7 +16098,7 @@ static void load_keymap(app_state_t *app);
 static void settings_apply_rest(app_state_t *app) {
     static bool first = true;
     static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
-                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0;
+                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_details = -1.0;
     rubraview_settings_t *st = &app->settings;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
 
@@ -16063,6 +16207,8 @@ static void settings_apply_rest(app_state_t *app) {
     app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookbehind")));
     double privacy = rubraview_settings_get(st, U8("cache"), U8("privacy_clean"));
     if (privacy != last_privacy) { app->export_options.privacy_clean = privacy > 0.5; last_privacy = privacy; }
+    double details = rubraview_settings_get(st, U8("cache"), U8("keep_details"));   /* 1.17.0 */
+    if (details != last_details) { app->export_options.keep_details = (int32_t)lround(details); last_details = details; }
 
     /* Keys */
     double keymap = rubraview_settings_get(st, U8("keys"), U8("use_keymap_file"));
@@ -23803,6 +23949,9 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
 
     if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
     if (!rubraview_pal_image_save(out_path, &pixels, &options)) { batch_say(input->path, "could not be written"); return false; }
+    int kept = details_keep(input->path, out_path, out_path, options.format, &options);   /* 1.17.0 */
+    if (kept == DETAILS_TXT) batch_say(out_path, "its details that it cannot hold are in a .txt beside it");
+    if (kept == DETAILS_FAILED) batch_say(out_path, "its details could not be kept");
 
     bc->written++;
     return true;

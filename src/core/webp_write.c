@@ -15,7 +15,12 @@ static bool config_for(const rubraview_webp_options_t *options, WebPConfig *conf
     if (quality > 100) quality = 100;
     if (effort < 0) effort = 0;
     if (effort > 6) effort = 6;
-    if (!WebPConfigInit(config)) return false;
+    if (options && options->preset >= 1 && options->preset <= 5) {
+        /* 1.17.0: libwebp's own tunings for a kind of picture, at this quality */
+        if (!WebPConfigPreset(config, (WebPPreset)options->preset, (float)quality)) return false;
+    } else if (!WebPConfigInit(config)) {
+        return false;
+    }
     config->quality = (float)quality;
     config->method = effort;
     if (options && options->lossless) {
@@ -25,6 +30,7 @@ static bool config_for(const rubraview_webp_options_t *options, WebPConfig *conf
     } else if (options) {
         if (options->alpha_quality >= 1 && options->alpha_quality <= 100) config->alpha_quality = options->alpha_quality;
         if (options->sharp_yuv) config->use_sharp_yuv = 1;
+        if (options->target_bytes > 0) { config->target_size = options->target_bytes; config->pass = 6; }
     }
     return WebPValidateConfig(config) != 0;
 }

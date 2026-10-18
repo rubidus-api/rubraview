@@ -1691,6 +1691,8 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
         }
     } else if (format == RUBRAVIEW_EXPORT_BMP && options && options->bmp_depth == RUBRAVIEW_BMP_24) {
         pixel_format = GUID_WICPixelFormat24bppBGR;
+    } else if (format == RUBRAVIEW_EXPORT_TIFF && options && options->tiff_cmyk) {
+        pixel_format = GUID_WICPixelFormat32bppCMYK;   /* 1.17.0: WIC's own conversion, no colour profile */
     }
     IWICBitmapFrameEncode_SetPixelFormat(frame, &pixel_format);
     IWICBitmapFrameEncode_SetSize(frame, width, height);
@@ -1789,7 +1791,7 @@ static void jpeg_rewrite(u8str_t path, const rubraview_export_options_t *options
         if (bytes.len > 0) {
             rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, (const uint8_t*)bytes.ptr, bytes.len,
                                                                           options->jpeg_progressive, options->jpeg_optimise,
-                                                                          options->jpeg_restart_rows);
+                                                                          options->jpeg_restart_rows, true);
             if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.len > 0) (void)rubraview_pal_fs_write_file(path, made.data);
         }
     }
@@ -1805,6 +1807,8 @@ static rubraview_webp_options_t webp_options_from(const rubraview_export_options
         .near_lossless = options->webp_near_lossless,   /* RV-140 */
         .alpha_quality = options->webp_alpha_quality,
         .sharp_yuv = options->webp_sharp_yuv,
+        .preset = options->webp_preset,   /* 1.17.0 */
+        .target_bytes = options->target_kb > 0 && options->target_kb < 2000000 ? options->target_kb * 1024 : 0,
     };
 }
 
@@ -1865,6 +1869,36 @@ int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_pat
     return result;
 }
 
+/* 1.17.0: one JPEG written at a quality, as the options ask it rewritten; its size, or 0. */
+static uint64_t jpeg_written_at(u8str_t path, const rubraview_pixbuf_t *pixels, rubraview_export_options_t *o, int32_t quality) {
+    o->jpeg_quality = quality;
+    if (!save_frames(path, pixels, o, RUBRAVIEW_EXPORT_JPEG, NULL, 0)) return 0;
+    if (o->jpeg_progressive || o->jpeg_optimise || o->jpeg_restart_rows > 0) jpeg_rewrite(path, o);
+    uint8_t probe_mem[4096];
+    proven_arena_t probe = proven_arena_create((proven_mem_mut_t){ .ptr = probe_mem, .size = sizeof(probe_mem) });
+    rubraview_fs_entry_t entry;
+    return rubraview_pal_fs_stat(&probe, path, &entry) ? entry.size_bytes : 0;
+}
+
+/* The best quality, at most the one asked for, whose file is no larger than the target:
+   halving the range, eight tries at most; the smallest (quality 1) when none is. */
+static bool save_jpeg_to_size(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
+    rubraview_export_options_t o = *options;
+    uint64_t want = (uint64_t)options->target_kb * 1024u;
+    int32_t lo = 1, hi = options->jpeg_quality > 0 ? options->jpeg_quality : 90, best = 0, last = 0;
+    for (int round = 0; round < 8 && lo <= hi; ++round) {
+        int32_t q = round == 0 ? hi : lo + (hi - lo) / 2;
+        uint64_t size = jpeg_written_at(path, pixels, &o, q);
+        if (size == 0) return false;
+        last = q;
+        if (size <= want) { best = q; lo = q + 1; if (round == 0) break; }
+        else hi = q - 1;
+    }
+    if (best == 0) best = 1;
+    if (best != last && jpeg_written_at(path, pixels, &o, best) == 0) return false;
+    return true;
+}
+
 bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options) {
@@ -1884,6 +1918,8 @@ bool rubraview_pal_image_save(u8str_t path,
     }
 
     if (format == RUBRAVIEW_EXPORT_WEBP) return save_webp(path, pixels, options);
+
+    if (format == RUBRAVIEW_EXPORT_JPEG && options->target_kb > 0) return save_jpeg_to_size(path, pixels, options);
 
     bool saved = save_frames(path, pixels, options, format, NULL, 0);
     if (saved && format == RUBRAVIEW_EXPORT_JPEG &&

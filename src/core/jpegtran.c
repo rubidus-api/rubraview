@@ -278,10 +278,10 @@ rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, const uint8_t *data, size_t size,
-                                                       bool progressive, bool optimise, int32_t restart_rows) {
+                                                       bool progressive, bool optimise, int32_t restart_rows, bool keep_markers) {
     if (restart_rows < 0) restart_rows = 0;
     if (restart_rows > 64) restart_rows = 64;
-    return run_transform(arena, data, size, JXFORM_NONE, false, true, progressive, optimise, (int)restart_rows);
+    return run_transform(arena, data, size, JXFORM_NONE, false, keep_markers, progressive, optimise, (int)restart_rows);
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *arena,

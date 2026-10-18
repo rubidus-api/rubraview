@@ -108,9 +108,10 @@ rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena
  * RV-140: the same JPEG written again, its coefficients as they are and every
  * marker kept: progressive or not, with Huffman tables optimised for it, and
  * a restart marker every `restart_rows` rows of blocks (0: none). Lossless.
+ * `keep_markers` false leaves EXIF, XMP, IPTC and the rest out (privacy clean, 1.17.0).
  */
 rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, const uint8_t *data, size_t size,
-                                                       bool progressive, bool optimise, int32_t restart_rows);
+                                                       bool progressive, bool optimise, int32_t restart_rows, bool keep_markers);
 
 /** Read a JPEG's size and MCU geometry without decoding it. */
 bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,

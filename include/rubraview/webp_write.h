@@ -29,6 +29,8 @@ typedef struct rubraview_webp_options {
     int32_t near_lossless;  /* lossless: 1..99 lets nearby values change for a smaller file; 0 or 100: off */
     int32_t alpha_quality;  /* lossy: 1..100, how well the transparency is kept; 0: as libwebp has it (100) */
     bool    sharp_yuv;      /* lossy: the slower, sharper RGB to YUV */
+    int32_t preset;         /* 1.17.0: 0 none; 1 picture, 2 photo, 3 drawing, 4 icon, 5 text (libwebp's WebPPreset) */
+    int32_t target_bytes;   /* 1.17.0, lossy: a size to come near, from above (libwebp's passes); 0 off */
 } rubraview_webp_options_t;
 
 /** One picture. False for a size WebP cannot hold (above 16383 a side) or no memory. */
