@@ -1674,3 +1674,21 @@ Do not store credentials, private infrastructure details, personal data, private
   - Every file opens (System.Drawing). Read back with our reader: the JPEG's details equal the source's.
   - Target: 217 KB free; 200 → 192 KB; 100 → 100 KB; 50 → 49 KB. CMYK TIFF: photometric 5.
   - Export, the JPEG as a JPEG with Progressive ticked: SOF2, its APP1 / APP13 / COM kept, 105,816 → 42,759 B, decoded pixels identical.
+
+## 2026-10-18: D-168 The details .txt read back; TOML with an identifier
+
+- Status: Accepted (owner 2026-10-18: "그림파일 읽을 때, 옆에 동일한 이름이 있는 텍스트 파일이 있으면 읽어보고 루브라뷰가 만든 파일이면 읽어서 마치 파일 내부 정보인 것처럼 읽어들이고 표시 ... 텍스트파일 만들 때 아예 첫행에 뭔가 식별자 ... 루브라뷰와 버젼 번호 ... 형식은 toml 부분집합").
+- Decision:
+  - The .txt is TOML 1.0 in a subset that the writer and reader share. The first line, `# Rubraview <version> details`, is a TOML comment and the identifier. `file` names the picture it belongs to: a numbered `photo-1.txt` still says whose it is, and a stranger's `photo.txt` is not taken.
+  - Tables are the information window's headings, quoted, because they are in the language the file was written in. Keys are its labels; a label that repeats becomes an array. `[comments] items` and `[xmp] packet` have fixed names, since they are read for their meaning, not only shown. The XMP is one basic string, with `\n` for its line ends: there are no multi-line strings to read.
+  - Read: `photo.txt`, `photo-1.txt` ... `photo-20.txt`, the first whose identifier and `file` fit; up to 1 MB. Anything outside the subset makes the file not read: it is not shown in part.
+  - Shown in the information window under "Kept beside it in <name>". Merged into the details a save carries (`rubraview_details_merge`: the tables, comments and XMP the picture's own lack). A save writes the picture's own .txt again (found by the same reading) instead of numbering a second.
+  - No .txt is looked for in an archive.
+- Consequences: host tests:
+  - write, read and write again give the same bytes;
+  - another picture's .txt and six malformed ones are refused;
+  - a hand-written file with a BOM, LF line ends, bare keys, comments, escapes and an array reads.
+  VM (2026-10-18):
+  - a photo to BMP with `--details=txt` gives `photo.txt` starting `# Rubraview ... details`, `file = "photo.bmp"`; a second run writes it again (no `photo-1.txt`);
+  - that BMP to PNG carries the .txt's XMP and words into the PNG's iTXt;
+  - the BMP's information window shows "Kept beside it in photo.txt" and the camera and lens.

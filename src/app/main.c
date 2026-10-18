@@ -14526,6 +14526,26 @@ static u8str_t save_read_whole(u8str_t path, void **out_mem) {
 
 static bool details_path_taken(u8str_t path, void *ctx) { (void)ctx; return rubraview_pal_fs_exists(path); }
 
+/* 1.18.0 (owner, 2026-10-18: "그림파일 읽을 때, 옆에 동일한 이름이 있는 텍스트 파일이 있으면 읽어보고
+   루브라뷰가 만든 파일이면 ... 파일 내부 정보인 것처럼"): the details a Rubraview .txt beside `picture`
+   holds for it — photo.txt, photo-1.txt ... photo-20.txt, the first that names this picture. Any
+   thread; `arena` keeps what is read. `out_path`, when given, is the .txt's path. */
+#define DETAILS_TXT_MAX_BYTES (1u << 20)
+static bool details_beside(proven_arena_t *arena, u8str_t picture, rubraview_details_src_t *out, u8str_t *out_path) {
+    *out = (rubraview_details_src_t){0};
+    for (unsigned k = 0; k <= 20; ++k) {
+        u8str_t path = rubraview_details_txt_candidate(arena, picture, k);
+        if (path.len == 0) return false;
+        if (!rubraview_pal_fs_exists(path)) continue;
+        u8str_t text = rubraview_pal_fs_read_file(arena, path, DETAILS_TXT_MAX_BYTES);
+        if (text.len > 0 && rubraview_details_from_txt(arena, text, picture, out)) {
+            if (out_path) *out_path = path;
+            return true;
+        }
+    }
+    return false;
+}
+
 /* 1.17.0 (owner, 2026-10-18): what `source` said (EXIF, XMP, IPTC, comments) put into `written`, a
    picture just written as `format` with its pixels only, where that format has a place; and, asked
    for, what it cannot hold in a .txt beside `named` (the name the file will have: an original
@@ -14548,13 +14568,19 @@ static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubravie
             void *work_mem = malloc(room);
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
-                rubraview_details_src_t details;
-                if (rubraview_details_read(&work, (const uint8_t*)src.ptr, src.len, &details)) {
+                rubraview_details_src_t details, beside;
+                bool own = rubraview_details_read(&work, (const uint8_t*)src.ptr, src.len, &details);
+                /* 1.18.0: what a .txt beside the source kept for it goes on with it */
+                if (details_beside(&work, source, &beside, NULL)) { rubraview_details_merge(&work, &details, &beside); own = true; }
+                if (own) {
                     rubraview_details_put_t put = rubraview_details_put(&work, format, out, &details);
                     if (put.file.ptr != out.ptr) said = rubraview_pal_fs_write_file(written, put.file) ? DETAILS_IN_FILE : DETAILS_FAILED;
                     if (!put.all_kept && said != DETAILS_FAILED && options->keep_details >= RUBRAVIEW_KEEP_DETAILS_OR_TXT && named.len > 0) {
-                        u8str_t txt_path = rubraview_details_txt_path(&work, named, details_path_taken, NULL);
-                        u8str_t txt = rubraview_details_txt(&work, &details, rubraview_path_basename(source));
+                        /* the one this picture has already, written again; else a free name */
+                        rubraview_details_src_t had;
+                        u8str_t txt_path = { .ptr = "", .len = 0 };
+                        if (!details_beside(&work, named, &had, &txt_path)) txt_path = rubraview_details_txt_path(&work, named, details_path_taken, NULL);
+                        u8str_t txt = rubraview_details_txt(&work, &details, rubraview_path_basename(source), rubraview_path_basename(named));
                         if (txt_path.len > 0 && txt.len > 0) {
                             /* a mark that says UTF-8, for Notepad and the like */
                             proven_result_mem_mut_t res = proven_arena_alloc(&work, txt.len + 3);
@@ -17634,6 +17660,21 @@ static void info_gather(app_state_t *app) {
                 else rubraview_info_add(a, &info, T("EXIF"), TU8("none in this file"));
                 static rubraview_iptc_info_t iptc;
                 if (rubraview_iptc_read(bytes, size, &iptc)) rubraview_info_add_iptc(a, &info, &iptc);
+            }
+            /* 1.18.0: what Rubraview kept beside it, shown as the file's own */
+            rubraview_details_src_t beside;
+            u8str_t beside_path = { .ptr = "", .len = 0 };
+            if (!in_archive && details_beside(a, path, &beside, &beside_path)) {
+                u8str_t beside_name = rubraview_path_basename(beside_path);
+                char title[400];
+                snprintf(title, sizeof(title), T("Kept beside it in %.*s"), (int)(beside_name.len < 300 ? beside_name.len : 300), beside_name.ptr);
+                rubraview_info_heading(a, &info, title);
+                for (size_t i = 0; i < beside.info.count; ++i) {
+                    const rubraview_info_line_t *l = &beside.info.lines[i];
+                    if (l->heading) rubraview_info_heading(a, &info, l->label.ptr);
+                    else rubraview_info_add(a, &info, l->label.ptr, l->value);
+                }
+                if (beside.xmp.len > 0) rubraview_info_addf(a, &info, T("XMP"), T("%zu bytes"), beside.xmp.len);
             }
             free(mem);
             rubraview_pal_fs_unmap(&map);

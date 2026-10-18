@@ -3,6 +3,7 @@
 #include "rubraview/fileinfo.h"
 #include "rubraview/lang.h"
 #include "rubraview/path.h"
+#include "rubraview/version.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -239,6 +240,15 @@ static void read_webp(const uint8_t *b, size_t size, rubraview_details_src_t *d)
     }
 }
 
+/* The words: the information lines as the window lays them out, CRLF. */
+static void build_words(proven_arena_t *arena, rubraview_details_src_t *d) {
+    out_buf_t o = { .arena = arena };
+    u8str_t rows[512];
+    size_t n = rubraview_info_rows(arena, &d->info, 24, rows, sizeof(rows) / sizeof(rows[0]));
+    for (size_t i = 0; i < n; ++i) { out_u8(&o, rows[i]); out_str(&o, "\r\n"); }
+    d->words = n > 0 ? out_done(&o) : (u8str_t){ .ptr = "", .len = 0 };
+}
+
 bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size, rubraview_details_src_t *out) {
     if (!out) return false;
     *out = (rubraview_details_src_t){0};
@@ -261,11 +271,8 @@ bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size
     for (size_t i = 0; i < out->comment_count; ++i) rubraview_info_add(arena, &info, T("Comment"), out->comments[i]);
     if (out->unread > 0) rubraview_info_addf(arena, &info, T("Compressed texts"), T("%zu, not read"), out->unread);
 
-    out_buf_t o = { .arena = arena };
-    u8str_t rows[512];
-    size_t n = rubraview_info_rows(arena, &info, 24, rows, sizeof(rows) / sizeof(rows[0]));
-    for (size_t i = 0; i < n; ++i) { out_u8(&o, rows[i]); out_str(&o, "\r\n"); }
-    out->words = n > 0 ? out_done(&o) : (u8str_t){ .ptr = "", .len = 0 };
+    out->info = info;
+    build_words(arena, out);
 
     out->any = exif_found || out->exif.len > 0 || out->xmp.len > 0 || out->iptc_app13.len > 0 || out->has_iptc ||
                out->comment_count > 0 || out->png_chunk_count > 0 || out->unread > 0;
@@ -530,16 +537,297 @@ rubraview_details_put_t rubraview_details_put(proven_arena_t *arena, rubraview_e
     }
 }
 
-u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src_t *src, u8str_t source_name) {
+/* ---- the .txt: a subset of TOML (1.18.0) ---- */
+
+static void toml_string(out_buf_t *o, u8str_t s) {
+    out_byte(o, '"');
+    for (size_t i = 0; i < s.len; ++i) {
+        uint8_t c = (uint8_t)s.ptr[i];
+        if (c == '"') out_str(o, "\\\"");
+        else if (c == '\\') out_str(o, "\\\\");
+        else if (c == '\n') out_str(o, "\\n");
+        else if (c == '\r') out_str(o, "\\r");
+        else if (c == '\t') out_str(o, "\\t");
+        else if (c < 0x20 || c == 0x7F) { char u[8]; snprintf(u, sizeof(u), "\\u%04X", (unsigned)c); out_str(o, u); }
+        else out_byte(o, c);
+    }
+    out_byte(o, '"');
+}
+
+static bool same_text(u8str_t a, u8str_t b) { return a.len == b.len && memcmp(a.ptr, b.ptr, a.len) == 0; }
+
+u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src_t *src, u8str_t source_name, u8str_t file_name) {
     if (!arena || !src || !src->any) return (u8str_t){ .ptr = "", .len = 0 };
     out_buf_t o = { .arena = arena };
-    char head[600];
-    int n = snprintf(head, sizeof(head), T("Details of %.*s, kept by Rubraview"), (int)(source_name.len < 400 ? source_name.len : 400), source_name.ptr);
-    if (n > 0) out_put(&o, head, (size_t)n < sizeof(head) ? (size_t)n : sizeof(head) - 1);
-    out_str(&o, "\r\n\r\n");
-    out_u8(&o, src->words);
-    if (src->xmp.len > 0) { out_str(&o, "\r\nXMP\r\n"); out_u8(&o, src->xmp); out_str(&o, "\r\n"); }
+    out_str(&o, "# Rubraview " RUBRAVIEW_VERSION_STRING " details\r\n# ");
+    out_str(&o, T("What this picture said that the file named here cannot hold, kept by Rubraview, which reads it back."));
+    out_str(&o, "\r\nfile = ");
+    toml_string(&o, file_name);
+    out_str(&o, "\r\nsource = ");
+    toml_string(&o, source_name);
+    out_str(&o, "\r\n");
+
+    /* the information lines: a table a heading, a key a label, an array when a label comes again;
+       the comments' own table is written from the comments themselves */
+    const rubraview_info_t *info = &src->info;
+    for (size_t i = 0; i < info->count;) {
+        u8str_t table = info->lines[i].heading ? info->lines[i].label : U8("Details");
+        size_t first = info->lines[i].heading ? i + 1 : i, end = first;
+        while (end < info->count && !info->lines[end].heading) end++;
+        bool comments = false;
+        for (size_t k = first; k < end && !comments; ++k)
+            for (size_t c = 0; c < src->comment_count; ++c) if (same_text(info->lines[k].value, src->comments[c])) { comments = true; break; }
+        if (!comments && end > first) {
+            out_str(&o, "\r\n[");
+            toml_string(&o, table);
+            out_str(&o, "]\r\n");
+            for (size_t k = first; k < end; ++k) {
+                bool seen = false;
+                for (size_t p = first; p < k && !seen; ++p) seen = same_text(info->lines[p].label, info->lines[k].label);
+                if (seen) continue;
+                size_t count = 0;
+                for (size_t q = k; q < end; ++q) count += same_text(info->lines[q].label, info->lines[k].label);
+                toml_string(&o, info->lines[k].label);
+                out_str(&o, " = ");
+                if (count > 1) out_byte(&o, '[');
+                bool more = false;
+                for (size_t q = k; q < end; ++q) {
+                    if (!same_text(info->lines[q].label, info->lines[k].label)) continue;
+                    if (more) out_str(&o, ", ");
+                    toml_string(&o, info->lines[q].value);
+                    more = true;
+                }
+                if (count > 1) out_byte(&o, ']');
+                out_str(&o, "\r\n");
+            }
+        }
+        i = end > i ? end : i + 1;
+    }
+    if (src->comment_count > 0) {
+        out_str(&o, "\r\n[comments]\r\nitems = [");
+        for (size_t c = 0; c < src->comment_count; ++c) {
+            if (c) out_str(&o, ", ");
+            toml_string(&o, src->comments[c]);
+        }
+        out_str(&o, "]\r\n");
+    }
+    if (src->xmp.len > 0) {
+        out_str(&o, "\r\n[xmp]\r\npacket = ");
+        toml_string(&o, src->xmp);
+        out_str(&o, "\r\n");
+    }
     return out_done(&o);
+}
+
+/* A basic string at `*at` (on its quote), unescaped; false when it is not one. */
+static bool toml_read_string(proven_arena_t *arena, u8str_t line, size_t *at, u8str_t *out) {
+    size_t i = *at;
+    if (i >= line.len || line.ptr[i] != '"') return false;
+    out_buf_t o = { .arena = arena };
+    for (++i; i < line.len; ++i) {
+        char c = line.ptr[i];
+        if (c == '"') {
+            *at = i + 1;
+            if (o.len == 0) { *out = (u8str_t){ .ptr = "", .len = 0 }; return true; }
+            *out = out_done(&o);
+            return !o.failed;
+        }
+        if ((uint8_t)c < 0x20 && c != '\t') return false;
+        if (c != '\\') { out_byte(&o, (uint8_t)c); continue; }
+        if (++i >= line.len) return false;
+        char e = line.ptr[i];
+        if (e == '"' || e == '\\') out_byte(&o, (uint8_t)e);
+        else if (e == 'n') out_byte(&o, '\n');
+        else if (e == 'r') out_byte(&o, '\r');
+        else if (e == 't') out_byte(&o, '\t');
+        else if (e == 'u' && i + 4 < line.len) {
+            uint32_t cp = 0;
+            for (int k = 1; k <= 4; ++k) {
+                char h = line.ptr[i + k];
+                uint32_t d = h >= '0' && h <= '9' ? (uint32_t)(h - '0') : h >= 'a' && h <= 'f' ? (uint32_t)(h - 'a' + 10)
+                           : h >= 'A' && h <= 'F' ? (uint32_t)(h - 'A' + 10) : 99u;
+                if (d > 15) return false;
+                cp = cp * 16u + d;
+            }
+            i += 4;
+            if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+            if (cp < 0x80) out_byte(&o, (uint8_t)cp);
+            else if (cp < 0x800) { out_byte(&o, (uint8_t)(0xC0 | (cp >> 6))); out_byte(&o, (uint8_t)(0x80 | (cp & 0x3F))); }
+            else { out_byte(&o, (uint8_t)(0xE0 | (cp >> 12))); out_byte(&o, (uint8_t)(0x80 | ((cp >> 6) & 0x3F))); out_byte(&o, (uint8_t)(0x80 | (cp & 0x3F))); }
+        } else {
+            return false;
+        }
+    }
+    return false;   /* no closing quote on the line */
+}
+
+static void skip_blanks(u8str_t line, size_t *at) {
+    while (*at < line.len && (line.ptr[*at] == ' ' || line.ptr[*at] == '\t')) (*at)++;
+}
+
+/* A key: bare (A-Z a-z 0-9 _ -) or quoted; NUL-terminated either way. */
+static bool toml_read_key(proven_arena_t *arena, u8str_t line, size_t *at, u8str_t *out) {
+    if (*at < line.len && line.ptr[*at] == '"') return toml_read_string(arena, line, at, out) && out->len > 0;
+    size_t start = *at;
+    while (*at < line.len) {
+        char c = line.ptr[*at];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) break;
+        (*at)++;
+    }
+    if (*at == start) return false;
+    out_buf_t o = { .arena = arena };
+    out_put(&o, line.ptr + start, *at - start);
+    *out = out_done(&o);
+    return !o.failed;
+}
+
+static bool only_comment_left(u8str_t line, size_t at) {
+    skip_blanks(line, &at);
+    return at >= line.len || line.ptr[at] == '#';
+}
+
+static bool same_name(u8str_t a, u8str_t b) {
+    if (a.len != b.len) return false;
+    for (size_t i = 0; i < a.len; ++i) {
+        char x = a.ptr[i], y = b.ptr[i];
+        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+        if (x != y) return false;
+    }
+    return true;
+}
+
+bool rubraview_details_from_txt(proven_arena_t *arena, u8str_t text, u8str_t picture_name, rubraview_details_src_t *out) {
+    if (!out) return false;
+    *out = (rubraview_details_src_t){0};
+    if (!arena || text.len == 0) return false;
+    if (text.len >= 3 && memcmp(text.ptr, "\xEF\xBB\xBF", 3) == 0) { text.ptr += 3; text.len -= 3; }
+    static const char ID[] = "# Rubraview ";
+    if (text.len < sizeof(ID) - 1 || memcmp(text.ptr, ID, sizeof(ID) - 1) != 0) return false;
+
+    rubraview_details_src_t d = {0};
+    u8str_t table = { .ptr = "", .len = 0 }, file = { .ptr = "", .len = 0 };
+    bool first = true, heading_put = false;
+    for (size_t at = 0; at < text.len;) {
+        size_t end = at;
+        while (end < text.len && text.ptr[end] != '\n') end++;
+        u8str_t line = { .ptr = text.ptr + at, .len = end - at };
+        if (line.len > 0 && line.ptr[line.len - 1] == '\r') line.len--;
+        at = end + 1;
+        if (first) {   /* "# Rubraview <version> details" */
+            first = false;
+            if (line.len < 8 || memcmp(line.ptr + line.len - 8, " details", 8) != 0) return false;
+            continue;
+        }
+        size_t i = 0;
+        skip_blanks(line, &i);
+        if (i >= line.len || line.ptr[i] == '#') continue;
+        if (line.ptr[i] == '[') {
+            ++i;
+            skip_blanks(line, &i);
+            if (!toml_read_key(arena, line, &i, &table)) return false;
+            skip_blanks(line, &i);
+            if (i >= line.len || line.ptr[i] != ']' || !only_comment_left(line, i + 1)) return false;
+            heading_put = false;
+            continue;
+        }
+        u8str_t key;
+        if (!toml_read_key(arena, line, &i, &key)) return false;
+        skip_blanks(line, &i);
+        if (i >= line.len || line.ptr[i] != '=') return false;
+        ++i;
+        skip_blanks(line, &i);
+        u8str_t values[64];
+        size_t count = 0;
+        if (i < line.len && line.ptr[i] == '[') {
+            ++i;
+            for (;;) {
+                skip_blanks(line, &i);
+                if (i < line.len && line.ptr[i] == ']') { ++i; break; }
+                u8str_t v;
+                if (!toml_read_string(arena, line, &i, &v)) return false;
+                if (count < 64) values[count++] = v;
+                skip_blanks(line, &i);
+                if (i < line.len && line.ptr[i] == ',') { ++i; continue; }
+                if (i < line.len && line.ptr[i] == ']') { ++i; break; }
+                return false;
+            }
+        } else {
+            if (!toml_read_string(arena, line, &i, &values[0])) return false;
+            count = 1;
+        }
+        if (!only_comment_left(line, i)) return false;
+
+        if (table.len == 0) {
+            if (rubraview_u8_eq_lit(key, "file") && count == 1) file = values[0];
+            continue;   /* "source", and anything else at the top: not shown */
+        }
+        if (rubraview_u8_eq_lit(table, "comments")) {
+            if (rubraview_u8_eq_lit(key, "items"))
+                for (size_t k = 0; k < count && d.comment_count < RUBRAVIEW_DETAILS_MAX_COMMENTS; ++k)
+                    if (values[k].len > 0) d.comments[d.comment_count++] = values[k];
+            continue;
+        }
+        if (rubraview_u8_eq_lit(table, "xmp")) {
+            if (rubraview_u8_eq_lit(key, "packet") && count == 1) d.xmp = values[0];
+            continue;
+        }
+        if (!heading_put) { rubraview_info_heading(arena, &d.info, table.ptr); heading_put = true; }
+        for (size_t k = 0; k < count; ++k) rubraview_info_add(arena, &d.info, key.ptr, values[k]);
+    }
+    if (file.len == 0 || !same_name(file, rubraview_path_basename(picture_name))) return false;
+    if (d.comment_count > 0) rubraview_info_heading(arena, &d.info, T("Comments"));
+    for (size_t c = 0; c < d.comment_count; ++c) rubraview_info_add(arena, &d.info, T("Comment"), d.comments[c]);
+    build_words(arena, &d);
+    d.beside = true;
+    d.any = d.info.count > 0 || d.xmp.len > 0;
+    *out = d;
+    return d.any;
+}
+
+u8str_t rubraview_details_txt_candidate(proven_arena_t *arena, u8str_t picture_path, unsigned k) {
+    u8str_t empty = { .ptr = "", .len = 0 };
+    if (!arena || picture_path.len == 0) return empty;
+    u8str_t ext = rubraview_path_ext(picture_path);
+    size_t base = picture_path.len - ext.len;
+    char tail[16];
+    int t = k == 0 ? snprintf(tail, sizeof(tail), ".txt") : snprintf(tail, sizeof(tail), "-%u.txt", k);
+    if (t <= 0) return empty;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, base + (size_t)t + 1);
+    if (!proven_is_ok(res.err)) return empty;
+    char *p = (char*)res.value.ptr;
+    memcpy(p, picture_path.ptr, base);
+    memcpy(p + base, tail, (size_t)t + 1);
+    return (u8str_t){ .ptr = p, .len = base + (size_t)t };
+}
+
+void rubraview_details_merge(proven_arena_t *arena, rubraview_details_src_t *into, const rubraview_details_src_t *extra) {
+    if (!arena || !into || !extra || !extra->any) return;
+    /* the tables the picture's own reading has not, under the headings they had */
+    for (size_t i = 0; i < extra->info.count;) {
+        size_t end = i + 1;
+        while (end < extra->info.count && !extra->info.lines[end].heading) end++;
+        bool have = false;
+        if (extra->info.lines[i].heading)
+            for (size_t k = 0; k < into->info.count && !have; ++k)
+                have = into->info.lines[k].heading && same_text(into->info.lines[k].label, extra->info.lines[i].label);
+        if (!have) {
+            for (size_t k = i; k < end; ++k) {
+                const rubraview_info_line_t *l = &extra->info.lines[k];
+                if (l->heading) rubraview_info_heading(arena, &into->info, l->label.ptr);
+                else rubraview_info_add(arena, &into->info, l->label.ptr, l->value);
+            }
+        }
+        i = end;
+    }
+    for (size_t c = 0; c < extra->comment_count && into->comment_count < RUBRAVIEW_DETAILS_MAX_COMMENTS; ++c) {
+        bool dup = false;
+        for (size_t k = 0; k < into->comment_count && !dup; ++k) dup = same_text(into->comments[k], extra->comments[c]);
+        if (!dup) into->comments[into->comment_count++] = extra->comments[c];
+    }
+    if (into->xmp.len == 0) into->xmp = extra->xmp;
+    build_words(arena, into);
+    into->any = true;
 }
 
 u8str_t rubraview_details_txt_path(proven_arena_t *arena, u8str_t written,

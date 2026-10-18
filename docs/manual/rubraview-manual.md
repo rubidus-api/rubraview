@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.17.0.exe              the viewer, as built
-dist/rubraview-v1.17.0/                 the release bundle
-dist/rubraview-v1.17.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.18.0.exe              the viewer, as built
+dist/rubraview-v1.18.0/                 the release bundle
+dist/rubraview-v1.18.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -450,6 +450,13 @@ words in their comment. **In the file, or a .txt beside it** also writes
 what the new file cannot hold (a BMP, TIFF or ICO; a WebP's comments and
 IPTC) as a text file of the same name beside it (`photo.txt`, or
 `photo-1.txt` when that is taken). **Dropped** writes the pixels only.
+The text file starts with `# Rubraview <version> details` and is a small
+TOML file (`file = "photo.bmp"` names the picture it belongs to). When a
+picture has such a file beside it, Rubraview reads it back: the
+information window (`I`) shows it under **Kept beside it in photo.txt**,
+as if it were in the picture, and saving that picture again carries it
+on (into the new file where it has a place). A text file that is not
+Rubraview's, or names another picture, is left alone.
 Privacy clean drops them all.
 
 A JPEG exported as a JPEG with nothing changed but **Progressive JPEG**,
