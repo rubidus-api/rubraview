@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const struct {
     const char *name;
@@ -18,7 +19,7 @@ static const struct {
     [RUBRAVIEW_EFFECT_EDGES]       = { "Edges",              1, 10, 3, false },
     [RUBRAVIEW_EFFECT_MEDIAN]      = { "Median (noise out)", 1, 10, 2, true },
     [RUBRAVIEW_EFFECT_OIL]         = { "Oil paint",          1, 10, 3, true },
-    [RUBRAVIEW_EFFECT_PIXELIZE]    = { "Pixelize",           2, 100, 12, true },
+    [RUBRAVIEW_EFFECT_PIXELIZE]    = { "Mosaic (pixelize)",  2, 100, 12, true },
     [RUBRAVIEW_EFFECT_NOISE]       = { "Noise",              1, 100, 20, false },
     [RUBRAVIEW_EFFECT_VIGNETTE]    = { "Vignette",           1, 100, 50, false },
     [RUBRAVIEW_EFFECT_SWIRL]       = { "Swirl",              -720, 720, 180, false },
@@ -30,6 +31,11 @@ static const struct {
     [RUBRAVIEW_EFFECT_BUTTON_3D]   = { "3D button",          2, 100, 12, true },
     [RUBRAVIEW_EFFECT_FRAGMENT]    = { "Fragment",           1, 50, 6, true },
     [RUBRAVIEW_EFFECT_EXPLOSION]   = { "Explosion",          1, 50, 8, true },
+    [RUBRAVIEW_EFFECT_THRESHOLD]   = { "Black and white",    1, 254, 128, false },
+    [RUBRAVIEW_EFFECT_DITHER]      = { "Black and white, dithered", 1, 254, 128, false },
+    [RUBRAVIEW_EFFECT_COLOURS]     = { "Fewer colours",      2, 256, 16, false },
+    [RUBRAVIEW_EFFECT_COLOURS_DITHER] = { "Fewer colours, dithered", 2, 256, 16, false },
+    [RUBRAVIEW_EFFECT_SKETCH]      = { "Pencil sketch",      1, 30, 6, true },
 };
 
 const char *rubraview_effect_name(rubraview_effect_t effect) {
@@ -84,6 +90,207 @@ static uint32_t next_random(uint32_t *s) {
     return *s;
 }
 
+/* ---- the common filters that see the whole picture at once ---- */
+
+/* A median-cut palette of `want` colours from a 5-bits-a-channel histogram:
+   the box holding the most pixels times its widest span is split at its
+   pixels' median along that span, until there are enough boxes. */
+typedef struct { int32_t first, count; uint32_t pixels; } cut_box_t;
+static int g_cut_channel;
+static const uint32_t *g_cut_bins;
+static int bin_channel(uint32_t bin, int c) { return (int)((bin >> (10 - 5 * c)) & 31u); }
+static int cut_compare(const void *a, const void *b) {
+    return bin_channel(*(const uint32_t*)a, g_cut_channel) - bin_channel(*(const uint32_t*)b, g_cut_channel);
+}
+
+static int32_t median_cut(proven_arena_t *arena, const rubraview_pixbuf_t *src, bool bgra, int32_t want, uint8_t palette[256][3]) {
+    proven_result_mem_mut_t hm = proven_arena_alloc(arena, 32768u * sizeof(uint32_t));
+    proven_result_mem_mut_t lm = proven_arena_alloc(arena, 32768u * sizeof(uint32_t));
+    if (!proven_is_ok(hm.err) || !proven_is_ok(lm.err)) return 0;
+    uint32_t *hist = (uint32_t*)(void*)hm.value.ptr, *bins = (uint32_t*)(void*)lm.value.ptr;
+    memset(hist, 0, 32768u * sizeof(uint32_t));
+    const int R = bgra ? 2 : 0, B = bgra ? 0 : 2;
+    for (int32_t y = 0; y < src->height; ++y)
+        for (int32_t x = 0; x < src->width; ++x) {
+            const uint8_t *s = at(src, x, y);
+            hist[((uint32_t)(s[R] >> 3) << 10) | ((uint32_t)(s[1] >> 3) << 5) | (uint32_t)(s[B] >> 3)]++;
+        }
+    int32_t n = 0;
+    for (uint32_t i = 0; i < 32768u; ++i) if (hist[i]) bins[n++] = i;
+    if (n == 0) return 0;
+    cut_box_t boxes[256];
+    int32_t nb = 1;
+    boxes[0] = (cut_box_t){ 0, n, (uint32_t)(src->width * src->height) };
+    g_cut_bins = hist;
+    while (nb < want) {
+        int32_t pick = -1, pick_c = 0;
+        double best = 0.0;
+        for (int32_t b = 0; b < nb; ++b) {
+            if (boxes[b].count < 2) continue;
+            for (int c = 0; c < 3; ++c) {
+                int lo = 31, hi = 0;
+                for (int32_t i = boxes[b].first; i < boxes[b].first + boxes[b].count; ++i) {
+                    int v = bin_channel(bins[i], c);
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                }
+                double score = (double)(hi - lo) * (double)boxes[b].pixels;
+                if (hi > lo && score > best) { best = score; pick = b; pick_c = c; }
+            }
+        }
+        if (pick < 0) break;   /* every box is one colour */
+        cut_box_t *box = &boxes[pick];
+        g_cut_channel = pick_c;
+        qsort(bins + box->first, (size_t)box->count, sizeof(uint32_t), cut_compare);
+        uint32_t half = box->pixels / 2, seen = 0;
+        int32_t split = 1;
+        for (int32_t i = 0; i < box->count - 1; ++i) {
+            seen += hist[bins[box->first + i]];
+            if (seen >= half) { split = i + 1; break; }
+            split = i + 1;
+        }
+        cut_box_t second = { box->first + split, box->count - split, box->pixels - seen };
+        box->count = split;
+        box->pixels = seen;
+        boxes[nb++] = second;
+    }
+    for (int32_t b = 0; b < nb; ++b) {   /* each box's colour: the mean of its pixels */
+        double acc[3] = { 0, 0, 0 }, total = 0.0;
+        for (int32_t i = boxes[b].first; i < boxes[b].first + boxes[b].count; ++i) {
+            double k = hist[bins[i]];
+            for (int c = 0; c < 3; ++c) acc[c] += k * (bin_channel(bins[i], c) * 8 + 4);
+            total += k;
+        }
+        for (int c = 0; c < 3; ++c) palette[b][c] = clamp8(total > 0.0 ? acc[c] / total : 0.0);
+    }
+    return nb;
+}
+
+/* The palette's colour nearest a 5-bits-a-channel bin, found once a bin. */
+static uint8_t nearest_of(int16_t *cache, const uint8_t palette[256][3], int32_t count, int r, int g, int b) {
+    r = clampi(r, 0, 255); g = clampi(g, 0, 255); b = clampi(b, 0, 255);
+    uint32_t bin = ((uint32_t)(r >> 3) << 10) | ((uint32_t)(g >> 3) << 5) | (uint32_t)(b >> 3);
+    if (cache[bin] >= 0) return (uint8_t)cache[bin];
+    int32_t best = 0, cr = (r & ~7) + 4, cg = (g & ~7) + 4, cb = (b & ~7) + 4;
+    long best_d = 1L << 30;
+    for (int32_t i = 0; i < count; ++i) {
+        long dr = cr - palette[i][0], dg = cg - palette[i][1], db = cb - palette[i][2];
+        long d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+        if (d < best_d) { best_d = d; best = i; }
+    }
+    cache[bin] = (int16_t)best;
+    return (uint8_t)best;
+}
+
+static bool whole_picture_filter(proven_arena_t *arena, const rubraview_pixbuf_t *src, rubraview_pixbuf_t *out,
+                                 rubraview_effect_t effect, double amount, bool bgra) {
+    const int R = bgra ? 2 : 0, B = bgra ? 0 : 2;
+    const int32_t w = src->width, h = src->height;
+    if (effect == RUBRAVIEW_EFFECT_THRESHOLD || effect == RUBRAVIEW_EFFECT_DITHER) {
+        bool spread = effect == RUBRAVIEW_EFFECT_DITHER;
+        proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)(w + 2) * 2u * sizeof(float));
+        if (!proven_is_ok(m.err)) return false;
+        float *row = (float*)(void*)m.value.ptr, *next = row + w + 2;
+        memset(row, 0, (size_t)(w + 2) * 2u * sizeof(float));
+        for (int32_t y = 0; y < h; ++y) {
+            for (int32_t x = 0; x < w; ++x) {
+                const uint8_t *s = at(src, x, y);
+                uint8_t *o = out_at(out, x, y);
+                double v = luma(s, bgra) + (spread ? row[x + 1] : 0.0f);
+                uint8_t g = v >= amount ? 255 : 0;
+                if (spread) {   /* Floyd-Steinberg: 7/16 on, 3/16 below left, 5/16 below, 1/16 below right */
+                    double e = v - g;
+                    row[x + 2] += (float)(e * 7.0 / 16.0);
+                    next[x] += (float)(e * 3.0 / 16.0);
+                    next[x + 1] += (float)(e * 5.0 / 16.0);
+                    next[x + 2] += (float)(e / 16.0);
+                }
+                o[0] = o[1] = o[2] = g;
+                o[3] = s[3];
+            }
+            float *t = row; row = next; next = t;
+            memset(next, 0, (size_t)(w + 2) * sizeof(float));
+        }
+        return true;
+    }
+    if (effect == RUBRAVIEW_EFFECT_COLOURS || effect == RUBRAVIEW_EFFECT_COLOURS_DITHER) {
+        uint8_t palette[256][3];
+        int32_t count = median_cut(arena, src, bgra, (int32_t)lround(amount), palette);
+        proven_result_mem_mut_t cm = proven_arena_alloc(arena, 32768u * sizeof(int16_t));
+        proven_result_mem_mut_t em = proven_arena_alloc(arena, (size_t)(w + 2) * 6u * sizeof(float));
+        if (count <= 0 || !proven_is_ok(cm.err) || !proven_is_ok(em.err)) return false;
+        int16_t *cache = (int16_t*)(void*)cm.value.ptr;
+        memset(cache, 0xFF, 32768u * sizeof(int16_t));
+        float *err = (float*)(void*)em.value.ptr, *row = err, *next = err + (w + 2) * 3;
+        memset(err, 0, (size_t)(w + 2) * 6u * sizeof(float));
+        bool spread = effect == RUBRAVIEW_EFFECT_COLOURS_DITHER;
+        for (int32_t y = 0; y < h; ++y) {
+            for (int32_t x = 0; x < w; ++x) {
+                const uint8_t *s = at(src, x, y);
+                uint8_t *o = out_at(out, x, y);
+                double v[3] = { s[R], s[1], s[B] };
+                if (spread) for (int c = 0; c < 3; ++c) v[c] += row[(x + 1) * 3 + c];
+                uint8_t i = nearest_of(cache, palette, count, (int)lround(v[0]), (int)lround(v[1]), (int)lround(v[2]));
+                if (spread) {
+                    for (int c = 0; c < 3; ++c) {
+                        double e = v[c] - palette[i][c];
+                        row[(x + 2) * 3 + c] += (float)(e * 7.0 / 16.0);
+                        next[x * 3 + c] += (float)(e * 3.0 / 16.0);
+                        next[(x + 1) * 3 + c] += (float)(e * 5.0 / 16.0);
+                        next[(x + 2) * 3 + c] += (float)(e / 16.0);
+                    }
+                }
+                o[R] = palette[i][0]; o[1] = palette[i][1]; o[B] = palette[i][2];
+                o[3] = s[3];
+            }
+            float *t = row; row = next; next = t;
+            memset(next, 0, (size_t)(w + 2) * 3u * sizeof(float));
+        }
+        return true;
+    }
+    if (effect == RUBRAVIEW_EFFECT_SKETCH) {
+        /* grey, its negative blurred (two box passes each way), the grey dodged by it */
+        size_t n = (size_t)w * (size_t)h;
+        proven_result_mem_mut_t gm = proven_arena_alloc(arena, n * 3u * sizeof(float));
+        if (!proven_is_ok(gm.err)) return false;
+        float *grey = (float*)(void*)gm.value.ptr, *a = grey + n, *b = a + n;
+        for (int32_t y = 0; y < h; ++y)
+            for (int32_t x = 0; x < w; ++x) {
+                grey[(size_t)y * w + x] = (float)luma(at(src, x, y), bgra);
+                a[(size_t)y * w + x] = 255.0f - grey[(size_t)y * w + x];
+            }
+        int32_t r = (int32_t)lround(amount);
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int32_t y = 0; y < h; ++y) {   /* across */
+                double sum = 0.0;
+                for (int32_t k = -r; k <= r; ++k) sum += a[(size_t)y * w + clampi(k, 0, w - 1)];
+                for (int32_t x = 0; x < w; ++x) {
+                    b[(size_t)y * w + x] = (float)(sum / (2 * r + 1));
+                    sum += a[(size_t)y * w + clampi(x + r + 1, 0, w - 1)] - a[(size_t)y * w + clampi(x - r, 0, w - 1)];
+                }
+            }
+            for (int32_t x = 0; x < w; ++x) {   /* down */
+                double sum = 0.0;
+                for (int32_t k = -r; k <= r; ++k) sum += b[(size_t)clampi(k, 0, h - 1) * w + x];
+                for (int32_t y = 0; y < h; ++y) {
+                    a[(size_t)y * w + x] = (float)(sum / (2 * r + 1));
+                    sum += b[(size_t)clampi(y + r + 1, 0, h - 1) * w + x] - b[(size_t)clampi(y - r, 0, h - 1) * w + x];
+                }
+            }
+        }
+        for (int32_t y = 0; y < h; ++y)
+            for (int32_t x = 0; x < w; ++x) {
+                double g = grey[(size_t)y * w + x], blur = a[(size_t)y * w + x];
+                uint8_t v = clamp8(blur >= 255.0 ? 255.0 : g * 255.0 / (255.0 - blur));
+                uint8_t *o = out_at(out, x, y);
+                o[0] = o[1] = o[2] = v;
+                o[3] = at(src, x, y)[3];
+            }
+        return true;
+    }
+    return false;
+}
+
 /* ---- the effects ---- */
 
 rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview_pixbuf_t *src,
@@ -102,6 +309,7 @@ rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview
     const int32_t w = src->width, h = src->height;
     const double cx = (w - 1) * 0.5, cy = (h - 1) * 0.5, reach = sqrt(cx * cx + cy * cy) + 1e-9;
     uint32_t seed = 0x9E3779B9u;
+    if (effect >= RUBRAVIEW_EFFECT_THRESHOLD) return whole_picture_filter(arena, src, &out, effect, amount, bgra) ? out : empty;
 
     for (int32_t y = 0; y < h; ++y) {
         for (int32_t x = 0; x < w; ++x) {
@@ -297,11 +505,47 @@ rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview
     return out;
 }
 
+static const rubraview_effect_t GROUPED[] = {
+    RUBRAVIEW_EFFECT_GRAYSCALE, RUBRAVIEW_EFFECT_SEPIA, RUBRAVIEW_EFFECT_NEGATIVE, RUBRAVIEW_EFFECT_THRESHOLD,
+    RUBRAVIEW_EFFECT_DITHER, RUBRAVIEW_EFFECT_COLOURS, RUBRAVIEW_EFFECT_COLOURS_DITHER, RUBRAVIEW_EFFECT_POSTERIZE,
+    RUBRAVIEW_EFFECT_SOLARIZE, RUBRAVIEW_EFFECT_COUNT,
+    RUBRAVIEW_EFFECT_PIXELIZE, RUBRAVIEW_EFFECT_OIL, RUBRAVIEW_EFFECT_SKETCH, RUBRAVIEW_EFFECT_EMBOSS,
+    RUBRAVIEW_EFFECT_EDGES, RUBRAVIEW_EFFECT_BUTTON_3D, RUBRAVIEW_EFFECT_COUNT,
+    RUBRAVIEW_EFFECT_MEDIAN, RUBRAVIEW_EFFECT_NOISE, RUBRAVIEW_EFFECT_RADIAL_BLUR, RUBRAVIEW_EFFECT_ZOOM_BLUR, RUBRAVIEW_EFFECT_COUNT,
+    RUBRAVIEW_EFFECT_SWIRL, RUBRAVIEW_EFFECT_WAVE, RUBRAVIEW_EFFECT_FRAGMENT, RUBRAVIEW_EFFECT_EXPLOSION, RUBRAVIEW_EFFECT_COUNT,
+    RUBRAVIEW_EFFECT_RED_EYE, RUBRAVIEW_EFFECT_CHROMATIC, RUBRAVIEW_EFFECT_VIGNETTE, RUBRAVIEW_EFFECT_COUNT,
+};
+
+const char *rubraview_effect_group_name(rubraview_effect_group_t group) {
+    static const char *const NAMES[RUBRAVIEW_EFFECT_GROUPS] = { "Colour", "Artistic", "Blur and noise", "Distort", "Fix and light" };
+    return group < RUBRAVIEW_EFFECT_GROUPS ? NAMES[group] : "?";
+}
+
+size_t rubraview_effect_group_members(rubraview_effect_group_t group, rubraview_effect_t *out, size_t cap) {
+    size_t g = 0, n = 0;
+    for (size_t i = 0; i < sizeof(GROUPED) / sizeof(GROUPED[0]); ++i) {
+        if (GROUPED[i] == RUBRAVIEW_EFFECT_COUNT) { if (g++ == (size_t)group) break; continue; }
+        if (g != (size_t)group) continue;
+        if (out && n < cap) out[n] = GROUPED[i];
+        n++;
+    }
+    return n;
+}
+
+rubraview_effect_group_t rubraview_effect_group_of(rubraview_effect_t effect) {
+    size_t g = 0;
+    for (size_t i = 0; i < sizeof(GROUPED) / sizeof(GROUPED[0]); ++i) {
+        if (GROUPED[i] == RUBRAVIEW_EFFECT_COUNT) { g++; continue; }
+        if (GROUPED[i] == effect) return (rubraview_effect_group_t)g;
+    }
+    return RUBRAVIEW_EFFECT_GROUP_COLOUR;
+}
+
 const char *rubraview_effect_key(rubraview_effect_t effect) {
     static const char *const KEYS[RUBRAVIEW_EFFECT_COUNT] = {
         "", "grayscale", "sepia", "negative", "solarize", "posterize", "emboss", "edges", "median", "oil",
         "pixelize", "noise", "vignette", "swirl", "radial-blur", "zoom-blur", "wave", "red-eye", "chromatic",
-        "button", "fragment", "explosion",
+        "button", "fragment", "explosion", "threshold", "dither", "colours", "colours-dither", "sketch",
     };
     return (int)effect >= 0 && effect < RUBRAVIEW_EFFECT_COUNT ? KEYS[effect] : "";
 }

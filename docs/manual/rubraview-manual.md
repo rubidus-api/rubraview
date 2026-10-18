@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.13.0.exe              the viewer, as built
-dist/rubraview-v1.13.0/                 the release bundle
-dist/rubraview-v1.13.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.14.0.exe              the viewer, as built
+dist/rubraview-v1.14.0/                 the release bundle
+dist/rubraview-v1.14.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -334,31 +334,42 @@ picture follows; press a slider's name to type its value. The curve box
 shows the histogram behind the curve; its corner button (**RGB >**) picks
 which curve you edit.
 
-**The change list.** Every change is a row: what it moved
-("Saturation -100: whole") and where. A click on a row shows the picture
-as it stood after that change; `Ctrl+Z` and `Ctrl+Y` step back and on.
-Each row has a box, an `x` that takes the change out, and arrows that
-move it up or down; **Remove the ticked changes** takes out every ticked
-one. A change after a crop or a resize keeps to the same part of the
-picture when the order changes. **Copies of every picture in the list...**
-does the changes to every picture of the folder or playlist and writes
-each as a copy (the name typed with `*`, below); **Apply to every
-original in the list...** writes them over the pictures themselves —
-it asks first and needs a second press, and each old file goes to the
-Recycle Bin. A picture inside an archive is never written over. After it
-the list starts empty, as the pictures now hold the changes.
+**An area first.** At the top left of the Edit window, **Choose an area
+on the picture**: the pointer becomes a cross over the picture, and a
+drag there marks a part of it — a rectangle, or an ellipse (**Shape** in
+the selection's box), with a soft edge if you give it a **Feather**. Drag
+inside it to move it, drag one of its eight handles to size it, or type
+X, Y, W and H in the selection's box. Press the button again, or `Esc`, to
+stop choosing: a drag then moves the picture and the wheel zooms, as
+without Edit. With an area, what you do next is done to it alone; without
+one, to the whole picture. **Copy the area to the clipboard** puts that
+part of the picture, with the edits in force, on the clipboard (an
+ellipse's corners clear); with no area, the whole picture.
 
-**A selection first.** Drag on the picture to mark a part of it — a
-rectangle, or an ellipse (**Shape** in the selection's box), with a soft
-edge if you give it a **Feather**. Drag inside it to move it, drag one of
-its eight handles to size it, or type X, Y, W and H in the selection's
-box, which you can move by its title. With a selection, what you do next
-is done to it alone; without one, to the whole picture.
+**The edits.** Under it, every edit is a row: what it moved ("Saturation
+-100: whole") and where. Each has its own area, so several faces can be
+blurred each by an edit of its own. A click on a row shows the picture as
+it stood after that edit; `Ctrl+Z` and `Ctrl+Y` step back and on. Drag a
+row by its name to another place (a line shows where), or use its arrows;
+its `x` takes it out, and **Remove the ticked edits** every ticked one. An
+edit after a crop or a resize keeps to the same part of the picture when
+the order changes. **Copies of every picture in the list...** does the
+edits to every picture of the folder or playlist and writes each as a
+copy (the name typed with `*`, below); **Apply to every original in the
+list...** writes them over the pictures themselves — it asks first and
+needs a second press, and each old file goes to the Recycle Bin. Copies
+named as the copies' pattern (`*_edit`) are left out of both, and a
+picture inside an archive is never written over. After it the list starts
+empty, as the pictures now hold the edits.
 
 **Then a change.** The tones, **Colour balance** (red, green, blue),
 **Automatic colour** (each channel stretched, a colour cast drawn in),
-an **Effect** with its amount (21 of them: grey, sepia, negative, oil
-paint, emboss, edges, pixelize, swirl, red eye, and more), **Crop to the
+an **Effect** with its amount, chosen by kind — **Colour** (grey, sepia,
+negative, black and white, black and white dithered, fewer colours (2 to
+256, dithered or not), posterize, solarize), **Artistic** (mosaic, oil
+paint, pencil sketch, emboss, edges, 3D button), **Blur and noise**,
+**Distort** (swirl, wave, fragment, explosion) and **Fix and light** (red
+eye, colour fringe, vignette) — **Crop to the
 selection**, **Resize**. A change is done at once, to the selection or,
 without one, to the whole picture, and is a step: moving more sliders
 changes that step, until **Done** (`Enter`), another kind of change, or
@@ -366,6 +377,15 @@ another selection starts the next. `Ctrl+Z` undoes the last step,
 `Ctrl+Y` does it again, and the undo list (its own movable box, closed by
 its `X`) goes back to any of them. **Reset** goes back to the picture as
 it was. **Show the original** compares.
+
+**What works with Edit open.** Turning the pages (over pictures only: a
+film, a sound or a text is passed by), the file list and the playlist,
+Export, the view's size and fit, and the information; the toolbox shows
+only these, and the other keys say they wait until Edit is closed. Export
+from Edit writes the picture with its edits, and Edit comes back after it
+with them. A film is edited by its frame: pause it, and `E` saves the
+frame beside the film as a picture (as Save frame does) and opens Edit on
+it; turning on from there does not come back to the film.
 
 **On the next picture.** Turn the page with Edit open and its steps are
 shown done to the new picture too — a selection or a crop at the same

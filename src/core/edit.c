@@ -719,6 +719,17 @@ bool rubraview_edit_steps_move(rubraview_edit_steps_t *steps, size_t index, bool
     return true;
 }
 
+bool rubraview_edit_steps_move_to(rubraview_edit_steps_t *steps, size_t from, size_t to) {
+    if (!steps) return false;
+    size_t in_force = steps->cursor < steps->count ? steps->cursor : steps->count;
+    if (from >= in_force || to >= in_force || from == to) return false;
+    while (from != to) {   /* a neighbour at a time, each keeping the areas in proportion */
+        if (!rubraview_edit_steps_move(steps, from, to < from)) return false;
+        from = to < from ? from - 1 : from + 1;
+    }
+    return true;
+}
+
 size_t rubraview_edit_steps_remove(rubraview_edit_steps_t *steps, const bool *gone) {
     if (!steps || !gone) return 0;
     steps->count = steps->cursor;

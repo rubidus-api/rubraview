@@ -49,6 +49,7 @@ struct rubraview_window {
     bool owned;             /* §3.22: a window belonging to another; its end is not the program's */
     bool tool;              /* RFC-0002 Q6: a detached toolbox */
     bool cursor_visible;
+    bool cursor_cross;      /* RV-137: an area is being chosen on the picture */
     bool fullscreen;
     bool tracking_leave;    /* TrackMouseEvent asked for WM_MOUSELEAVE */
     int32_t width, height;
@@ -603,6 +604,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             /* §3.2.5: hidden over this window's client area only. ShowCursor hid it over every
                window of the program, the settings window too, where moving it brought nothing back. */
             if (!w->cursor_visible && LOWORD(lparam) == HTCLIENT) { SetCursor(NULL); return TRUE; }
+            if (w->cursor_cross && LOWORD(lparam) == HTCLIENT) { SetCursor(LoadCursorW(NULL, IDC_CROSS)); return TRUE; }
             break;
 
         case WM_SYSCOMMAND:
@@ -1221,6 +1223,16 @@ void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool vi
     POINT at;
     if (window->hwnd && GetCursorPos(&at) && WindowFromPoint(at) == window->hwnd) {
         SetCursor(visible ? LoadCursorW(NULL, IDC_ARROW) : NULL);
+    }
+}
+
+void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview_cursor_shape_t shape) {
+    bool cross = shape == RUBRAVIEW_CURSOR_CROSS;
+    if (!window || window->cursor_cross == cross) return;
+    window->cursor_cross = cross;
+    POINT at;   /* the pointer over it now changes at once */
+    if (window->hwnd && window->cursor_visible && GetCursorPos(&at) && WindowFromPoint(at) == window->hwnd) {
+        SetCursor(LoadCursorW(NULL, cross ? IDC_CROSS : IDC_ARROW));
     }
 }
 

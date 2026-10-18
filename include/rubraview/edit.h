@@ -359,6 +359,8 @@ rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_
  */
 bool rubraview_edit_steps_move(rubraview_edit_steps_t *steps, size_t index, bool up);
 size_t rubraview_edit_steps_remove(rubraview_edit_steps_t *steps, const bool *gone);
+/** RV-137: a change dragged in the list: step `from` put at `to`, the ones between shifted; false when nothing moved. */
+bool rubraview_edit_steps_move_to(rubraview_edit_steps_t *steps, size_t from, size_t to);
 
 bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps);
 bool rubraview_edit_steps_redo(rubraview_edit_steps_t *steps);

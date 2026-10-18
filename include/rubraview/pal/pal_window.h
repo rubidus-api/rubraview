@@ -341,6 +341,10 @@ bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window);
 /** §3.2.5: hide the pointer during fullscreen presentation. Idempotent. */
 void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible);
 
+/** RV-137: the pointer's shape over the window's client area: an arrow, or a cross while an area is chosen. */
+typedef enum rubraview_cursor_shape { RUBRAVIEW_CURSOR_ARROW = 0, RUBRAVIEW_CURSOR_CROSS } rubraview_cursor_shape_t;
+void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview_cursor_shape_t shape);
+
 /** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */
 void rubraview_pal_window_begin_drag(rubraview_window_t *window);
 /* The title bar's Resize button (owner, 2026-09-29): the OS sizes the

@@ -674,6 +674,14 @@ typedef struct app_state {
     uint64_t                   edit_sig;
     rubraview_listwin_t        changes;            /* the change list, rows as the playlist's */
     bool                       change_checked[RUBRAVIEW_EDIT_MAX_STEPS];
+    int32_t                    change_press;       /* the change whose name is held, or -1 */
+    double                     change_press_y;
+    bool                       change_dragging;    /* moved far enough: let go, it goes there */
+    bool                       sel_mode;           /* RV-137: a drag on the picture chooses an area (else it moves the picture) */
+    int32_t                    effect_group;       /* the kind of effect offered (owner, 2026-10-18) */
+    bool                       export_from_edit;   /* Export opened from Edit: the edits are in what it writes, and Edit comes back */
+    bool                       edit_kept;          /* Edit opened again with the edits it had */
+    char                       edit_after[1024];   /* a film's frame saved to be edited: Edit opens when it is on screen */
     rubraview_renderer_t      *files_renderer;
     bool                       files_open, files_dirty;
     int32_t                    files_frame[4];
@@ -1255,6 +1263,8 @@ static void edit_window_close(app_state_t *app);
 static void changes_remove_checked(app_state_t *app);
 static void edit_steps_changed(app_state_t *app);
 static void edit_preview_close(app_state_t *app);
+static bool edit_denies(u8str_t action);
+static void sel_mode_set(app_state_t *app, bool on);
 static void fontpick_reveal(app_state_t *app);
 static void media_ab_check(app_state_t *app);
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
@@ -1560,7 +1570,7 @@ static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride
    animation, copied to the clipboard or written as a PNG beside its file.
    It is asked for (`frame_wanted`) and taken where the next frame's
    pixels are at hand: a paused film is asked for its frame again. */
-enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE };
+enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE, FRAME_EDIT };   /* FRAME_EDIT: saved beside the film, then edited (RV-137) */
 static double play_position(const app_state_t *app);
 
 /* RV-116 (owner, 2026-10-14): Ctrl+C, or Copy picture, on a still picture — the
@@ -1640,6 +1650,11 @@ static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int
     options.format = RUBRAVIEW_EXPORT_PNG;
     bool written = rubraview_pal_image_save(target, &pixels, &options);
     free(copy);
+    if (wanted == FRAME_EDIT && written && target.len < sizeof(app->edit_after)) {
+        memcpy(app->edit_after, target.ptr, target.len);   /* Edit opens once it is the page on screen */
+        app->edit_after[target.len] = '\0';
+        reopen_on_path(app, app_keep(app, target), (size_t)page + 1);
+    }
     char line[600];
     snprintf(line, sizeof(line), written ? T("frame saved: %s") : T("could not write %s"), file);
     osd_say(app, cstr(line));
@@ -4867,6 +4882,7 @@ static void toolbox_refresh(app_state_t *app) {
             if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "toggle_slideshow")) continue;
             /* D-123: and its Delay tile for the speed tile, while it runs. */
             if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "media_speed_cycle")) continue;
+            if (edit_panel_open(app) && edit_denies(tile->action)) continue;   /* RV-137: not while Edit is open */
             if (((int32_t)p != last_part || tile->group != last_group) && groups < RUBRAVIEW_TOOLBOX_MAX_GROUPS) groups++;
             last_part = (int32_t)p;
             last_group = tile->group;
@@ -5000,11 +5016,38 @@ static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_ti
 /* The owner (2026-10-18): "툴바 아이콘 위의 텍스트는 언제나 영어로 ... 아이콘 안의 텍스트만
    영어로 해야 넘치지 않아요" — a tile's own words are English whatever the language, so
    they fit it; its tooltip, the menus and every message stay in the language in use. */
+/* The fit tile has no key of its own: the key of the fit it shows (owner, 2026-10-18). */
+static const char *fit_action_of(rubraview_fit_mode_t fit) {
+    switch (fit) {
+        case RUBRAVIEW_FIT_WIDTH: return "fit_width";
+        case RUBRAVIEW_FIT_HEIGHT: return "fit_height";
+        case RUBRAVIEW_FIT_STRETCH: return "fit_stretch";
+        case RUBRAVIEW_FIT_ACTUAL_SIZE: return "actual_size";
+        case RUBRAVIEW_FIT_SMART: return "smart_fit";
+        case RUBRAVIEW_FIT_WINDOW: default: return "fit_window";
+    }
+}
+
 static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
     const rubraview_lang_t *pack = rubraview_lang_current();
     rubraview_lang_use(NULL);
     u8str_t caption = toolbox_caption_in(app, tile_in, out_enabled);
     rubraview_lang_use(pack);
+    /* The owner (2026-10-18): the key set for it now, under its words ("Open" over "O"). */
+    static char ring[64][96];
+    static unsigned next;
+    u8str_t keyed = rubraview_u8_eq_lit(tile_in->action, "fit_cycle") ? cstr(fit_action_of(app->fit_mode)) : tile_in->action;
+    for (size_t b = 0; b < app->keymap.count && caption.len > 0; ++b) {
+        const rubraview_key_binding_t *binding = &app->keymap.bindings[b];
+        if (!rubraview_u8_eq(binding->action, keyed) || binding->combo_count == 0) continue;
+        char combo[48];
+        u8str_t k = rubraview_key_combo_format(combo, sizeof(combo), binding->combos[0]);
+        if (k.len == 0) break;
+        char *out = ring[next++ % 64u];
+        int n = snprintf(out, sizeof(ring[0]), "%.*s\n%.*s", (int)caption.len, caption.ptr, (int)k.len, k.ptr);
+        if (n > 0 && (size_t)n < sizeof(ring[0])) caption = (u8str_t){ .ptr = out, .len = (size_t)n };
+        break;
+    }
     return caption;
 }
 
@@ -5789,9 +5832,62 @@ static void pan_key(app_state_t *app, int dx, int dy) {
     note_activity(app);
 }
 
+/* RV-137 (owner, 2026-10-18: "에디트 상태에서 동작해야 할 버튼과 아닌 버튼을 구분하고, 작동 안하는건
+   ... 안보이게"): what does not work while Edit is open — another view of the page, a show,
+   another screen, the file itself changed or moved, a film's or a text's own controls. Hidden
+   from the toolbox, and said when a key or the menu asks for it. */
+static bool edit_denies(u8str_t action) {
+    static const char *const NO[] = {
+        "rotate_cw", "rotate_ccw", "rotate_180", "flip_horizontal", "flip_vertical", "toggle_layout", "toggle_spread_detect",
+        "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
+        "rename_file", "delete_file", "purge_file", "copy_to_folder", "move_to_folder", "copy_to_other_folder",
+        "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
+        "next_audio_track", "next_subtitle_track", "toggle_classify",
+    };
+    for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (rubraview_u8_eq_lit(action, NO[i])) return true;
+    static const char *const PREFIX[] = { "media_", "anim_", "subpage_", "text_", "zoom_strip" };
+    for (size_t i = 0; i < sizeof(PREFIX) / sizeof(PREFIX[0]); ++i) {
+        size_t n = strlen(PREFIX[i]);
+        if (action.len >= n && memcmp(action.ptr, PREFIX[i], n) == 0) return true;
+    }
+    return false;
+}
+
+/* While Edit is open the pages turned are pictures only: a film, a sound, a text is passed over. */
+static bool edit_page_is_picture(const app_state_t *app, size_t i) {
+    u8str_t path = app->source.pages[i].path.len > 0 ? app->source.pages[i].path : app->source.pages[i].name;
+    return !is_media_path(path) && !is_text_path(path) && rubraview_glob_match_list(rubraview_path_basename(path), U8(IMAGE_FILTER));
+}
+
+static bool edit_turn(app_state_t *app, int dir, bool to_end) {
+    size_t count = page_count(app);
+    int32_t at = current_page_index(app);
+    if (count == 0) return false;
+    long i = to_end ? (dir > 0 ? (long)count - 1 : 0) : (long)at + dir;
+    for (; i >= 0 && i < (long)count; i += to_end ? -dir : dir) {
+        if (i == at) break;
+        if (!edit_page_is_picture(app, (size_t)i)) continue;
+        go_to_spread(app, spread_for_chosen_page(app, (int32_t)i));
+        update_precache(app);
+        return true;
+    }
+    osd_say(app, TU8("no other picture that way"));
+    return true;
+}
+
 static void handle_action(app_state_t *app, u8str_t action) {
     if (text_action(app, action)) return;   /* RFC-0005 */
     if (action.len == 0) return;
+    if (edit_panel_open(app) && edit_denies(action)) {
+        osd_say(app, TU8("not while Edit is open (E closes it)"));
+        return;
+    }
+    if (edit_panel_open(app)) {   /* pictures only, the rest passed over */
+        if (rubraview_u8_eq_lit(action, "next_page") && edit_turn(app, +1, false)) return;
+        if (rubraview_u8_eq_lit(action, "prev_page") && edit_turn(app, -1, false)) return;
+        if (rubraview_u8_eq_lit(action, "first_page") && edit_turn(app, -1, true)) return;
+        if (rubraview_u8_eq_lit(action, "last_page") && edit_turn(app, +1, true)) return;
+    }
     note_activity(app);
     /* D-88: while the archive on screen is being written again nothing is
        opened, closed or changed; Esc stops the writing, and a quit does too. */
@@ -6112,7 +6208,14 @@ static void handle_action(app_state_t *app, u8str_t action) {
         else settings_open(app);
     } else if (rubraview_u8_eq_lit(action, "open_edit")) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
-        else panel_open_edit(app);
+        else if (app->media && !(app->media_info.has_video && app->media_page >= 0)) osd_say(app, TU8("Edit is for pictures"));
+        else if (app->media && !app->media_paused) osd_say(app, TU8("pause the film first (Space): E then edits the frame on screen"));
+        else if (app->media) {
+            /* The owner (2026-10-18): a paused film's frame, and only it — saved beside the film as a
+               picture, which Edit opens; turning on, Edit passes the film by. */
+            app->frame_wanted = FRAME_EDIT;
+            media_seek_to(app, app->media_position);
+        } else panel_open_edit(app);
     } else if (rubraview_u8_eq_lit(action, "copy_frame") || rubraview_u8_eq_lit(action, "save_frame")) {
         /* RV-108: of a film or an animation; a still picture has Export. */
         bool film = app->media && app->media_info.has_video && app->media_page >= 0;
@@ -6128,7 +6231,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
     } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
-        else panel_open_export(app);
+        else {
+            /* From Edit (owner, 2026-10-18): the edits are in what Export writes, and Edit comes back after it. */
+            app->export_from_edit = edit_panel_open(app) && app->edit_steps.cursor > 0;
+            if (edit_panel_open(app)) { edit_live_close(app); sel_mode_set(app, false); edit_window_close(app); }
+            panel_open_export(app);
+        }
     } else if (rubraview_u8_eq_lit(action, "new_window")) {
         new_window(app);
     } else if (rubraview_u8_eq_lit(action, "open_batch")) {
@@ -11051,6 +11159,14 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
     return 0;
 }
 
+/* A copy Edit made, by its name as the copies' pattern makes them ("*_edit"):
+   left out when the steps go onto the list's pictures, as copies or over the
+   originals (owner, 2026-10-18), so a copy is not edited a second time. */
+static bool edit_is_copy_name(u8str_t path, u8str_t pattern) {
+    if (pattern.len == 0) pattern = U8("*_edit");
+    return rubraview_glob_match_list(rubraview_path_stem(rubraview_path_basename(path)), pattern);
+}
+
 static void apply_all_typed(app_state_t *app) {
     u8str_t text = rubraview_textedit_text(&app->rename_edit);
     char pattern[160];
@@ -11070,6 +11186,7 @@ static void apply_all_typed(app_state_t *app) {
     for (size_t i = 0; job->paths && i < count; ++i) {
         u8str_t p = app->source.pages[i].path;
         if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) continue;   /* pictures only */
+        if (edit_is_copy_name(p, cstr(pattern))) continue;                                                    /* not a copy made before */
         char *copy = (char*)malloc(p.len + 1);
         if (!copy) continue;
         memcpy(copy, p.ptr, p.len);
@@ -11113,9 +11230,10 @@ static void apply_all_originals(app_state_t *app) {
     if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len > 0) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
     if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
     size_t count = page_count(app), pictures = 0;
+    u8str_t copies = rubraview_settings_get_text(&app->settings, U8("edit"), U8("copy_name"));   /* Edit's copies are not originals */
     for (size_t i = 0; i < count; ++i) {
         u8str_t p = app->source.pages[i].path;
-        if (p.len > 0 && rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) pictures++;
+        if (p.len > 0 && rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER)) && !edit_is_copy_name(p, copies)) pictures++;
     }
     if (pictures == 0) { osd_say(app, TU8("no pictures in the list")); return; }
     double now = rubraview_pal_time_now_seconds();
@@ -11132,7 +11250,7 @@ static void apply_all_originals(app_state_t *app) {
     job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
         u8str_t p = app->source.pages[i].path;
-        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) continue;
+        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER)) || edit_is_copy_name(p, copies)) continue;
         char *copy = (char*)malloc(p.len + 1);
         if (!copy) continue;
         memcpy(copy, p.ptr, p.len);
@@ -12051,6 +12169,7 @@ enum {
     PANEL_CLS_HERE, PANEL_CLS_COPY, PANEL_CLS_MOVE, PANEL_CLS_CLEAR, PANEL_CLS_SETTINGS,
     /* RV-137: the Edit window's rooms and the change list's buttons */
     PANEL_SP_CURVE, PANEL_SP_SEL, PANEL_SP_CHANGES, PANEL_CHANGES_REMOVE, PANEL_ALL_COPIES, PANEL_ALL_ORIGINALS,
+    PANEL_SEL_MODE, PANEL_SEL_COPY, PANEL_EFFECT_GROUP,
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
@@ -12214,7 +12333,67 @@ static void print_temp_drop(app_state_t *app);
 
 static void px_edit_close(app_state_t *app);
 
+/* RV-137 (owner, 2026-10-18: "선택 영역 곧바로 잘라서 클립보드에 복사"): the picture at
+   its own size with the changes in force, cut to the chosen area (an ellipse's
+   corners left clear), put on the clipboard; no area, the whole picture. */
+static void edit_copy_area(app_state_t *app) {
+    int32_t page = current_page_index(app);
+    if (page < 0 || (size_t)page >= page_count(app) || !app->pages[page].loaded) { osd_say(app, TU8("there is no picture to copy")); return; }
+    int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
+    if (w <= 0 || h <= 0 || (uint64_t)w * (uint64_t)h > (uint64_t)100000000u) { osd_say(app, TU8("this picture is too large to copy")); return; }
+    rubraview_edit_steps_t steps = app->edit_steps;
+    steps.count = steps.cursor;   /* the changes in force, the one in hand among them */
+    size_t big = (size_t)w * (size_t)h * 4u * (6u + steps.count) + (32u << 20);
+    void *memory = malloc(big);
+    if (!memory) { osd_say(app, TU8("there is not memory enough to copy this picture")); return; }
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
+    rubraview_pixbuf_t full = {0};
+    u8str_t path = app->source.pages[page].path;
+    if (path.len > 0) {
+        full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, 0, 0);
+    } else {
+        rubraview_page_bytes_t bytes = { .ok = false };
+        AcquireSRWLockExclusive(&app->source_lock);
+        bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
+        ReleaseSRWLockExclusive(&app->source_lock);
+        if (bytes.ok && bytes.data.len > 0)
+            full = rubraview_pal_image_read_pixels_within(&scratch, U8(""), (const uint8_t*)bytes.data.ptr, bytes.data.len, true, 0, 0);
+    }
+    rubraview_pixbuf_t done = rubraview_pixbuf_is_valid(&full) && steps.count > 0 ? rubraview_edit_steps_apply(&scratch, &steps, &full, 1.0) : full;
+    rubraview_pixbuf_t bgra = !rubraview_pixbuf_is_valid(&done) || done.format == RUBRAVIEW_PIXFMT_BGRA8
+        ? done : rubraview_pixbuf_convert(&scratch, &done, RUBRAVIEW_PIXFMT_BGRA8);
+    const rubraview_crop_rect_t *c = &app->edit.crop;
+    if (rubraview_pixbuf_is_valid(&bgra) && app->edit.crop_active && c->width >= 1 && c->height >= 1 &&
+        c->x + c->width <= bgra.width && c->y + c->height <= bgra.height) {
+        rubraview_pixbuf_t cut = rubraview_pixbuf_crop(&scratch, &bgra, c->x, c->y, c->width, c->height);
+        if (rubraview_pixbuf_is_valid(&cut) && app->sel_shape == RUBRAVIEW_AREA_ELLIPSE) {
+            double rx = cut.width / 2.0, ry = cut.height / 2.0;
+            for (int32_t y = 0; y < cut.height; ++y) {
+                uint8_t *row = cut.pixels + (size_t)y * (size_t)cut.stride;
+                for (int32_t x = 0; x < cut.width; ++x) {
+                    double dx = (x + 0.5 - rx) / rx, dy = (y + 0.5 - ry) / ry;
+                    if (dx * dx + dy * dy > 1.0) row[x * 4 + 3] = 0;   /* outside the ellipse: clear */
+                }
+            }
+        }
+        bgra = cut;
+    }
+    bool copied = rubraview_pixbuf_is_valid(&bgra) &&
+                  rubraview_pal_clipboard_set_image(app->window, bgra.pixels, bgra.width, bgra.height, (size_t)bgra.stride);
+    free(memory);
+    osd_say(app, !copied ? TU8("the picture could not be copied")
+                 : app->edit.crop_active ? TU8("the area is on the clipboard") : TU8("the picture is on the clipboard"));
+}
+
+static void sel_mode_set(app_state_t *app, bool on) {
+    app->sel_mode = on;
+    rubraview_pal_window_set_cursor_shape(app->window, on ? RUBRAVIEW_CURSOR_CROSS : RUBRAVIEW_CURSOR_ARROW);
+}
+
 static void panel_close(app_state_t *app) {
+    bool back_to_edit = app->export_from_edit && app->panel_is_export;
+    app->export_from_edit = false;
+    sel_mode_set(app, false);
     edit_window_close(app);
     edit_preview_close(app);
     app->sel_panel.open = false;
@@ -12233,6 +12412,11 @@ static void panel_close(app_state_t *app) {
     app->panel_is_convert = false;
     if (app->panel_is_print && !app->print_going) print_temp_drop(app);
     app->panel_is_print = false;
+    if (back_to_edit) {   /* Export done or left: Edit again, with its edits */
+        app->edit_kept = true;
+        panel_open_edit(app);
+    }
+    toolbox_refresh(app);    /* Edit closed: the toolbox whole again */
 }
 
 /* §3.13's workbench. Every row's range comes from the edit session, so
@@ -12644,7 +12828,14 @@ static void edit_rows_detail(app_state_t *app) {
 }
 
 static void edit_rows_effect(app_state_t *app) {
-    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), app->effect_choice, RUBRAVIEW_EFFECT_COUNT);
+    /* By kind (owner, 2026-10-18): the kind, then its effects; 0 is none. */
+    if (app->effect_choice != RUBRAVIEW_EFFECT_NONE) app->effect_group = (int32_t)rubraview_effect_group_of((rubraview_effect_t)app->effect_choice);
+    rubraview_effect_t members[RUBRAVIEW_EFFECT_COUNT];
+    size_t n = rubraview_effect_group_members((rubraview_effect_group_t)app->effect_group, members, RUBRAVIEW_EFFECT_COUNT);
+    int32_t at = 0;
+    for (size_t i = 0; i < n; ++i) if ((int32_t)members[i] == app->effect_choice) at = (int32_t)i + 1;
+    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT_GROUP, TU8("Effects"), app->effect_group, RUBRAVIEW_EFFECT_GROUPS);
+    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), at, (int32_t)n + 1);
     {
         double lo = 0.0, hi = 1.0;
         rubraview_effect_range((rubraview_effect_t)app->effect_choice, &lo, &hi, NULL);
@@ -12678,17 +12869,29 @@ static void edit_rows_save(app_state_t *app) {
     rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, TU8("Save a copy"));
 }
 
+/* RV-137 (owner, 2026-10-18): a drag on the picture moves it and the wheel
+   zooms, as without Edit; an area is chosen after this button, with a cross
+   for the pointer; and the area copied to the clipboard at once. */
+static void edit_rows_choose(app_state_t *app) {
+    rubraview_panel_add_button(&app->panel, PANEL_SEL_MODE, app->sel_mode ? TU8("Choosing an area: drag on the picture (press to stop)")
+                                                                          : TU8("Choose an area on the picture"));
+    rubraview_panel_add_button(&app->panel, PANEL_SEL_COPY, app->edit.crop_active ? TU8("Copy the area to the clipboard")
+                                                                                  : TU8("Copy the picture to the clipboard"));
+}
+
 /* RV-137: Edit's rows in its own window, in the order its width wants
    (the owner, 2026-10-18, chose these three): one column scrolled; two;
    three. A column begins at a section, never inside one. */
 static void edit_rows_windowed(app_state_t *app) {
-    enum { CURVE, SEL, TONE, LEVELS, DETAIL, EFFECT, RESIZE, HISTORY, SAVE, NEXT, END };
+    enum { CHOOSE, CURVE, SEL, TONE, LEVELS, DETAIL, EFFECT, RESIZE, HISTORY, SAVE, NEXT, END };
     /* The change list near the top of its column: it is what the window is for (VM, 2026-10-18:
        under the selection's numbers it was below a 680-pixel window's bottom). */
-    static const int ORDER[3][13] = {
-        { CURVE, HISTORY, TONE, LEVELS, DETAIL, EFFECT, SEL, RESIZE, SAVE, END },
-        { CURVE, TONE, LEVELS, DETAIL, NEXT, HISTORY, SEL, EFFECT, RESIZE, SAVE, END },
-        { CURVE, HISTORY, SEL, NEXT, TONE, LEVELS, DETAIL, NEXT, EFFECT, RESIZE, SAVE, END },
+    /* The owner (2026-10-18): first of all, top left, the button that chooses an area; then the
+       edits; then the curve. */
+    static const int ORDER[3][14] = {
+        { CHOOSE, HISTORY, CURVE, TONE, LEVELS, DETAIL, EFFECT, SEL, RESIZE, SAVE, END },
+        { CHOOSE, HISTORY, CURVE, TONE, LEVELS, NEXT, SEL, DETAIL, EFFECT, RESIZE, SAVE, END },
+        { CHOOSE, HISTORY, CURVE, SEL, NEXT, TONE, LEVELS, DETAIL, NEXT, EFFECT, RESIZE, SAVE, END },
     };
     const rubraview_edit_session_t *e = &app->edit;
     rubraview_panel_t *p = &app->panel;
@@ -12698,6 +12901,7 @@ static void edit_rows_windowed(app_state_t *app) {
     for (int k = 0; ORDER[mode][k] != END; ++k) {
         switch (ORDER[mode][k]) {
             case NEXT: app->edit_firsts[++column] = p->row_count; continue;
+            case CHOOSE: edit_rows_choose(app); break;
             case CURVE: rubraview_panel_add_spacer(p, PANEL_SP_CURVE, 184.0 * dpi); break;
             case SEL:
                 rubraview_panel_add_spacer(p, PANEL_SP_SEL, 200.0 * dpi);   /* as tall as its box, set when laid out */
@@ -12710,7 +12914,7 @@ static void edit_rows_windowed(app_state_t *app) {
             case RESIZE: edit_rows_resize(app); break;
             case HISTORY:   /* undo and redo are Ctrl+Z / Ctrl+Y and a click on a change */
                 rubraview_panel_add_spacer(p, PANEL_SP_CHANGES, 160.0 * dpi);
-                rubraview_panel_add_button(p, PANEL_CHANGES_REMOVE, TU8("Remove the ticked changes"));
+                rubraview_panel_add_button(p, PANEL_CHANGES_REMOVE, TU8("Remove the ticked edits"));
                 rubraview_panel_add_button(p, PANEL_ALL_COPIES, TU8("Copies of every picture in the list..."));
                 rubraview_panel_add_button(p, PANEL_ALL_ORIGINALS, TU8("Apply to every original in the list..."));
                 rubraview_panel_add_button(p, PANEL_RESET, TU8("Reset: back to the picture as it was"));
@@ -12750,6 +12954,7 @@ static void panel_build_edit(app_state_t *app) {
     }
     /* First where: the selection (drawn on the picture, or its numbers). */
     rubraview_panel_add_button(&app->panel, PANEL_SEL_BOX, edit_sel_label(app));
+    edit_rows_choose(app);
     rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
     rubraview_panel_add_separator(&app->panel);
     /* Then what: every effect, in one window (owner, 2026-10-17). */
@@ -12781,15 +12986,21 @@ static void panel_open_edit(app_state_t *app) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
 
-    app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
-    rubraview_edit_steps_begin(&app->edit_steps, real_w(&app->pages[page]), real_h(&app->pages[page]));
-    app->sel_shape = RUBRAVIEW_AREA_RECT;
-    app->sel_feather = 0;
+    if (app->edit_kept && app->edit_steps.width > 0) {
+        app->edit_kept = false;   /* back from Export: the edits as they were (the preview rebases them) */
+    } else {
+        app->edit_kept = false;
+        app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
+        rubraview_edit_steps_begin(&app->edit_steps, real_w(&app->pages[page]), real_h(&app->pages[page]));
+        app->sel_shape = RUBRAVIEW_AREA_RECT;
+        app->sel_feather = 0;
+    }
     app->edit_rev++;
     app->panel.open = false;
     panel_build_edit(app);
     edit_preview_open(app);
     edit_window_show(app);   /* RV-137: in a window of its own beside the viewer */
+    toolbox_refresh(app);    /* what does not work in Edit leaves the toolbox */
 }
 
 /* The effects' names in the language in use (effects.c keeps them in English). */
@@ -12805,7 +13016,7 @@ static const char *effect_word(int32_t e) {
         case RUBRAVIEW_EFFECT_EDGES: return T("Edges");
         case RUBRAVIEW_EFFECT_MEDIAN: return T("Median (noise out)");
         case RUBRAVIEW_EFFECT_OIL: return T("Oil paint");
-        case RUBRAVIEW_EFFECT_PIXELIZE: return T("Pixelize");
+        case RUBRAVIEW_EFFECT_PIXELIZE: return T("Mosaic (pixelize)");
         case RUBRAVIEW_EFFECT_NOISE: return T("Noise");
         case RUBRAVIEW_EFFECT_VIGNETTE: return T("Vignette");
         case RUBRAVIEW_EFFECT_SWIRL: return T("Swirl");
@@ -12817,6 +13028,22 @@ static const char *effect_word(int32_t e) {
         case RUBRAVIEW_EFFECT_BUTTON_3D: return T("3D button");
         case RUBRAVIEW_EFFECT_FRAGMENT: return T("Fragment");
         case RUBRAVIEW_EFFECT_EXPLOSION: return T("Explosion");
+        case RUBRAVIEW_EFFECT_THRESHOLD: return T("Black and white");
+        case RUBRAVIEW_EFFECT_DITHER: return T("Black and white, dithered");
+        case RUBRAVIEW_EFFECT_COLOURS: return T("Fewer colours");
+        case RUBRAVIEW_EFFECT_COLOURS_DITHER: return T("Fewer colours, dithered");
+        case RUBRAVIEW_EFFECT_SKETCH: return T("Pencil sketch");
+        default: return NULL;
+    }
+}
+
+static const char *effect_group_word(int32_t g) {
+    switch ((rubraview_effect_group_t)g) {
+        case RUBRAVIEW_EFFECT_GROUP_COLOUR: return T("Colour");
+        case RUBRAVIEW_EFFECT_GROUP_ARTISTIC: return T("Artistic");
+        case RUBRAVIEW_EFFECT_GROUP_BLUR: return T("Blur and noise");
+        case RUBRAVIEW_EFFECT_GROUP_DISTORT: return T("Distort");
+        case RUBRAVIEW_EFFECT_GROUP_FIX: return T("Fix and light");
         default: return NULL;
     }
 }
@@ -12857,7 +13084,13 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     const char *word = NULL;
     switch (row->id) {
         case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
-        case PANEL_EFFECT:       word = effect_word(i); break;
+        case PANEL_EFFECT: {   /* within the kind chosen */
+            rubraview_effect_t members[RUBRAVIEW_EFFECT_COUNT];
+            size_t n = rubraview_effect_group_members((rubraview_effect_group_t)app->effect_group, members, RUBRAVIEW_EFFECT_COUNT);
+            word = i <= 0 ? effect_word(RUBRAVIEW_EFFECT_NONE) : (size_t)i <= n ? effect_word(members[i - 1]) : NULL;
+            break;
+        }
+        case PANEL_EFFECT_GROUP: word = effect_group_word(i); break;
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
         /* RV-129: the batch window */
@@ -14405,8 +14638,16 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         case PANEL_BAL_R:       app->edit.params.balance_r = (float)v; break;
         case PANEL_BAL_G:       app->edit.params.balance_g = (float)v; break;
         case PANEL_BAL_B:       app->edit.params.balance_b = (float)v; break;
+        case PANEL_EFFECT_GROUP:   /* another kind: none of it chosen yet */
+            app->effect_group = (int32_t)v;
+            app->effect_choice = RUBRAVIEW_EFFECT_NONE;
+            panel_build_edit(app);
+            break;
         case PANEL_EFFECT: {
-            app->effect_choice = (int32_t)v;
+            rubraview_effect_t members[RUBRAVIEW_EFFECT_COUNT];
+            size_t n = rubraview_effect_group_members((rubraview_effect_group_t)app->effect_group, members, RUBRAVIEW_EFFECT_COUNT);
+            size_t pick = (size_t)lround(v);
+            app->effect_choice = pick >= 1 && pick <= n ? (int32_t)members[pick - 1] : RUBRAVIEW_EFFECT_NONE;
             double start = 0.0;
             rubraview_effect_range((rubraview_effect_t)app->effect_choice, NULL, NULL, &start);
             app->effect_amount = start;
@@ -14490,7 +14731,7 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_SHARPEN_RADIUS: case PANEL_SHARPEN_THRESHOLD:
                 edit_live_update(app, RUBRAVIEW_STEP_ADJUST);
                 break;
-            case PANEL_EFFECT: case PANEL_EFFECT_AMOUNT:
+            case PANEL_EFFECT: case PANEL_EFFECT_AMOUNT: case PANEL_EFFECT_GROUP:
                 edit_live_update(app, RUBRAVIEW_STEP_EFFECT);
                 break;
             default: break;
@@ -14520,6 +14761,12 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_REDO:         edit_undo(app, true); break;
         case PANEL_STEPS:        edit_steps_toggle(app); break;
         case PANEL_CHANGES_REMOVE: changes_remove_checked(app); break;
+        case PANEL_SEL_MODE:
+            sel_mode_set(app, !app->sel_mode);
+            osd_say(app, app->sel_mode ? TU8("drag on the picture to choose an area (Esc: stop choosing)") : TU8("a drag moves the picture again"));
+            panel_build_edit(app);
+            break;
+        case PANEL_SEL_COPY:     edit_copy_area(app); break;
         case PANEL_ALL_COPIES:   apply_all_begin(app); break;
         case PANEL_ALL_ORIGINALS: apply_all_originals(app); break;
         case PANEL_SEL_BOX:      edit_sel_toggle(app); break;
@@ -14573,7 +14820,7 @@ static void panel_button(app_state_t *app, int32_t index) {
             panel_close(app);
             break;
         case PANEL_EXPORT_NOW:
-            panel_write_current(app, false);
+            panel_write_current(app, app->export_from_edit);   /* opened from Edit: the edits written in */
             panel_close(app);
             break;
         case PANEL_BATCH_CROP: case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
@@ -21074,6 +21321,8 @@ static void edit_window_show(app_state_t *app) {
     app->changes.bar_height = 0.0;
     app->changes.placed = app->changes.open = true;
     memset(app->change_checked, 0, sizeof(app->change_checked));
+    app->change_press = -1;
+    app->change_dragging = false;
     app->steps_panel.open = false;    /* the change list is in the window */
     app->edit_mode = -1;
     edit_sel_build(app);              /* the selection's numbers, always there */
@@ -21091,11 +21340,11 @@ static void changes_remove_checked(app_state_t *app) {
     edit_live_close(app);
     bool any = false;
     for (size_t i = 0; i < app->edit_steps.cursor; ++i) any = any || app->change_checked[i];
-    if (!any) { osd_say(app, TU8("tick the changes to take out first")); return; }
+    if (!any) { osd_say(app, TU8("tick the edits to remove first")); return; }
     size_t n = rubraview_edit_steps_remove(&app->edit_steps, app->change_checked);
     changes_changed(app);
     char said[96];
-    int m = snprintf(said, sizeof(said), T("%zu changes taken out"), n);
+    int m = snprintf(said, sizeof(said), T("%zu edits removed"), n);
     if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
 }
 
@@ -21122,15 +21371,43 @@ static bool changes_press(app_state_t *app, double x, double y) {
             if (rubraview_edit_steps_move(&app->edit_steps, index, up)) changes_changed(app);
             break;
         }
-        case RUBRAVIEW_LISTWIN_ROW:   /* the picture as it stood after this change */
+        case RUBRAVIEW_LISTWIN_ROW:   /* held: dragged, it moves (owner, 2026-10-18); let go where it was, the picture after it */
             if (index < count) {
-                edit_live_close(app);
-                if (rubraview_edit_steps_go(&app->edit_steps, index + 1)) edit_steps_changed(app);
+                app->change_press = (int32_t)index;
+                app->change_press_y = y;
+                app->change_dragging = false;
             }
             break;
         default: break;
     }
     return true;
+}
+
+/* Where a change carried to `y` would go: the row it goes before (count: at the end). */
+static size_t changes_drop_at(const app_state_t *app, double y) {
+    size_t in_force = app->edit_steps.cursor;
+    size_t at = rubraview_listwin_insert_index(&app->changes, y, app->edit_steps.count);
+    return at > in_force ? in_force : at;   /* among the changes in force */
+}
+
+static void changes_motion(app_state_t *app, double y) {
+    if (app->change_press < 0) return;
+    if (!app->change_dragging && fabs(y - app->change_press_y) >= 6.0 * rubraview_pal_window_dpi_scale(app->edit_window)) app->change_dragging = true;
+}
+
+static void changes_release(app_state_t *app, double y) {
+    if (app->change_press < 0) return;
+    size_t from = (size_t)app->change_press;
+    bool dragged = app->change_dragging;
+    app->change_press = -1;
+    app->change_dragging = false;
+    edit_live_close(app);
+    if (!dragged) {   /* a click: the picture as it stood after this change */
+        if (rubraview_edit_steps_go(&app->edit_steps, from + 1)) edit_steps_changed(app);
+        return;
+    }
+    size_t at = changes_drop_at(app, y), to = at > from ? at - 1 : at;
+    if (from < app->edit_steps.cursor && rubraview_edit_steps_move_to(&app->edit_steps, from, to)) changes_changed(app);
 }
 
 static void draw_changes(app_state_t *app) {
@@ -21158,8 +21435,15 @@ static void draw_changes(app_state_t *app) {
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
                                        in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
     }
+    if (app->change_dragging && app->change_press >= 0) {   /* where the carried change would go */
+        size_t at = changes_drop_at(app, app->pointer_y);
+        double y = at < count ? rubraview_listwin_row_rect(lw, at, count).y
+                              : rubraview_listwin_row_rect(lw, count - 1, count).y + lw->row_height;
+        if (y >= lw->y - 1.0 && y <= lw->y + lw->height + 1.0)
+            rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ lw->x, y - 1.0, lw->width, 2.0 }, 0xFF5B9BD5u, 0.0);
+    }
     if (count == 0) {
-        rubraview_pal_render_draw_text(rr, TU8("no change yet: move a slider or choose an effect"),
+        rubraview_pal_render_draw_text(rr, TU8("no edit yet: move a slider or choose an effect"),
                                        (rubraview_pal_rect_t){ lw->x, lw->y, lw->width, lw->row_height }, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
     }
 }
@@ -21207,7 +21491,7 @@ static void draw_edit_window(app_state_t *app) {
         edit_heading(app, PANEL_SP_SEL, T("Selection"), 0);
         draw_panel_of(app, &app->sel_panel, true);
     }
-    edit_heading(app, PANEL_SP_CHANGES, T("Changes (Ctrl+Z undoes, Ctrl+Y redoes)"), app->edit_steps.count);
+    edit_heading(app, PANEL_SP_CHANGES, T("Edits (Ctrl+Z undoes, Ctrl+Y redoes)"), app->edit_steps.count);
     draw_changes(app);
     draw_curve_widget(app);
     if (app->rename_active && (app->rename_is_value || app->rename_is_apply)) {
@@ -21246,6 +21530,7 @@ static size_t edit_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->edit_px = event.mouse.x;
                 app->edit_py = event.mouse.y;
+                if (app->change_press >= 0) { changes_motion(app, event.mouse.y); break; }
                 if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
                 if (app->panel.active_row >= 0) {
                     int32_t dragged = -1;
@@ -21268,6 +21553,7 @@ static size_t edit_pump(app_state_t *app) {
                 (void)panel_handle_press(app, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                changes_release(app, event.mouse.y);
                 app->curve_dragging = -1;
                 rubraview_panel_release(&app->panel);
                 rubraview_panel_release(&app->sel_panel);
@@ -21282,6 +21568,7 @@ static size_t edit_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                 /* Esc leaves Edit here (the viewer's Esc ends the program); the rest are the viewer's keys. */
+                if (key_is(event.key.combo, "Escape") && app->sel_mode) { sel_mode_set(app, false); panel_build_edit(app); break; }
                 if (key_is(event.key.combo, "Escape") && !app->rename_active && !app->px_edit_open) { panel_close(app); return handled; }
                 dispatch_key(app, event.key.combo);
                 break;
@@ -21846,19 +22133,25 @@ static void tick_timers(app_state_t *app, double dt) {
     {
         /* RV-116: resting on a box's anchor, pin, grip or seek bar says what they do */
         rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
-        u8str_t hint = app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open
-            ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
-        if (hint.len == 0 && app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open)
+        bool free_pointer = app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open;
+        u8str_t hint = free_pointer ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
+        const char *keys_of = hint.len ? "toggle_menu" : NULL;   /* the owner (2026-10-18): every tooltip with its keys */
+        if (hint.len == 0 && free_pointer) {
             hint = rubraview_box_hint(&app->toolbox, &base, app->pointer_x, app->pointer_y);
+            keys_of = rubraview_rect_contains(rubraview_box_pin_rect(&app->toolbox, &base), app->pointer_x, app->pointer_y) ? "toggle_toolbox_pin" : "toggle_toolbox";
+        }
+        if (hint.len > 0 && keys_of) hint = hint_with_keys(app, cstr(keys_of), hint.ptr, hint_scratch, sizeof(hint_scratch));
         if (hint.len == 0 && app->pointer_inside && app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED &&
             app->toolbox.state != RUBRAVIEW_BOX_DETACHED && !app->ctx_open && !app->slidepop_open) {
             /* the layout's icon says which it is, as words, when the pointer rests on it (owner, 2026-10-14) */
             int32_t tile = rubraview_box_tile_at(&app->toolbox, &base, app->pointer_x, app->pointer_y);
             if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_layout")) {
-                hint = cstr(layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)));
+                hint = hint_with_keys(app, U8("toggle_layout"), layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)),
+                                      hint_scratch, sizeof(hint_scratch));
             }
             if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "fit_cycle")) {
-                hint = cstr(rubraview_fit_tile_hint(app->fit_mode));   /* the fit it is in, in words (owner, 2026-10-15) */
+                /* the fit it is in, in words (owner, 2026-10-15), and its keys */
+                hint = hint_with_keys(app, cstr(fit_action_of(app->fit_mode)), rubraview_fit_tile_hint(app->fit_mode), hint_scratch, sizeof(hint_scratch));
             }
             if (hint.len == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
                 const char *said = rubraview_action_hint(app->toolbox_tiles[tile].action);
@@ -24769,6 +25062,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     break;
 
                 case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
+                    if (app.sel_mode && key_is(event.key.combo, "Escape")) {   /* stops choosing, not the program */
+                        sel_mode_set(&app, false);
+                        if (edit_panel_open(&app)) panel_build_edit(&app);
+                        break;
+                    }
                     dispatch_key(&app, event.key.combo);
                     break;
 
@@ -25078,7 +25376,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (edit_panel_open(&app) && app.listwin.open &&
                         rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y) &&
                         listwin_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
+                    /* RV-137 (owner, 2026-10-18): in its own window, Edit chooses an area only after its button. */
+                    bool choosing = app.sel_mode;   /* only after the button (owner, 2026-10-18: a drag moved boxes too) */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) && choosing &&
                         (edit_away || !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y))) {
                         int32_t hit = sel_hit(&app, event.mouse.x, event.mouse.y);
                         if (hit && crop_point_to_image(&app, event.mouse.x, event.mouse.y, &app.sel_grab_x, &app.sel_grab_y)) {
@@ -25087,7 +25387,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             break;
                         }
                     }
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) && choosing &&
                         (edit_away || !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y)) &&
                         !point_in_curve_widget(&app, event.mouse.x, event.mouse.y) &&
                         crop_point_to_image(&app, event.mouse.x, event.mouse.y,
@@ -25396,6 +25696,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         tiles_take_all(&app);   /* D-40 */
         save_job_poll(&app, false);
         apply_all_poll(&app, false);
+        if (app.edit_after[0]) {   /* a film's frame saved for Edit: opened once it is on screen */
+            int32_t page = current_page_index(&app);
+            if (page >= 0 && app.pages[page].loaded && rubraview_path_same(app.source.pages[page].path, cstr(app.edit_after))) {
+                app.edit_after[0] = '\0';
+                if (!edit_panel_open(&app)) panel_open_edit(&app);
+            }
+        }
         arc_job_poll(&app, false);
         page_job_poll(&app);
         arena_refill(&app);

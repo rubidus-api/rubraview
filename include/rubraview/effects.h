@@ -38,6 +38,12 @@ typedef enum rubraview_effect {
     RUBRAVIEW_EFFECT_BUTTON_3D,     /* amount: bevel, 2..100 px */
     RUBRAVIEW_EFFECT_FRAGMENT,      /* amount: offset, 1..50 px (four copies laid over) */
     RUBRAVIEW_EFFECT_EXPLOSION,     /* amount: scatter, 1..50 px */
+    /* Common filters (owner, 2026-10-18: "흑백 그레이스케일 디더링 색상감소 모자이크 ... 보편적인 필터들") */
+    RUBRAVIEW_EFFECT_THRESHOLD,     /* black and white: amount, the level that turns white, 1..254 */
+    RUBRAVIEW_EFFECT_DITHER,        /* black and white by error diffusion (Floyd-Steinberg): amount, the level, 1..254 */
+    RUBRAVIEW_EFFECT_COLOURS,       /* fewer colours: amount, how many, 2..256 (a median-cut palette) */
+    RUBRAVIEW_EFFECT_COLOURS_DITHER,/* the same palette, dithered */
+    RUBRAVIEW_EFFECT_SKETCH,        /* pencil sketch: amount, the stroke's softness, 1..30 px */
     RUBRAVIEW_EFFECT_COUNT
 } rubraview_effect_t;
 
@@ -49,6 +55,21 @@ const char *rubraview_effect_key(rubraview_effect_t effect);
 void rubraview_effect_range(rubraview_effect_t effect, double *lo, double *hi, double *start);
 /** Whether its amount is in pixels (scaled with the picture for a preview). */
 bool rubraview_effect_amount_is_pixels(rubraview_effect_t effect);
+
+/* The effects by kind, for choosing (owner, 2026-10-18: "카테고리별로 묶어서 표시"). */
+typedef enum rubraview_effect_group {
+    RUBRAVIEW_EFFECT_GROUP_COLOUR = 0,   /* grey, sepia, black and white, fewer colours ... */
+    RUBRAVIEW_EFFECT_GROUP_ARTISTIC,     /* mosaic, oil paint, pencil sketch, emboss ... */
+    RUBRAVIEW_EFFECT_GROUP_BLUR,         /* blurs and noise */
+    RUBRAVIEW_EFFECT_GROUP_DISTORT,      /* swirl, wave, fragment, explosion */
+    RUBRAVIEW_EFFECT_GROUP_FIX,          /* red eye, colour fringe, vignette */
+    RUBRAVIEW_EFFECT_GROUPS
+} rubraview_effect_group_t;
+
+const char *rubraview_effect_group_name(rubraview_effect_group_t group);
+rubraview_effect_group_t rubraview_effect_group_of(rubraview_effect_t effect);
+/** The effects of a kind, in the order they are offered; how many (at most `cap` written). */
+size_t rubraview_effect_group_members(rubraview_effect_group_t group, rubraview_effect_t *out, size_t cap);
 
 /** The effect on `src`, a new picture in `arena`; empty for none or out of memory. */
 rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview_pixbuf_t *src,
