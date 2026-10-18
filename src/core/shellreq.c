@@ -424,6 +424,38 @@ bool rubraview_print_place(int32_t cell_x, int32_t cell_y, int32_t cell_w, int32
     return true;
 }
 
+bool rubraview_print_preview_region(const rubraview_print_placement_t *pl, int32_t picture_w, int32_t picture_h,
+                                    double texture_w, double texture_h,
+                                    double dst_x, double dst_y, double dst_w, double dst_h,
+                                    double out_src[4], double out_m[6]) {
+    if (!pl || !out_src || !out_m || picture_w <= 0 || picture_h <= 0 || texture_w <= 0.0 || texture_h <= 0.0 ||
+        pl->src_w <= 0 || pl->src_h <= 0 || dst_w <= 0.0 || dst_h <= 0.0) return false;
+    double w = picture_w, h = picture_h;
+    double sx = pl->src_x, sy = pl->src_y, sw = pl->src_w, sh = pl->src_h;
+    int q = pl->quarter_turns & 3;
+    double ux, uy, uw, uh;   /* the part in the unturned picture */
+    if (q == 0)      { ux = sx; uy = sy; uw = sw; uh = sh; }
+    else if (q == 1) { ux = sy; uy = h - sx - sw; uw = sh; uh = sw; }
+    else if (q == 2) { ux = w - sx - sw; uy = h - sy - sh; uw = sw; uh = sh; }
+    else             { ux = w - sy - sh; uy = sx; uw = sh; uh = sw; }
+    double fx = texture_w / w, fy = texture_h / h;
+    double rw = uw * fx, rh = uh * fy;
+    out_src[0] = ux * fx;
+    out_src[1] = uy * fy;
+    out_src[2] = out_src[0] + rw;
+    out_src[3] = out_src[1] + rh;
+    /* The region's own pixels, 0..rw by 0..rh, turned a quarter clockwise q times onto dst. */
+    double kx = (q & 1) ? dst_w / rh : dst_w / rw, ky = (q & 1) ? dst_h / rw : dst_h / rh;
+    double m[4][6] = {
+        { kx, 0, 0, ky, dst_x, dst_y },
+        { 0, ky, -kx, 0, dst_x + rh * kx, dst_y },
+        { -kx, 0, 0, -ky, dst_x + rw * kx, dst_y + rh * ky },
+        { 0, -ky, kx, 0, dst_x, dst_y + rw * ky },
+    };
+    for (int i = 0; i < 6; ++i) out_m[i] = m[q][i];
+    return true;
+}
+
 static char entry_lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
 static bool entry_starts(u8str_t text, size_t at, const char *word) {

@@ -220,6 +220,18 @@ bool rubraview_print_place(int32_t cell_x, int32_t cell_y, int32_t cell_w, int32
                            const rubraview_print_options_t *options, rubraview_print_placement_t *out);
 
 /**
+ * 1.23.1: how the preview draws a placement with a small texture (`texture_w` x `texture_h`) standing
+ * for the picture (`picture_w` x `picture_h`, unturned). `out_src` (left, top, right, bottom) is the part
+ * of the texture printed; `out_m` (a, b, c, d, e, f: x' = a x + c y + e, y' = b x + d y + f) puts that
+ * part's own pixels — (0, 0) at its corner, as a region is drawn — turned as the print turns it, on
+ * `dst_*`. False when there is nothing to draw.
+ */
+bool rubraview_print_preview_region(const rubraview_print_placement_t *placement, int32_t picture_w, int32_t picture_h,
+                                    double texture_w, double texture_h,
+                                    double dst_x, double dst_y, double dst_w, double dst_h,
+                                    double out_src[4], double out_m[6]);
+
+/**
  * D-110: is a verb found under some `shell` key in the registry one of
  * Rubraview's, this version's or an older one's? By its key name
  * ("Rubraview", "Rubraview.open" and such) or by the program its command

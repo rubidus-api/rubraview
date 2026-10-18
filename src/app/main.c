@@ -14680,26 +14680,13 @@ static void draw_print_preview(app_state_t *app) {
         }
         rubraview_print_placement_t pl;
         if (!rubraview_print_place(cx, cy, cw, ch, sh->dpi_x, sh->dpi_y, w, h, &o, &pl)) continue;
-        double tw = app->print_thumb_w[k], th = app->print_thumb_h[k];
-        double fx = tw / (double)w, fy = th / (double)h;   /* the picture's pixels to the texture's */
-        /* the source part in the turned picture's pixels, back into the texture's unturned ones */
-        double sx = pl.src_x, sy = pl.src_y, sw = pl.src_w, shh = pl.src_h;
-        int q = pl.quarter_turns & 3;
-        double ux, uy, uw, uh;   /* in the unturned picture */
-        if (q == 0) { ux = sx; uy = sy; uw = sw; uh = shh; }
-        else if (q == 1) { ux = sy; uy = h - sx - sw; uw = shh; uh = sw; }
-        else if (q == 2) { ux = w - sx - sw; uy = h - sy - shh; uw = sw; uh = shh; }
-        else { ux = w - sy - shh; uy = sx; uw = shh; uh = sw; }
-        double rx = ux * fx, ry = uy * fy, rw = uw * fx, rh = uh * fy;   /* the region in the texture */
-        rubraview_src_rect_t src = { .left = rx, .top = ry, .right = rx + rw, .bottom = ry + rh };
-        /* the texture's region to the sheet: turned a quarter clockwise q times, into dst */
-        double dx = ox + pl.dst_x * scale, dy = oy + pl.dst_y * scale, dw = pl.dst_w * scale, dh = pl.dst_h * scale;
-        double kx = (q & 1) ? dw / rh : dw / rw, ky = (q & 1) ? dh / rw : dh / rh;
-        rubraview_mat3x2_t m;
-        if (q == 0)      m = (rubraview_mat3x2_t){ kx, 0, 0, ky, dx - rx * kx, dy - ry * ky };
-        else if (q == 1) m = (rubraview_mat3x2_t){ 0, ky, -kx, 0, dx + (ry + rh) * kx, dy - rx * ky };
-        else if (q == 2) m = (rubraview_mat3x2_t){ -kx, 0, 0, -ky, dx + (rx + rw) * kx, dy + (ry + rh) * ky };
-        else             m = (rubraview_mat3x2_t){ 0, -ky, kx, 0, dx - ry * kx, dy + (rx + rw) * ky };
+        /* 1.23.1: the part printed, drawn from its own corner (the renderer's region) onto where it goes;
+           what is past the cell is cut away as the printing cuts it, so nothing leaves the paper */
+        double r[4], mm[6];
+        if (!rubraview_print_preview_region(&pl, w, h, app->print_thumb_w[k], app->print_thumb_h[k],
+                                            ox + pl.dst_x * scale, oy + pl.dst_y * scale, pl.dst_w * scale, pl.dst_h * scale, r, mm)) continue;
+        rubraview_src_rect_t src = { .left = r[0], .top = r[1], .right = r[2], .bottom = r[3] };
+        rubraview_mat3x2_t m = { mm[0], mm[1], mm[2], mm[3], mm[4], mm[5] };
         rubraview_pal_render_draw_texture_region(app->renderer, app->print_thumbs[k], src, m, RUBRAVIEW_INTERP_LINEAR);
     }
     char line[200];
