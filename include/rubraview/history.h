@@ -100,6 +100,13 @@ typedef struct rubraview_recent {
 } rubraview_recent_t;
 
 rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text);
+
+/**
+ * RFC-0006: the list moved whole into `arena` — its entries and every path —
+ * so what it was built from (an older list, a file read) can be given back.
+ * False, with the list as it was, when the arena cannot hold it.
+ */
+bool rubraview_recent_rehome(proven_arena_t *arena, rubraview_recent_t *recent);
 u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent);
 
 /** `path` was opened at `timestamp`: it becomes the newest; at most `max_entries` are kept. */

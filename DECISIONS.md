@@ -1577,3 +1577,29 @@ Do not store credentials, private infrastructure details, personal data, private
   - RV-138 (filter plug-ins: `.8bf`, a C interface of our own, Paint.NET's weighed), RV-139 (saving JPEG XL and AVIF), RV-140 (more saving choices) recorded for later.
   - In Edit (owner, 2026-10-18: "에디트 상태에서 동작해야 할 버튼과 아닌 버튼을 구분하고, 작동 안하는건 에디트 상태에서는 안보이게 ... 파일 목록과 내보내기는 동작 ... 파일 이동하는 버튼도요. 단 이미지 사이에서만 ... 동영상에서는 정지 상태에서만 edit"): `edit_denies` (another view of the page, a show, another screen, the file changed or moved, a film's or a text's controls) hides those tiles and answers those keys with a message; turning goes to the next picture, passing films, sounds and texts; Export from Edit carries the steps (`export_from_edit`) and Edit opens again with them (`edit_kept`); E on a paused film saves the frame beside it (as Save frame does) and Edit opens on that picture once it is on screen.
 - Consequences: seen on the VM (2026-10-18) — the choose button first, no area without it, two mosaic edits on two areas, the area (187 x 225) on the clipboard, an earlier `*_edit` copy left out (the new copy named `p0_edit-1`); the toolbox's keys under the words (First Home, Wide alone Shift+B, Fit 1) and in the anchors' tooltips; in Edit the rotate, layout, wide, slides and picker tiles gone, `.` from a.png to c.png past a film and to e.png past a text; Export from Edit wrote `e_edit.png` grey and Edit came back with its edit; E on a paused film saved `b_clip_00-01-208.png` and Edit opened on it, `.` then went on to c.png. The pointer's cross is not in the screenshots (Windows leaves the pointer out), so it was not seen; the dragged reorder was checked by its unit test (the two rows had the same words).
+
+## 2026-10-18: D-165 Memory by use (RFC-0006, RV-141)
+
+- Status: Accepted (owner 2026-10-18: "arena에 stack으로 만든 pool을 복합 적용하여, 각 타입들로 따로 pool을 두어 ... 어떤 한계가 넘으면 재시작을 권유 ... 아레나는 힙으로 할당 ... 기존 아레나를 새 아레나로 옮기는 기능 ... 용도에 따라 아레나 공간을 분할 ... RFC로 계획부터"; "힙이 필요하면 아레나에 집착말고 힙을 쓰세요").
+- Decision:
+  - `memory.c`:
+    - regions of heap chunks that move on to a new arena and count what they hold;
+    - type pools: proven's pool, a stack of freed items, over a region or the heap;
+    - block pools; scratch blocks of 1, 4, 16 and 64 MB, larger ones malloc'd and freed;
+    - `rubraview_mem_t` with `persist` (the app arena), `media`, `bgm`, `recent[2]`, `windows` and `scratch`;
+    - pressure levels.
+  - Moved off the session arena:
+    - a song's head, tags, words and sheet → `media`, reset per track; background music takes the region whole (`media` and `bgm` swapped);
+    - its next track → `bgm`;
+    - `recent.ini` → the idle half, the list rehomed there;
+    - a language pack read, the settings file read to merge → scratch;
+    - eight windows that open and close → a 1 MB block each, given back after their renderer and window.
+  - `app_keep` refuses (empty, `full` set) instead of handing back the text it was given.
+  - `edit_copy_area` uses two lanes; buffer sizes through `rubraview_size_product`, `picture_bytes` and `bytes_scaled`, `SIZE_MAX` on overflow.
+  - A restart offered once when `persist` passes 512 MB, or all held passes 1.5 GB (`debug.memory_restart_mb` for a test). Y writes the settings and starts `--new-instance <file on screen>`, then closes after `subs_may_leave`. Settings › Cache has the figures and the action.
+- Consequences: seen on the VM (2026-10-18), all under full page heap (GlobalFlag 0x02000000, PageHeapFlags 3, removed after):
+  - thirty 2.9 MB songs turned through: session 0 MB, a track 2 MB, 108 MB held, before and after. Before the swap it was 33 MB and 43 MB, which is how the swap was found.
+  - Edit opened and closed twenty times: no window block left, 93 MB held.
+  - the restart offered by the test setting, Y: a new process on the same file, the old one gone.
+  - No break in Settings, music, Edit or the restart.
+  - The review's claim that the arena filled and failed was wrong (`arena_refill` moved on); the fault was growth that was never given back.

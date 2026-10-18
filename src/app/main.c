@@ -83,6 +83,7 @@
 #include "rubraview/ui_listwin.h"
 #include "rubraview/classify.h"
 #include "rubraview/fontspec.h"
+#include "rubraview/memory.h"
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
@@ -126,7 +127,6 @@
 #include "rubraview/textview.h"
 #include "rubraview/effects.h"
 
-#define APP_ARENA_BYTES (64u * 1024u * 1024u)
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico;*.avif;*.jxl"
 /* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
 #define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
@@ -350,7 +350,11 @@ typedef struct apply_all_job {
 } apply_all_job_t;
 
 typedef struct app_state {
-    proven_arena_t *arena;
+    proven_arena_t *arena;    /* RFC-0006: &mem->persist.arena, the region of what lasts */
+    rubraview_mem_t *mem;
+    /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
+       windows pool, given back when it closes. */
+    struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -970,6 +974,9 @@ typedef struct app_state {
     char                   rename_composing[64];   /* the IME's unfinished syllable, drawn after the text */
     size_t                 rename_composing_length;
     bool                   confirm_purge;   /* §3.18.1's Y/N dialog is showing */
+    bool                   confirm_restart; /* RFC-0006: a restart offered, Y / N */
+    bool                   restart_offered; /* once a session */
+    double                 memory_checked_at;
 
     /* A short-lived message: "moved to Best", "cannot be brought back".
        §3.18.3 calls it a notification badge; it is a line of text with a
@@ -1187,6 +1194,8 @@ static void files_show(app_state_t *app);
 static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
 static bool subs_may_leave(app_state_t *app);
+static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text);
+static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text);
 static void slides_follow_screen(app_state_t *app);
 static bool popups_key(app_state_t *app, rubraview_key_combo_t combo);
 static bool hint_shown(const app_state_t *app);
@@ -1573,6 +1582,20 @@ static bool anim_read_frame(void *ctx, size_t index, uint8_t *dst, size_t stride
 enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE, FRAME_EDIT };   /* FRAME_EDIT: saved beside the film, then edited (RV-137) */
 static double play_position(const app_state_t *app);
 
+/* RV-141 (5): a buffer's size from a picture's, checked — SIZE_MAX, which malloc refuses,
+   when it does not fit (a width and a height come out of a file). */
+static size_t picture_bytes(size_t w, size_t h, size_t per_pixel, size_t extra) {
+    size_t n = 0;
+    if (!rubraview_size_product(&n, w, h, per_pixel) || PROVEN_CKD_ADD(&n, n, extra)) return SIZE_MAX;
+    return n;
+}
+
+static size_t bytes_scaled(size_t n, size_t k, size_t extra) {
+    size_t out = 0;
+    if (n == SIZE_MAX || PROVEN_CKD_MUL(&out, n, k) || PROVEN_CKD_ADD(&out, out, extra)) return SIZE_MAX;
+    return out;
+}
+
 /* RV-116 (owner, 2026-10-14): Ctrl+C, or Copy picture, on a still picture — the
    picture as its file holds it, at its own size (not turned or adjusted as it is
    shown), read again into memory of its own that is given back at once. */
@@ -1587,7 +1610,7 @@ static void picture_copy(app_state_t *app) {
         osd_say(app, TU8("this picture is too large to copy"));
         return;
     }
-    size_t big = (size_t)w * (size_t)h * 4u * 3u + (16u << 20);
+    size_t big = picture_bytes((size_t)w, (size_t)h, 4u * 3u, 16u << 20);
     void *memory = malloc(big);
     if (!memory) { osd_say(app, TU8("there is not memory enough to copy this picture")); return; }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
@@ -1819,7 +1842,7 @@ static void animation_prepare(app_state_t *app) {
                                                &timed_frames, &timed_count, &canvas_w, &canvas_h);
     if (app->anim_reader) {
         free(mem);
-        size_t whole = (size_t)canvas_w * (size_t)canvas_h * 4;
+        size_t whole = picture_bytes((size_t)canvas_w, (size_t)canvas_h, 4u, 0);
         app->anim_buffers = (uint8_t*)rubraview_malloc_product(whole, 3, 1);
         if (!app->anim_buffers) { anim_close(app); return; }
         rubraview_frame_canvas_init(&app->anim_canvas, timed_frames, timed_count, canvas_w, canvas_h,
@@ -2218,6 +2241,45 @@ static void music_clear(app_state_t *app) {
     app->music_lyrics = (rubraview_lyrics_t){0};
     app->music_cue = (rubraview_cue_sheet_t){0};
     memset(app->viz_peaks, 0, sizeof(app->viz_peaks));
+    /* RFC-0006: what a track carried, given back for the next one. A track that went on
+       as the background music took its region with it (bgm_adopt). */
+    if (app->mem) rubraview_region_reset(&app->mem->media);
+}
+
+/* RFC-0006: a window's block from the windows pool (the session's arena when none can be had). */
+static proven_arena_t *window_block_take(app_state_t *app, struct window_block *wb) {
+    if (wb->block) return &wb->arena;   /* already its own */
+    if (!app->mem || !rubraview_block_take(&app->mem->windows, &wb->arena, &wb->block)) return app->arena;
+    return &wb->arena;
+}
+
+static proven_arena_t *window_block_arena(app_state_t *app, struct window_block *wb) {
+    return wb->block ? &wb->arena : app->arena;
+}
+
+/* After the window and its renderer are gone. */
+static void window_block_give(app_state_t *app, struct window_block *wb) {
+    if (wb->block && app->mem) rubraview_block_give(&app->mem->windows, wb->block);
+    wb->block = NULL;
+}
+
+/* RFC-0006: memory for a moment, from scratch — the session's arena when none can be had
+   (then `give` does nothing). */
+static proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes) {
+    *s = (rubraview_scratch_t){ .cls = -1 };
+    if (app->mem && rubraview_scratch_take(app->mem, bytes, s)) return &s->arena;
+    return app->arena;
+}
+
+static void scratch_end(app_state_t *app, rubraview_scratch_t *s) {
+    if (app->mem && s->block) rubraview_scratch_give(app->mem, s);
+}
+
+/* The media region with room for `need` more (RFC-0006): a track's head, tags, words and sheet. */
+static proven_arena_t *media_arena(app_state_t *app, size_t need) {
+    if (!app->mem) return app->arena;
+    if (!rubraview_region_ensure(&app->mem->media, need)) return app->arena;   /* past its limit: the session's, as before */
+    return &app->mem->media.arena;
 }
 
 /* The equaliser window's bands (owner, 2026-10-01): `audio.eq_band1..10`
@@ -2299,29 +2361,31 @@ static void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) 
 static void music_load(app_state_t *app, u8str_t path) {
     music_clear(app);
     if (path.len == 0) return;
-    u8str_t head = rubraview_pal_fs_read_file(app->arena, path, MUSIC_MAX_HEAD_BYTES);
+    u8str_t head = rubraview_pal_fs_read_file(media_arena(app, MUSIC_MAX_HEAD_BYTES + 4096u), path, MUSIC_MAX_HEAD_BYTES);
     if (head.len == 0) return;      /* a record too large for the head budget: no tags, and it still plays */
-    app->music_tags = rubraview_tags_read(app->arena, (rubraview_tags_source_t){
+    app->music_tags = rubraview_tags_read(media_arena(app, head.len + (1u << 20)), (rubraview_tags_source_t){
         .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
     app->music_tags_read = true;
     music_make_backdrop(app, &app->music_tags);
     /* A `.lrc` of the same name beside it: the words, in time. Else the
        words the file carries (owner, 2026-10-01): SYLT's timed lines,
        then USLT / LYRICS / ©lyr text, which is read as LRC when it is. */
-    u8str_t lrc = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".lrc"), 1024u * 1024u);
-    if (lrc.len > 0) app->music_lyrics = rubraview_lyrics_parse(app->arena, lrc);
+    proven_arena_t *ma = media_arena(app, 3u << 20);   /* the words: a megabyte at most, and their parse */
+    u8str_t lrc = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".lrc"), 1024u * 1024u);
+    if (lrc.len > 0) app->music_lyrics = rubraview_lyrics_parse(ma, lrc);
     if (app->music_lyrics.count == 0 && app->music_tags.synced_lyrics_count > 0) {
-        app->music_lyrics = rubraview_lyrics_from_lines(app->arena, app->music_tags.synced_lyrics,
+        app->music_lyrics = rubraview_lyrics_from_lines(ma, app->music_tags.synced_lyrics,
                                                         app->music_tags.synced_lyrics_count);
     }
     if (app->music_lyrics.count == 0 && app->music_tags.lyrics_text.len > 0) {
-        app->music_lyrics = rubraview_lyrics_from_text(app->arena, app->music_tags.lyrics_text);
+        app->music_lyrics = rubraview_lyrics_from_text(ma, app->music_tags.lyrics_text);
     }
+    ma = media_arena(app, 3u << 20);   /* the sheet: the same */
     /* A `.cue` of the same name: one file cut into the record's tracks.
        Else a sheet of any name beside it whose FILE names this file
        (owner, 2026-10-01: `CDImage.cue` for `Album.flac`). */
-    u8str_t cue = rubraview_pal_fs_read_file(app->arena, rubraview_path_with_ext(app->arena, path, ".cue"), 1024u * 1024u);
-    if (cue.len > 0) app->music_cue = rubraview_cue_parse(app->arena, cue, app->music_tags.duration_seconds);
+    u8str_t cue = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".cue"), 1024u * 1024u);
+    if (cue.len > 0) app->music_cue = rubraview_cue_parse(ma, cue, app->music_tags.duration_seconds);
     if (app->music_cue.count < 2) {
         app->music_cue = (rubraview_cue_sheet_t){0};
         u8str_t dir = rubraview_path_dirname(path);
@@ -2354,8 +2418,9 @@ static void music_load(app_state_t *app, u8str_t path) {
             }
         }
         for (size_t i = 0; i < app->cue_scan_count; ++i) {
-            u8str_t text = rubraview_pal_fs_read_file(app->arena, app->cue_scan_paths[i], 1024u * 1024u);
-            rubraview_cue_sheet_t sheet = rubraview_cue_parse(app->arena, text, app->music_tags.duration_seconds);
+            proven_arena_t *sa = media_arena(app, 3u << 20);   /* each sheet read for this track only */
+            u8str_t text = rubraview_pal_fs_read_file(sa, app->cue_scan_paths[i], 1024u * 1024u);
+            rubraview_cue_sheet_t sheet = rubraview_cue_parse(sa, text, app->music_tags.duration_seconds);
             if (sheet.count >= 2 && rubraview_cue_names_audio(&sheet, rubraview_path_basename(path))) {
                 app->music_cue = sheet;
                 break;
@@ -2777,6 +2842,8 @@ static void bgm_close(app_state_t *app) {
     app->bgm_page = -1;
     app->bgm_position = 0.0;
     app->bgm_paused = false;
+    app->bgm_tags = (rubraview_tags_t){0};   /* RFC-0006: its words given back with it */
+    if (app->mem) rubraview_region_reset(&app->mem->bgm);
     (void)rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_CLOSED, bgm_pause_for_sound(app));
 }
 
@@ -2797,6 +2864,14 @@ static bool bgm_adopt(app_state_t *app) {
     app->bgm_page = app->media_page;
     app->bgm_position = app->media_position;
     app->bgm_tags = app->music_tags;   /* its words outlive the page too */
+    if (app->mem) {
+        /* RFC-0006: and the region they are in goes with them — the media and the background
+           music's regions change places whole, nothing copied (VM, 2026-10-18: turning through
+           thirty songs kept every one, as each became the background music for a moment). */
+        rubraview_region_t held = app->mem->bgm;
+        app->mem->bgm = app->mem->media;
+        app->mem->media = held;
+    }
     app->bgm_paused = app->media_paused;
     app->media = NULL;
     app->media_page = -1;
@@ -4241,13 +4316,8 @@ static bool strip_press(app_state_t *app, double x, double y) {
    pictures); as a last guard, a working arena running low goes on in a
    new block. The full one is kept: what is in it is still in use. */
 static void arena_refill(app_state_t *app) {
-    proven_arena_t *a = app->arena;
-    if (!a || a->backing.size - a->offset >= APP_ARENA_LOW) return;
-    void *mem = malloc(APP_ARENA_BYTES);
-    proven_arena_t *next = (proven_arena_t*)malloc(sizeof(*next));
-    if (!mem || !next) { free(mem); free(next); return; }
-    *next = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = APP_ARENA_BYTES });
-    app->arena = next;
+    /* RFC-0006: the persist region moves on to a new heap chunk; app->arena is that region's arena. */
+    if (app->mem && !rubraview_region_ensure(&app->mem->persist, APP_ARENA_LOW)) app->mem->full = true;
 }
 
 /* The idle picker arena, emptied: the next listing is built in it. */
@@ -4267,8 +4337,12 @@ static proven_arena_t *picker_next_arena(app_state_t *app) {
    favourite, a path being opened), copied into the working arena. */
 static u8str_t app_keep(app_state_t *app, u8str_t text) {
     if (text.len == 0) return text;
+    /* RFC-0006 (RV-141): room is made in the session's region; when there is none, nothing
+       is kept and that is said — the text handed in is never given back as if it were kept,
+       since a caller's stack buffer would then be held after it is gone. */
+    if (app->mem && !rubraview_region_ensure(&app->mem->persist, text.len + 1)) { app->mem->full = true; return U8(""); }
     proven_result_mem_mut_t res = proven_arena_alloc(app->arena, text.len + 1);
-    if (!proven_is_ok(res.err)) return text;
+    if (!proven_is_ok(res.err)) { if (app->mem) app->mem->full = true; return U8(""); }
     memcpy(res.value.ptr, text.ptr, text.len);
     res.value.ptr[text.len] = '\0';
     return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = text.len };
@@ -6739,6 +6813,41 @@ static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
 /* Everything §3.18 puts in front of the reader answers the next key
    press before anything else does: a confirmation that is ignored is
    worse than no confirmation at all. */
+/* RFC-0006: the program started again where it is — the file on screen (a book's page
+   comes back from the reading history) — after what quitting asks; then this one closes. */
+static void restart_now(app_state_t *app) {
+    app->confirm_restart = false;
+    if (!subs_may_leave(app)) return;   /* subtitle changes not saved: asked, as quitting asks */
+    settings_write_if_changed(app, false);
+    u8str_t here = current_file_path(app);
+    if (app->source.archive_path.len > 0) here = app->source.archive_path;
+    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    char line[4096];
+    size_t pos = 0;
+    line[0] = '\0';
+    if (exe.len > 0) {
+        append_arg(line, sizeof(line), &pos, exe);
+        append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
+        if (here.len > 0) append_arg(line, sizeof(line), &pos, here);
+    }
+    if (exe.len == 0 || !rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) {
+        osd_say(app, TU8("Rubraview could not be started again"));
+        return;
+    }
+    rubraview_pal_window_request_close(app->window);
+}
+
+/* Twice a second: past the session's limit (or a test's), a restart is offered, once. */
+static void memory_watch(app_state_t *app, double now) {
+    if (!app->mem || app->restart_offered || now - app->memory_checked_at < 0.5) return;
+    app->memory_checked_at = now;
+    double test_mb = rubraview_settings_get(&app->settings, U8("debug"), U8("memory_restart_mb"));
+    if (test_mb > 0.0) app->mem->heap_restart_at = (size_t)test_mb << 20;   /* a test's limit, on all the program holds */
+    if (rubraview_mem_pressure(app->mem) == RUBRAVIEW_MEM_OK) return;
+    app->restart_offered = true;
+    app->confirm_restart = true;
+}
+
 static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     /* An open text box takes every key first: a resume offer still on
        screen took its Enter, and the typed path went nowhere (VM,
@@ -6777,6 +6886,14 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         return true;
     }
 
+    if (app->confirm_restart) {   /* RFC-0006 */
+        if (key_is(combo, "Y") || key_is(combo, "Enter")) restart_now(app);
+        else {
+            app->confirm_restart = false;
+            osd_say(app, TU8("later, then: Settings > Cache restarts it when you like"));
+        }
+        return true;
+    }
     if (app->confirm_purge) {
         if (key_is(combo, "Y") || key_is(combo, "Enter")) {
             app->confirm_purge = false;
@@ -7232,6 +7349,7 @@ static void mini_close(app_state_t *app) {
     if (app->mini_cover) rubraview_pal_texture_destroy(app->mini_cover);
     if (app->mini_renderer) rubraview_pal_render_destroy(app->mini_renderer);
     if (app->mini_window) rubraview_pal_window_destroy(app->mini_window);
+    window_block_give(app, &app->mini_block);
     app->mini_cover = NULL;
     app->mini_renderer = NULL;
     app->mini_window = NULL;
@@ -7264,7 +7382,7 @@ static void mini_show(app_state_t *app) {
     rubraview_window_config_t config = {
         .title = T("Rubraview music"), .width = MINI_WIDTH, .height = MINI_HEIGHT + 24, .owner = app->window,
     };
-    app->mini_window = rubraview_pal_window_create(app->arena, &config);
+    app->mini_window = rubraview_pal_window_create(window_block_take(app, &app->mini_block), &config);
     if (!app->mini_window) {
         osd_say(app, TU8("the mini player could not be opened"));
         return;
@@ -7275,11 +7393,11 @@ static void mini_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->mini_window, &w, &h);
-    app->mini_renderer = rubraview_pal_render_create(app->arena,
+    app->mini_renderer = rubraview_pal_render_create(window_block_arena(app, &app->mini_block),
                                                      rubraview_pal_window_native_handle(app->mini_window), w, h);
     ui_font_apply_all(app);
     if (!app->mini_renderer) {
-        rubraview_pal_window_destroy(app->mini_window);
+        rubraview_pal_window_destroy(app->mini_window); window_block_give(app, &app->mini_block);
         app->mini_window = NULL;
         osd_say(app, TU8("the mini player could not be drawn"));
         return;
@@ -7396,7 +7514,7 @@ static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y,
         .title = T("Rubraview toolbox"), .width = (int32_t)(w / dpi), .height = (int32_t)(h / dpi),
         .owner = app->window, .tool_window = true,
     };
-    app->toolbox_window = rubraview_pal_window_create(app->arena, &config);
+    app->toolbox_window = rubraview_pal_window_create(window_block_take(app, &app->toolbox_block), &config);
     if (!app->toolbox_window) {
         rubraview_box_dock(&app->toolbox);
         osd_say(app, TU8("the toolbox could not open a window of its own"));
@@ -7405,7 +7523,7 @@ static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y,
     rubraview_pal_window_set_frame(app->toolbox_window, screen_x, screen_y, w, h);
     int32_t cw = 0, ch = 0;
     rubraview_pal_window_get_size(app->toolbox_window, &cw, &ch);
-    app->toolbox_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->toolbox_window), cw, ch);
+    app->toolbox_renderer = rubraview_pal_render_create(window_block_arena(app, &app->toolbox_block), rubraview_pal_window_native_handle(app->toolbox_window), cw, ch);
     ui_font_apply_all(app);
     app->toolbox_window_opacity = -1.0;
     app->toolbox_window_drawn = 0.0;
@@ -7418,6 +7536,7 @@ static void toolbox_detach(app_state_t *app, int32_t screen_x, int32_t screen_y,
 static void toolbox_dock(app_state_t *app, double client_x, double client_y) {
     if (app->toolbox_renderer) rubraview_pal_render_destroy(app->toolbox_renderer);
     if (app->toolbox_window) rubraview_pal_window_destroy(app->toolbox_window);
+    window_block_give(app, &app->toolbox_block);
     app->toolbox_renderer = NULL;
     app->toolbox_window = NULL;
     rubraview_box_dock(&app->toolbox);
@@ -8889,7 +9008,7 @@ static void draw_vobsub(app_state_t *app) {
             app->vobsub_texture_h = app->vobsub_cue.height;
         }
         if (!app->vobsub_texture) return;
-        size_t pixels = (size_t)app->vobsub_cue.width * (size_t)app->vobsub_cue.height;
+        size_t pixels = picture_bytes((size_t)app->vobsub_cue.width, (size_t)app->vobsub_cue.height, 1u, 0);
         proven_result_mem_mut_t mem = rubraview_arena_alloc_array(app->arena, pixels, sizeof(uint32_t));
         if (!proven_is_ok(mem.err)) return;
         uint32_t *bgra = (uint32_t*)mem.value.ptr;
@@ -8937,7 +9056,7 @@ static void draw_pgs(app_state_t *app) {
             app->pgs_texture_h = app->pgs_cue.height;
         }
         if (!app->pgs_texture) return;
-        size_t pixels = (size_t)app->pgs_cue.width * (size_t)app->pgs_cue.height;
+        size_t pixels = picture_bytes((size_t)app->pgs_cue.width, (size_t)app->pgs_cue.height, 1u, 0);
         proven_result_mem_mut_t mem = rubraview_arena_alloc_array(app->arena, pixels, sizeof(uint32_t));
         if (!proven_is_ok(mem.err)) return;
         uint32_t *bgra = (uint32_t*)mem.value.ptr;
@@ -9851,6 +9970,16 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     /* The equaliser is worked by hand, so it sits over the floating boxes
        (VM, 2026-10-01: the toolbox showed through it). */
     draw_eqwin(app, win_w, win_h);
+    if (app->confirm_restart) {   /* RFC-0006 */
+        double box_w = 680.0 * chrome_dpi, box_h = 100.0 * chrome_dpi;
+        if (box_w > win_w - 16.0) box_w = win_w - 16.0;
+        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_TILE_CURRENT, 2.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer,
+                                       TU8("Rubraview has used much of its memory. Restart it where you are?  (Y: restart now, N: later)"),
+                                       box, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
     if (app->confirm_purge) {
         double box_w = 520.0 * chrome_dpi, box_h = 90.0 * chrome_dpi;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
@@ -11093,15 +11222,16 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
         if (com && rubraview_pal_image_size(path, &w, &h) && w > 0 && h > 0) {
             rubraview_edit_steps_t steps = job->steps;
             rubraview_edit_steps_rebase(&steps, w, h);   /* the same parts of this picture */
-            size_t biggest = (size_t)w * (size_t)h * 4u;
+            size_t biggest = picture_bytes((size_t)w, (size_t)h, 4u, 0);
             for (size_t k = 1; k <= steps.cursor; ++k) {
                 int32_t sw = 0, sh = 0;
                 rubraview_edit_steps_size(&steps, k, &sw, &sh);
-                if ((size_t)sw * (size_t)sh * 4u > biggest) biggest = (size_t)sw * (size_t)sh * 4u;
+                size_t b = picture_bytes((size_t)sw, (size_t)sh, 4u, 0);
+                if (b > biggest) biggest = b;
             }
-            size_t half = biggest * 6u + (16u << 20);
-            size_t first = (size_t)w * (size_t)h * 4u * 3u + (16u << 20);
-            void *mem = malloc(first + half * 2u);
+            size_t half = bytes_scaled(biggest, 6u, 16u << 20), all = bytes_scaled(half, 2u, 0);
+            size_t first = picture_bytes((size_t)w, (size_t)h, 4u * 3u, 16u << 20);
+            void *mem = all == SIZE_MAX || first == SIZE_MAX || PROVEN_CKD_ADD(&all, all, first) ? NULL : malloc(all);
             if (mem) {
                 proven_arena_t read = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = first });
                 proven_arena_t lanes[2] = {
@@ -12343,10 +12473,28 @@ static void edit_copy_area(app_state_t *app) {
     if (w <= 0 || h <= 0 || (uint64_t)w * (uint64_t)h > (uint64_t)100000000u) { osd_say(app, TU8("this picture is too large to copy")); return; }
     rubraview_edit_steps_t steps = app->edit_steps;
     steps.count = steps.cursor;   /* the changes in force, the one in hand among them */
-    size_t big = (size_t)w * (size_t)h * 4u * (6u + steps.count) + (32u << 20);
+    /* RV-141 (4): the picture read into memory of its own, then each step from one lane into
+       the other, the one before given back as the next is made — not a picture's size a step. */
+    size_t pixels = 0, first = 0, biggest = 0;
+    if (!rubraview_size_product(&pixels, (size_t)w, (size_t)h, 4u)) { osd_say(app, TU8("this picture is too large to copy")); return; }
+    biggest = pixels;
+    for (size_t k = 1; k <= steps.count; ++k) {
+        int32_t sw = 0, sh = 0;
+        size_t b = 0;
+        rubraview_edit_steps_size(&steps, k, &sw, &sh);
+        if (sw > 0 && sh > 0 && rubraview_size_product(&b, (size_t)sw, (size_t)sh, 4u) && b > biggest) biggest = b;
+    }
+    size_t lane = 0, big = 0;
+    if (!rubraview_size_product(&first, pixels, 3u, 1u) || !rubraview_size_product(&lane, biggest, 6u, 1u) ||
+        PROVEN_CKD_ADD(&first, first, (size_t)(16u << 20)) || PROVEN_CKD_ADD(&lane, lane, (size_t)(16u << 20)) ||
+        PROVEN_CKD_ADD(&big, first, lane) || PROVEN_CKD_ADD(&big, big, lane)) { osd_say(app, TU8("this picture is too large to copy")); return; }
     void *memory = malloc(big);
     if (!memory) { osd_say(app, TU8("there is not memory enough to copy this picture")); return; }
-    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
+    proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = first });
+    proven_arena_t lanes[2] = {
+        proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory + first, .size = lane }),
+        proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory + first + lane, .size = lane }),
+    };
     rubraview_pixbuf_t full = {0};
     u8str_t path = app->source.pages[page].path;
     if (path.len > 0) {
@@ -12359,13 +12507,22 @@ static void edit_copy_area(app_state_t *app) {
         if (bytes.ok && bytes.data.len > 0)
             full = rubraview_pal_image_read_pixels_within(&scratch, U8(""), (const uint8_t*)bytes.data.ptr, bytes.data.len, true, 0, 0);
     }
-    rubraview_pixbuf_t done = rubraview_pixbuf_is_valid(&full) && steps.count > 0 ? rubraview_edit_steps_apply(&scratch, &steps, &full, 1.0) : full;
+    rubraview_pixbuf_t done = full;
+    for (size_t k = 0; k < steps.count && rubraview_pixbuf_is_valid(&done); ++k) {
+        proven_arena_t *into = &lanes[k % 2u];
+        proven_arena_reset(into);
+        rubraview_pixbuf_t next = rubraview_edit_step_apply(into, &steps.steps[k], &done, 1.0);
+        if (rubraview_pixbuf_is_valid(&next)) done = next; else done = (rubraview_pixbuf_t){0};
+    }
+    proven_arena_t *out_arena = &lanes[steps.count % 2u];   /* the lane not holding the result */
+    proven_arena_reset(out_arena);
+    if (steps.count == 0) out_arena = &lanes[0];
     rubraview_pixbuf_t bgra = !rubraview_pixbuf_is_valid(&done) || done.format == RUBRAVIEW_PIXFMT_BGRA8
-        ? done : rubraview_pixbuf_convert(&scratch, &done, RUBRAVIEW_PIXFMT_BGRA8);
+        ? done : rubraview_pixbuf_convert(out_arena, &done, RUBRAVIEW_PIXFMT_BGRA8);
     const rubraview_crop_rect_t *c = &app->edit.crop;
     if (rubraview_pixbuf_is_valid(&bgra) && app->edit.crop_active && c->width >= 1 && c->height >= 1 &&
         c->x + c->width <= bgra.width && c->y + c->height <= bgra.height) {
-        rubraview_pixbuf_t cut = rubraview_pixbuf_crop(&scratch, &bgra, c->x, c->y, c->width, c->height);
+        rubraview_pixbuf_t cut = rubraview_pixbuf_crop(bgra.pixels == done.pixels ? out_arena : &scratch, &bgra, c->x, c->y, c->width, c->height);
         if (rubraview_pixbuf_is_valid(&cut) && app->sel_shape == RUBRAVIEW_AREA_ELLIPSE) {
             double rx = cut.width / 2.0, ry = cut.height / 2.0;
             for (int32_t y = 0; y < cut.height; ++y) {
@@ -12611,7 +12768,7 @@ static void edit_effect_apply(app_state_t *app) {
 static void edit_auto_colour(app_state_t *app) {
     if (!rubraview_pixbuf_is_valid(&app->edit_small)) { osd_say(app, TU8("the picture is not read yet")); return; }
     edit_live_close(app);   /* measured on the steps as they are, then a step of its own */
-    size_t bytes = (size_t)app->edit_small.width * (size_t)app->edit_small.height * 4u * (6u + 4u * app->edit_steps.cursor) + (8u << 20);
+    size_t bytes = picture_bytes((size_t)app->edit_small.width, (size_t)app->edit_small.height, 4u * (6u + 4u * app->edit_steps.cursor), 8u << 20);
     void *mem = malloc(bytes);
     if (!mem) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = bytes });
@@ -14204,15 +14361,16 @@ static int save_job_work(save_job_t *job) {
        arena is a fixed 64 MB, a 3840x2400 page is 37 MB decoded, and the
        commit's first copy used to fail there — which wrote the page
        unedited, as if the edit had been saved (T093). */
-    size_t src_bytes = (size_t)job->width * (size_t)job->height * 4u;
+    size_t src_bytes = picture_bytes((size_t)job->width, (size_t)job->height, 4u, 0);
     size_t out_bytes = src_bytes;
     if (job->apply_edit && job->edit.resize_width > 0 && job->edit.resize_height > 0) {
-        size_t r = (size_t)job->edit.resize_width * (size_t)job->edit.resize_height * 4u;
+        size_t r = picture_bytes((size_t)job->edit.resize_width, (size_t)job->edit.resize_height, 4u, 0);
         if (r > out_bytes) out_bytes = r;
     }
     /* decode and its conversion, then the commit's clone, blur and sharpen
        (each a copy plus a row buffer's worth), then the resize */
-    size_t need = src_bytes * 8u + out_bytes * 2u + (16u << 20);
+    size_t need = bytes_scaled(src_bytes, 8u, 0), twice_out = bytes_scaled(out_bytes, 2u, 16u << 20);
+    if (need == SIZE_MAX || twice_out == SIZE_MAX || PROVEN_CKD_ADD(&need, need, twice_out)) need = SIZE_MAX;   /* malloc refuses it */
     void *work_mem = malloc(need);
     if (!work_mem) return SAVE_NO_MEMORY;
     proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = need });
@@ -14228,11 +14386,11 @@ static int save_job_work(save_job_t *job) {
         for (size_t i = 1; i <= job->steps.cursor; ++i) {
             int32_t sw = 0, sh = 0;
             rubraview_edit_steps_size(&job->steps, i, &sw, &sh);
-            size_t b = (size_t)sw * (size_t)sh * 4u;
+            size_t b = picture_bytes((size_t)sw, (size_t)sh, 4u, 0);
             if (b > biggest) biggest = b;
         }
-        size_t half = biggest * 6u + (16u << 20);
-        steps_mem = malloc(half * 2u);
+        size_t half = bytes_scaled(biggest, 6u, 16u << 20), both = bytes_scaled(half, 2u, 0);
+        steps_mem = both == SIZE_MAX ? NULL : malloc(both);
         if (!steps_mem) {
             result = SAVE_NO_MEMORY;
         } else {
@@ -15213,6 +15371,12 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
                      : T("not found (or not 9.x) - Media Foundation only"));
     } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
+    } else if (rubraview_u8_eq_lit(source, "memory.use") && app->mem) {
+        /* RFC-0006: the program's memory by use, and the most the session ever held */
+        rubraview_mem_stats_t st = rubraview_mem_stats(app->mem);
+        n = snprintf(buffer, capacity, T("session %zu MB (most %zu), a track %zu MB, %zu window(s), %zu MB for the moment; %zu MB held"),
+                     st.persist_used >> 20, st.persist_peak >> 20, st.media_used >> 20, st.windows_live, st.scratch_live >> 20,
+                     st.total_held >> 20);
     } else if (rubraview_u8_eq_lit(source, "cache.used")) {
         size_t loaded = 0;
         uint64_t bytes = 0;
@@ -15450,9 +15614,14 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
     /* D-99: with several viewers open, only what this one changed goes over
        the file as it is now; what another changed meanwhile stays in it. */
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
-    rubraview_settings_t merged = rubraview_settings_merge_changed(app->arena, &app->settings, &app->settings_saved, existing);
+    /* RFC-0006: the file as it is and the merge, for the moment; the text written stays,
+       since the curation folders are read from it. */
+    rubraview_scratch_t sc;
+    proven_arena_t *sa = scratch_begin(app, &sc, 4u << 20);
+    u8str_t existing = rubraview_pal_fs_read_file(sa, app->settings_path, 256u * 1024u);
+    rubraview_settings_t merged = rubraview_settings_merge_changed(sa, &app->settings, &app->settings_saved, existing);
     u8str_t text = rubraview_settings_save(app->arena, &merged, existing);
+    scratch_end(app, &sc);
     bool written = text.len > 0 && rubraview_pal_fs_write_file_atomic(app->settings_path, text);
     if (locked) rubraview_pal_config_unlock();
     if (written) {
@@ -15610,11 +15779,13 @@ static void lang_apply(app_state_t *app) {
         bool loaded = false;
         for (int i = 0; i < 2 && !loaded; i++) {
             if (dirs[i].len == 0) continue;
-            u8str_t path = rubraview_path_join(app->arena, dirs[i], cstr(name));
-            u8str_t text = rubraview_pal_fs_read_file(app->arena, path, RUBRAVIEW_LANG_MAX_FILE);
-            if (text.len == 0) continue;
+            rubraview_scratch_t sc;   /* the pack keeps its own copy; the file read is for the moment */
+            proven_arena_t *sa = scratch_begin(app, &sc, RUBRAVIEW_LANG_MAX_FILE + (64u << 10));
+            u8str_t path = rubraview_path_join(sa, dirs[i], cstr(name));
+            u8str_t text = rubraview_pal_fs_read_file(sa, path, RUBRAVIEW_LANG_MAX_FILE);
             rubraview_lang_stats_t stats;
-            loaded = rubraview_lang_load(&g_lang, text, &stats);
+            if (text.len > 0) loaded = rubraview_lang_load(&g_lang, text, &stats);
+            scratch_end(app, &sc);
         }
         if (loaded) {
             rubraview_lang_use(&g_lang);
@@ -15916,11 +16087,14 @@ static void lang_import(app_state_t *app) {
             while (at < n && at < stem.len && tolower((unsigned char)stem.ptr[at]) == tolower((unsigned char)LANG_PACKS[k][at])) at++;
             if (at == n && stem.len == n) code = LANG_PACKS[k];
         }
-        u8str_t text = code ? rubraview_pal_fs_read_file(app->arena, picked.paths[i], RUBRAVIEW_LANG_MAX_FILE) : U8("");
+        rubraview_scratch_t sc;   /* read only to see that it is a pack */
+        proven_arena_t *sa = scratch_begin(app, &sc, RUBRAVIEW_LANG_MAX_FILE + (64u << 10));
+        u8str_t text = code ? rubraview_pal_fs_read_file(sa, picked.paths[i], RUBRAVIEW_LANG_MAX_FILE) : U8("");
         rubraview_lang_t probe = {0};
         rubraview_lang_stats_t stats;
         bool reads = text.len > 0 && rubraview_lang_load(&probe, text, &stats);
         rubraview_lang_free(&probe);
+        scratch_end(app, &sc);
         if (!reads) continue;
         char name[32];
         snprintf(name, sizeof(name), "%s.txt", code);
@@ -16284,6 +16458,8 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, rubraview_pal_shell_open_web("https://github.com/BtbN/FFmpeg-Builds/releases")
                                       ? T("the FFmpeg download page is opening in the browser")
                                       : T("the browser could not be started"));
+            } else if (rubraview_u8_eq_lit(node->name, "app.restart")) {
+                restart_now(app);
             } else if (rubraview_u8_eq_lit(node->name, "cache.clear_thumbs")) {
                 /* RV-107: the picker's pictures are kept in memory only; they are made again as tiles come into view. */
                 picker_thumbs_free(app);
@@ -17137,7 +17313,7 @@ static void info_gather(app_state_t *app) {
                open stays quick. */
             if (bytes && described && d.frames <= 1 && d.width > 0 && d.height > 0 &&
                 (double)d.width * (double)d.height <= 24e6) {
-                size_t need = (size_t)d.width * (size_t)d.height * 4u + (4u << 20);
+                size_t need = picture_bytes((size_t)d.width, (size_t)d.height, 4u, 4u << 20);
                 void *work = malloc(need);
                 if (work) {
                     proven_arena_t wa = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work, .size = need });
@@ -17255,6 +17431,7 @@ static void info_close(app_state_t *app) {
                                    &app->info_frame[2], &app->info_frame[3]);
     if (app->info_renderer) rubraview_pal_render_destroy(app->info_renderer);
     if (app->info_window) rubraview_pal_window_destroy(app->info_window);
+    window_block_give(app, &app->info_block);
     app->info_renderer = NULL;
     app->info_window = NULL;
     app->info_open = false;
@@ -17265,7 +17442,7 @@ static void info_show(app_state_t *app) {
     rubraview_window_config_t config = {
         .title = T("Rubraview - information"), .width = 760, .height = 640, .owner = app->window,
     };
-    app->info_window = rubraview_pal_window_create(app->arena, &config);
+    app->info_window = rubraview_pal_window_create(window_block_take(app, &app->info_block), &config);
     if (!app->info_window) { osd_say(app, TU8("the information window could not be opened")); return; }
     if (app->info_frame[2] > 0 && app->info_frame[3] > 0) {
         rubraview_pal_window_set_frame(app->info_window, app->info_frame[0], app->info_frame[1],
@@ -17273,10 +17450,10 @@ static void info_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->info_window, &w, &h);
-    app->info_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->info_window), w, h);
+    app->info_renderer = rubraview_pal_render_create(window_block_arena(app, &app->info_block), rubraview_pal_window_native_handle(app->info_window), w, h);
     ui_font_apply_all(app);
     if (!app->info_renderer) {
-        rubraview_pal_window_destroy(app->info_window);
+        rubraview_pal_window_destroy(app->info_window); window_block_give(app, &app->info_block);
         app->info_window = NULL;
         osd_say(app, TU8("the information window could not be drawn"));
         return;
@@ -17514,6 +17691,7 @@ static void help_close(app_state_t *app) {
                                    &app->help_frame[2], &app->help_frame[3]);
     if (app->help_renderer) rubraview_pal_render_destroy(app->help_renderer);
     if (app->help_window) rubraview_pal_window_destroy(app->help_window);
+    window_block_give(app, &app->help_block);
     app->help_renderer = NULL;
     app->help_window = NULL;
     app->help_open = false;
@@ -17525,7 +17703,7 @@ static void help_show(app_state_t *app) {
     rubraview_window_config_t config = {
         .title = T("Rubraview help - keys"), .width = 860, .height = 720, .owner = app->window,
     };
-    app->help_window = rubraview_pal_window_create(app->arena, &config);
+    app->help_window = rubraview_pal_window_create(window_block_take(app, &app->help_block), &config);
     if (!app->help_window) {
         osd_say(app, TU8("the help window could not be opened"));
         return;
@@ -17536,11 +17714,11 @@ static void help_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->help_window, &w, &h);
-    app->help_renderer = rubraview_pal_render_create(app->arena,
+    app->help_renderer = rubraview_pal_render_create(window_block_arena(app, &app->help_block),
                                                      rubraview_pal_window_native_handle(app->help_window), w, h);
     ui_font_apply_all(app);
     if (!app->help_renderer) {
-        rubraview_pal_window_destroy(app->help_window);
+        rubraview_pal_window_destroy(app->help_window); window_block_give(app, &app->help_block);
         app->help_window = NULL;
         osd_say(app, TU8("the help window could not be drawn"));
         return;
@@ -17790,10 +17968,12 @@ static void mini_go_to(app_state_t *app, int32_t index) {
         app->bgm_position = 0.0;
         app->bgm_paused = was_paused;
         app->bgm_tags = (rubraview_tags_t){0};
+        if (app->mem) rubraview_region_reset(&app->mem->bgm);   /* RFC-0006: the track before's words given back */
         {
-            u8str_t head = rubraview_pal_fs_read_file(app->arena, path, MUSIC_MAX_HEAD_BYTES);
+            proven_arena_t *ba = app->mem && rubraview_region_ensure(&app->mem->bgm, MUSIC_MAX_HEAD_BYTES + (2u << 20)) ? &app->mem->bgm.arena : app->arena;
+            u8str_t head = rubraview_pal_fs_read_file(ba, path, MUSIC_MAX_HEAD_BYTES);
             if (head.len > 0) {
-                app->bgm_tags = rubraview_tags_read(app->arena, (rubraview_tags_source_t){
+                app->bgm_tags = rubraview_tags_read(ba, (rubraview_tags_source_t){
                     .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
             }
         }
@@ -18008,6 +18188,7 @@ static void files_close(app_state_t *app) {
     files_preview_drop(app);
     if (app->files_renderer) rubraview_pal_render_destroy(app->files_renderer);
     if (app->files_window) rubraview_pal_window_destroy(app->files_window);
+    window_block_give(app, &app->files_block);
     app->files_renderer = NULL;
     app->files_window = NULL;
     app->files_open = false;
@@ -18028,7 +18209,7 @@ static void files_show(app_state_t *app) {
         return;
     }
     rubraview_window_config_t config = { .title = T("Rubraview files"), .width = 760, .height = 560, .owner = app->window };
-    app->files_window = rubraview_pal_window_create(app->arena, &config);
+    app->files_window = rubraview_pal_window_create(window_block_take(app, &app->files_block), &config);
     if (!app->files_window) {
         osd_say(app, TU8("the file list could not be opened"));
         return;
@@ -18039,10 +18220,10 @@ static void files_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->files_window, &w, &h);
-    app->files_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->files_window), w, h);
+    app->files_renderer = rubraview_pal_render_create(window_block_arena(app, &app->files_block), rubraview_pal_window_native_handle(app->files_window), w, h);
     ui_font_apply_all(app);
     if (!app->files_renderer) {
-        rubraview_pal_window_destroy(app->files_window);
+        rubraview_pal_window_destroy(app->files_window); window_block_give(app, &app->files_block);
         app->files_window = NULL;
         osd_say(app, TU8("the file list could not be drawn"));
         return;
@@ -18236,6 +18417,7 @@ static void fontpick_close(app_state_t *app) {
     if (!app->fontpick_open) return;
     if (app->fontpick_renderer) rubraview_pal_render_destroy(app->fontpick_renderer);
     if (app->fontpick_window) rubraview_pal_window_destroy(app->fontpick_window);
+    window_block_give(app, &app->fontpick_block);
     app->fontpick_renderer = NULL;
     app->fontpick_window = NULL;
     free(app->fontpick_mem);
@@ -18266,13 +18448,14 @@ static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key) {
     app->fontpick_drawn = (uint8_t*)drawn.value.ptr;
     memset(app->fontpick_drawn, 0, app->fontpick_all_count + 1);
     rubraview_window_config_t config = { .title = T("Rubraview font"), .width = 680, .height = 600, .owner = app->settings_window };
-    app->fontpick_window = rubraview_pal_window_create(app->arena, &config);
+    app->fontpick_window = rubraview_pal_window_create(window_block_take(app, &app->fontpick_block), &config);
     int32_t w = 0, h = 0;
     if (app->fontpick_window) rubraview_pal_window_get_size(app->fontpick_window, &w, &h);
     app->fontpick_renderer = app->fontpick_window
-        ? rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->fontpick_window), w, h) : NULL;
+        ? rubraview_pal_render_create(window_block_arena(app, &app->fontpick_block), rubraview_pal_window_native_handle(app->fontpick_window), w, h) : NULL;
     if (!app->fontpick_renderer) {
         if (app->fontpick_window) rubraview_pal_window_destroy(app->fontpick_window);
+        window_block_give(app, &app->fontpick_block);
         app->fontpick_window = NULL;
         free(app->fontpick_mem);
         app->fontpick_mem = NULL;
@@ -19392,6 +19575,7 @@ static void subs_close(app_state_t *app) {
                                    &app->subs_frame[2], &app->subs_frame[3]);
     if (app->subs_renderer) rubraview_pal_render_destroy(app->subs_renderer);
     if (app->subs_window) rubraview_pal_window_destroy(app->subs_window);
+    window_block_give(app, &app->subs_block);
     app->subs_renderer = NULL;
     app->subs_window = NULL;
     app->subs_open = false;
@@ -19421,7 +19605,7 @@ static void subs_show(app_state_t *app) {
         return;
     }
     rubraview_window_config_t config = { .title = T("Rubraview subtitles"), .width = 620, .height = 560, .owner = app->window };
-    app->subs_window = rubraview_pal_window_create(app->arena, &config);
+    app->subs_window = rubraview_pal_window_create(window_block_take(app, &app->subs_block), &config);
     if (!app->subs_window) {
         osd_say(app, TU8("the subtitle list could not be opened"));
         return;
@@ -19432,10 +19616,10 @@ static void subs_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->subs_window, &w, &h);
-    app->subs_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->subs_window), w, h);
+    app->subs_renderer = rubraview_pal_render_create(window_block_arena(app, &app->subs_block), rubraview_pal_window_native_handle(app->subs_window), w, h);
     ui_font_apply_all(app);
     if (!app->subs_renderer) {
-        rubraview_pal_window_destroy(app->subs_window);
+        rubraview_pal_window_destroy(app->subs_window); window_block_give(app, &app->subs_block);
         app->subs_window = NULL;
         osd_say(app, TU8("the subtitle list could not be drawn"));
         return;
@@ -20426,12 +20610,12 @@ static void edit_preview_open(app_state_t *app) {
     size_t big = 0;
     void *scratch_mem = NULL;
     if (!within) {
-        big = (size_t)w * (size_t)h * 4u * 2u + (16u << 20);
+        big = picture_bytes((size_t)w, (size_t)h, 4u * 2u, 16u << 20);
         scratch_mem = malloc(big);
         within = scratch_mem == NULL;
     }
     if (within) {
-        big = (size_t)pw * (size_t)ph * 4u * 3u + (16u << 20);
+        big = picture_bytes((size_t)pw, (size_t)ph, 4u * 3u, 16u << 20);
         scratch_mem = malloc(big);
         if (!scratch_mem) return;
     }
@@ -20455,7 +20639,7 @@ static void edit_preview_open(app_state_t *app) {
         }
     }
     if (rubraview_pixbuf_is_valid(&full) && pw > 0 && ph > 0) {
-        size_t small = (size_t)pw * (size_t)ph * 4u;
+        size_t small = picture_bytes((size_t)pw, (size_t)ph, 4u, 0);
         app->edit_small_bytes = small + (1u << 20);
         app->edit_work_bytes = small * 10u + (8u << 20);   /* commit's stages and the BGRA copy */
         app->edit_small_mem = malloc(app->edit_small_bytes);
@@ -20510,7 +20694,7 @@ static void edit_preview_update(app_state_t *app) {
 
     /* The owner's edit: the steps in force, then the step being made on its area,
        on the small copy; room for each step's buffers. */
-    size_t small_bytes = (size_t)app->edit_small.width * (size_t)app->edit_small.height * 4u;
+    size_t small_bytes = picture_bytes((size_t)app->edit_small.width, (size_t)app->edit_small.height, 4u, 0);
     size_t need = small_bytes * (10u + 4u * app->edit_steps.cursor) + (8u << 20);
     if (need > app->edit_work_bytes) {
         void *more = realloc(app->edit_work_mem, need);
@@ -21282,7 +21466,7 @@ static void edit_window_close(app_state_t *app) {
     if (!app->edit_window) return;
     rubraview_pal_window_get_frame(app->edit_window, &app->edit_frame[0], &app->edit_frame[1], &app->edit_frame[2], &app->edit_frame[3]);
     if (app->edit_renderer) rubraview_pal_render_destroy(app->edit_renderer);
-    rubraview_pal_window_destroy(app->edit_window);
+    rubraview_pal_window_destroy(app->edit_window); window_block_give(app, &app->edit_block);
     app->edit_renderer = NULL;
     app->edit_window = NULL;
     app->edit_text_on = false;
@@ -21292,7 +21476,7 @@ static void edit_window_close(app_state_t *app) {
 static void edit_window_show(app_state_t *app) {
     if (app->edit_window || !edit_panel_open(app)) return;
     rubraview_window_config_t config = { .title = T("Rubraview Edit"), .width = 980, .height = 640, .owner = app->window };
-    app->edit_window = rubraview_pal_window_create(app->arena, &config);
+    app->edit_window = rubraview_pal_window_create(window_block_take(app, &app->edit_block), &config);
     if (!app->edit_window) return;   /* the panel stays in the viewer, as before */
     if (app->edit_frame[2] > 0 && app->edit_frame[3] > 0) {
         rubraview_pal_window_set_frame(app->edit_window, app->edit_frame[0], app->edit_frame[1], app->edit_frame[2], app->edit_frame[3]);
@@ -21306,9 +21490,9 @@ static void edit_window_show(app_state_t *app) {
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->edit_window, &w, &h);
-    app->edit_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->edit_window), w, h);
+    app->edit_renderer = rubraview_pal_render_create(window_block_arena(app, &app->edit_block), rubraview_pal_window_native_handle(app->edit_window), w, h);
     if (!app->edit_renderer) {
-        rubraview_pal_window_destroy(app->edit_window);
+        rubraview_pal_window_destroy(app->edit_window); window_block_give(app, &app->edit_block);
         app->edit_window = NULL;
         return;
     }
@@ -22270,7 +22454,7 @@ static uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
     SIG(&h, app->chrome_hidden); SIG(&h, (int64_t)app->picker.columns);
-    SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge);
+    SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge); SIG(&h, app->confirm_restart);
     SIG(&h, app->arc_job != NULL); SIG(&h, app->arc_ask);
     if (app->arc_job) SIG(&h, atomic_load(&app->arc_job->job.done));
     SIG(&h, rubraview_pal_window_is_fullscreen(app->window));
@@ -22626,23 +22810,41 @@ static bool recent_kept_out(const app_state_t *app, u8str_t path) {
    every viewer takes: what another opened since is taken in, `opened`
    (if any) becomes the newest, or the list is emptied. The file is
    written only when that changed it. */
+/* RFC-0006: the recent list is built in the idle half of its two, emptied first
+   (the list before the one in use: nobody holds it now). */
+static proven_arena_t *recent_arena(app_state_t *app) {
+    if (!app->mem) return app->arena;
+    proven_arena_t *a = rubraview_mem_recent_next(app->mem);
+    if (!rubraview_region_ensure(&app->mem->recent[app->mem->recent_live ^ 1], 2u << 20)) return app->arena;
+    return a;
+}
+
+/* ... and moved there whole before it becomes the list, so the half before can go. */
+static void recent_settle(app_state_t *app, proven_arena_t *built, rubraview_recent_t *all) {
+    if (!app->mem || built == app->arena) return;
+    if (rubraview_recent_rehome(built, all)) { rubraview_mem_recent_swap(app->mem); return; }
+    if (!rubraview_recent_rehome(app->arena, all)) app->mem->full = true;   /* no room there: kept with the session's */
+}
+
 static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
     if (app->recent_path.len == 0) return;
+    proven_arena_t *ra = recent_arena(app);
     u8str_t dirs[RECENT_SKIP_DIRS];
     size_t dir_count = recent_skip_dirs(app, dirs);
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t before = rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u);
-    rubraview_recent_t all = rubraview_recent_parse(app->arena, before);
-    rubraview_recent_merge(app->arena, &all, &app->recent, RECENT_KEPT);
+    u8str_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
+    rubraview_recent_t all = rubraview_recent_parse(ra, before);
+    rubraview_recent_merge(ra, &all, &app->recent, RECENT_KEPT);
     if (clear) rubraview_recent_clear(&all, (int64_t)time(NULL));
-    if (opened.len > 0) rubraview_recent_add(app->arena, &all, app_keep(app, opened), (int64_t)time(NULL), RECENT_KEPT);
+    if (opened.len > 0) rubraview_recent_add(ra, &all, opened, (int64_t)time(NULL), RECENT_KEPT);   /* copied into its home below */
     (void)rubraview_history_drop_within(&all.list, dirs, dir_count);
-    u8str_t after = rubraview_recent_serialize(app->arena, &all);
+    u8str_t after = rubraview_recent_serialize(ra, &all);
     bool same = after.len == before.len && (after.len == 0 || memcmp(after.ptr, before.ptr, after.len) == 0);
     if (!same && (before.len > 0 || all.list.count > 0 || all.cleared > 0)) {
         (void)rubraview_pal_fs_write_file_atomic(app->recent_path, after);
     }
     if (locked) rubraview_pal_config_unlock();
+    recent_settle(app, ra, &all);
     app->recent = all;
 }
 
@@ -22650,14 +22852,16 @@ static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
    under the same lock, so the other viewers do not bring them back. */
 static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count) {
     if (app->recent_path.len == 0 || count == 0) return;
+    proven_arena_t *ra = recent_arena(app);
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t before = rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u);
-    rubraview_recent_t all = rubraview_recent_parse(app->arena, before);
-    rubraview_recent_merge(app->arena, &all, &app->recent, RECENT_KEPT);
+    u8str_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
+    rubraview_recent_t all = rubraview_recent_parse(ra, before);
+    rubraview_recent_merge(ra, &all, &app->recent, RECENT_KEPT);
     int64_t now = (int64_t)time(NULL);
-    for (size_t i = 0; i < count; ++i) rubraview_recent_remove(app->arena, &all, app_keep(app, paths[i]), now);
-    (void)rubraview_pal_fs_write_file_atomic(app->recent_path, rubraview_recent_serialize(app->arena, &all));
+    for (size_t i = 0; i < count; ++i) rubraview_recent_remove(ra, &all, paths[i], now);
+    (void)rubraview_pal_fs_write_file_atomic(app->recent_path, rubraview_recent_serialize(ra, &all));
     if (locked) rubraview_pal_config_unlock();
+    recent_settle(app, ra, &all);
     app->recent = all;
 }
 
@@ -24709,12 +24913,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        from the outside looks like an image that will not render. */
     rubraview_pal_image_startup();
 
-    void *memory = malloc(APP_ARENA_BYTES);
-    if (!memory) {
+    /* RFC-0006: the program's memory by use, every part of it on the heap. What lasts
+       for the session is `persist`, a region of heap chunks: when the one in use runs
+       low the next turn of the loop moves on to a new one, and the older ones stay. */
+    static rubraview_mem_t mem;
+    if (!rubraview_mem_init(&mem)) {
         CoUninitialize();
         return 1;
     }
-    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = APP_ARENA_BYTES });
+    proven_arena_t *const arena = &mem.persist.arena;
 
     /* §3.11: the command line is read before a window is created,
        because `--batch` must not open one. */
@@ -24725,13 +24932,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             /* Every argument: Explorer's menu may name many files (D-86). */
             int usable = 0;
             const char **argv_utf8 = NULL;
-            proven_result_mem_mut_t list = rubraview_arena_alloc_array(&arena, (size_t)(argc > 0 ? argc : 1), sizeof(char*));
+            proven_result_mem_mut_t list = rubraview_arena_alloc_array(arena, (size_t)(argc > 0 ? argc : 1), sizeof(char*));
             if (proven_is_ok(list.err)) {
                 argv_utf8 = (const char**)(void*)list.value.ptr;
                 for (int i = 0; i < argc; ++i) {
                     argv_utf8[i] = "";
                     int need = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, NULL, 0, NULL, NULL);
-                    proven_result_mem_mut_t one = need > 0 ? proven_arena_alloc(&arena, (size_t)need)
+                    proven_result_mem_mut_t one = need > 0 ? proven_arena_alloc(arena, (size_t)need)
                                                            : (proven_result_mem_mut_t){ .err = PROVEN_ERR_OVERFLOW };
                     if (proven_is_ok(one.err) &&
                         WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, (char*)(void*)one.value.ptr, need, NULL, NULL) > 0) {
@@ -24743,7 +24950,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
 
             rubraview_cli_result_t cli;
-            rubraview_cli_parse(&cli, &arena, usable, argv_utf8);
+            rubraview_cli_parse(&cli, arena, usable, argv_utf8);
 
             if (cli.err != RUBRAVIEW_CLI_OK) {
                 char message[512];
@@ -24763,41 +24970,41 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     message[pos] = '\0';
                 }
                 console_line(message);
-                free(memory);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return 2;
             }
 
             if (cli.show_version) {
                 console_line("rubraview " RUBRAVIEW_VERSION_STRING);
-                free(memory);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return 0;
             }
 
             if (cli.probe_media) {
-                int code = probe_media_file(&arena, cli.input);
-                free(memory);
+                int code = probe_media_file(arena, cli.input);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return code;
             }
 
             if (cli.probe_gpu) {
                 probe_gpu_resize();   /* D-38 first: it needs no file */
-                int code = probe_gpu_file(&arena, cli.input);
-                free(memory);
+                int code = probe_gpu_file(arena, cli.input);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return code;
             }
 
             if (cli.diagnostics) {
-                int code = run_diagnostics(&arena, cli.input);
-                free(memory);
+                int code = run_diagnostics(arena, cli.input);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return code;
             }
 
-            launch_paths_gather(&arena, &cli);
+            launch_paths_gather(arena, &cli);
             g_launch_verb = cli.shell_verb;
             /* RV-106: the order and the depth of this run's folders. */
             if (cli.sort_given) g_cli_sort = (int)cli.sort_mode;
@@ -24806,8 +25013,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             g_launch_whole = cli.shell_whole;
 
             if (cli.batch_mode) {
-                int code = run_batch(&arena, &cli);
-                free(memory);
+                int code = run_batch(arena, &cli);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return code;
             }
@@ -24819,7 +25026,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 int removed = shell_wipe(cli.shell_all_users);
                 console_line(removed < 0 ? "rubraview: could not remove the entries (every user's need an administrator)"
                                          : "rubraview: every Rubraview entry is out of Explorer's menu");
-                free(memory);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return removed < 0 ? SHELL_FAILED : SHELL_DONE;
             }
@@ -24829,7 +25036,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     u8str_t selection = cli.shell_types.len > 0 ? cli.shell_types : rubraview_shell_extensions_all();
                     shell_part_t types = cli.shell_no_types ? SHELL_PART_LEAVE : cli.shell_remove_types ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
                     shell_part_t menu = cli.shell_no_menu ? SHELL_PART_LEAVE : cli.shell_remove_menu ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
-                    code = shell_apply(&arena, selection, cli.shell_menu_types, types, menu, cli.shell_all_users);
+                    code = shell_apply(arena, selection, cli.shell_menu_types, types, menu, cli.shell_all_users);
                 } else {
                     code = shell_remove(cli.shell_all_users);
                 }
@@ -24839,7 +25046,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                            : code == SHELL_DONE_STORE ? "rubraview: updated; Windows 11's menu is left to the Microsoft Store's copy"
                            : "rubraview: file types and menu updated");
                 if (cli.shell_setup) code = rubraview_shell_setup_exit(code, cli.unregister_shell && !cli.register_shell);
-                free(memory);
+                rubraview_mem_release(&mem);
                 CoUninitialize();
                 return code;
             }
@@ -24850,22 +25057,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 /* The file the viewer itself reads (settings_read_file): beside the
                    executable in portable mode, under AppData otherwise. It was looked
                    for in the working folder, so an installed viewer never saw it. */
-                u8str_t exe = rubraview_pal_process_executable(&arena);
+                u8str_t exe = rubraview_pal_process_executable(arena);
                 u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
                 if (beside.len == 0) beside = U8(".");
-                u8str_t portable_ini = rubraview_path_join(&arena, beside, U8("settings.ini"));
+                u8str_t portable_ini = rubraview_path_join(arena, beside, U8("settings.ini"));
                 u8str_t appdata = U8(".");
                 char appdata_utf8[1024];
                 DWORD appdata_len = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
                 if (appdata_len > 0 && appdata_len < sizeof(appdata_utf8)) appdata = (u8str_t){ .ptr = appdata_utf8, .len = appdata_len };
                 u8str_t settings_file = rubraview_config_path(
-                    &arena, rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini)),
+                    arena, rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini)),
                     beside, appdata, U8("settings.ini"));
-                u8str_t settings = rubraview_pal_fs_read_file(&arena, settings_file, 256u * 1024u);
+                u8str_t settings = rubraview_pal_fs_read_file(arena, settings_file, 256u * 1024u);
                 /* Through the settings loader, which knows where the key
                    lives now ([general]) and where older files put it — and
                    what it is when no file says (D-99: a window each). */
-                rubraview_settings_t loaded = rubraview_settings_load(&arena, settings);
+                rubraview_settings_t loaded = rubraview_settings_load(arena, settings);
                 bool single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
                 /* What the menu asks is for the window that is open (the
                    classic menu starts this once a selected file). */
@@ -24886,7 +25093,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         free(blob);
                     }
                     if (sent) {
-                        free(memory);
+                        rubraview_mem_release(&mem);
                         CoUninitialize();
                         return 0;
                     }
@@ -24899,7 +25106,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     }
 
     app_state_t app = {0};
-    app.arena = &arena;
+    app.arena = arena;
+    app.mem = &mem;
     app.fit_mode = RUBRAVIEW_FIT_WINDOW;
     app.zoom = 1.0;
     app.layout_exempt = -1;
@@ -24918,21 +25126,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         .height = 800,
         .frameless = true, /* §2 invariant 5: zero-margin canvas */
     };
-    app.window = rubraview_pal_window_create(&arena, &window_config);
+    app.window = rubraview_pal_window_create(arena, &window_config);
     if (!app.window) {
-        free(memory);
+        rubraview_mem_release(&mem);
         CoUninitialize();
         return 1;
     }
 
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app.window, &win_w, &win_h);
-    app.renderer = rubraview_pal_render_create(&arena, rubraview_pal_window_native_handle(app.window), win_w, win_h);
+    app.renderer = rubraview_pal_render_create(arena, rubraview_pal_window_native_handle(app.window), win_w, win_h);
     ui_font_apply_all(&app);
     if (!app.renderer) {
         report_startup_failure();
         rubraview_pal_window_destroy(app.window);
-        free(memory);
+        rubraview_mem_release(&mem);
         CoUninitialize();
         return 1;
     }
@@ -24946,7 +25154,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.media_page = -1;
     /* §3.22 [video] decoder (D-9): which backend opens a file first. The
        other one still gets its turn when this one cannot. */
-    app.media_preferred = preferred_backend(&arena);
+    app.media_preferred = preferred_backend(arena);
     history_load(&app);
     load_keymap(&app);   /* after history_load: it settles portable or AppData, and so where keymap.ini is */
     /* history_load read settings.ini from wherever it lives (beside the
@@ -24987,8 +25195,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        numbers only curated when the viewer happened to be started in a
        folder holding one, which is to say almost never. */
     {
-        u8str_t settings = rubraview_pal_fs_read_file(&arena, app.settings_path, 256u * 1024u);
-        app.curation = rubraview_curation_parse(&arena, settings);
+        u8str_t settings = rubraview_pal_fs_read_file(arena, app.settings_path, 256u * 1024u);
+        app.curation = rubraview_curation_parse(arena, settings);
     }
     rubraview_pal_window_accept_drops(app.window, true);
     sync_menubox_tiles(&app);
@@ -25706,6 +25914,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         arc_job_poll(&app, false);
         page_job_poll(&app);
         arena_refill(&app);
+        memory_watch(&app, rubraview_pal_time_now_seconds());
         if (app.media_skip_pending) {
             /* D-9: the file nothing could open was reported; move past it. */
             app.media_skip_pending = false;
@@ -25835,12 +26044,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         /* D-99: other viewers wrote their places since this one read the file:
            theirs and this one's are put together, each book at its newer place. */
         bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-        rubraview_history_t all = rubraview_history_parse(&arena, rubraview_pal_fs_read_file(&arena, app.history_path, 1024u * 1024u));
-        rubraview_history_merge(&arena, &all, &app.history);
+        rubraview_history_t all = rubraview_history_parse(arena, rubraview_pal_fs_read_file(arena, app.history_path, 1024u * 1024u));
+        rubraview_history_merge(arena, &all, &app.history);
         u8str_t skip_dirs[RECENT_SKIP_DIRS];
         (void)rubraview_history_drop_within(&all, skip_dirs, recent_skip_dirs(&app, skip_dirs));   /* D-104 */
         rubraview_history_prune(&all, HISTORY_MAX_ENTRIES);
-        rubraview_pal_fs_write_file_atomic(app.history_path, rubraview_history_serialize(&arena, &all));
+        rubraview_pal_fs_write_file_atomic(app.history_path, rubraview_history_serialize(arena, &all));
         if (locked) rubraview_pal_config_unlock();
     }
 
@@ -25869,7 +26078,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     secure_wipe(app.passwords, sizeof(app.passwords));   /* owner, 2026-10-01: memory only, and not after */
     rubraview_pal_render_destroy(app.renderer);
     rubraview_pal_window_destroy(app.window);
-    free(memory);
+    rubraview_mem_release(&mem);
     CoUninitialize();
     return 0;
 }

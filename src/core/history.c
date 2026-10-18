@@ -320,6 +320,31 @@ void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp) {
     recent->removed.count = 0;   /* the clearing keeps them all away now */
 }
 
+static bool history_rehome(proven_arena_t *arena, rubraview_history_t *h) {
+    if (h->count == 0) { *h = (rubraview_history_t){0}; return true; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, h->count, sizeof(rubraview_history_entry_t));
+    if (!proven_is_ok(res.err)) return false;
+    rubraview_history_entry_t *moved = (rubraview_history_entry_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < h->count; ++i) {
+        moved[i] = h->entries[i];
+        if (moved[i].path.len == 0) continue;
+        proven_result_mem_mut_t p = proven_arena_alloc(arena, moved[i].path.len);
+        if (!proven_is_ok(p.err)) return false;
+        memcpy(p.value.ptr, moved[i].path.ptr, moved[i].path.len);
+        moved[i].path = (u8str_t){ .ptr = (const char*)p.value.ptr, .len = moved[i].path.len };
+    }
+    *h = (rubraview_history_t){ .entries = moved, .count = h->count, .capacity = h->count };
+    return true;
+}
+
+bool rubraview_recent_rehome(proven_arena_t *arena, rubraview_recent_t *recent) {
+    if (!arena || !recent) return false;
+    rubraview_recent_t moved = *recent;
+    if (!history_rehome(arena, &moved.list) || !history_rehome(arena, &moved.removed)) return false;
+    *recent = moved;
+    return true;
+}
+
 void rubraview_recent_merge(proven_arena_t *arena, rubraview_recent_t *into, const rubraview_recent_t *from,
                             size_t max_entries) {
     if (!arena || !into || !from) return;

@@ -100,6 +100,15 @@ static inline void *rubraview_malloc_product(proven_size_t a, proven_size_t b, p
     return malloc(bytes);
 }
 
+/* RV-141: the size alone, checked: `*out = a * b * c`, false when it does not fit. */
+[[nodiscard]]
+static inline bool rubraview_size_product(proven_size_t *out, proven_size_t a, proven_size_t b, proven_size_t c) {
+    proven_size_t bytes = 0;
+    if (PROVEN_CKD_MUL(&bytes, a, b) || PROVEN_CKD_MUL(&bytes, bytes, c)) return false;
+    *out = bytes;
+    return true;
+}
+
 typedef enum rubraview_pixel_format {
     RUBRAVIEW_PIXFMT_RGBA8 = 0,   /* Standard 32-bit RGBA (8 bits per channel) */
     RUBRAVIEW_PIXFMT_BGRA8,       /* Direct2D/WIC native layout */

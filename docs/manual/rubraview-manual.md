@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.14.0.exe              the viewer, as built
-dist/rubraview-v1.14.0/                 the release bundle
-dist/rubraview-v1.14.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.15.0.exe              the viewer, as built
+dist/rubraview-v1.15.0/                 the release bundle
+dist/rubraview-v1.15.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1155,6 +1155,12 @@ filename code page, the memory cap). Some worth knowing:
   Windows' dialog, not the picker.
 - **Cache** has **In use now** (pages and megabytes of the cap),
   **Clear the picker's thumbnails**, and **Forget every reading place**.
+  **The program's memory** shows what the session keeps (and the most it
+  kept), what the song playing carries, the windows open, what is read for
+  a moment and all it holds; **Restart Rubraview where it is** writes the
+  settings and starts it again on the file or archive on screen. When its
+  memory is nearly used up, Rubraview offers that restart once (`Y` restarts,
+  `N` carries on).
 - **Cache** — how much memory pages may take (up to 16 GB) and how many are
   read ahead and kept behind (up to 99 each; as many as the memory holds,
   the nearest first); **Always strip metadata on export** starts Export with
