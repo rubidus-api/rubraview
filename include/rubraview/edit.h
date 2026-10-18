@@ -350,6 +350,16 @@ bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubravie
 void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height);
 /** A rectangle of a `from_w` x `from_h` picture, the same part of a `to_w` x `to_h` one (at least 1 x 1, inside it). */
 rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_t from_w, int32_t from_h, int32_t to_w, int32_t to_h);
+/**
+ * RV-137 (owner, 2026-10-18): the steps in force reordered or taken out
+ * from the list. The steps undone after them go first. A step that now
+ * comes after another size (a crop or a resize moved or gone) has its
+ * area, and a crop its rectangle, put in proportion to that size.
+ * move: false at an end; remove: how many went (`gone[i]` for step i).
+ */
+bool rubraview_edit_steps_move(rubraview_edit_steps_t *steps, size_t index, bool up);
+size_t rubraview_edit_steps_remove(rubraview_edit_steps_t *steps, const bool *gone);
+
 bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps);
 bool rubraview_edit_steps_redo(rubraview_edit_steps_t *steps);
 /** To `cursor` steps in force (0 is the picture as it was); false past the end. */

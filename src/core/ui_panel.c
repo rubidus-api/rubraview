@@ -79,6 +79,23 @@ bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, u8str_t la
     return true;
 }
 
+bool rubraview_panel_add_spacer(rubraview_panel_t *panel, int32_t id, double height) {
+    rubraview_panel_row_t *row = push_row(panel);
+    if (!row) return false;
+    row->kind = RUBRAVIEW_ROW_SPACER;
+    row->id = id;
+    row->enabled = false;
+    row->extent = height > 0.0 ? height : 0.0;
+    return true;
+}
+
+void rubraview_panel_set_spacer(rubraview_panel_t *panel, int32_t id, double height) {
+    if (!panel) return;
+    for (size_t i = 0; i < panel->row_count; ++i) {
+        if (panel->rows[i].kind == RUBRAVIEW_ROW_SPACER && panel->rows[i].id == id) panel->rows[i].extent = height > 0.0 ? height : 0.0;
+    }
+}
+
 bool rubraview_panel_add_separator(rubraview_panel_t *panel) {
     rubraview_panel_row_t *row = push_row(panel);
     if (!row) return false;
@@ -91,7 +108,68 @@ bool rubraview_panel_add_separator(rubraview_panel_t *panel) {
 /* A separator is a thin rule rather than a full row: it groups without
    costing the vertical space a row does. */
 static double row_extent(const rubraview_panel_t *panel, const rubraview_panel_row_t *row) {
+    if (row->kind == RUBRAVIEW_ROW_SPACER) return row->extent;
     return row->kind == RUBRAVIEW_ROW_SEPARATOR ? panel->row_height * 0.4 : panel->row_height;
+}
+
+/* ---- RV-137: a bare panel in columns ---- */
+
+int32_t rubraview_panel_column_of_row(const rubraview_panel_t *panel, size_t index) {
+    if (!panel || !panel->bare || panel->columns <= 1) return 0;
+    int32_t c = 0;
+    for (int32_t k = 1; k < panel->columns; ++k) if (index >= panel->column_first[k]) c = k;
+    return c;
+}
+
+static size_t column_end(const rubraview_panel_t *panel, int32_t c) {
+    return c + 1 < panel->columns ? panel->column_first[c + 1] : panel->row_count;
+}
+
+static double column_room(const rubraview_panel_t *panel) {
+    return panel->bounds.height - panel->padding * 2.0;
+}
+
+void rubraview_panel_layout_columns(rubraview_panel_t *panel, rubraview_rect_t area, int32_t columns, const size_t *firsts) {
+    if (!panel) return;
+    if (columns < 1) columns = 1;
+    if (columns > RUBRAVIEW_PANEL_MAX_COLUMNS) columns = RUBRAVIEW_PANEL_MAX_COLUMNS;
+    panel->bare = true;
+    panel->bounds = area;
+    panel->columns = columns;
+    panel->column_gap = panel->padding * 2.0;
+    double inner = area.width - panel->padding * 2.0 - panel->column_gap * (double)(columns - 1);
+    panel->column_width = inner / (double)columns > 0.0 ? inner / (double)columns : 0.0;
+    panel->column_first[0] = 0;
+    for (int32_t c = 1; c < columns; ++c) {
+        size_t f = firsts ? firsts[c] : panel->row_count;
+        if (f < panel->column_first[c - 1]) f = panel->column_first[c - 1];
+        if (f > panel->row_count) f = panel->row_count;
+        panel->column_first[c] = f;
+    }
+    panel->content_height = 0.0;
+    for (int32_t c = 0; c < columns; ++c) {
+        double content = 0.0;
+        for (size_t i = panel->column_first[c]; i < column_end(panel, c); ++i) content += row_extent(panel, &panel->rows[i]);
+        panel->column_content[c] = content;
+        if (content > panel->content_height) panel->content_height = content;
+        double most = content - column_room(panel);
+        panel->column_scroll[c] = clampd(panel->column_scroll[c], 0.0, most > 0.0 ? most : 0.0);
+    }
+}
+
+int32_t rubraview_panel_column_at(const rubraview_panel_t *panel, double px) {
+    if (!panel || !panel->bare || panel->columns <= 1) return 0;
+    double x = px - panel->bounds.x - panel->padding;
+    int32_t c = (int32_t)(x / (panel->column_width + panel->column_gap));
+    return c < 0 ? 0 : c >= panel->columns ? panel->columns - 1 : c;
+}
+
+void rubraview_panel_scroll_at(rubraview_panel_t *panel, double px, double dy) {
+    if (!panel) return;
+    if (!panel->bare) { rubraview_panel_scroll_by(panel, dy); return; }
+    int32_t c = rubraview_panel_column_at(panel, px);
+    double most = panel->column_content[c] - column_room(panel);
+    panel->column_scroll[c] = clampd(panel->column_scroll[c] + dy, 0.0, most > 0.0 ? most : 0.0);
 }
 
 void rubraview_panel_layout(rubraview_panel_t *panel, double window_width, double window_height) {
@@ -126,7 +204,7 @@ void rubraview_panel_layout(rubraview_panel_t *panel, double window_width, doubl
 }
 
 bool rubraview_panel_title_hit(const rubraview_panel_t *panel, double px, double py) {
-    if (!panel || !panel->open || !rubraview_rect_contains(panel->bounds, px, py)) return false;
+    if (!panel || !panel->open || panel->bare || !rubraview_rect_contains(panel->bounds, px, py)) return false;
     if (rubraview_rect_contains(rubraview_panel_close_rect(panel), px, py)) return false;
     return py < panel->bounds.y + panel->padding + panel->row_height;
 }
@@ -156,6 +234,20 @@ void rubraview_panel_scroll_by(rubraview_panel_t *panel, double dy) {
 rubraview_rect_t rubraview_panel_row_rect(const rubraview_panel_t *panel, size_t index) {
     rubraview_rect_t empty = {0};
     if (!panel || index >= panel->row_count) return empty;
+    if (panel->bare) {
+        /* In its column, under the window's top edge; a spacer may show in part, a row only whole. */
+        int32_t c = rubraview_panel_column_of_row(panel, index);
+        double top = panel->bounds.y + panel->padding, bottom = panel->bounds.y + panel->bounds.height - panel->padding;
+        double y = top - panel->column_scroll[c];
+        for (size_t i = panel->column_first[c]; i < index; ++i) y += row_extent(panel, &panel->rows[i]);
+        double h = row_extent(panel, &panel->rows[index]);
+        bool spacer = panel->rows[index].kind == RUBRAVIEW_ROW_SPACER;
+        if (spacer ? (y + h <= top || y >= bottom) : (y < top - 0.5 || y + h > bottom + 0.5)) return empty;
+        return (rubraview_rect_t){
+            .x = panel->bounds.x + panel->padding + (panel->column_width + panel->column_gap) * (double)c,
+            .y = y, .width = panel->column_width, .height = h,
+        };
+    }
 
     double top = panel->bounds.y + panel->padding + panel->row_height; /* below the title */
     double y = top - panel->scroll;
@@ -197,7 +289,7 @@ int32_t rubraview_panel_row_at(const rubraview_panel_t *panel, double px, double
     if (!rubraview_rect_contains(panel->bounds, px, py)) return -1;
 
     for (size_t i = 0; i < panel->row_count; ++i) {
-        if (panel->rows[i].kind == RUBRAVIEW_ROW_SEPARATOR) continue;
+        if (panel->rows[i].kind == RUBRAVIEW_ROW_SEPARATOR || panel->rows[i].kind == RUBRAVIEW_ROW_SPACER) continue;
         if (!panel->rows[i].enabled) continue;
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
         if (rubraview_rect_contains(r, px, py)) return (int32_t)i;
@@ -228,7 +320,7 @@ static double value_from_x(const rubraview_panel_t *panel, size_t index, double 
 }
 
 rubraview_rect_t rubraview_panel_close_rect(const rubraview_panel_t *panel) {
-    if (!panel || !panel->open) return (rubraview_rect_t){0};
+    if (!panel || !panel->open || panel->bare) return (rubraview_rect_t){0};   /* a bare panel's window has its own X */
     double a = panel->row_height;
     return (rubraview_rect_t){ panel->bounds.x + panel->bounds.width - panel->padding - a,
                                panel->bounds.y + panel->padding, a, a };
@@ -302,7 +394,7 @@ double rubraview_panel_fill_fraction(const rubraview_panel_t *panel, size_t inde
 int32_t rubraview_panel_find(const rubraview_panel_t *panel, int32_t id) {
     if (!panel) return -1;
     for (size_t i = 0; i < panel->row_count; ++i) {
-        if (panel->rows[i].kind != RUBRAVIEW_ROW_SEPARATOR && panel->rows[i].id == id) return (int32_t)i;
+        if (panel->rows[i].kind != RUBRAVIEW_ROW_SEPARATOR && panel->rows[i].id == id) return (int32_t)i;   /* a spacer too */
     }
     return -1;
 }

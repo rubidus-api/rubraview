@@ -689,6 +689,55 @@ void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, i
     steps->height = height;
 }
 
+/* Each step's area kept on the same part of the picture now that the size
+   it is made on may have changed: `old_w/h[i]` is step i's size before. */
+static void steps_refit(rubraview_edit_steps_t *steps, const int32_t *old_w, const int32_t *old_h) {
+    for (size_t i = 0; i < steps->count; ++i) {
+        int32_t nw = 0, nh = 0;
+        rubraview_edit_steps_size(steps, i, &nw, &nh);   /* the steps before it are already put right */
+        rubraview_edit_step_t *st = &steps->steps[i];
+        if ((nw == old_w[i] && nh == old_h[i]) || old_w[i] <= 0 || old_h[i] <= 0 || nw <= 0 || nh <= 0) continue;
+        if (st->area.shape != RUBRAVIEW_AREA_ALL || st->kind == RUBRAVIEW_STEP_CROP)
+            st->area.rect = rubraview_edit_rect_rebase(st->area.rect, old_w[i], old_h[i], nw, nh);
+    }
+}
+
+bool rubraview_edit_steps_move(rubraview_edit_steps_t *steps, size_t index, bool up) {
+    if (!steps) return false;
+    steps->count = steps->cursor;   /* only the steps in force are in the list to change */
+    if (index >= steps->count || (up && index == 0) || (!up && index + 1 >= steps->count)) return false;
+    int32_t old_w[RUBRAVIEW_EDIT_MAX_STEPS], old_h[RUBRAVIEW_EDIT_MAX_STEPS];
+    for (size_t i = 0; i < steps->count; ++i) rubraview_edit_steps_size(steps, i, &old_w[i], &old_h[i]);
+    size_t other = up ? index - 1 : index + 1;
+    rubraview_edit_step_t t = steps->steps[index];
+    steps->steps[index] = steps->steps[other];
+    steps->steps[other] = t;
+    int32_t tw = old_w[index], th = old_h[index];
+    old_w[index] = old_w[other]; old_h[index] = old_h[other];
+    old_w[other] = tw; old_h[other] = th;
+    steps_refit(steps, old_w, old_h);
+    return true;
+}
+
+size_t rubraview_edit_steps_remove(rubraview_edit_steps_t *steps, const bool *gone) {
+    if (!steps || !gone) return 0;
+    steps->count = steps->cursor;
+    int32_t old_w[RUBRAVIEW_EDIT_MAX_STEPS], old_h[RUBRAVIEW_EDIT_MAX_STEPS];
+    for (size_t i = 0; i < steps->count; ++i) rubraview_edit_steps_size(steps, i, &old_w[i], &old_h[i]);
+    size_t kept = 0;
+    for (size_t i = 0; i < steps->count; ++i) {
+        if (gone[i]) continue;
+        steps->steps[kept] = steps->steps[i];
+        old_w[kept] = old_w[i];
+        old_h[kept] = old_h[i];
+        kept++;
+    }
+    size_t removed = steps->count - kept;
+    steps->count = steps->cursor = kept;
+    steps_refit(steps, old_w, old_h);
+    return removed;
+}
+
 bool rubraview_edit_steps_undo(rubraview_edit_steps_t *steps) {
     if (!steps || steps->cursor == 0) return false;
     steps->cursor--;

@@ -29,6 +29,7 @@ typedef enum rubraview_row_kind {
     RUBRAVIEW_ROW_CHOICE,   /* one of a small set, cycled or picked */
     RUBRAVIEW_ROW_BUTTON,
     RUBRAVIEW_ROW_SEPARATOR,
+    RUBRAVIEW_ROW_SPACER,   /* RV-137: room of a given height the caller draws in (the curve, a box); never hit */
 } rubraview_row_kind_t;
 
 typedef struct rubraview_panel_row {
@@ -41,9 +42,11 @@ typedef struct rubraview_panel_row {
     double  step;           /* 0 for continuous */
     int32_t choice_count;   /* choices only */
     bool    enabled;
+    double  extent;         /* spacers only: their height */
 } rubraview_panel_row_t;
 
 #define RUBRAVIEW_PANEL_MAX_ROWS 64
+#define RUBRAVIEW_PANEL_MAX_COLUMNS 4
 
 typedef struct rubraview_panel {
     u8str_t title;
@@ -65,6 +68,16 @@ typedef struct rubraview_panel {
     double  grab_x, grab_y;      /* where in the panel it was taken */
     double  scroll;              /* how far its rows are scrolled up */
     double  content_height;      /* its rows, all of them */
+    /* RV-137 (owner, 2026-10-18): a panel that is a whole window of its own
+       (Edit's): no title row or X — the window has them — and its rows
+       flowed into columns, each from a row the caller names, each scrolled
+       by itself. */
+    bool    bare;
+    int32_t columns;
+    size_t  column_first[RUBRAVIEW_PANEL_MAX_COLUMNS];
+    double  column_scroll[RUBRAVIEW_PANEL_MAX_COLUMNS];
+    double  column_content[RUBRAVIEW_PANEL_MAX_COLUMNS];
+    double  column_width, column_gap;
 } rubraview_panel_t;
 
 /**
@@ -82,6 +95,25 @@ bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, u8str_t la
                                 int32_t index, int32_t choice_count);
 bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, u8str_t label);
 bool rubraview_panel_add_separator(rubraview_panel_t *panel);
+/** RV-137: room `height` tall for the caller to draw in, found by its id. */
+bool rubraview_panel_add_spacer(rubraview_panel_t *panel, int32_t id, double height);
+/** A spacer's height changed (the box it holds grew or shrank). */
+void rubraview_panel_set_spacer(rubraview_panel_t *panel, int32_t id, double height);
+
+/**
+ * RV-137: the panel fills `area` (a window of its own), in `columns`
+ * columns; column c begins at row `firsts[c]` (`firsts[0]` is 0 whatever
+ * it says; they rise). A column's rows that do not fit scroll with that
+ * column only; scrolls are kept where they can be.
+ */
+void rubraview_panel_layout_columns(rubraview_panel_t *panel, rubraview_rect_t area, int32_t columns, const size_t *firsts);
+
+/** The column a row or a point (x) is in; 0 for a panel of one. */
+int32_t rubraview_panel_column_of_row(const rubraview_panel_t *panel, size_t index);
+int32_t rubraview_panel_column_at(const rubraview_panel_t *panel, double px);
+
+/** RV-137: the column under `px` scrolled by `dy` (or the whole panel, when it is not bare). */
+void rubraview_panel_scroll_at(rubraview_panel_t *panel, double px, double dy);
 
 /**
  * Place the panel inside a window. It is kept fully on screen: a panel

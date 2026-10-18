@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.12.0.exe              the viewer, as built
-dist/rubraview-v1.12.0/                 the release bundle
-dist/rubraview-v1.12.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.13.0.exe              the viewer, as built
+dist/rubraview-v1.13.0/                 the release bundle
+dist/rubraview-v1.13.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -323,10 +323,30 @@ through its pages, and opens an `.ico` at its largest layer.
 
 ## Adjusting a picture
 
-`E` opens Edit, one window for everything that changes the picture.
-Drag a slider and the picture follows; press a slider's name to type its
-value. The curve box shows the histogram behind the curve; its corner
-button (**RGB >**) picks which curve you edit.
+`E` opens Edit, a window of its own beside the viewer, as the settings
+window is: everything that changes the picture is there, while the
+picture, the selection drawn on it and the preview stay in the viewer.
+Its layout follows its width: one column that scrolls on a narrow window,
+two on a middle one, three on a wide one (each column scrolls on its own).
+Its size and place are kept while the program runs; its `X` or `Esc`
+closes Edit, and the viewer's keys work from it. Drag a slider and the
+picture follows; press a slider's name to type its value. The curve box
+shows the histogram behind the curve; its corner button (**RGB >**) picks
+which curve you edit.
+
+**The change list.** Every change is a row: what it moved
+("Saturation -100: whole") and where. A click on a row shows the picture
+as it stood after that change; `Ctrl+Z` and `Ctrl+Y` step back and on.
+Each row has a box, an `x` that takes the change out, and arrows that
+move it up or down; **Remove the ticked changes** takes out every ticked
+one. A change after a crop or a resize keeps to the same part of the
+picture when the order changes. **Copies of every picture in the list...**
+does the changes to every picture of the folder or playlist and writes
+each as a copy (the name typed with `*`, below); **Apply to every
+original in the list...** writes them over the pictures themselves —
+it asks first and needs a second press, and each old file goes to the
+Recycle Bin. A picture inside an archive is never written over. After it
+the list starts empty, as the pictures now hold the changes.
 
 **A selection first.** Drag on the picture to mark a part of it — a
 rectangle, or an ellipse (**Shape** in the selection's box), with a soft

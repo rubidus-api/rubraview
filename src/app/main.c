@@ -342,6 +342,7 @@ typedef struct apply_all_job {
     size_t count;
     rubraview_edit_steps_t steps;
     char prefix[64], suffix[64];
+    bool over;   /* RV-137: written over each original (the old one to the Recycle Bin), not beside it */
     rubraview_export_options_t options;
     rubraview_window_t *wake;
     HANDLE thread;
@@ -662,6 +663,17 @@ typedef struct app_state {
     size_t                     fontpick_find_len;
     double                     fontpick_px, fontpick_py;
     void                      *fontpick_mem;
+    /* RV-137: Edit in a window of its own (owner, 2026-10-18) */
+    rubraview_window_t        *edit_window;
+    rubraview_renderer_t      *edit_renderer;
+    int32_t                    edit_frame[4];
+    double                     edit_px, edit_py, edit_drawn_at;
+    int32_t                    edit_mode;          /* its columns less one; -1 before the first layout */
+    size_t                     edit_firsts[3];
+    bool                       edit_dirty, edit_text_on;
+    uint64_t                   edit_sig;
+    rubraview_listwin_t        changes;            /* the change list, rows as the playlist's */
+    bool                       change_checked[RUBRAVIEW_EDIT_MAX_STEPS];
     rubraview_renderer_t      *files_renderer;
     bool                       files_open, files_dirty;
     int32_t                    files_frame[4];
@@ -1237,6 +1249,12 @@ static void settings_took_effect(app_state_t *app);
 static void ui_font_apply_all(app_state_t *app);
 static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key);
 static void fontpick_close(app_state_t *app);
+static void edit_window_layout(app_state_t *app);
+static void edit_window_show(app_state_t *app);
+static void edit_window_close(app_state_t *app);
+static void changes_remove_checked(app_state_t *app);
+static void edit_steps_changed(app_state_t *app);
+static void edit_preview_close(app_state_t *app);
 static void fontpick_reveal(app_state_t *app);
 static void media_ab_check(app_state_t *app);
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
@@ -1252,6 +1270,8 @@ static bool edit_apply_pending(app_state_t *app, bool say);
 static void edit_live_update(app_state_t *app, int32_t kind);
 static void edit_live_close(app_state_t *app);
 static void apply_all_begin(app_state_t *app);
+static void apply_all_start(app_state_t *app, apply_all_job_t *job);
+static void apply_all_originals(app_state_t *app);
 static void apply_all_typed(app_state_t *app);
 static void apply_all_poll(app_state_t *app, bool quitting);
 static void edit_undo(app_state_t *app, bool redo);
@@ -5208,10 +5228,10 @@ static void sub_tile_result(app_state_t *app, rubraview_tap_result_t r) {
 static void listwin_place_clear(app_state_t *app, double win_w, double win_h) {
     rubraview_listwin_t *lw = &app->listwin;
     double view_w = win_w;
-    if (edit_panel_open(app) && app->panel.open && app->panel.bounds.x > win_w * 0.3 && app->panel.bounds.x < win_w)
+    if (edit_panel_open(app) && !app->edit_window && app->panel.open && app->panel.bounds.x > win_w * 0.3 && app->panel.bounds.x < win_w)
         view_w = app->panel.bounds.x - 4.0;
     rubraview_listwin_place(lw, view_w, win_h);
-    if (!edit_panel_open(app)) return;
+    if (!edit_panel_open(app) || app->edit_window) return;
     rubraview_pal_rect_t curve = curve_widget_rect(app);
     double below = curve.y + curve.height + 4.0;
     if (curve.width <= 0.0 || lw->y >= below || curve.x >= lw->x + lw->width || curve.x + curve.width <= lw->x) return;
@@ -9512,9 +9532,10 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
     if (!app->rename_active) return;
     {
         double box_w = 560.0 * dpi, box_h = 64.0 * dpi;
+        if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
         /* Edit to all asks with Edit open: the box goes left of its panel. */
-        if (edit_panel_open(app) && app->panel.open && box.x + box.width > app->panel.bounds.x && app->panel.bounds.x > box_w)
+        if (edit_panel_open(app) && !app->edit_window && app->panel.open && box.x + box.width > app->panel.bounds.x && app->panel.bounds.x > box_w)
             box.x = (app->panel.bounds.x - box_w) * 0.5;
         /* A password is asked in the middle, clear of the toolbox's anchor
            (VM, 2026-10-01: it showed through the box). */
@@ -9750,9 +9771,10 @@ static void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
                                                 : TU8("Z  as ZIP (CBZ)        7  as 7z (CB7)        Esc  leave it"),
                                        lower, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    draw_rename_box(app, win_w, win_h, chrome_dpi);
+    /* RV-137: a value typed, or the copies' name, asked for in the Edit window is drawn there */
+    if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply))) draw_rename_box(app, win_w, win_h, chrome_dpi);
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
-    draw_px_edit_box(app, win_w, win_h, chrome_dpi);
+    if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */
     draw_notice(app, win_w, win_h, chrome_dpi);
 }
 
@@ -10986,7 +11008,21 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     rubraview_pixbuf_t next = rubraview_edit_step_apply(lane, &steps.steps[k], &px, 1.0);
                     if (rubraview_pixbuf_is_valid(&next)) px = next; else ok = false;
                 }
-                if (ok) {
+                if (ok && job->over) {
+                    /* RV-137: written beside it first, then the original to the Recycle Bin and this in its place */
+                    rubraview_export_options_t options = job->options;
+                    rubraview_export_format_t f = rubraview_export_format_for_name(path);
+                    options.format = f;
+                    u8str_t ext = rubraview_export_extension(f);
+                    u8str_t stem = rubraview_path_stem(rubraview_path_basename(path));
+                    u8str_t dir = rubraview_path_dirname(path);
+                    char tmp[2048];
+                    int n = snprintf(tmp, sizeof(tmp), "%.*s\\%.*s.rvsaving.%.*s", (int)dir.len, dir.ptr, (int)stem.len, stem.ptr, (int)ext.len, ext.ptr);
+                    u8str_t out = { .ptr = tmp, .len = n > 0 && (size_t)n < sizeof(tmp) ? (size_t)n : 0 };
+                    ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.len > 0 && rubraview_pal_image_save(out, &px, &options) &&
+                         rubraview_pal_fs_recycle(path) && rubraview_pal_fs_replace(out, path);
+                    if (!ok && out.len > 0 && rubraview_pal_fs_exists(out) && rubraview_pal_fs_exists(path)) (void)rubraview_pal_fs_recycle(out);
+                } else if (ok) {
                     /* in its own format when it can be written, else PNG */
                     rubraview_export_options_t options = job->options;
                     rubraview_export_format_t f = rubraview_export_format_for_name(path);
@@ -11044,6 +11080,11 @@ static void apply_all_typed(app_state_t *app) {
     *star = '\0';
     snprintf(job->prefix, sizeof(job->prefix), "%s", pattern);
     snprintf(job->suffix, sizeof(job->suffix), "%s", star + 1);
+    apply_all_start(app, job);
+}
+
+/* The job's pictures listed: the steps in force, the export's choices, a thread. */
+static void apply_all_start(app_state_t *app, apply_all_job_t *job) {
     job->steps = app->edit_steps;
     job->options = app->export_options;
     if (app->edit.resize_dpi > 0.0) job->options.dpi = app->edit.resize_dpi;
@@ -11060,6 +11101,47 @@ static void apply_all_typed(app_state_t *app) {
     char said[96];
     int m = snprintf(said, sizeof(said), T("applying the edit to %zu pictures..."), job->count);
     if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+}
+
+/* RV-137 (owner, 2026-10-18): the steps written over every picture of the
+   folder or playlist, on a second press, the old files to the Recycle Bin. */
+static void apply_all_originals(app_state_t *app) {
+    static double asked_at = -100.0;
+    if (!edit_panel_open(app)) return;
+    edit_live_close(app);
+    if (app->edit_steps.cursor == 0) { osd_say(app, TU8("make a change in Edit first: its steps are what is applied")); return; }
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len > 0) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
+    if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
+    size_t count = page_count(app), pictures = 0;
+    for (size_t i = 0; i < count; ++i) {
+        u8str_t p = app->source.pages[i].path;
+        if (p.len > 0 && rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) pictures++;
+    }
+    if (pictures == 0) { osd_say(app, TU8("no pictures in the list")); return; }
+    double now = rubraview_pal_time_now_seconds();
+    if (now - asked_at > 5.0) {
+        asked_at = now;
+        char said[160];
+        int m = snprintf(said, sizeof(said), T("press again to write the changes over %zu originals (the old files go to the Recycle Bin)"), pictures);
+        if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+        return;
+    }
+    asked_at = -100.0;
+    apply_all_job_t *job = (apply_all_job_t*)calloc(1, sizeof(*job));
+    if (!job) return;
+    job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
+    for (size_t i = 0; job->paths && i < count; ++i) {
+        u8str_t p = app->source.pages[i].path;
+        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) continue;
+        char *copy = (char*)malloc(p.len + 1);
+        if (!copy) continue;
+        memcpy(copy, p.ptr, p.len);
+        copy[p.len] = '\0';
+        job->paths[job->count++] = copy;
+    }
+    if (job->count == 0) { free(job->paths); free(job); return; }
+    job->over = true;
+    apply_all_start(app, job);
 }
 
 /* How far it is, said as it goes; at the end, what was made. A quit stops it after the picture in hand. */
@@ -11080,15 +11162,31 @@ static void apply_all_poll(app_state_t *app, bool quitting) {
     WaitForSingleObject(job->thread, INFINITE);
     CloseHandle(job->thread);
     done = job->done; failed = job->failed;
+    bool over = job->over;
     for (size_t i = 0; i < job->count; ++i) free(job->paths[i]);
     free(job->paths);
     free(job);
     app->apply_job = NULL;
     if (quitting) return;
     char said[128];
-    int m = failed ? snprintf(said, sizeof(said), T("%ld copies made beside the pictures; %ld could not be"), (long)done, (long)failed)
+    int m = over ? (failed ? snprintf(said, sizeof(said), T("%ld originals written over; %ld could not be"), (long)done, (long)failed)
+                           : snprintf(said, sizeof(said), T("%ld originals written over"), (long)done))
+          : failed ? snprintf(said, sizeof(said), T("%ld copies made beside the pictures; %ld could not be"), (long)done, (long)failed)
                    : snprintf(said, sizeof(said), T("%ld copies made beside the pictures"), (long)done);
     if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+    if (over && done > 0) {
+        /* the pictures hold the changes now: shown again they would be made twice, and read again from their files */
+        if (edit_panel_open(app)) {
+            rubraview_edit_steps_reset(&app->edit_steps);
+            edit_steps_changed(app);
+        }
+        unload_all_pages(app);
+        app->needs_relayout = true;
+        if (edit_panel_open(app)) {   /* Edit's preview made again from the files as they are now */
+            edit_preview_close(app);
+            app->edit_preview_tries = 0;
+        }
+    }
     /* the folder again, the picture on screen kept */
     int32_t page = current_page_index(app);
     if (page >= 0 && done > 0) reopen_on_path(app, app_keep(app, app->source.pages[page].path), (size_t)page);
@@ -11951,6 +12049,8 @@ enum {
     PANEL_RESIZE_PRESET, PANEL_RESIZE_LOCK, PANEL_RESIZE_FILTER, PANEL_RESIZE_LINEAR, PANEL_RESIZE_SHARPEN, PANEL_RESIZE_DPI,
     /* RV-133 */
     PANEL_CLS_HERE, PANEL_CLS_COPY, PANEL_CLS_MOVE, PANEL_CLS_CLEAR, PANEL_CLS_SETTINGS,
+    /* RV-137: the Edit window's rooms and the change list's buttons */
+    PANEL_SP_CURVE, PANEL_SP_SEL, PANEL_SP_CHANGES, PANEL_CHANGES_REMOVE, PANEL_ALL_COPIES, PANEL_ALL_ORIGINALS,
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
@@ -12099,6 +12199,7 @@ static bool classify_press(app_state_t *app, double px, double py) {
    the window changes size. */
 static void panel_relayout(app_state_t *app) {
     if (!app->panel.open) return;
+    if (app->edit_window && edit_panel_open(app)) { edit_window_layout(app); return; }   /* RV-137: laid out in its own window */
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     if (w > 0 && h > 0) rubraview_panel_layout(&app->panel, (double)w, (double)h);
@@ -12114,6 +12215,7 @@ static void print_temp_drop(app_state_t *app);
 static void px_edit_close(app_state_t *app);
 
 static void panel_close(app_state_t *app) {
+    edit_window_close(app);
     edit_preview_close(app);
     app->sel_panel.open = false;
     app->steps_panel.open = false;
@@ -12349,9 +12451,36 @@ static void edit_undo(app_state_t *app, bool redo) {
 }
 
 /* The undo list's words for a step. */
+/* RV-137 (VM, 2026-10-18: two rows both "Adjust: whole"): what an adjustment
+   moved, its first two values by name ("Saturation -100, Exposure +1.20"). */
+static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, size_t cap) {
+    const rubraview_edit_params_t *q = &s->values.params;
+    struct { const char *name; double v; bool fine; } all[] = {
+        { T("Exposure"), q->exposure_ev, true }, { T("Brightness"), q->brightness, false }, { T("Contrast"), q->contrast, false },
+        { T("Saturation"), q->saturation, false }, { T("Temperature"), q->temperature, false }, { T("Tint"), q->tint, false },
+        { T("Red"), q->balance_r, false }, { T("Green"), q->balance_g, false }, { T("Blue"), q->balance_b, false },
+        { T("Black point"), (double)q->black_point, false }, { T("White point"), q->white_point == 255 ? 0.0 : (double)q->white_point, false },
+        { T("Midtone"), fabs(q->midtone_gamma - 1.0) < 1e-4 ? 0.0 : q->midtone_gamma, true },
+        { T("Blur"), s->values.blur_sigma, true }, { T("Sharpen"), s->values.sharpen_amount, false },
+    };
+    size_t used = 0, said = 0;
+    buf[0] = '\0';
+    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+        if (fabs(all[i].v) < 1e-4) continue;
+        if (said == 2) { snprintf(buf + used, cap - used, ", ..."); break; }
+        int n = all[i].fine ? snprintf(buf + used, cap - used, "%s%s %+.2f", said ? ", " : "", all[i].name, all[i].v)
+                            : snprintf(buf + used, cap - used, "%s%s %+.0f", said ? ", " : "", all[i].name, all[i].v);
+        if (n <= 0 || (size_t)n >= cap - used) break;
+        used += (size_t)n;
+        said++;
+    }
+    return said ? buf : T("Adjust");   /* the curve alone, or nothing named */
+}
+
 static u8str_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
+    char moved[80];
     const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
-                     : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect) : T("Adjust");
+                     : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect) : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
     int n;
@@ -12479,27 +12608,9 @@ static u8str_t edit_sel_label(const app_state_t *app) {
     return (u8str_t){ .ptr = line, .len = n > 0 ? (size_t)n : 0 };
 }
 
-static void panel_build_edit(app_state_t *app) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    app->edit_preview_tries = 0;
+/* Edit's rows by section, in whichever order the panel wants them (RV-137). */
+static void edit_rows_tone(app_state_t *app) {
     const rubraview_edit_session_t *e = &app->edit;
-    bool placed = app->panel.open && edit_panel_open(app) && app->panel.placed;
-    double px = app->panel.place_x, py = app->panel.place_y, scroll = app->panel.open ? app->panel.scroll : 0.0;
-    app->panel = rubraview_panel_create(TU8("Edit"), dpi);
-    app->panel.placed = placed;
-    app->panel.place_x = px;
-    app->panel.place_y = py;
-    app->panel.scroll = scroll;
-    app->panel_is_export = false;
-    app->panel_is_batch = false;
-    app->panel_is_print = false;
-    app->panel_is_convert = false;
-
-    /* First where: the selection (drawn on the picture, or its numbers). */
-    rubraview_panel_add_button(&app->panel, PANEL_SEL_BOX, edit_sel_label(app));
-    rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
-    rubraview_panel_add_separator(&app->panel);
-    /* Then what: every effect, in one window (owner, 2026-10-17). */
     rubraview_panel_add_slider(&app->panel, PANEL_EXPOSURE, TU8("Exposure"), e->params.exposure_ev, -3.0, 3.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BRIGHTNESS, TU8("Brightness"), e->params.brightness, -100.0, 100.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_CONTRAST, TU8("Contrast"), e->params.contrast, -100.0, 100.0, 0.0);
@@ -12510,11 +12621,17 @@ static void panel_build_edit(app_state_t *app) {
     rubraview_panel_add_slider(&app->panel, PANEL_BAL_G, TU8("Green"), e->params.balance_g, -100.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BAL_B, TU8("Blue"), e->params.balance_b, -100.0, 100.0, 1.0);
     rubraview_panel_add_button(&app->panel, PANEL_AUTO_COLOUR, TU8("Automatic colour correction"));
-    rubraview_panel_add_separator(&app->panel);
+}
+
+static void edit_rows_levels(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
     rubraview_panel_add_slider(&app->panel, PANEL_BLACK, TU8("Black point"), (double)e->params.black_point, 0.0, 254.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_WHITE, TU8("White point"), (double)e->params.white_point, 1.0, 255.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_GAMMA, TU8("Midtone"), e->params.midtone_gamma, 0.1, 3.0, 0.0);
-    rubraview_panel_add_separator(&app->panel);
+}
+
+static void edit_rows_detail(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
     rubraview_panel_add_slider(&app->panel, PANEL_BLUR, TU8("Blur"), e->blur_sigma, 0.0, 50.0, 0.0);
     rubraview_panel_add_choice(&app->panel, PANEL_BLUR_KIND, TU8("Blur kind"), e->blur_box ? 1 : 0, 2);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, TU8("Sharpen"), e->sharpen_amount, 0.0, 300.0, 0.0);
@@ -12524,8 +12641,9 @@ static void panel_build_edit(app_state_t *app) {
     /* Changes are on the picture at once (owner, 2026-10-18): this only ends the step, so the next change is one of its own. */
     rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
                                                                             : TU8("Done: next change a new step (Enter)"));
-    rubraview_panel_add_separator(&app->panel);
-    /* Effects (owner, 2026-10-17): one chosen, seen on the picture, applied as a step. */
+}
+
+static void edit_rows_effect(app_state_t *app) {
     rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), app->effect_choice, RUBRAVIEW_EFFECT_COUNT);
     {
         double lo = 0.0, hi = 1.0;
@@ -12534,7 +12652,10 @@ static void panel_build_edit(app_state_t *app) {
     }
     rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
     rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
-    rubraview_panel_add_separator(&app->panel);
+}
+
+static void edit_rows_resize(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
     rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, TU8("Crop to the selection"));
     rubraview_panel_add_button(&app->panel, PANEL_TRIM, TU8("Select the plain margins' inside"));
     int32_t cw = 0, ch = 0;
@@ -12549,15 +12670,106 @@ static void panel_build_edit(app_state_t *app) {
     rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_SHARPEN, TU8("  Sharpen after"), e->resize_sharpen, 0.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_DPI, TU8("  DPI (cm, in)"), e->resize_dpi > 0.0 ? e->resize_dpi : 300.0, 72.0, 1200.0, 1.0);
     rubraview_panel_add_button(&app->panel, PANEL_RESIZE_APPLY, TU8("Resize"));
+}
+
+static void edit_rows_save(app_state_t *app) {
+    /* D-88: inside an archive, Save writes the page over in the archive. */
+    rubraview_panel_add_button(&app->panel, PANEL_SAVE_ORIGINAL, on_archive_page(app) ? TU8("Save over the page") : TU8("Save (over the original)"));
+    rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, TU8("Save a copy"));
+}
+
+/* RV-137: Edit's rows in its own window, in the order its width wants
+   (the owner, 2026-10-18, chose these three): one column scrolled; two;
+   three. A column begins at a section, never inside one. */
+static void edit_rows_windowed(app_state_t *app) {
+    enum { CURVE, SEL, TONE, LEVELS, DETAIL, EFFECT, RESIZE, HISTORY, SAVE, NEXT, END };
+    /* The change list near the top of its column: it is what the window is for (VM, 2026-10-18:
+       under the selection's numbers it was below a 680-pixel window's bottom). */
+    static const int ORDER[3][13] = {
+        { CURVE, HISTORY, TONE, LEVELS, DETAIL, EFFECT, SEL, RESIZE, SAVE, END },
+        { CURVE, TONE, LEVELS, DETAIL, NEXT, HISTORY, SEL, EFFECT, RESIZE, SAVE, END },
+        { CURVE, HISTORY, SEL, NEXT, TONE, LEVELS, DETAIL, NEXT, EFFECT, RESIZE, SAVE, END },
+    };
+    const rubraview_edit_session_t *e = &app->edit;
+    rubraview_panel_t *p = &app->panel;
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window);
+    int32_t mode = app->edit_mode >= 0 && app->edit_mode <= 2 ? app->edit_mode : 2, column = 0;
+    app->edit_firsts[0] = app->edit_firsts[1] = app->edit_firsts[2] = 0;
+    for (int k = 0; ORDER[mode][k] != END; ++k) {
+        switch (ORDER[mode][k]) {
+            case NEXT: app->edit_firsts[++column] = p->row_count; continue;
+            case CURVE: rubraview_panel_add_spacer(p, PANEL_SP_CURVE, 184.0 * dpi); break;
+            case SEL:
+                rubraview_panel_add_spacer(p, PANEL_SP_SEL, 200.0 * dpi);   /* as tall as its box, set when laid out */
+                rubraview_panel_add_choice(p, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
+                break;
+            case TONE: edit_rows_tone(app); break;
+            case LEVELS: edit_rows_levels(app); break;
+            case DETAIL: edit_rows_detail(app); break;
+            case EFFECT: edit_rows_effect(app); break;
+            case RESIZE: edit_rows_resize(app); break;
+            case HISTORY:   /* undo and redo are Ctrl+Z / Ctrl+Y and a click on a change */
+                rubraview_panel_add_spacer(p, PANEL_SP_CHANGES, 160.0 * dpi);
+                rubraview_panel_add_button(p, PANEL_CHANGES_REMOVE, TU8("Remove the ticked changes"));
+                rubraview_panel_add_button(p, PANEL_ALL_COPIES, TU8("Copies of every picture in the list..."));
+                rubraview_panel_add_button(p, PANEL_ALL_ORIGINALS, TU8("Apply to every original in the list..."));
+                rubraview_panel_add_button(p, PANEL_RESET, TU8("Reset: back to the picture as it was"));
+                break;
+            case SAVE: edit_rows_save(app); break;
+            default: break;
+        }
+        int next = ORDER[mode][k + 1];
+        if (next != NEXT && next != END) rubraview_panel_add_separator(p);
+    }
+}
+
+static void panel_build_edit(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window ? app->edit_window : app->window);
+    double column_scroll[RUBRAVIEW_PANEL_MAX_COLUMNS];
+    memcpy(column_scroll, app->panel.column_scroll, sizeof(column_scroll));   /* each column stays where it was scrolled */
+    app->edit_preview_tries = 0;
+    const rubraview_edit_session_t *e = &app->edit;
+    bool placed = app->panel.open && edit_panel_open(app) && app->panel.placed;
+    double px = app->panel.place_x, py = app->panel.place_y, scroll = app->panel.open ? app->panel.scroll : 0.0;
+    app->panel = rubraview_panel_create(TU8("Edit"), dpi);
+    app->panel.placed = placed;
+    app->panel.place_x = px;
+    app->panel.place_y = py;
+    app->panel.scroll = scroll;
+    app->panel_is_export = false;
+    app->panel_is_batch = false;
+    app->panel_is_print = false;
+    app->panel_is_convert = false;
+
+    if (app->edit_window) {
+        memcpy(app->panel.column_scroll, column_scroll, sizeof(column_scroll));
+        edit_rows_windowed(app);
+        app->panel.open = true;
+        panel_relayout(app);
+        return;
+    }
+    /* First where: the selection (drawn on the picture, or its numbers). */
+    rubraview_panel_add_button(&app->panel, PANEL_SEL_BOX, edit_sel_label(app));
+    rubraview_panel_add_choice(&app->panel, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
+    rubraview_panel_add_separator(&app->panel);
+    /* Then what: every effect, in one window (owner, 2026-10-17). */
+    edit_rows_tone(app);
+    rubraview_panel_add_separator(&app->panel);
+    edit_rows_levels(app);
+    rubraview_panel_add_separator(&app->panel);
+    edit_rows_detail(app);
+    rubraview_panel_add_separator(&app->panel);
+    /* Effects (owner, 2026-10-17): one chosen, seen on the picture, applied as a step. */
+    edit_rows_effect(app);
+    rubraview_panel_add_separator(&app->panel);
+    edit_rows_resize(app);
     rubraview_panel_add_separator(&app->panel);
     rubraview_panel_add_button(&app->panel, PANEL_UNDO, TU8("Undo (Ctrl+Z)"));
     rubraview_panel_add_button(&app->panel, PANEL_REDO, TU8("Redo (Ctrl+Y)"));
     rubraview_panel_add_button(&app->panel, PANEL_STEPS, TU8("Undo list..."));
     rubraview_panel_add_button(&app->panel, PANEL_RESET, TU8("Reset: back to the picture as it was"));
     rubraview_panel_add_separator(&app->panel);
-    /* D-88: inside an archive, Save writes the page over in the archive. */
-    rubraview_panel_add_button(&app->panel, PANEL_SAVE_ORIGINAL, on_archive_page(app) ? TU8("Save over the page") : TU8("Save (over the original)"));
-    rubraview_panel_add_button(&app->panel, PANEL_SAVE_COPY, TU8("Save a copy"));
+    edit_rows_save(app);
 
     app->panel.open = true;
     panel_relayout(app);
@@ -12577,6 +12789,7 @@ static void panel_open_edit(app_state_t *app) {
     app->panel.open = false;
     panel_build_edit(app);
     edit_preview_open(app);
+    edit_window_show(app);   /* RV-137: in a window of its own beside the viewer */
 }
 
 /* The effects' names in the language in use (effects.c keeps them in English). */
@@ -14306,6 +14519,9 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_UNDO:         edit_undo(app, false); break;
         case PANEL_REDO:         edit_undo(app, true); break;
         case PANEL_STEPS:        edit_steps_toggle(app); break;
+        case PANEL_CHANGES_REMOVE: changes_remove_checked(app); break;
+        case PANEL_ALL_COPIES:   apply_all_begin(app); break;
+        case PANEL_ALL_ORIGINALS: apply_all_originals(app); break;
         case PANEL_SEL_BOX:      edit_sel_toggle(app); break;
         case PANEL_SAVE_ORIGINAL:
             (void)edit_apply_pending(app, false);
@@ -14519,10 +14735,11 @@ static bool panel_handle_press(app_state_t *app, double px, double py) {
    rectangle; this only fills them. */
 static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
 static void draw_panel(app_state_t *app) {
-    if (app->panel.open) draw_panel_of(app, &app->panel, edit_panel_open(app));
+    bool windowed = app->edit_window && edit_panel_open(app);   /* RV-137: Edit draws in its own window */
+    if (app->panel.open && !windowed) draw_panel_of(app, &app->panel, edit_panel_open(app));
     /* The owner's edit: the selection's numbers and the undo list, each a box of its own. */
-    if (edit_panel_open(app) && app->sel_panel.open) draw_panel_of(app, &app->sel_panel, true);
-    if (edit_panel_open(app) && app->steps_panel.open) draw_panel_of(app, &app->steps_panel, false);
+    if (edit_panel_open(app) && app->sel_panel.open && !windowed) draw_panel_of(app, &app->sel_panel, true);
+    if (edit_panel_open(app) && app->steps_panel.open && !windowed) draw_panel_of(app, &app->steps_panel, false);
     /* RV-133: the classify window says what the page on screen is set aside for */
     if (app->classify_panel.open) {
         if (app->classify_shown_page != current_page_index(app)) classify_build(app);
@@ -14533,10 +14750,11 @@ static void draw_panel(app_state_t *app) {
 static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers) {
     rubraview_pal_rect_t body = { panel->bounds.x, panel->bounds.y,
                                   panel->bounds.width, panel->bounds.height };
+    double text_size = panel->row_height * 0.45;
+    if (panel->bare) goto rows;   /* RV-137: the window is its box; no title or X of its own */
     rubraview_pal_render_fill_rect(app->renderer, body, COLOR_BOX_FILL, 3.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 3.0);
 
-    double text_size = panel->row_height * 0.45;
     rubraview_pal_rect_t title = { panel->bounds.x + panel->padding,
                                    panel->bounds.y + panel->padding,
                                    panel->bounds.width - panel->padding * 2.0,
@@ -14551,11 +14769,13 @@ static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool
         rubraview_pal_render_draw_text(app->renderer, U8("X"), xb, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
+rows:
     g_conv_is_7z = lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1;
     for (size_t i = 0; i < panel->row_count; ++i) {
         const rubraview_panel_row_t *row = &panel->rows[i];
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
         if (r.width <= 0.0) continue;  /* scrolled out of the box */
+        if (row->kind == RUBRAVIEW_ROW_SPACER) continue;   /* room the caller draws in */
 
         if (row->kind == RUBRAVIEW_ROW_SEPARATOR) {
             rubraview_pal_rect_t rule = { r.x, r.y + r.height * 0.5, r.width, 1.0 };
@@ -15298,7 +15518,8 @@ static void settings_apply_rest(app_state_t *app) {
 static void ui_font_apply_all(app_state_t *app) {
     rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, U8("general"), U8("ui_font")));
     rubraview_renderer_t *all[] = { app->renderer, app->mini_renderer, app->toolbox_renderer, app->settings_renderer, app->info_renderer,
-                                    app->help_renderer, app->files_renderer, app->subs_renderer, app->fontpick_renderer };
+                                    app->help_renderer, app->files_renderer, app->subs_renderer, app->fontpick_renderer,
+                                    app->edit_renderer };
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
         if (all[i]) rubraview_pal_render_set_ui_font(all[i], face.family, face.weight, face.italic);
     }
@@ -20240,6 +20461,13 @@ static rubraview_pal_rect_t curve_widget_rect(const app_state_t *app) {
     if (!app->panel.open || app->panel_is_export || app->panel_is_batch || app->panel_is_print || app->panel_is_convert) {
         return (rubraview_pal_rect_t){0};
     }
+    if (app->edit_window) {   /* RV-137: its room at the top of the Edit window's first column */
+        int32_t i = rubraview_panel_find(&app->panel, PANEL_SP_CURVE);
+        rubraview_rect_t r = i >= 0 ? rubraview_panel_row_rect(&app->panel, (size_t)i) : (rubraview_rect_t){0};
+        double side = r.width < r.height - 8.0 ? r.width : r.height - 8.0;
+        if (r.width <= 0.0 || side <= 0.0) return (rubraview_pal_rect_t){0};
+        return (rubraview_pal_rect_t){ r.x, r.y + 4.0, side, side };
+    }
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double side = 168.0 * dpi;
     double gap = 8.0 * dpi;
@@ -20755,6 +20983,324 @@ static void text_column(app_state_t *app, double win_w, double *x, double *w) {
     *w = width;
 }
 
+/* ---- RV-137: Edit in a window of its own (owner, 2026-10-18) ----
+   "edit 창은 메인 창 내부가 아니라 설정창처럼 외부에 독립된 모달리스 창으로":
+   the panel, the curve, the selection's numbers and the change list live in
+   a window beside the viewer; the picture, its selection and the preview
+   stay in the viewer. Laid out by its width in one, two or three columns.
+   While it is open the viewer's own paths do not ask these boxes: their
+   rectangles are in this window's pixels. */
+
+#define EDIT_BACKGROUND 0xFF1A1A1Au
+
+static bool edit_windowed(const app_state_t *app) {
+    return app->edit_window != NULL && edit_panel_open(app);
+}
+
+static rubraview_rect_t edit_room(const app_state_t *app, int32_t id) {
+    int32_t i = rubraview_panel_find(&app->panel, id);
+    return i >= 0 ? rubraview_panel_row_rect(&app->panel, (size_t)i) : (rubraview_rect_t){0};
+}
+
+static void edit_window_layout(app_state_t *app) {
+    if (!edit_windowed(app)) return;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->edit_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window);
+    int32_t mode = (double)w / dpi < 560.0 ? 0 : (double)w / dpi < 940.0 ? 1 : 2;
+    if (mode != app->edit_mode) {   /* another width band: the rows in its order */
+        app->edit_mode = mode;
+        panel_build_edit(app);      /* lays itself out again through here */
+        return;
+    }
+    double head = app->panel.row_height;
+    if (app->sel_panel.open)
+        rubraview_panel_set_spacer(&app->panel, PANEL_SP_SEL, head + (double)app->sel_panel.row_count * app->sel_panel.row_height + app->sel_panel.padding * 2.0);
+    size_t shown = app->edit_steps.count < 3 ? 3 : app->edit_steps.count > 8 ? 8 : app->edit_steps.count;
+    rubraview_panel_set_spacer(&app->panel, PANEL_SP_CHANGES, head + (double)shown * app->changes.row_height + 4.0 * dpi);
+    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, (double)w, (double)h }, mode + 1, app->edit_firsts);
+    rubraview_rect_t r = edit_room(app, PANEL_SP_SEL);
+    if (app->sel_panel.open) {
+        if (r.width > 0.0) rubraview_panel_layout_columns(&app->sel_panel, (rubraview_rect_t){ r.x, r.y + head, r.width, r.height - head }, 1, NULL);
+        else app->sel_panel.bounds = (rubraview_rect_t){ 0.0, -1.0e6, 0.0, 0.0 };
+    }
+    r = edit_room(app, PANEL_SP_CHANGES);
+    app->changes.x = r.x;
+    app->changes.y = r.y + head;
+    app->changes.width = r.width;
+    app->changes.height = r.width > 0.0 ? r.height - head : 0.0;
+}
+
+static void edit_window_close(app_state_t *app) {
+    if (!app->edit_window) return;
+    rubraview_pal_window_get_frame(app->edit_window, &app->edit_frame[0], &app->edit_frame[1], &app->edit_frame[2], &app->edit_frame[3]);
+    if (app->edit_renderer) rubraview_pal_render_destroy(app->edit_renderer);
+    rubraview_pal_window_destroy(app->edit_window);
+    app->edit_renderer = NULL;
+    app->edit_window = NULL;
+    app->edit_text_on = false;
+    app->sel_panel.open = false;
+}
+
+static void edit_window_show(app_state_t *app) {
+    if (app->edit_window || !edit_panel_open(app)) return;
+    rubraview_window_config_t config = { .title = T("Rubraview Edit"), .width = 980, .height = 640, .owner = app->window };
+    app->edit_window = rubraview_pal_window_create(app->arena, &config);
+    if (!app->edit_window) return;   /* the panel stays in the viewer, as before */
+    if (app->edit_frame[2] > 0 && app->edit_frame[3] > 0) {
+        rubraview_pal_window_set_frame(app->edit_window, app->edit_frame[0], app->edit_frame[1], app->edit_frame[2], app->edit_frame[3]);
+    } else {   /* beside the viewer's right edge, or over it when the screen has no room */
+        int32_t vx = 0, vy = 0, vw = 0, vh = 0, ex = 0, ey = 0, ew = 0, eh = 0, sw = 0, sh = 0;
+        if (rubraview_pal_window_get_frame(app->window, &vx, &vy, &vw, &vh) && rubraview_pal_window_get_frame(app->edit_window, &ex, &ey, &ew, &eh)) {
+            int32_t x = vx + vw + 8;
+            if (rubraview_pal_window_monitor_size(app->window, &sw, &sh) && sw > 0 && x + ew > sw) x = sw - ew > 0 ? sw - ew : 0;
+            rubraview_pal_window_set_frame(app->edit_window, x, vy, ew, eh);
+        }
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->edit_window, &w, &h);
+    app->edit_renderer = rubraview_pal_render_create(app->arena, rubraview_pal_window_native_handle(app->edit_window), w, h);
+    if (!app->edit_renderer) {
+        rubraview_pal_window_destroy(app->edit_window);
+        app->edit_window = NULL;
+        return;
+    }
+    ui_font_apply_all(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window);
+    app->changes = rubraview_listwin_create(dpi);
+    app->changes.editable = true;     /* each row's box, x and arrows */
+    app->changes.own_window = true;   /* no X or R of its own */
+    app->changes.title_height = 0.0;
+    app->changes.bar_height = 0.0;
+    app->changes.placed = app->changes.open = true;
+    memset(app->change_checked, 0, sizeof(app->change_checked));
+    app->steps_panel.open = false;    /* the change list is in the window */
+    app->edit_mode = -1;
+    edit_sel_build(app);              /* the selection's numbers, always there */
+    panel_build_edit(app);
+    app->edit_dirty = true;
+}
+
+/* The change list: a press on a row's box, x, arrows or name. */
+static void changes_changed(app_state_t *app) {
+    memset(app->change_checked, 0, sizeof(app->change_checked));
+    edit_steps_changed(app);
+}
+
+static void changes_remove_checked(app_state_t *app) {
+    edit_live_close(app);
+    bool any = false;
+    for (size_t i = 0; i < app->edit_steps.cursor; ++i) any = any || app->change_checked[i];
+    if (!any) { osd_say(app, TU8("tick the changes to take out first")); return; }
+    size_t n = rubraview_edit_steps_remove(&app->edit_steps, app->change_checked);
+    changes_changed(app);
+    char said[96];
+    int m = snprintf(said, sizeof(said), T("%zu changes taken out"), n);
+    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+}
+
+static bool changes_press(app_state_t *app, double x, double y) {
+    rubraview_listwin_t *lw = &app->changes;
+    if (lw->height <= 0.0 || !rubraview_rect_contains((rubraview_rect_t){ lw->x, lw->y, lw->width, lw->height }, x, y)) return false;
+    size_t count = app->edit_steps.count, index = 0;
+    switch (rubraview_listwin_hit(lw, x, y, count, &index)) {
+        case RUBRAVIEW_LISTWIN_ROW_CHECK:
+            if (index < RUBRAVIEW_EDIT_MAX_STEPS) app->change_checked[index] = !app->change_checked[index];
+            break;
+        case RUBRAVIEW_LISTWIN_ROW_REMOVE: {
+            if (index >= count) break;
+            edit_live_close(app);
+            bool gone[RUBRAVIEW_EDIT_MAX_STEPS] = { false };
+            gone[index] = true;
+            if (index < app->edit_steps.cursor && rubraview_edit_steps_remove(&app->edit_steps, gone)) changes_changed(app);
+            break;
+        }
+        case RUBRAVIEW_LISTWIN_ROW_UP:
+        case RUBRAVIEW_LISTWIN_ROW_DOWN: {
+            bool up = rubraview_listwin_hit(lw, x, y, count, &index) == RUBRAVIEW_LISTWIN_ROW_UP;
+            edit_live_close(app);
+            if (rubraview_edit_steps_move(&app->edit_steps, index, up)) changes_changed(app);
+            break;
+        }
+        case RUBRAVIEW_LISTWIN_ROW:   /* the picture as it stood after this change */
+            if (index < count) {
+                edit_live_close(app);
+                if (rubraview_edit_steps_go(&app->edit_steps, index + 1)) edit_steps_changed(app);
+            }
+            break;
+        default: break;
+    }
+    return true;
+}
+
+static void draw_changes(app_state_t *app) {
+    rubraview_listwin_t *lw = &app->changes;
+    rubraview_renderer_t *rr = app->renderer;
+    size_t count = app->edit_steps.count;
+    if (lw->height <= 0.0) return;
+    rubraview_listwin_scroll(lw, 0, count);
+    size_t rows = rubraview_listwin_rows_visible(lw);
+    double small = lw->row_height * 0.5, text_x = rubraview_listwin_row_text_x(lw);
+    for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
+        rubraview_rect_t r0 = rubraview_listwin_row_rect(lw, i, count);
+        bool in_force = i < app->edit_steps.cursor;
+        if (i + 1 == app->edit_steps.cursor) rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ r0.x, r0.y, r0.width, r0.height }, 0xFF2B4A6Fu, 2.0);
+        else if (rubraview_rect_contains(r0, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ r0.x, r0.y, r0.width, r0.height }, COLOR_TILE_FILL, 2.0);
+        list_check_mark(rr, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_CHECK), app->change_checked[i], false);
+        list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_REMOVE), "x", small, false, COLOR_TEXT);
+        list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_UP), "\xE2\x96\xB2", small * 0.8, false,
+                    i > 0 && in_force ? COLOR_TEXT : COLOR_BOX_BORDER);
+        list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_DOWN), "\xE2\x96\xBC", small * 0.8, false,
+                    i + 1 < app->edit_steps.cursor ? COLOR_TEXT : COLOR_BOX_BORDER);
+        char line[96], fit[200];
+        u8str_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
+        rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - text_x - 4.0, r0.height };
+        rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
+                                       in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
+    }
+    if (count == 0) {
+        rubraview_pal_render_draw_text(rr, TU8("no change yet: move a slider or choose an effect"),
+                                       (rubraview_pal_rect_t){ lw->x, lw->y, lw->width, lw->row_height }, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+    }
+}
+
+static void edit_heading(app_state_t *app, int32_t id, const char *words, size_t number) {
+    rubraview_rect_t r = edit_room(app, id);
+    if (r.width <= 0.0) return;
+    char text[96];
+    int n = number ? snprintf(text, sizeof(text), "%s   %zu", words, number) : snprintf(text, sizeof(text), "%s", words);
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ text, (size_t)n }, (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
+                                              app->panel.row_height * 0.5, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* What the window shows, cheaply: drawn again when it changes (or twice a second, for the histogram). */
+static uint64_t edit_window_signature(const app_state_t *app) {
+    uint64_t h = 1469598103934665603ull;
+    double v[] = { (double)app->edit_rev, (double)app->edit_steps.count, (double)app->edit_steps.cursor, (double)app->edit.crop_active,
+                   app->edit.crop.x, app->edit.crop.y, app->edit.crop.width, app->edit.crop.height, (double)app->panel.row_count,
+                   (double)app->sel_panel.row_count, (double)app->edit.active_channel };
+    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i) { uint64_t b; memcpy(&b, &v[i], 8); h = (h ^ b) * 1099511628211ull; }
+    for (size_t i = 0; i < app->panel.row_count; ++i) { uint64_t b; memcpy(&b, &app->panel.rows[i].value, 8); h = (h ^ b) * 1099511628211ull; }
+    return h;
+}
+
+static void draw_curve_widget(app_state_t *app);
+static void draw_edit_window(app_state_t *app) {
+    if (!app->edit_window) return;
+    if (!edit_panel_open(app)) { edit_window_close(app); return; }
+    double now = rubraview_pal_time_now_seconds();
+    uint64_t sig = edit_window_signature(app);
+    if (!app->edit_dirty && sig == app->edit_sig && now - app->edit_drawn_at < 0.5) return;
+    app->edit_dirty = false;
+    app->edit_sig = sig;
+    app->edit_drawn_at = now;
+    edit_window_layout(app);
+    /* drawn by the viewer's own drawing code, on this window's renderer with this window's pointer */
+    rubraview_renderer_t *viewer = app->renderer;
+    double vx = app->pointer_x, vy = app->pointer_y;
+    app->renderer = app->edit_renderer;
+    app->pointer_x = app->edit_px;
+    app->pointer_y = app->edit_py;
+    rubraview_pal_render_begin(app->renderer, EDIT_BACKGROUND);
+    draw_panel_of(app, &app->panel, true);
+    if (app->sel_panel.open && edit_room(app, PANEL_SP_SEL).width > 0.0) {
+        edit_heading(app, PANEL_SP_SEL, T("Selection"), 0);
+        draw_panel_of(app, &app->sel_panel, true);
+    }
+    edit_heading(app, PANEL_SP_CHANGES, T("Changes (Ctrl+Z undoes, Ctrl+Y redoes)"), app->edit_steps.count);
+    draw_changes(app);
+    draw_curve_widget(app);
+    if (app->rename_active && (app->rename_is_value || app->rename_is_apply)) {
+        int32_t ww = 0, wh = 0;
+        rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+        draw_rename_box(app, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
+    }
+    if (app->px_edit_open) {   /* a value typed: its box where it was asked for */
+        int32_t ww = 0, wh = 0;
+        rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+        draw_px_edit_box(app, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
+    }
+    bool ok = rubraview_pal_render_end(app->renderer);
+    app->renderer = viewer;
+    app->pointer_x = vx;
+    app->pointer_y = vy;
+    if (!ok) { edit_window_close(app); edit_window_show(app); }   /* its device went: made again */
+}
+
+static size_t edit_pump(app_state_t *app) {
+    size_t handled = 0;
+    rubraview_window_event_t event;
+    while (app->edit_window && rubraview_pal_window_poll_event(app->edit_window, &event)) {
+        handled++;
+        app->edit_dirty = true;
+        if (!edit_panel_open(app)) { edit_window_close(app); break; }
+        edit_window_layout(app);
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE:
+                panel_close(app);   /* its X is Edit's */
+                return handled;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
+                rubraview_pal_render_resize(app->edit_renderer, event.resize.width, event.resize.height);
+                edit_window_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                app->edit_px = event.mouse.x;
+                app->edit_py = event.mouse.y;
+                if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
+                if (app->panel.active_row >= 0) {
+                    int32_t dragged = -1;
+                    if (rubraview_panel_drag(&app->panel, event.mouse.x, event.mouse.y, &dragged) == RUBRAVIEW_PANEL_VALUE_CHANGED) panel_apply_row(app, dragged);
+                    break;
+                }
+                if (app->sel_panel.active_row >= 0) {
+                    int32_t dragged = -1;
+                    if (rubraview_panel_drag(&app->sel_panel, event.mouse.x, event.mouse.y, &dragged) == RUBRAVIEW_PANEL_VALUE_CHANGED) edit_sel_apply_row(app, dragged);
+                }
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_LEAVE:
+                app->edit_px = app->edit_py = -1.0;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) { (void)curve_widget_press(app, event.mouse.x, event.mouse.y, true); break; }
+                if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (changes_press(app, event.mouse.x, event.mouse.y)) break;
+                if (edit_side_press(app, event.mouse.x, event.mouse.y)) break;
+                (void)panel_handle_press(app, event.mouse.x, event.mouse.y);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                app->curve_dragging = -1;
+                rubraview_panel_release(&app->panel);
+                rubraview_panel_release(&app->sel_panel);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                if (app->changes.height > 0.0 && rubraview_rect_contains((rubraview_rect_t){ app->changes.x, app->changes.y, app->changes.width, app->changes.height }, event.mouse.x, event.mouse.y)) {
+                    rubraview_listwin_scroll(&app->changes, event.mouse.wheel_delta > 0 ? -1 : 1, app->edit_steps.count);
+                    break;
+                }
+                rubraview_panel_scroll_at(&app->panel, event.mouse.x, -event.mouse.wheel_delta * app->panel.row_height * 3.0);
+                edit_window_layout(app);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
+                /* Esc leaves Edit here (the viewer's Esc ends the program); the rest are the viewer's keys. */
+                if (key_is(event.key.combo, "Escape") && !app->rename_active && !app->px_edit_open) { panel_close(app); return handled; }
+                dispatch_key(app, event.key.combo);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_TEXT:
+            case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+                rename_text(app, &event);   /* a name or a number typed while this window has the keys */
+                break;
+            default:
+                break;
+        }
+    }
+    bool typing = app->rename_active || app->px_edit_open;
+    if (app->edit_window && typing != app->edit_text_on) {
+        rubraview_pal_window_text_input(app->edit_window, typing);
+        app->edit_text_on = typing;
+    }
+    return handled;
+}
+
 static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
     text_page_t *t = app->text;
     if (!t || t->view.count == 0) return;
@@ -21203,7 +21749,7 @@ static void render_frame(app_state_t *app) {
         draw_seekfan(app, app->renderer, false);
         draw_chrome_answers(app, (double)win_w, (double)win_h);
         draw_panel(app);
-        draw_curve_widget(app);
+        if (!app->edit_window) draw_curve_widget(app);
     }
 
     if (!rubraview_pal_render_end(app->renderer)) {
@@ -24262,7 +24808,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         app.pointer_y = event.mouse.y;
                         break;
                     }
-                    if (app.curve_dragging >= 0) {
+                    if (app.curve_dragging >= 0 && !app.edit_window) {
                         curve_widget_drag(&app, event.mouse.x, event.mouse.y);
                         app.pointer_x = event.mouse.x;
                         app.pointer_y = event.mouse.y;
@@ -24280,7 +24826,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     }
                     {
                         /* A box taken by its title follows the pointer. */
-                        rubraview_panel_t *moving = app.panel.moving ? &app.panel : app.sel_panel.moving ? &app.sel_panel
+                        rubraview_panel_t *moving = app.edit_window ? (app.classify_panel.moving ? &app.classify_panel : NULL)
+                                                  : app.panel.moving ? &app.panel : app.sel_panel.moving ? &app.sel_panel
                                                   : app.steps_panel.moving ? &app.steps_panel
                                                   : app.classify_panel.moving ? &app.classify_panel : NULL;
                         if (moving) {
@@ -24303,7 +24850,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         app.pointer_y = event.mouse.y;
                         break;
                     }
-                    if (app.panel.open && app.panel.active_row >= 0) {
+                    if (app.panel.open && app.panel.active_row >= 0 && !(app.edit_window && edit_panel_open(&app))) {
                         int32_t dragged = -1;
                         if (rubraview_panel_drag(&app.panel, event.mouse.x, event.mouse.y, &dragged)
                                 == RUBRAVIEW_PANEL_VALUE_CHANGED) {
@@ -24522,7 +25069,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                        shut the workbench at the first press on the picture. */
                     /* The owner's edit: the boxes beside it, then the selection's handles and inside. */
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && classify_press(&app, event.mouse.x, event.mouse.y)) break;
-                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_side_press(&app, event.mouse.x, event.mouse.y)) break;
+                    bool edit_away = app.edit_window && edit_panel_open(&app);   /* RV-137: Edit's boxes are in their own window */
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && !edit_away && edit_side_press(&app, event.mouse.x, event.mouse.y)) break;
                     /* The floating lists over the picture are theirs, not the selection's ("Edit to all"). */
                     if (edit_panel_open(&app) && app.recentwin.open && event.mouse.button == RUBRAVIEW_MOUSE_LEFT &&
                         rubraview_rect_contains(rubraview_listwin_rect(&app.recentwin), event.mouse.x, event.mouse.y) &&
@@ -24531,7 +25079,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         rubraview_rect_contains(rubraview_listwin_rect(&app.listwin), event.mouse.x, event.mouse.y) &&
                         listwin_press(&app, event.mouse.x, event.mouse.y, event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
-                        !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y)) {
+                        (edit_away || !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y))) {
                         int32_t hit = sel_hit(&app, event.mouse.x, event.mouse.y);
                         if (hit && crop_point_to_image(&app, event.mouse.x, event.mouse.y, &app.sel_grab_x, &app.sel_grab_y)) {
                             app.sel_grab = hit;
@@ -24540,7 +25088,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                     }
                     if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(&app) &&
-                        !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y) &&
+                        (edit_away || !rubraview_rect_contains(app.panel.bounds, event.mouse.x, event.mouse.y)) &&
                         !point_in_curve_widget(&app, event.mouse.x, event.mouse.y) &&
                         crop_point_to_image(&app, event.mouse.x, event.mouse.y,
                                             &app.crop_drag_x0, &app.crop_drag_y0)) {
@@ -24550,7 +25098,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         break;
                     }
 
-                    if (panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
+                    if (!edit_away && panel_handle_press(&app, event.mouse.x, event.mouse.y)) break;
                     if (app.eqwin.open && eqwin_press(&app, event.mouse.x, event.mouse.y,
                                                       event.mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
                     if (app.recentwin.open && event.mouse.button == RUBRAVIEW_MOUSE_LEFT && recentwin_press(&app, event.mouse.x, event.mouse.y)) break;
@@ -24571,7 +25119,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         intent = rubraview_pointer_side_button(false);
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_X2) {
                         intent = rubraview_pointer_side_button(true);
-                    } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT &&
+                    } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT && !app.edit_window &&
                                curve_widget_press(&app, event.mouse.x, event.mouse.y, true)) {
                         break;   /* a point taken off the curve */
                     } else if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
@@ -24687,7 +25235,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         /* The owner's edit: a box taller than the window scrolls. */
                         rubraview_panel_t *boxes[4] = { &app.classify_panel, &app.steps_panel, &app.sel_panel, &app.panel };
                         bool took = false;
-                        for (int b = 0; b < 4 && !took; ++b) {
+                        for (int b = 0; b < (app.edit_window ? 1 : 4) && !took; ++b) {   /* RV-137: Edit's scroll in its window */
                             if (!boxes[b]->open || !rubraview_rect_contains(boxes[b]->bounds, event.mouse.x, event.mouse.y)) continue;
                             rubraview_panel_scroll_by(boxes[b], -event.mouse.wheel_delta * boxes[b]->row_height * 3.0);
                             took = true;
@@ -24807,6 +25355,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         handled += mini_pump(&app);
         handled += files_pump(&app);
         handled += fontpick_pump(&app);
+        handled += edit_pump(&app);
         handled += subs_pump(&app);
 
         if (app.needs_relayout) {
@@ -24924,6 +25473,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         files_preview_step(&app, now);
         draw_files_window(&app);
         draw_fontpick_window(&app);
+        draw_edit_window(&app);
         takeout_step(&app);
         putin_step(&app);
         draw_subs_window(&app);
