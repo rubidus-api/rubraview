@@ -38,6 +38,8 @@ static const char *const PARTS[] = {
 "  note \"Auto follows Windows' display language. A language is a file in the lang folder beside rubraview.exe.\"\n"
 "  note \"Import copies a pack (ko.txt and the like) to where rubraview reads it.\"\n"
 "  action lang.import              \"Import language packs...\"\n"
+"  section \"Font\"\n"
+"  path   general.ui_font          \"UI font\"                 wired\n"
 "\n",
 "page explorer \"Explorer\"\n"
 "  section \"What Rubraview is given\"\n"
@@ -369,6 +371,7 @@ static const char *const PARTS[] = {
 "help general.explorer_open \"What the open window does with a file sent from Explorer: add it to the list being viewed, open its whole folder instead, or show only that file.\"\n"
 "help general.first_with_folder \"On: the first file opened brings the other pictures of its folder with it, so the arrows go through the folder. Off: only that file is opened.\"\n"
 "help general.native_dialog \"On: Ctrl+O opens Windows' own Open dialog. Off: it opens Rubraview's own file screen with thumbnails, Recent and favourites.\"\n"
+"help general.ui_font \"The face of every word the program writes: menus, tiles, lists, panels and messages; its weight and italic too. Empty is Segoe UI. The text viewer and the subtitles have fonts of their own. Click to choose one.\"\n"
 "help general.titlebar_trigger_px \"With the frameless window: how close to the top edge the pointer must come before the title bar slides down.\"\n"
 "help viewer.fit_mode \"How a picture is sized when it is opened: fitted to the window, to its width or height, at its real size, and so on. Keys 1 to 6 change it on the page.\"\n"
 "help viewer.layout \"One page at a time, two side by side (a book or a comic, left to right or right to left), or a long strip for webtoons.\"\n"

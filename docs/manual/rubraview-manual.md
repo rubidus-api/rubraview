@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.11.0.exe              the viewer, as built
-dist/rubraview-v1.11.0/                 the release bundle
-dist/rubraview-v1.11.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.12.0.exe              the viewer, as built
+dist/rubraview-v1.12.0/                 the release bundle
+dist/rubraview-v1.12.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1016,9 +1016,22 @@ the last change did. A long explanation is wrapped to the window.
 Rest the pointer on a setting's name and a fuller explanation comes up
 for the harder ones. **Defaults** puts back every setting, **this page**
 only the page you are on, **this setting** only the one with the focus;
-**Revert** undoes any of them. **Subtitle font** and the text viewer's
-**Font** open Windows' own font dialog: pick a face (its size has a
-setting of its own).
+**Revert** undoes any of them.
+
+**Fonts.** **General › UI font** is the face of every word the program
+writes — menus, tiles, lists, panels, messages (empty is Segoe UI); the
+text viewer's **Font** and **Subtitle font** are their own. A click on
+one opens the font picker: type to find a family (the first whose name
+begins with what you typed is chosen), `Up` / `Down` to move, a click to
+choose. Right of each name a short sample — `Iil1 aoO0` and a word of
+the language in use — is drawn in that family once its row has been in
+sight a moment. Under the list: the weight (`<` `>`, or `Left` /
+`Right`), **Italic** (`Ctrl+I`; `Ctrl+B` for bold), a large preview,
+**Default** (the program's own font), **OK** (`Enter`, or a double click)
+and **Cancel** (`Esc`). A setting keeps the font as
+`Family, Weight, Italic`, the weight and italic only when they are not
+the plain ones. The settings and help windows keep their fixed-width
+face, so their columns stay lined up.
 
 `F10` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says
@@ -1108,7 +1121,7 @@ filename code page, the memory cap). Some worth knowing:
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
-**Hide**, the first of the title bar's buttons (also Show > Hide all in
+**Hide**, the first of the title bar's buttons (also Screen > Hide all in
 the menu), puts the title bar and the floating boxes away, so nothing
 comes up under the pointer. The next click anywhere in the window brings
 them back, and does nothing else. Settings is on the menu's first level.

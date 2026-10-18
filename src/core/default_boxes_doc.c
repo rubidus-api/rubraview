@@ -505,7 +505,7 @@ static const char *const PARTS[] = {
 "  item subtitle_sync_reset    \"Sync reset\"\n"
 "  item extract_subtitles      \"Take out of film\"\n"
 "end\n"
-"menu \"Show\"\n"
+"menu \"Screen\"\n"
 "  menu \"Slide show\"\n"
 "    item toggle_slideshow     \"Start / stop\"\n"
 "    item interval_down        \"Faster\"\n"

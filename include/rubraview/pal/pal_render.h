@@ -198,6 +198,28 @@ typedef enum rubraview_text_align {
  */
 void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family);
 
+/** RV-136: the same, with a weight (100..900, 0 for 400) and italic. */
+void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic);
+
+/**
+ * RV-136: the program's own face — what draw_text and the measures use
+ * when no other family is set (Settings › General › UI font). An empty
+ * family is Segoe UI.
+ */
+void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic);
+
+/** One font family the machine has: its name in the user's language and its English one (stored). */
+typedef struct rubraview_font_family {
+    u8str_t shown;
+    u8str_t name;
+} rubraview_font_family_t;
+
+/**
+ * RV-136: the machine's font families, sorted by the name shown, into
+ * `arena`; 0 when DirectWrite gives none. Vertical (`@`) faces are not listed.
+ */
+size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_t **out);
+
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
                                     u8str_t text,
                                     rubraview_pal_rect_t rect,
@@ -247,6 +269,8 @@ typedef struct rubraview_text_style {
     double  line_spacing;  /* a line's height as a multiple of the size (1.5 = 150 %) */
     double  width;         /* the column's width: lines wrap there when `wrap` */
     bool    wrap;
+    int32_t weight;        /* RV-136: 100..900, 0 for 400 */
+    bool    italic;
 } rubraview_text_style_t;
 
 typedef struct rubraview_text_block rubraview_text_block_t;

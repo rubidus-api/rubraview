@@ -86,6 +86,11 @@ uint32_t rubraview_pal_render_last_hresult(void) {
 struct rubraview_renderer {
     proven_arena_t *arena;
     WCHAR text_family[64];         /* RV-107: "" for the program's own face */
+    DWRITE_FONT_WEIGHT text_weight;
+    DWRITE_FONT_STYLE  text_style;
+    WCHAR ui_family[64];           /* RV-136: the program's own face; "" for Segoe UI */
+    DWRITE_FONT_WEIGHT ui_weight;
+    DWRITE_FONT_STYLE  ui_style;
     ID2D1Factory1 *factory;
     ID2D1Device *device;
     ID2D1DeviceContext *target;    /* the render target, and the effect graph's owner */
@@ -759,12 +764,108 @@ bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t cod
     return ok;
 }
 
-void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family) {
-    if (!renderer) return;
-    renderer->text_family[0] = 0;
+static DWRITE_FONT_WEIGHT weight_of(int32_t weight) {
+    return weight >= 100 && weight <= 950 ? (DWRITE_FONT_WEIGHT)weight : DWRITE_FONT_WEIGHT_NORMAL;
+}
+
+static void wide_family(WCHAR out[64], u8str_t family) {
+    out[0] = 0;
     if (family.len == 0 || family.len > 120) return;
-    int n = MultiByteToWideChar(CP_UTF8, 0, family.ptr, (int)family.len, renderer->text_family, 63);
-    renderer->text_family[n > 0 && n < 64 ? n : 0] = 0;
+    int n = MultiByteToWideChar(CP_UTF8, 0, family.ptr, (int)family.len, out, 63);
+    out[n > 0 && n < 64 ? n : 0] = 0;
+}
+
+void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic) {
+    if (!renderer) return;
+    wide_family(renderer->text_family, family);
+    renderer->text_weight = weight_of(weight);
+    renderer->text_style = italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+}
+
+void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family) {
+    rubraview_pal_render_set_text_font(renderer, family, 0, false);
+}
+
+void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic) {
+    if (!renderer) return;
+    wide_family(renderer->ui_family, family);
+    renderer->ui_weight = weight_of(weight);
+    renderer->ui_style = italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+}
+
+/* The face draw_text and the measures use: the one set for now, else the program's own. */
+static const WCHAR *face_family(const rubraview_renderer_t *r) {
+    return r->text_family[0] ? r->text_family : r->ui_family[0] ? r->ui_family : L"Segoe UI";
+}
+static DWRITE_FONT_WEIGHT face_weight(const rubraview_renderer_t *r) {
+    return r->text_family[0] ? (r->text_weight ? r->text_weight : DWRITE_FONT_WEIGHT_NORMAL) : (r->ui_weight ? r->ui_weight : DWRITE_FONT_WEIGHT_NORMAL);
+}
+static DWRITE_FONT_STYLE face_style(const rubraview_renderer_t *r) {
+    return r->text_family[0] ? r->text_style : r->ui_style;
+}
+
+static int family_name_compare(const void *a, const void *b) {
+    const rubraview_font_family_t *x = (const rubraview_font_family_t*)a, *y = (const rubraview_font_family_t*)b;
+    size_t n = x->shown.len < y->shown.len ? x->shown.len : y->shown.len;
+    for (size_t i = 0; i < n; ++i) {
+        int cx = (unsigned char)x->shown.ptr[i], cy = (unsigned char)y->shown.ptr[i];
+        if (cx >= 'A' && cx <= 'Z') cx += 32;
+        if (cy >= 'A' && cy <= 'Z') cy += 32;
+        if (cx != cy) return cx - cy;
+    }
+    return x->shown.len < y->shown.len ? -1 : x->shown.len > y->shown.len ? 1 : 0;
+}
+
+/* A localized name as UTF-8 in `arena`: the locale's, else English, else the first. */
+static u8str_t family_name(proven_arena_t *arena, IDWriteLocalizedStrings *names, const WCHAR *locale) {
+    UINT32 index = 0, len = 0;
+    BOOL exists = FALSE;
+    if (locale && (FAILED(IDWriteLocalizedStrings_FindLocaleName(names, locale, &index, &exists)) || !exists)) index = UINT32_MAX;
+    if (index == UINT32_MAX && (FAILED(IDWriteLocalizedStrings_FindLocaleName(names, L"en-us", &index, &exists)) || !exists)) index = 0;
+    WCHAR wide[128];
+    if (FAILED(IDWriteLocalizedStrings_GetStringLength(names, index, &len)) || len == 0 || len >= 128 ||
+        FAILED(IDWriteLocalizedStrings_GetString(names, index, wide, 128))) return (u8str_t){ .ptr = "", .len = 0 };
+    char utf8[400];
+    int n = WideCharToMultiByte(CP_UTF8, 0, wide, (int)len, utf8, (int)sizeof(utf8), NULL, NULL);
+    if (n <= 0) return (u8str_t){ .ptr = "", .len = 0 };
+    proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)n);
+    if (!proven_is_ok(m.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    memcpy(m.value.ptr, utf8, (size_t)n);
+    return (u8str_t){ .ptr = (const char*)m.value.ptr, .len = (size_t)n };
+}
+
+size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_t **out) {
+    *out = NULL;
+    IDWriteFactory *dwrite = NULL;
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &RUBRAVIEW_IID_IDWriteFactory, (IUnknown**)&dwrite)) || !dwrite) return 0;
+    IDWriteFontCollection *fonts = NULL;
+    size_t count = 0;
+    if (SUCCEEDED(IDWriteFactory_GetSystemFontCollection(dwrite, &fonts, FALSE)) && fonts) {
+        UINT32 total = IDWriteFontCollection_GetFontFamilyCount(fonts);
+        proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)(total ? total : 1) * sizeof(rubraview_font_family_t));
+        WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+        bool has_locale = GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH) > 0;
+        if (proven_is_ok(m.err)) {
+            rubraview_font_family_t *list = (rubraview_font_family_t*)(void*)m.value.ptr;
+            for (UINT32 i = 0; i < total; ++i) {
+                IDWriteFontFamily *family = NULL;
+                IDWriteLocalizedStrings *names = NULL;
+                if (FAILED(IDWriteFontCollection_GetFontFamily(fonts, i, &family)) || !family) continue;
+                if (SUCCEEDED(IDWriteFontFamily_GetFamilyNames(family, &names)) && names) {
+                    u8str_t name = family_name(arena, names, NULL);
+                    u8str_t shown = has_locale ? family_name(arena, names, locale) : name;
+                    if (name.len > 0 && name.ptr[0] != '@') list[count++] = (rubraview_font_family_t){ .shown = shown.len ? shown : name, .name = name };
+                    IDWriteLocalizedStrings_Release(names);
+                }
+                IDWriteFontFamily_Release(family);
+            }
+            qsort(list, count, sizeof(*list), family_name_compare);
+            *out = list;
+        }
+        IDWriteFontCollection_Release(fonts);
+    }
+    IDWriteFactory_Release(dwrite);
+    return count;
 }
 
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
@@ -784,9 +885,9 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
     if (wide_len <= 0) return false;
 
     IDWriteTextFormat *format = NULL;
-    HRESULT hr = IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL,
-                                                 DWRITE_FONT_WEIGHT_NORMAL,
-                                                 DWRITE_FONT_STYLE_NORMAL,
+    HRESULT hr = IDWriteFactory_CreateTextFormat(renderer->dwrite, face_family(renderer), NULL,
+                                                 face_weight(renderer),
+                                                 face_style(renderer),
                                                  DWRITE_FONT_STRETCH_NORMAL,
                                                  (FLOAT)font_size, L"", &format);
     if (FAILED(hr) || !format) return false;
@@ -827,8 +928,8 @@ bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t t
     int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
-                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, face_family(renderer), NULL, face_weight(renderer),
+                                               face_style(renderer), DWRITE_FONT_STRETCH_NORMAL,
                                                (FLOAT)font_size, L"", &format)) || !format) {
         return false;
     }
@@ -859,8 +960,8 @@ bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u
     if (wide_len <= 0) return false;
     /* The same face and wrapping draw_text draws with. */
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->text_family[0] ? renderer->text_family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
-                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, face_family(renderer), NULL, face_weight(renderer),
+                                               face_style(renderer), DWRITE_FONT_STRETCH_NORMAL,
                                                (FLOAT)font_size, L"", &format)) || !format) {
         return false;
     }
@@ -934,8 +1035,10 @@ rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *rend
     family[fn > 0 ? fn : 0] = 0;
     double size = style->size > 1.0 ? style->size : 16.0;
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, family[0] ? family : L"Segoe UI", NULL, DWRITE_FONT_WEIGHT_NORMAL,
-                                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, (FLOAT)size, L"", &format)) || !format) {
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, family[0] ? family : renderer->ui_family[0] ? renderer->ui_family : L"Segoe UI", NULL,
+                                               style->weight >= 100 ? weight_of(style->weight) : family[0] ? DWRITE_FONT_WEIGHT_NORMAL : face_weight(renderer),
+                                               style->italic ? DWRITE_FONT_STYLE_ITALIC : family[0] ? DWRITE_FONT_STYLE_NORMAL : renderer->ui_style,
+                                               DWRITE_FONT_STRETCH_NORMAL, (FLOAT)size, L"", &format)) || !format) {
         free(wide); free(b->u8_of); free(b);
         return NULL;
     }
