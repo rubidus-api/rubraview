@@ -11,8 +11,8 @@
  * the Windows side prints the lines this file writes.
  */
 
-#define TITLE_ROWS 2      /* the page title, and a blank row under it */
-#define FOOTER_ROWS 2     /* a blank row, and the buttons */
+#define TITLE_ROWS RUBRAVIEW_SETTINGS_TOP_ROWS   /* the page title, the buttons, a blank row */
+#define FOOTER_ROWS 1     /* what the last action did */
 #define PAGE_LIST_TOP 2   /* the first page's row in the list */
 
 /* ---- cells: how wide text is on a fixed-width grid ---- */
@@ -129,6 +129,39 @@ static void put_words(cell_writer_t *w, u8str_t text, int32_t limit) {
     put_bytes(w, "\xE2\x81\xA9", 3, 0);   /* PDI */
 }
 
+/* A note's rows (owner, 2026-10-18: a long explanation ran off the window):
+   its words wrapped at `width` cells, broken at a space or before a wide
+   character, a word longer than a row cut. Returns how many rows there are;
+   `*out` is row `k`'s text when there is one. */
+static int32_t note_row(u8str_t text, int32_t width, int32_t k, u8str_t *out) {
+    if (out) *out = (u8str_t){ .ptr = text.ptr, .len = 0 };
+    if (width < 4) width = 4;
+    int32_t rows = 0;
+    size_t start = 0;
+    while (start < text.len) {
+        while (start < text.len && text.ptr[start] == ' ') start++;
+        if (start >= text.len) break;
+        size_t i = start, cut = start, end = text.len;
+        int32_t cells = 0;
+        while (i < text.len) {
+            uint32_t cp = 0;
+            size_t n = next_code_point(text.ptr + i, text.len - i, &cp);
+            int c = cell_width(cp);
+            if (cp == ' ') cut = i;                       /* a break before the space */
+            else if (c == 2 && i > start) cut = i;        /* or before a wide character */
+            if (cells + c > width) { end = cut > start ? cut : i; break; }
+            cells += c;
+            i += n;
+            if (c == 2) cut = i;                          /* and after one */
+        }
+        if (end <= start) end = i > start ? i : start + 1;
+        if (rows == k && out) *out = (u8str_t){ .ptr = text.ptr + start, .len = end - start };
+        rows++;
+        start = end;
+    }
+    return rows > 0 ? rows : 1;
+}
+
 static void pad_to(cell_writer_t *w, int32_t cells) {
     while (w->cells < cells) put_bytes(w, " ", 1, 1);
 }
@@ -217,6 +250,7 @@ static void layout(rubraview_settings_view_t *view) {
                 break;
             case RUBRAVIEW_NODE_NOTE:
                 line.kind = RUBRAVIEW_LINE_NOTE;
+                line.height = note_row(tr(node->text), view->cols - view->content_col - 1, -1, NULL);
                 break;
             default:
                 continue;
@@ -643,7 +677,7 @@ rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view
         return RUBRAVIEW_SEVENT_MOVED;
     }
 
-    if (row == view->rows - 1) {
+    if (row == RUBRAVIEW_SETTINGS_BUTTON_ROW) {
         for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
             int32_t first = 0, width = 0;
             rubraview_settings_view_button_cells(view, (rubraview_settings_button_t)b, &first, &width);
@@ -775,9 +809,12 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             break;
         }
 
-        case RUBRAVIEW_LINE_NOTE:
-            put_words(&w, tr(node->text), width);
+        case RUBRAVIEW_LINE_NOTE: {
+            u8str_t piece;
+            note_row(tr(node->text), width, table_index < 0 ? 0 : table_index, &piece);
+            put_words(&w, piece, width);
             break;
+        }
 
         case RUBRAVIEW_LINE_TABLE: {
             char row[512];

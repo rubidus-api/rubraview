@@ -1063,6 +1063,18 @@ bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_
         }
         IDWriteTextLayout_Release(text);
     }
+    /* A row as tall as the tallest script it may hold: Korean, Japanese,
+       Chinese and Persian come from fallback faces taller than Consolas,
+       and a row measured on Latin alone let them run into the next one and
+       off the window's bottom (owner, 2026-10-18). */
+    static const WCHAR mixed[] = L"Mg\uAC00\u3042\u6F22\u067E\u06AF";
+    IDWriteTextLayout *tall = NULL;
+    if (ok && out_height && SUCCEEDED(IDWriteFactory_CreateTextLayout(renderer->dwrite, mixed, (UINT32)(sizeof(mixed) / sizeof(mixed[0]) - 1),
+                                                                      format, 10000.0f, 1000.0f, &tall)) && tall) {
+        DWRITE_TEXT_METRICS metrics;
+        if (SUCCEEDED(IDWriteTextLayout_GetMetrics(tall, &metrics)) && (double)metrics.height > *out_height) *out_height = (double)metrics.height;
+        IDWriteTextLayout_Release(tall);
+    }
     IDWriteTextFormat_Release(format);
     return ok;
 }

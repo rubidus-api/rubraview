@@ -33,6 +33,13 @@ extern "C" {
  *   └───────────┴──────────────────────────────────────────────┘
  */
 
+/* The window's rows (owner, 2026-10-18: the buttons at the top, where they
+   are easy to reach and never cut off under a tall script): the page's
+   title, the buttons, a blank row, the page; the last row is what the last
+   action did. */
+#define RUBRAVIEW_SETTINGS_TOP_ROWS   3
+#define RUBRAVIEW_SETTINGS_BUTTON_ROW 1
+
 typedef enum rubraview_settings_line_kind {
     RUBRAVIEW_LINE_SECTION = 0,
     RUBRAVIEW_LINE_SETTING,

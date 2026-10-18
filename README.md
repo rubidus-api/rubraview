@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.10.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.10.0/rubraview-v1.10.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.10.0/rubraview-v1.10.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.11.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.11.0/rubraview-v1.11.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.11.0/rubraview-v1.11.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -215,7 +215,6 @@ ships with, so it cannot drift from them.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
 | Menu `Korean` | Read the open archive's file names as Korean (CP949) |

@@ -912,6 +912,7 @@ typedef struct app_state {
     size_t                 spath_composing_length;
     u8str_t                spath_section, spath_key;
     int32_t                spath_list_index;   /* a folder of a list (`recent.skip_dirs`) being typed, or -1 */
+    int32_t                spath_list;         /* which of FOLDER_LISTS that list is */
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
@@ -3948,6 +3949,15 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
 
 /* Each pass: take in what the thread has made, and ask for the tiles now
    on screen that have not been asked for. Nothing here waits. */
+/* The owner (2026-10-18): folders whose files show no thumbnail, and all
+   under them, typed as the folders kept out of Recent are. */
+static bool thumb_kept_out(const app_state_t *app, u8str_t path) {
+    u8str_t dirs[64];
+    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("thumbs"), U8("skip_dirs")), dirs, 64);
+    if (n > 64) n = 64;
+    return n > 0 && path.len > 0 && rubraview_recent_is_kept_out(path, dirs, n);
+}
+
 static void picker_thumbs_step(app_state_t *app) {
     app->picker_thumbs_arrived = false;
     if (!app->picker_open || !app->picker_thumbs) return;
@@ -3989,6 +3999,7 @@ static void picker_thumbs_step(app_state_t *app) {
        for first and the first one last: they fill in from the top. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
     int book_reads = 0;
+    bool book_kept_out = app->picker_in_book && thumb_kept_out(app, app->source.archive_path);
     for (size_t k = visible.count; k-- > 0;) {
         size_t index = visible.first + k;
         if (index >= app->picker_thumb_count || index >= app->picker_listing.count) continue;
@@ -3999,6 +4010,7 @@ static void picker_thumbs_step(app_state_t *app) {
         /* A drive's first picture is not looked for: an empty reader or a
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
+        if (book_kept_out || (!app->picker_in_book && thumb_kept_out(app, entry->path))) { t->state = 2; continue; }
         if (app->picker_in_book) {
             /* A page in the book has no file to ask about: its bytes go to
                the thread instead (owner, 2026-09-29) — three a pass, so the
@@ -4135,6 +4147,7 @@ static void strip_step(app_state_t *app, double dt) {
         struct picker_thumb *t = &app->strip_cells[index];
         if (t->state != 0) continue;
         u8str_t path = app->source.pages[index].path;
+        if (thumb_kept_out(app, path.len > 0 ? path : app->source.archive_path)) { t->state = 2; continue; }
         if (path.len > 0) {
             t->state = rubraview_pal_thumbs_request(app->strip_thumbs, app->strip_generation, index, false, 1.0, path) ? 3 : 2;
             continue;
@@ -8168,6 +8181,61 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
     rubraview_pal_render_draw_text(r, caption, tile, size, ink, RUBRAVIEW_TEXT_CENTER);
 }
 
+/* The owner (2026-10-18): a tile's words all inside it in every language —
+   smaller when they would not fit, each word whole on its line. Sizes are
+   remembered by the words and the tile's size, so a frame measures nothing. */
+/* A Korean word is never split between its syllables (DirectWrite would,
+   "최근 파 / 일"): a word joiner (U+2060) between each two of a word. */
+static u8str_t tile_caption_keep_words(u8str_t caption, char *buf, size_t cap) {
+    size_t n = 0;
+    bool last_hangul = false;
+    for (size_t i = 0; i < caption.len;) {
+        unsigned char c = (unsigned char)caption.ptr[i];
+        size_t len = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+        if (i + len > caption.len) len = caption.len - i;
+        bool hangul = len == 3 && c >= 0xEA && c <= 0xED;
+        if (hangul && last_hangul) {
+            if (n + 3 >= cap) return caption;
+            memcpy(buf + n, "\xE2\x81\xA0", 3);
+            n += 3;
+        }
+        if (n + len >= cap) return caption;
+        memcpy(buf + n, caption.ptr + i, len);
+        n += len;
+        last_hangul = hangul;
+        i += len;
+    }
+    return (u8str_t){ .ptr = buf, .len = n };
+}
+
+static double tile_caption_size(app_state_t *app, u8str_t caption, rubraview_pal_rect_t tile, double size) {
+    static struct { uint64_t key; double size; } memo[128];
+    uint64_t key = 1469598103934665603ull;
+    for (size_t i = 0; i < caption.len; ++i) key = (key ^ (unsigned char)caption.ptr[i]) * 1099511628211ull;
+    key ^= (uint64_t)lround(tile.width * 8.0) << 40 ^ (uint64_t)lround(tile.height * 8.0) << 20 ^ (uint64_t)lround(size * 64.0);
+    size_t slot = (size_t)(key % 128u);
+    if (memo[slot].key == key && memo[slot].size > 0.0) return memo[slot].size;
+    double room_w = tile.width - 6.0, room_h = tile.height - 4.0, smallest = size * 0.55;
+    for (; size > smallest; size *= 0.92) {
+        double w = 0.0, h = 0.0, word = 0.0;
+        if (!rubraview_pal_render_measure_text_wrapped(app->renderer, caption, size, room_w, &w, &h)) break;
+        bool fits = h <= room_h;
+        for (size_t a = 0; fits && a < caption.len;) {   /* no word broken across lines */
+            size_t b = a;
+            while (b < caption.len && caption.ptr[b] != ' ') ++b;
+            bool breaks = false;   /* Chinese and Japanese break between any two characters; Korean, Latin and Persian keep the word */
+            for (size_t c = a; c < b; ++c) breaks = breaks || ((unsigned char)caption.ptr[c] >= 0xE3 && (unsigned char)caption.ptr[c] <= 0xE9);
+            if (b > a && !breaks && rubraview_pal_render_measure_text(app->renderer, (u8str_t){ caption.ptr + a, b - a }, size, &word) && word > room_w) fits = false;
+            a = b + 1;
+        }
+        if (fits) break;
+    }
+    if (size < smallest) size = smallest;
+    memo[slot].key = key;
+    memo[slot].size = size;
+    return size;
+}
+
 static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
@@ -8261,8 +8329,10 @@ static void draw_box(app_state_t *app, const rubraview_box_t *box, const rubravi
         if (current) {
             rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_TILE_CURRENT, 2.0, 0.0);
         }
+        char joined[384];
+        if (caption.len > 0) caption = tile_caption_keep_words(caption, joined, sizeof(joined));
         if (caption.len > 0) {
-            rubraview_pal_render_draw_text(app->renderer, caption, tile, t.height * 0.22,
+            rubraview_pal_render_draw_text(app->renderer, caption, tile, tile_caption_size(app, caption, tile, t.height * 0.22),
                                            enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
@@ -10211,7 +10281,8 @@ static void draw_wheel_strip(app_state_t *app) {
                 int32_t w = 0, h = 0;
                 rubraview_pal_texture_size(tex, &w, &h);
                 tw = (double)w; th = (double)h;
-            } else if (app->pages[index].loaded && app->pages[index].texture) {
+            } else if (app->pages[index].loaded && app->pages[index].texture &&   /* the page read already, unless its folder shows none */
+                       !thumb_kept_out(app, app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.archive_path)) {
                 tex = app->pages[index].texture;
                 tw = (double)app->pages[index].width; th = (double)app->pages[index].height;
             }
@@ -14672,13 +14743,37 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
 /* The rows the document's `table` lines name. */
 /* ---- The folders kept out of Recent, as many as wanted (owner, 2026-10-16) ---- */
 
-static size_t skip_dirs_count(const app_state_t *app) {
-    return rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), NULL, 0);
+/* The lists typed a folder a row, each a table of its own: the folders kept
+   out of Recent, and (owner, 2026-10-18) the folders shown without thumbnails. */
+enum { FOLDER_LIST_RECENT = 0, FOLDER_LIST_THUMBS, FOLDER_LIST_COUNT };
+static const struct { const char *table, *section, *key; } FOLDER_LISTS[FOLDER_LIST_COUNT] = {
+    { "skip_dirs",  "recent", "skip_dirs" },
+    { "thumb_dirs", "thumbs", "skip_dirs" },
+};
+
+static u8str_t folder_list_text(const app_state_t *app, int32_t list) {
+    return rubraview_settings_get_text(&app->settings, cstr(FOLDER_LISTS[list].section), cstr(FOLDER_LISTS[list].key));
 }
 
-/* The table's height: its heading, a row a folder, and one to add another. */
+static void folder_list_set(app_state_t *app, int32_t list, u8str_t text) {
+    rubraview_settings_set_text(&app->settings, cstr(FOLDER_LISTS[list].section), cstr(FOLDER_LISTS[list].key), text);
+}
+
+/* The list a table shows, or -1. */
+static int32_t folder_list_of_table(u8str_t table) {
+    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) if (rubraview_u8_eq_lit(table, FOLDER_LISTS[l].table)) return l;
+    return -1;
+}
+
+static size_t folder_list_count(const app_state_t *app, int32_t list) {
+    return rubraview_folder_list_split(folder_list_text(app, list), NULL, 0);
+}
+
+/* Each table's height: its heading, a row a folder, and one to add another. */
 static void skip_dirs_table_rows(app_state_t *app) {
-    rubraview_settings_view_set_named_table_rows(&app->settings_view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 2);
+    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {
+        rubraview_settings_view_set_named_table_rows(&app->settings_view, cstr(FOLDER_LISTS[l].table), (int32_t)folder_list_count(app, l) + 2);
+    }
 }
 
 /* The eight folders of before go into the list, once, and are emptied in the file. */
@@ -14719,15 +14814,17 @@ static void skip_dirs_take_old(app_state_t *app) {
 
 static size_t settings_table_row(void *user, u8str_t source, size_t index, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
-    if (rubraview_u8_eq_lit(source, "skip_dirs")) {
+    int32_t folders = folder_list_of_table(source);
+    if (folders >= 0) {
         u8str_t dirs[256];
-        size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
+        size_t n = rubraview_folder_list_split(folder_list_text(app, folders), dirs, 256);
         /* The last row is the box every folder is typed in; the one being changed says so. */
-        bool changing = app->spath_active && app->spath_list_index >= 0 && (size_t)app->spath_list_index == index - 1;
+        bool typing = app->spath_active && app->spath_list_index >= 0 && app->spath_list == folders;
+        bool changing = typing && (size_t)app->spath_list_index == index - 1;
         int w = index == 0 ? snprintf(buffer, capacity, T("Folder  (Enter changes it in the box below; Delete or the x at the end takes it off)"))
               : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].len, dirs[index - 1].ptr,
                                       changing ? T("   (being changed below)") : "")
-              : index == n + 1 ? (app->spath_active && app->spath_list_index >= 0 ? 0
+              : index == n + 1 ? (typing ? 0
                                   : snprintf(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
               : 0;
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
@@ -14790,7 +14887,7 @@ static void settings_grid(const app_state_t *app, int32_t *out_cols, int32_t *ou
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
     *out_cols = (int32_t)((double)w / app->settings_cell_w);
-    *out_rows = (int32_t)((double)h / app->settings_cell_h);
+    *out_rows = (int32_t)(((double)h - app->settings_cell_h * 0.5) / app->settings_cell_h);   /* half a row spare under the buttons */
     if (*out_cols < 40) *out_cols = 40;
     if (*out_rows < 12) *out_rows = 12;
 }
@@ -15593,29 +15690,31 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_TABLE_EDIT:
         case RUBRAVIEW_SEVENT_TABLE_CLEAR: {
             int32_t row = rubraview_settings_view_focused_table_row(&app->settings_view);
-            if (rubraview_u8_eq_lit(rubraview_settings_view_focused_table(&app->settings_view), "skip_dirs")) {
-                /* A folder kept out: Enter types or browses it (the last row adds one), Delete takes it off. */
-                size_t n = skip_dirs_count(app);
+            int32_t folders = folder_list_of_table(rubraview_settings_view_focused_table(&app->settings_view));
+            if (folders >= 0) {
+                /* A folder of the list: Enter types or browses it (the last row adds one), Delete takes it off. */
+                size_t n = folder_list_count(app, folders);
                 if (row < 1) break;
                 if (event == RUBRAVIEW_SEVENT_TABLE_CLEAR) {
                     if ((size_t)row > n) break;
                     char buffer[8192];
-                    u8str_t list = rubraview_folder_list_remove(buffer, sizeof(buffer),
-                                                                rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), (size_t)row - 1);
-                    rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
+                    u8str_t list = rubraview_folder_list_remove(buffer, sizeof(buffer), folder_list_text(app, folders), (size_t)row - 1);
+                    folder_list_set(app, folders, app_keep(app, list));
                     skip_dirs_table_rows(app);
                     settings_took_effect(app);
-                    settings_say(app, T("folder taken off: its files are written down again from now on"));
+                    settings_say(app, folders == FOLDER_LIST_THUMBS ? T("folder taken off: its thumbnails are shown again")
+                                                                    : T("folder taken off: its files are written down again from now on"));
                 } else {
-                    const rubraview_setting_def_t *def = rubraview_settings_find(U8("recent"), U8("skip_dirs"));
+                    const rubraview_setting_def_t *def = rubraview_settings_find(cstr(FOLDER_LISTS[folders].section), cstr(FOLDER_LISTS[folders].key));
                     if (def) settings_path_begin(app, def);
+                    app->spath_list = folders;
                     app->spath_list_index = row - 1;   /* the folder in place, or past the end: a new one */
                     u8str_t dirs[256];
-                    size_t have = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")), dirs, 256);
+                    size_t have = rubraview_folder_list_split(folder_list_text(app, folders), dirs, 256);
                     rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : U8(""));
                     rubraview_textedit_select_all(&app->spath_edit);
                     /* Typed in the box that is always there, the list's last row, never over another row. */
-                    rubraview_settings_view_focus_table_row(&app->settings_view, U8("skip_dirs"), (int32_t)n + 1);
+                    rubraview_settings_view_focus_table_row(&app->settings_view, cstr(FOLDER_LISTS[folders].table), (int32_t)n + 1);
                     if ((size_t)row <= n) settings_say(app, T("change the folder in the box; Enter keeps it, Esc leaves it, Ctrl+O browses"));
                 }
                 break;
@@ -15822,18 +15921,22 @@ static void settings_path_commit(app_state_t *app) {
             settings_say(app, T("no such folder - put it right, or Esc"));
             return;
         }
-        u8str_t now = rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs"));
+        int32_t folders = app->spath_list;
+        u8str_t now = folder_list_text(app, folders);
         char buffer[8192];
         u8str_t list = text.len == 0 ? rubraview_folder_list_remove(buffer, sizeof(buffer), now, (size_t)app->spath_list_index)
                                      : rubraview_folder_list_put(buffer, sizeof(buffer), now, text, (size_t)app->spath_list_index);
         if (text.len > 0 && list.len == 0) { settings_say(app, T("the list is full")); return; }
-        rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
+        folder_list_set(app, folders, app_keep(app, list));
         app->spath_list_index = -1;
         settings_path_end(app);
         skip_dirs_table_rows(app);
-        rubraview_settings_view_focus_table_row(&app->settings_view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1);   /* the box, for the next one */
+        rubraview_settings_view_focus_table_row(&app->settings_view, cstr(FOLDER_LISTS[folders].table),
+                                                (int32_t)folder_list_count(app, folders) + 1);   /* the box, for the next one */
         settings_took_effect(app);
-        settings_say(app, text.len == 0 ? T("folder taken off") : T("folder kept out of Recent, and all under it"));
+        settings_say(app, text.len == 0 ? T("folder taken off")
+                          : folders == FOLDER_LIST_THUMBS ? T("no thumbnails for this folder, and all under it")
+                          : T("folder kept out of Recent, and all under it"));
         return;
     }
     if (text.len == 0) {
@@ -15901,15 +16004,15 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
 /* Where the typing box is: the list's last row for a folder kept out of
    Recent (drawn there all the time), else over the focused path setting's
    value. Grid row, first column and width; false when out of sight. */
-static bool settings_path_box(const app_state_t *app, bool list, int32_t *row, int32_t *col0, int32_t *cols) {
+static bool settings_path_box(const app_state_t *app, int32_t list, int32_t *row, int32_t *col0, int32_t *cols) {
     const rubraview_settings_view_t *v = &app->settings_view;
-    if (list) {
-        *row = rubraview_settings_view_table_screen_row(v, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1);
+    if (list >= 0) {
+        *row = rubraview_settings_view_table_screen_row(v, cstr(FOLDER_LISTS[list].table), (int32_t)folder_list_count(app, list) + 1);
         *col0 = v->content_col;
     } else {
         if (v->focus_line < 0) return false;
         int32_t content_row = v->lines[v->focus_line].row - v->scroll;
-        *row = content_row >= 0 && content_row < rubraview_settings_view_visible_rows(v) ? 2 + content_row : -1;
+        *row = content_row >= 0 && content_row < rubraview_settings_view_visible_rows(v) ? RUBRAVIEW_SETTINGS_TOP_ROWS + content_row : -1;
         *col0 = v->content_col + v->label_cols;
     }
     *cols = v->cols - *col0 - 1;
@@ -15948,10 +16051,10 @@ static void skip_dirs_draw_x(app_state_t *app) {
     const rubraview_settings_view_t *v = &app->settings_view;
     rubraview_renderer_t *r = app->settings_renderer;
     const double cw = app->settings_cell_w, ch = app->settings_cell_h;
-    size_t n = skip_dirs_count(app);
     int32_t mc = (int32_t)(app->settings_tip_x / cw), mr = (int32_t)(app->settings_tip_y / ch);
-    for (size_t k = 1; k <= n; ++k) {
-        int32_t row = rubraview_settings_view_table_screen_row(v, U8("skip_dirs"), (int32_t)k);
+    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l)
+    for (size_t k = 1, n = folder_list_count(app, l); k <= n; ++k) {
+        int32_t row = rubraview_settings_view_table_screen_row(v, cstr(FOLDER_LISTS[l].table), (int32_t)k);
         if (row < 0) continue;
         rubraview_pal_rect_t cell = { cw * skip_dirs_x_col(app), ch * row, cw * 3, ch };
         bool over = mr == row && mc >= skip_dirs_x_col(app) && mc < skip_dirs_x_col(app) + 3;
@@ -15963,17 +16066,17 @@ static void skip_dirs_draw_x(app_state_t *app) {
 /* The typing box: its text, the selection, the caret. The list's box is
    there even when nothing is typed, an empty field waiting for a folder. */
 static void settings_path_draw(app_state_t *app) {
-    bool list = !app->spath_active || app->spath_list_index >= 0;
-    int32_t row = 0, col0 = 0, cols = 0;
-    if (!settings_path_box(app, list, &row, &col0, &cols)) return;
     rubraview_renderer_t *r = app->settings_renderer;
     const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
+    int32_t row = 0, col0 = 0, cols = 0;
+    int32_t typing = app->spath_active ? (app->spath_list_index >= 0 ? app->spath_list : -1) : -2;
+    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {   /* waiting: each field's frame round its hint */
+        if (l == typing || !settings_path_box(app, l, &row, &col0, &cols)) continue;
+        rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ cw * col0, ch * row, cw * cols, ch }, 0xFF707070u, 1.0, 0.0);
+    }
+    if (!app->spath_active || !settings_path_box(app, typing, &row, &col0, &cols)) return;
     double y = ch * row;
     rubraview_pal_rect_t box = { cw * col0, y, cw * cols, ch };
-    if (!app->spath_active) {   /* waiting: the field's frame round its hint */
-        rubraview_pal_render_stroke_rect(r, box, 0xFF707070u, 1.0, 0.0);
-        return;
-    }
     rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 0.0);
     rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 0.0);
     u8str_t text = rubraview_textedit_text(&app->spath_edit);
@@ -16059,7 +16162,7 @@ static size_t settings_pump(app_state_t *app) {
                 if (app->spath_active) {   /* a click in the box moves the caret; elsewhere keeps the folder as it was */
                     int32_t brow = 0, bcol = 0, bcols = 0;
                     int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = (int32_t)(event.mouse.y / app->settings_cell_h);
-                    if (settings_path_box(app, app->spath_list_index >= 0, &brow, &bcol, &bcols) &&
+                    if (settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols) &&
                         mr == brow && mc >= bcol && mc < bcol + bcols) {
                         settings_path_click(app, mc - bcol, bcols);
                         break;
@@ -16078,7 +16181,7 @@ static size_t settings_pump(app_state_t *app) {
                 int32_t col = (int32_t)(event.mouse.x / app->settings_cell_w);
                 int32_t row = (int32_t)(event.mouse.y / app->settings_cell_h);
                 if (app->settings_sel.active) { app->settings_sel.active = false; app->settings_dirty = true; }
-                if (col >= view->content_col && row < view->rows - 1 &&
+                if (col >= view->content_col && row != RUBRAVIEW_SETTINGS_BUTTON_ROW &&
                     ((event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) || settings_row_is_text(app, row))) {
                     int32_t c = col - view->content_col;
                     app->settings_sel = (rubraview_grid_selection_t){ true, row, c, row, c };
@@ -16088,10 +16191,13 @@ static size_t settings_pump(app_state_t *app) {
                 }
                 {
                     /* The X at a folder's end takes it off. */
-                    int32_t k = rubraview_settings_view_table_row_at(view, col, row);
-                    if (k >= 1 && (size_t)k <= skip_dirs_count(app) && col >= skip_dirs_x_col(app) && col < skip_dirs_x_col(app) + 3 &&
-                        rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), k) == row) {
-                        rubraview_settings_view_focus_table_row(view, U8("skip_dirs"), k);
+                    int32_t k = rubraview_settings_view_table_row_at(view, col, row), hit = -1;
+                    for (int32_t l = 0; l < FOLDER_LIST_COUNT && hit < 0; ++l) {
+                        if (k >= 1 && (size_t)k <= folder_list_count(app, l) && col >= skip_dirs_x_col(app) && col < skip_dirs_x_col(app) + 3 &&
+                            rubraview_settings_view_table_screen_row(view, cstr(FOLDER_LISTS[l].table), k) == row) hit = l;
+                    }
+                    if (hit >= 0) {
+                        rubraview_settings_view_focus_table_row(view, cstr(FOLDER_LISTS[hit].table), k);
                         settings_event(app, RUBRAVIEW_SEVENT_TABLE_CLEAR);
                         app->settings_dirty = true;
                         break;
@@ -16100,10 +16206,14 @@ static size_t settings_pump(app_state_t *app) {
                 app->settings_mouse_down = true;
                 {
                     /* One click on the folder box starts typing in it. */
-                    bool box = rubraview_settings_view_table_row_at(view, col, row) == (int32_t)skip_dirs_count(app) + 1 &&
-                               rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), (int32_t)skip_dirs_count(app) + 1) == row;
+                    int32_t box = -1;
+                    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {
+                        int32_t last = (int32_t)folder_list_count(app, l) + 1;
+                        if (rubraview_settings_view_table_row_at(view, col, row) == last &&
+                            rubraview_settings_view_table_screen_row(view, cstr(FOLDER_LISTS[l].table), last) == row) box = l;
+                    }
                     rubraview_settings_event_t pressed = rubraview_settings_view_press(view, &app->settings, col, row);
-                    if (box && rubraview_u8_eq_lit(rubraview_settings_view_focused_table(view), "skip_dirs")) pressed = RUBRAVIEW_SEVENT_TABLE_EDIT;
+                    if (box >= 0 && folder_list_of_table(rubraview_settings_view_focused_table(view)) == box) pressed = RUBRAVIEW_SEVENT_TABLE_EDIT;
                     settings_event(app, pressed);
                 }
                 break;
@@ -16112,8 +16222,10 @@ static size_t settings_pump(app_state_t *app) {
                 int32_t tip = rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w),
                                                                    (int32_t)(event.mouse.y / app->settings_cell_h));
                 /* Only the keys' rows say what an action does; the folders' rows are not actions. */
-                if (tip > 0 && rubraview_settings_view_table_screen_row(view, U8("skip_dirs"), tip) ==
-                                   (int32_t)(event.mouse.y / app->settings_cell_h)) tip = -1;
+                for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {
+                    if (tip > 0 && rubraview_settings_view_table_screen_row(view, cstr(FOLDER_LISTS[l].table), tip) ==
+                                       (int32_t)(event.mouse.y / app->settings_cell_h)) tip = -1;
+                }
                 /* The owner (2026-10-17): resting on a setting's name shows its fuller explanation. */
                 int32_t help = -1;
                 if (tip <= 0) {
@@ -16144,7 +16256,7 @@ static size_t settings_pump(app_state_t *app) {
                     int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w) - view->content_col;
                     int32_t rr = (int32_t)(event.mouse.y / app->settings_cell_h);
                     app->settings_sel.end_col = c < 0 ? 0 : c;
-                    app->settings_sel.end_row = rr < 0 ? 0 : rr > view->rows - 2 ? view->rows - 2 : rr;
+                    app->settings_sel.end_row = rr < 0 ? 0 : rr > view->rows - 1 ? view->rows - 1 : rr;
                     app->settings_dirty = true;
                     break;
                 }
@@ -16197,8 +16309,8 @@ static size_t settings_pump(app_state_t *app) {
    nothing: a row the pointer can mark from without changing anything. */
 static bool settings_row_is_text(const app_state_t *app, int32_t row) {
     const rubraview_settings_view_t *v = &app->settings_view;
-    if (row <= 1 || row == v->rows - 2) return true;
-    int32_t content = row - 2 + v->scroll;
+    if (row < RUBRAVIEW_SETTINGS_TOP_ROWS || row == v->rows - 1) return row != RUBRAVIEW_SETTINGS_BUTTON_ROW;
+    int32_t content = row - RUBRAVIEW_SETTINGS_TOP_ROWS + v->scroll;
     for (size_t i = 0; i < v->line_count; ++i) {
         const rubraview_settings_line_t *ln = &v->lines[i];
         if (content < ln->row || content >= ln->row + ln->height) continue;
@@ -16213,7 +16325,7 @@ static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!(combo.modifiers & RUBRAVIEW_MOD_CTRL)) return false;
     const rubraview_settings_view_t *v = &app->settings_view;
     if (key_is(combo, "A")) {
-        app->settings_sel = (rubraview_grid_selection_t){ true, 0, 0, v->rows - 2, INT32_MAX / 2 };
+        app->settings_sel = (rubraview_grid_selection_t){ true, 0, 0, v->rows - 1, INT32_MAX / 2 };
         app->settings_dirty = true;
         return true;
     }
@@ -16276,6 +16388,18 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
 static void settings_text_link(app_state_t *app, u8str_t text, double x, double y, uint32_t base, char open, char close) {
     size_t a = 0, b = text.len;
     while (a < text.len && text.ptr[a] != open) ++a;
+    if (close == 0) {   /* from `open` to the text's end: a box and its word ("[x] on") */
+        while (b > a && text.ptr[b - 1] == ' ') --b;
+        if (a >= b) { settings_text(app, text, x, y, base); return; }
+        u8str_t before = { text.ptr, a }, link = { text.ptr + a, b - a };
+        double lx = x + app->settings_cell_w * (double)rubraview_text_columns(before);
+        settings_text(app, before, x, y, base);
+        settings_text(app, link, lx, y, SETTINGS_LINK);
+        double line = app->settings_cell_h > 16.0 ? app->settings_cell_h / 16.0 : 1.0;
+        rubraview_pal_render_fill_rect(app->settings_renderer, (rubraview_pal_rect_t){ lx, y + app->settings_cell_h - line * 1.5,
+                                       app->settings_cell_w * (double)rubraview_text_columns(link), line }, SETTINGS_LINK, 0.0);
+        return;
+    }
     while (b > a && text.ptr[b - 1] != close) --b;
     if (a >= text.len || b <= a + 1) { settings_text(app, text, x, y, base); return; }
     u8str_t before = { text.ptr, a }, link = { text.ptr + a, b - a }, after = { text.ptr + b, text.len - b };
@@ -16301,6 +16425,7 @@ static void settings_text_link(app_state_t *app, u8str_t text, double x, double 
 #define HELP_HEADING    0xFF6FA8DCu
 #define HELP_KEYS       0xFFE8C46Fu
 #define HELP_TEXT       0xFFE8E8E8u
+#define HELP_LINK       0xFF5AAEFFu   /* the project page, pressed like a link */
 
 
 /* ---- the file's information (owner, 2026-09-29) ---- */
@@ -16930,10 +17055,14 @@ static void help_show(app_state_t *app) {
 }
 
 /* How many lines fit, and how far the reader may scroll. */
+/* Above the keys (owner, 2026-10-18): the version and the day it was
+   released, the project's page as a link, a blank row. */
+#define HELP_TOP_ROWS 3
+
 static int32_t help_rows(const app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->help_window, &w, &h);
-    int32_t rows = (int32_t)((double)h / app->help_cell_h) - 1;
+    int32_t rows = (int32_t)((double)h / app->help_cell_h) - 1 - HELP_TOP_ROWS;
     return rows > 1 ? rows : 1;
 }
 
@@ -16959,11 +17088,20 @@ static void draw_help_window(app_state_t *app) {
     int32_t rows = help_rows(app);
     double keys_col = cw * 2.0;
     double text_col = cw * (double)app->help_key_cols;
+    {
+        char top[160];
+        int n = snprintf(top, sizeof(top), T("Rubraview %s, released %s"), RUBRAVIEW_VERSION_STRING, RUBRAVIEW_RELEASE_DATE);
+        if (n > 0) rubraview_pal_render_draw_text_mono(r, (u8str_t){ top, (size_t)n }, keys_col, 0.0, fs, HELP_HEADING);
+        u8str_t url = U8(RUBRAVIEW_PROJECT_URL);
+        rubraview_pal_render_draw_text_mono(r, url, keys_col, ch, fs, HELP_LINK);
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ keys_col, ch * 2.0 - (ch > 16.0 ? ch / 16.0 : 1.0) * 1.5,
+                                                                  cw * (double)url.len, ch > 16.0 ? ch / 16.0 : 1.0 }, HELP_LINK, 0.0);
+    }
     for (int32_t row = 0; row < rows; ++row) {
         size_t index = (size_t)(app->help_scroll + row);
         if (index >= app->help_count) break;
         const rubraview_help_line_t *line = &app->help_lines[index];
-        double y = ch * (double)row;
+        double y = ch * (double)(row + HELP_TOP_ROWS);
         int32_t c0 = 0, c1 = 0;
         if (rubraview_grid_selection_row(&app->help_sel, (int32_t)index, &c0, &c1)) {
             int32_t last = (int32_t)((double)w / cw);
@@ -17031,7 +17169,14 @@ static size_t help_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP: {
                 /* A drag marks the text, as in the settings and information windows. */
                 int32_t col = (int32_t)(event.mouse.x / app->help_cell_w);
-                int32_t row = app->help_scroll + (int32_t)(event.mouse.y / app->help_cell_h);
+                int32_t screen_row = (int32_t)(event.mouse.y / app->help_cell_h);
+                if (screen_row == 1 && event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN && event.mouse.button == RUBRAVIEW_MOUSE_LEFT &&
+                    col >= 2 && col < 2 + (int32_t)strlen(RUBRAVIEW_PROJECT_URL)) {   /* the project's page */
+                    if (!rubraview_pal_shell_open_web(RUBRAVIEW_PROJECT_URL)) snprintf(app->help_message, sizeof(app->help_message), "%s", T("the page could not be opened"));
+                    app->help_dirty = true;
+                    break;
+                }
+                int32_t row = app->help_scroll + screen_row - HELP_TOP_ROWS;
                 if (row >= (int32_t)app->help_count) row = app->help_count ? (int32_t)app->help_count - 1 : 0;
                 if (row < 0) row = 0;
                 if (col < 0) col = 0;
@@ -19061,6 +19206,13 @@ static void settings_grid_keep(app_state_t *app, int32_t row, u8str_t text) {
     app->settings_grid_len[row] = (uint16_t)n;
 }
 
+/* A table row with a box to tick in it (an extension's): "[x]" or "[ ]". */
+static bool settings_row_has_box(u8str_t text) {
+    for (size_t i = 0; i + 2 < text.len; ++i)
+        if (text.ptr[i] == '[' && (text.ptr[i + 1] == 'x' || text.ptr[i + 1] == ' ') && text.ptr[i + 2] == ']') return true;
+    return false;
+}
+
 static void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -19082,7 +19234,13 @@ static void draw_settings_window(app_state_t *app) {
         if (p == v->page) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, y, cw * v->list_cols, ch }, SETTINGS_FOCUS, 0.0);
         }
-        settings_text(app, rubraview_settings_page_text(v, p, line, sizeof(line)), 0.0, y, SETTINGS_TEXT);
+        u8str_t page = rubraview_settings_page_text(v, p, line, sizeof(line));
+        if (p == v->page) settings_text(app, page, 0.0, y, SETTINGS_TEXT);
+        else {   /* another page, a click away: a link (owner, 2026-10-18) */
+            size_t a = 0;
+            while (a < page.len && page.ptr[a] == ' ') ++a;
+            settings_text_link(app, (u8str_t){ page.ptr + a, page.len - a }, app->settings_cell_w * (double)a, y, SETTINGS_TEXT, page.ptr[a], 0);
+        }
     }
 
     /* The page. Each row's text is kept as drawn, for a marked block to copy. */
@@ -19096,7 +19254,7 @@ static void draw_settings_window(app_state_t *app) {
         for (int32_t k = 0; k < ln->height; ++k) {
             int32_t content_row = ln->row + k - v->scroll;
             if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(v)) continue;
-            double y = ch * (2 + content_row);
+            double y = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + content_row);
             if (ln->kind == RUBRAVIEW_LINE_PREVIEW) {
                 if (k == 0) {
                     rubraview_pal_rect_t box = { x0, y, cw * (v->cols - v->content_col - 1), ch * ln->height };
@@ -19115,10 +19273,30 @@ static void draw_settings_window(app_state_t *app) {
             if (ln->kind == RUBRAVIEW_LINE_SETTING && !v->doc->defs[node->setting].wired &&
                 (int32_t)i != v->focus_line) color = SETTINGS_DIM;
             if (ln->kind == RUBRAVIEW_LINE_TABLE && k == 0) color = SETTINGS_ACCENT;
-            settings_grid_keep(app, 2 + content_row, text);
+            settings_grid_keep(app, RUBRAVIEW_SETTINGS_TOP_ROWS + content_row, text);
+            /* The owner (2026-10-18): whatever a click changes looks like a link — a switch, a choice,
+               a slider, an extension's boxes — as the actions and the paths do. */
+            const rubraview_setting_def_t *def = ln->kind == RUBRAVIEW_LINE_SETTING ? &v->doc->defs[node->setting] : NULL;
+            u8str_t value = { text.ptr, 0 };
+            if (def) {   /* what follows the label */
+                size_t at = 0;
+                for (int32_t c = 0; at < text.len && c < v->label_cols;) {
+                    uint32_t cp = (unsigned char)text.ptr[at];
+                    size_t n = cp < 0x80 ? 1 : cp < 0xE0 ? 2 : cp < 0xF0 ? 3 : 4;
+                    c += (int32_t)rubraview_text_columns((u8str_t){ text.ptr + at, n });
+                    at += n;
+                }
+                value = (u8str_t){ text.ptr + at, text.len - at };
+            }
+            u8str_t label = { text.ptr, (size_t)(value.ptr - text.ptr) };
+            double vx = x0 + cw * (double)rubraview_text_columns(label);
             if (ln->kind == RUBRAVIEW_LINE_ACTION) settings_text_link(app, text, x0, y, color, '<', '>');
-            else if (ln->kind == RUBRAVIEW_LINE_SETTING && v->doc->defs[node->setting].type == RUBRAVIEW_SETTING_PATH)
-                settings_text_link(app, text, x0, y, color, '[', ']');   /* pressed, it is typed or chosen */
+            else if (def && def->pair != 0) { settings_text(app, label, x0, y, color); settings_text_link(app, value, vx, y, color, '[', 0); }
+            else if (def && def->type == RUBRAVIEW_SETTING_PATH) settings_text_link(app, text, x0, y, color, '[', ']');   /* pressed, it is typed or chosen */
+            else if (def && def->type == RUBRAVIEW_SETTING_BOOL) { settings_text(app, label, x0, y, color); settings_text_link(app, value, vx, y, color, '[', 0); }
+            else if (def && def->type == RUBRAVIEW_SETTING_CHOICE) { settings_text(app, label, x0, y, color); settings_text_link(app, value, vx, y, color, '<', '>'); }
+            else if (def) { settings_text(app, label, x0, y, color); settings_text_link(app, value, vx, y, color, '[', ']'); }   /* a slider */
+            else if (ln->kind == RUBRAVIEW_LINE_TABLE && k > 0 && settings_row_has_box(text)) settings_text_link(app, text, x0, y, color, '[', 0);
             else settings_text(app, text, x0, y, color);
         }
     }
@@ -19126,13 +19304,13 @@ static void draw_settings_window(app_state_t *app) {
     skip_dirs_draw_x(app);
     settings_path_draw(app);
 
-    /* Under the page: the last action's result, then the buttons. */
+    /* Under the page: the last action's result (the buttons are at the top). */
     if (app->settings_message[0]) {
-        settings_grid_keep(app, v->rows - 2, cstr(app->settings_message));
-        rubraview_pal_render_draw_text_mono(r, cstr(app->settings_message), x0, ch * (v->rows - 2), fs, SETTINGS_DIM);
+        settings_grid_keep(app, v->rows - 1, cstr(app->settings_message));
+        rubraview_pal_render_draw_text_mono(r, cstr(app->settings_message), x0, ch * (v->rows - 1), fs, SETTINGS_DIM);
     }
     /* The marked block, shaded over the text it covers. */
-    for (int32_t row = 0; row < v->rows - 1; ++row) {
+    for (int32_t row = 0; row < v->rows; ++row) {
         int32_t c0 = 0, c1 = 0;
         if (!rubraview_grid_selection_row(&app->settings_sel, row, &c0, &c1)) continue;
         int32_t last_col = v->cols - v->content_col - 1;
@@ -19144,7 +19322,7 @@ static void draw_settings_window(app_state_t *app) {
     for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
         int32_t col = 0, width = 0;
         rubraview_settings_view_button_cells(v, (rubraview_settings_button_t)b, &col, &width);
-        double y = ch * (v->rows - 1);
+        double y = ch * RUBRAVIEW_SETTINGS_BUTTON_ROW;
         if (b == v->focus_button) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * col, y, cw * width, ch }, SETTINGS_FOCUS, 0.0);
         }

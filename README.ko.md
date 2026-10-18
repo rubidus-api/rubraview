@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.10.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.10.0/rubraview-v1.10.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.10.0/rubraview-v1.10.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.11.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.11.0/rubraview-v1.11.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.11.0/rubraview-v1.11.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -214,7 +214,6 @@
 | 오른쪽 클릭 `Book`, 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
 | 오른쪽 클릭 `Webtoon`, 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 오른쪽 클릭 `Choose subtitles`, 메뉴 `Choose` | 목록에서 자막 고르기 |
-| 메뉴 `Clear this list` | 최근 파일 목록 비우기 |
 | 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
 | 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |
 | 메뉴 `Korean` | 열린 압축 파일의 파일 이름을 한국어(CP949)로 읽기 |

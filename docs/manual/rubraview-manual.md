@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.10.0.exe              the viewer, as built
-dist/rubraview-v1.10.0/                 the release bundle
-dist/rubraview-v1.10.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.11.0.exe              the viewer, as built
+dist/rubraview-v1.11.0/                 the release bundle
+dist/rubraview-v1.11.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -78,9 +78,11 @@ the volume — is written a moment later and takes effect in every other
 open window at once. Keys changed on the Keys page reach the others as
 the settings window closes.
 
-**File › Recent** lists the last ten files, books, folders and playlists
-you opened, in any window, newest first. **Clear this list** at its end
-empties it (tap it twice: it asks first).
+**File › Recent files...** (`Ctrl+Shift+R`) opens the files, books,
+folders and playlists you opened lately, in any window, newest first, in a
+floating list like the playlist (`P`): each with when it was opened, its
+size and its folder. A click opens one; its box and **Remove**, or its
+`x`, take files off the list (not off the disk); **Clear all** empties it.
 
 ### In Explorer: double click and the right-click menu
 
@@ -1004,9 +1006,12 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 ## Settings
 
 
-What can be pressed is blue and underlined: the actions (Register,
-Import, ...), the buttons under the page, and the box of a folder or a
-font.
+What can be pressed is blue and underlined, like a link: the pages on the
+left, the actions (Register, Import, ...), the buttons at the top, a
+switch, a choice, a slider, an extension's boxes, and the box of a folder
+or a font. The buttons (**Revert**, **Defaults**, **this page**, **this
+setting**, **Close**) are under the page's name; the last row says what
+the last change did. A long explanation is wrapped to the window.
 
 Rest the pointer on a setting's name and a fuller explanation comes up
 for the harder ones. **Defaults** puts back every setting, **this page**
@@ -1056,7 +1061,7 @@ filename code page, the memory cap). Some worth knowing:
   whatever these say. Changing any of them lists the open folder again.
 - **Files** — **Remember the page** off keeps no reading history;
   **Offer to resume** off opens where you stopped without asking.
-  **Keep the list** off writes nothing more to File › Recent. Under
+  **Keep the list** off writes nothing more to the recent files. Under
   **Folders that are not written down** is a list as long as you like: a
   file in a folder named there, or in any folder under it, is written
   neither to the recent list nor to the reading history (and leaves the
@@ -1065,7 +1070,10 @@ filename code page, the memory cap). Some worth knowing:
   `Enter` adds it. `Enter` on a folder in the list puts it in the same box
   to change (the row says it is being changed); `Esc` leaves it as it was.
   `Delete`, or a click on the **X** at the end of its row, takes a folder
-  off.
+  off. **Folders shown without thumbnails** is a list of the same kind: the
+  files of a folder named there, and of every folder under it, are shown in
+  the open-file screen and the filmstrip as plain tiles with their names,
+  and no picture of them is made.
 - **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
@@ -1136,8 +1144,8 @@ Settings > Files). `Ctrl+Z` undoes any of it,
 one file at a time. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
 
-**Recent** on the bar under the path (or File › Recent › **All recent
-files...**) shows the files opened lately on this same screen — newest
+**Recent** on the bar under the path shows the files opened lately on
+this same screen — newest
 first, in tiles or details, sorted and picked like any folder.
 
 Your favourite folders come first on the bar under the path (`Ctrl+D` or the
@@ -1148,7 +1156,9 @@ to put it somewhere else on the bar. Both are kept in `favorites.ini`.
 `F2` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
 
-`F1` opens the help in a window of its own. It lists every key that is
+`F1` opens the help in a window of its own. Its first lines say the
+version and the day it was released, and give the project's page on
+GitHub as a link a click opens. It lists every key that is
 bound, grouped by where it works, and it stays open while you use the
 viewer, so you can try a key with the list in front of you. The wheel or
 `PageUp` / `PageDown` scrolls it, `F1` or `Esc` closes it. The keys it
@@ -1357,7 +1367,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
 | Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `Clear this list` | Empty the list of recent files |
 | Menu `Auto` | Read the open archive's file names in the code page that fits them |
 | Menu `UTF-8` | Read the open archive's file names as UTF-8 |
 | Menu `Korean` | Read the open archive's file names as Korean (CP949) |
