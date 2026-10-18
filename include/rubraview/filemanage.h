@@ -81,6 +81,7 @@ typedef struct rubraview_file_action {
     u8str_t source_path;      /* where it was */
     u8str_t target_path;      /* where it went; empty for a recycle or a purge */
     size_t  playlist_index;   /* where it sat in the sequence, so undo can put it back there */
+    uint32_t batch;           /* 1.23.0: not 0 for the files of one move, copy or bin of many; one undo takes them all */
 } rubraview_file_action_t;
 
 #define RUBRAVIEW_UNDO_CAPACITY 64
@@ -112,6 +113,9 @@ typedef enum rubraview_undo_result {
 rubraview_undo_result_t rubraview_undo_peek(const rubraview_undo_stack_t *stack,
                                             rubraview_file_action_t *out_action);
 void rubraview_undo_commit(rubraview_undo_stack_t *stack);
+
+/** 1.23.0: whether the action now on top belongs to `batch` (not 0), so the same undo goes on to it. */
+bool rubraview_undo_same_batch(const rubraview_undo_stack_t *stack, uint32_t batch);
 
 /** Whether an operation is one an undo can reverse at all. */
 bool rubraview_file_op_is_undoable(rubraview_file_op_t op);

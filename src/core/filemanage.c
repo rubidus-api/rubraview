@@ -179,6 +179,10 @@ void rubraview_undo_commit(rubraview_undo_stack_t *stack) {
     if (stack && stack->count > 0) stack->count--;
 }
 
+bool rubraview_undo_same_batch(const rubraview_undo_stack_t *stack, uint32_t batch) {
+    return stack && batch != 0 && stack->count > 0 && stack->actions[stack->count - 1].batch == batch;
+}
+
 /* ---- §3.18.3 curation ---- */
 
 rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, u8str_t settings_ini) {

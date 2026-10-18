@@ -122,6 +122,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "picker_move_to", "Move what is picked to a folder" },
     { "picker_open_item", "Open what was right-clicked in the open-file screen" },
     { "picker_recycle", "Put what is picked in the recycle bin" },
+    { "picker_rename", "Rename the file or folder that was right-clicked" },
     { "picker_reveal", "Show in Explorer what was right-clicked" },
     { "prev_archive", "Previous archive in the folder" },
     { "prev_page", "Previous page" },

@@ -229,6 +229,9 @@ bool rubraview_pal_fs_copy(u8str_t from, u8str_t to);
 /** 1.22.0: a folder and all in it copied to `to` (made); false when any of it could not be. */
 bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to);
 
+/** 1.23.0: a folder and all in it gone for good (an undone folder copy); false when any of it stays. */
+bool rubraview_pal_fs_delete_tree(u8str_t path);
+
 /** Create a directory, and any missing parent of it. */
 bool rubraview_pal_fs_make_dirs(u8str_t path);
 

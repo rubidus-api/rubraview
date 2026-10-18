@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.22.0.exe              the viewer, as built
-dist/rubraview-v1.22.0/                 the release bundle
-dist/rubraview-v1.22.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.23.0.exe              the viewer, as built
+dist/rubraview-v1.23.0/                 the release bundle
+dist/rubraview-v1.23.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -80,7 +80,7 @@ the volume — is written a moment later and takes effect in every other
 open window at once. Keys changed on the Keys page reach the others as
 the settings window closes.
 
-**File › Recent files...** (`Ctrl+Shift+R`) opens the files, books,
+**Recent files...** (`Ctrl+Shift+R`, or the right click) opens the files, books,
 folders and playlists you opened lately, in any window, newest first, in a
 floating list like the playlist (`P`): each with when it was opened, its
 size and its folder. A click opens one; its box and **Remove**, or its
@@ -138,7 +138,7 @@ being read, the folder's files and the new ones become one list; a book
 has no files to add to, so the files are opened as a list of their own. A
 film that was playing goes on from where it was.
 
-**Print** (`Ctrl+P`, or File › Print...) prints the picture on screen the
+**Print** (`Ctrl+P`, or Print... in the right click) prints the picture on screen the
 same way. A panel asks how first, and beside it a preview shows the sheet
 as it will come out: the paper in its proportions, the part the printer
 reaches (a grey line), the cells when several pictures go on a sheet, and
@@ -189,7 +189,7 @@ items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--conve
 ## Reading
 
 `PageDown` / `PageUp`, `Space` / `Backspace` turn the pages. `B`, the toolbox's Layout button (its icon is the layout in
-use) and Menu › View › Layout choose how pages are laid out, and
+use) and the right click on a book choose how pages are laid out, and
 Settings › Viewer › Layout shows and keeps the same choice:
 
 - **Single** — one page at a time, a wide scan whole.
@@ -259,7 +259,7 @@ does not match) is not shown.
 When the names inside an archive come out garbled — made on a Japanese,
 Chinese or Taiwanese computer — press `Shift+N` to read them again in the
 next code page (Japanese Shift-JIS, Chinese GBK and Big5, Korean, UTF-8,
-Western), or pick one from File › Names in archive. The page you are on
+Western). The page you are on
 stays on screen, and the choice is for that archive only: the next one
 opens with Settings › Files › Archive filenames again.
 
@@ -286,13 +286,14 @@ clicked, for what is on screen. For a picture: Copy picture, Adjust
 picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
 Info; Rename, Copy to folder, Move to folder, Copy to another folder...,
 Move to another folder..., Show in Explorer,
-Delete (click it twice: it goes to the recycle bin); Help and About. What
-the toolbox on screen has a button for is left out of it. Beside it, a
-second column holds everything else Rubraview does, in sections — File,
-Edit, Go, View, Playback, Sound, Subtitles, Screen, Help: a section opens
-in its place, its first row (◂) goes back (or `Left`, `Backspace`). A book or an archive has the next and previous archive and
-the layouts; a film has play and stop, the subtitles, the sound track,
-normal speed, copying and saving the frame and full screen; a song has
+Delete (click it twice: it goes to the recycle bin); Open file, Recent
+files..., Batch, Print...; Help and About. What the toolbox on screen has
+a button for is left out of it (Open file stays). Every list has Open
+file, Recent files... and Batch, a picture's, a book's and an animation's
+Print... too. A book or an archive has the next and previous archive and
+the layouts; a film has play and stop, the subtitles (taking them out of
+the film too), the sound track, slower, faster and normal speed, copying
+and saving the frame and full screen; a song has
 the previous and next file, what the end does, the equaliser and the
 mini player. A row that cannot act now is grey. The arrow keys and
 `Enter` choose, `Esc` or a click elsewhere closes it. The mouse's back and
@@ -509,8 +510,7 @@ turn or an adjustment.
 While a film or an animation is on screen, `Ctrl+C` copies the frame you
 see to the clipboard and `Ctrl+Shift+E` saves it as a PNG beside the file
 (`film_00-23-792.png`: the minute, second and thousandth). On a still
-picture `Ctrl+C` (or Copy picture in the right-click list, or Edit › Copy
-picture) copies the picture itself, whole and as its file holds it — not
+picture `Ctrl+C` (or Copy picture in the right-click list) copies the picture itself, whole and as its file holds it — not
 turned or adjusted as it is shown.
 
 Privacy clean on a JPEG that is otherwise unchanged does not re-encode
@@ -545,15 +545,14 @@ Two more keys do the same with a folder each, whatever the number keys are
 set to: `F6` **copies** the file on screen to one folder and `F7` **moves**
 it to another (Settings › Files › The file on screen, to a folder; or
 `copy_dir` and `move_dir` under `[curation]`). They are in the toolbox too
-(Copy to, Move to) and in Menu › File. A page inside an archive can be
+(Copy to, Move to) and in the right click. A page inside an archive can be
 copied out with `F6` — it is written as a file of its own — but not moved
 (to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
 the name is taken the file goes in as `name-1.jpg`, then `name-2.jpg`, and
 so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
 
 To send it somewhere else, `Shift+F6` (copy) and `Shift+F7` (move) — also
-Menu › File › This file › Copy to another folder... / Move to another
-folder..., and `F6` / `F7` themselves while no folder is set for them —
+Copy to another folder... / Move to another folder... in the right click, and `F6` / `F7` themselves while no folder is set for them —
 open a box in the middle of the window holding the last folder you used.
 Type or paste a folder, or press `Ctrl+O` to browse to one, and press
 `Enter`. A folder that is not there yet is not made by accident: the
@@ -616,7 +615,7 @@ Moves, copies and renames do undo properly.
 
 ### Classifying
 
-`K` (or File › This file › Classify...) opens a window of the nine
+`K` (or Classify... in the right click) opens a window of the nine
 folders the number keys have, each with how many pictures are set aside
 for it. Click a folder, or press its digit, and the picture on screen is
 set aside for it — nothing moves yet — and the next one comes. Look
@@ -725,7 +724,7 @@ While it does:
   volume while playing**; with it off the wheel zooms a film). `Ctrl` and
   the wheel zoom, and a drag moves the picture.
 - What happens when a film or a song ends is set by the toolbox's end
-  button, `Ctrl+R`, Playback › At the end, or Settings › Audio › When a
+  button, `Ctrl+R`, At the end in a song's right click, or Settings › Audio › When a
   file ends: **Once** stops there; **Next** plays the next film or song in
   the folder or playlist and stops after the last; **1 loop** plays the same
   one again; **Loop** goes round all of them; **Shuffle** plays them in a
@@ -738,7 +737,7 @@ While it does:
   `&amp;`, `&lt;`, `&#44032;` and the like show as the characters they
   stand for; the file itself is written back as it was.
 - The sound can be shaped (Settings › Audio › Sound, the toolbox's **EQ**,
-  **Night** and **Viz** buttons, or Playback › Sound): an equaliser with
+  **Night** and **Viz** buttons): an equaliser with
   eight presets and a window of ten sliders of its own (**EQ bands**:
   drag a band, turn the wheel over it, right-click for 0 dB), night mode,
   which brings loud passages down so quiet
@@ -761,8 +760,7 @@ While it does:
   sound is playing.
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later, `Shift+Z` / `Shift+X` a tenth of a second,
-  and `Alt+Z` puts them back to the file's own times (Subtitles in the menu
-  has the same). The move is for this film only and leaves the file alone;
+  and `Alt+Z` puts them back to the file's own times. The move is for this film only and leaves the file alone;
   while it is not nought the line under the toolbox's bar says so
   (`sub -0.3 s`).
 - Text subtitles sit in a shaded box, and the box always holds the whole
@@ -780,7 +778,7 @@ While it does:
   the subtitle settings and **X** turns subtitles off. Tap anywhere else
   to let go of the box. A DVD's or a Blu-ray's picture subtitles stay
   where the disc puts them.
-- `Shift+C` (the speech-bubble button, or Subtitles › List window) opens
+- `Shift+C` (the speech-bubble button, or Subtitle list in the right click) opens
   the film's subtitles as a list in **a window of its own**: a row each,
   with when it comes, when it goes and what it says; the one playing is
   marked and the list follows the film. A click on a row goes to that
@@ -817,7 +815,7 @@ While it does:
   goes on and leaves them. A SAMI caption has no end
   of its own: moved, it takes along the empty line that closes it, and one
   closed by the next caption only begins elsewhere. **Take out**, at the
-  window's top right (or Subtitles › Take out of film), writes the text
+  window's top right (or Take out of film in the right click), writes the text
   subtitles a Matroska film (`.mkv`) or an MP4 (its 3GPP text subtitles,
   as SubRip) holds inside as files beside it —
   `film.kor.srt`, `film.eng.ass`, named by their language, a SubStation
@@ -911,8 +909,9 @@ encoding and how far through the file you are.
 ## The floating boxes
 
 The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`).
-There is no menu of its own: what the toolbox does not have a button for
-is in the right click, in its sections. The toolbox's last group has **Settings**,
+There is no menu: what the toolbox does not have a button for is in the
+right click, on a key (the help, `F1`, lists them) or in Settings; the
+keys are changed on the Settings window's **Keys** page. The toolbox's last group has **Settings**,
 **Bar pin** (the title bar stays shown; Settings > General > Title bar)
 and **Info bar** (`Shift+I`); a picture's toolbox also has **Wheel strip**:
 off, turning pages with the wheel brings up no thumbnails (Settings >
@@ -950,22 +949,21 @@ ten characters, with "..." between — and at the right the file's size, the
 picture's size in pixels and, at the very right, which file it is of how
 many in the folder or archive (`3 / 120`).
 
-The menu reads the same way everywhere: a tile ending in `>` opens a submenu,
-a switch says whether it is on (`Crisp: off`), the layout and fit in use
-have a blue edge, and a grey tile cannot do anything with what is on screen
-(`Next archive` in a plain folder, `Track` on a film with one sound track).
-The menu always opens at its top level. `Delete` in the menu asks first:
-its tile turns into `Delete?`, and a second tap within five seconds moves
-the file to the recycle bin. The Layout tile says the layout in use and whether it
+The toolbox and the right click read the same way: a switch says whether
+it is on, the layout and fit in use have a blue edge, and a grey button or
+row cannot do anything with what is on screen (`Next archive` in a plain
+folder, `Track` on a film with one sound track). `Delete` in the right
+click asks first: its row turns into `Delete?`, and a second click within
+five seconds moves the file to the recycle bin. The Layout tile says the layout in use and whether it
 runs right to left (`Layout: book rtl`). Open folder lists folders and the files
 the viewer can open, and says how many others it left out.
 
-**View › Shape** shows the picture or the film in another shape without
+The **shape** (`Shift+A`) shows the picture or the film in another shape without
 touching the file: 4:3, 5:4, 3:2, 16:10, 16:9, the cinema's 1.85:1 and
 2.39:1, 21:9, 1:1, A4 / B4 and US Letter paper, or **Custom** — the two
 numbers under Settings › Viewer › Shape. **On its side** turns the chosen
-ratio over (9:16; paper lying down). `Shift+A` goes round them; **Original**
-puts the file's own shape back. The choice lasts until the viewer is closed.
+ratio over (9:16; paper lying down). `Shift+A` goes round them, back to
+the file's own shape. The choice lasts until the viewer is closed.
 
 The toolbox starts in the bottom-right corner (an M box top left, below
 where the title bar comes), and the title bar's box button puts it back
@@ -996,19 +994,15 @@ The toolbox keeps what is used most: turning pages, the zoom and the fit,
 turning, the layout and the slide show, opening, the lists and the
 information, editing and exporting; for a film, playing, 5 s back and on
 (held, those two offer steps up to 5 min), the sound and the subtitles.
-Ten on and back, zooming by steps, the single fits, the filmstrip,
-flipping, renaming, copying and moving are in the menu; always on top and
-full screen are the title bar's, and Settings is the menu's. Its buttons
-come in the same order of groups for every kind of page: going and
-playing, how it plays, sound, subtitles, view, turning, the file. The menu
-holds everything the viewer does, by what it is about: File, Edit (copy,
-adjust, save the frame, undo), Go (every way of turning pages), View,
-Playback (a film, a song or an animation), Sound and Subtitles (a film or
-a song), Show and Help. Resting the pointer on a box's anchor, pin, grip
+Ten on and back, zooming by steps, the single fits, the filmstrip and
+flipping are on keys (the help, `F1`, lists them); renaming, copying and
+moving are in the right click; always on top and full screen are the title
+bar's, and Settings is its last group's. Its buttons come in the same
+order of groups for every kind of page: going and playing, how it plays,
+sound, subtitles, view, turning, the file. Resting the pointer on a box's anchor, pin, grip
 or seek bar says what a click or a drag does there, and `Esc` folds an
 open box before it closes anything else. While a box is open, a second square beside its pin, with
-three dots, sizes it: drag it sideways for more or fewer buttons (or menu
-tiles) a row, and away from the box or back for bigger or smaller ones; the
+three dots, sizes it: drag it sideways for more or fewer buttons a row, and away from the box or back for bigger or smaller ones; the
 size is kept, and Settings › Display has the same four numbers.
 
 At the middle of each side of the window, pointing near the edge shows
@@ -1017,7 +1011,7 @@ and the first, the right ones to the next, ten on and the last; for a film
 or a song they go 5 s and 30 s back or on, and to the previous or next file
 (`Shift` + `Left`/`Right` also go 30 s).
 
-`P`, the playlist button or File › Playlist shows what is open as a list
+`P` or the playlist button shows what is open as a list
 floating over the picture: the playlist, or the folder's or the archive's
 files when there is none. The file on screen is marked and kept in view; a
 click goes to a file, the wheel scrolls, the title drags it, `X` or `Esc`
@@ -1042,7 +1036,7 @@ sizes the window: press it and drag, and it stays under the pointer — the
 top and the right edge follow it, the bottom and the left stay. A folder whose list you change is from then on
 a playlist: it keeps your order.
 
-`F3` (the Files button, or File › File list window) opens the same list in
+`F3` (the Files button) opens the same list in
 **a window of its own**, with a preview. The viewer goes on showing its
 page; the other window lists what the archive holds — or the folder, or
 the playlist — each file with its size, the one on screen marked. Point at
@@ -1067,7 +1061,7 @@ and **Delete the file...**, which first asks in a warning of Windows' own —
 No is the answer it starts on — and then moves the file to the recycle
 bin, from where it can be put back.
 
-`I` (or `Ctrl+I`, or File › Info) opens the file's information: its
+`I` (or `Ctrl+I`, the Info button, or Info in the right click) opens the file's information: its
 size, dates, pixels and format, and for a photo what the camera wrote —
 camera and lens, when it was taken (with the time zone), exposure, aperture,
 ISO, focal length, program, metering, white balance, colour space, and where
@@ -1105,7 +1099,7 @@ edge follow it, the bottom and the left stay. A double
 click on the title bar maximises the window or gives it back its size.
 
 `Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
-that stays on top, and `Dock` puts it back. The menu's first tile, the `Pin`
+that stays on top, and `Dock` puts it back. The `Pin`
 button on the title bar (point at the top edge) and `Ctrl+Shift+T` keep the
 viewer itself on top of other windows. `Ctrl` + arrows size the window,
 `Alt` + arrows move it.
@@ -1194,7 +1188,7 @@ filename code page, the memory cap). Some worth knowing:
   folder named there, and every folder under it, is shown from the folder
   above as a plain tile with its name, and no picture of what is in it is
   made. Inside it, its files show their own thumbnails as anywhere else.
-- **Display** — the size of the menu tiles and anchors (48, 64 or 96), the
+- **Display** — the size of the toolbox's buttons and anchors (48, 64 or 96), the
   colour that marks the choice in use, and whether a picture's own colour
   profile is used.
 - **Audio** — **Gapless playback** runs one song into the next with no
@@ -1236,10 +1230,9 @@ filename code page, the memory cap). Some worth knowing:
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
-**Hide**, the first of the title bar's buttons (also Screen > Hide all in
-the menu), puts the title bar and the floating boxes away, so nothing
+**Hide**, the first of the title bar's buttons, puts the title bar and the floating boxes away, so nothing
 comes up under the pointer. The next click anywhere in the window brings
-them back, and does nothing else. Settings is on the menu's first level.
+them back, and does nothing else.
 
 The file picker has a band across its top that holds nothing to press;
 pointing at the window's top edge brings the title bar down over it (the
@@ -1259,7 +1252,7 @@ shows only the names holding what you type (capitals or not); what you
 picked stays picked when the filter changes or is cleared (`Esc`, or its
 ×). A right click on a tile — or a long press, held still — gives a short
 list: on one thing (that one is picked alone), Open, Look inside (a book),
-Add to the list, Copy the whole path, Show in Explorer, Copy to, Move to
+Add to the list, Copy the whole path, Show in Explorer, Rename, Copy to, Move to
 and To the recycle bin (click it twice); on one of several picked, Add them
 to the list, Make a playlist of them, Copy their paths, Copy or Move them,
 Them to the recycle bin and Pick none. A folder picked is copied or moved
@@ -1267,6 +1260,16 @@ whole; added to a list, it brings its pictures, films, music and text.
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.
+
+Above the tiles (and the rows) is a line of column heads — Name, Type,
+Size, Created, Modified, Resolution, Length, as many as the width holds.
+Its check box picks everything here but `..`, and again nothing; it
+shows a dash when some are picked. A click on a head sorts by that
+column, and again the other way round (▲ rising, ▼ falling). **Open**, the
+first button at the bottom, opens what is picked — several files open
+together as one set — or, with nothing picked, the one in focus.
+`Ctrl+Z` here takes back a rename, a move or a copy made here; a move or a
+copy of many is taken back at once, and a copied folder goes whole.
 
 In the file picker, the bottom row picks several files without holding a
 key: **Individual** makes every tap turn one file on or off, **Range**
@@ -1487,21 +1490,21 @@ listed under a later heading only means that while that is on screen.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox, the menu or the right click**
+**No key of its own: in the toolbox or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Right click `Stop`, Menu `Stop` | Stop, and back to the beginning |
+| Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
-| Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
-| Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
-| Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
-| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
-| Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `EQ` | The equaliser's next preset |
+| Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `Night` | Night mode: loud passages brought down |
+| Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
+| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Viz` | The analyser: bars, the wave, or none |
 | Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
@@ -1509,6 +1512,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Rename` | Rename the file or folder that was right-clicked |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
@@ -1519,45 +1523,14 @@ listed under a later heading only means that while that is on screen.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
-| Right click `About Rubraview`, Menu `About` | About Rubraview: the version and the licences of what it carries |
-| Right click `One page`, Menu `Single` | Layout: one page at a time |
-| Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
-| Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
-| Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
-| Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `Auto` | Read the open archive's file names in the code page that fits them |
-| Menu `UTF-8` | Read the open archive's file names as UTF-8 |
-| Menu `Korean` | Read the open archive's file names as Korean (CP949) |
-| Menu `Japanese (Shift-JIS)` | Read the open archive's file names as Japanese (Shift-JIS) |
-| Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
-| Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
-| Menu `Western` | Read the open archive's file names as Western (CP1252) |
-| Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
-| Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
-| Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
-| Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
-| Menu `Original` | Shape: the file's own |
-| Menu `4:3` | Shape: 4:3 |
-| Menu `5:4` | Shape: 5:4 |
-| Menu `3:2` | Shape: 3:2 |
-| Menu `16:10` | Shape: 16:10 |
-| Menu `16:9` | Shape: 16:9 |
-| Menu `1.85:1 cinema` | Shape: 1.85:1 (cinema, flat) |
-| Menu `21:9` | Shape: 21:9 |
-| Menu `2.39:1 cinema` | Shape: 2.39:1 (cinema, scope) |
-| Menu `1:1` | Shape: 1:1 |
-| Menu `A4 / B4` | Shape: A and B paper (A4, B4 ...), upright |
-| Menu `US Letter` | Shape: US Letter, upright |
-| Menu `Custom` | Shape: the two numbers in Settings > Viewer |
-| Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
-| Menu `Slower` | Play slower |
-| Menu `Faster` | Play faster |
-| Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
-| Menu `100%` | The floating boxes fully opaque |
-| Menu `80%` | The floating boxes' opacity: 80% |
-| Menu `60%` | The floating boxes' opacity: 60% |
-| Menu `40%` | The floating boxes' opacity: 40% |
-| Menu `Change keys` | Settings, opened on its Keys page |
+| Right click `About Rubraview` | About Rubraview: the version and the licences of what it carries |
+| Right click `One page` | Layout: one page at a time |
+| Right click `Two pages` | Layout: two pages side by side |
+| Right click `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `Webtoon` | Layout: every page one under the other, one long strip |
+| Right click `Choose subtitles` | Choose the subtitles from a list |
+| Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Slower` | Play slower |
+| Right click `Faster` | Play faster |
 
 <!-- keys:end -->

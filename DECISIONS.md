@@ -1764,3 +1764,23 @@ Do not store credentials, private infrastructure details, personal data, private
   - "pl" showed apple and plum picked; Esc showed all six, the four still picked;
   - the list's Add opened at `sub` in add mode; two picked and added: 1/3;
   - the wheel's strip came up on, and not off.
+
+## 2026-10-19: D-173 No menu sections on the right click; the open-file screen's Rename, Open, heads and undo
+
+- Status: Accepted (owner 2026-10-19):
+  - "탐색기 우클릭 메뉴에 \"이름 바꾸기\" 추가", "폴더 복사도 되돌리기가 되게 하기";
+  - "우클릭 컨텍스트 메뉴에서 일괄처리와 인쇄만 기존 컨텍스트 메뉴에 추가하고, 메뉴에서 넘어온 파일부터 도움말까지 하위메뉴 있는 것들은 다 제거해도 될 것 같아요. 다 별개의 호출경로가 있잖아요", "최근 파일도", "파일 열기도";
+  - "단축키 바꾸기는 설정창에서 바꾸는게 올바른 방향";
+  - "자체 파일 탐색기에서 열기 버튼이 없어요 ... 테이블의 헤드 역할을 하는 행 ... 체크박스가 있어서 전체 선택 및 해제 ... 누르면 그 열의 데이터 기준으로 오름차순 내림차순 정렬".
+- Decision:
+  - The built-in boxes document has no `menu` sections. The right click is its `context` list alone, less what the toolbox has a tile for; Open file stays though the toolbox has it (the owner's word is the later one). Open file, Recent files..., Batch go in every page's list, Print in the picture, book, many-page and animation lists.
+  - 34 actions had only the menu. `extract_subtitles`, `media_speed_down`, `media_speed_up` went into the film's list; the rest are INTERNAL in `scripts/check-actions.py`, each with its other way in: archive name code pages by Shift+N, shapes by Shift+A, the right-to-left and comic layouts by Settings and B, box opacity by Settings, `hide_boxes` by the title bar, `open_keys` by the Settings window's Keys page. They stay handled for keymap.ini.
+  - The menu's parser and the headless menu box stay for a boxes file of one's own; the F1 help, which named actions by their menu labels, uses the action descriptions.
+  - Picker Rename: the rename box over the one right-clicked (a folder too); never over a name already there. Open: one picked or the focus as a tap; several, their files as one set. The heads line is in both views; its box picks all (not `..`) or none, a dash when some are.
+  - Undo: actions carry a batch number; one undo goes through a batch. The picker's moves, copies, recycles and extension changes had popped their last entry right after pushing (a bug since they were written); that is gone. A copied folder is undone by deleting its copy for good (`rubraview_pal_fs_delete_tree`), as a copied file is. `Ctrl+Z` works in the picker.
+- Consequences: VM (2026-10-19):
+  - a right click on a picture: one column, Open file / Recent files... / Batch / Print... above Help, no File▸ to Help▸;
+  - the picker's heads in the tiles view; the box picked 4 (not `..`); Size sorted, again falling;
+  - pear.png renamed pear2.png by its right click, back by Ctrl+Z;
+  - `sub` and apple.png copied to a numbered folder, both gone after one Ctrl+Z, the originals there;
+  - Open with two picked: "(1/2)"; F1 help in descriptions.

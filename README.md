@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.22.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.23.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.0/rubraview-v1.23.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.0/rubraview-v1.23.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -189,21 +189,21 @@ ships with, so it cannot drift from them.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox, the menu or the right click**
+**No key of its own: in the toolbox or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Right click `Stop`, Menu `Stop` | Stop, and back to the beginning |
+| Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
 | Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ`, Menu `Equaliser` | The equaliser's next preset |
-| Toolbox `EQ bands`, Right click `Equaliser window`, Menu `Equaliser window` | The equaliser's ten bands, in a window over the picture |
-| Toolbox `Night`, Menu `Night mode` | Night mode: loud passages brought down |
-| Toolbox `Sub`, Right click `Subtitles on / off`, Menu `On/off` | Subtitles on or off |
-| Toolbox `100%`, Menu `Next zoom` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
-| Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `EQ` | The equaliser's next preset |
+| Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbox `Night` | Night mode: loud passages brought down |
+| Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
+| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Viz` | The analyser: bars, the wave, or none |
 | Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
@@ -211,6 +211,7 @@ ships with, so it cannot drift from them.
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Rename` | Rename the file or folder that was right-clicked |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
@@ -221,46 +222,15 @@ ships with, so it cannot drift from them.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
-| Right click `About Rubraview`, Menu `About` | About Rubraview: the version and the licences of what it carries |
-| Right click `One page`, Menu `Single` | Layout: one page at a time |
-| Right click `Two pages`, Menu `Dual` | Layout: two pages side by side |
-| Right click `Book`, Menu `Book` | Layout: the cover alone, then two pages side by side |
-| Right click `Webtoon`, Menu `Webtoon` | Layout: every page one under the other, one long strip |
-| Right click `Choose subtitles`, Menu `Choose` | Choose the subtitles from a list |
-| Menu `Auto` | Read the open archive's file names in the code page that fits them |
-| Menu `UTF-8` | Read the open archive's file names as UTF-8 |
-| Menu `Korean` | Read the open archive's file names as Korean (CP949) |
-| Menu `Japanese (Shift-JIS)` | Read the open archive's file names as Japanese (Shift-JIS) |
-| Menu `Chinese (GBK)` | Read the open archive's file names as Chinese (GBK) |
-| Menu `Chinese (Big5)` | Read the open archive's file names as Chinese (Big5) |
-| Menu `Western` | Read the open archive's file names as Western (CP1252) |
-| Menu `Dual, right to left` | Layout: two pages side by side, read right to left |
-| Menu `Book, right to left` | Layout: the cover alone, then two pages side by side, read right to left |
-| Menu `Comic` | Layout: one page at a time, a wide scan as its two halves |
-| Menu `Comic, right to left` | Layout: one page at a time, a wide scan as its two halves, the right half first |
-| Menu `Original` | Shape: the file's own |
-| Menu `4:3` | Shape: 4:3 |
-| Menu `5:4` | Shape: 5:4 |
-| Menu `3:2` | Shape: 3:2 |
-| Menu `16:10` | Shape: 16:10 |
-| Menu `16:9` | Shape: 16:9 |
-| Menu `1.85:1 cinema` | Shape: 1.85:1 (cinema, flat) |
-| Menu `21:9` | Shape: 21:9 |
-| Menu `2.39:1 cinema` | Shape: 2.39:1 (cinema, scope) |
-| Menu `1:1` | Shape: 1:1 |
-| Menu `A4 / B4` | Shape: A and B paper (A4, B4 ...), upright |
-| Menu `US Letter` | Shape: US Letter, upright |
-| Menu `Custom` | Shape: the two numbers in Settings > Viewer |
-| Menu `On its side` | Shape on its side (16:9 becomes 9:16; paper, landscape) |
-| Menu `Slower` | Play slower |
-| Menu `Faster` | Play faster |
-| Menu `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Menu `Hide all` | Hide the title bar and the floating boxes until the picture is clicked |
-| Menu `100%` | The floating boxes fully opaque |
-| Menu `80%` | The floating boxes' opacity: 80% |
-| Menu `60%` | The floating boxes' opacity: 60% |
-| Menu `40%` | The floating boxes' opacity: 40% |
-| Menu `Change keys` | Settings, opened on its Keys page |
+| Right click `About Rubraview` | About Rubraview: the version and the licences of what it carries |
+| Right click `One page` | Layout: one page at a time |
+| Right click `Two pages` | Layout: two pages side by side |
+| Right click `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `Webtoon` | Layout: every page one under the other, one long strip |
+| Right click `Choose subtitles` | Choose the subtitles from a list |
+| Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Slower` | Play slower |
+| Right click `Faster` | Play faster |
 
 <!-- keys:end -->
 
@@ -304,7 +274,7 @@ These belong to their window and are not on the Keys page.
 
 ## Layouts
 
-`B`, the toolbox's Layout button and Menu > View > Layout choose one of eight, and Settings > Viewer > Layout keeps it:
+`B`, the toolbox's Layout button and a book's right click choose one of eight, and Settings > Viewer > Layout keeps it:
 **single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
 under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves) — and
 **dual-rtl**, **book-rtl** and **comic-rtl**, each right after its own, read right to left as a Japanese comic is: the

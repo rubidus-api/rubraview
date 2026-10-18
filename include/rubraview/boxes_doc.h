@@ -78,8 +78,8 @@ typedef struct rubraview_box_node {
 #define RUBRAVIEW_BOXES_MAX_TILES 320
 #define RUBRAVIEW_BOXES_MAX_PROFILES 16
 #define RUBRAVIEW_BOXES_MAX_NODES 256
-#define RUBRAVIEW_BOXES_MAX_CONTEXT_ITEMS 160
-#define RUBRAVIEW_CONTEXT_MAX_ITEMS 20    /* in one right-click list */
+#define RUBRAVIEW_BOXES_MAX_CONTEXT_ITEMS 224
+#define RUBRAVIEW_CONTEXT_MAX_ITEMS 24    /* in one right-click list */
 #define RUBRAVIEW_TOOLBOX_MAX_TILES 40    /* in one profile: five rows of the strip as designed (owner, 2026-09-29: most of what the viewer does) */
 
 typedef struct rubraview_boxes_doc {

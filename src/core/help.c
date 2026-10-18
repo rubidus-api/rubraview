@@ -1,5 +1,6 @@
 #include "rubraview/help.h"
 #include "rubraview/lang.h"
+#include "rubraview/action_words.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -36,6 +37,9 @@ u8str_t rubraview_help_action_label(const rubraview_boxes_doc_t *boxes, u8str_t 
             return rubraview_tr_ctx_u8("menu", node->label);
         }
     }
+    /* 1.23.0: the built-in menu is gone; the words the key tables say it in are the sentence now. */
+    const char *words = rubraview_action_words(action);
+    if (words) return rubraview_tr_u8((u8str_t){ .ptr = words, .len = strlen(words) });
     for (size_t i = 0; i < boxes->tile_count; ++i) {
         const rubraview_box_tile_t *tile = &boxes->tiles[i];
         if (tile->action.len == action.len && memcmp(tile->action.ptr, action.ptr, action.len) == 0) {

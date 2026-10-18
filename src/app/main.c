@@ -589,10 +589,7 @@ typedef struct app_state {
     /* 1.21.0 (owner, 2026-10-18: "우클릭 컨텍스트 메뉴의 '메뉴' 항목과 그 자체를 다 없애주세요 ... 다른 경로로
        접근 불가능한 기능이 있다면 ... 우클릭 컨텍스트 메뉴 쪽으로"): the menu's tree is the right click's lower
        rows, entered in place: the menu item shown (-1: the list itself), and the way back */
-    bool                       ctx_with_menu;
-    int32_t                    ctx_node;
-    int32_t                    ctx_stack[RUBRAVIEW_MENU_MAX_DEPTH];
-    int32_t                    ctx_depth;
+    bool                       ctx_on_picture;   /* opened on the picture: what the toolbox has is left out */
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
     bool                       slidepop_open, slidepop_typing;
     u8str_t                    hint;               /* RV-116: what the box part under the pointer does */
@@ -932,12 +929,15 @@ typedef struct app_state {
     /* §3.18: triage. The undo stack is what makes Delete safe to press
        quickly, which is the point of the whole section. */
     rubraview_undo_stack_t undo;
+    uint32_t               undo_batch;   /* 1.23.0: the last batch number given to a move, copy or bin of many */
     rubraview_curation_t   curation;
     bool                   rename_active;
     struct save_job       *save_job;   /* Save a copy in progress on its own thread, or NULL */
     struct page_job       *page_job;   /* a far page being read on its own thread, or NULL */
     SRWLOCK                source_lock;/* held around every read of the page source */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
+    bool                   rename_is_picker;      /* 1.23.0: the box is naming a file or folder of the open-file screen */
+    size_t                 rename_picker_at;      /* which, in its listing */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
     bool                   rename_is_filter;      /* 1.22.0: the picker's filter on names */
     /* The box takes the folder to copy or move to (owner, 2026-10-16): the
@@ -3748,6 +3748,7 @@ static void toggle_slideshow(app_state_t *app) {
    own button does. */
 #define PICKER_DETAIL_ROW 30.0
 #define PICKER_DETAIL_HEAD 26.0   /* the line naming the columns */
+#define PICKER_HEAD_CHECK_ROOM 30.0   /* 1.23.0: the heads' check box, before Name */
 #define PICKER_TILE 160.0
 
 static bool picker_details(const app_state_t *app) {
@@ -3768,7 +3769,7 @@ static double picker_top(const app_state_t *app) {
 /* Where the tiles or the rows begin, below the path, the places and — in
    the details view — the columns' names. */
 static double picker_grid_top(const app_state_t *app, double dpi) {
-    return picker_top(app) + (PICKER_HEADER_HEIGHT + (picker_details(app) ? PICKER_DETAIL_HEAD : 0.0)) * dpi;
+    return picker_top(app) + (PICKER_HEADER_HEIGHT + PICKER_DETAIL_HEAD) * dpi;   /* 1.23.0: the heads in the tiles view too */
 }
 
 /* A chip in the path or the places bar, as wide as its label. */
@@ -3915,7 +3916,8 @@ static void picker_layout(app_state_t *app) {
 /* The buttons along the bottom of the picker (owner, 2026-09-23). The
    first three are modes and switches; the rest act on what is picked. */
 typedef enum picker_button {
-    PICKER_BTN_INDIVIDUAL = 0,
+    PICKER_BTN_OPEN = 0,     /* 1.23.0: what is picked, or the one with the focus */
+    PICKER_BTN_INDIVIDUAL,
     PICKER_BTN_RANGE,
     PICKER_BTN_SAME_TYPE,
     PICKER_BTN_MEDIA,        /* 1.22.0: the pictures, films, music and text here, picked at once or let go */
@@ -3930,7 +3932,7 @@ typedef enum picker_button {
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
-    N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
+    N_("Open"), N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
     N_("Playlist"), N_("Recycle"), N_("Move to"), N_("Copy to"), N_("Deselect all"), N_("Details"),
 };
 
@@ -4498,6 +4500,7 @@ static bool picker_is_up(const app_state_t *app, size_t index);
 static void picker_filter_set(app_state_t *app, u8str_t text);
 static void picker_filter_forget(app_state_t *app);
 static void ctx_close(app_state_t *app);
+static void picker_activate(app_state_t *app, size_t index);
 static void slidepop_close(app_state_t *app);
 static void listwin_sync(app_state_t *app);
 static void list_insert_paths(app_state_t *app, const u8str_t *paths, size_t count, size_t to);
@@ -4694,6 +4697,8 @@ static u8str_t picker_focus_extension(const app_state_t *app) {
 }
 
 static void rename_extension_begin(app_state_t *app);
+static void rename_picker_begin(app_state_t *app, size_t at);
+static void rename_picker_commit(app_state_t *app);
 static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said);
 
 /* The picked files, gathered as a listing the page source can take. */
@@ -4779,16 +4784,17 @@ static void picker_recycle(app_state_t *app) {
     rubraview_confirm_clear(&app->picker_confirm);
 
     size_t done = 0;
+    uint32_t batch = ++app->undo_batch;
     for (size_t i = 0; i < n; ++i) {
         if (!rubraview_pal_fs_recycle(entries[i].path)) continue;
         rubraview_undo_push(&app->undo, (rubraview_file_action_t){
             .op = RUBRAVIEW_FILE_OP_RECYCLE,
             .source_path = app_keep(app, entries[i].path),
             .target_path = app_keep(app, entries[i].path),
+            .batch = batch,
         });
         done++;
     }
-    rubraview_undo_commit(&app->undo);
     char line[96];
     int written = snprintf(line, sizeof(line), T("%zu file(s) in the recycle bin"), done);
     if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
@@ -4803,6 +4809,7 @@ static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) 
 
     rubraview_pal_fs_make_dirs(target_dir);
     size_t done = 0;
+    uint32_t batch = ++app->undo_batch;   /* 1.23.0: one undo for all of them */
     for (size_t i = 0; i < n; ++i) {
         u8str_t target = rubraview_path_join(app->arena, target_dir, entries[i].name);
         if (target.len == 0) continue;
@@ -4814,10 +4821,10 @@ static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) 
             .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
             .source_path = app_keep(app, entries[i].path),
             .target_path = target,
+            .batch = batch,
         });
         done++;
     }
-    rubraview_undo_commit(&app->undo);
     char line[128];
     int written = snprintf(line, sizeof(line), T("%zu file(s) %s %.*s"), done, moving ? T("moved to") : T("copied to"),
                            (int)target_dir.len, target_dir.ptr);
@@ -4999,6 +5006,13 @@ static rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t ind
     return (rubraview_pal_rect_t){ x + 12.0 * dpi, y + 12.0 * dpi, side, side };
 }
 
+/* 1.23.0: the check box on the columns' line, over the rows' own (all of them, or none). */
+static rubraview_pal_rect_t picker_head_check_rect(const app_state_t *app, double dpi) {
+    double side = 18.0 * dpi, hh = PICKER_DETAIL_HEAD * dpi;
+    double hy = picker_grid_top(app, dpi) - hh;
+    return (rubraview_pal_rect_t){ 7.0 * dpi, hy + (hh - side) * 0.5, side, side };
+}
+
 static void draw_picker_check(app_state_t *app, size_t index, double win_w, double dpi) {
     if (app->picker_in_book || picker_is_up(app, index)) return;
     rubraview_pal_rect_t box = picker_check_rect(app, index, win_w, dpi);
@@ -5126,10 +5140,33 @@ static void picker_hold_tick(app_state_t *app) {
 }
 
 /* One of the buttons along the bottom was pressed. */
+/* 1.23.0 (owner, 2026-10-19: "자체 파일 탐색기에서 열기 버튼이 없어요"): the Open button. One picked, or
+   none and the focus on one: that, as a tap opens it (a folder is gone into). Many: their files, as one set. */
+static void picker_open_picked(app_state_t *app) {
+    size_t picked = 0, one = 0;
+    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
+        if (app->picker_selected[i]) { if (picked++ == 0) one = i; }
+    if (picked == 0) {
+        if (app->picker.focus < app->picker_listing.count) picker_activate(app, app->picker.focus);
+        else osd_say(app, TU8("pick something to open first"));
+        return;
+    }
+    if (picked == 1) { picker_activate(app, one); return; }
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries), files = 0;
+    for (size_t i = 0; i < n; ++i) if (!entries[i].is_directory) entries[files++] = entries[i];
+    if (files == 0) { osd_say(app, TU8("pick some files first")); return; }
+    char line[64];
+    int k = snprintf(line, sizeof(line), T("%zu files opened together"), files);
+    app->picker_open = false;
+    open_set_from_entries(app, entries, files, (u8str_t){ .ptr = line, .len = k > 0 ? (size_t)k : 0 });
+}
+
 static void picker_button(app_state_t *app, picker_button_t button) {
     char line[128];
     /* A page inside a book is not a file: nothing here can pick, move,
        copy or recycle it. */
+    if (button == PICKER_BTN_OPEN) { picker_open_picked(app); return; }
     if (app->picker_in_book && button != PICKER_BTN_CLEAR && button != PICKER_BTN_VIEW) {
         osd_say(app, TU8("inside a book: tap a page to go to it"));
         return;
@@ -6777,6 +6814,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
         else if (rubraview_u8_eq_lit(action, "picker_reveal")) {
             if (at < app->picker_listing.count) (void)rubraview_pal_shell_reveal(app->picker_listing.entries[at].path);
         }
+        else if (rubraview_u8_eq_lit(action, "picker_rename")) rename_picker_begin(app, at);
         else if (rubraview_u8_eq_lit(action, "picker_copy_to")) picker_button(app, PICKER_BTN_COPY);
         else if (rubraview_u8_eq_lit(action, "picker_move_to")) picker_button(app, PICKER_BTN_MOVE);
         else if (rubraview_u8_eq_lit(action, "picker_recycle")) {
@@ -7103,6 +7141,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) { picker_select_everything(app); return true; }   /* 1.22.0 */
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "F")) { picker_filter_begin(app); return true; }        /* 1.22.0 */
+    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "Z")) { triage_undo(app); return true; }   /* 1.23.0: what was done here, back */
 
     if (combo.key_name.len == 1) {
         char c = combo.key_name.ptr[0];
@@ -9261,8 +9300,9 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
        show through (seen on the VM, 2026-09-25). */
     rubraview_pal_rect_t crumb_bar = { 0.0, 0.0, win_w, header_h };
     rubraview_pal_render_fill_rect(app->renderer, crumb_bar, 0xFF101010u, 0.0);
-    if (details) {
-        /* The columns' names, on the line the rows scroll under. */
+    {
+        /* The columns' names, on the line the rows scroll under; 1.23.0: in the tiles view too, and a check
+           box at its left end for all of them (owner, 2026-10-19: "테이블의 헤드 역할을 하는 행"). */
         double hy = header_h - PICKER_DETAIL_HEAD * dpi, hh = PICKER_DETAIL_HEAD * dpi, font = 13.0 * dpi;
         rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, hy, win_w, hh }, COLOR_BAR_FILL, 0.0);
         /* A click on a column's name sorts by it; again, the other way round (owner, 2026-10-16). */
@@ -9275,12 +9315,27 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                              k == sorted ? (desc ? " \xE2\x96\xBC" : " \xE2\x96\xB2") : "");
             bool right = k == RUBRAVIEW_PICKER_SORT_SIZE;
             double pad = right ? 14.0 * dpi : 4.0 * dpi;
-            rubraview_pal_rect_t at = { k == 0 ? cols.name_x : cols.x[k], hy, cols.w[k] - pad, hh };
+            double from = k == 0 ? cols.name_x + PICKER_HEAD_CHECK_ROOM * dpi : cols.x[k];
+            rubraview_pal_rect_t at = { from, hy, cols.x[k] + cols.w[k] - from - pad, hh };
             if (app->pointer_y >= hy && app->pointer_y < hy + hh && app->pointer_x >= cols.x[k] && app->pointer_x < cols.x[k] + cols.w[k]) {
                 rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_FILL, 0.0);
             }
             if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ head, (size_t)n }, at, font,
                                                       k == sorted ? COLOR_TEXT : COLOR_BOX_BORDER, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);
+        }
+        if (!app->picker_in_book) {
+            size_t rows = 0, on = 0;
+            for (size_t i = 0; i < app->picker_listing.count; ++i) {
+                if (picker_is_up(app, i)) continue;
+                rows++;
+                if (app->picker_selected && app->picker_selected[i]) on++;
+            }
+            rubraview_pal_rect_t box = picker_head_check_rect(app, dpi);
+            bool all = rows > 0 && on == rows;
+            rubraview_pal_render_fill_rect(app->renderer, box, on > 0 ? 0xFF2E7BD6u : 0xB0101010u, 3.0 * dpi);
+            rubraview_pal_render_stroke_rect(app->renderer, box, on > 0 ? 0xFFFFFFFFu : 0xC0FFFFFFu, 1.5 * dpi, 3.0 * dpi);
+            if (on > 0) rubraview_pal_render_draw_text(app->renderer, all ? U8("\xE2\x9C\x93") : U8("\xE2\x80\x93"), box,
+                                                       box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);   /* some: a dash */
         }
     }
     if (top > 0.0) {
@@ -9741,15 +9796,15 @@ static void draw_sub_list(app_state_t *app) {
 
 /* ---- RV-116: the right-click list, and the slide show's settings ---- */
 
-#define CTX_MAX (RUBRAVIEW_CONTEXT_MAX_ITEMS + MENU_MAX_TILES + 2)   /* the list and the menu's sections, or a section and Back */
+#define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
 
-enum { CTX_ROW_ACTION = 0, CTX_ROW_SUB, CTX_ROW_BACK };
-typedef struct ctx_row { u8str_t caption, action; int32_t group, kind, node; } ctx_row_t;
+typedef struct ctx_row { u8str_t caption, action; int32_t group; } ctx_row_t;
 
 /* 1.21.0 (owner, 2026-10-18: "우클릭 메뉴에서, 툴바 버튼으로 호출 가능한 기능들은 빼 주세요"): is this action
-   a tile of the toolbox for what is on screen? Then the right click leaves it out. */
+   a tile of the toolbox for what is on screen? Then the right click leaves it out. Open file stays
+   (owner, 2026-10-19: "파일 열기도 우클릭 컨텍스트 메뉴에 있어야 해요"). */
 static bool ctx_on_toolbox(const app_state_t *app, u8str_t action) {
-    if (action.len == 0) return false;
+    if (action.len == 0 || rubraview_u8_eq_lit(action, "open_picker")) return false;
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     const rubraview_toolbox_profile_t *p = rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app)));
     if (!p) return false;
@@ -9758,50 +9813,16 @@ static bool ctx_on_toolbox(const app_state_t *app, u8str_t action) {
     return false;
 }
 
-/* Has a menu item something the right click would show: an action not on the toolbox, or a section holding one? */
-static bool ctx_node_shows(const app_state_t *app, int32_t at, int depth) {
-    const rubraview_menu_tree_t *tree = &app->menu_tree;
-    if (at < 0 || (size_t)at >= tree->item_count || depth > RUBRAVIEW_MENU_MAX_DEPTH) return false;
-    const rubraview_menu_item_t *item = &tree->items[at];
-    if (item->child_count <= 0) return !ctx_on_toolbox(app, item->action);
-    for (int32_t c = 0; c < item->child_count; ++c) if (ctx_node_shows(app, item->first_child + c, depth + 1)) return true;
-    return false;
-}
-
-/* The rows on show: the list's, then (on the picture) a section a row for each of the menu's; or, in a
-   section, Back and its items, a section in it a row that opens it. On the picture, what the toolbox
-   has a tile for is left out, and a section left with nothing. */
+/* The rows on show: the list's, less (on the picture) what the toolbox has a tile for. 1.23.0: the
+   menu's sections are gone from it (owner, 2026-10-19: all of them have another way in). */
 static size_t ctx_row_list(const app_state_t *app, ctx_row_t *rows) {
     if (!app->ctx_list) return 0;
     size_t n = 0;
-    const rubraview_menu_tree_t *tree = &app->menu_tree;
-    if (app->ctx_node >= 0 && (size_t)app->ctx_node < tree->item_count) {
-        const rubraview_menu_item_t *node = &tree->items[app->ctx_node];
-        rows[n++] = (ctx_row_t){ node->label, U8(""), 0, CTX_ROW_BACK, -1 };
-        for (int32_t c = 0; c < node->child_count && n < CTX_MAX; ++c) {
-            int32_t at = node->first_child + c;
-            if (at < 0 || (size_t)at >= tree->item_count) break;
-            const rubraview_menu_item_t *item = &tree->items[at];
-            if (!ctx_node_shows(app, at, 0)) continue;
-            rows[n++] = (ctx_row_t){ item->label, item->action, 1, item->child_count > 0 ? CTX_ROW_SUB : CTX_ROW_ACTION, at };
-        }
-        return n;
-    }
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
-    for (int32_t i = 0; i < app->ctx_list->tile_count && n < RUBRAVIEW_CONTEXT_MAX_ITEMS; ++i) {
+    for (int32_t i = 0; i < app->ctx_list->tile_count && n < CTX_MAX; ++i) {
         const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + i];
-        if (app->ctx_with_menu && ctx_on_toolbox(app, item->action)) continue;
-        rows[n++] = (ctx_row_t){ item->caption, item->action, item->group, CTX_ROW_ACTION, -1 };
-    }
-    if (app->ctx_with_menu) {
-        int32_t group = n > 0 ? rows[n - 1].group + 1 : 0;
-        for (int32_t r = 0; r < tree->root_count && n < CTX_MAX; ++r) {
-            int32_t at = tree->root_first + r;
-            if (at < 0 || (size_t)at >= tree->item_count) break;
-            const rubraview_menu_item_t *item = &tree->items[at];
-            if (!ctx_node_shows(app, at, 0)) continue;
-            rows[n++] = (ctx_row_t){ item->label, item->action, group, item->child_count > 0 ? CTX_ROW_SUB : CTX_ROW_ACTION, at };
-        }
+        if (app->ctx_on_picture && ctx_on_toolbox(app, item->action)) continue;
+        rows[n++] = (ctx_row_t){ item->caption, item->action, item->group };
     }
     return n;
 }
@@ -9822,58 +9843,27 @@ static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
     rubraview_action_facts_t facts = action_facts(app);
     for (size_t i = 0; i < n; ++i) {
         groups[i] = rows[i].group;
-        if (enabled) enabled[i] = rows[i].kind != CTX_ROW_ACTION || rubraview_action_state(rows[i].action, &facts).enabled;
+        if (enabled) enabled[i] = rubraview_action_state(rows[i].action, &facts).enabled;
     }
     return n;
 }
 
-/* 1.21.0: the list in one column; on the picture, the menu's sections in a second one beside it
-   (to the right, else to the left), so neither grows past the window. */
+/* The list's one column, turned to stay in the window. */
 typedef struct ctx_layout {
-    size_t n, split;               /* rows; the first in the second column (n: none) */
+    size_t n;
     int32_t groups[CTX_MAX];
     bool enabled[CTX_MAX];
-    rubraview_rect_t a, b;
+    rubraview_rect_t a;
     rubraview_ctxmenu_metrics_t m;
 } ctx_layout_t;
 
 static void ctx_layout_make(const app_state_t *app, ctx_layout_t *L) {
     L->n = ctx_rows(app, L->groups, L->enabled);
-    L->split = L->n;
-    if (app->ctx_node < 0 && app->ctx_with_menu && app->ctx_list) {
-        ctx_row_t rows[CTX_MAX];
-        size_t total = ctx_row_list(app, rows), own = 0;
-        while (own < total && rows[own].node < 0) own++;   /* the list's rows come first; the sections have their node */
-        if (own > 0 && own < L->n) L->split = own;   /* none of its own left: the sections alone, one column */
-    }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(ctx_window(app), &w, &h);
     L->m = ctx_metrics(app);
-    L->a = rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &L->m, L->groups, L->split);
-    L->b = (rubraview_rect_t){0};
-    if (L->split < L->n) {
-        L->b = rubraview_ctxmenu_frame((double)w, (double)h, L->a.x + L->a.width, L->a.y, &L->m, L->groups + L->split, L->n - L->split);
-        if (L->b.x < L->a.x + L->a.width - 0.5) L->b.x = L->a.x - L->b.width >= 0.0 ? L->a.x - L->b.width : 0.0;
-    }
+    L->a = rubraview_ctxmenu_frame((double)w, (double)h, app->ctx_x, app->ctx_y, &L->m, L->groups, L->n);
 }
-
-static rubraview_rect_t ctx_layout_row(const ctx_layout_t *L, size_t i) {
-    return i < L->split ? rubraview_ctxmenu_row(L->a, &L->m, L->groups, i)
-                        : rubraview_ctxmenu_row(L->b, &L->m, L->groups + L->split, i - L->split);
-}
-
-static int32_t ctx_layout_row_at(const ctx_layout_t *L, double x, double y) {
-    int32_t r = rubraview_ctxmenu_row_at(L->a, &L->m, L->groups, L->split, x, y);
-    if (r >= 0) return r;
-    if (L->split >= L->n) return -1;
-    r = rubraview_ctxmenu_row_at(L->b, &L->m, L->groups + L->split, L->n - L->split, x, y);
-    return r >= 0 ? r + (int32_t)L->split : -1;
-}
-
-static bool ctx_layout_contains(const ctx_layout_t *L, double x, double y) {
-    return rubraview_rect_contains(L->a, x, y) || (L->split < L->n && rubraview_rect_contains(L->b, x, y));
-}
-
 
 static rubraview_rect_t slidepop_frame(const app_state_t *app) {
     int32_t w = 0, h = 0;
@@ -9887,9 +9877,7 @@ static void ctx_close(app_state_t *app) {
     app->ctx_open = false;
     app->ctx_list = NULL;
     app->ctx_focus = -1;
-    app->ctx_with_menu = false;
-    app->ctx_node = -1;
-    app->ctx_depth = 0;
+    app->ctx_on_picture = false;
     rubraview_confirm_clear(&app->ctx_confirm);
 }
 
@@ -9917,18 +9905,10 @@ static void ctx_open_at(app_state_t *app, double x, double y) {
     app->ctx_list = list;
     app->ctx_x = x;
     app->ctx_y = y;
-    menu_rebuild(app);          /* the menu's tree for this moment: what it holds under the list */
-    app->ctx_with_menu = true;
+    app->ctx_on_picture = true;
 }
 
 /* A row chosen, by a click or Enter. Delete asks a second time, as the menu's does. */
-static void ctx_back(app_state_t *app) {
-    if (app->ctx_node < 0) return;
-    app->ctx_node = app->ctx_depth > 0 ? app->ctx_stack[--app->ctx_depth] : -1;
-    app->ctx_focus = -1;
-    rubraview_confirm_clear(&app->ctx_confirm);
-}
-
 static void ctx_choose(app_state_t *app, int32_t row) {
     int32_t groups[CTX_MAX];
     bool enabled[CTX_MAX];
@@ -9936,14 +9916,6 @@ static void ctx_choose(app_state_t *app, int32_t row) {
     if (row < 0 || (size_t)row >= n || !enabled[row]) return;
     ctx_row_t rows[CTX_MAX];
     (void)ctx_row_list(app, rows);
-    if (rows[row].kind == CTX_ROW_BACK) { ctx_back(app); return; }
-    if (rows[row].kind == CTX_ROW_SUB) {   /* a section entered in place */
-        if (app->ctx_depth < RUBRAVIEW_MENU_MAX_DEPTH) app->ctx_stack[app->ctx_depth++] = app->ctx_node;
-        app->ctx_node = rows[row].node;
-        app->ctx_focus = -1;
-        rubraview_confirm_clear(&app->ctx_confirm);
-        return;
-    }
     bool clears = rubraview_u8_eq_lit(rows[row].action, "recent_clear");
     if ((clears || rubraview_u8_eq_lit(rows[row].action, "delete_file") || rubraview_u8_eq_lit(rows[row].action, "picker_recycle")) &&
         !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
@@ -9965,40 +9937,31 @@ static void draw_ctxmenu_on(app_state_t *app, rubraview_renderer_t *r, double px
     const bool *enabled = L.enabled;
     rubraview_ctxmenu_metrics_t m = L.m;
     double dpi = rubraview_pal_window_dpi_scale(ctx_window(app));
-    for (int k = 0; k < 2; ++k) {
-        rubraview_rect_t f = k == 0 ? L.a : L.b;
-        if (k == 1 && L.split >= L.n) break;
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
-        rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
-    }
+    rubraview_rect_t f = L.a;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
+    rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
     ctx_row_t rows[CTX_MAX];
     (void)ctx_row_list(app, rows);
-    int32_t hover = ctx_layout_row_at(&L, px, py);
+    int32_t hover = rubraview_ctxmenu_row_at(L.a, &m, groups, n, px, py);
     if (hover < 0) hover = app->ctx_focus;
     rubraview_action_facts_t facts = action_facts(app);
     double now = rubraview_pal_time_now_seconds();
     for (size_t i = 0; i < n; ++i) {
-        rubraview_rect_t row = ctx_layout_row(&L, i);
-        rubraview_rect_t f = i < L.split ? L.a : L.b;
-        if (i > 0 && i != L.split && groups[i] != groups[i - 1]) {   /* the line between two groups */
+        rubraview_rect_t row = rubraview_ctxmenu_row(L.a, &m, groups, i);
+        if (i > 0 && groups[i] != groups[i - 1]) {   /* the line between two groups */
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x + 8.0 * dpi, row.y - m.gap * 0.5 - 0.5 * dpi,
                                                                       f.width - 16.0 * dpi, 1.0 * dpi }, 0x40FFFFFFu, 0.0);
         }
         rubraview_pal_rect_t cell = { row.x + 4.0 * dpi, row.y + 1.0 * dpi, row.width - 8.0 * dpi, row.height - 2.0 * dpi };
         if ((int32_t)i == hover && enabled[i]) rubraview_pal_render_fill_rect(r, cell, 0x40FFFFFFu, 3.0 * dpi);
         const ctx_row_t *item = &rows[i];
-        rubraview_action_state_t st = item->kind == CTX_ROW_ACTION ? rubraview_action_state(item->action, &facts)
-                                                                   : (rubraview_action_state_t){ .enabled = true, .mark = RUBRAVIEW_MARK_NONE };
+        rubraview_action_state_t st = rubraview_action_state(item->action, &facts);
         char scratch[160];
         u8str_t text;
         if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
             text = rubraview_u8_eq_lit(item->action, "recent_clear") ? TU8("Clear?") : TU8("Delete?");
-        } else if (item->kind == CTX_ROW_BACK) {   /* the section's own name, with the way back */
-            u8str_t name = rubraview_tr_ctx_u8("menu", item->caption);
-            int k = snprintf(scratch, sizeof(scratch), "\xE2\x97\x82 %.*s", (int)(name.len < 120 ? name.len : 120), name.ptr);
-            text = (u8str_t){ .ptr = scratch, .len = k > 0 ? (size_t)k : 0 };
         } else {
-            text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), item->kind == CTX_ROW_SUB, st.mark, st.value, scratch, sizeof(scratch));
+            text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, scratch, sizeof(scratch));
         }
         rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi, enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
@@ -10152,8 +10115,8 @@ static bool popups_press(app_state_t *app, double x, double y, bool right) {
     ctx_layout_t L;
     ctx_layout_make(app, &L);
     if (right) { ctx_close(app); return false; }
-    if (ctx_layout_contains(&L, x, y)) {
-        int32_t row = ctx_layout_row_at(&L, x, y);
+    if (rubraview_rect_contains(L.a, x, y)) {
+        int32_t row = rubraview_ctxmenu_row_at(L.a, &L.m, L.groups, L.n, x, y);
         if (row >= 0) ctx_choose(app, row);
         return true;
     }
@@ -10187,8 +10150,7 @@ static bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (key_is(combo, "Escape")) { ctx_close(app); return true; }
     if (key_is(combo, "Down")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, +1); return true; }
     if (key_is(combo, "Up")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, -1); return true; }
-    if (key_is(combo, "Enter") || key_is(combo, "Right")) { if (app->ctx_focus >= 0) ctx_choose(app, app->ctx_focus); return true; }
-    if (key_is(combo, "Left") || key_is(combo, "Backspace")) { ctx_back(app); return true; }   /* 1.21.0: out of a section */
+    if (key_is(combo, "Enter")) { if (app->ctx_focus >= 0) ctx_choose(app, app->ctx_focus); return true; }
     ctx_close(app);   /* any other key: it closes, and the key does what it does */
     return false;
 }
@@ -12124,29 +12086,48 @@ static void triage_undo(app_state_t *app) {
             break;
     }
 
-    bool ok = false;
-    switch (action.op) {
-        case RUBRAVIEW_FILE_OP_MOVE:
-        case RUBRAVIEW_FILE_OP_RENAME:
-            ok = rubraview_pal_fs_move(action.target_path, action.source_path);
-            break;
-        case RUBRAVIEW_FILE_OP_COPY:
-            /* Undoing a copy means removing the copy, not the original. */
-            ok = rubraview_pal_fs_delete(action.target_path);
-            break;
-        case RUBRAVIEW_FILE_OP_RECYCLE:
-            ok = rubraview_pal_fs_restore_last_recycled(action.source_path);
-            if (!ok) osd_say(app, TU8("Windows keeps the recycle bin's undo to itself — restore it from there"));
-            break;
-        default:
-            break;
+    /* 1.23.0: the files of one move or copy of many go back together, newest first. */
+    size_t undone = 0;
+    for (;;) {
+        bool ok = false;
+        switch (action.op) {
+            case RUBRAVIEW_FILE_OP_MOVE:
+            case RUBRAVIEW_FILE_OP_RENAME:
+                ok = rubraview_pal_fs_move(action.target_path, action.source_path);
+                break;
+            case RUBRAVIEW_FILE_OP_COPY:
+                /* Undoing a copy means removing the copy, not the original; a folder's copy whole (1.23.0). */
+                ok = rubraview_pal_fs_delete(action.target_path) || rubraview_pal_fs_delete_tree(action.target_path);
+                break;
+            case RUBRAVIEW_FILE_OP_RECYCLE:
+                ok = rubraview_pal_fs_restore_last_recycled(action.source_path);
+                if (!ok) osd_say(app, TU8("Windows keeps the recycle bin's undo to itself — restore it from there"));
+                break;
+            default:
+                break;
+        }
+        if (!ok) {
+            if (undone > 0) break;
+            if (action.op == RUBRAVIEW_FILE_OP_COPY) osd_say(app, TU8("could not take the copy back"));
+            return;
+        }
+        rubraview_undo_commit(&app->undo);
+        undone++;
+        rubraview_file_action_t next = {0};
+        if (!rubraview_undo_same_batch(&app->undo, action.batch) ||
+            rubraview_undo_peek(&app->undo, &next) != RUBRAVIEW_UNDO_AVAILABLE) break;
+        action = next;
     }
 
-    if (!ok) return;
-
-    rubraview_undo_commit(&app->undo);
-    osd_say(app, TU8("undone"));
-    reopen_after_removal(app, action.playlist_index);
+    if (undone > 1) {
+        char line[96];
+        int n = snprintf(line, sizeof(line), T("%zu undone"), undone);
+        osd_say(app, (u8str_t){ .ptr = line, .len = n > 0 ? (size_t)n : 0 });
+    } else {
+        osd_say(app, TU8("undone"));
+    }
+    if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what it lists has changed */
+    else reopen_after_removal(app, action.playlist_index);
 }
 
 /* §3.18.2's inline rename. The box is drawn here, not a child EDIT
@@ -12160,6 +12141,7 @@ static void rename_end(app_state_t *app) {
     app->rename_active = false;
     app->rename_is_archive = false;
     app->rename_is_extension = false;
+    app->rename_is_picker = false;
     app->rename_is_path = false;
     app->rename_is_filter = false;
     app->rename_is_target = false;
@@ -12376,6 +12358,48 @@ static void rename_extension_begin(app_state_t *app) {
     osd_say(app, TU8("type the extension for the picked files"));
 }
 
+/* 1.23.0 (owner, 2026-10-19): a file or a folder of the open-file screen renamed from its right click.
+   The box is the rename box, holding its whole name. */
+static void rename_picker_begin(app_state_t *app, size_t at) {
+    if (at >= app->picker_listing.count || app->rename_active) return;
+    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) {
+        osd_say(app, TU8("this list's names cannot be changed here"));
+        return;
+    }
+    u8str_t name = app->picker_listing.entries[at].name;
+    if (name.len == 0 || name.len >= sizeof(app->rename_buffer)) return;
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, name);
+    app->rename_active = true;
+    app->rename_is_picker = true;
+    app->rename_picker_at = at;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+static void rename_picker_commit(app_state_t *app) {
+    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    size_t at = app->rename_picker_at;
+    rename_end(app);
+    if (at >= app->picker_listing.count) return;
+    const rubraview_fs_entry_t *entry = &app->picker_listing.entries[at];
+    u8str_t typed = rubraview_textedit_text(&app->rename_edit);
+    if (typed.len == entry->name.len && memcmp(typed.ptr, entry->name.ptr, typed.len) == 0) return;   /* nothing changed */
+    rubraview_rename_err_t err = rubraview_rename_validate(typed);
+    if (err != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(err)); return; }
+    u8str_t source = app_keep(app, entry->path);
+    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(source), typed);
+    if (target.len == 0 || rubraview_pal_fs_exists(target) || !rubraview_pal_fs_move(source, target)) {
+        osd_say(app, TU8("could not rename that file"));
+        return;
+    }
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = RUBRAVIEW_FILE_OP_RENAME, .source_path = source, .target_path = target,
+    });
+    osd_say(app, TU8("renamed"));
+    picker_navigate(app, app->picker_dir);   /* the name on screen has changed */
+}
+
 /* Renames every picked file to the typed extension, one undo entry each. */
 static void rename_extension_commit(app_state_t *app) {
     u8str_t typed = rubraview_textedit_text(&app->rename_edit);
@@ -12389,6 +12413,7 @@ static void rename_extension_commit(app_state_t *app) {
     }
 
     size_t done = 0, failed = 0;
+    uint32_t batch = ++app->undo_batch;
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
         if (!app->picker_selected || !app->picker_selected[i]) continue;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
@@ -12411,10 +12436,10 @@ static void rename_extension_commit(app_state_t *app) {
             .op = RUBRAVIEW_FILE_OP_RENAME,
             .source_path = app_keep(app, entry->path),
             .target_path = target,
+            .batch = batch,
         });
         done++;
     }
-    rubraview_undo_commit(&app->undo);
 
     char line[128];
     int written = failed > 0
@@ -12432,6 +12457,7 @@ static void rename_commit(app_state_t *app) {
     if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_apply) { apply_all_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
+    if (app->rename_is_picker) { rename_picker_commit(app); return; }
     if (app->rename_is_path) { picker_path_commit(app); return; }
     if (app->rename_is_filter) { picker_filter_follow(app); rename_end(app); return; }   /* 1.22.0: kept */
     if (app->rename_is_target) { target_commit(app); return; }
@@ -26654,8 +26680,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                         if (event.mouse.y < grid_top) {
                             /* the columns' names: sort by the one pressed, again the other way round (owner, 2026-10-16) */
-                            if (picker_details(&app) && event.mouse.y >= grid_top - PICKER_DETAIL_HEAD * dpi) {
+                            if (event.mouse.y >= grid_top - PICKER_DETAIL_HEAD * dpi) {
                                 picker_columns_t cols = picker_detail_columns((double)pw, dpi);
+                                if (event.mouse.x < cols.name_x + PICKER_HEAD_CHECK_ROOM * dpi) {
+                                    picker_select_everything(&app);   /* 1.23.0: the heads' check box, all or none */
+                                    break;
+                                }
                                 int k = picker_column_at(&cols, event.mouse.x);
                                 if (k >= 0) picker_sort_by(&app, k);
                             }

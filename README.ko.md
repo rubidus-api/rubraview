@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.22.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.23.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.0/rubraview-v1.23.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.0/rubraview-v1.23.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -188,21 +188,21 @@
 | `.` | 파일 안 다음 쪽 |
 | `,` | 파일 안 이전 쪽 |
 
-**단축키 없이 도구 상자나 메뉴, 오른쪽 클릭에서 쓰는 동작**
+**단축키 없이 도구 상자나 오른쪽 클릭에서 쓰는 동작**
 
 | 있는 곳 | 하는 일 |
 |---|---|
-| 도구 상자 `Stop`, 오른쪽 클릭 `Stop`, 메뉴 `Stop` | 정지하고 처음으로 |
+| 도구 상자 `Stop`, 오른쪽 클릭 `Stop` | 정지하고 처음으로 |
 | 도구 상자 `1x` | 다음 재생 속도. 위아래로 끌거나 버튼 위에서 휠을 돌리면 0.1x씩 |
 | 도구 상자 `A-B` | A-B 반복: 여기서부터 → 여기까지 → 끄기 |
-| 도구 상자 `EQ`, 메뉴 `Equaliser` | 이퀄라이저 다음 프리셋 |
-| 도구 상자 `EQ bands`, 오른쪽 클릭 `Equaliser window`, 메뉴 `Equaliser window` | 이퀄라이저 10밴드 창 |
-| 도구 상자 `Night`, 메뉴 `Night mode` | 야간 모드: 큰 소리를 줄임 |
-| 도구 상자 `Sub`, 오른쪽 클릭 `Subtitles on / off`, 메뉴 `On/off` | 자막 켜기/끄기 |
-| 도구 상자 `100%`, 메뉴 `Next zoom` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
-| 도구 상자 `Fit`, 메뉴 `Next fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 |
+| 도구 상자 `EQ` | 이퀄라이저 다음 프리셋 |
+| 도구 상자 `EQ bands`, 오른쪽 클릭 `Equaliser window` | 이퀄라이저 10밴드 창 |
+| 도구 상자 `Night` | 야간 모드: 큰 소리를 줄임 |
+| 도구 상자 `Sub`, 오른쪽 클릭 `Subtitles on / off` | 자막 켜기/끄기 |
+| 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
+| 도구 상자 `Fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 |
 | 도구 상자 `Bar pin` | 제목 표시줄 고정 |
-| 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
+| 도구 상자 `Viz` | 분석기: 막대 / 파형 / 끔 |
 | 도구 상자 `Wheel strip` | 휠로 넘길 때 썸네일 |
 | 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
 | 오른쪽 클릭 `Open` | 탐색기에서 우클릭한 것 열기 |
@@ -210,6 +210,7 @@
 | 오른쪽 클릭 `Add to the list`, 오른쪽 클릭 `Add them to the list` | 고른 것을 목록에 추가 |
 | 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
 | 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
+| 오른쪽 클릭 `Rename` | 우클릭한 파일이나 폴더의 이름 바꾸기 |
 | 오른쪽 클릭 `Copy to...`, 오른쪽 클릭 `Copy them to...` | 고른 것을 폴더로 복사 |
 | 오른쪽 클릭 `Move to...`, 오른쪽 클릭 `Move them to...` | 고른 것을 폴더로 이동 |
 | 오른쪽 클릭 `To the recycle bin`, 오른쪽 클릭 `Them to the recycle bin` | 고른 것을 휴지통으로 |
@@ -220,46 +221,15 @@
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |
 | 오른쪽 클릭 `Take out of the list` | 목록의 파일 우클릭: 목록에서 빼기 (파일은 그대로) |
 | 오른쪽 클릭 `Delete the file...` | 목록의 파일 우클릭: 경고하고 확인한 뒤 휴지통으로 |
-| 오른쪽 클릭 `About Rubraview`, 메뉴 `About` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
-| 오른쪽 클릭 `One page`, 메뉴 `Single` | 보기 방식: 한 장씩 |
-| 오른쪽 클릭 `Two pages`, 메뉴 `Dual` | 보기 방식: 두 장 나란히 |
-| 오른쪽 클릭 `Book`, 메뉴 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
-| 오른쪽 클릭 `Webtoon`, 메뉴 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
-| 오른쪽 클릭 `Choose subtitles`, 메뉴 `Choose` | 목록에서 자막 고르기 |
-| 메뉴 `Auto` | 열린 압축 파일의 파일 이름을 알맞은 코드 페이지로 읽기 |
-| 메뉴 `UTF-8` | 열린 압축 파일의 파일 이름을 UTF-8로 읽기 |
-| 메뉴 `Korean` | 열린 압축 파일의 파일 이름을 한국어(CP949)로 읽기 |
-| 메뉴 `Japanese (Shift-JIS)` | 열린 압축 파일의 파일 이름을 일본어(Shift-JIS)로 읽기 |
-| 메뉴 `Chinese (GBK)` | 열린 압축 파일의 파일 이름을 중국어 간체(GBK)로 읽기 |
-| 메뉴 `Chinese (Big5)` | 열린 압축 파일의 파일 이름을 중국어 번체(Big5)로 읽기 |
-| 메뉴 `Western` | 열린 압축 파일의 파일 이름을 서유럽어(CP1252)로 읽기 |
-| 메뉴 `Dual, right to left` | 보기 방식: 두 장 나란히, 오른쪽에서 왼쪽으로 |
-| 메뉴 `Book, right to left` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩, 오른쪽에서 왼쪽으로 |
-| 메뉴 `Comic` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서(코믹) |
-| 메뉴 `Comic, right to left` | 보기 방식: 한 장씩, 가로로 긴 쪽은 반반 나눠서 오른쪽 절반부터 |
-| 메뉴 `Original` | 화면 비율: 원본 |
-| 메뉴 `4:3` | 화면 비율: 4:3 |
-| 메뉴 `5:4` | 화면 비율: 5:4 |
-| 메뉴 `3:2` | 화면 비율: 3:2 |
-| 메뉴 `16:10` | 화면 비율: 16:10 |
-| 메뉴 `16:9` | 화면 비율: 16:9 |
-| 메뉴 `1.85:1 cinema` | 화면 비율: 1.85:1 (영화관) |
-| 메뉴 `21:9` | 화면 비율: 21:9 |
-| 메뉴 `2.39:1 cinema` | 화면 비율: 2.39:1 (영화관 시네마스코프) |
-| 메뉴 `1:1` | 화면 비율: 1:1 |
-| 메뉴 `A4 / B4` | 화면 비율: A·B 판형 종이(A4, B4 …), 세로 |
-| 메뉴 `US Letter` | 화면 비율: US Letter, 세로 |
-| 메뉴 `Custom` | 화면 비율: 설정 › Viewer에 적은 두 숫자 |
-| 메뉴 `On its side` | 비율을 옆으로 눕히기 (16:9 → 9:16, 종이는 가로) |
-| 메뉴 `Slower` | 더 느리게 재생 |
-| 메뉴 `Faster` | 더 빠르게 재생 |
-| 메뉴 `Take out of film` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
-| 메뉴 `Hide all` | 화면을 클릭할 때까지 타이틀바와 플로팅 박스 숨기기 |
-| 메뉴 `100%` | 떠 있는 상자를 불투명하게 |
-| 메뉴 `80%` | 떠 있는 상자 불투명도 80% |
-| 메뉴 `60%` | 떠 있는 상자 불투명도 60% |
-| 메뉴 `40%` | 떠 있는 상자 불투명도 40% |
-| 메뉴 `Change keys` | 설정을 단축키 쪽에서 열기 |
+| 오른쪽 클릭 `About Rubraview` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
+| 오른쪽 클릭 `One page` | 보기 방식: 한 장씩 |
+| 오른쪽 클릭 `Two pages` | 보기 방식: 두 장 나란히 |
+| 오른쪽 클릭 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
+| 오른쪽 클릭 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
+| 오른쪽 클릭 `Choose subtitles` | 목록에서 자막 고르기 |
+| 오른쪽 클릭 `Take out of film` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
+| 오른쪽 클릭 `Slower` | 더 느리게 재생 |
+| 오른쪽 클릭 `Faster` | 더 빠르게 재생 |
 
 <!-- keys:end -->
 

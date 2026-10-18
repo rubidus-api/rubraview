@@ -743,6 +743,16 @@ bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to) {
     return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
 }
 
+bool rubraview_pal_fs_delete_tree(u8str_t path) {
+    WCHAR wide[MAX_PATH * 2 + 2];
+    if (!to_wide_double_null(path, wide, sizeof(wide) / sizeof(wide[0]) - 1)) return false;
+    DWORD attrs = GetFileAttributesW(wide);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) return false;   /* a folder, and only one */
+    SHFILEOPSTRUCTW op = { .wFunc = FO_DELETE, .pFrom = wide,
+                           .fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT };   /* no ALLOWUNDO: as a file copy's undo */
+    return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted && GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES;
+}
+
 bool rubraview_pal_fs_make_dirs(u8str_t path) {
     WCHAR wide[MAX_PATH * 2];
     if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;
