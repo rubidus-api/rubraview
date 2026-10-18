@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.18.0.exe              the viewer, as built
-dist/rubraview-v1.18.0/                 the release bundle
-dist/rubraview-v1.18.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.19.0.exe              the viewer, as built
+dist/rubraview-v1.19.0/                 the release bundle
+dist/rubraview-v1.19.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -139,11 +139,20 @@ has no files to add to, so the files are opened as a list of their own. A
 film that was playing goes on from where it was.
 
 **Print** (`Ctrl+P`, or File › Print...) prints the picture on screen the
-same way. A panel asks how first; its **Print...** button then opens the
-system's dialog, where the printer and the paper are chosen.
+same way. A panel asks how first, and beside it a preview shows the sheet
+as it will come out: the paper in its proportions, the part the printer
+reaches (a grey line), the cells when several pictures go on a sheet, and
+each picture where and how it is printed. It changes as the choices do.
+**Print** sends it to the printer chosen, with no other dialog; **With
+Windows' print dialog...** opens Windows' own instead.
 
 | In the panel | What it sets |
 |---|---|
+| Printer | Any printer of this computer (Windows' default first chosen) |
+| Paper | The printer's own papers, with their sizes |
+| The sheet | As the printer has it, upright (portrait) or on its side (landscape) |
+| Copies | 1 to 99 |
+| Preview of | With several sheets, which one the preview shows |
 | Turn | Auto (a quarter when the picture then fills more of the sheet), None, 90° right, 180°, 90° left |
 | Size | Fit the sheet (all of the picture, as large as fits), Fill the sheet (the sheet covered, the overhang cut off), Stretch (both sides to the sheet's, proportions given up), Actual size (96 pixels an inch) |
 | Scale % | 10 to 400, of the size chosen: 50 is half the fitted picture, 200 twice — what then passes the sheet is cut off |

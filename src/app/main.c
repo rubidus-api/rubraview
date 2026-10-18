@@ -869,8 +869,22 @@ typedef struct app_state {
     char                      arc_undo_backup[1024];   /* ... and the file it was before, kept beside it */
     char                      print_temp[1024];        /* D-89: an archive page laid out as a file to print */
     bool                      print_going;
+    bool                      print_with_dialog;   /* 1.19.0: Windows' dialog asked for */
     u8str_t                  *print_list;        /* what the print panel's button prints */
     size_t                    print_list_count;
+    /* 1.19.0: the printer, paper and way up chosen in the panel, and its preview */
+    char                      print_printer_names[32][256];
+    size_t                    print_printer_count;
+    int32_t                   print_printer;            /* index; -1 none */
+    rubraview_printer_paper_t print_papers[160];
+    size_t                    print_paper_count;
+    int32_t                   print_paper;              /* index; -1 the printer's own */
+    rubraview_print_sheet_t   print_sheet;
+    bool                      print_sheet_ok;
+    int32_t                   print_preview_sheet;      /* which sheet the preview shows, 0 first */
+    rubraview_texture_t      *print_thumbs[9];
+    int32_t                   print_thumb_w[9], print_thumb_h[9];
+    size_t                    print_thumb_count;
     /* §3.13: a crop being dragged on the picture — where it started, in image pixels. */
     bool                      crop_dragging;
     /* §3.13: the curve widget — which point is being dragged, or -1. */
@@ -12145,6 +12159,9 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
 }
 
 static void panel_open_print(app_state_t *app);
+static void print_devices_load(app_state_t *app);
+static void print_thumbs_load(app_state_t *app);
+static void print_thumbs_drop(app_state_t *app);
 
 /* D-87: these pictures are to be printed: how is asked first, in the panel. */
 static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
@@ -12154,6 +12171,9 @@ static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
     for (size_t i = 0; i < count; ++i) app->print_list[i] = paths[i];
     app->print_list_count = count;
     if (app->panel.open) panel_close(app);
+    app->print_preview_sheet = 0;
+    print_devices_load(app);   /* 1.19.0 */
+    print_thumbs_load(app);
     panel_open_print(app);
 }
 
@@ -12353,6 +12373,7 @@ enum {
     PANEL_BATCH_TEXT, PANEL_BATCH_TEXT_CORNER, PANEL_BATCH_TEXT_SIZE, PANEL_BATCH_TEXT_COLOUR, PANEL_BATCH_DPI,   /* RV-134 */
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
+    PANEL_PRINT_PRINTER, PANEL_PRINT_PAPER, PANEL_PRINT_ORIENT, PANEL_PRINT_COPIES, PANEL_PRINT_SHEET, PANEL_PRINT_DIALOG,   /* 1.19.0 */
     PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
     /* The owner's edit (2026-10-17) */
     PANEL_APPLY_SEL, PANEL_CROP_SEL, PANEL_RESIZE_APPLY, PANEL_UNDO, PANEL_REDO, PANEL_STEPS, PANEL_SEL_BOX,
@@ -12634,6 +12655,7 @@ static void panel_close(app_state_t *app) {
     }
     app->panel_is_convert = false;
     if (app->panel_is_print && !app->print_going) print_temp_drop(app);
+    if (app->panel_is_print) print_thumbs_drop(app);   /* 1.19.0 */
     app->panel_is_print = false;
     if (back_to_edit) {   /* Export done or left: Edit again, with its edits */
         app->edit_kept = true;
@@ -13979,6 +14001,171 @@ static rubraview_print_options_t print_options(const app_state_t *app) {
     return o;
 }
 
+/* ---- 1.19.0 (owner, 2026-10-18: "인쇄할 때 용지 선택 가능하게 하고 프리뷰로 어떻게 인쇄되는지 예상 그림
+   보여주세요. 프린터 선택도 가능해야 해요."): the printer, its paper and the way up in the panel, a preview of
+   the sheet beside it ---- */
+
+static const app_state_t *g_print_app;   /* whose printers and papers the row words name */
+
+static u8str_t print_printer_name(const app_state_t *app) {
+    if (app->print_printer < 0 || (size_t)app->print_printer >= app->print_printer_count) return U8("");
+    return cstr(app->print_printer_names[app->print_printer]);
+}
+
+static int32_t print_orientation(const app_state_t *app) {
+    return (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("orientation")));
+}
+
+static void print_thumbs_drop(app_state_t *app) {
+    for (size_t i = 0; i < 9; ++i) {
+        if (app->print_thumbs[i]) rubraview_pal_texture_destroy(app->print_thumbs[i]);
+        app->print_thumbs[i] = NULL;
+    }
+    app->print_thumb_count = 0;
+}
+
+/* The pictures of the sheet the preview shows, small, white under what is see-through. */
+static void print_thumbs_load(app_state_t *app) {
+    print_thumbs_drop(app);
+    rubraview_print_options_t o = print_options(app);
+    size_t sheets = rubraview_print_sheets(app->print_list_count, o.per_sheet);
+    if (app->print_preview_sheet < 0 || (size_t)app->print_preview_sheet >= sheets) app->print_preview_sheet = 0;
+    size_t first = (size_t)app->print_preview_sheet * (size_t)o.per_sheet;
+    rubraview_scratch_t sc;
+    proven_arena_t *sa = scratch_begin(app, &sc, 16u << 20);
+    for (size_t k = 0; k < (size_t)o.per_sheet && first + k < app->print_list_count && k < 9; ++k) {
+        proven_arena_reset(sa);
+        rubraview_pixbuf_t px = rubraview_pal_image_read_pixels_within(sa, app->print_list[first + k], NULL, 0, true, 720, 720);
+        if (!px.pixels || px.width <= 0 || px.height <= 0 || px.stride != px.width * 4) continue;
+        bool rgba = px.format == RUBRAVIEW_PIXFMT_RGBA8;
+        uint8_t *p = px.pixels;
+        for (size_t i = 0; i < (size_t)px.width * (size_t)px.height; ++i, p += 4) {
+            unsigned a = p[3], rest = 255u - a;
+            uint8_t c0 = (uint8_t)((p[0] * a + 255u * rest + 127u) / 255u), c1 = (uint8_t)((p[1] * a + 255u * rest + 127u) / 255u),
+                    c2 = (uint8_t)((p[2] * a + 255u * rest + 127u) / 255u);
+            p[0] = rgba ? c2 : c0; p[1] = c1; p[2] = rgba ? c0 : c2; p[3] = 255;
+        }
+        rubraview_texture_t *t = rubraview_pal_texture_create_bgra(app->renderer, px.width, px.height);
+        if (t && rubraview_pal_texture_upload_bgra(t, px.pixels, px.stride)) {
+            app->print_thumbs[k] = t;
+            app->print_thumb_w[k] = px.width;
+            app->print_thumb_h[k] = px.height;
+        } else if (t) {
+            rubraview_pal_texture_destroy(t);
+        }
+    }
+    app->print_thumb_count = 9;
+    scratch_end(app, &sc);
+}
+
+static void print_sheet_load(app_state_t *app) {
+    int32_t paper = app->print_paper >= 0 && (size_t)app->print_paper < app->print_paper_count ? app->print_papers[app->print_paper].id : 0;
+    app->print_sheet_ok = app->print_printer >= 0 &&
+                          rubraview_pal_printer_sheet(print_printer_name(app), paper, print_orientation(app), &app->print_sheet);
+}
+
+static void print_papers_load(app_state_t *app) {
+    app->print_paper_count = 0;
+    app->print_paper = -1;
+    if (app->print_printer < 0) return;
+    int32_t own = 0;
+    app->print_paper_count = rubraview_pal_printer_papers(print_printer_name(app), app->print_papers, 160, &own);
+    int32_t want = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("paper")));
+    for (size_t i = 0; i < app->print_paper_count; ++i) if (app->print_papers[i].id == want) app->print_paper = (int32_t)i;
+    for (size_t i = 0; i < app->print_paper_count && app->print_paper < 0; ++i) if (app->print_papers[i].id == own) app->print_paper = (int32_t)i;
+}
+
+static void print_devices_load(app_state_t *app) {
+    g_print_app = app;
+    rubraview_scratch_t sc;
+    proven_arena_t *sa = scratch_begin(app, &sc, 1u << 20);
+    u8str_t names[32];
+    int32_t def = -1;
+    size_t n = rubraview_pal_printers(sa, names, 32, &def);
+    app->print_printer_count = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (names[i].len >= sizeof(app->print_printer_names[0])) continue;
+        memcpy(app->print_printer_names[app->print_printer_count], names[i].ptr, names[i].len);
+        app->print_printer_names[app->print_printer_count][names[i].len] = '\0';
+        if ((int32_t)i == def) def = (int32_t)app->print_printer_count;
+        app->print_printer_count++;
+    }
+    scratch_end(app, &sc);
+    u8str_t want = rubraview_settings_get_text(&app->settings, U8("print"), U8("printer"));
+    app->print_printer = def >= 0 && (size_t)def < app->print_printer_count ? def : (app->print_printer_count > 0 ? 0 : -1);
+    for (size_t i = 0; i < app->print_printer_count; ++i)
+        if (want.len > 0 && rubraview_u8_eq(want, cstr(app->print_printer_names[i]))) app->print_printer = (int32_t)i;
+    print_papers_load(app);
+    print_sheet_load(app);
+}
+
+/* The sheet as it will come out, to the left of the panel: the paper, the part the printer reaches,
+   the cells, and each picture where and how it goes — the same sums the printing does. */
+static void draw_print_preview(app_state_t *app) {
+    if (!app->panel.open || !app->panel_is_print) return;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window), pad = 24.0 * dpi;
+    double right = app->panel.bounds.x > (double)win_w * 0.3 ? app->panel.bounds.x : (double)win_w;
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0, 0, (double)win_w, (double)win_h }, 0xE0202020u, 0.0);
+    if (!app->print_sheet_ok) {
+        draw_outlined_text_aligned(app->renderer, app->print_printer < 0 ? TU8("no printer: Windows' own dialog prints")
+                                                                        : TU8("the printer does not say its sheet"),
+                                   (rubraview_pal_rect_t){ pad, pad, right - 2.0 * pad, 40.0 * dpi }, 16.0 * dpi, 2.0, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+        return;
+    }
+    const rubraview_print_sheet_t *sh = &app->print_sheet;
+    double scale = 0, px = 0, py = 0;
+    if (!rubraview_print_preview_fit(sh, pad, pad + 28.0 * dpi, right - 2.0 * pad, (double)win_h - 2.0 * pad - 28.0 * dpi, &scale, &px, &py)) return;
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ px + 4.0 * dpi, py + 4.0 * dpi, sh->paper_w * scale, sh->paper_h * scale }, 0x80000000u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ px, py, sh->paper_w * scale, sh->paper_h * scale }, 0xFFFFFFFFu, 0.0);
+    double ox = px + sh->print_x * scale, oy = py + sh->print_y * scale;
+    rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ ox, oy, sh->print_w * scale, sh->print_h * scale }, 0xFFB0B0B0u, 1.0, 0.0);
+    rubraview_print_options_t o = print_options(app);
+    for (int32_t k = 0; k < o.per_sheet && k < 9; ++k) {
+        int32_t cx = 0, cy = 0, cw = 0, ch = 0;
+        rubraview_print_cell(sh->print_w, sh->print_h, sh->dpi_x, sh->dpi_y, &o, k, &cx, &cy, &cw, &ch);
+        if (o.per_sheet > 1)
+            rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ ox + cx * scale, oy + cy * scale, cw * scale, ch * scale }, 0xFFD8D8D8u, 1.0, 0.0);
+        if ((size_t)k >= app->print_thumb_count || !app->print_thumbs[k]) continue;
+        /* the picture's full size, so the sums are the printing's; the small texture stands for it */
+        size_t index = (size_t)app->print_preview_sheet * (size_t)o.per_sheet + (size_t)k;
+        int32_t w = 0, h = 0;
+        if (index >= app->print_list_count || !rubraview_pal_image_size(app->print_list[index], &w, &h) || w <= 0 || h <= 0) {
+            w = app->print_thumb_w[k]; h = app->print_thumb_h[k];
+        }
+        rubraview_print_placement_t pl;
+        if (!rubraview_print_place(cx, cy, cw, ch, sh->dpi_x, sh->dpi_y, w, h, &o, &pl)) continue;
+        double tw = app->print_thumb_w[k], th = app->print_thumb_h[k];
+        double fx = tw / (double)w, fy = th / (double)h;   /* the picture's pixels to the texture's */
+        /* the source part in the turned picture's pixels, back into the texture's unturned ones */
+        double sx = pl.src_x, sy = pl.src_y, sw = pl.src_w, shh = pl.src_h;
+        int q = pl.quarter_turns & 3;
+        double ux, uy, uw, uh;   /* in the unturned picture */
+        if (q == 0) { ux = sx; uy = sy; uw = sw; uh = shh; }
+        else if (q == 1) { ux = sy; uy = h - sx - sw; uw = shh; uh = sw; }
+        else if (q == 2) { ux = w - sx - sw; uy = h - sy - shh; uw = sw; uh = shh; }
+        else { ux = w - sy - shh; uy = sx; uw = shh; uh = sw; }
+        double rx = ux * fx, ry = uy * fy, rw = uw * fx, rh = uh * fy;   /* the region in the texture */
+        rubraview_src_rect_t src = { .left = rx, .top = ry, .right = rx + rw, .bottom = ry + rh };
+        /* the texture's region to the sheet: turned a quarter clockwise q times, into dst */
+        double dx = ox + pl.dst_x * scale, dy = oy + pl.dst_y * scale, dw = pl.dst_w * scale, dh = pl.dst_h * scale;
+        double kx = (q & 1) ? dw / rh : dw / rw, ky = (q & 1) ? dh / rw : dh / rh;
+        rubraview_mat3x2_t m;
+        if (q == 0)      m = (rubraview_mat3x2_t){ kx, 0, 0, ky, dx - rx * kx, dy - ry * ky };
+        else if (q == 1) m = (rubraview_mat3x2_t){ 0, ky, -kx, 0, dx + (ry + rh) * kx, dy - rx * ky };
+        else if (q == 2) m = (rubraview_mat3x2_t){ -kx, 0, 0, -ky, dx + (rx + rw) * kx, dy + (ry + rh) * ky };
+        else             m = (rubraview_mat3x2_t){ 0, -ky, kx, 0, dx - ry * kx, dy + (rx + rw) * ky };
+        rubraview_pal_render_draw_texture_region(app->renderer, app->print_thumbs[k], src, m, RUBRAVIEW_INTERP_LINEAR);
+    }
+    char line[200];
+    size_t sheets = rubraview_print_sheets(app->print_list_count, o.per_sheet);
+    double mm_w = sh->paper_w * 25.4 / sh->dpi_x, mm_h = sh->paper_h * 25.4 / sh->dpi_y;
+    int n = snprintf(line, sizeof(line), T("sheet %d of %zu  -  %.0f x %.0f mm"), (int)app->print_preview_sheet + 1, sheets, mm_w, mm_h);
+    if (n > 0) draw_outlined_text_aligned(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                                          (rubraview_pal_rect_t){ pad, pad - 4.0 * dpi, right - 2.0 * pad, 28.0 * dpi }, 15.0 * dpi, 2.0, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+}
+
 static void panel_open_print(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     app->panel = rubraview_panel_create(TU8("Print"), dpi);
@@ -13987,6 +14174,15 @@ static void panel_open_print(app_state_t *app) {
     app->panel_is_print = true;
 
     rubraview_print_options_t o = print_options(app);
+    if (app->print_printer_count > 0) {   /* 1.19.0 */
+        rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PRINTER, TU8("Printer"), app->print_printer, (int32_t)app->print_printer_count);
+        if (app->print_paper_count > 0)
+            rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PAPER, TU8("Paper"), app->print_paper < 0 ? 0 : app->print_paper, (int32_t)app->print_paper_count);
+        rubraview_panel_add_choice(&app->panel, PANEL_PRINT_ORIENT, TU8("The sheet"), print_orientation(app), 3);
+        rubraview_panel_add_slider(&app->panel, PANEL_PRINT_COPIES, TU8("Copies"),
+                                   rubraview_settings_get(&app->settings, U8("print"), U8("copies")), 1.0, 99.0, 1.0);
+        rubraview_panel_add_separator(&app->panel);
+    }
     rubraview_panel_add_choice(&app->panel, PANEL_PRINT_TURN, TU8("Turn"), (int32_t)o.turn, RUBRAVIEW_PRINT_TURN_COUNT);
     rubraview_panel_add_choice(&app->panel, PANEL_PRINT_SIZE, TU8("Size"), (int32_t)o.size, RUBRAVIEW_PRINT_SIZE_COUNT);
     rubraview_panel_add_slider(&app->panel, PANEL_PRINT_SCALE, TU8("Scale %"), (double)o.scale_percent,
@@ -13996,11 +14192,20 @@ static void panel_open_print(app_state_t *app) {
                                0.0, (double)RUBRAVIEW_PRINT_MARGIN_MAX_MM, 1.0);
     rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PER_SHEET, TU8("A sheet"),
                                rubraview_print_per_sheet_index(o.per_sheet), 5);
+    size_t sheets = rubraview_print_sheets(app->print_list_count, o.per_sheet);
+    if (sheets > 1) rubraview_panel_add_choice(&app->panel, PANEL_PRINT_SHEET, TU8("Preview of"), app->print_preview_sheet, (int32_t)(sheets < 999 ? sheets : 999));
     rubraview_panel_add_separator(&app->panel);
     static char label[64];
-    if (app->print_list_count == 1) snprintf(label, sizeof(label), T("Print..."));
-    else snprintf(label, sizeof(label), T("Print the %zu chosen files..."), app->print_list_count);
+    if (app->print_printer_count == 0) {
+        if (app->print_list_count == 1) snprintf(label, sizeof(label), T("Print..."));
+        else snprintf(label, sizeof(label), T("Print the %zu chosen files..."), app->print_list_count);
+    } else if (app->print_list_count == 1) {
+        snprintf(label, sizeof(label), T("Print"));
+    } else {
+        snprintf(label, sizeof(label), T("Print the %zu chosen files"), app->print_list_count);
+    }
     rubraview_panel_add_button(&app->panel, PANEL_PRINT_NOW, cstr(label));
+    if (app->print_printer_count > 0) rubraview_panel_add_button(&app->panel, PANEL_PRINT_DIALOG, TU8("With Windows' print dialog..."));
 
     app->panel.open = true;
     panel_relayout(app);
@@ -14017,6 +14222,17 @@ static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, si
         case PANEL_PRINT_SIZE:      n = snprintf(buffer, size, "%s", rubraview_print_size_name((rubraview_print_size_t)v)); break;
         case PANEL_PRINT_PLACE:     n = snprintf(buffer, size, "%s", rubraview_print_place_name((rubraview_print_place_t)v)); break;
         case PANEL_PRINT_PER_SHEET: n = snprintf(buffer, size, "%d", (int)rubraview_print_per_sheet_of(v)); break;
+        case PANEL_PRINT_PRINTER:   n = g_print_app && v >= 0 && (size_t)v < g_print_app->print_printer_count
+                                          ? snprintf(buffer, size, "%s", g_print_app->print_printer_names[v]) : 0; break;
+        case PANEL_PRINT_PAPER:
+            if (g_print_app && v >= 0 && (size_t)v < g_print_app->print_paper_count) {
+                const rubraview_printer_paper_t *p = &g_print_app->print_papers[v];
+                n = snprintf(buffer, size, "%s (%d x %d mm)", p->name, (int)lround(p->w_tenth_mm / 10.0), (int)lround(p->h_tenth_mm / 10.0));
+            }
+            break;
+        case PANEL_PRINT_ORIENT:    n = snprintf(buffer, size, "%s", v == 1 ? T("upright (portrait)") : v == 2 ? T("on its side (landscape)") : T("as the printer has it")); break;
+        case PANEL_PRINT_COPIES:    n = snprintf(buffer, size, "%d", (int)v); break;
+        case PANEL_PRINT_SHEET:     n = snprintf(buffer, size, T("sheet %d"), (int)v + 1); break;
         case PANEL_PRINT_SCALE:
         case PANEL_PRINT_MARGIN:
         case PANEL_CONV_LEVEL:      n = snprintf(buffer, size, "%d", (int)v); break;
@@ -14033,7 +14249,16 @@ static void print_now(app_state_t *app) {
     rubraview_print_options_t o = print_options(app);
     size_t count = app->print_list_count, printed = 0;
     if (count == 0) return;
-    if (!rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), app->print_list, count, &o, &printed)) {
+    bool printed_ok = false;
+    if (app->print_printer >= 0 && !app->print_with_dialog) {   /* 1.19.0: there, as chosen, no dialog */
+        int32_t paper = app->print_paper >= 0 && (size_t)app->print_paper < app->print_paper_count ? app->print_papers[app->print_paper].id : 0;
+        int32_t copies = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("copies")));
+        printed_ok = rubraview_pal_print_pictures_on(print_printer_name(app), paper, print_orientation(app), copies, app->print_list, count, &o, &printed);
+    } else {
+        printed_ok = rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), app->print_list, count, &o, &printed);
+    }
+    app->print_with_dialog = false;
+    if (!printed_ok) {
         osd_say(app, TU8("not printed"));
         return;
     }
@@ -15022,7 +15247,25 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_PRINT_SCALE:     rubraview_settings_set(&app->settings, U8("print"), U8("scale"), v); break;
             case PANEL_PRINT_PLACE:     rubraview_settings_set(&app->settings, U8("print"), U8("place"), v); break;
             case PANEL_PRINT_MARGIN:    rubraview_settings_set(&app->settings, U8("print"), U8("margin_mm"), v); break;
-            case PANEL_PRINT_PER_SHEET: rubraview_settings_set(&app->settings, U8("print"), U8("per_sheet"), v); break;
+            case PANEL_PRINT_PER_SHEET: rubraview_settings_set(&app->settings, U8("print"), U8("per_sheet"), v);
+                                        app->print_preview_sheet = 0; print_thumbs_load(app); panel_open_print(app); break;
+            /* 1.19.0 */
+            case PANEL_PRINT_PRINTER:
+                app->print_printer = (int32_t)v;
+                rubraview_settings_set_text(&app->settings, U8("print"), U8("printer"), app_keep(app, print_printer_name(app)));
+                print_papers_load(app);
+                print_sheet_load(app);
+                panel_open_print(app);
+                break;
+            case PANEL_PRINT_PAPER:
+                app->print_paper = (int32_t)v;
+                if (app->print_paper >= 0 && (size_t)app->print_paper < app->print_paper_count)
+                    rubraview_settings_set(&app->settings, U8("print"), U8("paper"), (double)app->print_papers[app->print_paper].id);
+                print_sheet_load(app);
+                break;
+            case PANEL_PRINT_ORIENT: rubraview_settings_set(&app->settings, U8("print"), U8("orientation"), v); print_sheet_load(app); break;
+            case PANEL_PRINT_COPIES: rubraview_settings_set(&app->settings, U8("print"), U8("copies"), v); break;
+            case PANEL_PRINT_SHEET:  app->print_preview_sheet = (int32_t)v; print_thumbs_load(app); break;
             default: break;
         }
         return;
@@ -15299,6 +15542,9 @@ static void panel_button(app_state_t *app, int32_t index) {
             panel_run_batch(app);
             panel_close(app);
             break;
+        case PANEL_PRINT_DIALOG:
+            app->print_with_dialog = true;
+            /* fall through */
         case PANEL_PRINT_NOW:
             /* The panel goes first: the system's dialog holds the window while it is up. */
             app->print_going = true;
@@ -22570,6 +22816,7 @@ static void render_frame(app_state_t *app) {
         draw_hint(app, (double)win_w, (double)win_h);
         draw_seekfan(app, app->renderer, false);
         draw_chrome_answers(app, (double)win_w, (double)win_h);
+        draw_print_preview(app);   /* 1.19.0: under the panel, over the rest */
         draw_panel(app);
         if (!app->edit_window) draw_curve_widget(app);
     }

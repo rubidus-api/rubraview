@@ -159,6 +159,25 @@ typedef struct rubraview_print_options {
     int32_t                 per_sheet;       /* 1, 2, 4, 6 or 9 pictures a sheet */
 } rubraview_print_options_t;
 
+/* 1.19.0: a printer's sheet in its own dots: the paper, the part it prints (its origin is the
+   origin of every cell), and its dots an inch. */
+typedef struct rubraview_print_sheet {
+    int32_t paper_w, paper_h;
+    int32_t print_x, print_y, print_w, print_h;
+    int32_t dpi_x, dpi_y;
+} rubraview_print_sheet_t;
+
+/**
+ * 1.19.0: the preview's scale and where the paper goes, as large as fits `box`, in the middle.
+ * A point (x, y) of the printer's printable part is at
+ * (out_x + (sheet->print_x + x) * scale, out_y + (sheet->print_y + y) * scale). False for no sheet.
+ */
+bool rubraview_print_preview_fit(const rubraview_print_sheet_t *sheet, double box_x, double box_y, double box_w, double box_h,
+                                 double *out_scale, double *out_x, double *out_y);
+
+/** How many sheets `pictures` take, `per_sheet` a sheet. */
+size_t rubraview_print_sheets(size_t pictures, int32_t per_sheet);
+
 /** Fit, turned when that fills more, in the middle, one a sheet: as before D-87. */
 rubraview_print_options_t rubraview_print_options_default(void);
 

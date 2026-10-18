@@ -1692,3 +1692,20 @@ Do not store credentials, private infrastructure details, personal data, private
   - a photo to BMP with `--details=txt` gives `photo.txt` starting `# Rubraview ... details`, `file = "photo.bmp"`; a second run writes it again (no `photo-1.txt`);
   - that BMP to PNG carries the .txt's XMP and words into the PNG's iTXt;
   - the BMP's information window shows "Kept beside it in photo.txt" and the camera and lens.
+
+## 2026-10-18: D-169 Printer, paper and a preview in Rubraview's print panel
+
+- Status: Accepted (owner 2026-10-18: "인쇄할 때 용지 선택 가능하게 하고 프리뷰로 어떻게 인쇄되는지 예상 그림 보여주세요. 프린터 선택도 가능해야 해요.").
+- Decision:
+  - The panel lists the printers (EnumPrinters level 4, local and connections, Windows' default chosen first) and the chosen printer's papers (DeviceCapabilities: numbers, names, sizes; its driver's current paper first chosen).
+  - It also has the way the sheet lies (as the printer has it, portrait, landscape) and copies 1..99. All are kept (`print.printer`, `print.paper`, `print.orientation`, `print.copies`).
+  - The sheet is asked of the printer itself: a DC made from its DEVMODE with those choices merged by DocumentProperties gives the paper, the printable part's offset and size, and the dots an inch. The preview needs no paper table of our own, and what it shows is what the driver will do.
+  - The preview is drawn to the left of the panel, over a dimmed viewer:
+    - the paper with a shadow, the printable part as a grey line, the cells when several go on a sheet;
+    - each picture through the same `rubraview_print_cell` / `rubraview_print_place` the printing uses, from the picture's real size. A texture of at most 720 px stands for it, turned by the matrix of the placement's quarter turns, its source cut as the print cuts it.
+    - One sheet at a time, "Preview of" choosing which. "sheet n of N, W x H mm" above it.
+  - Print goes to that DC with no dialog (`rubraview_pal_print_pictures_on`, the same loop as before: `print_on_dc`). "With Windows' print dialog..." keeps the old way. With no printer the panel has no printer rows and Print is the dialog, as before.
+- Consequences: VM (2026-10-18), with Microsoft Print to PDF:
+  - a 1600x900 picture on A4 portrait is turned a quarter, as Auto says; landscape lays it flat; A5 landscape reads 210 x 148 mm;
+  - Print gave a one-page PDF whose MediaBox is 595.32 x 419.52 pt, A5 landscape, with no Windows print dialog (only the PDF driver's own Save As).
+  - Host: the preview's fit and the sheets a list takes.

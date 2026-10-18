@@ -264,6 +264,22 @@ const char *rubraview_print_place_name(rubraview_print_place_t place) {
     return (int)place >= 0 && place < RUBRAVIEW_PRINT_PLACE_COUNT ? NAMES[place] : "";
 }
 
+bool rubraview_print_preview_fit(const rubraview_print_sheet_t *sheet, double box_x, double box_y, double box_w, double box_h,
+                                 double *out_scale, double *out_x, double *out_y) {
+    if (!sheet || sheet->paper_w <= 0 || sheet->paper_h <= 0 || !(box_w > 0.0) || !(box_h > 0.0)) return false;
+    double sx = box_w / (double)sheet->paper_w, sy = box_h / (double)sheet->paper_h;
+    double scale = sx < sy ? sx : sy;
+    if (out_scale) *out_scale = scale;
+    if (out_x) *out_x = box_x + (box_w - (double)sheet->paper_w * scale) / 2.0;
+    if (out_y) *out_y = box_y + (box_h - (double)sheet->paper_h * scale) / 2.0;
+    return true;
+}
+
+size_t rubraview_print_sheets(size_t pictures, int32_t per_sheet) {
+    if (per_sheet < 1) per_sheet = 1;
+    return (pictures + (size_t)per_sheet - 1u) / (size_t)per_sheet;
+}
+
 void rubraview_print_cell(int32_t sheet_w, int32_t sheet_h, int32_t dpi_x, int32_t dpi_y,
                           const rubraview_print_options_t *options, int32_t index,
                           int32_t *out_x, int32_t *out_y, int32_t *out_w, int32_t *out_h) {

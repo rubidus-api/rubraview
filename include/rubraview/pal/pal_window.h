@@ -255,6 +255,24 @@ int rubraview_pal_instance_take_config_changed(void);
 bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
                                   const rubraview_print_options_t *options, size_t *out_printed);
 
+/* 1.19.0: the printers, their papers and the sheet, for Rubraview's own print panel and its preview. */
+typedef struct rubraview_printer_paper {
+    int32_t id;                    /* the driver's paper number (DMPAPER_*) */
+    int32_t w_tenth_mm, h_tenth_mm;
+    char    name[96];              /* the driver's name for it, UTF-8 */
+} rubraview_printer_paper_t;
+
+/** The printers this user can print on; `*out_default` the index of Windows' default, or -1. */
+size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capacity, int32_t *out_default);
+/** A printer's papers; `*out_default_id` the one its driver has now (0 when not known). */
+size_t rubraview_pal_printer_papers(u8str_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id);
+/** The sheet as the printer has it for that paper (0: its own) and that way up (0 its own, 1 portrait, 2 landscape). */
+bool rubraview_pal_printer_sheet(u8str_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out);
+/** Printed there, as chosen, with no dialog; `copies` of the document. */
+bool rubraview_pal_print_pictures_on(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
+                                     const u8str_t *paths, size_t count, const rubraview_print_options_t *options,
+                                     size_t *out_printed);
+
 /** An Explorer window on the file's folder with the file picked out.
  *  False when there is no such file to show. */
 bool rubraview_pal_shell_reveal(u8str_t path);

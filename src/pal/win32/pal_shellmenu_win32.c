@@ -25,6 +25,8 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <commdlg.h>
+#include <winspool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -705,6 +707,30 @@ static bool print_one(HDC dc, u8str_t path, const rubraview_print_options_t *opt
     return ok;
 }
 
+/* The pictures onto the DC's sheets, `per_sheet` a sheet: one document. */
+static bool print_on_dc(HDC dc, const u8str_t *paths, size_t count, const rubraview_print_options_t *chosen,
+                        const WCHAR *output, size_t *out_printed) {
+    DOCINFOW doc = { .cbSize = sizeof(doc), .lpszDocName = L"Rubraview", .lpszOutput = output };
+    size_t printed = 0;
+    int32_t on_sheet = 0;
+    bool started = StartDocW(dc, &doc) > 0;
+    for (size_t i = 0; started && i < count; ++i) {
+        if (print_one(dc, paths[i], chosen, &on_sheet)) printed++;
+        if (on_sheet >= chosen->per_sheet) {
+            EndPage(dc);
+            on_sheet = 0;
+        }
+    }
+    if (started) {
+        if (on_sheet > 0) EndPage(dc);
+        /* A job with nothing on it is not sent. */
+        if (printed > 0) EndDoc(dc);
+        else AbortDoc(dc);
+    }
+    *out_printed = printed;
+    return started;
+}
+
 bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
                                   const rubraview_print_options_t *options, size_t *out_printed) {
     if (out_printed) *out_printed = 0;
@@ -726,26 +752,147 @@ bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *pat
     }
 
     HDC dc = dialog.hDC;
-    DOCINFOW doc = { .cbSize = sizeof(doc), .lpszDocName = L"Rubraview" };
     size_t printed = 0;
-    int32_t on_sheet = 0;
-    bool started = StartDocW(dc, &doc) > 0;
-    for (size_t i = 0; started && i < count; ++i) {
-        if (print_one(dc, paths[i], &chosen, &on_sheet)) printed++;
-        if (on_sheet >= chosen.per_sheet) {
-            EndPage(dc);
-            on_sheet = 0;
-        }
-    }
-    if (started) {
-        if (on_sheet > 0) EndPage(dc);
-        /* A job with nothing on it is not sent. */
-        if (printed > 0) EndDoc(dc);
-        else AbortDoc(dc);
-    }
+    bool started = print_on_dc(dc, paths, count, &chosen, NULL, &printed);
     DeleteDC(dc);
     if (dialog.hDevMode) GlobalFree(dialog.hDevMode);
     if (dialog.hDevNames) GlobalFree(dialog.hDevNames);
+    if (out_printed) *out_printed = printed;
+    return started;
+}
+
+/* ---- 1.19.0 (owner, 2026-10-18: "인쇄할 때 용지 선택 ... 프리뷰 ... 프린터 선택도"): the printer,
+   its paper and the way the sheet lies chosen in Rubraview's own panel, and printed without Windows' dialog ---- */
+
+static bool wide_of(u8str_t s, WCHAR *out, int cap) {
+    if (s.len == 0 || s.len >= (size_t)cap) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.ptr, (int)s.len, out, cap - 1);
+    if (n <= 0) return false;
+    out[n] = 0;
+    return true;
+}
+
+static u8str_t utf8_of(proven_arena_t *arena, const WCHAR *w) {
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    if (n <= 1) return (u8str_t){ .ptr = "", .len = 0 };
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n);
+    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, (char*)res.value.ptr, n, NULL, NULL);
+    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)n - 1 };
+}
+
+size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capacity, int32_t *out_default) {
+    if (out_default) *out_default = -1;
+    if (!arena || !out || capacity == 0) return 0;
+    DWORD need = 0, got = 0;
+    DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+    EnumPrintersW(flags, NULL, 4, NULL, 0, &need, &got);
+    if (need == 0) return 0;
+    BYTE *buf = (BYTE*)malloc(need);
+    if (!buf) return 0;
+    size_t count = 0;
+    if (EnumPrintersW(flags, NULL, 4, buf, need, &need, &got)) {
+        WCHAR def[512];
+        DWORD def_len = 512;
+        if (!GetDefaultPrinterW(def, &def_len)) def[0] = 0;
+        const PRINTER_INFO_4W *info = (const PRINTER_INFO_4W*)(const void*)buf;
+        for (DWORD i = 0; i < got && count < capacity; ++i) {
+            if (!info[i].pPrinterName) continue;
+            u8str_t name = utf8_of(arena, info[i].pPrinterName);
+            if (name.len == 0) continue;
+            if (out_default && def[0] && lstrcmpiW(def, info[i].pPrinterName) == 0) *out_default = (int32_t)count;
+            out[count++] = name;
+        }
+    }
+    free(buf);
+    return count;
+}
+
+size_t rubraview_pal_printer_papers(u8str_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id) {
+    if (out_default_id) *out_default_id = 0;
+    WCHAR name[512];
+    if (!out || capacity == 0 || !wide_of(printer, name, 512)) return 0;
+    int n = DeviceCapabilitiesW(name, NULL, DC_PAPERS, NULL, NULL);
+    if (n <= 0 || n > 4096) return 0;
+    WORD *ids = (WORD*)calloc((size_t)n, sizeof(WORD));
+    WCHAR *names = (WCHAR*)calloc((size_t)n, 64 * sizeof(WCHAR));
+    POINT *sizes = (POINT*)calloc((size_t)n, sizeof(POINT));
+    size_t count = 0;
+    if (ids && names && sizes &&
+        DeviceCapabilitiesW(name, NULL, DC_PAPERS, (LPWSTR)ids, NULL) == n &&
+        DeviceCapabilitiesW(name, NULL, DC_PAPERNAMES, names, NULL) == n &&
+        DeviceCapabilitiesW(name, NULL, DC_PAPERSIZE, (LPWSTR)(void*)sizes, NULL) == n) {
+        for (int i = 0; i < n && count < capacity; ++i) {
+            if (sizes[i].x <= 0 || sizes[i].y <= 0) continue;
+            rubraview_printer_paper_t *p = &out[count++];
+            *p = (rubraview_printer_paper_t){ .id = ids[i], .w_tenth_mm = sizes[i].x, .h_tenth_mm = sizes[i].y };
+            WCHAR one[65];
+            memcpy(one, names + (size_t)i * 64u, 64 * sizeof(WCHAR));
+            one[64] = 0;
+            int m = WideCharToMultiByte(CP_UTF8, 0, one, -1, p->name, (int)sizeof(p->name), NULL, NULL);
+            if (m <= 1) snprintf(p->name, sizeof(p->name), "%d x %d mm", (int)(sizes[i].x / 10), (int)(sizes[i].y / 10));
+        }
+    }
+    free(ids); free(names); free(sizes);
+    /* the printer's own paper, as its driver has it now */
+    HANDLE h = NULL;
+    if (out_default_id && OpenPrinterW(name, &h, NULL) && h) {
+        LONG size = DocumentPropertiesW(NULL, h, name, NULL, NULL, 0);
+        DEVMODEW *dm = size > 0 ? (DEVMODEW*)malloc((size_t)size) : NULL;
+        if (dm && DocumentPropertiesW(NULL, h, name, dm, NULL, DM_OUT_BUFFER) == IDOK && (dm->dmFields & DM_PAPERSIZE)) *out_default_id = dm->dmPaperSize;
+        free(dm);
+        ClosePrinter(h);
+    }
+    return count;
+}
+
+/* A DC for the printer with this paper, this way up and copies; NULL when it cannot. */
+static HDC printer_dc(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies) {
+    WCHAR name[512];
+    if (!wide_of(printer, name, 512)) return NULL;
+    HANDLE h = NULL;
+    if (!OpenPrinterW(name, &h, NULL) || !h) return NULL;
+    HDC dc = NULL;
+    LONG size = DocumentPropertiesW(NULL, h, name, NULL, NULL, 0);
+    DEVMODEW *dm = size > 0 ? (DEVMODEW*)malloc((size_t)size) : NULL;
+    if (dm && DocumentPropertiesW(NULL, h, name, dm, NULL, DM_OUT_BUFFER) == IDOK) {
+        if (paper_id > 0) { dm->dmPaperSize = (short)paper_id; dm->dmFields |= DM_PAPERSIZE; dm->dmFields &= ~(DWORD)(DM_PAPERLENGTH | DM_PAPERWIDTH); }
+        if (orientation == 1 || orientation == 2) { dm->dmOrientation = orientation == 2 ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT; dm->dmFields |= DM_ORIENTATION; }
+        if (copies > 1) { dm->dmCopies = (short)copies; dm->dmFields |= DM_COPIES; }
+        if (DocumentPropertiesW(NULL, h, name, dm, dm, DM_IN_BUFFER | DM_OUT_BUFFER) == IDOK) dc = CreateDCW(L"WINSPOOL", name, NULL, dm);
+    }
+    free(dm);
+    ClosePrinter(h);
+    return dc;
+}
+
+bool rubraview_pal_printer_sheet(u8str_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out) {
+    if (!out) return false;
+    *out = (rubraview_print_sheet_t){0};
+    HDC dc = printer_dc(printer, paper_id, orientation, 1);
+    if (!dc) return false;
+    *out = (rubraview_print_sheet_t){
+        .paper_w = GetDeviceCaps(dc, PHYSICALWIDTH), .paper_h = GetDeviceCaps(dc, PHYSICALHEIGHT),
+        .print_x = GetDeviceCaps(dc, PHYSICALOFFSETX), .print_y = GetDeviceCaps(dc, PHYSICALOFFSETY),
+        .print_w = GetDeviceCaps(dc, HORZRES), .print_h = GetDeviceCaps(dc, VERTRES),
+        .dpi_x = GetDeviceCaps(dc, LOGPIXELSX), .dpi_y = GetDeviceCaps(dc, LOGPIXELSY),
+    };
+    DeleteDC(dc);
+    return out->paper_w > 0 && out->paper_h > 0 && out->print_w > 0 && out->print_h > 0 && out->dpi_x > 0 && out->dpi_y > 0;
+}
+
+bool rubraview_pal_print_pictures_on(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
+                                     const u8str_t *paths, size_t count, const rubraview_print_options_t *options,
+                                     size_t *out_printed) {
+    if (out_printed) *out_printed = 0;
+    if (!paths || count == 0) return false;
+    rubraview_print_options_t chosen = options ? *options : rubraview_print_options_default();
+    rubraview_print_options_clamp(&chosen);
+    HDC dc = printer_dc(printer, paper_id, orientation, copies);
+    if (!dc) return false;
+    size_t printed = 0;
+    bool started = print_on_dc(dc, paths, count, &chosen, NULL, &printed);
+    DeleteDC(dc);
     if (out_printed) *out_printed = printed;
     return started;
 }
