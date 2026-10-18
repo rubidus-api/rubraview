@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.21.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.22.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -203,7 +203,18 @@
 | 도구 상자 `Fit`, 메뉴 `Next fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 |
 | 도구 상자 `Bar pin` | 제목 표시줄 고정 |
 | 도구 상자 `Viz`, 메뉴 `Analyser` | 분석기: 막대 / 파형 / 끔 |
+| 도구 상자 `Wheel strip` | 휠로 넘길 때 썸네일 |
 | 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
+| 오른쪽 클릭 `Open` | 탐색기에서 우클릭한 것 열기 |
+| 오른쪽 클릭 `Look inside (a book)` | 우클릭한 책 안 보기 |
+| 오른쪽 클릭 `Add to the list`, 오른쪽 클릭 `Add them to the list` | 고른 것을 목록에 추가 |
+| 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
+| 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
+| 오른쪽 클릭 `Copy to...`, 오른쪽 클릭 `Copy them to...` | 고른 것을 폴더로 복사 |
+| 오른쪽 클릭 `Move to...`, 오른쪽 클릭 `Move them to...` | 고른 것을 폴더로 이동 |
+| 오른쪽 클릭 `To the recycle bin`, 오른쪽 클릭 `Them to the recycle bin` | 고른 것을 휴지통으로 |
+| 오른쪽 클릭 `Make a playlist of them` | 고른 것으로 재생목록 만들기 |
+| 오른쪽 클릭 `Pick none` | 탐색기에서 고른 것 모두 해제 |
 | 오른쪽 클릭 `Open` | 목록의 파일 우클릭: 열기 |
 | 오른쪽 클릭 `Copy the whole path` | 목록의 파일 우클릭: 전체 경로를 클립보드로 |
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |

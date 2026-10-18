@@ -42,6 +42,7 @@ typedef struct rubraview_action_facts {
     bool slideshow, filmstrip, osd, toolbox_pinned, toolbox_detached, fullscreen;
     bool nearest, pixel_grid, spread_detect, fit_lock, always_on_top, muted;
     bool titlebar_pinned;     /* 1.20.0: the title bar kept shown */
+    bool wheel_strip;         /* 1.22.0: thumbnails come up while the wheel turns pages */
     bool rtl;                 /* pages read right to left */
     bool playing;             /* a film, music or animation is running (not paused) */
     int32_t repeat_mode;      /* rubraview_repeat_mode_t: what the end of a film or a song does */

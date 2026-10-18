@@ -730,6 +730,19 @@ bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) {
     return CopyFileW(wfrom, wto, TRUE) != 0;
 }
 
+/* 1.22.0: a folder copied whole, as Explorer copies one, with no question asked and nothing put up. */
+bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to) {
+    WCHAR wfrom[MAX_PATH * 2 + 2], wto[MAX_PATH * 2 + 2];
+    if (!utf8_to_wide_buf(from, wfrom, MAX_PATH * 2)) return false;
+    if (!utf8_to_wide_buf(to, wto, MAX_PATH * 2)) return false;
+    if (GetFileAttributesW(wto) != INVALID_FILE_ATTRIBUTES) return false;   /* never over what is there */
+    wfrom[wcslen(wfrom) + 1] = 0;   /* SHFileOperation's lists end in two NULs */
+    wto[wcslen(wto) + 1] = 0;
+    SHFILEOPSTRUCTW op = { .wFunc = FO_COPY, .pFrom = wfrom, .pTo = wto,
+                           .fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI | FOF_SILENT };
+    return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
+}
+
 bool rubraview_pal_fs_make_dirs(u8str_t path) {
     WCHAR wide[MAX_PATH * 2];
     if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;

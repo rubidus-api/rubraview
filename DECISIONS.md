@@ -1742,3 +1742,25 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: VM (2026-10-19):
   - a picture's right click: Copy picture, Fit to window, Real size, Rotate back, the file's own items, Help, About. Adjust, Rotate, Slide show and Info are on the toolbox and not there.
   - Beside it File, Edit, Go, View, Screen, Help. View opens in place (◂ View, Layout, Fit, Zoom, Shape, Turn, Crisp, Grid), and ◂ goes back.
+
+## 2026-10-19: D-172 The open-file screen's own work; the wheel's strip on or off
+
+- Status: Accepted (owner 2026-10-19):
+  - "재생목록의 위에 추가 버튼에 대해, 현재 열린 파일의 위치에서 자체 파일 탐색기로 열게 하고, ... 이미지, 동영상, 음악, 텍스트 파일만 해당 폴더 위치에서 모두 선택할 수 있는 버튼 ... (누를 때마다 토글) ... 필터 기능(... 선택 또는 해제된 파일들은 필터 해제하고 모두 봐도 그대로 유지)";
+  - "자체 파일 탐색기에서 Ctrl+A로 모두 선택 ... 폴더도 선택 ... 우클릭하면 컨텍스트 메뉴 ... 손가락 오래 누르는건 우클릭 ... 하나 골랐거나 고르지 않았을 때의 우클릭 동작과, 여러개 골랐을 때의 우클릭 컨텍스트 메뉴는 서로 달라야 ... 좌상단에 체크박스";
+  - "마우스 휠로 이미지 파일 사이를 이동할 때 하단에 보이는 썸네일에 대해서, 툴바 및 설정 페이지 옵션으로 끄고 킬 수 있게".
+- Decision:
+  - The filter works on a copy of the rows, so the picker and its thumbnails need no change. The folder's rows stay as read with their own picks; the rows shown map back to them; picks go back on every change. Sorting under a filter sorts the folder, then filters again.
+  - A tap on a tile now happens on release. A press held 0.55 s without moving 10 px is a right click: a long press by touch arrives as a held left press. Right clicking an archive entered it before; that is now "Look inside" in its list.
+  - One thing (or nothing) picked: the tile right-clicked becomes the one picked and its list acts on it. It is among several picked: the list for the many. Recycling from either list asks with a second click, as Delete does.
+  - Folders picked: Move and Recycle take them as they are; Copy copies the tree (SHFileOperation, never over something there); Add to the list brings their media; Make a playlist leaves them out.
+  - Add mode is left by any other way of opening the picker.
+  - `viewer.wheel_strip` (on as it comes) and its tile on the picture, book and many-page toolboxes.
+- Consequences: VM (2026-10-19):
+  - check boxes on a folder and a file;
+  - the many list on a picked tile, the one list on another (it alone picked);
+  - Ctrl+A 5 picked; Media 4 (the PNGs and the text, not the folder);
+  - a 1.3 s press gave the list;
+  - "pl" showed apple and plum picked; Esc showed all six, the four still picked;
+  - the list's Add opened at `sub` in add mode; two picked and added: 1/3;
+  - the wheel's strip came up on, and not off.

@@ -226,6 +226,8 @@ bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes);
 
 /** Copy a file (§3.18.3's copy mode). Fails rather than overwriting. */
 bool rubraview_pal_fs_copy(u8str_t from, u8str_t to);
+/** 1.22.0: a folder and all in it copied to `to` (made); false when any of it could not be. */
+bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to);
 
 /** Create a directory, and any missing parent of it. */
 bool rubraview_pal_fs_make_dirs(u8str_t path);

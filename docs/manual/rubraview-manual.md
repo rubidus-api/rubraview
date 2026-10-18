@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.21.0.exe              the viewer, as built
-dist/rubraview-v1.21.0/                 the release bundle
-dist/rubraview-v1.21.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.22.0.exe              the viewer, as built
+dist/rubraview-v1.22.0/                 the release bundle
+dist/rubraview-v1.22.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -914,7 +914,9 @@ The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`).
 There is no menu of its own: what the toolbox does not have a button for
 is in the right click, in its sections. The toolbox's last group has **Settings**,
 **Bar pin** (the title bar stays shown; Settings > General > Title bar)
-and **Info bar** (`Shift+I`). A small anchor,
+and **Info bar** (`Shift+I`); a picture's toolbox also has **Wheel strip**:
+off, turning pages with the wheel brings up no thumbnails (Settings >
+Viewer > Thumbnails while the wheel turns pages). A small anchor,
 **T**, floats over the picture for the toolbox. The toolbox changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or previous
 archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
@@ -1248,6 +1250,24 @@ dark, so the name drawn over it stays readable — and a folder shows the
 first picture in it (or its first film). The tiles fill in as they come
 into view; an archive keeps a plain tile.
 
+Every tile (and every row of the details view) has a check box at its top
+left: a click on it picks that file or folder, or lets it go, whatever the
+mode. `Ctrl+A` picks everything here, folders too, and again nothing.
+**Media** picks the pictures, films, music and text files here, and again
+lets them go. **Filter names** at the right of the path bar (or `Ctrl+F`)
+shows only the names holding what you type (capitals or not); what you
+picked stays picked when the filter changes or is cleared (`Esc`, or its
+×). A right click on a tile — or a long press, held still — gives a short
+list: on one thing (that one is picked alone), Open, Look inside (a book),
+Add to the list, Copy the whole path, Show in Explorer, Copy to, Move to
+and To the recycle bin (click it twice); on one of several picked, Add them
+to the list, Make a playlist of them, Copy their paths, Copy or Move them,
+Them to the recycle bin and Pick none. A folder picked is copied or moved
+whole; added to a list, it brings its pictures, films, music and text.
+**Add** on the list's bar opens this screen at the folder of the file on
+screen, picking at a tap; **Add to the list** (where Playlist is) joins
+what is picked to the list.
+
 In the file picker, the bottom row picks several files without holding a
 key: **Individual** makes every tap turn one file on or off, **Range**
 takes two taps and turns over everything between them, **Same type**
@@ -1482,7 +1502,18 @@ listed under a later heading only means that while that is on screen.
 | Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Bar pin` | Keep the title bar shown |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `Open` | Open what was right-clicked in the open-file screen |
+| Right click `Look inside (a book)` | Look inside the book right-clicked |
+| Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
+| Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
+| Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
+| Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
+| Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
+| Right click `Make a playlist of them` | Make a playlist of what is picked |
+| Right click `Pick none` | Pick nothing in the open-file screen |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |

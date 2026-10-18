@@ -57,6 +57,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
         { "toggle_fit_lock",       offsetof(rubraview_action_facts_t, fit_lock) },
         { "toggle_always_on_top",  offsetof(rubraview_action_facts_t, always_on_top) },
         { "toggle_titlebar_pin",   offsetof(rubraview_action_facts_t, titlebar_pinned) },   /* 1.20.0 */
+        { "toggle_wheel_strip",    offsetof(rubraview_action_facts_t, wheel_strip) },       /* 1.22.0 */
         { "media_mute",            offsetof(rubraview_action_facts_t, muted) },
         { "toggle_subtitles",      offsetof(rubraview_action_facts_t, subtitle_shown) },
     };
@@ -192,6 +193,7 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "toggle_playlist", 0xE8FD },       /* BulletedList */
         { "toggle_always_on_top", 0xE718 },  /* Pin */
         { "toggle_titlebar_pin", 0xE840 },   /* Pinned: the title bar kept shown (1.20.0) */
+        { "toggle_wheel_strip", 0xE8B9 },    /* Pictures: the wheel's thumbnails (1.22.0) */
         { "toggle_osd", 0xE7C3 },            /* Page: the information bar (1.20.0) */
         { "rename_file", 0xE8AC },           /* Rename */
         { "toggle_file_list", 0xE8A9 },      /* ViewAll: the files in the archive, with a preview */

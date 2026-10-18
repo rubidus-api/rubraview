@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.21.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.21.0/rubraview-v1.21.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.22.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.22.0/rubraview-v1.22.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -204,7 +204,18 @@ ships with, so it cannot drift from them.
 | Toolbox `Fit`, Menu `Next fit` | Fit round: window, width, height, smart, stretch, window again |
 | Toolbox `Bar pin` | Keep the title bar shown |
 | Toolbox `Viz`, Menu `Analyser` | The analyser: bars, the wave, or none |
+| Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Right click `Open` | Open what was right-clicked in the open-file screen |
+| Right click `Look inside (a book)` | Look inside the book right-clicked |
+| Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
+| Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
+| Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
+| Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
+| Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
+| Right click `Make a playlist of them` | Make a playlist of what is picked |
+| Right click `Pick none` | Pick nothing in the open-file screen |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
