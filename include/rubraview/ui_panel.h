@@ -134,6 +134,7 @@ typedef enum rubraview_panel_event {
     RUBRAVIEW_PANEL_VALUE_CHANGED,
     RUBRAVIEW_PANEL_BUTTON_PRESSED,
     RUBRAVIEW_PANEL_CLOSE,          /* the X at the title's right end (owner, 2026-10-15) */
+    RUBRAVIEW_PANEL_CHOOSE,         /* 1.24.0: a choice was pressed: list its words to pick from; the value stays */
 } rubraview_panel_event_t;
 
 /** The X at the right end of the title row, a row tall and square; empty while closed. */

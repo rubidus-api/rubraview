@@ -350,9 +350,7 @@ rubraview_panel_event_t rubraview_panel_press(rubraview_panel_t *panel, double p
             row->value = row->value > 0.5 ? 0.0 : 1.0;
             return RUBRAVIEW_PANEL_VALUE_CHANGED;
         case RUBRAVIEW_ROW_CHOICE:
-            row->value += 1.0;
-            if (row->value > row->max_value) row->value = 0.0;
-            return RUBRAVIEW_PANEL_VALUE_CHANGED;
+            return RUBRAVIEW_PANEL_CHOOSE;   /* 1.24.0 (owner, 2026-10-19): a list, not the next one */
         case RUBRAVIEW_ROW_BUTTON:
             return RUBRAVIEW_PANEL_BUTTON_PRESSED;
         default:

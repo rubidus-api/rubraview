@@ -1784,3 +1784,27 @@ Do not store credentials, private infrastructure details, personal data, private
   - pear.png renamed pear2.png by its right click, back by Ctrl+Z;
   - `sub` and apple.png copied to a numbered folder, both gone after one Ctrl+Z, the originals there;
   - Open with two picked: "(1/2)"; F1 help in descriptions.
+
+## 2026-10-19: D-174 One-of-many choices open a list; the open-file screen's bars; favourites of files; buttons on every typed box
+
+- Status: Accepted (owner 2026-10-19):
+  - "여러개 중에 하나를 선택해야 되는 기능이라면 누를 때마다 하나씩 옮겨가는 것이 아니라 추가로 하위요소 팝업창이 떠서 그 안에서 선택 ... 설정 창에서는 텍스트 목록 ... 툴바 쪽에서는 손가락으로 누르기 편해야";
+  - "상단에 뒤로가기/위로가기/앞으로가기 버튼 ... Alt+좌우화살표 ... 바로가기 버튼들의 가로폭과 여유공간을 줄일 것 ... 하단의 버튼을 열기/재생목록에 추가/휴지통으로/이동/복사 로 줄이고 상단에 ... 체크박스 / 하나씩 / 범위 / 같은형식 / 미디어 / 정렬 옵션 / 정렬 순서";
+  - "확장자 바꾸기는 선택된 파일들의 확장자들에 대해 각각"; "타일 모드 ... 화면 좌우 폭에 따라"; "탐색기 모드에서는 타이틀바가 고정 ... Rubraview - 폴더이름 ... 쉬프트키 클릭으로 범위 ... Ctrl+클릭으로 개별";
+  - "상단 타이틀바에 설정(Set) 버튼"; "Rubraview 정보 항목을 없애주시고 해당 기능은 완전히 없애 ... 설정 항목도 우클릭 메뉴에";
+  - "파일이나 폴더의 즐겨찾기 ... 재생목록이나 최근 파일 창이랑 비슷하게";
+  - "다른 폴더로 복사 또는 이동에서, Ctrl+O ... 화면 버튼으로도 ... 다른 텍스트 입력 상황에서도 ... 버튼으로"; "모든 슬라이드 컨트롤은 텍스트로 직접 입력".
+- Decision:
+  - `ui_chooser` (core) places the list under what was pressed, over it when there is no room, scrolls a long one with the choice in force in view. A tile, a panel choice and a setting report "choose" (`RUBRAVIEW_PANEL_CHOOSE`, `RUBRAVIEW_SEVENT_CHOOSE`); the viewer fills the words and does the pick. The keys that step (B, Shift+A, E ...) still step: a key has no list to point at.
+  - Picker history: 24 folders back and forward, kept by the viewer, a folder a step; a navigation from history does not push. The tool row replaces the bottom's modes; Change ext and Make a playlist moved to the right click; the head row's all box moved into the tool row. Tiles a row: the width over 230 px a tile, 2 to 12.
+  - Change extensions: up to 16 extensions, compared without case; an extension typed with or without its dot; the same one (or empty) leaves its files; no file is renamed over another.
+  - `about` removed (action, items, descriptions); `open_settings` stays on the right click though the toolbox has it, as `open_picker` does.
+  - Favourites may be files: the PC page and the places bar open a file in the viewer. The window's rows come from `favorites.ini` as it is; reordering writes it at once.
+  - Typed boxes draw their buttons under them and keep their rectangles for the click; the settings window's box draws them on the row under it.
+  - A setting's slider: a click on its number (not its bar) or Enter types it; values are kept in range by the settings store.
+- Consequences: VM (2026-10-19):
+  - Fit tile: a list of five; the right click with Favourites, Batch, Print, Help, Settings, no About;
+  - the open-file screen: ◀ ▲ ▶, the tool row, five bottom buttons, five tiles a row at 1100 px, title "Rubraview - f"; Ctrl+click and Shift+click picks; Sort by list; back, forward, Alt+Left by the window's title;
+  - Change extensions on .png, .nfo, .txt: .png left, .nfo → .inf, .txt → .text, one Ctrl+Z back;
+  - settings: a choice's text list, a number's box with OK / Cancel; print: Turn's list, Scale typed 250;
+  - the copy box with OK / Browse... / Cancel; the favourites window with a file added from the right click.

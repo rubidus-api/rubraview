@@ -102,6 +102,8 @@ typedef enum rubraview_titlebar_button {
     RUBRAVIEW_TITLEBAR_MENU,
     /* At the bar's left end (owner, 2026-10-18: "파일 열기 아이콘을 툴바에 하나 추가"): the picker. */
     RUBRAVIEW_TITLEBAR_OPEN,
+    /* Beside Open (owner, 2026-10-19: "상단 타이틀바에 설정(Set) 버튼"): the settings window. */
+    RUBRAVIEW_TITLEBAR_SETTINGS,
     RUBRAVIEW_TITLEBAR_CAPTION, /* empty space: dragging here moves the window */
 } rubraview_titlebar_button_t;
 

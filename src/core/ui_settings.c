@@ -58,6 +58,14 @@ static u8str_t tr(u8str_t text) { return rubraview_tr_u8(text); }
 static u8str_t tr_unit(u8str_t unit) { return rubraview_tr_ctx_u8("unit", unit); }
 static const char *tr_choice(const char *word) { return rubraview_tr_ctx("choice", word); }
 
+u8str_t rubraview_settings_choice_word(const rubraview_setting_def_t *def, int32_t index) {
+    if (!def || index < 0 || index >= def->choice_count) return (u8str_t){ .ptr = "", .len = 0 };
+    const char *word = tr_choice(def->choices[index]);
+    if (rubraview_u8_eq_lit(def->section, "general") && rubraview_u8_eq_lit(def->key, "language") &&
+        rubraview_lang_native_name(def->choices[index])) word = rubraview_lang_native_name(def->choices[index]);
+    return (u8str_t){ .ptr = word, .len = strlen(word) };
+}
+
 size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity) {
     if (!out || capacity == 0) return 0;
     size_t count = 0;
@@ -309,6 +317,11 @@ int32_t rubraview_settings_view_focused_table_row(const rubraview_settings_view_
 const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view) {
     if (!view || !view->doc || view->focus_line < 0 || (size_t)view->focus_line >= view->line_count) return NULL;
     return &view->doc->nodes[view->lines[view->focus_line].node];
+}
+
+const rubraview_setting_def_t *rubraview_settings_view_focused_def(const rubraview_settings_view_t *view) {
+    const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(view);
+    return node && node->kind == RUBRAVIEW_NODE_SETTING ? &view->doc->defs[node->setting] : NULL;
 }
 
 static int32_t first_setting(const rubraview_settings_view_t *view) {
@@ -656,6 +669,9 @@ rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t
             {
                 const rubraview_setting_def_t *def = def_of(view, (size_t)view->focus_line);
                 if (def && def->pair != 0) return flip(settings, part_def(view, def, view->focus_part));
+                /* 1.24.0: a choice lists its words; a number is typed (the arrows still step either) */
+                if (def && def->type == RUBRAVIEW_SETTING_CHOICE) return RUBRAVIEW_SEVENT_CHOOSE;
+                if (def && (def->type == RUBRAVIEW_SETTING_INT || def->type == RUBRAVIEW_SETTING_FLOAT)) return RUBRAVIEW_SEVENT_TYPE_NUMBER;
             }
             return nudge(view, settings, (size_t)view->focus_line, +1, 1.0, true);
     }
@@ -726,14 +742,14 @@ rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view
         switch (def->type) {
             case RUBRAVIEW_SETTING_BOOL:
                 return nudge(view, settings, i, +1, 1.0, true);
-            case RUBRAVIEW_SETTING_CHOICE: {
-                /* `<` goes back; the word, `>` and the rest go on (owner, 2026-10-14: a click on the
-                   word went back, 4/4 3/4 2/4, since the left quarter of the row was "back"). */
-                int32_t start = view->content_col + view->label_cols;
-                return nudge(view, settings, i, col <= start ? -1 : +1, 1.0, true);
-            }
+            case RUBRAVIEW_SETTING_CHOICE:
+                /* 1.24.0 (owner, 2026-10-19): a click lists the words to pick from; the arrow keys still step */
+                return RUBRAVIEW_SEVENT_CHOOSE;
             case RUBRAVIEW_SETTING_INT:
             case RUBRAVIEW_SETTING_FLOAT: {
+                int32_t first = 0, cells = 0;
+                slider_cells(view, def, &first, &cells);
+                if (col >= first + cells) return RUBRAVIEW_SEVENT_TYPE_NUMBER;   /* 1.24.0: its number, typed */
                 view->dragging_line = (int32_t)i;
                 rubraview_settings_event_t e = set_from_column(view, settings, i, col);
                 return e == RUBRAVIEW_SEVENT_NONE && moved ? RUBRAVIEW_SEVENT_MOVED : e;

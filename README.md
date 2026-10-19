@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.23.1** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.1/rubraview-v1.23.1.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.1/rubraview-v1.23.1.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.24.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -72,7 +72,7 @@ ships with, so it cannot drift from them.
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `P` | The playlist, or this folder's files, floating over the picture |
-| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle; a tap on its button lists them to choose from |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
@@ -109,7 +109,7 @@ ships with, so it cannot drift from them.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |
 | `Ctrl+[` | Previous archive in the folder |
@@ -178,7 +178,7 @@ ships with, so it cannot drift from them.
 | `Shift+Z` | Subtitles a tenth of a second earlier |
 | `Shift+X` | Subtitles a tenth of a second later |
 | `Alt+Z` | Subtitles back to the file's own times |
-| `A` | Next sound track |
+| `A` | Next sound track; a tap on its button lists them to choose from |
 | `C` | Next subtitles |
 | `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
 
@@ -194,24 +194,26 @@ ships with, so it cannot drift from them.
 | Where | What it does |
 |---|---|
 | Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
-| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
+| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ` | The equaliser's next preset |
+| Toolbox `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
 | Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night` | Night mode: loud passages brought down |
 | Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
-| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
+| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
 | Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz` | The analyser: bars, the wave, or none |
+| Toolbox `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
-| Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Toolbox `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
 | Right click `Rename` | Rename the file or folder that was right-clicked |
+| Right click `Change extensions...`, Right click `Change their extensions...` | Give the picked files new extensions, one for each extension they have |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
@@ -222,7 +224,8 @@ ships with, so it cannot drift from them.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
-| Right click `About Rubraview` | About Rubraview: the version and the licences of what it carries |
+| Right click `Favourites...` | The favourites, files and folders, in a list window: open, reorder, remove |
+| Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
 | Right click `Book` | Layout: the cover alone, then two pages side by side |

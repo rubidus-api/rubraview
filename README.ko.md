@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.23.1** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.1/rubraview-v1.23.1.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.23.1/rubraview-v1.23.1.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.24.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -71,7 +71,7 @@
 | `F1` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |
 | `P` | 재생목록(없으면 이 폴더의 파일) — 화면 위에 떠 있는 창 |
-| `Ctrl+R` | 동영상·음악이 끝나면: 정지 / 다음 파일 / 이 파일 반복 / 전체 반복 / 셔플 |
+| `Ctrl+R` | 동영상·음악이 끝나면: 정지 / 다음 파일 / 이 파일 반복 / 전체 반복 / 셔플 (도구 상자 버튼을 누르면 목록에서 고름) |
 | `Shift+P` | 미니 플레이어 |
 | `G` | 400% 넘으면 픽셀 격자 |
 | `Esc` | 끝내기 |
@@ -108,7 +108,7 @@
 | `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |
 | `Shift+Left`, `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
-| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 |
+| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 (도구 상자 버튼을 누르면 목록에서 고름) |
 | `Shift+B` | 펼침면 자동 인식 |
 | `Ctrl+]` | 폴더의 다음 압축 |
 | `Ctrl+[` | 폴더의 이전 압축 |
@@ -177,7 +177,7 @@
 | `Shift+Z` | 자막 0.1초 빠르게 |
 | `Shift+X` | 자막 0.1초 늦게 |
 | `Alt+Z` | 자막 싱크를 원래대로 |
-| `A` | 다음 소리 트랙 |
+| `A` | 다음 소리 트랙 (도구 상자 버튼을 누르면 목록에서 고름) |
 | `C` | 다음 자막 |
 | `Shift+C` | 영상의 자막을 별도 창의 목록으로 — 클릭하면 그 자막으로 이동, 체크박스로 선택, 앞으로/뒤로 버튼으로 선택한 자막 이동 |
 
@@ -193,24 +193,26 @@
 | 있는 곳 | 하는 일 |
 |---|---|
 | 도구 상자 `Stop`, 오른쪽 클릭 `Stop` | 정지하고 처음으로 |
-| 도구 상자 `1x` | 다음 재생 속도. 위아래로 끌거나 버튼 위에서 휠을 돌리면 0.1x씩 |
+| 도구 상자 `1x` | 다음 재생 속도. 위아래로 끌거나 버튼 위에서 휠을 돌리면 0.1x씩 (도구 상자 버튼을 누르면 목록에서 고름) |
 | 도구 상자 `A-B` | A-B 반복: 여기서부터 → 여기까지 → 끄기 |
-| 도구 상자 `EQ` | 이퀄라이저 다음 프리셋 |
+| 도구 상자 `EQ` | 이퀄라이저 다음 프리셋 (도구 상자 버튼을 누르면 목록에서 고름) |
 | 도구 상자 `EQ bands`, 오른쪽 클릭 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 도구 상자 `Night` | 야간 모드: 큰 소리를 줄임 |
 | 도구 상자 `Sub`, 오른쪽 클릭 `Subtitles on / off` | 자막 켜기/끄기 |
-| 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 |
-| 도구 상자 `Fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 |
+| 도구 상자 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 (도구 상자 버튼을 누르면 목록에서 고름) |
+| 도구 상자 `Fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 (도구 상자 버튼을 누르면 목록에서 고름) |
 | 도구 상자 `Bar pin` | 제목 표시줄 고정 |
-| 도구 상자 `Viz` | 분석기: 막대 / 파형 / 끔 |
+| 도구 상자 `Viz` | 분석기: 막대 / 파형 / 끔 (도구 상자 버튼을 누르면 목록에서 고름) |
 | 도구 상자 `Wheel strip` | 휠로 넘길 때 썸네일 |
-| 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 순환, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
+| 도구 상자 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 목록, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
 | 오른쪽 클릭 `Open` | 탐색기에서 우클릭한 것 열기 |
 | 오른쪽 클릭 `Look inside (a book)` | 우클릭한 책 안 보기 |
 | 오른쪽 클릭 `Add to the list`, 오른쪽 클릭 `Add them to the list` | 고른 것을 목록에 추가 |
 | 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
 | 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
+| 오른쪽 클릭 `Favourite (in or out)` | 우클릭한 파일이나 폴더를 즐겨찾기에 넣거나 빼기 |
 | 오른쪽 클릭 `Rename` | 우클릭한 파일이나 폴더의 이름 바꾸기 |
+| 오른쪽 클릭 `Change extensions...`, 오른쪽 클릭 `Change their extensions...` | 고른 파일들의 확장자를, 지금 확장자마다 따로 바꾸기 |
 | 오른쪽 클릭 `Copy to...`, 오른쪽 클릭 `Copy them to...` | 고른 것을 폴더로 복사 |
 | 오른쪽 클릭 `Move to...`, 오른쪽 클릭 `Move them to...` | 고른 것을 폴더로 이동 |
 | 오른쪽 클릭 `To the recycle bin`, 오른쪽 클릭 `Them to the recycle bin` | 고른 것을 휴지통으로 |
@@ -221,7 +223,8 @@
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |
 | 오른쪽 클릭 `Take out of the list` | 목록의 파일 우클릭: 목록에서 빼기 (파일은 그대로) |
 | 오른쪽 클릭 `Delete the file...` | 목록의 파일 우클릭: 경고하고 확인한 뒤 휴지통으로 |
-| 오른쪽 클릭 `About Rubraview` | Rubraview 정보: 버전과 포함된 것들의 라이선스 |
+| 오른쪽 클릭 `Favourites...` | 즐겨찾기(파일과 폴더) 목록 창: 열기, 순서 바꾸기, 빼기 |
+| 오른쪽 클릭 `Add to favourites` | 화면의 파일을 즐겨찾기에 넣거나 빼기 |
 | 오른쪽 클릭 `One page` | 보기 방식: 한 장씩 |
 | 오른쪽 클릭 `Two pages` | 보기 방식: 두 장 나란히 |
 | 오른쪽 클릭 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |

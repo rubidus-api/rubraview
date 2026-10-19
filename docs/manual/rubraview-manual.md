@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.23.1.exe              the viewer, as built
-dist/rubraview-v1.23.1/                 the release bundle
-dist/rubraview-v1.23.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.24.0.exe              the viewer, as built
+dist/rubraview-v1.24.0/                 the release bundle
+dist/rubraview-v1.24.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -270,8 +270,8 @@ it is — full screen only if the window already was (the slide show's
 settings have a button for it). The toolbox then starts
 with a stop button and the delay between slides ("3 s") where a film's
 speed button would be: turn the wheel over it, or hold it and drag up or
-down, and the delay moves half a second; a tap goes round 1, 2, 3, 5 and
-10 seconds. A right click on the picture while it runs opens **the slide
+down, and the delay moves half a second; a tap lists 1, 2, 3, 5 and
+10 seconds to choose from. A right click on the picture while it runs opens **the slide
 show's settings**: the delay — type it in the field (`Enter` keeps it) or
 press **-** and **+** for half a second less or more — how one slide
 changes to the next (**Cut**, **Fade**, **Slide**, **Zoom**, the same as
@@ -287,9 +287,10 @@ picture; Fit to window, Real size, Rotate, Rotate back; Slide show,
 Info; Rename, Copy to folder, Move to folder, Copy to another folder...,
 Move to another folder..., Show in Explorer,
 Delete (click it twice: it goes to the recycle bin); Open file, Recent
-files..., Batch, Print...; Help and About. What the toolbox on screen has
-a button for is left out of it (Open file stays). Every list has Open
-file, Recent files... and Batch, a picture's, a book's and an animation's
+files..., Favourites..., Add to favourites, Batch, Print...; Help and
+Settings. What the toolbox on screen has a button for is left out of it
+(Open file and Settings stay). Every list has Open file, Recent files...,
+the favourites and Batch, a picture's, a book's and an animation's
 Print... too. A book or an archive has the next and previous archive and
 the layouts; a film has play and stop, the subtitles (taking them out of
 the film too), the sound track, slower, faster and normal speed, copying
@@ -908,7 +909,15 @@ its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
 ## The floating boxes
 
-The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`).
+The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`), and
+**Set** beside it opens Settings (`F10`). A button that chooses one of
+several — zoom, fit, layout, speed, what the end does, the equaliser, the
+analyser, the slide show's delay, line breaks, the encoding, the sound
+track — opens a list of them to tap, rows a finger wide; its key still
+steps to the next one. A panel's choice (printing, exporting, Edit) opens
+the same list, and a panel's slider takes a typed number: press its
+number (or its name). Every box that takes typing has its buttons under
+it — **OK**, **Cancel**, and **Browse...** where a folder is asked for.
 There is no menu: what the toolbox does not have a button for is in the
 right click, on a key (the help, `F1`, lists them) or in Settings; the
 keys are changed on the Settings window's **Keys** page. The toolbox's last group has **Settings**,
@@ -1114,6 +1123,12 @@ or a font. The buttons (**Revert**, **Defaults**, **this page**, **this
 setting**, **Close**) are under the page's name; the last row says what
 the last change did. A long explanation is wrapped to the window.
 
+A choice opens a list of its words where it is: click one (or the arrow
+keys and `Enter`; `Esc` leaves it). A slider's number is typed: click
+the number after its bar, or press `Enter` on it, and the box under it
+takes the number (**OK**, **Cancel**; a folder's box has **Browse...** too).
+The left and right arrows still step either.
+
 Rest the pointer on a setting's name and a fuller explanation comes up
 for the harder ones. **Defaults** puts back every setting, **this page**
 only the page you are on, **this setting** only the one with the focus;
@@ -1263,44 +1278,61 @@ what is picked to the list.
 
 Above the tiles (and the rows) is a line of column heads — Name, Type,
 Size, Created, Modified, Resolution, Length, as many as the width holds.
-Its check box picks everything here but `..`, and again nothing; it
-shows a dash when some are picked. A click on a head sorts by that
-column, and again the other way round (▲ rising, ▼ falling). **Open**, the
-first button at the bottom, opens what is picked — several files open
+A click on a head sorts by that column, and again the other way round
+(▲ rising, ▼ falling). **Open**, the first button at the bottom, opens what is picked — several files open
 together as one set — or, with nothing picked, the one in focus.
 `Ctrl+Z` here takes back a rename, a move or a copy made here; a move or a
 copy of many is taken back at once, and a copied folder goes whole.
 
-In the file picker, the bottom row picks several files without holding a
-key: **Individual** makes every tap turn one file on or off, **Range**
-takes two taps and turns over everything between them, **Same type**
-takes every file with the same extension as the one in focus, **Change
-ext** gives all the picked files one extension you type, **Playlist**
-writes them as a playlist file beside themselves and opens them as one
-sequence, **Recycle** bins them (press it twice), **Move to** and **Copy
-to** send them to one of the numbered folders — press the number after
-the button, or `0` for another folder, typed or browsed in the same box
-as `Shift+F6`, a new one made on a second `Enter` (with no numbered
-folder set, the button opens that box at once) — and **Select all** picks every file, after which the same
-button reads **Deselect all** and lets them all go. **Details** at the
-right end shows the files as a list — a row a file, with its type (the
+At the path bar's left end, ◀ goes back to the folder you were in
+before, ▲ up a folder and ▶ forward again (`Alt+Left`, `Alt+Up`,
+`Alt+Right`). The title bar stays over this screen, and the window's
+title is **Rubraview - <the folder>**. The tiles a row follow the
+window's width. `Ctrl+click` picks or lets go of one, `Shift+click` picks
+everything from the last one clicked.
+
+The row over the list picks without holding a key: the **All** box picks
+everything here but `..` (a dash when some are), **Individual** makes
+every tap turn one file on or off, **Range** takes two taps and turns over
+everything between them, **Same type** takes every file with the same
+extension as the one in focus, **Media** the pictures, films, music and
+text. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
+**Details** (or **Tiles**) at its end changes the view. The bottom row
+acts on what is picked: **Open**, **Add to the list**, **Recycle** (press
+it twice), **Move to** and **Copy to** — send them to one of the numbered
+folders: press the number after the button, or `0` for another folder,
+typed or browsed (**Browse...** under the box, or `Ctrl+O`) in the same
+box as `Shift+F6`, a new one made on a second `Enter` (with no numbered
+folder set, the button opens that box at once). A playlist file of them
+and **Change extensions...** are on the right click: the latter lists each
+extension the picked files have, a new one beside each (`.txt → .text`,
+`.nfo → .inf`; a row left as it was leaves its files alone), edited a
+row at a time (a click on a row, `Tab`, or `Enter` for the next) and
+done by **Apply**. **Details** shows the files as a list — a row a file, with its type (the
 extension), size, created and modified times, resolution and, for a film
 or a song, its length; resolution and length fill in as each row comes on
 screen. A click on a column's name sorts by it, rising (▲); again,
 falling (▼); folders stay first, and the choice is kept (Settings > Files
 > sorted by). **Tiles** brings the pictures back (the same switch is in
-Settings > Files). `Ctrl+Z` undoes any of it,
-one file at a time. A mode stays on until you press its button again, and
+Settings > Files). `Ctrl+Z` undoes any of it; what was done to many at
+once is undone at once. A mode stays on until you press its button again, and
 `..` at the start of the list goes up a folder.
 
 **Recent** on the bar under the path shows the files opened lately on
 this same screen — newest
 first, in tiles or details, sorted and picked like any folder.
 
-Your favourite folders come first on the bar under the path (`Ctrl+D` or the
-star adds or removes the folder on screen). Right-click one to give it a
+Your favourites come first on the bar under the path (`Ctrl+D` or the
+star adds or removes the folder on screen; a file or a folder is added or
+taken off by its right click, **Favourite (in or out)**). Right-click one to give it a
 name of your own (an empty name gives the folder's back); drag one sideways
-to put it somewhere else on the bar. Both are kept in `favorites.ini`.
+to put it somewhere else on the bar. **★ Favourites** at the bar's right
+end (or **Favourites...** in any right click) opens all of them in a list
+window, as the recent files' is: a click opens one — a folder here, a
+file in the viewer — ▲ and ▼ move it up or down, its X or the ticked ones'
+**Remove** take it off, and **Add this file** adds the file on screen
+(**Add to favourites** on a right click does the same). All is kept in
+`favorites.ini`.
 
 `F2` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
@@ -1373,7 +1405,7 @@ listed under a later heading only means that while that is on screen.
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `P` | The playlist, or this folder's files, floating over the picture |
-| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle; a tap on its button lists them to choose from |
 | `Shift+P` | Mini player |
 | `G` | Pixel grid past 400% |
 | `Esc` | Quit |
@@ -1410,7 +1442,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 | `Ctrl+]` | Next archive in the folder |
 | `Ctrl+[` | Previous archive in the folder |
@@ -1479,7 +1511,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Z` | Subtitles a tenth of a second earlier |
 | `Shift+X` | Subtitles a tenth of a second later |
 | `Alt+Z` | Subtitles back to the file's own times |
-| `A` | Next sound track |
+| `A` | Next sound track; a tap on its button lists them to choose from |
 | `C` | Next subtitles |
 | `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
 
@@ -1495,24 +1527,26 @@ listed under a later heading only means that while that is on screen.
 | Where | What it does |
 |---|---|
 | Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
-| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time |
+| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ` | The equaliser's next preset |
+| Toolbox `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
 | Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbox `Night` | Night mode: loud passages brought down |
 | Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again |
-| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again |
+| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
+| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
 | Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz` | The analyser: bars, the wave, or none |
+| Toolbox `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
-| Toolbox `Delay` | The slide show's delay: a tap goes round 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Toolbox `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
+| Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
 | Right click `Rename` | Rename the file or folder that was right-clicked |
+| Right click `Change extensions...`, Right click `Change their extensions...` | Give the picked files new extensions, one for each extension they have |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
@@ -1523,7 +1557,8 @@ listed under a later heading only means that while that is on screen.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
-| Right click `About Rubraview` | About Rubraview: the version and the licences of what it carries |
+| Right click `Favourites...` | The favourites, files and folders, in a list window: open, reorder, remove |
+| Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
 | Right click `Book` | Layout: the cover alone, then two pages side by side |

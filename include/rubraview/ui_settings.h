@@ -158,7 +158,12 @@ typedef enum rubraview_settings_event {
     RUBRAVIEW_SEVENT_DEFAULTS_PAGE,
     RUBRAVIEW_SEVENT_DEFAULTS_ONE,
     RUBRAVIEW_SEVENT_CLOSE,
+    RUBRAVIEW_SEVENT_CHOOSE,     /* 1.24.0: a choice was clicked: list its words to pick from (the focused line's) */
+    RUBRAVIEW_SEVENT_TYPE_NUMBER,/* 1.24.0: a number's value clicked, or Enter on it: let it be typed */
 } rubraview_settings_event_t;
+
+/** 1.24.0: a choice's word `index`, as the settings window shows it (a language by its own name). */
+u8str_t rubraview_settings_choice_word(const rubraview_setting_def_t *def, int32_t index);
 
 rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t *view,
                                                         rubraview_settings_t *settings,
@@ -172,6 +177,8 @@ int32_t rubraview_settings_view_table_row_at(const rubraview_settings_view_t *vi
 
 /** The focused line's document node, or NULL when a button has focus. */
 const rubraview_settings_node_t *rubraview_settings_view_focused_node(const rubraview_settings_view_t *view);
+/** 1.24.0: the focused line's setting, or NULL when it is not a setting. */
+const rubraview_setting_def_t *rubraview_settings_view_focused_def(const rubraview_settings_view_t *view);
 
 /** A click, in cells. */
 rubraview_settings_event_t rubraview_settings_view_press(rubraview_settings_view_t *view,
