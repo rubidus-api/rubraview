@@ -72,6 +72,13 @@ bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_
  * no picture shown, no sound heard — for 3 s (`stalled_seconds`). A film longer than its header says keeps
  * showing pictures, so it is not cut. False without a duration.
  */
+/**
+ * RV-149: why FFmpeg does not decode a film on the graphics card (an English N_ literal, translated where
+ * shown), or NULL when it may: [video] hardware_decode `mode` off, no decode device, no decoders offered
+ * (mode 1), an HDR film (`hdr`: PQ or HLG, kept on the processor), or DLLs without the hardware calls.
+ */
+const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, bool hdr, bool api);
+
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds);
 
 bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,

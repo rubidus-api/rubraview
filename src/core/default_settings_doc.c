@@ -438,7 +438,7 @@ static const char *const PARTS[] = {
 "help audio.wasapi_latency_ms \"How far ahead sound is prepared. Lower answers faster; raise it if the sound crackles or stutters.\"\n"
 "help audio.bgm_pause_on_video \"On: background music pauses while a film with its own sound plays, and goes on after it.\"\n"
 "help video.decoder \"Which decoder tries a film first: Windows' own (Media Foundation) or FFmpeg, when its DLLs are there. The other is tried if the first cannot.\"\n"
-"help video.hardware_decode \"Lets the graphics card decode films, which saves the processor. Off if films show wrong colours or freeze on this computer.\"\n"
+"help video.hardware_decode \"Lets the graphics card decode films, which saves the processor — with either decoder, Windows' or FFmpeg's (an HDR film stays on the processor with FFmpeg). Off if films show wrong colours or freeze on this computer.\"\n"
 "help video.subtitle_fit \"A subtitle too long for its box: the box grows to hold it, or the letters shrink until it fits.\"\n"
 "help video.ab_step_seconds \"How much the A and B points of a repeat move with each press of their buttons or keys.\"\n"
 "help video.audio_language \"The sound track chosen first when a film has several: a language code as films name it, kor, eng, jpn.\"\n"

@@ -1,17 +1,22 @@
 #ifdef _WIN32
+#define COBJMACROS
 #include <windows.h>
+#include <d3d11.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/channel_layout.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/lang.h"
+#include "rubraview/mediaclock.h"
 #include <stdio.h>
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/fileinfo.h"
@@ -44,7 +49,15 @@ typedef struct ff_slot {
     uint8_t *pixels;
     double pts, duration;
     uint64_t generation;
+    /* RV-149: a picture decoded on the card is turned into BGRA there, into this texture — shared with the
+       renderer's device under a keyed mutex, as Media Foundation's are; made on first use */
+    ID3D11Texture2D *texture;
+    IDXGIKeyedMutex *mutex;
+    ID3D11VideoProcessorOutputView *vp_out;   /* the decode thread's, released when it ends */
+    bool on_gpu;
 } ff_slot_t;
+
+#define VP_INPUTS 48   /* the decoder's pool slices a view was made for */
 
 typedef struct ff_media {
     HANDLE thread, opened;
@@ -80,6 +93,18 @@ typedef struct ff_media {
     rubraview_track_set_t tracks;
     char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
     rubraview_details_t details;            /* written before `opened`, read-only afterwards */
+
+    /* RV-149 (owner, 2026-10-20): decoding on the graphics card, D3D11VA, on the renderer's decode device */
+    rubraview_media_gpu_t gpu;               /* what the caller offered; the device AddRef'd while open */
+    AVBufferRef *hw_device;                  /* the decode thread's */
+    bool hw_attached;                        /* the decoder was given the card */
+    _Atomic bool hw_used;                    /* it chose the card's pictures (get_format) */
+    ID3D11VideoProcessorEnumerator *vp_enum; /* NV12 / P010 to BGRA, made for the first picture's size */
+    ID3D11VideoProcessor *vp;
+    int vp_w, vp_h, vp_space;
+    struct { ID3D11Texture2D *texture; UINT slice; ID3D11VideoProcessorInputView *view; } vp_in[VP_INPUTS];
+    int vp_in_count;
+    const char *hw_why;                      /* on the processor: why (an N_ literal); NULL on the card */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -116,6 +141,13 @@ typedef struct ff_api {
     void (*av_packet_free)(AVPacket**);
     void (*av_packet_unref)(AVPacket*);
     /* avutil */
+    /* RV-149, decoding on the card; any may be missing, and then FFmpeg decodes on the processor */
+    AVBufferRef *(*av_hwdevice_ctx_alloc)(enum AVHWDeviceType);
+    int (*av_hwdevice_ctx_init)(AVBufferRef*);
+    AVBufferRef *(*av_buffer_ref)(const AVBufferRef*);
+    void (*av_buffer_unref)(AVBufferRef**);
+    int (*av_hwframe_transfer_data)(AVFrame*, const AVFrame*, int);
+    enum AVPixelFormat (*avcodec_default_get_format)(struct AVCodecContext*, const enum AVPixelFormat*);
     unsigned (*avutil_version)(void);
     AVFrame *(*av_frame_alloc)(void);
     void (*av_frame_free)(AVFrame**);
@@ -245,6 +277,9 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND_OPTIONAL(util, av_chroma_location_name); BIND_OPTIONAL(util, av_channel_layout_describe);
     BIND_OPTIONAL(fmt, avformat_alloc_context); BIND_OPTIONAL(fmt, avio_alloc_context);
     BIND_OPTIONAL(fmt, avio_context_free); BIND_OPTIONAL(util, av_malloc); BIND_OPTIONAL(util, av_free);
+    BIND_OPTIONAL(util, av_hwdevice_ctx_alloc); BIND_OPTIONAL(util, av_hwdevice_ctx_init);
+    BIND_OPTIONAL(util, av_buffer_ref); BIND_OPTIONAL(util, av_buffer_unref);
+    BIND_OPTIONAL(util, av_hwframe_transfer_data); BIND_OPTIONAL(codec, avcodec_default_get_format);
     BIND(sws, swscale_version); BIND(sws, sws_getContext); BIND(sws, sws_scale); BIND(sws, sws_freeContext);
     BIND(swr, swresample_version); BIND(swr, swr_alloc_set_opts2); BIND(swr, swr_init);
     BIND(swr, swr_convert); BIND(swr, swr_free);
@@ -542,6 +577,9 @@ bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t m
 
 /* ---- decode thread ---- */
 
+static bool ff_hw_api(void);
+static bool ff_hw_attach(ff_media_t *m, AVCodecContext *video);
+
 typedef struct ff_decode {
     AVFormatContext *format;
     AVCodecContext *video, *audio;
@@ -551,6 +589,7 @@ typedef struct ff_decode {
     int swr_rate, swr_channels, swr_format;   /* what the resampler was told it would be given */
     AVPacket *packet;
     AVFrame *frame;
+    AVFrame *swframe;   /* RV-149: a picture of the card's brought back, when the card could not turn it */
     /* D-120: where the heard position was told to start (0, or a seek's
        target), and whether its first sound has come since. */
     double audio_base;
@@ -877,15 +916,36 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
             m->failure = rubraview_media_classify(true, true, false, fourcc);
             return false;
         }
-        d->video = g_ff.avcodec_alloc_context3(decoder);
-        if (d->video) {   /* 1.25.1: every core of the processor (it decoded on one) */
-            d->video->thread_count = 0;
-            d->video->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        /* RV-149: on the card where it is offered and can; an HDR film stays on the processor (the owner,
+           2026-10-21: no tone mapping on the card yet). Anything refused is decoded on the processor. */
+        bool hdr = par->color_trc == AVCOL_TRC_SMPTE2084 || par->color_trc == AVCOL_TRC_ARIB_STD_B67;
+        m->hw_why = rubraview_ffmpeg_hw_refusal(m->gpu.mode, m->gpu.device != NULL, m->gpu.decoder_profiles, hdr, ff_hw_api());
+        bool opened_video = false;
+        if (!m->hw_why) {
+            d->video = g_ff.avcodec_alloc_context3(decoder);
+            if (d->video && g_ff.avcodec_parameters_to_context(d->video, par) >= 0 && ff_hw_attach(m, d->video)) {
+                d->video->thread_count = 1;   /* D3D11VA decodes on one thread */
+                opened_video = g_ff.avcodec_open2(d->video, decoder, NULL) >= 0;
+            }
+            if (opened_video) {
+                m->hw_attached = true;
+            } else {
+                if (d->video) g_ff.avcodec_free_context(&d->video);
+                if (m->hw_device) g_ff.av_buffer_unref(&m->hw_device);
+                m->hw_why = N_("FFmpeg could not take the graphics card for this film");
+            }
         }
-        if (!d->video || g_ff.avcodec_parameters_to_context(d->video, par) < 0 ||
-            g_ff.avcodec_open2(d->video, decoder, NULL) < 0) {
-            m->failure = rubraview_media_classify(true, true, false, fourcc);
-            return false;
+        if (!opened_video) {
+            d->video = g_ff.avcodec_alloc_context3(decoder);
+            if (d->video) {   /* 1.25.1: every core of the processor (it decoded on one) */
+                d->video->thread_count = 0;
+                d->video->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+            }
+            if (!d->video || g_ff.avcodec_parameters_to_context(d->video, par) < 0 ||
+                g_ff.avcodec_open2(d->video, decoder, NULL) < 0) {
+                m->failure = rubraview_media_classify(true, true, false, fourcc);
+                return false;
+            }
         }
         m->width = par->width;
         m->height = par->height;
@@ -936,11 +996,19 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     };
     if (m->video_stream >= 0) {   /* 1.25.1: the way to the screen, for the information window */
         rubraview_media_info_t *in = &m->info;
-        in->decode_threads = d->video->thread_count > 0 ? d->video->thread_count : -1;
-        snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the processor"));
-        snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("swscale on the processor, bilinear, to BGRA"));
-        snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
-        snprintf(in->path_why_software, sizeof(in->path_why_software), "%s", N_("FFmpeg decodes on the processor; the graphics card decodes through Media Foundation"));
+        in->hardware_decode = m->hw_attached;
+        if (m->hw_attached) {   /* RV-149 */
+            in->decode_threads = 0;
+            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the graphics card (D3D11VA)"));
+            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("the card's video processor (Direct3D 11), to BGRA"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("a shared texture (keyed mutex), copied on the card into the page's"));
+        } else {
+            in->decode_threads = d->video->thread_count > 0 ? d->video->thread_count : -1;
+            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the processor"));
+            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("swscale on the processor, bilinear, to BGRA"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
+            snprintf(in->path_why_software, sizeof(in->path_why_software), "%s", m->hw_why ? m->hw_why : "");
+        }
     }
     return true;
 }
@@ -951,6 +1019,7 @@ static void free_decode(ff_decode_t *d) {
     if (d->video) g_ff.avcodec_free_context(&d->video);
     if (d->audio) g_ff.avcodec_free_context(&d->audio);
     if (d->frame) g_ff.av_frame_free(&d->frame);
+    if (d->swframe) g_ff.av_frame_free(&d->swframe);
     if (d->packet) g_ff.av_packet_free(&d->packet);
     if (d->format) g_ff.avformat_close_input(&d->format);
 }
@@ -958,6 +1027,160 @@ static void free_decode(ff_decode_t *d) {
 /* Puts one decoded picture in the ring, waiting for room while playing
    but never longer than VIDEO_ROOM_WAIT_MS: the sound must not end up
    waiting on the picture. Returns false when the caller should stop. */
+/* ---- RV-149: decoding on the graphics card (D3D11VA) ---- */
+
+static const GUID FF_IID_IDXGIKeyedMutex = { 0x9d8e1289, 0xd7b3, 0x465f, { 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d } };
+
+/* The decoder offers its formats: the card's when it is among them, else what it would pick itself. */
+static enum AVPixelFormat ff_get_format(struct AVCodecContext *c, const enum AVPixelFormat *formats) {
+    ff_media_t *m = (ff_media_t*)c->opaque;
+    for (const enum AVPixelFormat *p = formats; *p != AV_PIX_FMT_NONE; ++p) {
+        if (*p == AV_PIX_FMT_D3D11) {
+            if (m) atomic_store_explicit(&m->hw_used, true, memory_order_release);
+            return *p;
+        }
+    }
+    if (m) atomic_store_explicit(&m->hw_used, false, memory_order_release);
+    return g_ff.avcodec_default_get_format(c, formats);
+}
+
+static bool ff_hw_api(void) {
+    return g_ff.av_hwdevice_ctx_alloc && g_ff.av_hwdevice_ctx_init && g_ff.av_buffer_ref && g_ff.av_buffer_unref &&
+           g_ff.av_hwframe_transfer_data && g_ff.avcodec_default_get_format;
+}
+
+/* The renderer's decode device handed to FFmpeg — AddRef'd, since FFmpeg releases what it is given. False:
+   the card is not taken, and the film decodes on the processor. */
+static bool ff_hw_attach(ff_media_t *m, AVCodecContext *video) {
+    ID3D11Device *device = (ID3D11Device*)m->gpu.device;
+    AVBufferRef *ref = g_ff.av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA);
+    if (!ref) return false;
+    AVD3D11VADeviceContext *hw = (AVD3D11VADeviceContext*)((AVHWDeviceContext*)(void*)ref->data)->hwctx;
+    ID3D11Device_AddRef(device);
+    hw->device = device;
+    ID3D11Device_GetImmediateContext(device, &hw->device_context);   /* a reference of its own, FFmpeg's to release */
+    if (!hw->device_context || g_ff.av_hwdevice_ctx_init(ref) < 0) {
+        g_ff.av_buffer_unref(&ref);   /* releases the device and its context */
+        return false;
+    }
+    video->hw_device_ctx = g_ff.av_buffer_ref(ref);
+    if (!video->hw_device_ctx) { g_ff.av_buffer_unref(&ref); return false; }
+    video->get_format = ff_get_format;
+    video->opaque = m;
+    m->hw_device = ref;
+    return true;
+}
+
+/* What the card was given for turning pictures, let go on the decode thread before FFmpeg's device goes. */
+static void ff_hw_release(ff_media_t *m) {
+    for (int i = 0; i < m->vp_in_count; ++i) if (m->vp_in[i].view) ID3D11VideoProcessorInputView_Release(m->vp_in[i].view);
+    m->vp_in_count = 0;
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        if (m->slots[i].vp_out) { ID3D11VideoProcessorOutputView_Release(m->slots[i].vp_out); m->slots[i].vp_out = NULL; }
+    }
+    if (m->vp) { ID3D11VideoProcessor_Release(m->vp); m->vp = NULL; }
+    if (m->vp_enum) { ID3D11VideoProcessorEnumerator_Release(m->vp_enum); m->vp_enum = NULL; }
+    if (m->hw_device) g_ff.av_buffer_unref(&m->hw_device);
+}
+
+/* BT.709 for high definition and when the film says so, BT.601 otherwise; the film's range. */
+static int ff_frame_space(const AVFrame *f) {
+    bool bt709 = f->colorspace == AVCOL_SPC_BT709 ||
+                 (f->colorspace != AVCOL_SPC_BT470BG && f->colorspace != AVCOL_SPC_SMPTE170M && f->height >= 720);
+    bool full = f->color_range == AVCOL_RANGE_JPEG;
+    return (bt709 ? 1 : 0) | (full ? 2 : 0);
+}
+
+/* One picture of the card's turned into BGRA by its video processor, into the slot's own texture. */
+static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
+    if (!m->hw_device || !f->data[0]) return false;
+    AVD3D11VADeviceContext *hw = (AVD3D11VADeviceContext*)((AVHWDeviceContext*)(void*)m->hw_device->data)->hwctx;
+    ID3D11Device *device = hw->device;
+    ID3D11VideoDevice *vd = hw->video_device;
+    ID3D11VideoContext *vc = hw->video_context;
+    if (!device || !vd || !vc) return false;
+    ID3D11Texture2D *source = (ID3D11Texture2D*)(void*)f->data[0];
+    UINT slice = (UINT)(intptr_t)f->data[1];
+
+    if (!s->texture) {   /* shared with the renderer's device, ordered by the keyed mutex */
+        D3D11_TEXTURE2D_DESC own = {
+            .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
+            .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+            .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
+        };
+        if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &s->texture))) s->texture = NULL;
+        if (s->texture && FAILED(ID3D11Texture2D_QueryInterface(s->texture, &FF_IID_IDXGIKeyedMutex, (void**)&s->mutex))) s->mutex = NULL;
+        if (!s->texture || !s->mutex) return false;
+    }
+    if (!m->vp || m->vp_w != f->width || m->vp_h != f->height) {
+        for (int i = 0; i < SLOT_COUNT; ++i) {
+            if (m->slots[i].vp_out) { ID3D11VideoProcessorOutputView_Release(m->slots[i].vp_out); m->slots[i].vp_out = NULL; }
+        }
+        for (int i = 0; i < m->vp_in_count; ++i) if (m->vp_in[i].view) ID3D11VideoProcessorInputView_Release(m->vp_in[i].view);
+        m->vp_in_count = 0;
+        if (m->vp) { ID3D11VideoProcessor_Release(m->vp); m->vp = NULL; }
+        if (m->vp_enum) { ID3D11VideoProcessorEnumerator_Release(m->vp_enum); m->vp_enum = NULL; }
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC content = {
+            .InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
+            .InputFrameRate = { 25, 1 }, .InputWidth = (UINT)f->width, .InputHeight = (UINT)f->height,
+            .OutputFrameRate = { 25, 1 }, .OutputWidth = (UINT)m->width, .OutputHeight = (UINT)m->height,
+            .Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
+        };
+        if (FAILED(ID3D11VideoDevice_CreateVideoProcessorEnumerator(vd, &content, &m->vp_enum))) { m->vp_enum = NULL; return false; }
+        if (FAILED(ID3D11VideoDevice_CreateVideoProcessor(vd, m->vp_enum, 0, &m->vp))) { m->vp = NULL; return false; }
+        m->vp_w = f->width;
+        m->vp_h = f->height;
+        m->vp_space = -1;
+    }
+    if (!s->vp_out) {
+        D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC out = { .ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D };
+        if (FAILED(ID3D11VideoDevice_CreateVideoProcessorOutputView(vd, (ID3D11Resource*)s->texture, m->vp_enum, &out, &s->vp_out))) {
+            s->vp_out = NULL;
+            return false;
+        }
+    }
+    ID3D11VideoProcessorInputView *in = NULL;
+    for (int i = 0; i < m->vp_in_count && !in; ++i)
+        if (m->vp_in[i].texture == source && m->vp_in[i].slice == slice) in = m->vp_in[i].view;
+    if (!in) {
+        if (m->vp_in_count >= VP_INPUTS) {   /* another pool: the views start again */
+            for (int i = 0; i < m->vp_in_count; ++i) if (m->vp_in[i].view) ID3D11VideoProcessorInputView_Release(m->vp_in[i].view);
+            m->vp_in_count = 0;
+        }
+        D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC desc = { .FourCC = 0, .ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D };
+        desc.Texture2D.MipSlice = 0;
+        desc.Texture2D.ArraySlice = slice;
+        if (FAILED(ID3D11VideoDevice_CreateVideoProcessorInputView(vd, (ID3D11Resource*)source, m->vp_enum, &desc, &in))) return false;
+        m->vp_in[m->vp_in_count].texture = source;
+        m->vp_in[m->vp_in_count].slice = slice;
+        m->vp_in[m->vp_in_count].view = in;
+        m->vp_in_count++;
+    }
+
+    hw->lock(hw->lock_ctx);   /* FFmpeg's decoder uses the same context */
+    int space = ff_frame_space(f);
+    if (space != m->vp_space) {
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE input = { 0 }, output = { 0 };
+        input.YCbCr_Matrix = (space & 1) ? 1 : 0;
+        input.Nominal_Range = (space & 2) ? D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255 : D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+        output.RGB_Range = 0;   /* full range RGB */
+        ID3D11VideoContext_VideoProcessorSetStreamColorSpace(vc, m->vp, 0, &input);
+        ID3D11VideoContext_VideoProcessorSetOutputColorSpace(vc, m->vp, &output);
+        ID3D11VideoContext_VideoProcessorSetStreamFrameFormat(vc, m->vp, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+        ID3D11VideoContext_VideoProcessorSetStreamAutoProcessingMode(vc, m->vp, 0, FALSE);
+        m->vp_space = space;
+    }
+    bool ok = false;
+    if (IDXGIKeyedMutex_AcquireSync(s->mutex, 0, 500) == S_OK) {
+        D3D11_VIDEO_PROCESSOR_STREAM stream = { .Enable = TRUE, .pInputSurface = in };
+        ok = SUCCEEDED(ID3D11VideoContext_VideoProcessorBlt(vc, m->vp, s->vp_out, 0, 1, &stream));
+        IDXGIKeyedMutex_ReleaseSync(s->mutex, 0);
+    }
+    hw->unlock(hw->lock_ctx);
+    return ok;
+}
+
 static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation) {
     size_t slot = 0;
     for (int waited = 0; !rubraview_spsc_acquire_write(&m->ring, &slot); waited += 5) {
@@ -968,23 +1191,38 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
         Sleep(5);
     }
 
-    /* 1.25.1: one converter while the pictures keep their size and format (one was made and freed a picture) */
-    if (d->sws && (d->sws_w != d->frame->width || d->sws_h != d->frame->height || d->sws_format != d->frame->format)) {
-        g_ff.sws_freeContext(d->sws);
-        d->sws = NULL;
+    /* RV-149: a picture of the card's is turned there; when the card cannot, it is brought back and turned here */
+    const AVFrame *src = d->frame;
+    m->slots[slot].on_gpu = false;
+    if (d->frame->format == AV_PIX_FMT_D3D11) {
+        if (ff_vp_blit(m, d->frame, &m->slots[slot])) {
+            m->slots[slot].on_gpu = true;
+        } else {
+            if (!d->swframe) d->swframe = g_ff.av_frame_alloc();
+            if (!d->swframe) return true;
+            g_ff.av_frame_unref(d->swframe);
+            if (g_ff.av_hwframe_transfer_data(d->swframe, d->frame, 0) < 0) return true;   /* this picture is dropped */
+            src = d->swframe;
+        }
     }
-    if (!d->sws) {
-        d->sws = g_ff.sws_getContext(d->frame->width, d->frame->height, (enum AVPixelFormat)d->frame->format,
-                                     m->width, m->height, AV_PIX_FMT_BGRA, SWS_BILINEAR, NULL, NULL, NULL);
-        d->sws_w = d->frame->width;
-        d->sws_h = d->frame->height;
-        d->sws_format = d->frame->format;
+    if (!m->slots[slot].on_gpu) {
+        /* 1.25.1: one converter while the pictures keep their size and format (one was made and freed a picture) */
+        if (d->sws && (d->sws_w != src->width || d->sws_h != src->height || d->sws_format != src->format)) {
+            g_ff.sws_freeContext(d->sws);
+            d->sws = NULL;
+        }
+        if (!d->sws) {
+            d->sws = g_ff.sws_getContext(src->width, src->height, (enum AVPixelFormat)src->format,
+                                         m->width, m->height, AV_PIX_FMT_BGRA, SWS_BILINEAR, NULL, NULL, NULL);
+            d->sws_w = src->width;
+            d->sws_h = src->height;
+            d->sws_format = src->format;
+        }
+        if (!d->sws) return true;
+        uint8_t *dst[4] = { m->slots[slot].pixels, NULL, NULL, NULL };
+        int stride[4] = { m->width * 4, 0, 0, 0 };
+        g_ff.sws_scale(d->sws, (const uint8_t *const*)src->data, src->linesize, 0, src->height, dst, stride);
     }
-    if (!d->sws) return true;
-    uint8_t *dst[4] = { m->slots[slot].pixels, NULL, NULL, NULL };
-    int stride[4] = { m->width * 4, 0, 0, 0 };
-    g_ff.sws_scale(d->sws, (const uint8_t *const*)d->frame->data, d->frame->linesize, 0, d->frame->height,
-                   dst, stride);
 
     m->slots[slot].pts = pts;
     m->slots[slot].duration = duration;
@@ -1221,7 +1459,8 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     bool opened = d.packet && d.frame && open_input(m, &d);
     SetEvent(m->opened);
     if (opened) decode_loop(m, &d);
-    free_decode(&d);
+    free_decode(&d);       /* the decoder's hold on the card first ... */
+    ff_hw_release(m);      /* ... then the processor's views and the device (RV-149) */
     return 0;
 }
 
@@ -1238,15 +1477,17 @@ static void ff_close(void *handle) {
     if (m->opened) CloseHandle(m->opened);
     rubraview_pal_audio_close(m->audio);
     free(m->pcm_storage);
-    for (int i = 0; i < SLOT_COUNT; ++i) free(m->slots[i].pixels);
+    for (int i = 0; i < SLOT_COUNT; ++i) {
+        free(m->slots[i].pixels);
+        if (m->slots[i].mutex) IDXGIKeyedMutex_Release(m->slots[i].mutex);
+        if (m->slots[i].texture) ID3D11Texture2D_Release(m->slots[i].texture);
+    }
+    if (m->gpu.device) IUnknown_Release((IUnknown*)m->gpu.device);
     free(m);
 }
 
 static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                      const rubraview_media_gpu_t *gpu) {
-    /* RV-062: D3D11VA hands back NV12 textures, which need a colour
-       conversion on the card of their own; FFmpeg decodes in software. */
-    (void)gpu;
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!ff_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
 
@@ -1256,6 +1497,9 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
         atomic_store_explicit(&m->audio_gain_millionths, 1000000, memory_order_release);
     }
     if (!m) return NULL;
+    /* RV-149: the card the renderer offers; held while the film is open */
+    if (gpu) m->gpu = *gpu;
+    if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
     memcpy(m->path, path.ptr, path.len);   /* FFmpeg takes UTF-8 paths on Windows */
     m->path[path.len] = '\0';
     m->video_stream = -1;
@@ -1297,8 +1541,10 @@ static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
             continue;
         }
         *out_frame = (rubraview_video_frame_t){
-            .pixels = s->pixels, .width = m->width, .height = m->height,
+            .pixels = s->on_gpu ? NULL : s->pixels, .width = m->width, .height = m->height,
             .stride = m->width * 4, .pts = s->pts, .duration = s->duration,
+            .gpu_texture = s->on_gpu ? (const void*)s->texture : NULL,   /* RV-149 */
+            .gpu_subresource = 0,
         };
         return true;
     }

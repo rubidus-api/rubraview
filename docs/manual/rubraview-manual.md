@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.25.2.exe              the viewer, as built
-dist/rubraview-v1.25.2/                 the release bundle
-dist/rubraview-v1.25.2.zip              that bundle, zipped — the download
+dist/rubraview-v1.26.0.exe              the viewer, as built
+dist/rubraview-v1.26.0/                 the release bundle
+dist/rubraview-v1.26.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1275,7 +1275,12 @@ filename code page, the memory cap). Some worth knowing:
   100 ms).
 - **Video** — **GPU decoding** lets the graphics card decode a film (`on`, as
   it comes, falls back to the processor when the card cannot; `always`
-  insists on the card; `off` never uses it).
+  insists on the card; `off` never uses it). It applies to both decoders:
+  Windows' (Media Foundation) and, with Decoder set to `ffmpeg`, FFmpeg's,
+  which then decodes through D3D11VA and has the card turn the pictures
+  into colour (an HDR film, PQ or HLG, stays on the processor with FFmpeg).
+  On the processor FFmpeg uses a thread a core. The information window's
+  **Display** says which it is and, on the processor, why.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,

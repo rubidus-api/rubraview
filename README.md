@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.25.2** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.25.2/rubraview-v1.25.2.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.25.2/rubraview-v1.25.2.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.26.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.26.0/rubraview-v1.26.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.26.0/rubraview-v1.26.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
