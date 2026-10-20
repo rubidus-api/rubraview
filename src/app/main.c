@@ -19720,10 +19720,46 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_addf(a, &info, T("Sound"), T("%u Hz, %u channel%s"), (unsigned)m->audio_sample_rate,
                                     (unsigned)m->audio_channels, m->audio_channels == 1 ? "" : TC("plural", "s"));
             }
+            {   /* 1.25.1: the device moved to another format since (the decoder said one thing, the samples another) */
+                uint32_t pr = 0, pc = 0;
+                if (m->has_audio && rubraview_pal_media_audio_format(app->media, &pr, &pc) && pr > 0 &&
+                    (pr != m->audio_sample_rate || pc != m->audio_channels))
+                    rubraview_info_addf(a, &info, T("Sound played at"), T("%u Hz, %u channel%s"), (unsigned)pr, (unsigned)pc,
+                                        pc == 1 ? "" : TC("plural", "s"));
+            }
             uint32_t kbps = m->bitrate_kbps;
             if (!kbps && file_bytes && m->duration_seconds > 0.0) kbps = (uint32_t)((double)file_bytes * 8.0 / m->duration_seconds / 1000.0);
             if (kbps) rubraview_info_addf(a, &info, T("Bitrate"), "%u kbit/s%s", (unsigned)kbps, m->bitrate_kbps ? "" : T(" (size over length)"));
             rubraview_info_add(a, &info, T("Opened by"), m->backend == RUBRAVIEW_BACKEND_FFMPEG ? U8("FFmpeg") : U8("Media Foundation"));
+            if (m->has_video) {
+                /* 1.25.1 (owner, 2026-10-20: "어떤 백엔드나 다이렉트x 같은거 어떻게 하여 화면에 출력해 주는지도 자세한 정보"):
+                   the way a picture goes from the file to the screen */
+                rubraview_info_heading(a, &info, T("Display"));
+                if (m->path_decoder[0]) {
+                    char dec[256];
+                    int dn = snprintf(dec, sizeof(dec), "%s", rubraview_tr(m->path_decoder));
+                    if (dn > 0 && m->decode_threads > 0) snprintf(dec + dn, sizeof(dec) - (size_t)dn, T(", %d threads"), (int)m->decode_threads);
+                    else if (dn > 0 && m->decode_threads < 0) snprintf(dec + dn, sizeof(dec) - (size_t)dn, "%s", T(", a thread a core"));
+                    rubraview_info_add(a, &info, T("Decoder"), cstr(dec));
+                }
+                if (m->path_colours[0]) rubraview_info_add(a, &info, T("Colours"), cstr(rubraview_tr(m->path_colours)));
+                if (m->path_handover[0]) rubraview_info_add(a, &info, T("Into the window"), cstr(rubraview_tr(m->path_handover)));
+                rubraview_render_facts_t rf;
+                if (rubraview_pal_render_facts(app->renderer, &rf)) {
+                    unsigned fl = rf.feature_level;
+                    rubraview_info_addf(a, &info, T("Drawn by"), T("Direct2D 1.1 on Direct3D 11 (feature level %u_%u), %s"),
+                                        (fl >> 12) & 0xFu, (fl >> 8) & 0xFu, rf.warp ? T("WARP, Windows' software rasteriser") : rf.adapter);
+                    if (rf.video_memory > 0)
+                        rubraview_info_addf(a, &info, T("Video memory"), "%llu MB", (unsigned long long)(rf.video_memory >> 20));
+                    rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, BGRA, %s"), rf.buffers,
+                                        rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
+                    if (rf.decode_device) rubraview_info_addf(a, &info, T("Card's decoders"), T("%u kinds (Direct3D 11 video)"), (unsigned)rf.decoder_profiles);
+                }
+                int gm = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hardware_decode")));
+                const char *mode = gm <= 0 ? TC("choice", "off") : gm == 1 ? TC("choice", "on") : TC("choice", "always");
+                rubraview_info_addf(a, &info, T("GPU decoding"), "%s%s%s", mode,
+                                    m->path_why_software[0] ? " - " : "", m->path_why_software[0] ? rubraview_tr(m->path_why_software) : "");
+            }
             /* What the container and the codecs say of themselves, all of it (owner, 2026-10-11). */
             info_add_details(a, &info, rubraview_pal_media_details(app->media));
             if (app->tracks.count > 0) {

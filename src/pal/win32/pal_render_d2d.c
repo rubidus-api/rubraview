@@ -1345,6 +1345,36 @@ void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t
     return renderer->decode_d3d;
 }
 
+bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render_facts_t *out) {
+    if (!out) return false;
+    *out = (rubraview_render_facts_t){ .warp = g_used_warp, .feature_level = (uint32_t)g_feature_level, .buffers = 2, .vsync = true };
+    if (!renderer || !renderer->d3d) return false;
+    IDXGIDevice *dxgi = NULL;
+    IDXGIAdapter *adapter = NULL;
+    if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi)) && dxgi) {
+        IDXGIDevice_GetAdapter(dxgi, &adapter);
+        IDXGIDevice_Release(dxgi);
+    }
+    if (adapter) {
+        DXGI_ADAPTER_DESC desc;
+        if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc))) {
+            int n = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, out->adapter, (int)sizeof(out->adapter), NULL, NULL);
+            if (n <= 0) out->adapter[0] = '\0';
+            out->video_memory = (uint64_t)desc.DedicatedVideoMemory;
+        }
+        IDXGIAdapter_Release(adapter);
+    }
+    out->decode_device = renderer->decode_d3d != NULL;
+    if (renderer->decode_d3d) {
+        ID3D11VideoDevice *video = NULL;
+        if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->decode_d3d, &RV_IID_ID3D11VideoDevice, (void**)&video)) && video) {
+            out->decoder_profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
+            ID3D11VideoDevice_Release(video);
+        }
+    }
+    return true;
+}
+
 rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
     if (!renderer || !renderer->d3d || !renderer->target || width <= 0 || height <= 0) return NULL;
     D3D11_TEXTURE2D_DESC desc = {

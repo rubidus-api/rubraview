@@ -13,6 +13,9 @@
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/pal/pal_media_backend.h"
+#include "rubraview/lang.h"
+#include "rubraview/mediaclock.h"
+#include <stdio.h>
 
 /*
  * Media Foundation backend for the media PAL (D-8). Video comes out of the
@@ -62,6 +65,13 @@ typedef struct mf_media {
     DWORD video_stream;                     /* NO_STREAM for a file with no picture */
     DWORD audio_stream;                     /* NO_STREAM when the sound is not played */
     uint32_t audio_rate, audio_channels;
+    /* 1.25.1 (owner, 2026-10-20: AAC-LC 22050 Hz mono heard fast and high): the samples the decoder hands over in
+       the first second, counted against their times; the header's own format, the likeliest true one */
+    uint32_t header_rate, header_channels;
+    double   heard_first_pts;
+    uint64_t heard_frames;
+    bool     heard_checked;
+    _Atomic uint32_t heard_corrected;     /* the rate the device was moved to by the count; 0 when it agreed */
     rubraview_pcm_ring_t pcm;
     float *pcm_storage;
     rubraview_audio_out_t *audio;           /* NULL: no sound (no device, or no audio stream) */
@@ -659,6 +669,16 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
         bool decodable = mf_negotiate_audio(reader, audio_stream, &rate, &channels);
         audio_rate = rate;
         audio_channels = channels;
+        IMFMediaType *native = NULL;
+        if (SUCCEEDED(IMFSourceReader_GetNativeMediaType(reader, audio_stream, 0, &native)) && native) {
+            UINT32 hr_ = 0, hc_ = 0;
+            IMFMediaType_GetUINT32(native, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &hr_);
+            IMFMediaType_GetUINT32(native, &MF_MT_AUDIO_NUM_CHANNELS, &hc_);
+            m->header_rate = hr_;
+            m->header_channels = hc_;
+            IMFMediaType_Release(native);
+        }
+        m->heard_first_pts = -1.0;
         size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
         if (decodable) {
             m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
@@ -914,6 +934,34 @@ static void push_audio(mf_media_t *m, const float *data, size_t count, uint64_t 
 /* One decoded audio sample into the ring. After a seek, packets wholly
    before the target are dropped and the one that straddles it is cut, so
    the sound starts where the picture does. */
+static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels);
+
+/* 1.25.1: Windows' AAC decoder names 44100 Hz stereo for some AAC-LC at 22050 Hz mono and hands over fewer
+   samples than that a second; played at what it named, the sound ran fast and high. The samples of the first
+   second are counted against their times; when they disagree with the device by more than a tenth, the
+   device is opened again at the format they fit — the header's when it fits, else the same channels at the
+   rate counted. */
+static void audio_count_check(mf_media_t *m, double pts, size_t floats) {
+    if (m->heard_checked || m->audio_channels == 0) return;
+    double span = pts - m->heard_first_pts;
+    if (m->heard_first_pts < 0.0 || span < 0.0 || span > 5.0) {   /* the first, or a seek: counted from here */
+        m->heard_first_pts = pts;
+        m->heard_frames = floats / m->audio_channels;
+        return;
+    }
+    if (span < 1.0) { m->heard_frames += floats / m->audio_channels; return; }
+    m->heard_checked = true;
+    double per_second = (double)m->heard_frames * (double)m->audio_channels / span;   /* floats a second */
+    UINT32 rate = 0, channels = 0;
+    if (!rubraview_audio_count_fix(per_second, m->audio_rate, m->audio_channels, m->header_rate, m->header_channels,
+                                   &rate, &channels)) return;
+    if (mf_reopen_audio(m, rate, channels)) {
+        m->heard_checked = true;   /* the reopen counts afresh; this one is settled */
+        rubraview_pal_audio_flush(m->audio, pts);
+        atomic_store_explicit(&m->heard_corrected, rate, memory_order_release);
+    }
+}
+
 static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *skip_until,
                           uint64_t generation, double base, bool *begun) {
     IMFMediaBuffer *buffer = NULL;
@@ -921,6 +969,8 @@ static void deliver_audio(mf_media_t *m, IMFSample *sample, double pts, double *
     BYTE *data = NULL;
     DWORD max_len = 0, len = 0;
     if (SUCCEEDED(IMFMediaBuffer_Lock(buffer, &data, &max_len, &len)) && data) {
+        audio_count_check(m, pts, len / sizeof(float));
+        if (!m->audio) { IMFMediaBuffer_Unlock(buffer); IMFMediaBuffer_Release(buffer); return; }
         size_t frames = len / ((size_t)m->audio_channels * sizeof(float));
         size_t skip = 0;
         if (*skip_until >= 0.0) {
@@ -974,6 +1024,8 @@ static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
     }
     m->audio_rate = rate;
     m->audio_channels = channels;
+    m->heard_checked = false;   /* 1.25.1: a new format, counted again */
+    m->heard_first_pts = -1.0;
     atomic_store_explicit(&m->played_rate, rate, memory_order_release);
     atomic_store_explicit(&m->played_channels, channels, memory_order_release);
     rubraview_pal_audio_set_gain(m->audio, (double)atomic_load_explicit(&m->audio_gain_millionths, memory_order_acquire) / 1e6);
@@ -1229,7 +1281,9 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
        diagnostic mode says to try anyway). If the reader will not open
        with it, or no picture comes out of it (T065 on the VM: a card with
        no decoders stops the decode), the film opens again without it. */
-    if (mf && gpu_wanted(m) && make_manager(m)) {
+    bool wanted_gpu = mf && gpu_wanted(m), tried_gpu = false;
+    if (wanted_gpu && make_manager(m)) {
+        tried_gpu = true;
         opened = open_reader(m, &reader, true);
         bool refused = false, rewound = false;
         if (opened && m->video_stream != NO_STREAM) {
@@ -1276,6 +1330,25 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
         }
     }
     if (!mf) fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+    /* 1.25.1: the way to the screen, for the information window */
+    if (opened && m->video_stream != NO_STREAM) {
+        rubraview_media_info_t *in = &m->info;
+        if (m->gpu_active) {
+            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("Media Foundation's decoder on the graphics card (DXVA, Direct3D 11)"));
+            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("Media Foundation's video processor, on the card, to BGRA"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("a shared texture (keyed mutex), copied on the card into the page's"));
+        } else {
+            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("Media Foundation's decoder on the processor"));
+            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("Media Foundation's video processor, on the processor, to RGB32"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
+            snprintf(in->path_why_software, sizeof(in->path_why_software), "%s",
+                     m->gpu.mode <= 0 ? N_("GPU decoding is off (Settings > Video)")
+                     : !m->gpu.device ? N_("no Direct3D 11 device for decoding was made")
+                     : !wanted_gpu ? N_("the graphics card offers no video decoders")
+                     : !tried_gpu ? N_("Media Foundation's device manager could not take the card")
+                     : N_("the card could not decode this film; decoded on the processor instead"));
+        }
+    }
     SetEvent(m->opened);
 
     if (opened) decode_loop(m, reader);

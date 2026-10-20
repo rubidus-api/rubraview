@@ -59,6 +59,20 @@ uint32_t rubraview_pal_render_last_hresult(void);
  */
 u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
 
+/* 1.25.1: what draws the window, for the information window (owner, 2026-10-20). */
+typedef struct rubraview_render_facts {
+    char     adapter[128];          /* the graphics card's name, UTF-8 */
+    uint64_t video_memory;          /* its own memory, bytes; 0 when it has none (shared) */
+    bool     warp;                  /* Windows' software rasteriser, no card */
+    uint32_t feature_level;         /* D3D_FEATURE_LEVEL, e.g. 0xb100 for 11_1 */
+    int32_t  buffers;               /* the swap chain's */
+    bool     vsync;                 /* presented with the screen's refresh */
+    bool     decode_device;         /* a second device was made on the card for decoding */
+    uint32_t decoder_profiles;      /* the video decoders that device offers */
+} rubraview_render_facts_t;
+
+bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render_facts_t *out);
+
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height);
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer);
 

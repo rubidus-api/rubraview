@@ -1,3 +1,4 @@
+#include <math.h>
 #include "rubraview/mediaclock.h"
 #include "rubraview/lang.h"
 
@@ -359,6 +360,24 @@ double rubraview_media_redraw_wait(double seconds_since_render) {
 }
 
 /* ---- RV-062: hardware decode ---- */
+
+bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,
+                               uint32_t header_channels, uint32_t *out_rate, uint32_t *out_channels) {
+    if (rate == 0 || channels == 0 || !(per_second > 0.0)) return false;
+    double expected = (double)rate * (double)channels;
+    if (fabs(per_second - expected) <= expected * 0.1) return false;
+    double ratio = expected / per_second;
+    bool doubled = fabs(ratio - 2.0) < 0.1 || fabs(ratio - 4.0) < 0.2 || fabs(ratio - 0.5) < 0.03 || fabs(ratio - 0.25) < 0.015;
+    if (!doubled) return false;
+    double header = (double)header_rate * (double)header_channels;
+    uint32_t r = 0, c = 0;
+    if (header > 0.0 && fabs(per_second - header) <= header * 0.1) { r = header_rate; c = header_channels; }
+    else { c = channels; r = (uint32_t)lround(per_second / (double)channels); }
+    if (r < 4000 || r > 384000 || c == 0 || c > 8) return false;
+    if (out_rate) *out_rate = r;
+    if (out_channels) *out_channels = c;
+    return true;
+}
 
 bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_profiles) {
     if (!has_device) return false;

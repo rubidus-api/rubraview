@@ -59,6 +59,16 @@ double rubraview_media_redraw_wait(double seconds_since_render);
  */
 bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_profiles);
 
+/**
+ * 1.25.1: the sound's first second counted. `per_second` floats came a second at what the decoder named
+ * `rate` x `channels`. True with the format to play at when the count is the decoder's mistake — off by a
+ * factor of 2 or 4 (a rate or a channel count doubled, or both) — the header's (`header_rate` x
+ * `header_channels`) when it fits the count, else the same channels at the counted rate. False when the
+ * count agrees (within a tenth) or is off by anything else (a gap in the sound), or the result is no rate.
+ */
+bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,
+                               uint32_t header_channels, uint32_t *out_rate, uint32_t *out_channels);
+
 /* ---- the playback clock ---- */
 
 typedef enum rubraview_clock_master {

@@ -11,6 +11,8 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include "rubraview/pal/pal_media_backend.h"
+#include "rubraview/lang.h"
+#include <stdio.h>
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/fileinfo.h"
 
@@ -544,6 +546,7 @@ typedef struct ff_decode {
     AVFormatContext *format;
     AVCodecContext *video, *audio;
     struct SwsContext *sws;
+    int sws_w, sws_h, sws_format;             /* 1.25.1: the pictures `sws` was made for, kept while they stay so */
     struct SwrContext *swr;
     int swr_rate, swr_channels, swr_format;   /* what the resampler was told it would be given */
     AVPacket *packet;
@@ -875,6 +878,10 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
             return false;
         }
         d->video = g_ff.avcodec_alloc_context3(decoder);
+        if (d->video) {   /* 1.25.1: every core of the processor (it decoded on one) */
+            d->video->thread_count = 0;
+            d->video->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        }
         if (!d->video || g_ff.avcodec_parameters_to_context(d->video, par) < 0 ||
             g_ff.avcodec_open2(d->video, decoder, NULL) < 0) {
             m->failure = rubraview_media_classify(true, true, false, fourcc);
@@ -927,6 +934,14 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         .audio_channels = m->audio_channels,
         .bitrate_kbps = d->format->bit_rate > 0 ? (uint32_t)(d->format->bit_rate / 1000) : 0,
     };
+    if (m->video_stream >= 0) {   /* 1.25.1: the way to the screen, for the information window */
+        rubraview_media_info_t *in = &m->info;
+        in->decode_threads = d->video->thread_count > 0 ? d->video->thread_count : -1;
+        snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the processor"));
+        snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("swscale on the processor, bilinear, to BGRA"));
+        snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
+        snprintf(in->path_why_software, sizeof(in->path_why_software), "%s", N_("FFmpeg decodes on the processor; the graphics card decodes through Media Foundation"));
+    }
     return true;
 }
 
@@ -953,15 +968,23 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
         Sleep(5);
     }
 
-    d->sws = g_ff.sws_getContext(d->frame->width, d->frame->height, (enum AVPixelFormat)d->frame->format,
-                                 m->width, m->height, AV_PIX_FMT_BGRA, SWS_BILINEAR, NULL, NULL, NULL);
+    /* 1.25.1: one converter while the pictures keep their size and format (one was made and freed a picture) */
+    if (d->sws && (d->sws_w != d->frame->width || d->sws_h != d->frame->height || d->sws_format != d->frame->format)) {
+        g_ff.sws_freeContext(d->sws);
+        d->sws = NULL;
+    }
+    if (!d->sws) {
+        d->sws = g_ff.sws_getContext(d->frame->width, d->frame->height, (enum AVPixelFormat)d->frame->format,
+                                     m->width, m->height, AV_PIX_FMT_BGRA, SWS_BILINEAR, NULL, NULL, NULL);
+        d->sws_w = d->frame->width;
+        d->sws_h = d->frame->height;
+        d->sws_format = d->frame->format;
+    }
     if (!d->sws) return true;
     uint8_t *dst[4] = { m->slots[slot].pixels, NULL, NULL, NULL };
     int stride[4] = { m->width * 4, 0, 0, 0 };
     g_ff.sws_scale(d->sws, (const uint8_t *const*)d->frame->data, d->frame->linesize, 0, d->frame->height,
                    dst, stride);
-    g_ff.sws_freeContext(d->sws);
-    d->sws = NULL;
 
     m->slots[slot].pts = pts;
     m->slots[slot].duration = duration;

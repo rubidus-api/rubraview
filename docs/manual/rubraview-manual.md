@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.25.0.exe              the viewer, as built
-dist/rubraview-v1.25.0/                 the release bundle
-dist/rubraview-v1.25.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.25.1.exe              the viewer, as built
+dist/rubraview-v1.25.1/                 the release bundle
+dist/rubraview-v1.25.1.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1123,7 +1123,16 @@ camera and lens, when it was taken (with the time zone), exposure, aperture,
 ISO, focal length, program, metering, white balance, colour space, and where
 it was: the place in degrees and minutes, the same in decimal degrees for a
 map's search box, the altitude, the direction the camera faced and the GPS
-time. A picture without any says so. `I` again or `Esc` closes it.
+time. A picture without any says so. For a film, **Display** says how its
+pictures reach the screen: which decoder, on the graphics card or the
+processor (and its threads), where the colours are turned into BGRA, how a
+picture gets into the window, what draws it (Direct2D 1.1 on Direct3D 11,
+the feature level and the card, or WARP, Windows' software rasteriser), the
+card's memory, the swap chain and whether it waits for the screen's
+refresh, how many video decoders the card offers, and GPU decoding's
+setting with the reason a film is decoded in software. When the sound is
+played in another format than the decoder named (see below), **Sound
+played at** says which. `I` again or `Esc` closes it.
 
 For a picture it also gives the aspect ratio, the size it prints at
 its DPI, how much memory it takes on screen, how long it took to decode

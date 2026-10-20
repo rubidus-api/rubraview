@@ -41,6 +41,13 @@ typedef struct rubraview_media_info {
     /* For the information window (owner, 2026-09-29); 0 when unknown. */
     uint32_t audio_sample_rate, audio_channels;
     uint32_t bitrate_kbps;               /* the whole file's, or picture and sound added */
+    /* 1.25.1 (owner, 2026-10-20: "어떤 백엔드나 다이렉트x 같은거 어떻게 하여 화면에 출력해 주는지"): how the
+       pictures get to the screen, in the backend's words (English; the window translates the labels) */
+    char     path_decoder[128];          /* what decodes the pictures, and where */
+    char     path_colours[128];          /* what turns them into BGRA, and where */
+    char     path_handover[128];         /* how a picture reaches the page's texture */
+    char     path_why_software[128];     /* decoded in software: why (empty on the card) */
+    int32_t  decode_threads;             /* the decoder's threads: 0 unknown, -1 one a core */
 } rubraview_media_info_t;
 
 /*

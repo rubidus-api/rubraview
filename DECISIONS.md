@@ -1838,3 +1838,15 @@ Do not store credentials, private infrastructure details, personal data, private
   - the open-file screen in an archive, Cancel/Open, a column widened and moved, Individual tap;
   - settings pages (faces, opacities, text), the rename box; text: paragraphs, one run, auto-scroll, Edit in Notepad, the wheel on UTF8;
   - a wide page alone in two pages on the first pass and after leaving memory; the exe holds five icons.
+
+## 2026-10-21: D-176 The sound counted against its times; the way to the screen in the information window
+
+- Status: Accepted (owner 2026-10-20):
+  - "소리가 무슨 망가진 비디오 테이프처럼 음성 소리가 고음으로 빠른 속도 재생인 것처럼 들리는데" — an MP4 of AAC-LC 22050 Hz mono (FFmpeg: 1024 samples a frame, no SBR) shown as "Decoded as 44100 Hz, 2 channels" on the owner's PC;
+  - "ffmpeg로 백엔드를 바꾸면 소프트웨어로 재생하네요. 하드웨어 가속 가능하게" (RV-149, a T3 plan waiting for the owner);
+  - "i키 눌렀을 때 나오는 정보에서 현재 어떤 백엔드나 다이렉트x 같은거 어떻게 하여 화면에 출력해 주는지도 자세한 정보".
+- Decision:
+  - Media Foundation's sound: the floats of the first second after opening, a seek or a format change are counted against the samples' times (`audio_count_check`). `rubraview_audio_count_fix` (core, tested) corrects only a factor of 2 or 4 — a rate or a channel count doubled — to the header's format when it fits, else the same channels at the counted rate; anything else (a gap) is left alone. The device is reopened and flushed at that sample's time.
+  - FFmpeg: `thread_count` 0 (a thread a core), frame and slice threads; the swscale context kept while width, height and format stay.
+  - `rubraview_media_info_t` carries the backend's own words for the decoder, the colour conversion, the handover and why a film is decoded in software (`N_` literals, translated where shown), and the decoder's threads; `rubraview_pal_render_facts` gives the adapter, its dedicated memory, WARP, feature level, the swap chain and the decode device's profiles.
+- Consequences: VM (2026-10-20, no graphics card, Windows decoding that file as 22050 Hz mono): 24 s of film in 22.5 s of wall clock, the count left it alone; the Display block shown for Media Foundation. Not seen: the correction itself (only the owner's PC decodes it as 44100 Hz stereo) and FFmpeg's block (the VM has FFmpeg 8's DLLs, the program takes 9's).
