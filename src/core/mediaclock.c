@@ -361,6 +361,11 @@ double rubraview_media_redraw_wait(double seconds_since_render) {
 
 /* ---- RV-062: hardware decode ---- */
 
+bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds) {
+    if (!(duration > 0.0)) return false;
+    return position >= duration - 1.5 && stalled_seconds >= 3.0;
+}
+
 bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,
                                uint32_t header_channels, uint32_t *out_rate, uint32_t *out_channels) {
     if (rate == 0 || channels == 0 || !(per_second > 0.0)) return false;

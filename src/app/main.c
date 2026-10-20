@@ -529,6 +529,7 @@ typedef struct app_state {
     uint8_t               *shuffle_flags;
     size_t                 shuffle_flags_count;
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
+    double                 media_progress_pos, media_progress_at;   /* 1.25.2: the last picture's time plus the sound heard, and when it last changed */
     double                 sound_dry_since;   /* when the sound device last ran empty; 0 while it plays */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
@@ -2398,6 +2399,8 @@ static void media_close(app_state_t *app) {
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
     /* Otherwise the still page after a film would keep drawing its last
        line of dialogue. */
     vobsub_clear(app);
@@ -3102,6 +3105,8 @@ static bool bgm_adopt(app_state_t *app) {
     app->media = NULL;
     app->media_page = -1;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
     app->media_has_frame = false;
     app->media_sought = false;
 
@@ -3123,6 +3128,8 @@ static bool bgm_release_to_page(app_state_t *app, int32_t index) {
     app->media_paused = app->bgm_paused;
     app->media_position = app->bgm_position;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
     app->media_has_frame = false;
     app->media_sought = false;
     app->media_title_tenth = -1;
@@ -3219,6 +3226,8 @@ static void media_prepare(app_state_t *app) {
     app->media_position = 0.0;
     app->media_title_tenth = -1;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
     /* §5.3: the sound is the master clock when it reaches a device;
        otherwise — a silent file, or no device, as on the test VM — the
        wall clock is. */
@@ -3400,11 +3409,23 @@ static void media_tick(app_state_t *app) {
     music_transition_tick(app);
     if (app->media != m) return;      /* it took over; the rest is the new track's */
 
+    if (app->media_paused) app->media_progress_at = now;   /* 1.25.2: a pause is no stall */
     if (!app->media_paused) {
         /* A sound-only file with no device decodes nothing; its end is its duration. */
         bool at_end = (app->media_info.has_video || app->media_info.audio_output)
             ? rubraview_pal_media_finished(m)
             : (app->media_info.duration_seconds > 0.0 && clock >= app->media_info.duration_seconds);
+        /* 1.25.2: the end nobody announced — a last picture waiting on a stopped clock, a device that never
+           empties — found at the length with nothing new: no picture shown, no sound heard, for 3 s */
+        double heard = 0.0, heard_at = 0.0;
+        double progress = (app->media_has_frame ? app->media_shown_pts : 0.0) +
+                          (rubraview_pal_media_audio_position(m, &heard, &heard_at) ? heard : 0.0);
+        if (fabs(progress - app->media_progress_pos) > 0.001) {
+            app->media_progress_pos = progress;
+            app->media_progress_at = now;
+        }
+        if (!at_end && rubraview_media_end_overdue(app->media_position, app->media_info.duration_seconds,
+                                                   now - app->media_progress_at)) at_end = true;
         if (at_end && app->next_media && app->next_playing) {
             /* One was already playing under it: hand over rather than
                stop — but not in the middle of a crossfade. The backend
@@ -3552,6 +3573,8 @@ static void music_promote_next(app_state_t *app) {
     rubraview_pal_media_set_gain(app->media, 1.0);
     app->media_paused = false;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
     app->media_has_frame = false;
     app->media_sought = false;
     app->media_position = 0.0;
@@ -3649,6 +3672,8 @@ static void media_seek_to(app_state_t *app, double seconds) {
     app->media_has_frame = !app->media_info.has_video;
     app->media_sought = true;
     app->media_ended = false;
+    app->media_progress_pos = -1.0;   /* 1.25.2: counted from now, not from the film before */
+    app->media_progress_at = rubraview_pal_time_now_seconds();
 }
 
 static void media_toggle_pause(app_state_t *app) {

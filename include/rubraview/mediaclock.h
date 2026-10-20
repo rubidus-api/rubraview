@@ -66,6 +66,14 @@ bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_
  * `header_channels`) when it fits the count, else the same channels at the counted rate. False when the
  * count agrees (within a tenth) or is off by anything else (a gap in the sound), or the result is no rate.
  */
+/**
+ * 1.25.2 (owner, 2026-10-21: "mp4에서, 연속으로 재생이 안되고 마지막에 끊기는 일이 가끔"): the end, when the
+ * decoder and the sound never say so: the position within 1.5 s of `duration` (or past it) and nothing new —
+ * no picture shown, no sound heard — for 3 s (`stalled_seconds`). A film longer than its header says keeps
+ * showing pictures, so it is not cut. False without a duration.
+ */
+bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds);
+
 bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,
                                uint32_t header_channels, uint32_t *out_rate, uint32_t *out_channels);
 

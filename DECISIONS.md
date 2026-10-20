@@ -1850,3 +1850,9 @@ Do not store credentials, private infrastructure details, personal data, private
   - FFmpeg: `thread_count` 0 (a thread a core), frame and slice threads; the swscale context kept while width, height and format stay.
   - `rubraview_media_info_t` carries the backend's own words for the decoder, the colour conversion, the handover and why a film is decoded in software (`N_` literals, translated where shown), and the decoder's threads; `rubraview_pal_render_facts` gives the adapter, its dedicated memory, WARP, feature level, the swap chain and the decode device's profiles.
 - Consequences: VM (2026-10-20, no graphics card, Windows decoding that file as 22050 Hz mono): 24 s of film in 22.5 s of wall clock, the count left it alone; the Display block shown for Media Foundation. Not seen: the correction itself (only the owner's PC decodes it as 44100 Hz stereo) and FFmpeg's block (the VM has FFmpeg 8's DLLs, the program takes 9's).
+
+## 2026-10-21: D-177 The end nobody announces
+
+- Status: Accepted (owner 2026-10-21): "mp4에서, 연속으로 재생이 안되고 마지막에 끊기는 일이 가끔 있습니다 ... 음성과 영상이 길이가 안맞아서 둘중 하나가 끊겨도 남은 것이 있어 다음으로 안넘어가는게 아닌가".
+- Decision: besides the backend's "finished" (no picture waiting, the decoder at its end, the device drained), a film ends when its position is within 1.5 s of its length (or past it) and nothing new has come for 3 s — the last shown picture's time plus the heard sound's position unchanged (`rubraview_media_end_overdue`, core, tested). The mark is reset on every open and seek and held while paused. No clock-past-the-length rule: a film longer than its header would be cut.
+- Consequences: not reproduced on the VM (the owner's AAC film and a 1 s clip went on with both decoders, before and after); a safety net, not a found cause. VM: the 1 s clip went on, a film paused 3 s before its end stayed, resumed it went on, both decoders.
