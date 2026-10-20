@@ -59,6 +59,9 @@ uint32_t rubraview_pal_render_last_hresult(void);
  */
 u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
 
+/* D-179: how the swap chain hands a frame to the compositor. */
+enum { RUBRAVIEW_PRESENT_COPY = 0, RUBRAVIEW_PRESENT_FLIP_DISCARD = 1, RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL = 2 };
+
 /* 1.25.1: what draws the window, for the information window (owner, 2026-10-20). */
 typedef struct rubraview_render_facts {
     char     adapter[128];          /* the graphics card's name, UTF-8 */
@@ -67,6 +70,7 @@ typedef struct rubraview_render_facts {
     uint32_t feature_level;         /* D3D_FEATURE_LEVEL, e.g. 0xb100 for 11_1 */
     int32_t  buffers;               /* the swap chain's */
     bool     vsync;                 /* presented with the screen's refresh */
+    int32_t  present_model;         /* RUBRAVIEW_PRESENT_* (D-179) */
     bool     decode_device;         /* a second device was made on the card for decoding */
     uint32_t decoder_profiles;      /* the video decoders that device offers */
 } rubraview_render_facts_t;

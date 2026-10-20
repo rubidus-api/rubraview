@@ -19776,7 +19776,10 @@ static void info_gather(app_state_t *app) {
                                         (fl >> 12) & 0xFu, (fl >> 8) & 0xFu, rf.warp ? T("WARP, Windows' software rasteriser") : rf.adapter);
                     if (rf.video_memory > 0)
                         rubraview_info_addf(a, &info, T("Video memory"), "%llu MB", (unsigned long long)(rf.video_memory >> 20));
-                    rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, BGRA, %s"), rf.buffers,
+                    rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, BGRA, %s, %s"), rf.buffers,
+                                        rf.present_model == RUBRAVIEW_PRESENT_FLIP_DISCARD ? T("flip model (flip discard)")
+                                        : rf.present_model == RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL ? T("flip model (flip sequential)")
+                                        : T("copy model (blt)"),
                                         rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
                     if (rf.decode_device) rubraview_info_addf(a, &info, T("Card's decoders"), T("%u kinds (Direct3D 11 video)"), (unsigned)rf.decoder_profiles);
                 }

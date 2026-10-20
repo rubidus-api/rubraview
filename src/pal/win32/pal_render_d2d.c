@@ -100,6 +100,7 @@ struct rubraview_renderer {
     ID3D11Device *decode_d3d;      /* RV-062: the decoder's own device, same card; made on first use */
     bool force_lost;               /* the next present is treated as a lost device (a test's trigger) */
     IDXGISwapChain1 *swap_chain;
+    int32_t present_model;         /* RUBRAVIEW_PRESENT_*: how the swap chain hands frames to the compositor */
     ID2D1Bitmap1 *back_buffer;
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
     HWND hwnd;
@@ -272,8 +273,25 @@ static bool create_device(struct rubraview_renderer *r) {
         .Flags = 0,
     };
 
-    hr = IDXGIFactory2_CreateSwapChainForHwnd(dxgi_factory, (IUnknown*)r->d3d, r->hwnd,
-                                              &desc, NULL, NULL, &r->swap_chain);
+    /* The flip model (D-179): the compositor takes the back buffer as it lies instead of copying it into the
+       window's redirection surface, one copy less a frame and the way to independent flip. FLIP_DISCARD
+       (Windows 10) first, FLIP_SEQUENTIAL (8) next, the copy model last. Every frame is drawn whole from a
+       clear, so a discarded back buffer loses nothing. A layered window (the floating widget, its opacity)
+       keeps the copy model: DWM's alpha is applied to the redirection surface a flip chain does not use. */
+    static const struct { DXGI_SWAP_EFFECT effect; int32_t model; } effects[] = {
+        { DXGI_SWAP_EFFECT_FLIP_DISCARD, RUBRAVIEW_PRESENT_FLIP_DISCARD },
+        { DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL },
+        { DXGI_SWAP_EFFECT_DISCARD, RUBRAVIEW_PRESENT_COPY },
+    };
+    bool layered = (GetWindowLongPtrW(r->hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) != 0;
+    hr = E_FAIL;
+    for (size_t i = layered ? 2 : 0; i < sizeof(effects) / sizeof(effects[0]); i++) {
+        desc.SwapEffect = effects[i].effect;
+        hr = IDXGIFactory2_CreateSwapChainForHwnd(dxgi_factory, (IUnknown*)r->d3d, r->hwnd,
+                                                  &desc, NULL, NULL, &r->swap_chain);
+        if (SUCCEEDED(hr) && r->swap_chain) { r->present_model = effects[i].model; break; }
+        r->swap_chain = NULL;
+    }
     IDXGIFactory2_Release(dxgi_factory);
     if (FAILED(hr) || !r->swap_chain) return fail_step("creating the swap chain for the window", hr);
 
@@ -1349,6 +1367,7 @@ bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render
     if (!out) return false;
     *out = (rubraview_render_facts_t){ .warp = g_used_warp, .feature_level = (uint32_t)g_feature_level, .buffers = 2, .vsync = true };
     if (!renderer || !renderer->d3d) return false;
+    out->present_model = renderer->present_model;
     IDXGIDevice *dxgi = NULL;
     IDXGIAdapter *adapter = NULL;
     if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->d3d, &RV_IID_IDXGIDevice, (void**)&dxgi)) && dxgi) {
