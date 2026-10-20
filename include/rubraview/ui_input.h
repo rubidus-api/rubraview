@@ -42,6 +42,7 @@ typedef enum rubraview_pointer_intent {
     RUBRAVIEW_INTENT_SCROLL_VERTICAL,  /* wheel while the image overflows vertically */
     RUBRAVIEW_INTENT_SKIP_FORWARD,     /* Shift + wheel: 10-page skip */
     RUBRAVIEW_INTENT_SKIP_BACKWARD,
+    RUBRAVIEW_INTENT_CENTER_PICTURE,   /* 1.25.0: double click: the picture back to the window's middle, its size kept */
 } rubraview_pointer_intent_t;
 
 /**
@@ -56,7 +57,7 @@ typedef struct rubraview_pointer_context {
     bool comic_mode;             /* §3.7.3: the click zones only flip pages in comic viewing */
     bool zoomed_in;
     bool scrollable_vertically;
-    bool wheel_turns_pages;      /* a picture or a book, not a film or a song (owner, 2026-10-15) */
+    bool wheel_zooms;            /* a picture or a book, not a film or a song: the wheel zooms (owner, 2026-10-20) */
 } rubraview_pointer_context_t;
 
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click);

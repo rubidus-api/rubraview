@@ -11,6 +11,7 @@
 #include <dwmapi.h>
 #include <string.h>
 #include <stdlib.h>
+#include <wctype.h>
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/path.h"
 
@@ -49,7 +50,7 @@ struct rubraview_window {
     bool owned;             /* §3.22: a window belonging to another; its end is not the program's */
     bool tool;              /* RFC-0002 Q6: a detached toolbox */
     bool cursor_visible;
-    bool cursor_cross;      /* RV-137: an area is being chosen on the picture */
+    int cursor_shape;      /* RV-137: an area is being chosen on the picture */   /* 1.25.0: rubraview_cursor_shape_t */
     bool fullscreen;
     bool tracking_leave;    /* TrackMouseEvent asked for WM_MOUSELEAVE */
     int32_t width, height;
@@ -604,7 +605,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             /* §3.2.5: hidden over this window's client area only. ShowCursor hid it over every
                window of the program, the settings window too, where moving it brought nothing back. */
             if (!w->cursor_visible && LOWORD(lparam) == HTCLIENT) { SetCursor(NULL); return TRUE; }
-            if (w->cursor_cross && LOWORD(lparam) == HTCLIENT) { SetCursor(LoadCursorW(NULL, IDC_CROSS)); return TRUE; }
+            if (w->cursor_shape != RUBRAVIEW_CURSOR_ARROW && LOWORD(lparam) == HTCLIENT) {
+                SetCursor(LoadCursorW(NULL, w->cursor_shape == RUBRAVIEW_CURSOR_SIZE_WE ? IDC_SIZEWE : IDC_CROSS));
+                return TRUE;
+            }
             break;
 
         case WM_SYSCOMMAND:
@@ -1216,6 +1220,34 @@ bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window) {
     return window ? window->fullscreen : false;
 }
 
+bool rubraview_pal_app_icon_bgra(uint8_t *out, int32_t size) {
+    if (!out || size <= 0 || size > 1024) return false;
+    HICON icon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+    if (!icon) return false;
+    bool ok = false;
+    ICONINFO info = { 0 };
+    if (GetIconInfo(icon, &info) && info.hbmColor) {
+        BITMAPINFO bi = { 0 };
+        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+        bi.bmiHeader.biWidth = size;
+        bi.bmiHeader.biHeight = -size;   /* top row first */
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        HDC dc = GetDC(NULL);
+        ok = dc && GetDIBits(dc, info.hbmColor, 0, (UINT)size, out, &bi, DIB_RGB_COLORS) == size;
+        if (dc) ReleaseDC(NULL, dc);
+    }
+    if (info.hbmColor) DeleteObject(info.hbmColor);
+    if (info.hbmMask) DeleteObject(info.hbmMask);
+    DestroyIcon(icon);
+    return ok;
+}
+
+bool rubraview_pal_window_is_maximized(const rubraview_window_t *window) {
+    return window && window->hwnd && !window->fullscreen && IsZoomed(window->hwnd);
+}
+
 void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible) {
     if (!window || window->cursor_visible == visible) return;
     window->cursor_visible = visible;
@@ -1227,12 +1259,11 @@ void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool vi
 }
 
 void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview_cursor_shape_t shape) {
-    bool cross = shape == RUBRAVIEW_CURSOR_CROSS;
-    if (!window || window->cursor_cross == cross) return;
-    window->cursor_cross = cross;
+    if (!window || window->cursor_shape == (int)shape) return;
+    window->cursor_shape = (int)shape;
     POINT at;   /* the pointer over it now changes at once */
     if (window->hwnd && window->cursor_visible && GetCursorPos(&at) && WindowFromPoint(at) == window->hwnd) {
-        SetCursor(LoadCursorW(NULL, cross ? IDC_CROSS : IDC_ARROW));
+        SetCursor(LoadCursorW(NULL, shape == RUBRAVIEW_CURSOR_CROSS ? IDC_CROSS : shape == RUBRAVIEW_CURSOR_SIZE_WE ? IDC_SIZEWE : IDC_ARROW));
     }
 }
 
@@ -1503,6 +1534,26 @@ static void delete_if_empty(HKEY root, const WCHAR *subkey) {
     if (got == ERROR_SUCCESS && keys == 0 && values == 0) RegDeleteKeyW(root, subkey);
 }
 
+/* 1.25.0 (owner, 2026-10-20): the icon a type of file shows in Explorer — the resource ID in
+   rubraview.rc: 2 a film, 3 text, 4 a picture, 5 a book (an archive); the program's own (1) for the rest. */
+static int icon_for_ext(const WCHAR *ext) {
+    static const struct { int id; const WCHAR *list; } KINDS[] = {
+        { 2, L".mp4.m4v.mkv.webm.avi.mov.wmv.flv.mpg.mpeg.ts.m2ts.mts.3gp.ogv.asf.vob." },
+        { 3, L".txt.text.md.log.nfo.ini.csv.json.xml.srt.ass.smi.vtt." },
+        { 4, L".jpg.jpeg.jpe.jfif.png.gif.webp.bmp.dib.tif.tiff.avif.heic.heif.jxl.ico.tga.psd.svg.dds.qoi." },
+        { 5, L".cbz.cbr.cb7.cbt.zip.rar.7z.tar.alz.egg.azo.epub.pdf." },
+    };
+    WCHAR probe[72];
+    size_t n = wcslen(ext);
+    if (n == 0 || n + 2 > sizeof(probe) / sizeof(probe[0])) return 1;
+    for (size_t i = 0; i < n; ++i) probe[i] = (WCHAR)towlower(ext[i]);
+    probe[n] = L'.';
+    probe[n + 1] = 0;
+    for (size_t k = 0; k < sizeof(KINDS) / sizeof(KINDS[0]); ++k)
+        if (wcsstr(KINDS[k].list, probe)) return KINDS[k].id;
+    return 1;
+}
+
 static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR exe[MAX_PATH * 2];
     if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
@@ -1524,7 +1575,8 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     wcscat(subkey, L"\\DefaultIcon");
     WCHAR icon[MAX_PATH * 2 + 8];
     wcscpy(icon, exe);
-    wcscat(icon, L",0");
+    int id = icon_for_ext(ext);
+    wcscat(icon, id == 2 ? L",-2" : id == 3 ? L",-3" : id == 4 ? L",-4" : id == 5 ? L",-5" : L",0");
     write_key(g_shell_root, subkey, NULL, icon);
 
     /* Also among the programs "Open with" offers for the type, whoever

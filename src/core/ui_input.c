@@ -10,32 +10,32 @@ rubraview_click_zone_t rubraview_click_zone_at(double x, double window_width) {
     return RUBRAVIEW_ZONE_CENTER;
 }
 
-/* §3.7.3: the left zone is "previous" when reading left-to-right and
-   "next" when reading right-to-left — the zones follow the page order,
-   not the screen side. */
+/* 1.25.0 (owner, 2026-10-20: "어떤 레이아웃에서도 우측 가운데가 다음파일/폴더 좌측 가운데가 이전파일/폴더입니다.
+   레이아웃이 바뀌었거나 rtl 모드라고 이게 바뀌면 안됩니다"): the left zone is always the one before, the right
+   always the next, whatever the reading order; the middle does nothing ("가운데 클릭 ... 아무것도 안하게"). */
 static rubraview_pointer_intent_t zone_to_page_intent(rubraview_click_zone_t zone, rubraview_reading_dir_t dir) {
-    bool rtl = (dir == RUBRAVIEW_READING_RTL);
+    (void)dir;
     switch (zone) {
         case RUBRAVIEW_ZONE_LEFT:
-            return rtl ? RUBRAVIEW_INTENT_NEXT_PAGE : RUBRAVIEW_INTENT_PREV_PAGE;
+            return RUBRAVIEW_INTENT_PREV_PAGE;
         case RUBRAVIEW_ZONE_RIGHT:
-            return rtl ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
+            return RUBRAVIEW_INTENT_NEXT_PAGE;
         case RUBRAVIEW_ZONE_CENTER:
         default:
-            return RUBRAVIEW_INTENT_TOGGLE_OVERLAY;
+            return RUBRAVIEW_INTENT_NONE;
     }
 }
 
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click) {
     if (!ctx) return RUBRAVIEW_INTENT_NONE;
 
-    if (is_double_click) return RUBRAVIEW_INTENT_TOGGLE_FULLSCREEN;
+    if (is_double_click) return RUBRAVIEW_INTENT_CENTER_PICTURE;   /* 1.25.0: the picture back in the middle */
 
     /* Dragging a zoomed image pans it; the page-flip zones would fight
        with panning, so they only apply when the whole image is visible. */
     if (ctx->zoomed_in) return RUBRAVIEW_INTENT_PAN;
 
-    if (!ctx->comic_mode) return RUBRAVIEW_INTENT_TOGGLE_OVERLAY;
+    if (!ctx->comic_mode) return RUBRAVIEW_INTENT_NONE;   /* 1.25.0: a click no longer opens the toolbar */
 
     return zone_to_page_intent(rubraview_click_zone_at(x, ctx->window_width), ctx->reading_direction);
 }
@@ -64,13 +64,10 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
         return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
     }
 
-    /* On a picture that fits, the wheel turns pages: away from you the one
-     * before, towards you the next (owner, 2026-10-15, reversing 2026-09-09).
-     * A picture larger than the window is left alone, so one notch never
-     * nudges it here and jumps to another file there; a film or a song
-     * has its own wheel. */
-    if (ctx->wheel_turns_pages && !ctx->zoomed_in) {
-        return forward ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
+    /* On a picture the wheel zooms, away from you in (owner, 2026-10-20: "휠을 돌리면 ... 줌 동작을 하게",
+     * turning pages before); a film or a song has its own wheel. */
+    if (ctx->wheel_zooms) {
+        return forward ? RUBRAVIEW_INTENT_ZOOM_IN : RUBRAVIEW_INTENT_ZOOM_OUT;
     }
     return RUBRAVIEW_INTENT_NONE;
 }

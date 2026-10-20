@@ -32,6 +32,29 @@ uint32_t rubraview_textenc_codepage(rubraview_textenc_t enc) {
     return enc < RUBRAVIEW_TEXTENC_COUNT ? ENCODINGS[enc].codepage : 0;
 }
 
+const char *rubraview_textenc_short(rubraview_textenc_t enc) {
+    switch (enc) {
+        case RUBRAVIEW_TEXTENC_UTF8:      return "UTF8";
+        case RUBRAVIEW_TEXTENC_UTF16LE:   return "UTF16\nLE";
+        case RUBRAVIEW_TEXTENC_UTF16BE:   return "UTF16\nBE";
+        case RUBRAVIEW_TEXTENC_CP949:     return "EUC\nKR";
+        case RUBRAVIEW_TEXTENC_ISO2022KR: return "ISO\nKR";
+        case RUBRAVIEW_TEXTENC_JOHAB:     return "JOHAB";
+        case RUBRAVIEW_TEXTENC_SJIS:      return "SHFT\nJIS";
+        case RUBRAVIEW_TEXTENC_EUCJP:     return "EUC\nJP";
+        case RUBRAVIEW_TEXTENC_ISO2022JP: return "ISO\nJP";
+        case RUBRAVIEW_TEXTENC_GBK:       return "SIMP\nCHN";
+        case RUBRAVIEW_TEXTENC_GB18030:   return "GB\n18030";
+        case RUBRAVIEW_TEXTENC_HZ:        return "HZ";
+        case RUBRAVIEW_TEXTENC_BIG5:      return "TRAD\nCHN";
+        case RUBRAVIEW_TEXTENC_CNS:       return "EUC\nTW";
+        case RUBRAVIEW_TEXTENC_CP1252:    return "WEST";
+        case RUBRAVIEW_TEXTENC_CP437:     return "DOS";
+        case RUBRAVIEW_TEXTENC_AUTO:
+        default:                          return "AUTO";
+    }
+}
+
 const char *rubraview_textenc_name(rubraview_textenc_t enc) {
     return enc < RUBRAVIEW_TEXTENC_COUNT ? ENCODINGS[enc].name : "?";
 }

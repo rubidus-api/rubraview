@@ -199,7 +199,7 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
            one where a sentence ends and the next line is indented, or, with
            no indenting at all, wherever a line ends a sentence. */
         size_t *run = (size_t *)calloc(n ? n : 1, sizeof(size_t));
-        size_t hist[8] = {0};
+        size_t hist[8] = {0}, lines_in = 0, lines_indented = 0;
         bool any_indent = false;
         if (!run) { free(lines); free(blank); return false; }
         for (size_t k = 0; k < n; ++k) {
@@ -208,8 +208,14 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             while (j < n && blank[j]) { ++r; ++j; }
             run[k] = j < n ? r : 0;   /* the last line: nothing follows */
             if (run[k]) hist[r < 7 ? r : 7]++;
-            any_indent = any_indent || starts_indented(s + lines[k].start, lines[k].end - lines[k].start);
+            bool in = starts_indented(s + lines[k].start, lines[k].end - lines[k].start);
+            any_indent = any_indent || in;
+            lines_in++;
+            lines_indented += in;
         }
+        /* 1.25.0 (VM, 2026-10-20: indented paragraphs a break apart, a blank line now and then, ran
+           together): an indent marks a paragraph when only some lines have one */
+        bool indent_marks = lines_indented > 0 && lines_indented < lines_in;
         size_t usual = 1;
         for (size_t r = 1; r < 8; ++r) if (hist[r] > hist[usual]) usual = r;
         bool more_ever = false;
@@ -229,11 +235,15 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
                            !rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
             if (heading && open) { end_para(&b); open = false; }
             if (!open) {
-                begin(&b, lines[k].start, b.v->count > 0, false);
+                /* 1.25.0 (owner, 2026-10-20: "문단의 맨 처음은 띄우게 ... 문단의 끝에서 개행. 빈 줄이 들어가는건 아님"):
+                   as in a printed novel — the first line in by a space, the next paragraph on the next line */
+                begin(&b, lines[k].start, false, false);
                 open = true;
                 if (!trim_lead && starts_indented(s + lines[k].start, lines[k].end - lines[k].start)) {
                     size_t keep_a = lines[k].start;
                     put(&b, s + keep_a, a - keep_a);   /* the indent the paragraph had */
+                } else if (!heading) {
+                    put(&b, " ", 1);
                 }
                 put(&b, s + a, e - a);
             } else {
@@ -244,7 +254,8 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             size_t next = k + run[k];
             bool sentence = rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
             bool ends;
-            if (more_ever) ends = sentence && run[k] > usual;
+            if (more_ever) ends = sentence && (run[k] > usual ||
+                                               (indent_marks && starts_indented(s + lines[next].start, lines[next].end - lines[next].start)));
             else if (any_indent) ends = sentence && starts_indented(s + lines[next].start, lines[next].end - lines[next].start);
             else ends = sentence;
             if (ends) { end_para(&b); open = false; }

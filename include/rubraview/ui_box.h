@@ -315,6 +315,9 @@ bool rubraview_box_dock(rubraview_box_t *box);
 void rubraview_box_hover_enter(rubraview_box_t *box);
 void rubraview_box_hover_leave(rubraview_box_t *box);
 void rubraview_box_click_anchor(rubraview_box_t *box); /* toggles the click-to-lock state */
+/* 1.25.0 (owner, 2026-10-20: "F 아이콘 클릭해도 Pin 상태가 되지 않게"): open as a hover opens it, or fold it
+   (the pin with it); never locked, so the pin stays as it was asked. */
+void rubraview_box_click_open(rubraview_box_t *box);
 void rubraview_box_dismiss(rubraview_box_t *box);      /* Esc, or a click outside; a pinned box stays */
 
 /** §3.6.1 pin: pinned, the box is open and stays open — no idle collapse, no dismissal. */

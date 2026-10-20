@@ -182,14 +182,16 @@ bool rubraview_titlebar_tick(rubraview_titlebar_t *bar, double delta_seconds) {
 /* §3.21.3: the control cluster sits at the right edge, ordered
    minimize, maximize/restore, fullscreen, close. */
 static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
-    /* First in the order is leftmost on screen. */
+    /* First in the order is leftmost on screen. 1.25.0 (owner, 2026-10-20): Set, P, then
+       "H, T, F, _, [], R, X" — hide, always on top, full screen, minimise, maximise, resize, close. */
+    RUBRAVIEW_TITLEBAR_SETTINGS,
+    RUBRAVIEW_TITLEBAR_BARPIN,
     RUBRAVIEW_TITLEBAR_HIDE,
-    RUBRAVIEW_TITLEBAR_SNAP_BOXES,
     RUBRAVIEW_TITLEBAR_PIN,
-    RUBRAVIEW_TITLEBAR_RESIZE,
+    RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
-    RUBRAVIEW_TITLEBAR_FULLSCREEN,
+    RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_CLOSE,
 };
 #define BUTTON_COUNT ((int32_t)(sizeof(BUTTON_ORDER) / sizeof(BUTTON_ORDER[0])))
@@ -205,9 +207,14 @@ rubraview_rect_t rubraview_titlebar_button_rect(const rubraview_titlebar_t *bar,
     if (!bar) return (rubraview_rect_t){0};
 
     double w = button_width(bar);
-    /* 1.20.0 (owner, 2026-10-18): the menu's button is gone; Open has the left end */
-    if (button == RUBRAVIEW_TITLEBAR_OPEN) return (rubraview_rect_t){ .x = 0.0, .y = 0.0, .width = w, .height = bar->height };
-    if (button == RUBRAVIEW_TITLEBAR_SETTINGS) return (rubraview_rect_t){ .x = w, .y = 0.0, .width = w, .height = bar->height };   /* 1.24.0 */
+    /* 1.25.0: ☰ at the left end, then the name as wide as it is drawn, short of the right-hand row */
+    if (button == RUBRAVIEW_TITLEBAR_MENU) return (rubraview_rect_t){ .x = 0.0, .y = 0.0, .width = w, .height = bar->height };
+    if (button == RUBRAVIEW_TITLEBAR_NAME) {
+        double room = window_width - (double)BUTTON_COUNT * w - w - 8.0;
+        double nw = bar->name_width < room ? bar->name_width : room;
+        if (nw <= 0.0) return (rubraview_rect_t){0};
+        return (rubraview_rect_t){ .x = w, .y = 0.0, .width = nw, .height = bar->height };
+    }
     for (int32_t i = 0; i < BUTTON_COUNT; ++i) {
         if (BUTTON_ORDER[i] != button) continue;
         /* Rightmost button is the last in the order. */
@@ -226,11 +233,11 @@ rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *b
                                                    double x, double y, double window_width) {
     if (!bar || !bar->shown) return RUBRAVIEW_TITLEBAR_NONE;
     if (y < 0.0 || y >= bar->height) return RUBRAVIEW_TITLEBAR_NONE;
-    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_OPEN, window_width), x, y)) {
-        return RUBRAVIEW_TITLEBAR_OPEN;
+    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_MENU, window_width), x, y)) {
+        return RUBRAVIEW_TITLEBAR_MENU;
     }
-    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_SETTINGS, window_width), x, y)) {
-        return RUBRAVIEW_TITLEBAR_SETTINGS;
+    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_NAME, window_width), x, y)) {
+        return RUBRAVIEW_TITLEBAR_NAME;
     }
 
     for (int32_t i = 0; i < BUTTON_COUNT; ++i) {

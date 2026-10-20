@@ -39,6 +39,11 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_ROW_UP,
     RUBRAVIEW_LISTWIN_ROW_DOWN,
     RUBRAVIEW_LISTWIN_APPLY,      /* the bar: Edit's steps onto every picture of the list, as copies (owner, 2026-10-18) */
+    /* 1.25.0 (owner, 2026-10-20): a row of tools under the bar (`tools`) */
+    RUBRAVIEW_LISTWIN_EXT,        /* .ext: the extensions in the list, each picked or let go at once */
+    RUBRAVIEW_LISTWIN_FILTER,     /* the names shown: those holding what is typed */
+    RUBRAVIEW_LISTWIN_SORT,       /* the list in another order: by what */
+    RUBRAVIEW_LISTWIN_ORDER,      /* rising or falling */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {
@@ -60,7 +65,11 @@ typedef struct rubraview_listwin {
     /* RV-117: the list in a window of its own (F3): the window's frame moves,
        sizes and closes it, so it has no R, no X and no title to drag */
     bool   own_window;
+    bool   tools;              /* 1.25.0: the tools row under the bar (an editable list) */
 } rubraview_listwin_t;
+
+/** 1.25.0: one of the tools row's parts (EXT, FILTER, SORT, ORDER); empty without the row. */
+rubraview_rect_t rubraview_listwin_tool_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part);
 
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale);
 

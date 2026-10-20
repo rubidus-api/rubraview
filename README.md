@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.24.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.24.0/rubraview-v1.24.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.25.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.25.0/rubraview-v1.25.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.25.0/rubraview-v1.25.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -53,9 +53,9 @@ ships with, so it cannot drift from them.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `T` | Open or close the toolbox |
-| `Shift+T` | Pin the toolbox open |
-| `Ctrl+T` | Give the toolbox a window of its own, or dock it |
+| `T` | Open or close the Toolbar |
+| `Shift+T` | Pin the Toolbar open |
+| `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
@@ -159,8 +159,8 @@ ships with, so it cannot drift from them.
 | `,` | One frame back |
 | `Ctrl+]` | Faster (0.25x a step) |
 | `Ctrl+[` | Slower (0.25x a step) |
-| `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
-| `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
+| `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
+| `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
 | `Ctrl+Shift+Right` | 1 second on |
 | `Ctrl+Shift+Left` | 1 second back |
@@ -171,7 +171,7 @@ ships with, so it cannot drift from them.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
-| `Shift+\` | Repeat by number: the A-B box (toolbox `Set A-B`), A = now and B = now take the moment playing |
+| `Shift+\` | Repeat by number: the A-B box (Toolbar `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
@@ -189,23 +189,25 @@ ships with, so it cannot drift from them.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox or the right click**
+**No key of its own: on the Toolbar or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
-| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
-| Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
-| Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
-| Toolbox `Night` | Night mode: loud passages brought down |
-| Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
-| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
-| Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
-| Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
-| Toolbox `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Toolbar `Stop`, Right click `Stop` | Stop, and back to the beginning |
+| Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
+| Toolbar `A-B` | A-B repeat: from here, to here, off |
+| Toolbar `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
+| Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbar `Night` | Night mode: loud passages brought down |
+| Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
+| Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
+| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
+| Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
+| Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
+| Toolbar `Reload` | Text: read the file again, at the same place |
+| Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
@@ -234,6 +236,8 @@ ships with, so it cannot drift from them.
 | Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Right click `Slower` | Play slower |
 | Right click `Faster` | Play faster |
+| Title bar ☰ `Pin the title bar` | Keep the title bar shown |
+| Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->
 
@@ -241,22 +245,26 @@ ships with, so it cannot drift from them.
 
 | Do this | And this happens |
 |---|---|
-| Click the left or right third of the window | Previous or next page, when a folder or an archive is open (the sides swap when reading right to left) |
-| Click the middle (or anywhere on a single picture) | The toolbox opens or closes |
+| Click the left or right part of the window | The file before or the next one, in every layout (right to left too) |
+| Click the middle | Nothing |
+| Double-click the picture | Its middle back on the window's |
+| Hold the left button still for a moment | The right-click list |
 | Hold the left button and drag | Moves a picture zoomed past the window, and the webtoon strip |
-| Hold a toolbox back / forward button | Five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag onto one and let go (a tap seeks 5 s) |
-| Click the toolbox's seek bar | Goes there, in a film, a song or an animated GIF / WebP / PNG |
+| Hold a Toolbar back / forward button | Five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag onto one and let go (a tap seeks 5 s) |
+| Click the Toolbar's seek bar | Goes there, in a film, a song or an animated GIF / WebP / PNG |
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | Click on a film or on music | Pause / play |
-| Drag the picture | Moves it, at any zoom |
-| `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
+| Wheel over a picture, `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
 | Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |
+| Wheel over a Toolbar button that chooses one of several | The one before or after |
+| Wheel over the Toolbar's bar | The size of file names and messages |
 | Wheel while a film or music plays | Volume |
 | `Shift` + wheel | Ten pages back or forward |
-| Wheel over a picture | Turns the page (away from you the one before, towards you the next) when it fits the window, and the filmstrip comes up at the bottom for a moment: click a thumbnail to go to it; scrolls the webtoon strip and a page shown at Fit Width; nothing on a picture zoomed past the window |
-| `Alt` + wheel over a floating box | Makes that box more or less see-through |
-| Point at the window's top edge | The title bar: drag it to move the window, double-click it to maximise, **Size** to resize, **Pin** for always on top, **Box** to bring the floating boxes back to their corners |
+| Wheel over the filmstrip | Goes through its thumbnails; click one to go to it |
+| Floating Widget **F**: click, drag, wheel, `Alt` + wheel | Opens or folds the Toolbar (never pinned); moves the widget; buttons a row; see-through |
+| Floating Widget **T**: point, drag, wheel | Opens the Toolbar while pointed at; up or down through the files, sideways through the folders or archives; button size |
+| Point at the window's top edge | The title bar: ☰ (its list), the name (the open-file screen), **Set P H T F _ [] R X**; drag it to move the window, double-click it to maximise |
 | Point near the middle of the left or right side | A button for the previous or next page |
 | Drop files or a folder on the window | Opens them |
 | Touch: drag, pinch | Moves the picture, zooms it |
@@ -277,7 +285,7 @@ These belong to their window and are not on the Keys page.
 
 ## Layouts
 
-`B`, the toolbox's Layout button and a book's right click choose one of eight, and Settings > Viewer > Layout keeps it:
+`B`, the Toolbar's Layout button and a book's right click choose one of eight, and Settings > Viewer > Layout keeps it:
 **single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
 under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves) — and
 **dual-rtl**, **book-rtl** and **comic-rtl**, each right after its own, read right to left as a Japanese comic is: the

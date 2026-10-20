@@ -19,7 +19,7 @@ static double clampd(double v, double lo, double hi) {
 
 double rubraview_listwin_head_height(const rubraview_listwin_t *lw) {
     if (!lw) return 0.0;
-    return lw->title_height + (lw->editable ? lw->bar_height : 0.0);
+    return lw->title_height + (lw->editable ? lw->bar_height : 0.0) + (lw->editable && lw->tools ? lw->bar_height : 0.0);
 }
 
 void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view_h) {
@@ -72,6 +72,21 @@ rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubra
     double w = (lw->width - lw->row_height) / (double)BAR_COUNT;
     for (size_t i = 0; i < BAR_COUNT; ++i) {
         if (BAR[i] == part) return (rubraview_rect_t){ lw->x + lw->row_height + (double)i * w, lw->y + lw->title_height, w, lw->bar_height };
+    }
+    return (rubraview_rect_t){0};
+}
+
+/* 1.25.0: the tools row — .ext, the filter (the widest), the sort, the order — under the bar. */
+rubraview_rect_t rubraview_listwin_tool_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part) {
+    if (!lw || !lw->editable || !lw->tools) return (rubraview_rect_t){0};
+    static const struct { rubraview_listwin_part_t part; double share; } TOOLS[] = {
+        { RUBRAVIEW_LISTWIN_EXT, 0.16 }, { RUBRAVIEW_LISTWIN_FILTER, 0.44 }, { RUBRAVIEW_LISTWIN_SORT, 0.22 }, { RUBRAVIEW_LISTWIN_ORDER, 0.18 },
+    };
+    double x = lw->x, y = lw->y + lw->title_height + lw->bar_height;
+    for (size_t i = 0; i < sizeof(TOOLS) / sizeof(TOOLS[0]); ++i) {
+        double w = lw->width * TOOLS[i].share;
+        if (TOOLS[i].part == part) return (rubraview_rect_t){ x, y, w, lw->bar_height };
+        x += w;
     }
     return (rubraview_rect_t){0};
 }
@@ -157,6 +172,11 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
     if (py < lw->y + lw->title_height) return RUBRAVIEW_LISTWIN_TITLE;
     double head = rubraview_listwin_head_height(lw);
     if (py < lw->y + head) {
+        if (lw->tools && py >= lw->y + lw->title_height + lw->bar_height) {   /* 1.25.0: the tools row */
+            static const rubraview_listwin_part_t PARTS[] = { RUBRAVIEW_LISTWIN_EXT, RUBRAVIEW_LISTWIN_FILTER, RUBRAVIEW_LISTWIN_SORT, RUBRAVIEW_LISTWIN_ORDER };
+            for (size_t i = 0; i < 4; ++i) if (rubraview_rect_contains(rubraview_listwin_tool_rect(lw, PARTS[i]), px, py)) return PARTS[i];
+            return RUBRAVIEW_LISTWIN_BODY;
+        }
         if (px < lw->x + lw->row_height) return RUBRAVIEW_LISTWIN_ALL;
         size_t b = (size_t)((px - lw->x - lw->row_height) / ((lw->width - lw->row_height) / (double)BAR_COUNT));
         return BAR[b < BAR_COUNT ? b : BAR_COUNT - 1];

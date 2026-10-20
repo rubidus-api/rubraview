@@ -355,12 +355,17 @@ void *rubraview_pal_window_native_handle(const rubraview_window_t *window);
 /** §3.21.3 / §3.2.5: true fullscreen covering the whole monitor, taskbar included. */
 void rubraview_pal_window_set_fullscreen(rubraview_window_t *window, bool enabled);
 bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window);
+/** 1.25.0: the program's own icon, `size` x `size`, as blue-green-red-alpha rows (straight alpha) into `out`
+    (size * size * 4 bytes). False when it cannot be had. */
+bool rubraview_pal_app_icon_bgra(uint8_t *out, int32_t size);
+/** 1.25.0: maximised (the title bar's [] says so). */
+bool rubraview_pal_window_is_maximized(const rubraview_window_t *window);
 
 /** §3.2.5: hide the pointer during fullscreen presentation. Idempotent. */
 void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible);
 
 /** RV-137: the pointer's shape over the window's client area: an arrow, or a cross while an area is chosen. */
-typedef enum rubraview_cursor_shape { RUBRAVIEW_CURSOR_ARROW = 0, RUBRAVIEW_CURSOR_CROSS } rubraview_cursor_shape_t;
+typedef enum rubraview_cursor_shape { RUBRAVIEW_CURSOR_ARROW = 0, RUBRAVIEW_CURSOR_CROSS, RUBRAVIEW_CURSOR_SIZE_WE /* 1.25.0: a column's width */ } rubraview_cursor_shape_t;
 void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview_cursor_shape_t shape);
 
 /** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */

@@ -510,6 +510,17 @@ void rubraview_box_click_anchor(rubraview_box_t *box) {
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) box->pinned = false;
 }
 
+void rubraview_box_click_open(rubraview_box_t *box) {
+    if (!box || box->state == RUBRAVIEW_BOX_DETACHED) return;
+    box->idle_seconds = 0.0;
+    if (box->state == RUBRAVIEW_BOX_COLLAPSED) {
+        box->state = box->pinned ? RUBRAVIEW_BOX_LOCKED_OPEN : RUBRAVIEW_BOX_EXPANDED;
+    } else {
+        box->state = RUBRAVIEW_BOX_COLLAPSED;
+        box->pinned = false;
+    }
+}
+
 void rubraview_box_dismiss(rubraview_box_t *box) {
     if (!box) return;
     if (box->state == RUBRAVIEW_BOX_DETACHED) return; /* a separate window is closed, not dismissed */
@@ -743,16 +754,16 @@ u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metr
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, m, px, py);
     if (half == RUBRAVIEW_ANCHOR_CLICK) {
         text = menu ? T("Click: open the menu and keep it open (again: close). Drag: move it")
-                    : T("T - Click: open the toolbox and keep it open; click again: close. "
-                      "Drag: move it; past the window's edge it becomes a window of its own");
+                    : T("F (Floating Widget) - Click: open or fold its toolbar. Drag: move it; past the window's edge it "
+                      "becomes a window of its own. Wheel: buttons a row; Alt+wheel: see-through");
     } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
         text = menu ? T("Rest the pointer here: the menu opens, and folds when the pointer leaves")
-                    : T("v - Rest the pointer here: the toolbox opens, and folds when the pointer leaves "
-                      "(the pin keeps it open). Drag: move it");
+                    : T("T (Toolbar) - Rest the pointer here: the toolbar opens, and folds when the pointer leaves "
+                      "(P keeps it open). Drag up or down: the files; sideways: the folders or archives. Wheel: button size");
     } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
-        text = T("Pin: on, the box stays open; off, it folds when the pointer leaves");
+        text = T("P (Pin): on, the toolbar stays open; off, it folds when the pointer leaves");
     } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {
-        text = T("Drag sideways: more or fewer buttons a row. Drag away or back: bigger or smaller");
+        text = T("R (Resize): drag sideways for more or fewer buttons a row, away or back for bigger or smaller");
     } else if (!menu && hint_in(rubraview_box_timeline_rect(box, m), px, py)) {
         text = T("Click or drag: go to that moment (or page)");
     }

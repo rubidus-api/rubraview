@@ -41,6 +41,8 @@ typedef enum rubraview_textenc {
 uint32_t rubraview_textenc_codepage(rubraview_textenc_t enc);
 /** What the menu and the information bar call it: "UTF-8", "CP949 (Korean)". */
 const char *rubraview_textenc_name(rubraview_textenc_t enc);
+/** 1.25.0 (owner, 2026-10-20): the encoding tile's short code, on one or two rows: "EUC\nKR", "UTF8", "SHFT\nJIS". */
+const char *rubraview_textenc_short(rubraview_textenc_t enc);
 /** The word settings.ini keeps: "auto", "utf8", "cp949", ... */
 const char *rubraview_textenc_word(rubraview_textenc_t enc);
 /** The encoding a settings word names; AUTO for one not known. */

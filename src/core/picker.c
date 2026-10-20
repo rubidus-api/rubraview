@@ -279,9 +279,12 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
     return false;
 }
 
+/* 1.25.0 (owner, 2026-10-20: "하나씩 혹은 범위버튼을 눌렀을 때 ... 선택과 범위 지정의 역할만"): a folder is picked
+   like a file in those modes; only `..` is still the way up. */
 static bool pickable(const rubraview_picker_t *picker, size_t index) {
-    return picker && picker->listing && picker->selected && index < picker->listing->count &&
-           !picker->listing->entries[index].is_directory;
+    if (!picker || !picker->listing || !picker->selected || index >= picker->listing->count) return false;
+    u8str_t name = picker->listing->entries[index].name;
+    return !(picker->listing->entries[index].is_directory && name.len == 2 && name.ptr[0] == '.' && name.ptr[1] == '.');
 }
 
 void rubraview_picker_set_mode(rubraview_picker_t *picker, rubraview_picker_mode_t mode) {

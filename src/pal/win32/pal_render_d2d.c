@@ -89,6 +89,8 @@ struct rubraview_renderer {
     DWRITE_FONT_WEIGHT text_weight;
     DWRITE_FONT_STYLE  text_style;
     WCHAR ui_family[64];           /* RV-136: the program's own face; "" for Segoe UI */
+    WCHAR mono_family[64];         /* 1.25.0: the settings window's face; "" for Consolas */
+    double mono_pad;               /* 1.25.0: room above each fixed-width line (half the extra line spacing) */
     DWRITE_FONT_WEIGHT ui_weight;
     DWRITE_FONT_STYLE  ui_style;
     ID2D1Factory1 *factory;
@@ -793,6 +795,14 @@ void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t fa
     renderer->ui_style = italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
 }
 
+void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, u8str_t family) {
+    if (renderer) wide_family(renderer->mono_family, family);
+}
+
+void rubraview_pal_render_set_mono_pad(rubraview_renderer_t *renderer, double pad) {
+    if (renderer) renderer->mono_pad = pad > 0.0 ? pad : 0.0;
+}
+
 /* The face draw_text and the measures use: the one set for now, else the program's own. */
 static const WCHAR *face_family(const rubraview_renderer_t *r) {
     return r->text_family[0] ? r->text_family : r->ui_family[0] ? r->ui_family : L"Segoe UI";
@@ -1103,6 +1113,38 @@ void rubraview_pal_text_block_draw(rubraview_renderer_t *renderer, const rubravi
     ID2D1SolidColorBrush_Release(brush);
 }
 
+void rubraview_pal_text_block_draw_upto(rubraview_renderer_t *renderer, const rubraview_text_block_t *block,
+                                        double x, double y, double height, uint32_t argb,
+                                        const rubraview_text_mark_t *marks, size_t mark_count) {
+    if (!renderer || !renderer->target || !block || !block->layout) return;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    set_identity(rt);
+    D2D1_RECT_F clip = { (FLOAT)-1.0e6, (FLOAT)y, (FLOAT)1.0e6, (FLOAT)(y + height) };
+    ID2D1RenderTarget_PushAxisAlignedClip(rt, &clip, D2D1_ANTIALIAS_MODE_ALIASED);
+    rubraview_pal_text_block_draw(renderer, block, x, y, argb, marks, mark_count);
+    ID2D1RenderTarget_PopAxisAlignedClip(rt);
+}
+
+bool rubraview_pal_text_block_last_line(const rubraview_text_block_t *block, size_t *start, double *top) {
+    if (!block || !block->layout || block->wide_len == 0) return false;
+    UINT32 lines = 0;
+    IDWriteTextLayout_GetLineMetrics(block->layout, NULL, 0, &lines);
+    if (lines == 0) return false;
+    DWRITE_LINE_METRICS *m = (DWRITE_LINE_METRICS*)malloc(lines * sizeof(*m));
+    if (!m) return false;
+    bool ok = SUCCEEDED(IDWriteTextLayout_GetLineMetrics(block->layout, m, lines, &lines)) && lines > 0;
+    if (ok) {
+        UINT32 at = 0;
+        FLOAT y = 0.0f;
+        for (UINT32 i = 0; i + 1 < lines; ++i) { at += m[i].length; y += m[i].height; }
+        if (at > block->wide_len) at = block->wide_len;
+        if (start) *start = block->u8_of[at];
+        if (top) *top = (double)y;
+    }
+    free(m);
+    return ok;
+}
+
 size_t rubraview_pal_text_block_hit(const rubraview_text_block_t *block, double x, double y) {
     if (!block || !block->layout || block->wide_len == 0) return 0;
     BOOL trailing = FALSE, inside = FALSE;
@@ -1135,7 +1177,7 @@ bool rubraview_pal_text_block_line_of(const rubraview_text_block_t *block, size_
 
 static IDWriteTextFormat *mono_format(rubraview_renderer_t *renderer, double font_size) {
     IDWriteTextFormat *format = NULL;
-    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, MONO_FAMILY, NULL,
+    if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, renderer->mono_family[0] ? renderer->mono_family : MONO_FAMILY, NULL,
                                                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                                DWRITE_FONT_STRETCH_NORMAL, (FLOAT)font_size, L"", &format)) ||
         !format) {
@@ -1202,6 +1244,7 @@ bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t
         return false;
     }
     set_identity(rt);
+    y += renderer->mono_pad;   /* 1.25.0: the line spacing, the text in the middle of its taller row */
     D2D1_RECT_F layout = { (FLOAT)x, (FLOAT)y, (FLOAT)(x + 100000.0), (FLOAT)(y + font_size * 2.0) };
     ID2D1RenderTarget_DrawText(rt, wide, (UINT32)wide_len, format, &layout, (ID2D1Brush*)brush,
                                D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);

@@ -97,13 +97,17 @@ typedef enum rubraview_titlebar_button {
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_CLOSE,
-    /* Once at the bar's left end (owner, 2026-10-15), gone in 1.20.0 (owner, 2026-10-18:
-       "타이틀바 좌측 상단의 메뉴는 완전히 없앱시다"): no rectangle, never hit. */
+    /* 1.25.0 (owner, 2026-10-20: "파일 열기 아이콘을 없애고 대신 가로줄 3줄짜리 메뉴 아이콘"): ☰ at the left end,
+       a pull-down of what the window does. */
     RUBRAVIEW_TITLEBAR_MENU,
-    /* At the bar's left end (owner, 2026-10-18: "파일 열기 아이콘을 툴바에 하나 추가"): the picker. */
+    /* Gone in 1.25.0 (the menu has Open file): no rectangle, never hit. */
     RUBRAVIEW_TITLEBAR_OPEN,
-    /* Beside Open (owner, 2026-10-19: "상단 타이틀바에 설정(Set) 버튼"): the settings window. */
+    /* 1.25.0: first of the right-hand row, left of Hide: the settings window. */
     RUBRAVIEW_TITLEBAR_SETTINGS,
+    /* 1.25.0: P, the title bar kept shown (not hidden on its own). */
+    RUBRAVIEW_TITLEBAR_BARPIN,
+    /* 1.25.0: the file's or the folder's name after ☰: a press opens the open-file screen. */
+    RUBRAVIEW_TITLEBAR_NAME,
     RUBRAVIEW_TITLEBAR_CAPTION, /* empty space: dragging here moves the window */
 } rubraview_titlebar_button_t;
 
@@ -113,6 +117,7 @@ typedef struct rubraview_titlebar {
     double hide_delay;      /* grace period after the pointer leaves, 0.5 s */
     bool   shown;
     double idle_seconds;
+    double name_width;      /* 1.25.0: how wide the name after ☰ is drawn (the caller measures it); 0: none */
     /* The last press on the caption, for a double press (owner, 2026-09-29). */
     bool   pressed_before;
     double press_time, press_x, press_y;

@@ -208,6 +208,12 @@ void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, u8str_t 
  */
 void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic);
 
+/** 1.25.0: the face of the fixed-width text (the settings window); empty is Consolas. A face whose letters are not all
+    one width still lays out on the grid, its letters each in a cell. */
+void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, u8str_t family);
+/** 1.25.0: room drawn above each fixed-width line, so a taller row holds its text in its middle. */
+void rubraview_pal_render_set_mono_pad(rubraview_renderer_t *renderer, double pad);
+
 /** One font family the machine has: its name in the user's language and its English one (stored). */
 typedef struct rubraview_font_family {
     u8str_t shown;
@@ -291,6 +297,12 @@ void rubraview_pal_text_block_size(const rubraview_text_block_t *block, double *
 void rubraview_pal_text_block_draw(rubraview_renderer_t *renderer, const rubraview_text_block_t *block,
                                    double x, double y, uint32_t argb,
                                    const rubraview_text_mark_t *marks, size_t mark_count);
+/** 1.25.0: as `draw`, only what lies above `y + height` (the rest left to the block after it). */
+void rubraview_pal_text_block_draw_upto(rubraview_renderer_t *renderer, const rubraview_text_block_t *block,
+                                        double x, double y, double height, uint32_t argb,
+                                        const rubraview_text_mark_t *marks, size_t mark_count);
+/** 1.25.0: where its last line starts (a byte offset) and how far down it is; false for an empty block. */
+bool rubraview_pal_text_block_last_line(const rubraview_text_block_t *block, size_t *start, double *top);
 /** The byte offset nearest a point given from the block's top-left. */
 size_t rubraview_pal_text_block_hit(const rubraview_text_block_t *block, double x, double y);
 /** The top and height of the line that holds byte offset `at`. */

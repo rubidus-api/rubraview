@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.24.0.exe              the viewer, as built
-dist/rubraview-v1.24.0/                 the release bundle
-dist/rubraview-v1.24.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.25.0.exe              the viewer, as built
+dist/rubraview-v1.25.0/                 the release bundle
+dist/rubraview-v1.25.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -188,7 +188,7 @@ items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--conve
 
 ## Reading
 
-`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages. `B`, the toolbox's Layout button (its icon is the layout in
+`PageDown` / `PageUp`, `Space` / `Backspace` turn the pages. `B`, the Toolbar's Layout button (its icon is the layout in
 use) and the right click on a book choose how pages are laid out, and
 Settings › Viewer › Layout shows and keeps the same choice:
 
@@ -211,7 +211,10 @@ its turn. A folder with nothing but films plays them in any layout.
 Dual, Book and Comic each come a second time, read right to left
 (`dual-rtl`, `book-rtl`, `comic-rtl` — a book read from the back, as a
 Japanese comic is): the earlier page stands on the right, Comic shows a
-wide scan's right half first, and a click or a swipe turns the other way.
+wide scan's right half first, and a swipe turns the other way. A click
+does not: in every layout a click on the right part of the window goes to
+the next file and on the left part to the one before; the middle does
+nothing.
 `B` goes through all eight in that order: each of the three is followed
 by its right-to-left form. There is no separate reading-order switch.
 
@@ -222,7 +225,10 @@ A picture smaller than the window is enlarged, and a moment after the view
 settles the part on screen is drawn again more sharply — lines and letters
 crisper, with no halo beside them. Settings › Viewer › **Enlarging a small
 picture** set to `smooth` leaves it as first drawn. Zoomed past the
-window, hold the left button and drag to move the picture.
+window, hold the left button and drag to move the picture. The wheel
+zooms a picture (a film's and a song's wheel is the volume); a double
+click puts the picture's middle back on the window's. Holding the button
+still for a moment opens the right-click list, as a right click does.
 
 Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
 they are shown one at a time, whole; standing tall, two at a time. Turned
@@ -267,7 +273,7 @@ A page turn fades the old page into the new one for a quarter of a
 second. While a slide show runs, the pointer goes away after a second and
 a half of stillness and comes back when it moves. It runs in the window as
 it is — full screen only if the window already was (the slide show's
-settings have a button for it). The toolbox then starts
+settings have a button for it). The Toolbar then starts
 with a stop button and the delay between slides ("3 s") where a film's
 speed button would be: turn the wheel over it, or hold it and drag up or
 down, and the delay moves half a second; a tap lists 1, 2, 3, 5 and
@@ -288,7 +294,7 @@ Info; Rename, Copy to folder, Move to folder, Copy to another folder...,
 Move to another folder..., Show in Explorer,
 Delete (click it twice: it goes to the recycle bin); Open file, Recent
 files..., Favourites..., Add to favourites, Batch, Print...; Help and
-Settings. What the toolbox on screen has a button for is left out of it
+Settings. What the Toolbar on screen has a button for is left out of it
 (Open file and Settings stay). Every list has Open file, Recent files...,
 the favourites and Batch, a picture's, a book's and an animation's
 Print... too. A book or an archive has the next and previous archive and
@@ -318,7 +324,7 @@ when it closes.
 An animated GIF, WebP or PNG (APNG, named `.png` or `.apng`) is played as a film is. `Space` pauses it, `.`
 and `,` step a frame, `Left` and `Right` seek five seconds, `[` and `]`
 set the two ends of a repeat and `\` clears it, and `Ctrl+]` / `Ctrl+[`
-change its speed from 0.25x to 4x. The toolbox has the same on buttons,
+change its speed from 0.25x to 4x. The Toolbar has the same on buttons,
 with Stop and a seek bar to click; paused, the title says where it is.
 
 At its end an animation goes round again. Settings › Viewer › When an
@@ -327,7 +333,7 @@ there, or go on to the next file. An animation may be as long as its
 file is; of a very long one only some pictures are kept in memory, and
 going back in it stays quick.
 
-In the toolbox, the back and forward buttons seek five seconds. Hold one
+In the Toolbar, the back and forward buttons seek five seconds. Hold one
 down and five steps open over it — 5 s, 10 s, 30 s, 1 min, 5 min; drag
 onto one and let go. This is the same for a film and for music.
 
@@ -396,7 +402,7 @@ it was. **Show the original** compares.
 
 **What works with Edit open.** Turning the pages (over pictures only: a
 film, a sound or a text is passed by), the file list and the playlist,
-Export, the view's size and fit, and the information; the toolbox shows
+Export, the view's size and fit, and the information; the Toolbar shows
 only these, and the other keys say they wait until Edit is closed. Export
 from Edit writes the picture with its edits, and Edit comes back after it
 with them. A film is edited by its frame: pause it, and `E` saves the
@@ -545,7 +551,7 @@ have not keep their usual meaning.
 Two more keys do the same with a folder each, whatever the number keys are
 set to: `F6` **copies** the file on screen to one folder and `F7` **moves**
 it to another (Settings › Files › The file on screen, to a folder; or
-`copy_dir` and `move_dir` under `[curation]`). They are in the toolbox too
+`copy_dir` and `move_dir` under `[curation]`). They are in the Toolbar too
 (Copy to, Move to) and in the right click. A page inside an archive can be
 copied out with `F6` — it is written as a file of its own — but not moved
 (to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
@@ -715,7 +721,7 @@ While it does:
   other point), `Enter` keeps them, `Esc` or the `X` at the box's top right leaves them as they were.
   `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
-- The toolbox's seek bar shows the time; click or drag on it to go
+- The Toolbar's seek bar shows the time; click or drag on it to go
   somewhere else.
 - A click on the picture — or on the window, for music — pauses and plays,
   also when the hand moves a little while pressing; a film is dragged only
@@ -724,7 +730,7 @@ While it does:
   The wheel is the volume, 5 a notch (Settings > Video > **Wheel is the
   volume while playing**; with it off the wheel zooms a film). `Ctrl` and
   the wheel zoom, and a drag moves the picture.
-- What happens when a film or a song ends is set by the toolbox's end
+- What happens when a film or a song ends is set by the Toolbar's end
   button, `Ctrl+R`, At the end in a song's right click, or Settings › Audio › When a
   file ends: **Once** stops there; **Next** plays the next film or song in
   the folder or playlist and stops after the last; **1 loop** plays the same
@@ -737,7 +743,7 @@ While it does:
   `.sup`) or from inside the film itself. In a SAMI file, `&nbsp;`,
   `&amp;`, `&lt;`, `&#44032;` and the like show as the characters they
   stand for; the file itself is written back as it was.
-- The sound can be shaped (Settings › Audio › Sound, the toolbox's **EQ**,
+- The sound can be shaped (Settings › Audio › Sound, the Toolbar's **EQ**,
   **Night** and **Viz** buttons): an equaliser with
   eight presets and a window of ten sliders of its own (**EQ bands**:
   drag a band, turn the wheel over it, right-click for 0 dB), night mode,
@@ -762,7 +768,7 @@ While it does:
 - `C` and `A` switch subtitles and sound tracks; `Z` / `X` move the subtitles
   half a second earlier or later, `Shift+Z` / `Shift+X` a tenth of a second,
   and `Alt+Z` puts them back to the file's own times. The move is for this film only and leaves the file alone;
-  while it is not nought the line under the toolbox's bar says so
+  while it is not nought the line under the Toolbar's bar says so
   (`sub -0.3 s`).
 - Text subtitles sit in a shaded box, and the box always holds the whole
   subtitle: one of many lines, or one long enough to wrap, makes the box
@@ -843,7 +849,7 @@ While it does:
   other keys do what they do in the viewer, so `Space` pauses and
   `Shift+C` or `Esc` closes it. A DVD's or a Blu-ray's picture subtitles
   are listed by their times only.
-- The toolbox's **CC** button turns subtitles off and on. Tap it twice
+- The Toolbar's **CC** button turns subtitles off and on. Tap it twice
   quickly, or hold it for half a second, and a list of the film's subtitles
   opens — tap the one you want (or **Off**).
 
@@ -852,7 +858,12 @@ While it does:
 A `.txt`, `.log`, `.nfo` or `.md` file opens as text, in the same window and
 the same walk through the folder as pictures and films (`PageDown` at its end
 goes on to the next file). A text file inside a ZIP or a 7z opens the same way.
-Nothing is ever written to it.
+Nothing is ever written to it. Settings › Text › **Show text files** off
+leaves text files out of every list and does not open them (Windows may
+still send one: which program opens a type is Explorer's choice). The
+Toolbar's **Edit** opens the file in the editor Settings › Text ›
+**Editor** names (Notepad without one); **Reload** reads it again, at the
+same place.
 
 **Encodings.** UTF-8 and UTF-16 (with or without a byte order mark), Korean
 (CP949 / EUC-KR, ISO-2022-KR, Johab), Japanese (Shift_JIS, EUC-JP,
@@ -869,22 +880,24 @@ Encoding can name one for every file instead. Files over 64 MB are not shown.
 | As they are | every break of the file is a break; blank lines stay |
 | All in one run | no breaks at all: the whole text runs on |
 | Blank lines dropped | the empty lines go; the other breaks stay |
-| Paragraphs | lines are joined; a paragraph ends where a line ends a sentence (`.` `!` `?` `。` or a closing quote) **and** more line breaks follow it than usually do in the file. A file with only one break everywhere ends a paragraph where a sentence ends and the next line is indented, or, with no indents at all, wherever a line ends a sentence |
+| Paragraphs | lines are joined; a paragraph ends where a line ends a sentence (`.` `!` `?` `。` or a closing quote) **and** more line breaks follow it than usually do in the file, or the next line is indented when only some lines are. A file with only one break everywhere ends a paragraph where a sentence ends and the next line is indented, or, with no indents at all, wherever a line ends a sentence. As in a printed book, each paragraph starts on a new line, in by one space, with no blank line between |
 
 Joined lines get a space between them, except between Chinese or Japanese
 characters, which are written without one. `Shift+B` removes the indents at
 the start of each line or paragraph, or keeps them.
 
-**Auto-scroll.** `A` starts and stops it. While it runs, `+` / `-`, the
+**Auto-scroll.** `S` (or `Space`) starts and stops it. While it runs, `+` / `-`, the
 wheel, or `↑` / `↓` change its speed, in lines a minute, shown at the
 bottom right; a click stops it. It stops at the end.
 
 **Size and spacing.** `Ctrl+wheel` or `Ctrl+Plus` / `Ctrl+Minus` the size of
 the letters, `Alt+wheel` or `[` / `]` the space between lines. `W` wraps the
 lines to the window or lets long lines run on (`Shift+wheel` then moves
-sideways); the toolbox has the same, and **Word wrap** for the wrapping.
+sideways); the Toolbar has the same, and **Word wrap** for the wrapping.
 Settings › Text also has the font, the side margins, a column at most so
-many characters wide, and the paper (dark, sepia, light, black).
+many characters wide, the paper (dark, sepia, light, black), and colours
+of your own for the text, the background, links and what Find found
+(`#RRGGBB`; empty keeps the paper's).
 
 **Moving.** The wheel and `↑` / `↓` by lines, `PageUp` / `PageDown` / `Space`
 by screens, `Home` / `End` to the start and the end. The place read to is
@@ -902,46 +915,69 @@ speed; **pages** moves a screen at a time (one line kept to read on from)
 every **A screen every** seconds, `+` / `-` changing it while it runs. `A`, `Space` or a click in the middle of
 the window starts and stops auto-scroll; the wheel always moves the text
 (the speed is `+` / `-` or the arrows). `,` and `.` go to the previous and
-the next file; the toolbox has the list (**List**) too.
+the next file; the Toolbar has the list (**List**) too.
 **Headings stand alone** keeps a short line with no sentence's end and a
 blank line before and after it (`제2장`, `Chapter 2`) as a paragraph of
 its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
-## The floating boxes
+## The title bar and the Floating Widget
 
-The title bar starts with a folder: **Open a file** (`O`, `Ctrl+O`), and
-**Set** beside it opens Settings (`F10`). A button that chooses one of
-several — zoom, fit, layout, speed, what the end does, the equaliser, the
-analyser, the slide show's delay, line breaks, the encoding, the sound
-track — opens a list of them to tap, rows a finger wide; its key still
-steps to the next one. A panel's choice (printing, exporting, Edit) opens
-the same list, and a panel's slider takes a typed number: press its
-number (or its name). Every box that takes typing has its buttons under
-it — **OK**, **Cancel**, and **Browse...** where a folder is asked for.
-There is no menu: what the toolbox does not have a button for is in the
-right click, on a key (the help, `F1`, lists them) or in Settings; the
-keys are changed on the Settings window's **Keys** page. The toolbox's last group has **Settings**,
-**Bar pin** (the title bar stays shown; Settings > General > Title bar)
-and **Info bar** (`Shift+I`); a picture's toolbox also has **Wheel strip**:
-off, turning pages with the wheel brings up no thumbnails (Settings >
-Viewer > Thumbnails while the wheel turns pages). A small anchor,
-**T**, floats over the picture for the toolbox. The toolbox changes with what is on screen — playing controls for a
-video or music, frame steps for an animation, layout and the next or previous
-archive for a comic archive. Hold `Alt` and turn the wheel over a box to make
-it more or less see-through (never below 30 %).
+The title bar starts with **☰**, a list of what the window does: Pin the
+title bar, Align the Floating Widget, New window, Open file, Recent
+files, Batch, Print, Playlist, Settings and Help. After it comes the
+name of the file on screen (the folder's, in the open-file screen); a
+click on it opens the open-file screen. At the right are **Set**
+(Settings, `F10`), **P** (the title bar stays shown), **H** (the title
+bar and the Floating Widget hidden until the picture is clicked), **T**
+(always on top), **F** (full screen), **_**, **[]** (maximise), **R**
+(drag it to size the window) and **X**. What is on is lit and bold;
+resting the pointer on a button says what it does.
 
-Each anchor has two halves. Point at the right one and the box opens; move
-away and it folds again. Click the left one and the box opens and stays;
-drag either one to move the box. Resting the pointer on either says so. A box never opens past the window's
-edge. While a box is open, a pin appears beside its anchor: it says
-whether the box stays open when the pointer leaves — click it to switch.
+A button that chooses one of several — zoom, fit, layout, speed, what the
+end does, the equaliser, the analyser, the slide show's delay, line
+breaks, the encoding, the sound track — opens a list of them to tap, rows
+a finger wide, and the wheel over it goes to the one before or after;
+its key still steps to the next one. A panel's choice (printing,
+exporting, Edit) opens the same list, and a panel's slider takes a typed
+number: press its number (or its name). Every box that takes typing has
+its buttons under it — **OK**, **Cancel**, and **Browse...** where a
+folder is asked for. The buttons do not show their keys; their tooltips
+do. What the Toolbar has no button for is in the right click, on a key
+(the help, `F1`, lists them) or in Settings; the keys are changed on the
+Settings window's **Keys** page. The Toolbar's last group has
+**Settings**, **Bar pin** and **Info bar** (`Shift+I`); a picture's
+Toolbar also has **Centre** (the picture's middle on the window's, as a
+double click does) and **Wheel strip**: off, turning pages with the wheel
+brings up no thumbnails.
 
-The toolbox is a strip: the seek bar (click or drag to go there) with the
+The **Floating Widget** sits at the bottom right (over the information
+bar while it shows; ☰ › Align the Floating Widget puts it back there):
+
+- **F** — a click opens or folds the **Toolbar** (it never pins it);
+  dragged, the widget moves, and past the window's edge the Toolbar gets
+  a window of its own. The wheel over F sets the buttons a row;
+  `Alt` + wheel how see-through the widget and the Toolbar are (never
+  below 30 %).
+- **T** — rest the pointer on it and the Toolbar opens, folding again
+  when the pointer leaves. Dragged up or down it goes through the files,
+  a step every few millimetres; sideways, through the folders (or the
+  archives) beside this one. The wheel over T sets the buttons' size.
+- **P** — while the Toolbar is open: on, it stays open when the pointer
+  leaves; off, it folds.
+- **R** — dragged sideways, more or fewer buttons a row; away or back,
+  bigger or smaller buttons.
+
+The Toolbar changes with what is on screen — playing controls for a
+video or music, frame steps for an animation, layout and the next or
+previous archive for a comic archive. It never opens past the window's
+edge.
+
+The Toolbar is a strip: the seek bar (click or drag to go there) with the
 file's name under it, then small icon buttons in groups — moving between
 files, playing, sound, size, turning and layout, files, the window — each
 group in a rounded frame of its own. Groups go along a row while they fit
 and the next one starts a new row, as words wrap; a group longer than a row
-has rows of its own (the grip beside the pin sets how many buttons a row).
+has rows of its own (R beside P sets how many buttons a row).
 An open box stays on the side of its anchor it opened on, so a longer name
 or another layout does not make it jump. A
 film's and a song's first row is Play / Pause, Stop, five seconds back and
@@ -951,14 +987,14 @@ button puts what it does where the name was. For a film or a song the line
 under the bar ends with the time, the volume, the speed and the A-B repeat;
 for a picture, with its place in the folder or archive (`4 / 6`), and the
 bar is a page bar; where the name needs the whole width, that goes on a
-row of its own under it. The seek bar is only in the toolbox. The information
+row of its own under it. The seek bar is only in the Toolbar. The information
 bar (`Shift+I`, off until asked for) runs along the bottom: the file's name
 at the left — a name too long for the room keeps its beginning and its last
 ten characters, with "..." between — and at the right the file's size, the
 picture's size in pixels and, at the very right, which file it is of how
 many in the folder or archive (`3 / 120`).
 
-The toolbox and the right click read the same way: a switch says whether
+The Toolbar and the right click read the same way: a switch says whether
 it is on, the layout and fit in use have a blue edge, and a grey button or
 row cannot do anything with what is on screen (`Next archive` in a plain
 folder, `Track` on a film with one sound track). `Delete` in the right
@@ -974,10 +1010,9 @@ numbers under Settings › Viewer › Shape. **On its side** turns the chosen
 ratio over (9:16; paper lying down). `Shift+A` goes round them, back to
 the file's own shape. The choice lasts until the viewer is closed.
 
-The toolbox starts in the bottom-right corner (an M box top left, below
-where the title bar comes), and the title bar's box button puts it back
-there. They are always whole
-inside the window, and when the window changes size each stays the same
+The Floating Widget starts in the bottom-right corner, and ☰ › Align the
+Floating Widget puts it back there. It is always whole
+inside the window, and when the window changes size it stays the same
 part of the way across and down.
 
 100 % is the size the fit option gives. The zoom button shows the zoom from
@@ -999,7 +1034,7 @@ seeking and the volume; in the webtoon strip Up and Down scroll). A click
 without a drag is what it was: a page turned at the window's sides, the
 boxes shown in its middle.
 
-The toolbox keeps what is used most: turning pages, the zoom and the fit,
+The Toolbar keeps what is used most: turning pages, the zoom and the fit,
 turning, the layout and the slide show, opening, the lists and the
 information, editing and exporting; for a film, playing, 5 s back and on
 (held, those two offer steps up to 5 min), the sound and the subtitles.
@@ -1063,6 +1098,18 @@ change in one is in the other. The two differ in what they are for: the
 floating list lies over the picture, see-through; this one is a window of
 its own with the pictures shown large.
 
+Both lists have a row of tools under their buttons. **.ext** lists the
+extensions in the list, each with a box: untick one and its files are
+not shown (the list keeps them; **All** shows every one again). **Filter**
+shows only the names holding what is typed — in the floating list the
+typing box opens over the picture and the rows follow each letter; in
+the window it is typed in place; `Esc` or the **×** shows them all.
+**Sort** puts the list itself in order by name, extension, size, date
+modified or created, and ▲ / ▼ turns it rising or falling. While a
+filter or an extension hides rows, rows are not moved by dragging or by
+their arrows. In the floating list, the row under the pointer shows its
+file as a thumbnail beside the list.
+
 A right click on a file in either list opens its own short list: **Open**;
 **Copy the whole path** (to the clipboard); **Show in Explorer**, the file
 picked out there; **Take out of the list** (the file stays on the disk);
@@ -1107,7 +1154,7 @@ press it and drag, and it stays under the pointer — the top and the right
 edge follow it, the bottom and the left stay. A double
 click on the title bar maximises the window or gives it back its size.
 
-`Shift+T` pins the toolbox open; `Ctrl+T` gives it a small window of its own
+`Shift+T` pins the Toolbar open; `Ctrl+T` gives it a small window of its own
 that stays on top, and `Dock` puts it back. The `Pin`
 button on the title bar (point at the top edge) and `Ctrl+Shift+T` keep the
 viewer itself on top of other windows. `Ctrl` + arrows size the window,
@@ -1146,8 +1193,12 @@ sight a moment. Under the list: the weight (`<` `>`, or `Left` /
 **Default** (the program's own font), **OK** (`Enter`, or a double click)
 and **Cancel** (`Esc`). A setting keeps the font as
 `Family, Weight, Italic`, the weight and italic only when they are not
-the plain ones. The settings and help windows keep their fixed-width
-face, so their columns stay lined up.
+the plain ones. Under it each place may have a face and a size of its own: the title
+bar's name, the right-click lists, file names and messages, the lists,
+the buttons and the settings window (with its line spacing); an empty
+face is the UI font. The settings window is best in a face whose letters
+are all one width, so its columns stay lined up; it has a scroll bar when
+the page is longer than the window.
 
 `F10` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says
@@ -1203,9 +1254,12 @@ filename code page, the memory cap). Some worth knowing:
   folder named there, and every folder under it, is shown from the folder
   above as a plain tile with its name, and no picture of what is in it is
   made. Inside it, its files show their own thumbnails as anywhere else.
-- **Display** — the size of the toolbox's buttons and anchors (48, 64 or 96), the
-  colour that marks the choice in use, and whether a picture's own colour
-  profile is used.
+- **Display** — the opacity of the Floating Widget, the Toolbar, the title
+  bar and the thumbnail strip; the Toolbar's buttons a row and their size;
+  the size of the Toolbar's buttons and anchors (48, 64 or 96); the size of
+  file names and messages (the wheel over the Toolbar's bar sets it too);
+  the colour that marks the choice in use, and whether a picture's own
+  colour profile is used.
 - **Audio** — **Gapless playback** runs one song into the next with no
   silence between; **Crossfade** (0 to 5 seconds) fades one into the next
   instead; **Audio latency** is how much sound is kept ready (20 to
@@ -1245,7 +1299,7 @@ filename code page, the memory cap). Some worth knowing:
   that box ticked.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
-**Hide**, the first of the title bar's buttons, puts the title bar and the floating boxes away, so nothing
+**H** on the title bar puts the title bar and the Floating Widget away, so nothing
 comes up under the pointer. The next click anywhere in the window brings
 them back, and does nothing else.
 
@@ -1279,8 +1333,10 @@ what is picked to the list.
 Above the tiles (and the rows) is a line of column heads — Name, Type,
 Size, Created, Modified, Resolution, Length, as many as the width holds.
 A click on a head sorts by that column, and again the other way round
-(▲ rising, ▼ falling). **Open**, the first button at the bottom, opens what is picked — several files open
-together as one set — or, with nothing picked, the one in focus.
+(▲ rising, ▼ falling). **Open**, at the bottom right, opens what is picked — several files open
+together as one set — or, with nothing picked, the one in focus;
+**Cancel** beside it closes the screen. Opened while an archive is being
+read, the screen shows what the archive holds.
 `Ctrl+Z` here takes back a rename, a move or a copy made here; a move or a
 copy of many is taken back at once, and a copied folder goes whole.
 
@@ -1293,13 +1349,14 @@ everything from the last one clicked.
 
 The row over the list picks without holding a key: the **All** box picks
 everything here but `..` (a dash when some are), **Individual** makes
-every tap turn one file on or off, **Range** takes two taps and turns over
-everything between them, **Same type** takes every file with the same
+every tap turn one file on or off (a tap only picks; nothing opens),
+**Range** takes two taps and turns over everything between them, **Same type** takes every file with the same
 extension as the one in focus, **Media** the pictures, films, music and
 text. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
 **Details** (or **Tiles**) at its end changes the view. The bottom row
-acts on what is picked: **Open**, **Add to the list**, **Recycle** (press
-it twice), **Move to** and **Copy to** — send them to one of the numbered
+acts on what is picked: **Add to the list**, **Recycle** (press
+it twice), **Move to**, **Copy to**, **Cancel** and **Open** (**OK** when
+files are being picked for the list) — send them to one of the numbered
 folders: press the number after the button, or `0` for another folder,
 typed or browsed (**Browse...** under the box, or `Ctrl+O`) in the same
 box as `Shift+F6`, a new one made on a second `Enter` (with no numbered
@@ -1311,7 +1368,9 @@ row at a time (a click on a row, `Tab`, or `Enter` for the next) and
 done by **Apply**. **Details** shows the files as a list — a row a file, with its type (the
 extension), size, created and modified times, resolution and, for a film
 or a song, its length; resolution and length fill in as each row comes on
-screen. A click on a column's name sorts by it, rising (▲); again,
+screen. Drag the line between two column names to make the one on its
+right wider or narrower, and drag a name to put that column somewhere
+else (Name stays first); both are kept. A click on a column's name sorts by it, rising (▲); again,
 falling (▼); folders stay first, and the choice is kept (Settings > Files
 > sorted by). **Tiles** brings the pictures back (the same switch is in
 Settings > Files). `Ctrl+Z` undoes any of it; what was done to many at
@@ -1386,9 +1445,9 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `F11`, `Alt+Enter` | Full screen |
-| `T` | Open or close the toolbox |
-| `Shift+T` | Pin the toolbox open |
-| `Ctrl+T` | Give the toolbox a window of its own, or dock it |
+| `T` | Open or close the Toolbar |
+| `Shift+T` | Pin the Toolbar open |
+| `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
@@ -1492,8 +1551,8 @@ listed under a later heading only means that while that is on screen.
 | `,` | One frame back |
 | `Ctrl+]` | Faster (0.25x a step) |
 | `Ctrl+[` | Slower (0.25x a step) |
-| `Right` | 5 seconds on; its toolbox button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
-| `Left` | 5 seconds back; its toolbox button, held, offers 5 s to 5 min the same way |
+| `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
+| `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
 | `Ctrl+Shift+Right` | 1 second on |
 | `Ctrl+Shift+Left` | 1 second back |
@@ -1504,7 +1563,7 @@ listed under a later heading only means that while that is on screen.
 | `[` | Repeat from here (A) |
 | `]` | Repeat to here (B) |
 | `\` | Repeat off |
-| `Shift+\` | Repeat by number: the A-B box (toolbox `Set A-B`), A = now and B = now take the moment playing |
+| `Shift+\` | Repeat by number: the A-B box (Toolbar `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
@@ -1522,23 +1581,25 @@ listed under a later heading only means that while that is on screen.
 | `.` | Next page of the file |
 | `,` | Previous page of the file |
 
-**No key of its own: in the toolbox or the right click**
+**No key of its own: on the Toolbar or the right click**
 
 | Where | What it does |
 |---|---|
-| Toolbox `Stop`, Right click `Stop` | Stop, and back to the beginning |
-| Toolbox `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
-| Toolbox `A-B` | A-B repeat: from here, to here, off |
-| Toolbox `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
-| Toolbox `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
-| Toolbox `Night` | Night mode: loud passages brought down |
-| Toolbox `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
-| Toolbox `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
-| Toolbox `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
-| Toolbox `Bar pin` | Keep the title bar shown |
-| Toolbox `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
-| Toolbox `Wheel strip` | Thumbnails while the wheel turns pages |
-| Toolbox `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
+| Toolbar `Stop`, Right click `Stop` | Stop, and back to the beginning |
+| Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
+| Toolbar `A-B` | A-B repeat: from here, to here, off |
+| Toolbar `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
+| Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbar `Night` | Night mode: loud passages brought down |
+| Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
+| Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
+| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
+| Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
+| Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
+| Toolbar `Reload` | Text: read the file again, at the same place |
+| Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
@@ -1567,5 +1628,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
 | Right click `Slower` | Play slower |
 | Right click `Faster` | Play faster |
+| Title bar ☰ `Pin the title bar` | Keep the title bar shown |
+| Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->

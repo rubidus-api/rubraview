@@ -1808,3 +1808,33 @@ Do not store credentials, private infrastructure details, personal data, private
   - Change extensions on .png, .nfo, .txt: .png left, .nfo → .inf, .txt → .text, one Ctrl+Z back;
   - settings: a choice's text list, a number's box with OK / Cancel; print: Turn's list, Scale typed 250;
   - the copy box with OK / Browse... / Cancel; the favourites window with a file added from the right click.
+
+## 2026-10-20: D-175 The Floating Widget, the title bar's ☰, clicks by side, list tools, per-place faces, file-type icons
+
+- Status: Accepted (owner 2026-10-20, one release for the whole list):
+  - "파일 열기 아이콘을 없애고 대신 가로줄 3줄짜리 메뉴 아이콘"; "플로팅 바를 우측 하단으로, 하단 Information bar가 있을 경우 그 위에"; "F 아이콘 클릭해도 Pin 상태가 되지 않게";
+  - "아이콘에는 단축키를 표시하지 말고 툴팁이나 ... 에만"; "툴바의 진행막대 위에서 휠을 돌리면 파일이름/안내메시지 글꼴 크기";
+  - "휠을 돌리면 ... 줌 동작을 하게"; "제자리에서 오래 누르고 있을 때도 우클릭과 동일한 동작"; right middle next and left middle previous in any layout, rtl included; the middle does nothing;
+  - "재생목록 위에 커서를 대면 해당 파일의 썸네일이 보이게"; "필터 에디트 박스(버튼 포함), 목록 정렬 ..., 목록 내 특정 확장자 파일만 보기"; a `.ext` button as Explorer has;
+  - "우하단에 취소와 열기(또는 맥락에 따라서는 확인) 버튼"; "각 열의 너비를 드래그로 ... 열 사이의 순서도 드래그로"; "하나씩 혹은 범위버튼을 눌렀을 때 ... 선택과 범위 지정의 역할만";
+  - "UI에 쓰이는 여러 글꼴의 종류와 크기 등을 설정"; "가로 세로 스크롤바가 생기거나"; "텍스트 뷰어를 사용할지 안할지 ... 텍스트 파일을 목록 등에서도 받지 않고 보여주지도 않음";
+  - "문단의 맨 처음은 띄우게 ... 문단의 끝에서 개행. 빈 줄이 들어가는건 아님"; "한줄로 ... 전체가 다 개행이 안되게"; "Shift+B의 펼침면 설정이 자꾸 풀림";
+  - the Floating Widget's wheel by the anchors' old names: over F the buttons a row (Alt: opacity), over T their size.
+- Decision:
+  - Anchors F (the widget) and T (its Toolbar), P and R; `rubraview_box_click_open` opens unpinned; T dragged steps files every 36 px down or up and folders or archives every 110 px sideways.
+  - Title bar: MENU at the left, NAME measured by the viewer (`name_width`), BARPIN, SETTINGS; OPEN and SNAP_BOXES keep their values but have no rectangle. The ☰ list is the viewer's TMENU table; `check-actions.py` reads it as "Title bar ☰".
+  - Clicks: the zones ignore the reading order; a click on a single picture is nothing; a double click is `CENTER_PICTURE`; the plain wheel zooms a still picture (a film and a song keep theirs); a still press of 0.6 s opens the right-click list.
+  - Lists: rows are a view of the pages (`list_map`) — names holding the filter, extensions not let go. A filtered list's rows are not carried or moved; Sort reorders the list itself through `list_apply` (stat for size and dates). The files window types its filter in its own row; the viewer's window uses the typed box. The row under the pointer shows the page's texture or its strip thumbnail.
+  - The chooser has a fourth home, the files window; `.ext` stays open while boxes are ticked.
+  - Faces per place (`general.font_*`, `size_*`), `settings_spacing`; `ui.widget_opacity`, `titlebar_opacity`, `strip_opacity`; `display.name_scale`; `text.viewer`, `text.editor`, `text.color_*`; `files.picker_columns` keeps widths and order.
+  - A page read for the first time, or in a shape the layout did not assume, lays the pages out again; a page put out of memory keeps `seen_w`/`seen_h`.
+  - Paragraph mode: an indent marks a paragraph when only some lines are indented, also where blank lines are sometimes used.
+  - Icons 2–5 in `rubraview.rc` (film, text, picture, book), drawn by `scripts/make-icon.py --types`; DefaultIcon names them by resource ID by extension.
+- Consequences: VM (2026-10-20):
+  - the logo; ☰ and its list; the whole name; Set P H T F _ [] R X; tooltips wrapped inside the window;
+  - F opens and folds without P; T rested and dragged (a file down); the wheel over F and T, over the bar (names 120 %), over a choice;
+  - left and right clicks in single and two-page right-to-left; double click, wheel zoom, long press, right click without the moved items;
+  - list tools in both windows: .ext boxes, filter typed (in the files window too), sort by name and extension (text kept), thumbnail of the row pointed at;
+  - the open-file screen in an archive, Cancel/Open, a column widened and moved, Individual tap;
+  - settings pages (faces, opacities, text), the rename box; text: paragraphs, one run, auto-scroll, Edit in Notepad, the wheel on UTF8;
+  - a wide page alone in two pages on the first pass and after leaving memory; the exe holds five icons.

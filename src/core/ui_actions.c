@@ -189,6 +189,8 @@ uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *f
         { "open_settings", 0xE713 },         /* Settings */
         { "toggle_help", 0xE897 },           /* Help */
         { "open_edit", 0xE70F },             /* Edit */
+        { "text_edit_external", 0xE70F },    /* Edit: the text file in an editor (1.25.0) */
+        { "text_reload", 0xE72C },           /* Refresh: the text file read again (1.25.0) */
         { "quick_export", 0xE74E },          /* Save */
         { "toggle_playlist", 0xE8FD },       /* BulletedList */
         { "toggle_always_on_top", 0xE718 },  /* Pin */

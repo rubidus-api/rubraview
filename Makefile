@@ -309,7 +309,7 @@ $(AVIF_LIB_WIN): $(AVIF_OBJS_WIN) $(DAV1D_OBJS_WIN)
 # The icon and the version Explorer shows (owner, 2026-09-29).
 MINGW_WINDRES ?= x86_64-w64-mingw32-windres
 RES_WIN = build/rubraview-res.o
-$(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico include/rubraview/version.h
+$(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico $(wildcard resources/distribution/rubraview-*.ico) include/rubraview/version.h
 	@mkdir -p build
 	$(MINGW_WINDRES) -I include -I . -O coff $< -o $@
 
