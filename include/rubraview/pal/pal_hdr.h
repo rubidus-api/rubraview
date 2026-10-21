@@ -60,6 +60,18 @@ bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *pass, const rubrav
 
 void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *pass);
 
+/**
+ * RV-153 (D-183): the window sent to an HDR screen. Direct2D draws the frame into an FP16 scene whose 1.0 is
+ * the SDR white; this pass brings it to the FP16 scRGB back buffer (1.0 = 80 nits), times `scale` (the SDR
+ * white in nits / 80), sRGB-decoding it first when `decode` (the scene holds encoded values). One a renderer,
+ * on its own device and thread.
+ */
+typedef struct rubraview_hdr_present rubraview_hdr_present_t;
+rubraview_hdr_present_t *rubraview_pal_hdr_present_create(void *d3d11_device, const char **why);
+bool rubraview_pal_hdr_present_run(rubraview_hdr_present_t *present, void *scene_view, void *back_view,
+                                   int32_t width, int32_t height, double scale, bool decode);
+void rubraview_pal_hdr_present_free(rubraview_hdr_present_t *present);
+
 #ifdef __cplusplus
 }
 #endif

@@ -52,6 +52,7 @@ typedef struct rubraview_media_info {
     int32_t  hdr_transfer;               /* rubraview_hdr_transfer_t: 0 none, 1 PQ, 2 HLG */
     bool     hdr_tone_mapped;            /* its pictures are tone mapped to SDR on the graphics card */
     char     path_hdr_why[128];          /* HDR not tone mapped: why (an N_ literal; empty otherwise) */
+    bool     hdr_output;                 /* RV-153: its pictures are for an HDR screen (FP16, 1.0 the SDR white) */
 } rubraview_media_info_t;
 
 /*
@@ -69,6 +70,10 @@ typedef struct rubraview_media_gpu {
        renderer's decode device, offered whether or not the card decodes */
     int32_t  tone_mapping;
     void    *shader_device;
+    /* RV-153: an HDR film tone mapped for an HDR screen of this peak, its SDR white at that many nits;
+       0: for an SDR screen */
+    double   hdr_screen_peak;
+    double   hdr_sdr_white;
 } rubraview_media_gpu_t;
 
 typedef struct rubraview_media_open_result {

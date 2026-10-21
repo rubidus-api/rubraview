@@ -61,7 +61,8 @@ static double srgb_encode(double v) {
     return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;
 }
 
-void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, double cr, double out_rgb[3]) {
+/* The codes to the film's light in nits, BT.2020 primaries; `peak` is what the curve folds from. */
+static void film_nits(const rubraview_tonemap_t *t, double y, double cb, double cr, double l[3], double *peak) {
     /* the codes back to Y' 0..1 and Cb, Cr -0.5..0.5 */
     int bits = t->bits >= 8 && t->bits <= 16 ? t->bits : 10;
     double max_code = (double)((1 << bits) - 1), unit = (double)(1 << (bits - 8));
@@ -81,31 +82,58 @@ void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, 
     double b = clamp01(yv + 1.8814 * cbv);
     double g = clamp01((yv - 0.2627 * (yv + 1.4746 * crv) - 0.0593 * (yv + 1.8814 * cbv)) / 0.6780);
 
-    double lr, lg, lb, peak = t->peak_nits;
+    *peak = t->peak_nits;
     if (t->transfer == RUBRAVIEW_HDR_HLG) {
         /* scene light, then the OOTF of a 1000-nit display (system gamma 1.2) */
         double sr = rubraview_hlg_to_scene(r), sg = rubraview_hlg_to_scene(g), sb = rubraview_hlg_to_scene(b);
         double ys = 0.2627 * sr + 0.6780 * sg + 0.0593 * sb;
         double gain = ys > 0.0 ? 1000.0 * pow(ys, 0.2) : 0.0;
-        lr = gain * sr; lg = gain * sg; lb = gain * sb;
-        peak = 1000.0;
+        l[0] = gain * sr; l[1] = gain * sg; l[2] = gain * sb;
+        *peak = 1000.0;
     } else {
-        lr = rubraview_pq_to_nits(r); lg = rubraview_pq_to_nits(g); lb = rubraview_pq_to_nits(b);
+        l[0] = rubraview_pq_to_nits(r); l[1] = rubraview_pq_to_nits(g); l[2] = rubraview_pq_to_nits(b);
     }
+}
 
+/* BT.2020 primaries to BT.709's */
+static void to_709(const double l[3], double o[3]) {
+    o[0] =  1.6605 * l[0] - 0.5876 * l[1] - 0.0728 * l[2];
+    o[1] = -0.1246 * l[0] + 1.1329 * l[1] - 0.0083 * l[2];
+    o[2] = -0.0182 * l[0] - 0.1006 * l[1] + 1.1187 * l[2];
+}
+
+void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, double cr, double out_rgb[3]) {
+    double l[3], peak;
+    film_nits(t, y, cb, cr, l, &peak);
     /* the brightest channel folded under the white, the others kept in proportion (hue kept) */
     double white = t->white_nits > 0.0 ? t->white_nits : RUBRAVIEW_SDR_WHITE_NITS;
-    double m = fmax(lr, fmax(lg, lb));
+    double m = fmax(l[0], fmax(l[1], l[2]));
     double scale = m > 0.0 ? rubraview_bt2390(m, peak, white) / m / white : 0.0;
-    lr *= scale; lg *= scale; lb *= scale;
+    for (int i = 0; i < 3; ++i) l[i] *= scale;
+    /* what falls outside BT.709 clipped */
+    double o[3];
+    to_709(l, o);
+    for (int i = 0; i < 3; ++i) out_rgb[i] = srgb_encode(o[i]);
+}
 
-    /* BT.2020 primaries to BT.709's, what falls outside clipped */
-    double r7 =  1.6605 * lr - 0.5876 * lg - 0.0728 * lb;
-    double g7 = -0.1246 * lr + 1.1329 * lg - 0.0083 * lb;
-    double b7 = -0.0182 * lr - 0.1006 * lg + 1.1187 * lb;
-    out_rgb[0] = srgb_encode(r7);
-    out_rgb[1] = srgb_encode(g7);
-    out_rgb[2] = srgb_encode(b7);
+double rubraview_srgb_encode_extended(double v) {
+    double a = fabs(v);
+    double e = a <= 0.0031308 ? 12.92 * a : 1.055 * pow(a, 1.0 / 2.4) - 0.055;
+    return v < 0.0 ? -e : e;
+}
+
+void rubraview_tonemap_pixel_hdr(const rubraview_tonemap_t *t, double y, double cb, double cr, double display_peak,
+                                 double out_rgb[3]) {
+    double l[3], peak;
+    film_nits(t, y, cb, cr, l, &peak);
+    double white = t->white_nits > 0.0 ? t->white_nits : RUBRAVIEW_SDR_WHITE_NITS;
+    double screen = display_peak > 0.0 ? display_peak : RUBRAVIEW_HDR_DEFAULT_PEAK;
+    double m = fmax(l[0], fmax(l[1], l[2]));
+    double scale = m > 0.0 ? rubraview_bt2390(m, peak, screen) / m / white : 0.0;
+    for (int i = 0; i < 3; ++i) l[i] *= scale;
+    double o[3];
+    to_709(l, o);   /* kept: scRGB holds what lies outside BT.709 */
+    for (int i = 0; i < 3; ++i) out_rgb[i] = rubraview_srgb_encode_extended(o[i]);
 }
 
 double rubraview_tonemap_sample_scale(int bits, bool high_bits) {

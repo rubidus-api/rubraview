@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.28.1.exe              the viewer, as built
-dist/rubraview-v1.28.1/                 the release bundle
-dist/rubraview-v1.28.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.29.0.exe              the viewer, as built
+dist/rubraview-v1.29.0/                 the release bundle
+dist/rubraview-v1.29.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1295,6 +1295,16 @@ filename code page, the memory cap). Some worth knowing:
   Windows' decoder opens and names as HDR is handed to FFmpeg. A VP9 or AV1
   film Windows names nothing for (VP9 in MP4) is looked at by FFmpeg too,
   and handed over when FFmpeg finds it HDR.
+- **Video** › **HDR output** (`auto`, the default, `off` or `always`): on a
+  screen with Windows' HDR on, an HDR film that is tone mapped goes out as
+  HDR — its highlights up to the screen's own peak, its colours wider than
+  sRGB — while the rest of the window stays at Windows' SDR brightness
+  ("SDR content brightness"), as other windows do. Moving the window to
+  another screen, or switching Windows' HDR, opens the film again for that
+  screen. `always` does it even on an ordinary screen (for testing). The
+  information window's **Presented** then says "scRGB FP16", and **HDR**
+  "sent to the screen as HDR"; otherwise **HDR output** says why not. A
+  frame taken out of such a film is clipped at SDR white.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,

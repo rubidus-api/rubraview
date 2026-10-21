@@ -34,6 +34,7 @@ typedef struct rubraview_tonemap {
     int    bits;             /* 8, 10, 12 */
     double peak_nits;        /* the film's brightest, from its metadata */
     double white_nits;       /* what the screen's white stands for */
+    double screen_peak_nits; /* RV-153: > 0 for an HDR screen of that peak (the shader's rubraview_tonemap_pixel_hdr) */
 } rubraview_tonemap_t;
 
 /** PQ's signal (0..1) to nits, and back. */
@@ -51,6 +52,18 @@ double rubraview_hdr_peak(double max_cll, double mastering_max);
 
 /** One pixel: Y', Cb, Cr as codes normalised to the bit depth's largest (code / (2^bits - 1)), to sRGB 0..1. */
 void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, double cr, double out_rgb[3]);
+
+/**
+ * RV-153 (D-183): one pixel for an HDR screen. The same film light as above, folded by BT.2390 under the
+ * screen's peak (`display_peak` nits) instead of the white, BT.2020 to BT.709 without clipping, divided by
+ * `t->white_nits` (what 1.0 stands for: the SDR white) and written with sRGB's curve extended past 1 and
+ * mirrored below 0 — the unit Direct2D's scene holds, decoded on the way to the screen.
+ */
+void rubraview_tonemap_pixel_hdr(const rubraview_tonemap_t *t, double y, double cb, double cr, double display_peak,
+                                 double out_rgb[3]);
+
+/** sRGB's curve for scRGB: extended past 1, mirrored below 0. */
+double rubraview_srgb_encode_extended(double v);
 
 /** RV-151 (D-181): the factor that turns a 16-bit sample, as the shader reads it (0..1), back into a code:
     FFmpeg's planar pictures keep a code in the sample's low bits, the card's P010 (and P016) in its high ones. */

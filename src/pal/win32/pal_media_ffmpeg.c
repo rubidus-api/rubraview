@@ -1031,6 +1031,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         snprintf(in->path_hdr_why, sizeof(in->path_hdr_why), "%s", m->hdr_why ? m->hdr_why : "");
         if (m->hdr_pass) {   /* RV-150 */
             in->hdr_tone_mapped = true;
+            in->hdr_output = m->tone.screen_peak_nits > 0.0;   /* RV-153 */
             snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("our shader on the graphics card (Direct3D 11): BT.2390 tone mapping, BT.2020 to sRGB"));
             snprintf(in->path_handover, sizeof(in->path_handover), "%s",
                      m->hw_attached ? N_("the card's picture (P010) copied on the card for the shader; a shared texture (keyed mutex), copied on the card into the page's")   /* RV-151 */
@@ -1125,7 +1126,8 @@ static bool ff_slot_texture(ff_media_t *m, ff_slot_t *s, ID3D11Device *device) {
     if (s->texture) return s->mutex != NULL;
     D3D11_TEXTURE2D_DESC own = {
         .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
-        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Format = m->tone.screen_peak_nits > 0.0 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,   /* RV-153 */
+        .SampleDesc = { .Count = 1, .Quality = 0 },
         .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
         .MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
     };
@@ -1188,6 +1190,10 @@ static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par) {
     m->tone.peak_nits = m->tone.transfer == RUBRAVIEW_HDR_HLG ? 1000.0 : rubraview_hdr_peak(max_cll, mastering);
     m->tone_peak_read = max_cll > 0.0 || mastering > 0.0;
     m->hdr_why = ff_tone_open(m, par);
+    if (m->hdr_pass && m->gpu.hdr_screen_peak > 0.0) {   /* RV-153: for an HDR screen, 1.0 its SDR white */
+        m->tone.screen_peak_nits = m->gpu.hdr_screen_peak;
+        m->tone.white_nits = m->gpu.hdr_sdr_white > 0.0 ? m->gpu.hdr_sdr_white : 80.0;
+    }
     atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
 }
 

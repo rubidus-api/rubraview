@@ -28,8 +28,9 @@ static const GUID HDR_IID_ID3D11Multithread =
     { 0x9b7e4e00, 0x342c, 0x4106, { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
 
 static const char SHADER[] =
-    "cbuffer tone : register(b0) { float4 a; float4 b; };\n"
-    /* a: sample to code, transfer, full range, largest code; b: peak, white, 2^(bits-8), 2^(bits-1) */
+    "cbuffer tone : register(b0) { float4 a; float4 b; float4 c; };\n"
+    /* a: sample to code, transfer, full range, largest code; b: peak, white, 2^(bits-8), 2^(bits-1);
+       c (RV-153): for an HDR screen, its peak */
     "Texture2D<float> plane_y : register(t0);\n"
     "Texture2D<float> plane_u : register(t1);\n"
     "Texture2D<float> plane_v : register(t2);\n"
@@ -72,6 +73,11 @@ static const char SHADER[] =
     "    }\n"
     "    return pq_to_nits(e2 * spq);\n"
     "}\n"
+    "float srgb_ext(float v) {\n"   /* RV-153: past 1, mirrored below 0 */
+    "    float x = abs(v);\n"
+    "    float e = x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1.0 / 2.4) - 0.055;\n"
+    "    return v < 0.0 ? -e : e;\n"
+    "}\n"
     "float srgb(float v) {\n"
     "    v = saturate(v);\n"
     "    return v <= 0.0031308 ? 12.92 * v : 1.055 * pow(v, 1.0 / 2.4) - 0.055;\n"
@@ -94,6 +100,13 @@ static const char SHADER[] =
     "        l = float3(pq_to_nits(r), pq_to_nits(g), pq_to_nits(bl));\n"
     "    }\n"
     "    float m = max(l.x, max(l.y, l.z));\n"
+    "    if (c.x > 0.0) {\n"   /* RV-153: under the HDR screen's peak, 1.0 the SDR white, nothing clipped */
+    "        l *= m > 0.0 ? bt2390(m, peak, c.x) / m / b.y : 0.0;\n"
+    "        float3 w = float3( 1.6605 * l.x - 0.5876 * l.y - 0.0728 * l.z,\n"
+    "                          -0.1246 * l.x + 1.1329 * l.y - 0.0083 * l.z,\n"
+    "                          -0.0182 * l.x - 0.1006 * l.y + 1.1187 * l.z);\n"
+    "        return float4(srgb_ext(w.x), srgb_ext(w.y), srgb_ext(w.z), 1.0);\n"
+    "    }\n"
     "    l *= m > 0.0 ? bt2390(m, peak, b.y) / m / b.y : 0.0;\n"
     "    float3 o = float3( 1.6605 * l.x - 0.5876 * l.y - 0.0728 * l.z,\n"
     "                      -0.1246 * l.x + 1.1329 * l.y - 0.0083 * l.z,\n"
@@ -163,18 +176,24 @@ void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *p) {
     free(p);
 }
 
-rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const char **why) {
+/* Windows' shader compiler, looked for once. */
+static d3dcompile_fn compiler(void) {
     static d3dcompile_fn compile_fn;
     static bool tried;
+    if (!tried) {
+        tried = true;
+        HMODULE dll = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        compile_fn = dll ? (d3dcompile_fn)(void*)GetProcAddress(dll, "D3DCompile") : NULL;
+    }
+    return compile_fn;
+}
+
+rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const char **why) {
     const char *dummy;
     if (!why) why = &dummy;
     *why = NULL;
     if (!d3d11_device) { *why = N_("no Direct3D 11 device for tone mapping was made"); return NULL; }
-    if (!tried) {
-        tried = true;
-        HMODULE compiler = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-        compile_fn = compiler ? (d3dcompile_fn)(void*)GetProcAddress(compiler, "D3DCompile") : NULL;
-    }
+    d3dcompile_fn compile_fn = compiler();
     if (!compile_fn) { *why = N_("no shader compiler (d3dcompiler_47.dll)"); return NULL; }
 
     rubraview_hdr_pass_t *p = (rubraview_hdr_pass_t*)calloc(1, sizeof(*p));
@@ -200,7 +219,7 @@ rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const ch
     p->p010_views = p->ps_p010 && SUCCEEDED(ID3D11Device_CheckFormatSupport(p->device, DXGI_FORMAT_P010, &support)) &&
                     (support & D3D11_FORMAT_SUPPORT_TEXTURE2D) && (support & D3D11_FORMAT_SUPPORT_SHADER_SAMPLE);
 
-    D3D11_BUFFER_DESC cb = { .ByteWidth = 32, .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_CONSTANT_BUFFER };
+    D3D11_BUFFER_DESC cb = { .ByteWidth = 48, .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_CONSTANT_BUFFER };
     if (FAILED(ID3D11Device_CreateBuffer(p->device, &cb, NULL, &p->params))) p->params = NULL;
     D3D11_SAMPLER_DESC sd = {
         .Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR,
@@ -253,10 +272,11 @@ static bool draw(rubraview_hdr_pass_t *p, ID3D11PixelShader *ps, ID3D11ShaderRes
     ID3D11RenderTargetView *rtv = target_view(p, target);
     if (!rtv) return false;
     int bits = tone->bits >= 8 && tone->bits <= 16 ? tone->bits : 10;
-    float params[8] = {
+    float params[12] = {
         (float)scale, (float)tone->transfer, tone->full_range ? 1.0f : 0.0f, (float)((1 << bits) - 1),
         (float)tone->peak_nits, (float)(tone->white_nits > 0.0 ? tone->white_nits : RUBRAVIEW_SDR_WHITE_NITS),
         (float)(1 << (bits - 8)), (float)(1 << (bits - 1)),
+        (float)(tone->screen_peak_nits > 0.0 ? tone->screen_peak_nits : 0.0), 0.0f, 0.0f, 0.0f,
     };
     ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->params, 0, NULL, params, 0, 0);
     D3D11_VIEWPORT viewport = { 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f };
@@ -430,6 +450,110 @@ bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *p, const rubraview
     if (!ok) return false;
     rubraview_hdr_p010_t source = { .texture = p->test_array, .slice = 1, .width = w, .height = h };
     return rubraview_pal_hdr_pass_run_p010(p, &source, tone, target);
+}
+
+/* ---- RV-153 (D-183): the scene to the scRGB back buffer ---- */
+
+static const char PRESENT_SHADER[] =
+    "cbuffer present : register(b0) { float4 c; };\n"   /* c.x: scale, c.y: decode */
+    "Texture2D<float4> scene : register(t0);\n"
+    "struct vs_out { float4 pos : SV_Position; float2 uv : TEXCOORD0; };\n"
+    "vs_out vs(uint id : SV_VertexID) {\n"
+    "    vs_out o;\n"
+    "    float2 t = float2((id << 1) & 2, id & 2);\n"
+    "    o.uv = t;\n"
+    "    o.pos = float4(t.x * 2.0 - 1.0, 1.0 - t.y * 2.0, 0.0, 1.0);\n"
+    "    return o;\n"
+    "}\n"
+    "float linear1(float v) {\n"   /* sRGB's curve undone, mirrored below 0 as scRGB's own extension is */
+    "    float a = abs(v);\n"
+    "    float l = a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4);\n"
+    "    return v < 0.0 ? -l : l;\n"
+    "}\n"
+    "float4 ps(vs_out i) : SV_Target {\n"
+    "    float3 v = scene.Load(int3(i.pos.xy, 0)).rgb;\n"
+    "    if (c.y > 0.5) v = float3(linear1(v.x), linear1(v.y), linear1(v.z));\n"
+    "    return float4(v * c.x, 1.0);\n"
+    "}\n";
+
+struct rubraview_hdr_present {
+    ID3D11Device *device;
+    ID3D11DeviceContext *context;
+    ID3D11VertexShader *vs;
+    ID3D11PixelShader *ps;
+    ID3D11Buffer *params;
+};
+
+void rubraview_pal_hdr_present_free(rubraview_hdr_present_t *p) {
+    if (!p) return;
+    if (p->params) ID3D11Buffer_Release(p->params);
+    if (p->ps) ID3D11PixelShader_Release(p->ps);
+    if (p->vs) ID3D11VertexShader_Release(p->vs);
+    if (p->context) ID3D11DeviceContext_Release(p->context);
+    if (p->device) ID3D11Device_Release(p->device);
+    free(p);
+}
+
+static ID3DBlob *compile_present(d3dcompile_fn fn, const char *entry, const char *profile) {
+    ID3DBlob *code = NULL, *errors = NULL;
+    HRESULT hr = fn(PRESENT_SHADER, sizeof(PRESENT_SHADER) - 1, "rubraview_present", NULL, NULL, entry, profile, 0, 0, &code, &errors);
+    if (errors) ID3D10Blob_Release(errors);
+    return SUCCEEDED(hr) ? code : NULL;
+}
+
+rubraview_hdr_present_t *rubraview_pal_hdr_present_create(void *d3d11_device, const char **why) {
+    const char *dummy;
+    if (!why) why = &dummy;
+    *why = NULL;
+    d3dcompile_fn fn = compiler();
+    if (!d3d11_device) { *why = N_("no Direct3D 11 device"); return NULL; }
+    if (!fn) { *why = N_("no shader compiler (d3dcompiler_47.dll)"); return NULL; }
+    rubraview_hdr_present_t *p = (rubraview_hdr_present_t*)calloc(1, sizeof(*p));
+    if (!p) { *why = N_("out of memory"); return NULL; }
+    p->device = (ID3D11Device*)d3d11_device;
+    ID3D11Device_AddRef(p->device);
+    ID3D11Device_GetImmediateContext(p->device, &p->context);
+    ID3DBlob *vs = compile_present(fn, "vs", "vs_4_0"), *ps = compile_present(fn, "ps", "ps_4_0");
+    if (vs && FAILED(ID3D11Device_CreateVertexShader(p->device, ID3D10Blob_GetBufferPointer(vs), ID3D10Blob_GetBufferSize(vs), NULL, &p->vs)))
+        p->vs = NULL;
+    if (ps && FAILED(ID3D11Device_CreatePixelShader(p->device, ID3D10Blob_GetBufferPointer(ps), ID3D10Blob_GetBufferSize(ps), NULL, &p->ps)))
+        p->ps = NULL;
+    if (vs) ID3D10Blob_Release(vs);
+    if (ps) ID3D10Blob_Release(ps);
+    D3D11_BUFFER_DESC cb = { .ByteWidth = 16, .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_CONSTANT_BUFFER };
+    if (FAILED(ID3D11Device_CreateBuffer(p->device, &cb, NULL, &p->params))) p->params = NULL;
+    if (!p->context || !p->vs || !p->ps || !p->params) {
+        *why = N_("the HDR output shader would not build");
+        rubraview_pal_hdr_present_free(p);
+        return NULL;
+    }
+    return p;
+}
+
+bool rubraview_pal_hdr_present_run(rubraview_hdr_present_t *p, void *scene_view, void *back_view,
+                                   int32_t width, int32_t height, double scale, bool decode) {
+    if (!p || !scene_view || !back_view || width <= 0 || height <= 0) return false;
+    float params[4] = { (float)scale, decode ? 1.0f : 0.0f, 0.0f, 0.0f };
+    ID3D11ShaderResourceView *view = (ID3D11ShaderResourceView*)scene_view;
+    ID3D11RenderTargetView *rtv = (ID3D11RenderTargetView*)back_view;
+    ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->params, 0, NULL, params, 0, 0);
+    D3D11_VIEWPORT viewport = { 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f };
+    ID3D11DeviceContext_IASetInputLayout(p->context, NULL);
+    ID3D11DeviceContext_IASetPrimitiveTopology(p->context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11DeviceContext_VSSetShader(p->context, p->vs, NULL, 0);
+    ID3D11DeviceContext_PSSetShader(p->context, p->ps, NULL, 0);
+    ID3D11DeviceContext_PSSetShaderResources(p->context, 0, 1, &view);
+    ID3D11DeviceContext_PSSetConstantBuffers(p->context, 0, 1, &p->params);
+    ID3D11DeviceContext_RSSetState(p->context, NULL);
+    ID3D11DeviceContext_RSSetViewports(p->context, 1, &viewport);
+    ID3D11DeviceContext_OMSetBlendState(p->context, NULL, NULL, 0xFFFFFFFFu);
+    ID3D11DeviceContext_OMSetDepthStencilState(p->context, NULL, 0);
+    ID3D11DeviceContext_OMSetRenderTargets(p->context, 1, &rtv, NULL);
+    ID3D11DeviceContext_Draw(p->context, 3, 0);
+    ID3D11ShaderResourceView *none = NULL;
+    ID3D11DeviceContext_PSSetShaderResources(p->context, 0, 1, &none);
+    ID3D11DeviceContext_OMSetRenderTargets(p->context, 0, NULL, NULL);
+    return true;
 }
 
 #endif /* _WIN32 */

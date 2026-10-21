@@ -73,9 +73,24 @@ typedef struct rubraview_render_facts {
     int32_t  present_model;         /* RUBRAVIEW_PRESENT_* (D-179) */
     bool     decode_device;         /* a second device was made on the card for decoding */
     uint32_t decoder_profiles;      /* the video decoders that device offers */
+    bool     hdr_output;            /* RV-153: the window goes out as scRGB (FP16) to an HDR screen */
+    double   hdr_sdr_white;         /* ...the nits SDR's white is shown at */
 } rubraview_render_facts_t;
 
 bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render_facts_t *out);
+
+/* RV-153 (D-183): the screen the window is on, as Windows sees it. */
+typedef struct rubraview_hdr_display {
+    bool   hdr;                     /* Windows' HDR is on for it (BT.2100 PQ) */
+    double peak_nits;               /* its brightest (MaxLuminance), within 100..10000; 0 when it says nothing */
+    double sdr_white_nits;          /* where Windows shows SDR's white ("SDR content brightness"); 80 when unknown */
+} rubraview_hdr_display_t;
+bool rubraview_pal_render_hdr_display(rubraview_renderer_t *renderer, rubraview_hdr_display_t *out);
+
+/** Sends the window as scRGB, FP16 (on), or as before (off); `sdr_white_nits` is what the drawing's 1.0 is
+    shown at. False, and `why` (an N_ literal), when it cannot: the copy model, a colour space the swap chain
+    refuses, no shader. Nothing is done when nothing changes. */
+bool rubraview_pal_render_set_hdr(rubraview_renderer_t *renderer, bool on, double sdr_white_nits, const char **why);
 
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height);
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer);
@@ -156,6 +171,10 @@ bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture,
 void *rubraview_pal_render_video_device(rubraview_renderer_t *renderer, uint32_t *out_decoder_profiles);
 rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer,
                                                         int32_t width, int32_t height);
+/** RV-153: the same in FP16, for a film sent to an HDR screen (sRGB-encoded, 1.0 the SDR white). Read back,
+    uploaded or measured as BGRA, clipped at that white. */
+rubraview_texture_t *rubraview_pal_texture_create_video_hdr(rubraview_renderer_t *renderer,
+                                                            int32_t width, int32_t height);
 /** Diagnostic (--probe-gpu): the average brightness, 0-255, of a video texture. */
 bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness);
 

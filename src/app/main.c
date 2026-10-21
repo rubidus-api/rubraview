@@ -446,6 +446,10 @@ typedef struct app_state {
     /* M5: the video on the current page, when it is one (D-8, D-9). */
     rubraview_media_t      *media;
     rubraview_media_info_t  media_info;
+    rubraview_hdr_display_t media_hdr_screen;  /* RV-153: the screen as it was when the film opened */
+    const char             *hdr_output_why;    /* the window could not go out as HDR (an N_ literal) */
+    bool                    hdr_output_refused;/* ...so films open for SDR until the screen changes */
+    double                  hdr_screen_check;  /* seconds since the screen was last looked at */
     int32_t                 media_hdr_handed;  /* RV-150: 1 Windows' decoder found it HDR and FFmpeg took it, to tone map it;
                                                   RV-152: 2 Windows named nothing (VP9, AV1) and FFmpeg found it HDR */
     rubraview_media_clock_t media_clock;
@@ -2718,6 +2722,7 @@ static app_page_t *media_page_ready(app_state_t *app) {
            and its frames are copied into it there; so does one tone mapped there (RV-150). */
         page->texture = !app->media_info.has_video
             ? audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h)
+            : app->media_info.hdr_output ? rubraview_pal_texture_create_video_hdr(app->renderer, w, h)   /* RV-153 */
             : app->media_info.hardware_decode || app->media_info.hdr_tone_mapped
                 ? rubraview_pal_texture_create_video(app->renderer, w, h)
                 : rubraview_pal_texture_create_bgra(app->renderer, w, h);
@@ -3210,6 +3215,14 @@ static void media_prepare(app_state_t *app) {
     /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
     gpu.tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_tone_mapping")));
     if (gpu.tone_mapping > 0) gpu.shader_device = gpu.device ? gpu.device : rubraview_pal_render_video_device(app->renderer, NULL);
+    /* RV-153: [video] hdr_output — an HDR film tone mapped for the HDR screen the window is on (always: any screen) */
+    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+    rubraview_pal_render_hdr_display(app->renderer, &app->media_hdr_screen);
+    if (gpu.tone_mapping > 0 && !app->hdr_output_refused && (hdr_out == 2 || (hdr_out == 1 && app->media_hdr_screen.hdr))) {
+        gpu.hdr_screen_peak = !app->media_hdr_screen.hdr ? app->media_hdr_screen.sdr_white_nits
+                            : app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits : RUBRAVIEW_HDR_DEFAULT_PEAK;
+        gpu.hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
+    }
     for (size_t i = 0; i < count; ++i) {
         opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
@@ -19797,6 +19810,10 @@ static void info_gather(app_state_t *app) {
                                         (fl >> 12) & 0xFu, (fl >> 8) & 0xFu, rf.warp ? T("WARP, Windows' software rasteriser") : rf.adapter);
                     if (rf.video_memory > 0)
                         rubraview_info_addf(a, &info, T("Video memory"), "%llu MB", (unsigned long long)(rf.video_memory >> 20));
+                    if (rf.hdr_output)   /* RV-153 */
+                        rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, scRGB FP16 for an HDR screen (SDR white at %.0f nits), %s"),
+                                            rf.buffers, rf.hdr_sdr_white, rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
+                    else
                     rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, BGRA, %s, %s"), rf.buffers,
                                         rf.present_model == RUBRAVIEW_PRESENT_FLIP_DISCARD ? T("flip model (flip discard)")
                                         : rf.present_model == RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL ? T("flip model (flip sequential)")
@@ -19811,12 +19828,24 @@ static void info_gather(app_state_t *app) {
                 if (m->hdr_transfer) {   /* RV-150 */
                     const char *kind = m->hdr_transfer == RUBRAVIEW_HDR_PQ ? "PQ (HDR10)" : "HLG";
                     double peak = 0.0;
-                    if (m->hdr_tone_mapped && rubraview_pal_media_hdr_peak(app->media, &peak))
+                    if (m->hdr_tone_mapped && m->hdr_output && rubraview_pal_media_hdr_peak(app->media, &peak))   /* RV-153 */
+                        rubraview_info_addf(a, &info, T("HDR"), T("%s, peak %.0f nits, sent to the screen as HDR: tone mapped on the graphics card (BT.2390) to its peak of %.0f nits"),
+                                            kind, peak, app->media_hdr_screen.hdr && app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits
+                                            : app->media_hdr_screen.hdr ? RUBRAVIEW_HDR_DEFAULT_PEAK : app->media_hdr_screen.sdr_white_nits);
+                    else if (m->hdr_tone_mapped && rubraview_pal_media_hdr_peak(app->media, &peak))
                         rubraview_info_addf(a, &info, T("HDR"), T("%s, peak %.0f nits, tone mapped on the graphics card (BT.2390) to a %.0f-nit white"),
                                             kind, peak, RUBRAVIEW_SDR_WHITE_NITS);
                     else
                         rubraview_info_addf(a, &info, T("HDR"), T("%s, not tone mapped - %s"), kind,
                                             m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map"));
+                    if (m->hdr_tone_mapped && !m->hdr_output) {   /* RV-153: why not as HDR */
+                        int ho = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+                        const char *why = ho <= 0 ? T("HDR output is off (Settings > Video)")
+                                        : app->hdr_output_refused && app->hdr_output_why ? rubraview_tr(app->hdr_output_why)
+                                        : !app->media_hdr_screen.hdr ? T("this screen is not in HDR (Windows' display settings)")
+                                        : T("not for this film");
+                        rubraview_info_addf(a, &info, T("HDR output"), T("off - %s"), why);
+                    }
                     if (app->media_hdr_handed == 1)
                         rubraview_info_add(a, &info, T("Handed over"), TU8("Windows' decoder found it HDR; FFmpeg took it to tone map it"));
                     else if (app->media_hdr_handed == 2)   /* RV-152 */
@@ -25527,6 +25556,17 @@ static void render_frame(app_state_t *app) {
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     if (win_w <= 0 || win_h <= 0) return;
 
+    /* RV-153: the window goes out as HDR while a film made for an HDR screen is the page shown */
+    if (app->media && app->media_info.hdr_output) {
+        bool want = current_page_index(app) == app->media_page;
+        const char *why = NULL;
+        if (!rubraview_pal_render_set_hdr(app->renderer, want, app->media_hdr_screen.sdr_white_nits, &why) && want) {
+            app->hdr_output_why = why;
+            app->hdr_output_refused = true;   /* reopened for SDR by hdr_screen_tick */
+        }
+    } else {
+        rubraview_pal_render_set_hdr(app->renderer, false, 0.0, NULL);
+    }
     rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
 
     draw_music_backdrop(app, win_w, win_h);
@@ -25643,8 +25683,38 @@ static void render_frame(app_state_t *app) {
    decoder lived on the lost card and would hand over no more frames.
    Software-decoded films and sound are not bound to the device and are
    left alone (reopening music would be a gap you can hear). */
+static void media_reopen(app_state_t *app);
+
 static void media_reopen_on_new_device(app_state_t *app) {
     if (!app->media || !app->media_info.has_video || !(app->media_info.hardware_decode || app->media_info.hdr_tone_mapped)) return;
+    media_reopen(app);
+    osd_say(app, TU8("the graphics device was reset: the film was opened again"));
+}
+
+/* RV-153: once a second while an HDR film is tone mapped, whether its screen is still the one it was opened
+   for (moved to another screen, Windows' HDR switched, the SDR brightness moved); if not, it is opened again. */
+static void hdr_screen_tick(app_state_t *app, double dt) {
+    if (!app->media || !app->media_info.hdr_tone_mapped) { app->hdr_screen_check = 0.0; return; }
+    if (app->hdr_output_refused && app->media_info.hdr_output) {   /* the window would not go out as HDR */
+        media_reopen(app);
+        return;
+    }
+    app->hdr_screen_check += dt;
+    if (app->hdr_screen_check < 1.0) return;
+    app->hdr_screen_check = 0.0;
+    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+    if (hdr_out != 1) return;
+    rubraview_hdr_display_t now;
+    rubraview_pal_render_hdr_display(app->renderer, &now);
+    const rubraview_hdr_display_t *was = &app->media_hdr_screen;
+    bool changed = now.hdr != was->hdr || (now.hdr && (now.peak_nits != was->peak_nits || now.sdr_white_nits != was->sdr_white_nits));
+    if (!changed) return;
+    app->hdr_output_refused = false;   /* another screen: ask again */
+    media_reopen(app);
+}
+
+/* A film opened again where it was, paused or not, on the same tracks. */
+static void media_reopen(app_state_t *app) {
     double position = app->media_position;
     bool paused = app->media_paused;
     int32_t subtitle = app->tracks.current_subtitle;
@@ -25661,13 +25731,13 @@ static void media_reopen_on_new_device(app_state_t *app) {
     media_seek_to(app, position);
     app->media_position = position;
     if (paused != app->media_paused) media_toggle_pause(app);
-    osd_say(app, TU8("the graphics device was reset: the film was opened again"));
 }
 
 /* ---- per-frame timers ---- */
 
 static void tick_timers(app_state_t *app, double dt) {
     rubraview_osd_tick(&app->osd, dt);
+    hdr_screen_tick(app, dt);   /* RV-153 */
     picker_hold_tick(app);   /* 1.22.0 */
     view_hold_tick(app);     /* 1.25.0 */
     /* Where the pointer is now, not where it last moved — the same reason

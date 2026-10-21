@@ -6,10 +6,12 @@
 #include <d3d11.h>
 #include <d3d11_4.h>   /* ID3D11Multithread (RV-062) */
 #include <dxgi1_2.h>
+#include <dxgi1_6.h>   /* IDXGISwapChain3, IDXGIOutput6 (RV-153) */
 #include <dwrite.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 /*
  * MinGW declares IID_IDWriteFactory with DEFINE_GUID but its import
@@ -35,12 +37,15 @@ static const GUID RV_IID_IDXGISurface =
     { 0xcafcb56c, 0x6ac3, 0x4889, { 0xbf, 0x47, 0x9e, 0x23, 0xbb, 0xd2, 0x60, 0xec } };
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
+#include "rubraview/pal/pal_hdr.h"
+#include "rubraview/lang.h"
 
 #define VIDEO_SOURCES 8   /* the decoder's slot textures a film's texture has opened (4 slots, a spare) */
 
 struct rubraview_texture {
     ID2D1Bitmap *bitmap;
     ID3D11Texture2D *d3d;                /* RV-062: a film's texture on the card; NULL otherwise */
+    bool fp16;                           /* RV-153: R16G16B16A16_FLOAT, for an HDR screen */
     /* RV-062: the decoder's shared slot textures, opened on this device. */
     struct { const void *source; ID3D11Texture2D *opened; IDXGIKeyedMutex *mutex; } sources[VIDEO_SOURCES];
     int32_t width, height;
@@ -101,7 +106,15 @@ struct rubraview_renderer {
     bool force_lost;               /* the next present is treated as a lost device (a test's trigger) */
     IDXGISwapChain1 *swap_chain;
     int32_t present_model;         /* RUBRAVIEW_PRESENT_*: how the swap chain hands frames to the compositor */
-    ID2D1Bitmap1 *back_buffer;
+    ID2D1Bitmap1 *back_buffer;     /* Direct2D's target: the swap chain's buffer, or (HDR) the scene */
+    /* RV-153 (D-183): the window sent to an HDR screen as scRGB, FP16 */
+    bool hdr;                      /* in that mode */
+    double hdr_sdr_white;          /* the nits the scene's 1.0 stands for */
+    ID3D11Texture2D *scene;
+    ID3D11ShaderResourceView *scene_view;
+    ID3D11RenderTargetView *back_view;
+    rubraview_hdr_present_t *hdr_present;
+    const char *hdr_why;           /* the last refusal (an N_ literal) */
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
     HWND hwnd;
     int32_t width, height;
@@ -158,7 +171,44 @@ static void texture_recycle(rubraview_renderer_t *renderer, struct rubraview_tex
 /* The swap chain's back buffer, wrapped as a Direct2D bitmap and made
    the context's target. Called at start-up and again after every resize,
    because the back buffer is a different surface each time. */
+static const GUID RV_IID_ID3D11Texture2D_bb =
+    { 0x6f15aaf2, 0xd208, 0x4e89, { 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c } };
+
+/* RV-153: Direct2D draws into an FP16 scene; the swap chain's FP16 buffer is written by our pass. */
+static bool bind_hdr_scene(struct rubraview_renderer *r) {
+    ID3D11Texture2D *back = NULL;
+    HRESULT hr = IDXGISwapChain1_GetBuffer(r->swap_chain, 0, &RV_IID_ID3D11Texture2D_bb, (void**)&back);
+    if (FAILED(hr) || !back) return fail_step("getting the swap chain's FP16 buffer", hr);
+    hr = ID3D11Device_CreateRenderTargetView(r->d3d, (ID3D11Resource*)back, NULL, &r->back_view);
+    ID3D11Texture2D_Release(back);
+    if (FAILED(hr) || !r->back_view) { r->back_view = NULL; return fail_step("a view of the FP16 buffer", hr); }
+    D3D11_TEXTURE2D_DESC desc = {
+        .Width = (UINT)r->width, .Height = (UINT)r->height, .MipLevels = 1, .ArraySize = 1,
+        .Format = DXGI_FORMAT_R16G16B16A16_FLOAT, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE,
+    };
+    hr = ID3D11Device_CreateTexture2D(r->d3d, &desc, NULL, &r->scene);
+    if (FAILED(hr) || !r->scene) { r->scene = NULL; return fail_step("the FP16 scene", hr); }
+    hr = ID3D11Device_CreateShaderResourceView(r->d3d, (ID3D11Resource*)r->scene, NULL, &r->scene_view);
+    if (FAILED(hr) || !r->scene_view) { r->scene_view = NULL; return fail_step("a view of the FP16 scene", hr); }
+    IDXGISurface *surface = NULL;
+    hr = ID3D11Texture2D_QueryInterface(r->scene, &RV_IID_IDXGISurface, (void**)&surface);
+    if (FAILED(hr) || !surface) return fail_step("the FP16 scene's surface", hr);
+    D2D1_BITMAP_PROPERTIES1 props = {
+        .pixelFormat = { .format = DXGI_FORMAT_R16G16B16A16_FLOAT, .alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED },
+        .dpiX = 96.0f, .dpiY = 96.0f,
+        .bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET,
+    };
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(r->target, surface, &props, &r->back_buffer);
+    IDXGISurface_Release(surface);
+    if (FAILED(hr) || !r->back_buffer) { r->back_buffer = NULL; return fail_step("wrapping the FP16 scene for Direct2D", hr); }
+    ID2D1DeviceContext_SetTarget(r->target, (struct ID2D1Image*)r->back_buffer);
+    ID2D1RenderTarget_SetDpi((ID2D1RenderTarget*)r->target, 96.0f, 96.0f);
+    return true;
+}
+
 static bool bind_back_buffer(struct rubraview_renderer *r) {
+    if (r->hdr) return bind_hdr_scene(r);
     IDXGISurface *surface = NULL;
     HRESULT hr_buffer = IDXGISwapChain1_GetBuffer(r->swap_chain, 0, &RV_IID_IDXGISurface, (void**)&surface);
     if (FAILED(hr_buffer) || !surface) {
@@ -198,6 +248,9 @@ static void release_back_buffer(struct rubraview_renderer *r) {
         ID2D1Bitmap_Release((ID2D1Bitmap*)r->back_buffer);
         r->back_buffer = NULL;
     }
+    if (r->scene_view) { ID3D11ShaderResourceView_Release(r->scene_view); r->scene_view = NULL; }
+    if (r->scene) { ID3D11Texture2D_Release(r->scene); r->scene = NULL; }
+    if (r->back_view) { ID3D11RenderTargetView_Release(r->back_view); r->back_view = NULL; }
 }
 
 /* Brings up D3D11, Direct2D and the swap chain. The hardware driver is
@@ -375,6 +428,8 @@ void rubraview_pal_render_force_lost(rubraview_renderer_t *renderer) {
 void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     if (!renderer) return;
     release_back_buffer(renderer);
+    rubraview_pal_hdr_present_free(renderer->hdr_present);
+    renderer->hdr_present = NULL;
     if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
     if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
     if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
@@ -413,6 +468,8 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
     ID2D1RenderTarget_BeginDraw(rt);
     renderer->drawing = true;
+    /* RV-153: ClearType is not promised on a float target */
+    ID2D1RenderTarget_SetTextAntialiasMode(rt, renderer->hdr ? D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE : D2D1_TEXT_ANTIALIAS_MODE_DEFAULT);
 
     D2D1_COLOR_F color = {
         .r = (float)((clear_argb >> 16) & 0xFF) / 255.0f,
@@ -430,6 +487,12 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
     HRESULT hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     renderer->drawing = false;
 
+    if (SUCCEEDED(hr) && renderer->hdr) {   /* RV-153: the scene to the scRGB buffer, the SDR white in place */
+        rubraview_pal_hdr_present_run(renderer->hdr_present, renderer->scene_view, renderer->back_view,
+                                      renderer->width, renderer->height, renderer->hdr_sdr_white / 80.0, true);
+        /* decoded: Direct2D does not linearise on a float target (seen on the VM, 2026-10-21), so the scene
+           holds sRGB-encoded values, the film's too */
+    }
     if (SUCCEEDED(hr) && renderer->swap_chain) {
         hr = IDXGISwapChain1_Present(renderer->swap_chain, 1, 0);
     }
@@ -445,6 +508,9 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
            it, textures included, so the whole device is rebuilt and the
            caller is told to reload. */
         release_back_buffer(renderer);
+        renderer->hdr = false;   /* RV-153: the new chain starts in SDR; the caller asks again */
+        rubraview_pal_hdr_present_free(renderer->hdr_present);
+        renderer->hdr_present = NULL;
         if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
         if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
         if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
@@ -1293,8 +1359,28 @@ rubraview_texture_t *rubraview_pal_texture_create_bgra(rubraview_renderer_t *ren
     return texture;
 }
 
+static uint16_t u8_to_half(uint8_t v);
+
 bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture, const uint8_t *pixels, int32_t stride) {
     if (!texture || !texture->bitmap || !pixels || stride <= 0) return false;
+    if (texture->fp16) {   /* RV-153: a picture the film's shader did not draw, into its FP16 texture */
+        size_t row = (size_t)texture->width * 8u;
+        uint16_t *half = (uint16_t*)rubraview_malloc_product(row, (size_t)texture->height, 1);
+        if (!half) return false;
+        for (int32_t y = 0; y < texture->height; ++y) {
+            const uint8_t *in = pixels + (size_t)y * (size_t)stride;
+            uint16_t *out = half + (size_t)y * (size_t)texture->width * 4u;
+            for (int32_t x = 0; x < texture->width; ++x) {
+                out[x * 4] = u8_to_half(in[x * 4 + 2]);
+                out[x * 4 + 1] = u8_to_half(in[x * 4 + 1]);
+                out[x * 4 + 2] = u8_to_half(in[x * 4]);
+                out[x * 4 + 3] = 0x3C00u;   /* 1.0 */
+            }
+        }
+        bool ok = SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, half, (UINT32)row));
+        free(half);
+        return ok;
+    }
     return SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, pixels, (UINT32)stride));
 }
 
@@ -1384,6 +1470,8 @@ bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render
         IDXGIAdapter_Release(adapter);
     }
     out->decode_device = renderer->decode_d3d != NULL;
+    out->hdr_output = renderer->hdr;
+    out->hdr_sdr_white = renderer->hdr_sdr_white;
     if (renderer->decode_d3d) {
         ID3D11VideoDevice *video = NULL;
         if (SUCCEEDED(ID3D11Device_QueryInterface(renderer->decode_d3d, &RV_IID_ID3D11VideoDevice, (void**)&video)) && video) {
@@ -1394,11 +1482,129 @@ bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render
     return true;
 }
 
-rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
+/* ---- RV-153 (D-183): HDR output ---- */
+
+static const GUID RV_IID_IDXGISwapChain3 =
+    { 0x94d99bdb, 0xf1f8, 0x4ab0, { 0xb2, 0x36, 0x7d, 0xa0, 0x17, 0x0e, 0xda, 0xb1 } };
+static const GUID RV_IID_IDXGIOutput6 =
+    { 0x068346e8, 0xaaec, 0x4b84, { 0xad, 0xd7, 0x13, 0x7f, 0x51, 0x3f, 0x77, 0xa1 } };
+static const GUID RV_IID_IDXGIFactory1 =
+    { 0x770aae78, 0xf26f, 0x4dba, { 0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87 } };
+
+/* Where Windows shows SDR's white on the screen named `gdi_name` (\\.\DISPLAYn); 0 when it will not say. */
+static double sdr_white_of(const WCHAR *gdi_name) {
+    UINT32 paths = 0, modes = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &paths, &modes) != ERROR_SUCCESS || paths == 0) return 0.0;
+    DISPLAYCONFIG_PATH_INFO *path = (DISPLAYCONFIG_PATH_INFO*)calloc(paths, sizeof(*path));
+    DISPLAYCONFIG_MODE_INFO *mode = (DISPLAYCONFIG_MODE_INFO*)calloc(modes ? modes : 1, sizeof(*mode));
+    double nits = 0.0;
+    if (path && mode && QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &paths, path, &modes, mode, NULL) == ERROR_SUCCESS) {
+        for (UINT32 i = 0; i < paths && nits == 0.0; ++i) {
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME source = { .header = {
+                .type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, .size = sizeof(source),
+                .adapterId = path[i].sourceInfo.adapterId, .id = path[i].sourceInfo.id } };
+            if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || wcscmp(source.viewGdiDeviceName, gdi_name) != 0) continue;
+            DISPLAYCONFIG_SDR_WHITE_LEVEL white = { .header = {
+                .type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL, .size = sizeof(white),
+                .adapterId = path[i].targetInfo.adapterId, .id = path[i].targetInfo.id } };
+            if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS && white.SDRWhiteLevel > 0)
+                nits = (double)white.SDRWhiteLevel / 1000.0 * 80.0;
+        }
+    }
+    free(path);
+    free(mode);
+    return nits;
+}
+
+bool rubraview_pal_render_hdr_display(rubraview_renderer_t *renderer, rubraview_hdr_display_t *out) {
+    if (!out) return false;
+    *out = (rubraview_hdr_display_t){ .sdr_white_nits = 80.0 };
+    if (!renderer || !renderer->hwnd) return false;
+    HMONITOR monitor = MonitorFromWindow(renderer->hwnd, MONITOR_DEFAULTTONEAREST);
+    IDXGIFactory1 *factory = NULL;
+    if (FAILED(CreateDXGIFactory1(&RV_IID_IDXGIFactory1, (void**)&factory)) || !factory) return false;
+    bool found = false;
+    /* every card's outputs: on a laptop with two cards the screen may hang off the other one */
+    IDXGIAdapter1 *adapter = NULL;
+    for (UINT a = 0; !found && IDXGIFactory1_EnumAdapters1(factory, a, &adapter) != DXGI_ERROR_NOT_FOUND; ++a) {
+        IDXGIOutput *output = NULL;
+        for (UINT o = 0; !found && IDXGIAdapter1_EnumOutputs(adapter, o, &output) != DXGI_ERROR_NOT_FOUND; ++o) {
+            IDXGIOutput6 *six = NULL;
+            DXGI_OUTPUT_DESC1 desc;
+            if (SUCCEEDED(IDXGIOutput_QueryInterface(output, &RV_IID_IDXGIOutput6, (void**)&six)) && six) {
+                if (SUCCEEDED(IDXGIOutput6_GetDesc1(six, &desc)) && desc.Monitor == monitor) {
+                    found = true;
+                    out->hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                    double peak = (double)desc.MaxLuminance;
+                    out->peak_nits = peak > 0.0 ? (peak < 100.0 ? 100.0 : peak > 10000.0 ? 10000.0 : peak) : 0.0;
+                    double white = sdr_white_of(desc.DeviceName);
+                    if (white > 0.0) out->sdr_white_nits = white;
+                }
+                IDXGIOutput6_Release(six);
+            }
+            IDXGIOutput_Release(output);
+        }
+        IDXGIAdapter1_Release(adapter);
+    }
+    IDXGIFactory1_Release(factory);
+    return found;
+}
+
+bool rubraview_pal_render_set_hdr(rubraview_renderer_t *r, bool on, double sdr_white_nits, const char **why) {
+    const char *dummy;
+    if (!why) why = &dummy;
+    *why = NULL;
+    if (!r || !r->swap_chain || !r->target || r->drawing) { *why = N_("no window to draw"); return false; }
+    if (!(sdr_white_nits > 0.0)) sdr_white_nits = 80.0;
+    if (on == r->hdr && (!on || r->hdr_sdr_white == sdr_white_nits)) return true;
+    if (on && r->hdr) { r->hdr_sdr_white = sdr_white_nits; return true; }
+    IDXGISwapChain3 *three = NULL;
+    if (FAILED(IDXGISwapChain1_QueryInterface(r->swap_chain, &RV_IID_IDXGISwapChain3, (void**)&three)) || !three) {
+        *why = N_("this Windows cannot set the window's colour space");
+        return false;
+    }
+    bool ok = false;
+    if (on) {
+        UINT support = 0;
+        if (r->present_model == RUBRAVIEW_PRESENT_COPY) *why = N_("the window is shown through the copy model, which has no HDR");
+        else if (!r->hdr_present && !(r->hdr_present = rubraview_pal_hdr_present_create(r->d3d, why))) {}
+        else {
+            release_back_buffer(r);
+            r->hdr = true;
+            r->hdr_sdr_white = sdr_white_nits;
+            /* the colour space is asked of the chain once it is FP16: a BGRA chain refuses scRGB */
+            if (FAILED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_R16G16B16A16_FLOAT, 0)))
+                *why = N_("the window could not be made FP16");
+            else if (FAILED(IDXGISwapChain3_CheckColorSpaceSupport(three, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &support)) ||
+                     !(support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) ||
+                     FAILED(IDXGISwapChain3_SetColorSpace1(three, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709)))
+                *why = N_("the swap chain refuses scRGB");
+            else if (!bind_back_buffer(r))
+                *why = N_("the window could not be made FP16");
+            else
+                ok = true;
+        }
+    }
+    if (!ok && (r->hdr || !on)) {   /* off, or back from a half-made HDR chain */
+        release_back_buffer(r);
+        r->hdr = false;
+        bool back = SUCCEEDED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
+        IDXGISwapChain3_SetColorSpace1(three, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+        back = back && bind_back_buffer(r);
+        if (!on) ok = back;
+    }
+    IDXGISwapChain3_Release(three);
+    if (!ok && !*why) *why = N_("the window could not be made FP16");
+    r->hdr_why = ok ? NULL : *why;
+    return ok;
+}
+
+static rubraview_texture_t *create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height, bool fp16) {
     if (!renderer || !renderer->d3d || !renderer->target || width <= 0 || height <= 0) return NULL;
+    DXGI_FORMAT format = fp16 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
     D3D11_TEXTURE2D_DESC desc = {
         .Width = (UINT)width, .Height = (UINT)height, .MipLevels = 1, .ArraySize = 1,
-        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Format = format, .SampleDesc = { .Count = 1, .Quality = 0 },
         .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
     };
     ID3D11Texture2D *d3d = NULL;
@@ -1407,7 +1613,7 @@ rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *re
     ID2D1Bitmap1 *bitmap = NULL;
     if (SUCCEEDED(ID3D11Texture2D_QueryInterface(d3d, &RV_IID_IDXGISurface, (void**)&surface)) && surface) {
         D2D1_BITMAP_PROPERTIES1 props = {
-            .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_IGNORE },
+            .pixelFormat = { .format = format, .alphaMode = fp16 ? D2D1_ALPHA_MODE_PREMULTIPLIED : D2D1_ALPHA_MODE_IGNORE },
             .dpiX = 96.0f, .dpiY = 96.0f, .bitmapOptions = D2D1_BITMAP_OPTIONS_NONE,
         };
         if (FAILED(ID2D1DeviceContext_CreateBitmapFromDxgiSurface(renderer->target, surface, &props, &bitmap))) bitmap = NULL;
@@ -1417,7 +1623,35 @@ rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *re
     rubraview_texture_t *texture = rubraview_d2d_texture_wrap(renderer, (ID2D1Bitmap*)bitmap, width, height);
     if (!texture) { ID2D1Bitmap_Release((ID2D1Bitmap*)bitmap); ID3D11Texture2D_Release(d3d); return NULL; }
     texture->d3d = d3d;
+    texture->fp16 = fp16;
     return texture;
+}
+
+rubraview_texture_t *rubraview_pal_texture_create_video(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
+    return create_video(renderer, width, height, false);
+}
+
+rubraview_texture_t *rubraview_pal_texture_create_video_hdr(rubraview_renderer_t *renderer, int32_t width, int32_t height) {
+    return create_video(renderer, width, height, true);
+}
+
+/* RV-153: FP16's halves to and from the 8-bit values they stand for (clipped at 1). */
+static uint8_t half_to_u8(uint16_t h) {
+    uint32_t e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
+    if (h & 0x8000u) return 0;
+    double v = e == 0 ? (double)m / 16777216.0 : e == 31 ? 1.0 : ldexp(1.0 + (double)m / 1024.0, (int)e - 15);
+    return v >= 1.0 ? 255 : (uint8_t)(v * 255.0 + 0.5);
+}
+
+static uint16_t u8_to_half(uint8_t v) {
+    if (v == 0) return 0;
+    double f = (double)v / 255.0;
+    int e = 0;
+    double m = frexp(f, &e);   /* f = m * 2^e, m in [0.5, 1) */
+    int exponent = e - 1 + 15;
+    uint32_t mant = (uint32_t)((m * 2.0 - 1.0) * 1024.0 + 0.5);
+    if (mant == 1024) { mant = 0; exponent++; }
+    return (uint16_t)(((uint32_t)exponent << 10) | mant);
 }
 
 static const GUID RV_IID_IDXGIResource =
@@ -1480,7 +1714,7 @@ bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst
     ID3D11Device *device = texture->owner->d3d;
     D3D11_TEXTURE2D_DESC desc = {
         .Width = (UINT)texture->width, .Height = (UINT)texture->height, .MipLevels = 1, .ArraySize = 1,
-        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Format = texture->fp16 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
         .Usage = D3D11_USAGE_STAGING, .CPUAccessFlags = D3D11_CPU_ACCESS_READ,
     };
     ID3D11Texture2D *staging = NULL;
@@ -1493,8 +1727,19 @@ bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst
         D3D11_MAPPED_SUBRESOURCE mapped;
         if (SUCCEEDED(ID3D11DeviceContext_Map(context, (ID3D11Resource*)staging, 0, D3D11_MAP_READ, 0, &mapped))) {
             for (int32_t y = 0; y < texture->height; ++y) {
-                memcpy(dst + (size_t)y * stride, (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch,
-                       (size_t)texture->width * 4u);
+                const uint8_t *row = (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch;
+                if (texture->fp16) {   /* RV-153: clipped at the SDR white */
+                    const uint16_t *h = (const uint16_t*)(const void*)row;
+                    uint8_t *out = dst + (size_t)y * stride;
+                    for (int32_t x = 0; x < texture->width; ++x) {
+                        out[x * 4] = half_to_u8(h[x * 4 + 2]);
+                        out[x * 4 + 1] = half_to_u8(h[x * 4 + 1]);
+                        out[x * 4 + 2] = half_to_u8(h[x * 4]);
+                        out[x * 4 + 3] = 255;
+                    }
+                } else {
+                    memcpy(dst + (size_t)y * stride, row, (size_t)texture->width * 4u);
+                }
             }
             ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)staging, 0);
             ok = true;
@@ -1506,7 +1751,7 @@ bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst
 }
 
 bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double *out_brightness) {
-    if (!texture || !texture->d3d || !texture->owner || !out_brightness) return false;
+    if (!texture || !texture->d3d || !texture->owner || !out_brightness || texture->fp16) return false;
     ID3D11Device *device = texture->owner->d3d;
     D3D11_TEXTURE2D_DESC desc = {
         .Width = (UINT)texture->width, .Height = (UINT)texture->height, .MipLevels = 1, .ArraySize = 1,
