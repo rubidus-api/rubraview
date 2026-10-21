@@ -37,6 +37,8 @@ typedef struct rubraview_media_backend_api {
     /** D-120: the pictures' rate as measured from their times, when it is
         not what the file was opened as. May be NULL; false until known. */
     bool  (*picture_rate)(void *impl, double *out_rate);
+    /** RV-150: the peak an HDR film is tone mapped from. May be NULL. */
+    bool  (*hdr_peak)(void *impl, double *out_nits);
 
     /** The container's tracks, as found while opening (§3.16.2). */
     bool  (*tracks)(void *impl, rubraview_track_set_t *out_set);

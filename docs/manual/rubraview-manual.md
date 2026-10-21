@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.26.1.exe              the viewer, as built
-dist/rubraview-v1.26.1/                 the release bundle
-dist/rubraview-v1.26.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.27.0.exe              the viewer, as built
+dist/rubraview-v1.27.0/                 the release bundle
+dist/rubraview-v1.27.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1128,9 +1128,11 @@ pictures reach the screen: which decoder, on the graphics card or the
 processor (and its threads), where the colours are turned into BGRA, how a
 picture gets into the window, what draws it (Direct2D 1.1 on Direct3D 11,
 the feature level and the card, or WARP, Windows' software rasteriser), the
-card's memory, the swap chain and whether it waits for the screen's
-refresh, how many video decoders the card offers, and GPU decoding's
-setting with the reason a film is decoded in software. When the sound is
+card's memory, the swap chain (flip or copy model) and whether it waits for
+the screen's refresh, how many video decoders the card offers, and GPU
+decoding's setting with the reason a film is decoded in software. An HDR
+film adds **HDR**: PQ or HLG, the peak it is tone mapped from and the white
+it is mapped to, or why it is not tone mapped. When the sound is
 played in another format than the decoder named (see below), **Sound
 played at** says which. `I` again or `Esc` closes it.
 
@@ -1278,9 +1280,17 @@ filename code page, the memory cap). Some worth knowing:
   insists on the card; `off` never uses it). It applies to both decoders:
   Windows' (Media Foundation) and, with Decoder set to `ffmpeg`, FFmpeg's,
   which then decodes through D3D11VA and has the card turn the pictures
-  into colour (an HDR film, PQ or HLG, stays on the processor with FFmpeg).
+  into colour (FFmpeg decodes an HDR film, PQ or HLG, on the processor).
   On the processor FFmpeg uses a thread a core. The information window's
   **Display** says which it is and, on the processor, why.
+- **Video** › **HDR tone mapping** (`bt2390`, the default, or `off`) brings
+  an HDR film (HDR10 or HLG) to an ordinary screen: on the graphics card,
+  its brightest parts are folded under the screen's white (BT.2390, from the
+  peak its metadata gives, 1000 nits when it gives none; the white stands
+  for 203 nits) and its BT.2020 colours are brought into sRGB, so it no
+  longer looks grey and washed out. It needs FFmpeg: an HDR film that
+  Windows' decoder opens and names as HDR is handed to FFmpeg. A VP9 HDR
+  film Windows opens is not named HDR by it and stays as before.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,

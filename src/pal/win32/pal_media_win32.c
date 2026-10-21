@@ -99,6 +99,10 @@ bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate
     return media && media->api->picture_rate && out_rate && media->api->picture_rate(media->impl, out_rate);
 }
 
+bool rubraview_pal_media_hdr_peak(rubraview_media_t *media, double *out_nits) {
+    return media && media->api->hdr_peak && out_nits && media->api->hdr_peak(media->impl, out_nits);
+}
+
 bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t stream_index) {
     if (!media || !media->api->select_audio_track) return false;
     return media->api->select_audio_track(media->impl, stream_index);

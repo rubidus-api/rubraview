@@ -11,6 +11,7 @@
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mastering_display_metadata.h>
 #include <libavutil/channel_layout.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -20,6 +21,8 @@
 #include <stdio.h>
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/fileinfo.h"
+#include "rubraview/tonemap.h"
+#include "rubraview/pal/pal_hdr.h"
 
 /*
  * The FFmpeg backend (D-8, RV-016). The DLLs are loaded at run time and
@@ -105,6 +108,13 @@ typedef struct ff_media {
     struct { ID3D11Texture2D *texture; UINT slice; ID3D11VideoProcessorInputView *view; } vp_in[VP_INPUTS];
     int vp_in_count;
     const char *hw_why;                      /* on the processor: why (an N_ literal); NULL on the card */
+    /* RV-150 (D-180): an HDR film tone mapped to SDR by our shader, into the same shared slot textures */
+    rubraview_hdr_pass_t *hdr_pass;          /* the decode thread's; NULL when not tone mapped */
+    rubraview_tonemap_t tone;
+    int tone_format;                         /* the planes' AVPixelFormat the pass was set up for */
+    bool tone_peak_read;                     /* the first picture's metadata was looked at */
+    _Atomic(double) tone_peak;               /* what the caller is told */
+    const char *hdr_why;                     /* HDR not tone mapped: why (an N_ literal) */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -579,6 +589,7 @@ bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t m
 
 static bool ff_hw_api(void);
 static bool ff_hw_attach(ff_media_t *m, AVCodecContext *video);
+static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par);
 
 typedef struct ff_decode {
     AVFormatContext *format;
@@ -916,8 +927,8 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
             m->failure = rubraview_media_classify(true, true, false, fourcc);
             return false;
         }
-        /* RV-149: on the card where it is offered and can; an HDR film stays on the processor (the owner,
-           2026-10-21: no tone mapping on the card yet). Anything refused is decoded on the processor. */
+        /* RV-149: on the card where it is offered and can; an HDR film is decoded on the processor (the owner,
+           2026-10-21; RV-150 tone maps it on the card). Anything refused is decoded on the processor. */
         bool hdr = par->color_trc == AVCOL_TRC_SMPTE2084 || par->color_trc == AVCOL_TRC_ARIB_STD_B67;
         m->hw_why = rubraview_ffmpeg_hw_refusal(m->gpu.mode, m->gpu.device != NULL, m->gpu.decoder_profiles, hdr, ff_hw_api());
         bool opened_video = false;
@@ -949,6 +960,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         }
         m->width = par->width;
         m->height = par->height;
+        if (hdr) ff_tone_setup(m, par);
         for (int i = 0; i < SLOT_COUNT; ++i) {
             m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)m->width, (size_t)m->height, 4u);
             if (!m->slots[i].pixels) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
@@ -1008,6 +1020,13 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
             snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("swscale on the processor, bilinear, to BGRA"));
             snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
             snprintf(in->path_why_software, sizeof(in->path_why_software), "%s", m->hw_why ? m->hw_why : "");
+        }
+        in->hdr_transfer = (int32_t)m->tone.transfer;
+        snprintf(in->path_hdr_why, sizeof(in->path_hdr_why), "%s", m->hdr_why ? m->hdr_why : "");
+        if (m->hdr_pass) {   /* RV-150 */
+            in->hdr_tone_mapped = true;
+            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("our shader on the graphics card (Direct3D 11): BT.2390 tone mapping, BT.2020 to sRGB"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's"));
         }
     }
     return true;
@@ -1091,6 +1110,108 @@ static int ff_frame_space(const AVFrame *f) {
     return (bt709 ? 1 : 0) | (full ? 2 : 0);
 }
 
+/* The slot's texture: shared with the renderer's device, ordered by the keyed mutex; made on first use. */
+static bool ff_slot_texture(ff_media_t *m, ff_slot_t *s, ID3D11Device *device) {
+    if (s->texture) return s->mutex != NULL;
+    D3D11_TEXTURE2D_DESC own = {
+        .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
+        .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
+        .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
+        .MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
+    };
+    if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &s->texture))) s->texture = NULL;
+    if (s->texture && FAILED(ID3D11Texture2D_QueryInterface(s->texture, &FF_IID_IDXGIKeyedMutex, (void**)&s->mutex))) s->mutex = NULL;
+    return s->texture && s->mutex;
+}
+
+/* ---- RV-150 (D-180): HDR tone mapped on the card ---- */
+
+/* The planes the shader reads: 10- or 12-bit, 4:2:0, 4:2:2 or 4:4:4, as FFmpeg's software decoders give them. */
+static bool ff_tone_format(int format, int *bits, int *shift_x, int *shift_y) {
+    switch (format) {
+    case AV_PIX_FMT_YUV420P10LE: *bits = 10; *shift_x = 1; *shift_y = 1; return true;
+    case AV_PIX_FMT_YUV422P10LE: *bits = 10; *shift_x = 1; *shift_y = 0; return true;
+    case AV_PIX_FMT_YUV444P10LE: *bits = 10; *shift_x = 0; *shift_y = 0; return true;
+    case AV_PIX_FMT_YUV420P12LE: *bits = 12; *shift_x = 1; *shift_y = 1; return true;
+    case AV_PIX_FMT_YUV422P12LE: *bits = 12; *shift_x = 1; *shift_y = 0; return true;
+    case AV_PIX_FMT_YUV444P12LE: *bits = 12; *shift_x = 0; *shift_y = 0; return true;
+    default: return false;
+    }
+}
+
+/* MaxCLL and the mastering display's brightest, from side data of either kind; 0 where absent. */
+static void ff_light_levels(int type, const uint8_t *data, size_t size, double *max_cll, double *mastering) {
+    if (!data) return;
+    if (type == 0 && size >= sizeof(AVContentLightMetadata)) {
+        const AVContentLightMetadata *c = (const AVContentLightMetadata*)(const void*)data;
+        if (c->MaxCLL > 0) *max_cll = (double)c->MaxCLL;
+    } else if (type == 1 && size >= sizeof(AVMasteringDisplayMetadata)) {
+        const AVMasteringDisplayMetadata *md = (const AVMasteringDisplayMetadata*)(const void*)data;
+        if (md->has_luminance && md->max_luminance.den > 0) *mastering = av_q2d(md->max_luminance);
+    }
+}
+
+static const char *ff_tone_open(ff_media_t *m, const AVCodecParameters *par) {
+    if (m->gpu.tone_mapping <= RUBRAVIEW_TONEMAP_OFF) return N_("HDR tone mapping is off (Settings > Video)");
+    if (m->hw_attached) return N_("an HDR film decoded on the graphics card is not tone mapped yet");
+    int bits = 0, sx = 0, sy = 0;
+    if (!ff_tone_format(par->format, &bits, &sx, &sy)) return N_("this HDR film's picture format is not tone mapped");
+    m->tone.bits = bits;
+    m->tone_format = par->format;
+    const char *why = NULL;
+    m->hdr_pass = rubraview_pal_hdr_pass_create(m->gpu.shader_device, &why);
+    return m->hdr_pass ? NULL : why;
+}
+
+/* Called once the decoder is open: what the film says of itself, and the pass when it can be had. */
+static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par) {
+    m->tone.transfer = par->color_trc == AVCOL_TRC_SMPTE2084 ? RUBRAVIEW_HDR_PQ : RUBRAVIEW_HDR_HLG;
+    m->tone.full_range = par->color_range == AVCOL_RANGE_JPEG;
+    m->tone.white_nits = RUBRAVIEW_SDR_WHITE_NITS;
+    double max_cll = 0.0, mastering = 0.0;
+    for (int i = 0; i < par->nb_coded_side_data; ++i) {
+        const AVPacketSideData *sd = &par->coded_side_data[i];
+        if (sd->type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, sd->data, sd->size, &max_cll, &mastering);
+        if (sd->type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, sd->data, sd->size, &max_cll, &mastering);
+    }
+    m->tone.peak_nits = m->tone.transfer == RUBRAVIEW_HDR_HLG ? 1000.0 : rubraview_hdr_peak(max_cll, mastering);
+    m->tone_peak_read = max_cll > 0.0 || mastering > 0.0;
+    m->hdr_why = ff_tone_open(m, par);
+    atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
+}
+
+/* One HDR picture through the shader into the slot's texture. False: it goes the old way. */
+static bool ff_tone_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
+    int bits = 0, sx = 0, sy = 0;
+    if (f->format != m->tone_format || !ff_tone_format(f->format, &bits, &sx, &sy) || f->width != m->width || f->height != m->height)
+        return false;
+    if (!m->tone_peak_read && m->tone.transfer == RUBRAVIEW_HDR_PQ) {   /* the film said nothing in its header */
+        m->tone_peak_read = true;
+        double max_cll = 0.0, mastering = 0.0;
+        for (int i = 0; i < f->nb_side_data; ++i) {
+            const AVFrameSideData *sd = f->side_data[i];
+            if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, sd->data, sd->size, &max_cll, &mastering);
+            if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, sd->data, sd->size, &max_cll, &mastering);
+        }
+        m->tone.peak_nits = rubraview_hdr_peak(max_cll, mastering);
+        atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
+    }
+    if (!ff_slot_texture(m, s, (ID3D11Device*)m->gpu.shader_device)) return false;
+    rubraview_hdr_planes_t planes = {
+        .data = { f->data[0], f->data[1], f->data[2] },
+        .stride = { f->linesize[0], f->linesize[1], f->linesize[2] },
+        .width = f->width, .height = f->height,
+        .chroma_width = (f->width + (1 << sx) - 1) >> sx, .chroma_height = (f->height + (1 << sy) - 1) >> sy,
+    };
+    if (planes.stride[0] <= 0 || planes.stride[1] <= 0 || planes.stride[2] <= 0) return false;
+    bool ok = false;
+    if (IDXGIKeyedMutex_AcquireSync(s->mutex, 0, 500) == S_OK) {
+        ok = rubraview_pal_hdr_pass_run(m->hdr_pass, &planes, &m->tone, s->texture);
+        IDXGIKeyedMutex_ReleaseSync(s->mutex, 0);
+    }
+    return ok;
+}
+
 /* One picture of the card's turned into BGRA by its video processor, into the slot's own texture. */
 static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
     if (!m->hw_device || !f->data[0]) return false;
@@ -1102,17 +1223,7 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
     ID3D11Texture2D *source = (ID3D11Texture2D*)(void*)f->data[0];
     UINT slice = (UINT)(intptr_t)f->data[1];
 
-    if (!s->texture) {   /* shared with the renderer's device, ordered by the keyed mutex */
-        D3D11_TEXTURE2D_DESC own = {
-            .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
-            .Format = DXGI_FORMAT_B8G8R8A8_UNORM, .SampleDesc = { .Count = 1, .Quality = 0 },
-            .Usage = D3D11_USAGE_DEFAULT, .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
-            .MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX,
-        };
-        if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &s->texture))) s->texture = NULL;
-        if (s->texture && FAILED(ID3D11Texture2D_QueryInterface(s->texture, &FF_IID_IDXGIKeyedMutex, (void**)&s->mutex))) s->mutex = NULL;
-        if (!s->texture || !s->mutex) return false;
-    }
+    if (!ff_slot_texture(m, s, device)) return false;
     if (!m->vp || m->vp_w != f->width || m->vp_h != f->height) {
         for (int i = 0; i < SLOT_COUNT; ++i) {
             if (m->slots[i].vp_out) { ID3D11VideoProcessorOutputView_Release(m->slots[i].vp_out); m->slots[i].vp_out = NULL; }
@@ -1194,7 +1305,9 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     /* RV-149: a picture of the card's is turned there; when the card cannot, it is brought back and turned here */
     const AVFrame *src = d->frame;
     m->slots[slot].on_gpu = false;
-    if (d->frame->format == AV_PIX_FMT_D3D11) {
+    if (m->hdr_pass && ff_tone_blit(m, d->frame, &m->slots[slot])) {
+        m->slots[slot].on_gpu = true;   /* RV-150 */
+    } else if (d->frame->format == AV_PIX_FMT_D3D11) {
         if (ff_vp_blit(m, d->frame, &m->slots[slot])) {
             m->slots[slot].on_gpu = true;
         } else {
@@ -1461,6 +1574,8 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     if (opened) decode_loop(m, &d);
     free_decode(&d);       /* the decoder's hold on the card first ... */
     ff_hw_release(m);      /* ... then the processor's views and the device (RV-149) */
+    rubraview_pal_hdr_pass_free(m->hdr_pass);   /* RV-150 */
+    m->hdr_pass = NULL;
     return 0;
 }
 
@@ -1483,6 +1598,7 @@ static void ff_close(void *handle) {
         if (m->slots[i].texture) ID3D11Texture2D_Release(m->slots[i].texture);
     }
     if (m->gpu.device) IUnknown_Release((IUnknown*)m->gpu.device);
+    if (m->gpu.shader_device) IUnknown_Release((IUnknown*)m->gpu.shader_device);
     free(m);
 }
 
@@ -1500,6 +1616,7 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     /* RV-149: the card the renderer offers; held while the film is open */
     if (gpu) m->gpu = *gpu;
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
+    if (m->gpu.shader_device) IUnknown_AddRef((IUnknown*)m->gpu.shader_device);   /* RV-150, the same way */
     memcpy(m->path, path.ptr, path.len);   /* FFmpeg takes UTF-8 paths on Windows */
     m->path[path.len] = '\0';
     m->video_stream = -1;
@@ -1527,6 +1644,13 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     *out_info = m->info;
     rubraview_pal_audio_set_playing(m->audio, true);
     return m;
+}
+
+static bool ff_hdr_peak(void *handle, double *out_nits) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !m->info.hdr_tone_mapped) return false;
+    *out_nits = atomic_load_explicit(&m->tone_peak, memory_order_acquire);
+    return true;
 }
 
 static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
@@ -1795,6 +1919,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .set_paused = ff_set_paused,
     .audio_position = ff_audio_position,
     .audio_format = ff_audio_format,
+    .hdr_peak = ff_hdr_peak,
     .tracks = ff_tracks,
     .details = ff_details,
     .select_audio_track = ff_select_audio_track,

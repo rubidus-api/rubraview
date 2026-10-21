@@ -124,6 +124,7 @@
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/mediaclock.h"
+#include "rubraview/tonemap.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
 #include "rubraview/textview.h"
@@ -445,6 +446,7 @@ typedef struct app_state {
     /* M5: the video on the current page, when it is one (D-8, D-9). */
     rubraview_media_t      *media;
     rubraview_media_info_t  media_info;
+    bool                    media_hdr_handed;  /* RV-150: Windows' decoder found it HDR and FFmpeg took it, to tone map it */
     rubraview_media_clock_t media_clock;
     int32_t                media_page;        /* -1 when no video is open */
     bool                   media_paused;
@@ -2712,10 +2714,10 @@ static app_page_t *media_page_ready(app_state_t *app) {
     if (!page->texture) {
         int32_t w = app->media_info.width, h = app->media_info.height;
         /* RV-062: a film decoded on the card gets a texture on the card,
-           and its frames are copied into it there. */
+           and its frames are copied into it there; so does one tone mapped there (RV-150). */
         page->texture = !app->media_info.has_video
             ? audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h)
-            : app->media_info.hardware_decode
+            : app->media_info.hardware_decode || app->media_info.hdr_tone_mapped
                 ? rubraview_pal_texture_create_video(app->renderer, w, h)
                 : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!page->texture) return NULL;
@@ -3204,10 +3206,27 @@ static void media_prepare(app_state_t *app) {
         .mode = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hardware_decode"))),
     };
     if (gpu.mode > 0) gpu.device = rubraview_pal_render_video_device(app->renderer, &gpu.decoder_profiles);
+    /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
+    gpu.tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_tone_mapping")));
+    if (gpu.tone_mapping > 0) gpu.shader_device = gpu.device ? gpu.device : rubraview_pal_render_video_device(app->renderer, NULL);
     for (size_t i = 0; i < count; ++i) {
         opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
         why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
+    }
+    /* RV-150 (owner, 2026-10-21): Windows' decoder does not tone map an HDR film; FFmpeg does, when it is here */
+    app->media_hdr_handed = false;
+    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION && opened.info.hdr_transfer &&
+        gpu.tone_mapping > 0 && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
+        rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
+        /* not when FFmpeg would lose the sound Windows plays */
+        if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
+            rubraview_pal_media_close(opened.media);
+            opened = other;
+            app->media_hdr_handed = true;
+        } else if (other.media) {
+            rubraview_pal_media_close(other.media);
+        }
     }
     if (!opened.media) {
         osd_say(app, rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
@@ -19787,6 +19806,18 @@ static void info_gather(app_state_t *app) {
                 const char *mode = gm <= 0 ? TC("choice", "off") : gm == 1 ? TC("choice", "on") : TC("choice", "always");
                 rubraview_info_addf(a, &info, T("GPU decoding"), "%s%s%s", mode,
                                     m->path_why_software[0] ? " - " : "", m->path_why_software[0] ? rubraview_tr(m->path_why_software) : "");
+                if (m->hdr_transfer) {   /* RV-150 */
+                    const char *kind = m->hdr_transfer == RUBRAVIEW_HDR_PQ ? "PQ (HDR10)" : "HLG";
+                    double peak = 0.0;
+                    if (m->hdr_tone_mapped && rubraview_pal_media_hdr_peak(app->media, &peak))
+                        rubraview_info_addf(a, &info, T("HDR"), T("%s, peak %.0f nits, tone mapped on the graphics card (BT.2390) to a %.0f-nit white"),
+                                            kind, peak, RUBRAVIEW_SDR_WHITE_NITS);
+                    else
+                        rubraview_info_addf(a, &info, T("HDR"), T("%s, not tone mapped - %s"), kind,
+                                            m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map"));
+                    if (app->media_hdr_handed)
+                        rubraview_info_add(a, &info, T("Handed over"), TU8("Windows' decoder found it HDR; FFmpeg took it to tone map it"));
+                }
             }
             /* What the container and the codecs say of themselves, all of it (owner, 2026-10-11). */
             info_add_details(a, &info, rubraview_pal_media_details(app->media));
@@ -25603,13 +25634,13 @@ static void render_frame(app_state_t *app) {
     }
 }
 
-/* RV-062: after a lost graphics device, a film decoded on the card is
+/* RV-062: after a lost graphics device, a film decoded (or tone mapped, RV-150) on the card is
    opened again, where it was, paused or not, on the same tracks: its
    decoder lived on the lost card and would hand over no more frames.
    Software-decoded films and sound are not bound to the device and are
    left alone (reopening music would be a gap you can hear). */
 static void media_reopen_on_new_device(app_state_t *app) {
-    if (!app->media || !app->media_info.has_video || !app->media_info.hardware_decode) return;
+    if (!app->media || !app->media_info.has_video || !(app->media_info.hardware_decode || app->media_info.hdr_tone_mapped)) return;
     double position = app->media_position;
     bool paused = app->media_paused;
     int32_t subtitle = app->tracks.current_subtitle;

@@ -48,6 +48,10 @@ typedef struct rubraview_media_info {
     char     path_handover[128];         /* how a picture reaches the page's texture */
     char     path_why_software[128];     /* decoded in software: why (empty on the card) */
     int32_t  decode_threads;             /* the decoder's threads: 0 unknown, -1 one a core */
+    /* RV-150 (D-180): an HDR film, and what was done with it */
+    int32_t  hdr_transfer;               /* rubraview_hdr_transfer_t: 0 none, 1 PQ, 2 HLG */
+    bool     hdr_tone_mapped;            /* its pictures are tone mapped to SDR on the graphics card */
+    char     path_hdr_why[128];          /* HDR not tone mapped: why (an N_ literal; empty otherwise) */
 } rubraview_media_info_t;
 
 /*
@@ -61,6 +65,10 @@ typedef struct rubraview_media_gpu {
     void    *device;
     uint32_t decoder_profiles;
     int32_t  mode;
+    /* RV-150: [video] hdr_tone_mapping (RUBRAVIEW_TONEMAP_*) and the device its shader runs on — the
+       renderer's decode device, offered whether or not the card decodes */
+    int32_t  tone_mapping;
+    void    *shader_device;
 } rubraview_media_gpu_t;
 
 typedef struct rubraview_media_open_result {
@@ -215,6 +223,10 @@ bool rubraview_pal_media_audio_format(rubraview_media_t *media, uint32_t *out_ra
  * backend whose opening figure is to be trusted.
  */
 bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate);
+
+/** RV-150: the peak an HDR film is tone mapped from, in nits — its metadata's, read from its pictures. False
+    while it is not tone mapped. */
+bool rubraview_pal_media_hdr_peak(rubraview_media_t *media, double *out_nits);
 
 /**
  * §3.16.2 / R135: the tracks the container holds. The set is worked out

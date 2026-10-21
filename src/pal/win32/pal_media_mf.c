@@ -103,6 +103,7 @@ typedef struct mf_media {
     rubraview_media_gpu_t gpu;              /* what the caller offered */
     IMFDXGIDeviceManager *manager;          /* NULL unless the device was handed over */
     bool gpu_active;                        /* the reader decodes on the card */
+    int32_t hdr_transfer;                   /* RV-150: the played picture's PQ (1) or HLG (2), from its type */
 
     /* §3.16.2: what the container holds, worked out once while opening.
        The strings live here so the set can be copied out by value. */
@@ -429,6 +430,9 @@ static void mf_detail_stream(mf_media_t *m, IMFSourceReader *reader, DWORD strea
     if (audio || video) rubraview_details_add(d, "Played", "%s", playing ? "yes" : "no");
     if (video) mf_detail_video(m, type, &subtype, seconds);
     else if (audio) mf_detail_audio(m, type, &subtype, seconds);
+    UINT32 transfer = 0;
+    if (video && playing && mf_u32(type, &MF_MT_TRANSFER_FUNCTION, &transfer))   /* RV-150: 15 ST 2084, 16 HLG */
+        m->hdr_transfer = transfer == 15 ? 1 : transfer == 16 ? 2 : 0;
 }
 
 static void mf_track_add(mf_media_t *m, IMFSourceReader *reader, DWORD stream,
@@ -781,6 +785,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
         .audio_sample_rate = audio_rate,
         .audio_channels = audio_channels,
         .bitrate_kbps = 0,   /* the window works it out from the size and the duration */
+        .hdr_transfer = m->hdr_transfer,
     };
     *out_reader = reader;
     return true;
