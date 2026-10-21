@@ -93,10 +93,18 @@ typedef struct rubraview_settings_view {
     rubraview_settings_line_t lines[RUBRAVIEW_SETTINGS_VIEW_MAX_LINES];
     size_t line_count;
     int32_t content_height;          /* rows the page needs */
+    /* 1.30.1: what information lines say, so a long one is laid out over as many rows as it needs */
+    void *info_user;
+    size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity);
 } rubraview_settings_view_t;
 
 rubraview_settings_view_t rubraview_settings_view_create(const rubraview_settings_doc_t *doc,
                                                          int32_t cols, int32_t rows);
+
+/** 1.30.1: where information lines' values come from (the same as rubraview_settings_sources_t.info), so the
+    layout gives a long one the rows it needs; laid out again. */
+void rubraview_settings_view_set_info(rubraview_settings_view_t *view, void *user,
+                                      size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity));
 
 /** The window changed size: lay the page out again, keeping the focus in sight. */
 void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t cols, int32_t rows);

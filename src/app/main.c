@@ -18029,6 +18029,7 @@ static void settings_open(app_state_t *app) {
     int32_t cols = 0, rows = 0;
     settings_grid(app, &cols, &rows);
     app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
+    rubraview_settings_view_set_info(&app->settings_view, app, settings_info);   /* 1.30.1: long values wrap */
     rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);  /* heading + bindings */
     skip_dirs_table_rows(app);
     app->settings_open = true;
@@ -23547,7 +23548,7 @@ static void draw_settings_window(app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
     rubraview_settings_sources_t sources = { .user = app, .info = settings_info, .table_row = settings_table_row };
-    char line[1024];
+    char line[4096];   /* 1.30.1: a 4K window's rows of 3-byte rules fit */
 
     rubraview_pal_render_begin(r, SETTINGS_BACKGROUND);
 

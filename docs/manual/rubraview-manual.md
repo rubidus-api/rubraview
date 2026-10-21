@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.30.0.exe              the viewer, as built
-dist/rubraview-v1.30.0/                 the release bundle
-dist/rubraview-v1.30.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.30.1.exe              the viewer, as built
+dist/rubraview-v1.30.1/                 the release bundle
+dist/rubraview-v1.30.1.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1183,8 +1183,8 @@ viewer itself on top of other windows. `Ctrl` + arrows size the window,
 What can be pressed is blue and underlined, like a link: the pages on the
 left, the actions (Register, Import, ...), the buttons at the top, a
 switch, a choice, a slider, an extension's boxes, and the box of a folder
-or a font. The buttons (**Revert**, **Defaults**, **this page**, **this
-setting**, **Close**) are under the page's name; the last row says what
+or a font. The buttons (**Revert**, **Reset: all**, **Reset: this page**,
+**Reset: this setting**, **Close**) are under the page's name; the last row says what
 the last change did. A long explanation is wrapped to the window.
 
 A choice opens a list of its words where it is: click one (or the arrow
@@ -1194,9 +1194,10 @@ takes the number (**OK**, **Cancel**; a folder's box has **Browse...** too).
 The left and right arrows still step either.
 
 Rest the pointer on a setting's name and a fuller explanation comes up
-for the harder ones. **Defaults** puts back every setting, **this page**
-only the page you are on, **this setting** only the one with the focus;
-**Revert** undoes any of them.
+for the harder ones. **Reset: all** puts every setting back to its
+default, **Reset: this page** only the page you are on, **Reset: this
+setting** only the one with the focus; **Revert** undoes any of them. An
+information line too long for the window is wrapped under itself.
 
 **Fonts.** **General › UI font** is the face of every word the program
 writes — menus, tiles, lists, panels, messages (empty is Segoe UI); the
@@ -1450,7 +1451,7 @@ shows are the ones in force, so a key you change appears changed.
 
 `F10` or `Ctrl+,` opens the settings window, a window of its own. A change
 takes effect at once; **Revert** goes back to what was there when it
-opened, **Defaults** to the defaults, and the file is written when the
+opened, **Reset: all** to the defaults, and the file is written when the
 window closes. The **Keys** page lists every key: select one and press
 `Enter`, then the key to add; `Delete` takes the last one off. A key another
 action already uses is refused, and the message says which. **Export keys

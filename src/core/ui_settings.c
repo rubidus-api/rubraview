@@ -170,13 +170,23 @@ static int32_t note_row(u8str_t text, int32_t width, int32_t k, u8str_t *out) {
     return rows > 0 ? rows : 1;
 }
 
+/* 1.30.1 (owner, 2026-10-21: the window froze on a 4K screen): a full buffer stops the padding — it
+   used to wait for cells that a buffer with no room never adds. */
 static void pad_to(cell_writer_t *w, int32_t cells) {
-    while (w->cells < cells) put_bytes(w, " ", 1, 1);
+    while (w->cells < cells) {
+        int32_t before = w->cells;
+        put_bytes(w, " ", 1, 1);
+        if (w->cells == before) break;
+    }
 }
 
 static void repeat(cell_writer_t *w, const char *glyph, int32_t count) {
     size_t n = strlen(glyph);
-    for (int32_t i = 0; i < count; ++i) put_bytes(w, glyph, n, 1);
+    for (int32_t i = 0; i < count; ++i) {
+        int32_t before = w->cells;
+        put_bytes(w, glyph, n, 1);
+        if (w->cells == before) break;
+    }
 }
 
 static u8str_t finish(cell_writer_t *w) {
@@ -218,7 +228,19 @@ static void layout(rubraview_settings_view_t *view) {
     if (view->list_cols > view->cols / 3) view->list_cols = view->cols / 3;
     view->content_col = view->list_cols + 2;
 
+    /* the label column first: an information line's value wraps in what is left of the row (1.30.1) */
     int32_t row = 0, longest_label = 0;
+    for (size_t i = 0; i < doc->node_count; ++i) {
+        const rubraview_settings_node_t *node = &doc->nodes[i];
+        if (node->page != view->page) continue;
+        int32_t c = node->kind == RUBRAVIEW_NODE_SETTING ? cells_of(tr(doc->defs[node->setting].label))
+                  : node->kind == RUBRAVIEW_NODE_INFO ? cells_of(tr(node->text)) : 0;
+        if (c > longest_label) longest_label = c;
+    }
+    int32_t content_width = view->cols - view->content_col - 1;
+    view->label_cols = longest_label + 2;
+    if (view->label_cols > (content_width * 45) / 100) view->label_cols = (content_width * 45) / 100;
+    if (view->label_cols < 8) view->label_cols = 8;
     bool first = true;
     for (size_t i = 0; i < doc->node_count && view->line_count < RUBRAVIEW_SETTINGS_VIEW_MAX_LINES; ++i) {
         const rubraview_settings_node_t *node = &doc->nodes[i];
@@ -230,16 +252,14 @@ static void layout(rubraview_settings_view_t *view) {
                 if (!first) row++;   /* a blank row before every heading but the first */
                 line.kind = RUBRAVIEW_LINE_SECTION;
                 break;
-            case RUBRAVIEW_NODE_SETTING: {
+            case RUBRAVIEW_NODE_SETTING:
                 line.kind = RUBRAVIEW_LINE_SETTING;
-                int32_t c = cells_of(tr(doc->defs[node->setting].label));
-                if (c > longest_label) longest_label = c;
                 break;
-            }
             case RUBRAVIEW_NODE_INFO: {
                 line.kind = RUBRAVIEW_LINE_INFO;
-                int32_t c = cells_of(tr(node->text));
-                if (c > longest_label) longest_label = c;
+                char value[256];
+                size_t n = view->info ? view->info(view->info_user, node->name, value, sizeof(value)) : 0;
+                if (n > 0) line.height = note_row((u8str_t){ .ptr = value, .len = n }, content_width - view->label_cols, -1, NULL);
                 break;
             }
             case RUBRAVIEW_NODE_PREVIEW:
@@ -269,11 +289,6 @@ static void layout(rubraview_settings_view_t *view) {
         view->lines[view->line_count++] = line;
     }
     view->content_height = row;
-
-    int32_t content_width = view->cols - view->content_col - 1;
-    view->label_cols = longest_label + 2;
-    if (view->label_cols > (content_width * 45) / 100) view->label_cols = (content_width * 45) / 100;
-    if (view->label_cols < 8) view->label_cols = 8;
 }
 
 static void keep_focus_visible(rubraview_settings_view_t *view) {
@@ -350,6 +365,14 @@ rubraview_settings_view_t rubraview_settings_view_create(const rubraview_setting
     focus_on(&view, first_setting(&view), false);
     if (view.focus_line < 0) view.focus_button = RUBRAVIEW_BUTTON_CLOSE;
     return view;
+}
+
+void rubraview_settings_view_set_info(rubraview_settings_view_t *view, void *user,
+                                      size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity)) {
+    if (!view) return;
+    view->info_user = user;
+    view->info = info;
+    if (view->doc) layout(view);
 }
 
 void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t cols, int32_t rows) {
@@ -443,8 +466,9 @@ int32_t rubraview_settings_view_screen_row(const rubraview_settings_view_t *view
     return TITLE_ROWS + row;
 }
 
-static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"), N_("[ Defaults: all ]"), N_("[ this page ]"),
-                                                                  N_("[ this setting ]"), N_("[ Close ]") };
+/* 1.30.1 (owner, 2026-10-21): "Reset:" says what the three do (they read "Defaults: all", "this page", "this setting") */
+static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"), N_("[ Reset: all ]"), N_("[ Reset: this page ]"),
+                                                                  N_("[ Reset: this setting ]"), N_("[ Close ]") };
 
 u8str_t rubraview_settings_button_text(rubraview_settings_button_t button) {
     if (button < 0 || button >= RUBRAVIEW_BUTTON_COUNT) return (u8str_t){ .ptr = "", .len = 0 };
@@ -816,12 +840,15 @@ u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
             repeat(&w, "\xE2\x94\x80", width - w.cells);
             break;
 
-        case RUBRAVIEW_LINE_INFO: {
-            put_words(&w, tr(node->text), view->label_cols - 1);
+        case RUBRAVIEW_LINE_INFO: {   /* 1.30.1: the value wrapped under itself, the label on its first row */
+            int32_t k = table_index < 0 ? 0 : table_index;
+            if (k == 0) put_words(&w, tr(node->text), view->label_cols - 1);
             pad_to(&w, view->label_cols);
             char value[256];
             size_t n = sources && sources->info ? sources->info(sources->user, node->name, value, sizeof(value)) : 0;
-            put_text(&w, n > 0 ? (u8str_t){ .ptr = value, .len = n } : U8("-"), width - w.cells);
+            u8str_t piece = { .ptr = value, .len = 0 };
+            if (n > 0) note_row((u8str_t){ .ptr = value, .len = n }, width - view->label_cols, k, &piece);
+            put_text(&w, n > 0 ? piece : k == 0 ? U8("-") : U8(""), width - w.cells);
             break;
         }
 
