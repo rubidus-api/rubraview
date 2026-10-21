@@ -443,7 +443,7 @@ static const char *const PARTS[] = {
 "help video.hardware_decode \"Lets the graphics card decode films, which saves the processor — with either decoder, Windows' or FFmpeg's (FFmpeg decodes an HDR film on the card only while HDR tone mapping is on). Off if films show wrong colours or freeze on this computer.\"\n"
 "help video.hdr_output \"On a screen with Windows' HDR on, an HDR film goes out as HDR: its highlights up to the screen's own peak, its colours wider than sRGB, while the rest of the window stays at Windows' SDR brightness. auto: when the screen is HDR. always: even on an ordinary screen (for testing). It needs HDR tone mapping on.\"\n"
 "help video.hdr_tone_mapping \"An HDR film (HDR10 or HLG) brought to this screen: its brightest parts folded under the screen's white (BT.2390) and its colours into sRGB, on the graphics card, so it does not look grey and washed out. It needs FFmpeg; an HDR film Windows' decoder opens is handed to FFmpeg. Off: shown as before.\"\n"
-"help video.subtitle_fit \"A subtitle too long for its box: the box grows to hold it, or the letters shrink until it fits.\"\n"
+"help video.subtitle_fit \"A subtitle too long for its box: the box grows to hold it, or the letters shrink until it fits.\"\n",
 "help video.ab_step_seconds \"How much the A and B points of a repeat move with each press of their buttons or keys.\"\n"
 "help video.audio_language \"The sound track chosen first when a film has several: a language code as films name it, kor, eng, jpn.\"\n"
 "help text.breaks \"keep: the file's breaks. one_line: all in one run. no_blank: blank lines dropped. paragraphs: lines joined, a paragraph ending where a line ends a sentence and more breaks than usual follow.\"\n"
@@ -453,7 +453,7 @@ static const char *const PARTS[] = {
 "help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
 "help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
-"help cache.keep_details \"Camera details, comments, XMP and IPTC, when Export, Edit or the batch writes a picture again: dropped; kept in the new file where its format has a place (JPEG, PNG, GIF, WebP; the rest in words in its comment); or that, and what the file cannot hold in a .txt of the same name beside it (photo.txt, then photo-1.txt). Never with the metadata stripped.\"\n"
+"help cache.keep_details \"Camera details, comments, XMP and IPTC, when Export, Edit or the batch writes a picture again: dropped; kept in the new file where its format has a place (JPEG, PNG, GIF, WebP, AVIF, JPEG XL; the rest in words in its comment); or that, and what the file cannot hold in a .txt of the same name beside it (photo.txt, then photo-1.txt). Never with the metadata stripped.\"\n"
 "help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"
 "help keys.use_keymap_file \"On: the keys come from keymap.ini, which the Keys page edits. Off: the built-in keys are used whatever the file says.\"\n",
 "help text.headings \"In paragraphs: a short line with no sentence's end and a blank line before and after it (Chapter 2) stays a paragraph of its own instead of joining the text after it.\"\n"

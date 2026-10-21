@@ -249,6 +249,188 @@ static void build_words(proven_arena_t *arena, rubraview_details_src_t *d) {
     d->words = n > 0 ? out_done(&o) : (u8str_t){ .ptr = "", .len = 0 };
 }
 
+/* ---- 1.31.0 (RV-139, D-185): ISO BMFF boxes — AVIF's HEIF items and JPEG XL's container ---- */
+
+typedef struct bmff_box { size_t at, head, size; char type[4]; } bmff_box_t;   /* `size` the whole box */
+
+static uint64_t be64(const uint8_t *p) { return ((uint64_t)be32(p) << 32) | be32(p + 4); }
+
+/* The box at `at`, within [at, end). */
+static bool bmff_at(const uint8_t *b, size_t end, size_t at, bmff_box_t *x) {
+    if (at > end || end - at < 8) return false;
+    uint64_t size = be32(b + at);
+    size_t head = 8;
+    if (size == 1) {
+        if (end - at < 16) return false;
+        size = be64(b + at + 8);
+        head = 16;
+    } else if (size == 0) {
+        size = end - at;
+    }
+    if (size < head || size > end - at) return false;
+    *x = (bmff_box_t){ .at = at, .head = head, .size = (size_t)size };
+    memcpy(x->type, b + at + 4, 4);
+    return true;
+}
+
+/* The first child of type `type` among the boxes in [from, end). */
+static bool bmff_find(const uint8_t *b, size_t from, size_t end, const char *type, bmff_box_t *x) {
+    for (size_t at = from; bmff_at(b, end, at, x); at += x->size)
+        if (memcmp(x->type, type, 4) == 0) return true;
+    return false;
+}
+
+static uint64_t be_n(const uint8_t *p, int n) {
+    uint64_t v = 0;
+    for (int i = 0; i < n; ++i) v = (v << 8) | p[i];
+    return v;
+}
+
+static void out_be(out_buf_t *o, uint64_t v, int n) {
+    for (int i = n - 1; i >= 0; --i) out_byte(o, (uint8_t)(v >> (8 * i)));
+}
+
+/* HEIF's item location box, read whole. */
+typedef struct iloc_extent { uint64_t index, offset, length; } iloc_extent_t;
+typedef struct iloc_item { uint32_t id; uint16_t method, dref; uint64_t base; size_t first, count; } iloc_item_t;
+typedef struct iloc_box {
+    int version, offset_size, length_size, base_size, index_size;
+    iloc_item_t *items; size_t item_count;
+    iloc_extent_t *extents; size_t extent_count;
+} iloc_box_t;
+
+static bool iloc_read(proven_arena_t *arena, const uint8_t *b, const bmff_box_t *box, iloc_box_t *out) {
+    size_t at = box->at + box->head, end = box->at + box->size;
+    if (end - at < 8) return false;
+    *out = (iloc_box_t){ .version = b[at] };
+    if (out->version > 2) return false;
+    at += 4;
+    out->offset_size = b[at] >> 4; out->length_size = b[at] & 15;
+    out->base_size = b[at + 1] >> 4; out->index_size = out->version >= 1 ? (b[at + 1] & 15) : 0;
+    at += 2;
+    int sizes[] = { out->offset_size, out->length_size, out->base_size, out->index_size };
+    for (int i = 0; i < 4; ++i) if (sizes[i] != 0 && sizes[i] != 4 && sizes[i] != 8) return false;
+    size_t count;
+    if (out->version < 2) { if (end - at < 2) return false; count = be16(b + at); at += 2; }
+    else { if (end - at < 4) return false; count = be32(b + at); at += 4; }
+    if (count > 4096) return false;
+    proven_result_mem_mut_t ri = proven_arena_alloc(arena, (count ? count : 1) * sizeof(iloc_item_t));
+    if (!proven_is_ok(ri.err)) return false;
+    out->items = (iloc_item_t*)ri.value.ptr;
+    size_t cap = 0;
+    for (size_t i = 0; i < count; ++i) {
+        iloc_item_t it = {0};
+        size_t need = (out->version < 2 ? 2u : 4u) + (out->version >= 1 ? 2u : 0u) + 2u + (size_t)out->base_size + 2u;
+        if (end - at < need) return false;
+        if (out->version < 2) { it.id = be16(b + at); at += 2; } else { it.id = be32(b + at); at += 4; }
+        if (out->version >= 1) { it.method = (uint16_t)(be16(b + at) & 15u); at += 2; }
+        it.dref = (uint16_t)be16(b + at); at += 2;
+        it.base = be_n(b + at, out->base_size); at += (size_t)out->base_size;
+        it.count = be16(b + at); at += 2;
+        it.first = out->extent_count;
+        size_t per = (size_t)out->index_size + (size_t)out->offset_size + (size_t)out->length_size;
+        if (it.count > 1024 || end - at < per * it.count) return false;
+        if (out->extent_count + it.count > cap) {
+            size_t ncap = (out->extent_count + it.count) * 2 + 8;
+            proven_result_mem_mut_t re = proven_arena_alloc(arena, ncap * sizeof(iloc_extent_t));
+            if (!proven_is_ok(re.err)) return false;
+            if (out->extent_count) memcpy(re.value.ptr, out->extents, out->extent_count * sizeof(iloc_extent_t));
+            out->extents = (iloc_extent_t*)re.value.ptr;
+            cap = ncap;
+        }
+        for (size_t e = 0; e < it.count; ++e) {
+            iloc_extent_t x = {0};
+            x.index = be_n(b + at, out->index_size); at += (size_t)out->index_size;
+            x.offset = be_n(b + at, out->offset_size); at += (size_t)out->offset_size;
+            x.length = be_n(b + at, out->length_size); at += (size_t)out->length_size;
+            out->extents[out->extent_count++] = x;
+        }
+        out->items[out->item_count++] = it;
+    }
+    return true;
+}
+
+/* An item's bytes when they lie in the file in one extent (what the readers here need). */
+static u8str_t iloc_bytes(const iloc_box_t *l, uint32_t id, const uint8_t *b, size_t size) {
+    for (size_t i = 0; i < l->item_count; ++i) {
+        const iloc_item_t *it = &l->items[i];
+        if (it->id != id || it->method != 0 || it->count != 1) continue;
+        const iloc_extent_t *x = &l->extents[it->first];
+        uint64_t at = it->base + x->offset, len = x->length ? x->length : (at < size ? size - at : 0);
+        if (at > size || len > size - at) return (u8str_t){ .ptr = "", .len = 0 };
+        return (u8str_t){ .ptr = (const char*)b + at, .len = (size_t)len };
+    }
+    return (u8str_t){ .ptr = "", .len = 0 };
+}
+
+/* An AVIF's (HEIF's) Exif and XMP items. */
+static void read_avif(const uint8_t *b, size_t size, rubraview_details_src_t *d, proven_arena_t *arena) {
+    bmff_box_t meta, iinf, iloc;
+    if (!bmff_find(b, 0, size, "meta", &meta)) return;
+    size_t from = meta.at + meta.head + 4, end = meta.at + meta.size;
+    iloc_box_t l;
+    if (!bmff_find(b, from, end, "iinf", &iinf) || !bmff_find(b, from, end, "iloc", &iloc) || !iloc_read(arena, b, &iloc, &l)) return;
+    size_t at = iinf.at + iinf.head;
+    if (iinf.size - iinf.head < 6) return;
+    int v = b[at];
+    at += 4 + (v == 0 ? 2u : 4u);
+    bmff_box_t infe;
+    for (; bmff_at(b, iinf.at + iinf.size, at, &infe); at += infe.size) {
+        if (memcmp(infe.type, "infe", 4) != 0) continue;
+        size_t p = infe.at + infe.head, e = infe.at + infe.size;
+        if (e - p < 12) continue;
+        int iv = b[p];
+        if (iv < 2) continue;
+        p += 4;
+        uint32_t id = iv == 2 ? be16(b + p) : be32(b + p);
+        p += iv == 2 ? 2u : 4u;
+        p += 2;   /* protection */
+        if (e - p < 4) continue;
+        const uint8_t *type = b + p;
+        p += 4;
+        while (p < e && b[p]) ++p;   /* the item's name */
+        ++p;
+        u8str_t data = iloc_bytes(&l, id, b, size);
+        if (memcmp(type, "Exif", 4) == 0 && data.len >= 4) {
+            uint32_t skip = be32((const uint8_t*)data.ptr);
+            if (skip <= data.len - 4 && is_tiff((const uint8_t*)data.ptr + 4 + skip, data.len - 4 - skip))
+                d->exif = (u8str_t){ .ptr = data.ptr + 4 + skip, .len = data.len - 4 - skip };
+        } else if (memcmp(type, "mime", 4) == 0 && p < e) {
+            const char *ct = (const char*)b + p;
+            size_t ctl = 0;
+            while (p + ctl < e && ct[ctl]) ++ctl;
+            if (ctl == 19 && memcmp(ct, "application/rdf+xml", 19) == 0 && data.len > 0) d->xmp = data;
+        }
+    }
+}
+
+/* A JPEG XL container's Exif and xml boxes. */
+static void read_jxl(const uint8_t *b, size_t size, rubraview_details_src_t *d) {
+    bmff_box_t x;
+    for (size_t at = 0; bmff_at(b, size, at, &x); at += x.size) {
+        const uint8_t *p = b + x.at + x.head;
+        size_t n = x.size - x.head;
+        if (memcmp(x.type, "Exif", 4) == 0 && n >= 4) {
+            uint32_t skip = be32(p);
+            if (skip <= n - 4 && is_tiff(p + 4 + skip, n - 4 - skip)) d->exif = (u8str_t){ .ptr = (const char*)p + 4 + skip, .len = n - 4 - skip };
+        } else if (memcmp(x.type, "xml ", 4) == 0 && n > 0) {
+            d->xmp = (u8str_t){ .ptr = (const char*)p, .len = n };
+        }
+    }
+}
+
+static const uint8_t JXL_SIGNATURE[12] = { 0, 0, 0, 12, 'J', 'X', 'L', ' ', 0x0D, 0x0A, 0x87, 0x0A };
+
+static bool is_avif(const uint8_t *b, size_t size) {
+    bmff_box_t f;
+    if (!bmff_at(b, size, 0, &f) || memcmp(f.type, "ftyp", 4) != 0 || f.size < 16) return false;
+    for (size_t at = 8; at + 4 <= f.size; at += 4) {
+        if (at == 12) continue;   /* the minor version */
+        if (memcmp(b + at, "avif", 4) == 0 || memcmp(b + at, "avis", 4) == 0) return true;
+    }
+    return false;
+}
+
 bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size, rubraview_details_src_t *out) {
     if (!out) return false;
     *out = (rubraview_details_src_t){0};
@@ -258,6 +440,8 @@ bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size
     else if (size >= 8 && memcmp(b, "\x89PNG\r\n\x1a\n", 8) == 0) read_png(arena, b, size, out);
     else if (memcmp(b, "GIF8", 4) == 0) read_gif(arena, b, size, out);
     else if (memcmp(b, "RIFF", 4) == 0 && memcmp(b + 8, "WEBP", 4) == 0) read_webp(b, size, out);
+    else if (size >= 12 && memcmp(b, JXL_SIGNATURE, 12) == 0) read_jxl(b, size, out);   /* 1.31.0 */
+    else if (is_avif(b, size)) read_avif(b, size, out, arena);
 
     /* In words, as the information window has them: what every format can hold as text. */
     rubraview_info_t info = {0};
@@ -524,6 +708,216 @@ static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, con
     return r;
 }
 
+/* ---- 1.31.0 (RV-139, D-185): into a JPEG XL and an AVIF ---- */
+
+static void bmff_box(out_buf_t *o, const char *type, const uint8_t *head, size_t head_len, u8str_t body) {
+    out_be(o, 8u + head_len + body.len, 4);
+    out_put(o, type, 4);
+    out_put(o, head, head_len);
+    out_u8(o, body);
+}
+
+/* A JPEG XL: the bare codestream put in the container (ISO/IEC 18181-2), or a container's boxes kept; the
+   Exif and xml boxes right after `ftyp`. */
+static rubraview_details_put_t put_jxl(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+    rubraview_details_put_t r = { .file = file, .all_kept = false };
+    const uint8_t *b = (const uint8_t*)file.ptr;
+    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.len == 0 && s->words.len > 0);
+    if (s->exif.len == 0 && s->xmp.len == 0) { r.all_kept = !text_left; return r; }
+    bool bare = file.len >= 2 && b[0] == 0xFF && b[1] == 0x0A;
+    bmff_box_t ftyp = {0};
+    if (!bare && !(file.len >= 12 && memcmp(b, JXL_SIGNATURE, 12) == 0 && bmff_at(b, file.len, 12, &ftyp) && memcmp(ftyp.type, "ftyp", 4) == 0))
+        return r;
+    out_buf_t o = { .arena = arena };
+    if (bare) {
+        out_put(&o, JXL_SIGNATURE, 12);
+        static const uint8_t FTYP[20] = { 0, 0, 0, 20, 'f', 't', 'y', 'p', 'j', 'x', 'l', ' ', 0, 0, 0, 0, 'j', 'x', 'l', ' ' };
+        out_put(&o, FTYP, 20);
+    } else {
+        out_put(&o, b, ftyp.at + ftyp.size);
+    }
+    if (s->exif.len > 0) {
+        u8str_t e = exif_upright(arena, s->exif);
+        if (e.len == 0) return r;
+        static const uint8_t NO_SKIP[4] = { 0, 0, 0, 0 };   /* the TIFF header right after */
+        bmff_box(&o, "Exif", NO_SKIP, 4, e);
+    }
+    if (s->xmp.len > 0) bmff_box(&o, "xml ", NULL, 0, s->xmp);
+    if (bare) bmff_box(&o, "jxlc", NULL, 0, file);
+    else out_put(&o, b + ftyp.at + ftyp.size, file.len - ftyp.at - ftyp.size);
+    u8str_t made = out_done(&o);
+    if (made.len == 0) return r;
+    r.file = made;
+    r.all_kept = !text_left;
+    return r;
+}
+
+/* The chunk offsets of every track (an AVIF that moves): those at or past `from` moved by `delta`, in place. */
+static void bmff_shift_chunks(uint8_t *b, size_t from_at, size_t end, size_t from, size_t delta) {
+    bmff_box_t x;
+    for (size_t at = from_at; bmff_at(b, end, at, &x); at += x.size) {
+        size_t body = x.at + x.head;
+        if (memcmp(x.type, "trak", 4) == 0 || memcmp(x.type, "mdia", 4) == 0 || memcmp(x.type, "minf", 4) == 0 ||
+            memcmp(x.type, "stbl", 4) == 0 || memcmp(x.type, "moov", 4) == 0) {
+            bmff_shift_chunks(b, body, x.at + x.size, from, delta);
+        } else if ((memcmp(x.type, "stco", 4) == 0 || memcmp(x.type, "co64", 4) == 0) && x.size - x.head >= 8) {
+            int n = x.type[0] == 's' ? 4 : 8;
+            uint32_t count = be32(b + body + 4);
+            if ((size_t)count > (x.size - x.head - 8) / (size_t)n) continue;
+            for (uint32_t k = 0; k < count; ++k) {
+                uint8_t *p = b + body + 8 + (size_t)k * (size_t)n;
+                uint64_t v = be_n(p, n);
+                if (v >= from) { v += delta; for (int i = n - 1; i >= 0; --i) { p[i] = (uint8_t)v; v >>= 8; } }
+            }
+        }
+    }
+}
+
+/* `iloc` written again: the items as they were (moved by `delta` where they lay past `from`), and the new ones. */
+static void iloc_write(out_buf_t *o, const iloc_box_t *l, size_t from, size_t delta,
+                       const uint32_t *ids, const uint64_t *offsets, const uint64_t *lengths, size_t added) {
+    int osz = l->offset_size < 4 ? 4 : l->offset_size, lsz = l->length_size < 4 ? 4 : l->length_size;
+    out_buf_t body = { .arena = o->arena };
+    out_byte(&body, (uint8_t)l->version); out_be(&body, 0, 3);
+    out_byte(&body, (uint8_t)((osz << 4) | lsz));
+    out_byte(&body, (uint8_t)((l->base_size << 4) | (l->version >= 1 ? l->index_size : 0)));
+    size_t count = l->item_count + added;
+    if (l->version < 2) out_be(&body, count, 2); else out_be(&body, count, 4);
+    for (size_t i = 0; i < count; ++i) {
+        bool old = i < l->item_count;
+        const iloc_item_t *it = old ? &l->items[i] : NULL;
+        uint32_t id = old ? it->id : ids[i - l->item_count];
+        if (l->version < 2) out_be(&body, id, 2); else out_be(&body, id, 4);
+        if (l->version >= 1) out_be(&body, old ? it->method : 0, 2);
+        out_be(&body, old ? it->dref : 0, 2);
+        out_be(&body, old ? it->base : 0, l->base_size);
+        out_be(&body, old ? it->count : 1, 2);
+        size_t n = old ? it->count : 1;
+        for (size_t e = 0; e < n; ++e) {
+            if (l->version >= 1 && l->index_size) out_be(&body, old ? l->extents[it->first + e].index : 0, l->index_size);
+            uint64_t off, len;
+            if (old) {
+                const iloc_extent_t *x = &l->extents[it->first + e];
+                off = x->offset;
+                len = x->length;
+                if (it->method == 0 && it->base + off >= from) off += delta;   /* in the file, past the meta box */
+            } else {
+                off = offsets[i - l->item_count];
+                len = lengths[i - l->item_count];
+            }
+            out_be(&body, off, osz);
+            out_be(&body, len, lsz);
+        }
+    }
+    if (body.failed) { o->failed = true; return; }
+    out_be(o, 8u + 4u + body.len - 4u, 4);
+    out_str(o, "iloc");
+    out_put(o, body.p, body.len);
+}
+
+/* An AVIF (HEIF): an Exif item and an XMP item ("mime", application/rdf+xml) in its meta box, said to describe
+   the primary picture (iref cdsc), their bytes in an mdat at the end; what lay past the meta box moved. */
+static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+    rubraview_details_put_t r = { .file = file, .all_kept = false };
+    const uint8_t *b = (const uint8_t*)file.ptr;
+    size_t size = file.len;
+    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.len == 0 && s->words.len > 0);
+    if (s->exif.len == 0 && s->xmp.len == 0) { r.all_kept = !text_left; return r; }
+    if (!is_avif(b, size)) return r;
+    bmff_box_t meta, iinf, iloc, pitm, iref = {0};
+    if (!bmff_find(b, 0, size, "meta", &meta) || meta.head != 8) return r;
+    size_t from = meta.at + meta.head + 4, end = meta.at + meta.size;
+    iloc_box_t l;
+    if (!bmff_find(b, from, end, "iinf", &iinf) || !bmff_find(b, from, end, "iloc", &iloc) ||
+        !bmff_find(b, from, end, "pitm", &pitm) || !iloc_read(arena, b, &iloc, &l)) return r;
+    bool has_iref = bmff_find(b, from, end, "iref", &iref);
+    if (has_iref && b[iref.at + iref.head] != 0) return r;   /* 32-bit references: not written here */
+    uint32_t primary = b[pitm.at + pitm.head] == 0 ? be16(b + pitm.at + pitm.head + 4) : be32(b + pitm.at + pitm.head + 4);
+    uint32_t next = 0;
+    for (size_t i = 0; i < l.item_count; ++i) if (l.items[i].id > next) next = l.items[i].id;
+    if (next + 2 > 0xFFFFu || l.version >= 2) return r;
+
+    u8str_t exif = s->exif.len > 0 ? exif_upright(arena, s->exif) : (u8str_t){ .ptr = "", .len = 0 };
+    uint32_t ids[2];
+    uint64_t lengths[2], offsets[2] = { 0, 0 };
+    size_t added = 0;
+    if (exif.len > 0) { ids[added] = ++next; lengths[added++] = 4u + exif.len; }
+    if (s->xmp.len > 0) { ids[added] = ++next; lengths[added++] = s->xmp.len; }
+    if (added == 0) return r;
+
+    /* twice: the first time for its size, the second with the offsets that size gives */
+    u8str_t made = { .ptr = "", .len = 0 };
+    for (int pass = 0; pass < 2; ++pass) {
+        out_buf_t m = { .arena = arena };
+        out_be(&m, 0, 4); out_str(&m, "meta"); out_put(&m, b + meta.at + 8, 4);
+        bmff_box_t c;
+        for (size_t at = from; bmff_at(b, end, at, &c); at += c.size) {
+            if (memcmp(c.type, "iinf", 4) == 0) {
+                size_t p = c.at + c.head;
+                int v = b[p];
+                size_t count = v == 0 ? be16(b + p + 4) : be32(b + p + 4);
+                size_t body_at = p + 4 + (v == 0 ? 2u : 4u);
+                out_buf_t ib = { .arena = arena };
+                out_put(&ib, b + p, 4);
+                out_be(&ib, count + added, v == 0 ? 2 : 4);
+                out_put(&ib, b + body_at, c.at + c.size - body_at);
+                for (size_t k = 0; k < added; ++k) {
+                    bool is_exif = exif.len > 0 && k == 0;
+                    const char *ct = "application/rdf+xml";
+                    size_t infe_len = 8u + 4u + 2u + 2u + 4u + 1u + (is_exif ? 0u : strlen(ct) + 1u);
+                    out_be(&ib, infe_len, 4); out_str(&ib, "infe");
+                    out_byte(&ib, 2); out_be(&ib, 0, 3);
+                    out_be(&ib, ids[k], 2); out_be(&ib, 0, 2);
+                    out_str(&ib, is_exif ? "Exif" : "mime");
+                    out_byte(&ib, 0);   /* no name */
+                    if (!is_exif) { out_str(&ib, ct); out_byte(&ib, 0); }
+                }
+                if (ib.failed) return r;
+                out_be(&m, 8u + ib.len, 4); out_str(&m, "iinf"); out_put(&m, ib.p, ib.len);
+                if (!has_iref) {   /* the references, right after */
+                    out_be(&m, 12u + 14u * added, 4); out_str(&m, "iref"); out_be(&m, 0, 4);
+                    for (size_t k = 0; k < added; ++k) { out_be(&m, 14, 4); out_str(&m, "cdsc"); out_be(&m, ids[k], 2); out_be(&m, 1, 2); out_be(&m, primary, 2); }
+                }
+            } else if (memcmp(c.type, "iref", 4) == 0) {
+                out_be(&m, c.size + 14u * added, 4);
+                out_put(&m, b + c.at + 4, c.size - 4);
+                for (size_t k = 0; k < added; ++k) { out_be(&m, 14, 4); out_str(&m, "cdsc"); out_be(&m, ids[k], 2); out_be(&m, 1, 2); out_be(&m, primary, 2); }
+            } else if (memcmp(c.type, "iloc", 4) == 0) {
+                /* the second time, how much the meta box grew (its size the first time gave) */
+                iloc_write(&m, &l, end, pass == 0 ? 0 : (size_t)(made.len - meta.size), ids, offsets, lengths, added);
+            } else {
+                out_put(&m, b + c.at, c.size);
+            }
+        }
+        if (m.failed || m.len < 8) return r;
+        put_be32(m.p, (uint32_t)m.len);
+        made = (u8str_t){ .ptr = (const char*)m.p, .len = m.len };
+        if (pass == 0) {   /* the new items' bytes: an mdat at the very end */
+            size_t mdat_at = size - meta.size + made.len;
+            uint64_t at = mdat_at + 8;
+            for (size_t k = 0; k < added; ++k) { offsets[k] = at; at += lengths[k]; }
+        }
+    }
+    size_t delta = made.len - meta.size;
+    out_buf_t o = { .arena = arena };
+    out_put(&o, b, meta.at);
+    out_u8(&o, made);
+    size_t rest_at = o.len;
+    out_put(&o, b + end, size - end);
+    if (o.failed) return r;
+    bmff_shift_chunks(o.p, rest_at, o.len, end, delta);   /* an AVIF that moves: its tracks' chunks */
+    uint64_t mdat_len = 8;
+    for (size_t k = 0; k < added; ++k) mdat_len += lengths[k];
+    out_be(&o, mdat_len, 4); out_str(&o, "mdat");
+    if (exif.len > 0) { out_be(&o, 0, 4); out_u8(&o, exif); }
+    if (s->xmp.len > 0) out_u8(&o, s->xmp);
+    u8str_t done = out_done(&o);
+    if (done.len == 0) return r;
+    r.file = done;
+    r.all_kept = !text_left;
+    return r;
+}
+
 rubraview_details_put_t rubraview_details_put(proven_arena_t *arena, rubraview_export_format_t format,
                                               u8str_t file, const rubraview_details_src_t *src) {
     rubraview_details_put_t none = { .file = file, .all_kept = !src || !src->any };
@@ -533,6 +927,8 @@ rubraview_details_put_t rubraview_details_put(proven_arena_t *arena, rubraview_e
         case RUBRAVIEW_EXPORT_PNG:  return put_png(arena, file, src);
         case RUBRAVIEW_EXPORT_GIF:  return put_gif(arena, file, src);
         case RUBRAVIEW_EXPORT_WEBP: return put_webp(arena, file, src);
+        case RUBRAVIEW_EXPORT_JXL:  return put_jxl(arena, file, src);    /* 1.31.0 */
+        case RUBRAVIEW_EXPORT_AVIF: return put_avif(arena, file, src);
         default: return none;   /* BMP, TIFF, ICO: no place this writer can fill */
     }
 }

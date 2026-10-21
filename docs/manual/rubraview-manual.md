@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.30.1.exe              the viewer, as built
-dist/rubraview-v1.30.1/                 the release bundle
-dist/rubraview-v1.30.1.zip              that bundle, zipped — the download
+dist/rubraview-v1.31.0.exe              the viewer, as built
+dist/rubraview-v1.31.0/                 the release bundle
+dist/rubraview-v1.31.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -438,9 +438,12 @@ nothing more ("as the file" shows the file's own format's). **AVIF
 (FFmpeg)** and **JPEG XL (FFmpeg)** are written by FFmpeg's encoders,
 when the FFmpeg the viewer uses has them (BtbN's 9.0 build has libjxl,
 libaom, SVT-AV1 and rav1e; Settings › Video › FFmpeg names those it found):
-their quality only, 100 being lossless JPEG XL. AVIF is written 4:2:0
-without transparency (it is laid over white); JPEG XL keeps it. Neither
-carries the file's details. Tick **Privacy
+their quality (100 being lossless JPEG XL) and, for AVIF, **AVIF colour**
+(4:2:0, or 4:4:4 for the sharpest colour) and **AVIF depth** (8 or 10
+bits). Transparency is kept in both (AVIF's needs libaom; another AV1
+encoder lays it over white), so are the file's details (EXIF and XMP), and
+an animation stays moving in both (JPEG XL's needs libjxl_anim; without
+it the first picture is written). Tick **Privacy
 clean** (JPEG, PNG, WebP, TIFF) to strip GPS and camera details, and press
 Export. **PNG
 colours** writes a PNG with or without transparency, in 256 colours or in
@@ -668,6 +671,7 @@ waits for a key before it closes.
 | `--filter=lanczos3\|bicubic\|bilinear\|nearest` | How to resample |
 | (Settings › Display) | Bicubic and Lanczos resizes of large pictures run on the graphics card when there is one, with the same result |
 | `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico\|avif\|jxl` | What to write (AVIF and JPEG XL by FFmpeg) |
+| `--avif-chroma=420\|444`, `--avif-bits=8\|10` | AVIF's colour resolution and depth |
 | `--quality=1..100` | For JPEG and WebP |
 | `--progressive` | A progressive JPEG |
 | `--lossless`, `--effort=0..6` | A WebP with every pixel as it was; how hard to try for a small one (4 as it comes) |

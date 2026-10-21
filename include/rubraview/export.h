@@ -126,6 +126,10 @@ typedef struct rubraview_export_options {
     int32_t webp_preset;        /* 0 none, 1 picture, 2 photo, 3 drawing, 4 icon, 5 text (libwebp's own tunings) */
     int32_t target_kb;          /* JPEG and lossy WebP: the file no larger than this many KB (the quality found for it); 0 off */
     bool    tiff_cmyk;          /* a TIFF in CMYK, for print (WIC's plain conversion, no colour profile) */
+
+    /* 1.31.0 (RV-139, D-185): AVIF's colour, written by FFmpeg */
+    int32_t avif_chroma;        /* 0 4:2:0, 1 4:4:4 (libaom, rav1e; SVT-AV1 writes 4:2:0) */
+    int32_t avif_bits;          /* 8 or 10 */
 } rubraview_export_options_t;
 
 /** Every field at the specification's default. */
@@ -164,6 +168,7 @@ enum {
     RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY  = 1u << 11,  /* lossy WebP: alpha quality, sharp YUV */
     RUBRAVIEW_EXPORT_ROW_WEBP_NEAR   = 1u << 12,  /* lossless WebP: near-lossless */
     RUBRAVIEW_EXPORT_ROW_TARGET      = 1u << 13,  /* JPEG and lossy WebP: a target size (1.17.0) */
+    RUBRAVIEW_EXPORT_ROW_AVIF        = 1u << 14,  /* AVIF: 4:2:0 or 4:4:4, 8 or 10 bits (1.31.0) */
 };
 
 /**

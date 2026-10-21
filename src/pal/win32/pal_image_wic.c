@@ -1834,6 +1834,66 @@ static bool anim_webp_read(void *ctx, size_t index, uint8_t *dst, size_t stride)
     return rubraview_pal_anim_read(reader, index, dst, stride, reader->frames[index].height);
 }
 
+static _Thread_local const char *g_save_why;   /* RV-139: why the last save on this thread failed */
+static rubraview_ffmpeg_still_t ffmpeg_how(const rubraview_export_options_t *options, bool avif);
+
+/* RV-139 (D-185): an animation's pictures as FFmpeg asks for them, made straight (the canvas multiplies alpha in). */
+typedef struct anim_ffmpeg {
+    rubraview_frame_canvas_t canvas;
+    rubraview_anim_reader_t *reader;
+    const rubraview_frame_t *frames;
+    size_t bytes;
+} anim_ffmpeg_t;
+
+static bool anim_ffmpeg_picture(void *context, size_t index, uint8_t *bgra, double *seconds) {
+    anim_ffmpeg_t *a = (anim_ffmpeg_t*)context;
+    if (!rubraview_frame_canvas_show(&a->canvas, index, anim_webp_read, a->reader)) return false;
+    const uint8_t *in = a->canvas.pixels;
+    for (size_t k = 0; k < a->bytes; k += 4) {
+        unsigned al = in[k + 3];
+        for (int c = 0; c < 3; ++c) {
+            unsigned v = al == 0 ? 0u : (in[k + c] * 255u + al / 2u) / al;
+            bgra[k + c] = (uint8_t)(v > 255u ? 255u : v);
+        }
+        bgra[k + 3] = (uint8_t)al;
+    }
+    *seconds = a->frames[index].delay_seconds;
+    return true;
+}
+
+static _Thread_local const char *g_anim_why;
+
+int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_path, const uint8_t *data, size_t size,
+                                              const rubraview_export_options_t *options, bool avif) {
+    g_save_why = NULL;
+    if (!options) return -1;
+    const rubraview_frame_t *frames = NULL;
+    size_t count = 0;
+    int32_t width = 0, height = 0;
+    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, data, size, &frames, &count, &width, &height);
+    if (!reader) return 0;
+    if (count <= 1 || width <= 0 || height <= 0) { rubraview_pal_anim_close(reader); return 0; }
+    /* JPEG XL that moves needs libjxl_anim: without it the first picture is written, as a still one */
+    if (!avif && !(rubraview_pal_ffmpeg_image_encoders(NULL, 0) & RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM)) { rubraview_pal_anim_close(reader); return 0; }
+    int result = -1;
+    anim_ffmpeg_t a = { .reader = reader, .frames = frames, .bytes = (size_t)width * (size_t)height * 4u };
+    uint8_t *buffers = (uint8_t*)calloc(3, a.bytes);
+    if (buffers) {
+        rubraview_frame_canvas_init(&a.canvas, frames, count, width, height, buffers, buffers + a.bytes, buffers + a.bytes * 2u);
+        rubraview_ffmpeg_still_t how = ffmpeg_how(options, avif);
+        size_t len = 0;
+        uint8_t *bytes = rubraview_pal_ffmpeg_pictures_encode(width, height, count, anim_ffmpeg_picture, &a, &how, &len, &g_anim_why);
+        if (bytes) {
+            if (rubraview_pal_fs_write_file(out_path, (u8str_t){ .ptr = (const char*)bytes, .len = len })) result = 1;
+            free(bytes);
+        }
+        g_save_why = g_anim_why;
+    }
+    free(buffers);
+    rubraview_pal_anim_close(reader);
+    return result;
+}
+
 int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
                                             const uint8_t *data, size_t size,
                                             const rubraview_export_options_t *options) {
@@ -1899,15 +1959,19 @@ static bool save_jpeg_to_size(u8str_t path, const rubraview_pixbuf_t *pixels, co
     return true;
 }
 
-/* RV-139: why the last save on this thread failed, when it can say */
-static _Thread_local const char *g_save_why;
-
+/* RV-139: why the last save on this thread failed, when it can say (g_save_why, above) */
 const char *rubraview_pal_image_save_why(void) { return g_save_why; }
 
 /* RV-139 (D-184): AVIF and JPEG XL are the user's FFmpeg's to write. */
+static rubraview_ffmpeg_still_t ffmpeg_how(const rubraview_export_options_t *options, bool avif) {
+    return (rubraview_ffmpeg_still_t){ .avif = avif, .quality = options->jpeg_quality,
+                                       .chroma444 = options->avif_chroma == 1, .bits = options->avif_bits == 10 ? 10 : 8 };
+}
+
 static bool save_by_ffmpeg(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options, bool avif) {
     size_t size = 0;
-    uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(pixels, avif, options->jpeg_quality, &size, &g_save_why);
+    rubraview_ffmpeg_still_t how = ffmpeg_how(options, avif);
+    uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(pixels, &how, &size, &g_save_why);
     if (!bytes) return false;
     bool written = rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = (const char*)bytes, .len = size });
     free(bytes);

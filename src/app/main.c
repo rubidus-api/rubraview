@@ -14219,6 +14219,7 @@ enum {
     PANEL_JPEG_SUBSAMPLING, PANEL_JPEG_GREY, PANEL_JPEG_OPTIMISE, PANEL_JPEG_RESTART, PANEL_PNG_FILTER, PANEL_PNG_INTERLACE,
     PANEL_COLOURS, PANEL_DITHER, PANEL_TIFF_COMPRESSION, PANEL_BMP_DEPTH, PANEL_WEBP_NEAR, PANEL_WEBP_ALPHA, PANEL_WEBP_SHARP,
     PANEL_KEEP_DETAILS, PANEL_WEBP_PRESET, PANEL_TARGET_KB, PANEL_TIFF_CMYK,   /* 1.17.0 */
+    PANEL_AVIF_CHROMA, PANEL_AVIF_BITS,   /* 1.31.0 */
     PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
     /* RV-129 */
     PANEL_BATCH_SIZE_BY, PANEL_BATCH_BOX_H, PANEL_BATCH_LINEAR, PANEL_BATCH_NO_ENLARGE, PANEL_BATCH_SHARPEN,
@@ -15248,6 +15249,8 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
         case PANEL_BMP_DEPTH:    word = i >= 0 && i < 3 ? BMP_BITS[i] : NULL; break;
         case PANEL_KEEP_DETAILS: word = i >= 0 && i < 3 ? KEEP[i] : NULL; break;
         case PANEL_WEBP_PRESET:  word = i >= 0 && i < 6 ? PRESET[i] : NULL; break;
+        case PANEL_AVIF_CHROMA:  word = i == 1 ? T("4:4:4 (sharpest colour)") : T("4:2:0 (smallest)"); break;   /* 1.31.0 */
+        case PANEL_AVIF_BITS:    word = i == 1 ? T("10 bits") : T("8 bits"); break;
         case PANEL_TARGET_KB:
             if (i <= 0) { word = T("off"); break; }
             snprintf(buffer, size, T("at most %d KB"), (int)i); return cstr(buffer);
@@ -15318,6 +15321,10 @@ static void export_more_rows(rubraview_panel_t *pn, const rubraview_export_optio
         rubraview_panel_add_slider(pn, PANEL_WEBP_NEAR, TU8("Near-lossless"),
                                    (double)o->webp_near_lossless, 0.0, 100.0, 1.0);
     }
+    if (rows & RUBRAVIEW_EXPORT_ROW_AVIF) {   /* 1.31.0 */
+        rubraview_panel_add_choice(pn, PANEL_AVIF_CHROMA, TU8("AVIF colour"), o->avif_chroma, 2);
+        rubraview_panel_add_choice(pn, PANEL_AVIF_BITS, TU8("AVIF depth"), o->avif_bits == 10 ? 1 : 0, 2);
+    }
     if (rows & RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY) {
         rubraview_panel_add_slider(pn, PANEL_WEBP_ALPHA, TU8("Alpha quality"),
                                    (double)o->webp_alpha_quality, 0.0, 100.0, 1.0);
@@ -15349,6 +15356,8 @@ static bool export_more_apply(rubraview_export_options_t *o, int32_t id, double 
         case PANEL_WEBP_PRESET:   o->webp_preset = (int32_t)v; break;
         case PANEL_TARGET_KB:     o->target_kb = (int32_t)lround(v); break;
         case PANEL_TIFF_CMYK:     o->tiff_cmyk = v > 0.5; break;
+        case PANEL_AVIF_CHROMA:   o->avif_chroma = (int32_t)v; break;   /* 1.31.0 */
+        case PANEL_AVIF_BITS:     o->avif_bits = (int32_t)v == 1 ? 10 : 8; break;
         default: break;
     }
     rubraview_export_clamp(o);
@@ -15493,6 +15502,8 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
         if (o->keep_details != d.keep_details && (unsigned)o->keep_details < 3u) batch_token(tk, "--details=%s", KEEP[o->keep_details]);
         static const char *const PRESETS[] = { "none", "picture", "photo", "drawing", "icon", "text" };
         if (o->webp_preset > 0 && o->webp_preset < 6) batch_token(tk, "--webp-preset=%s", PRESETS[o->webp_preset]);
+        if (o->avif_chroma == 1) batch_token(tk, "--avif-chroma=444");   /* 1.31.0 */
+        if (o->avif_bits == 10) batch_token(tk, "--avif-bits=10");
         if (o->target_kb > 0) batch_token(tk, "--target-kb=%d", (int)o->target_kb);
         if (o->tiff_cmyk) batch_token(tk, "--cmyk");
     }
@@ -16714,9 +16725,11 @@ static int save_job_work(save_job_t *job) {
     {
         rubraview_export_format_t to = job->options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? job->source_format
                                                                                               : job->options.format;
-        if (to == RUBRAVIEW_EXPORT_WEBP && !job->apply_edit) {
-            int moved = rubraview_pal_image_save_animation_webp(out_path, source, NULL, 0, &job->options);
-            if (moved > 0) (void)details_keep(source, out_path, save_job_named(job), RUBRAVIEW_EXPORT_WEBP, &job->options);
+        if ((to == RUBRAVIEW_EXPORT_WEBP || to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && !job->apply_edit) {
+            int moved = to == RUBRAVIEW_EXPORT_WEBP ? rubraview_pal_image_save_animation_webp(out_path, source, NULL, 0, &job->options)
+                      : rubraview_pal_image_save_animation_ffmpeg(out_path, source, NULL, 0, &job->options, to == RUBRAVIEW_EXPORT_AVIF);   /* 1.31.0 */
+            if (moved > 0) (void)details_keep(source, out_path, save_job_named(job), to, &job->options);
+            if (moved < 0) job->why = rubraview_pal_image_save_why();
             if (moved != 0) return moved > 0 ? SAVE_OK : SAVE_UNWRITABLE;
         }
     }
@@ -27285,11 +27298,16 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
     }
     /* RV-109: an animation that is only changed to WebP keeps moving. */
     rubraview_export_format_t to = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
-    int moved = to == RUBRAVIEW_EXPORT_WEBP && !orient && !resize && !color && !extra
-              ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options) : 0;
+    bool plain = !orient && !resize && !color && !extra;
+    int moved = to == RUBRAVIEW_EXPORT_WEBP && plain ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options)
+              : (to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && plain   /* 1.31.0: AVIF and JPEG XL too */
+                ? rubraview_pal_image_save_animation_ffmpeg(out_path, input->path, NULL, 0, &options, to == RUBRAVIEW_EXPORT_AVIF) : 0;
     bool ok = false;
-    if (moved > 0) { ok = true; bc->written++; }
-    else if (moved < 0) batch_say(input->path, "the animation could not be written");
+    if (moved > 0) { ok = true; bc->written++; (void)details_keep(input->path, out_path, out_path, to, &options); }
+    else if (moved < 0) {
+        const char *why = rubraview_pal_image_save_why();
+        batch_say(input->path, why ? why : "the animation could not be written");
+    }
     else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, extra, options, source_format);
     if (ok) batch_keep_date(arena, bc, input->path, out_path);
     free(own);

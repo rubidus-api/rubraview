@@ -11,6 +11,7 @@ rubraview_export_options_t rubraview_export_defaults(void) {
     return (rubraview_export_options_t){
         .format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE,
         .jpeg_quality = 90,
+        .avif_bits = 8,   /* 1.31.0 */
         .jpeg_progressive = false,
         .webp_lossless = false,
         .webp_quality = 85,
@@ -65,6 +66,8 @@ void rubraview_export_clamp(rubraview_export_options_t *options) {
     options->keep_details = clampi(options->keep_details, 0, 2);
     options->webp_preset = clampi(options->webp_preset, 0, 5);
     options->target_kb = clampi(options->target_kb, 0, 1000000);
+    options->avif_chroma = clampi(options->avif_chroma, 0, 1);
+    options->avif_bits = options->avif_bits == 10 ? 10 : 8;
 }
 
 int32_t rubraview_export_palette_size(const rubraview_export_options_t *options) {
@@ -89,6 +92,7 @@ uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t s
             if (o->bmp_depth == RUBRAVIEW_BMP_8) rows |= RUBRAVIEW_EXPORT_ROW_COLOURS;
             break;
         case RUBRAVIEW_EXPORT_TIFF: rows |= RUBRAVIEW_EXPORT_ROW_TIFF; break;
+        case RUBRAVIEW_EXPORT_AVIF: rows |= RUBRAVIEW_EXPORT_ROW_AVIF; break;   /* 1.31.0 */
         case RUBRAVIEW_EXPORT_WEBP:
             rows |= o->webp_lossless ? RUBRAVIEW_EXPORT_ROW_WEBP_NEAR : (RUBRAVIEW_EXPORT_ROW_WEBP_LOSSY | RUBRAVIEW_EXPORT_ROW_TARGET);
             break;
@@ -213,7 +217,7 @@ uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_
             return RUBRAVIEW_EXPORT_ROW_PRIVACY;
         case RUBRAVIEW_EXPORT_AVIF:
         case RUBRAVIEW_EXPORT_JXL:
-            return RUBRAVIEW_EXPORT_ROW_QUALITY;   /* RV-139: written without the file's details */
+            return RUBRAVIEW_EXPORT_ROW_QUALITY | RUBRAVIEW_EXPORT_ROW_PRIVACY;   /* RV-139; 1.31.0 carries details */
         default:
             return 0u;   /* GIF, BMP, ICO: nothing to choose */
     }

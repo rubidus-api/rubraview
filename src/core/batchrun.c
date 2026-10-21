@@ -429,9 +429,11 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             static const char *const BMPS[] = { "32", "24", "8" };
             static const char *const DETAILS[] = { "drop", "file", "txt" };
             static const char *const PRESETS[] = { "none", "picture", "photo", "drawing", "icon", "text" };
+            static const char *const CHROMAS[] = { "420", "444" }, *const AVIF_BITS[] = { "8", "10" };   /* 1.31.0 */
             static const struct { const char *flag; const char *const *words; int count; int which; } WORDS[] = {
                 { "--subsampling=", SUBSAMPLINGS, 4, 0 }, { "--png-filter=", PNG_FILTERS, 7, 1 },
                 { "--tiff=", TIFFS, 4, 2 }, { "--bmp=", BMPS, 3, 3 }, { "--details=", DETAILS, 3, 4 }, { "--webp-preset=", PRESETS, 6, 5 },
+                { "--avif-chroma=", CHROMAS, 2, 6 }, { "--avif-bits=", AVIF_BITS, 2, 7 },
             };
             bool took = false, bad = false;
             for (size_t k = 0; k < sizeof(WORDS) / sizeof(WORDS[0]) && !took; ++k) {
@@ -446,6 +448,8 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
                     case 2: result.export_options.tiff_compression = (rubraview_tiff_compression_t)found; break;
                     case 3: result.export_options.bmp_depth = (rubraview_bmp_depth_t)found; break;
                     case 4: result.export_options.keep_details = found; break;   /* 1.17.0 */
+                    case 6: result.export_options.avif_chroma = found; break;     /* 1.31.0 */
+                    case 7: result.export_options.avif_bits = found == 1 ? 10 : 8; break;
                     default: result.export_options.webp_preset = found; break;
                 }
             }

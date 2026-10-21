@@ -227,6 +227,14 @@ const char *rubraview_pal_image_save_why(void);
  * source is not such an animation (nothing is written: save it as a
  * picture), -1 when it is one and could not be written.
  */
+/**
+ * RV-139 (D-185): the same, written as a moving AVIF (`avif`) or JPEG XL by the user's FFmpeg; 0 also when
+ * its FFmpeg cannot write a moving JPEG XL (the first picture is then written as a still one). Why it failed:
+ * rubraview_pal_image_save_why().
+ */
+int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_path, const uint8_t *data, size_t size,
+                                              const rubraview_export_options_t *options, bool avif);
+
 int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
                                             const uint8_t *data, size_t size,
                                             const rubraview_export_options_t *options);

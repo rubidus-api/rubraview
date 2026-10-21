@@ -128,19 +128,37 @@ rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void);
  * on a side, or there is no decoder. May be called from any thread.
  */
 /**
- * RV-139 (D-184): which still pictures the user's FFmpeg can write — RUBRAVIEW_FFMPEG_WRITES_* — and the
+ * RV-139 (D-184, D-185): which pictures the user's FFmpeg can write — RUBRAVIEW_FFMPEG_WRITES_* — and the
  * encoders' names into `names` ("libjxl, libaom-av1").
  */
-#define RUBRAVIEW_FFMPEG_WRITES_JXL  1u
-#define RUBRAVIEW_FFMPEG_WRITES_AVIF 2u
+#define RUBRAVIEW_FFMPEG_WRITES_JXL        1u
+#define RUBRAVIEW_FFMPEG_WRITES_AVIF       2u
+#define RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM   4u   /* libjxl_anim */
+#define RUBRAVIEW_FFMPEG_WRITES_AVIF_ALPHA 8u   /* libaom: transparency as a second, grey picture */
 uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size);
 
+typedef struct rubraview_ffmpeg_still {
+    bool    avif;        /* AVIF, else JPEG XL */
+    int32_t quality;     /* 1..100 (rubraview_export_jxl_distance / _av1_crf); 100 is lossless JPEG XL */
+    bool    chroma444;   /* AVIF: 4:4:4 (libaom, rav1e), else 4:2:0 */
+    int32_t bits;        /* AVIF: 8 or 10 */
+    bool    moving;      /* set by the writer: more than one picture */
+} rubraview_ffmpeg_still_t;
+
 /**
- * A picture (BGRA or RGBA rows) written as AVIF (`avif`: an AV1 encoder, 4:2:0, transparency over white, in
- * FFmpeg's avif muxer) or JPEG XL (libjxl, alpha kept) at `quality` 1..100 (rubraview_export_jxl_distance /
- * _av1_crf; 100 is lossless JPEG XL). The file's bytes (free()), or NULL and `why` (an N_ literal).
+ * Pictures written as one AVIF (an AV1 encoder in FFmpeg's avif muxer; transparency as libaom's grey second
+ * picture, or laid over white by another encoder) or JPEG XL (libjxl, libjxl_anim for more than one; alpha
+ * kept). `picture` fills picture `index` as straight BGRA rows, width * 4 bytes apart, and says how long it
+ * shows; it is asked for every picture twice (whether any is see-through, then to write). The file's bytes
+ * (free()), or NULL and `why` (an N_ literal).
  */
-uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *pixels, bool avif, int32_t quality,
+uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, size_t count,
+                                              bool (*picture)(void *context, size_t index, uint8_t *bgra, double *seconds),
+                                              void *context, const rubraview_ffmpeg_still_t *how,
+                                              size_t *out_size, const char **why);
+
+/** One picture (BGRA or RGBA rows, straight alpha). */
+uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *pixels, const rubraview_ffmpeg_still_t *how,
                                            size_t *out_size, const char **why);
 
 bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,

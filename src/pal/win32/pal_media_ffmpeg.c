@@ -1082,7 +1082,7 @@ static void free_decode(ff_decode_t *d) {
 /* Puts one decoded picture in the ring, waiting for room while playing
    but never longer than VIDEO_ROOM_WAIT_MS: the sound must not end up
    waiting on the picture. Returns false when the caller should stop. */
-/* ---- RV-139 (D-184): still pictures written by the user's FFmpeg ---- */
+/* ---- RV-139 (D-184, D-185): pictures written by the user's FFmpeg ---- */
 
 static const char *const AV1_ENCODERS[] = { "libaom-av1", "libsvtav1", "librav1e" };
 
@@ -1097,7 +1097,10 @@ static bool ff_mux_api(void) {
            g_ff.av_write_trailer && g_ff.avio_open_dyn_buf && g_ff.avio_close_dyn_buf && g_ff.av_free;
 }
 
-static const AVCodec *ff_av1_encoder(void) {
+/* The AV1 encoder for this picture: libaom for 4:4:4 or transparency (it codes both), else the first there is. */
+static const AVCodec *ff_av1_encoder(bool needs_aom) {
+    const AVCodec *aom = g_ff.avcodec_find_encoder_by_name("libaom-av1");
+    if (needs_aom && aom) return aom;
     for (size_t i = 0; i < sizeof(AV1_ENCODERS) / sizeof(AV1_ENCODERS[0]); ++i) {
         const AVCodec *c = g_ff.avcodec_find_encoder_by_name(AV1_ENCODERS[i]);
         if (c) return c;
@@ -1110,167 +1113,288 @@ uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size) {
     if (!ff_available() || !ff_encode_api()) return 0;
     uint32_t found = 0;
     const AVCodec *jxl = g_ff.avcodec_find_encoder_by_name("libjxl");
-    const AVCodec *av1 = ff_av1_encoder();
+    const AVCodec *av1 = ff_av1_encoder(false);
     if (jxl) found |= RUBRAVIEW_FFMPEG_WRITES_JXL;
+    if (g_ff.avcodec_find_encoder_by_name("libjxl_anim")) found |= RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM;
     if (av1 && ff_mux_api() && g_ff.av_guess_format("avif", NULL, NULL)) found |= RUBRAVIEW_FFMPEG_WRITES_AVIF;
+    if ((found & RUBRAVIEW_FFMPEG_WRITES_AVIF) && g_ff.avcodec_find_encoder_by_name("libaom-av1")) found |= RUBRAVIEW_FFMPEG_WRITES_AVIF_ALPHA;
     if (names && size) snprintf(names, size, "%s%s%s", jxl ? "libjxl" : "", jxl && av1 ? ", " : "", av1 ? av1->name : "");
     return found;
 }
 
-/* The picture as the encoder takes it (`format`); transparency over white when it cannot hold it. */
-static AVFrame *ff_still_frame(const rubraview_pixbuf_t *px, enum AVPixelFormat format, bool flatten) {
-    AVFrame *frame = g_ff.av_frame_alloc();
-    if (!frame) return NULL;
-    frame->format = format;
-    frame->width = px->width;
-    frame->height = px->height;
-    if (g_ff.av_frame_get_buffer(frame, 0) < 0) { g_ff.av_frame_free(&frame); return NULL; }
-    const uint8_t *rows = px->pixels;
+/* One picture of straight BGRA (the caller's rows made straight and, `flatten`, laid over white) into `frame`. */
+static bool ff_fill_frame(AVFrame *frame, const uint8_t *bgra, int32_t width, int32_t height, bool flatten, struct SwsContext **sws) {
+    const uint8_t *rows = bgra;
     uint8_t *flat = NULL;
     if (flatten) {
-        flat = (uint8_t*)rubraview_malloc_product((size_t)px->stride, (size_t)px->height, 1);
-        if (!flat) { g_ff.av_frame_free(&frame); return NULL; }
-        for (int32_t y = 0; y < px->height; ++y) {
-            const uint8_t *in = px->pixels + (size_t)y * (size_t)px->stride;
-            uint8_t *out = flat + (size_t)y * (size_t)px->stride;
-            for (int32_t x = 0; x < px->width; ++x) {
-                unsigned a = in[x * 4 + 3];
-                for (int c = 0; c < 3; ++c) out[x * 4 + c] = (uint8_t)((in[x * 4 + c] * a + 255u * (255u - a) + 127u) / 255u);
-                out[x * 4 + 3] = 255;
-            }
+        flat = (uint8_t*)rubraview_malloc_product((size_t)width, (size_t)height, 4u);
+        if (!flat) return false;
+        for (size_t k = 0; k < (size_t)width * (size_t)height; ++k) {
+            unsigned a = bgra[k * 4 + 3];
+            for (int c = 0; c < 3; ++c) flat[k * 4 + c] = (uint8_t)((bgra[k * 4 + c] * a + 255u * (255u - a) + 127u) / 255u);
+            flat[k * 4 + 3] = 255;
         }
         rows = flat;
     }
-    enum AVPixelFormat from = px->format == RUBRAVIEW_PIXFMT_RGBA8 ? AV_PIX_FMT_RGBA : AV_PIX_FMT_BGRA;
-    struct SwsContext *sws = g_ff.sws_getContext(px->width, px->height, from, px->width, px->height, format,
-                                                 SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
-    bool ok = sws != NULL;
-    if (sws) {
+    if (!*sws) *sws = g_ff.sws_getContext(width, height, AV_PIX_FMT_BGRA, width, height, (enum AVPixelFormat)frame->format,
+                                          SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT, NULL, NULL, NULL);
+    bool ok = *sws != NULL;
+    if (ok) {
         const uint8_t *src[4] = { rows, NULL, NULL, NULL };
-        int stride[4] = { px->stride, 0, 0, 0 };
-        ok = g_ff.sws_scale(sws, src, stride, 0, px->height, frame->data, frame->linesize) == px->height;
-        g_ff.sws_freeContext(sws);
+        int stride[4] = { width * 4, 0, 0, 0 };
+        ok = g_ff.sws_scale(*sws, src, stride, 0, height, frame->data, frame->linesize) == height;
     }
     free(flat);
-    if (!ok) g_ff.av_frame_free(&frame);
-    return frame;
+    return ok;
 }
 
-/* The one picture through the encoder; its packets' bytes joined (one, for these). */
-static uint8_t *ff_encode_one(AVCodecContext *codec, AVFrame *frame, size_t *out_size, AVPacket **keep) {
-    AVPacket *packet = g_ff.av_packet_alloc();
-    if (!packet) return NULL;
-    uint8_t *bytes = NULL;
-    size_t size = 0;
-    bool ok = g_ff.avcodec_send_frame(codec, frame) >= 0 && g_ff.avcodec_send_frame(codec, NULL) >= 0;
-    while (ok) {
-        int r = g_ff.avcodec_receive_packet(codec, packet);
-        if (r == AVERROR_EOF) break;
-        if (r < 0) { ok = false; break; }
-        uint8_t *grown = (uint8_t*)realloc(bytes, size + (size_t)packet->size);
-        if (!grown) { ok = false; break; }
-        memcpy(grown + size, packet->data, (size_t)packet->size);
-        bytes = grown;
-        size += (size_t)packet->size;
-        if (keep && !*keep) { *keep = packet; packet = g_ff.av_packet_alloc(); if (!packet) { ok = false; break; } }
-        else g_ff.av_packet_unref(packet);
+/* The alpha of straight BGRA as a grey plane (8 or 10 bits). */
+static void ff_fill_alpha(AVFrame *frame, const uint8_t *bgra, int32_t width, int32_t height) {
+    bool ten = frame->format == AV_PIX_FMT_GRAY10LE;
+    for (int32_t y = 0; y < height; ++y) {
+        uint8_t *row = frame->data[0] + (size_t)y * (size_t)frame->linesize[0];
+        const uint8_t *in = bgra + (size_t)y * (size_t)width * 4u;
+        for (int32_t x = 0; x < width; ++x) {
+            unsigned a = in[x * 4 + 3];
+            if (ten) { uint16_t v = (uint16_t)((a * 1023u + 127u) / 255u); row[x * 2] = (uint8_t)v; row[x * 2 + 1] = (uint8_t)(v >> 8); }
+            else row[x] = (uint8_t)a;
+        }
     }
-    if (packet) g_ff.av_packet_free(&packet);
-    if (!ok || size == 0) { free(bytes); return NULL; }
-    *out_size = size;
-    return bytes;
 }
 
-uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *px, bool avif, int32_t quality,
-                                           size_t *out_size, const char **why) {
-    const char *dummy;
-    if (!why) why = &dummy;
-    *why = NULL;
-    if (!px || !px->pixels || px->width <= 0 || px->height <= 0 || !out_size ||
-        (px->format != RUBRAVIEW_PIXFMT_BGRA8 && px->format != RUBRAVIEW_PIXFMT_RGBA8)) { *why = N_("no picture to write"); return NULL; }
-    if (!ff_available()) { *why = N_("it is written by FFmpeg, which is not set up (Settings > Video)"); return NULL; }
-    if (!ff_encode_api() || (avif && !ff_mux_api())) { *why = N_("these FFmpeg DLLs cannot write pictures"); return NULL; }
-    const AVCodec *encoder = avif ? ff_av1_encoder() : g_ff.avcodec_find_encoder_by_name("libjxl");
-    if (!encoder) { *why = avif ? N_("this FFmpeg has no AV1 encoder (libaom, SVT-AV1 or rav1e)") : N_("this FFmpeg has no JPEG XL encoder (libjxl)"); return NULL; }
-    const AVOutputFormat *muxer = avif ? g_ff.av_guess_format("avif", NULL, NULL) : NULL;
-    if (avif && !muxer) { *why = N_("this FFmpeg cannot write AVIF files"); return NULL; }
-
-    bool alpha = false;
-    for (int32_t y = 0; y < px->height && !alpha; ++y) {
-        const uint8_t *row = px->pixels + (size_t)y * (size_t)px->stride;
-        for (int32_t x = 0; x < px->width; ++x) if (row[x * 4 + 3] != 255) { alpha = true; break; }
-    }
-    enum AVPixelFormat format = avif ? AV_PIX_FMT_YUV420P : alpha ? AV_PIX_FMT_RGBA : AV_PIX_FMT_RGB24;
+static AVCodecContext *ff_still_codec(const AVCodec *encoder, int32_t width, int32_t height, enum AVPixelFormat format,
+                                      const rubraview_ffmpeg_still_t *how, bool alpha_plane, bool global_header) {
     AVCodecContext *codec = g_ff.avcodec_alloc_context3(encoder);
-    AVFrame *frame = NULL;
-    AVFormatContext *mux = NULL;
-    AVPacket *first = NULL;
-    uint8_t *bytes = NULL;
-    size_t size = 0;
+    if (!codec) return NULL;
     char value[32];
-    *why = N_("the encoder refused the picture");
-    if (!codec) goto done;
-    codec->width = px->width;
-    codec->height = px->height;
+    codec->width = width;
+    codec->height = height;
     codec->pix_fmt = format;
-    codec->time_base = (AVRational){ 1, 1 };
-    codec->framerate = (AVRational){ 1, 1 };
-    if (avif) {
-        /* swscale's default: BT.601, limited range; said so in the file, with sRGB's primaries and curve */
-        codec->colorspace = AVCOL_SPC_SMPTE170M;
-        codec->color_range = AVCOL_RANGE_MPEG;
-        codec->color_primaries = AVCOL_PRI_BT709;
-        codec->color_trc = AVCOL_TRC_IEC61966_2_1;
-        if (muxer->flags & AVFMT_GLOBALHEADER) codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-        snprintf(value, sizeof(value), "%d", (int)rubraview_export_av1_crf(quality));
+    codec->time_base = (AVRational){ 1, 1000 };   /* a picture's time in milliseconds */
+    codec->framerate = (AVRational){ 0, 1 };
+    if (how->avif) {
+        if (alpha_plane) {
+            codec->color_range = AVCOL_RANGE_JPEG;
+        } else {   /* swscale's default: BT.601, limited range; said so, with sRGB's primaries and curve */
+            codec->colorspace = AVCOL_SPC_SMPTE170M;
+            codec->color_range = AVCOL_RANGE_MPEG;
+            codec->color_primaries = AVCOL_PRI_BT709;
+            codec->color_trc = AVCOL_TRC_IEC61966_2_1;
+        }
+        if (global_header) codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        snprintf(value, sizeof(value), "%d", (int)rubraview_export_av1_crf(how->quality));
         g_ff.av_opt_set(codec, "crf", value, AV_OPT_SEARCH_CHILDREN);
-        g_ff.av_opt_set(codec, "still-picture", "1", AV_OPT_SEARCH_CHILDREN);   /* libaom */
-        g_ff.av_opt_set(codec, "cpu-used", "6", AV_OPT_SEARCH_CHILDREN);        /* libaom: quick enough for a picture */
+        if (how->moving) g_ff.av_opt_set(codec, "g", "120", AV_OPT_SEARCH_CHILDREN);
+        else g_ff.av_opt_set(codec, "still-picture", "1", AV_OPT_SEARCH_CHILDREN);   /* libaom */
+        g_ff.av_opt_set(codec, "cpu-used", "6", AV_OPT_SEARCH_CHILDREN);        /* libaom: quick enough */
+        g_ff.av_opt_set(codec, "row-mt", "1", AV_OPT_SEARCH_CHILDREN);
         g_ff.av_opt_set(codec, "preset", "8", AV_OPT_SEARCH_CHILDREN);          /* SVT-AV1 */
         g_ff.av_opt_set(codec, "speed", "6", AV_OPT_SEARCH_CHILDREN);           /* rav1e */
     } else {
-        snprintf(value, sizeof(value), "%.3f", rubraview_export_jxl_distance(quality));
+        snprintf(value, sizeof(value), "%.3f", rubraview_export_jxl_distance(how->quality));
         g_ff.av_opt_set(codec, "distance", value, AV_OPT_SEARCH_CHILDREN);
         g_ff.av_opt_set(codec, "effort", "7", AV_OPT_SEARCH_CHILDREN);
     }
-    if (g_ff.avcodec_open2(codec, encoder, NULL) < 0) goto done;
-    frame = ff_still_frame(px, format, avif && alpha);
-    if (!frame) { *why = N_("out of memory"); goto done; }
-    frame->pts = 0;
-    bytes = ff_encode_one(codec, frame, &size, avif ? &first : NULL);
-    if (!bytes) goto done;
-    if (avif) {   /* the AV1 picture into its HEIF box */
-        free(bytes);
-        bytes = NULL;
+    if (g_ff.avcodec_open2(codec, encoder, NULL) < 0) g_ff.avcodec_free_context(&codec);
+    return codec;
+}
+
+/* Each picture's start and length in milliseconds, so a packet keeps its picture's time (the last one too). */
+typedef struct ff_times { const int64_t *at, *ms; size_t count; } ff_times_t;
+
+/* What a codec has ready: into the muxer's stream `stream`, or (no muxer) onto `bytes`. */
+static bool ff_drain(AVCodecContext *codec, AVPacket *packet, AVFormatContext *mux, int stream, uint8_t **bytes, size_t *size,
+                     const ff_times_t *times) {
+    for (;;) {
+        int r = g_ff.avcodec_receive_packet(codec, packet);
+        if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) return true;
+        if (r < 0) return false;
+        bool ok = true;
+        for (size_t k = 0; times && k < times->count; ++k)
+            if (times->at[k] == packet->pts) { packet->duration = times->ms[k]; break; }
+        if (mux) {
+            AVRational from = codec->time_base, to = mux->streams[stream]->time_base;
+            if (to.num > 0 && to.den > 0 && (from.num != to.num || from.den != to.den)) {
+                if (packet->pts != AV_NOPTS_VALUE) packet->pts = packet->pts * (int64_t)from.num * to.den / ((int64_t)from.den * to.num);
+                if (packet->dts != AV_NOPTS_VALUE) packet->dts = packet->dts * (int64_t)from.num * to.den / ((int64_t)from.den * to.num);
+                packet->duration = packet->duration * (int64_t)from.num * to.den / ((int64_t)from.den * to.num);
+            }
+            packet->stream_index = stream;
+            ok = g_ff.av_write_frame(mux, packet) >= 0;
+        } else {
+            uint8_t *grown = (uint8_t*)realloc(*bytes, *size + (size_t)packet->size);
+            if (grown) { memcpy(grown + *size, packet->data, (size_t)packet->size); *bytes = grown; *size += (size_t)packet->size; }
+            ok = grown != NULL;
+        }
+        g_ff.av_packet_unref(packet);
+        if (!ok) return false;
+    }
+}
+
+uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, size_t count,
+                                              bool (*picture)(void *context, size_t index, uint8_t *bgra, double *seconds),
+                                              void *context, const rubraview_ffmpeg_still_t *how,
+                                              size_t *out_size, const char **why) {
+    const char *dummy;
+    if (!why) why = &dummy;
+    *why = NULL;
+    if (!picture || !how || !out_size || width <= 0 || height <= 0 || count == 0) { *why = N_("no picture to write"); return NULL; }
+    if (!ff_available()) { *why = N_("it is written by FFmpeg, which is not set up (Settings > Video)"); return NULL; }
+    if (!ff_encode_api() || (how->avif && !ff_mux_api())) { *why = N_("these FFmpeg DLLs cannot write pictures"); return NULL; }
+    size_t frame_bytes = (size_t)width * (size_t)height * 4u;
+    uint8_t *bgra = (uint8_t*)rubraview_malloc_product(frame_bytes, 1, 1);
+    if (!bgra) { *why = N_("out of memory"); return NULL; }
+
+    /* first: is anything see-through (every picture of a moving one looked at) */
+    bool alpha = false;
+    double seconds = 0.0;
+    for (size_t i = 0; i < count && !alpha; ++i) {
+        if (!picture(context, i, bgra, &seconds)) { free(bgra); *why = N_("a picture of it could not be read"); return NULL; }
+        for (size_t k = 3; k < frame_bytes; k += 4) if (bgra[k] != 255) { alpha = true; break; }
+    }
+    bool ten = how->avif && how->bits == 10;
+    const AVCodec *encoder = how->avif ? ff_av1_encoder(alpha || how->chroma444)
+                           : g_ff.avcodec_find_encoder_by_name(count > 1 ? "libjxl_anim" : "libjxl");
+    if (!encoder) {
+        free(bgra);
+        *why = how->avif ? N_("this FFmpeg has no AV1 encoder (libaom, SVT-AV1 or rav1e)")
+             : count > 1 ? N_("this FFmpeg cannot write a moving JPEG XL (libjxl_anim)") : N_("this FFmpeg has no JPEG XL encoder (libjxl)");
+        return NULL;
+    }
+    bool aom = strcmp(encoder->name, "libaom-av1") == 0;
+    bool alpha_plane = how->avif && alpha && aom;      /* AVIF's transparency: libaom's grey second picture */
+    bool flatten = how->avif && alpha && !aom;         /* else laid over white */
+    bool chroma444 = how->avif && how->chroma444 && strcmp(encoder->name, "libsvtav1") != 0;
+    const AVOutputFormat *muxer = how->avif ? g_ff.av_guess_format("avif", NULL, NULL) : NULL;
+    if (how->avif && !muxer) { free(bgra); *why = N_("this FFmpeg cannot write AVIF files"); return NULL; }
+    enum AVPixelFormat format = how->avif ? (chroma444 ? (ten ? AV_PIX_FMT_YUV444P10LE : AV_PIX_FMT_YUV444P)
+                                                       : (ten ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P))
+                              : alpha ? AV_PIX_FMT_RGBA : AV_PIX_FMT_RGB24;
+
+    rubraview_ffmpeg_still_t used = *how;
+    used.moving = count > 1;
+    bool global = muxer && (muxer->flags & AVFMT_GLOBALHEADER);
+    AVCodecContext *colour = ff_still_codec(encoder, width, height, format, &used, false, global);
+    AVCodecContext *grey = alpha_plane ? ff_still_codec(encoder, width, height, ten ? AV_PIX_FMT_GRAY10LE : AV_PIX_FMT_GRAY8, &used, true, global) : NULL;
+    AVFrame *frame = NULL, *aframe = NULL;   /* a new one each picture: an encoder may hold the last one it was given */
+    AVPacket *packet = g_ff.av_packet_alloc();
+    AVFormatContext *mux = NULL;
+    struct SwsContext *sws = NULL;
+    uint8_t *bytes = NULL;
+    size_t size = 0;
+    bool ok = false;
+    int64_t *starts = NULL, *lengths = NULL;
+    ff_times_t times = { 0 };
+    *why = N_("the encoder refused the picture");
+    if (!colour || (alpha_plane && !grey) || !packet) goto done;
+    if (muxer) {   /* the AV1 pictures into the HEIF boxes as they come */
         *why = N_("FFmpeg could not make the AVIF file");
-        if (!first || g_ff.avformat_alloc_output_context2(&mux, muxer, NULL, NULL) < 0 || !mux) { mux = NULL; goto done; }
-        AVStream *stream = g_ff.avformat_new_stream(mux, NULL);
-        if (!stream || g_ff.avcodec_parameters_from_context(stream->codecpar, codec) < 0) goto done;
-        stream->time_base = codec->time_base;
+        if (g_ff.avformat_alloc_output_context2(&mux, muxer, NULL, NULL) < 0 || !mux) { mux = NULL; goto done; }
+        AVCodecContext *codecs[2] = { colour, grey };
+        for (int k = 0; k < (alpha_plane ? 2 : 1); ++k) {
+            AVStream *stream = g_ff.avformat_new_stream(mux, NULL);
+            if (!stream || g_ff.avcodec_parameters_from_context(stream->codecpar, codecs[k]) < 0) goto done;
+            stream->time_base = codecs[k]->time_base;
+        }
         if (g_ff.avio_open_dyn_buf(&mux->pb) < 0) { mux->pb = NULL; goto done; }
-        bool written = g_ff.avformat_write_header(mux, NULL) >= 0;
-        first->stream_index = stream->index;
-        first->pts = first->dts = 0;
-        written = written && g_ff.av_write_frame(mux, first) >= 0 && g_ff.av_write_trailer(mux) >= 0;
+        if (g_ff.avformat_write_header(mux, NULL) < 0) goto done;
+        *why = N_("the encoder refused the picture");
+    }
+    int64_t at = 0;
+    bool fed = true;
+    starts = (int64_t*)calloc(count, sizeof(int64_t));
+    lengths = (int64_t*)calloc(count, sizeof(int64_t));
+    times = (ff_times_t){ .at = starts, .ms = lengths, .count = starts && lengths ? count : 0 };
+    for (size_t i = 0; i < count && fed; ++i) {
+        if (frame) g_ff.av_frame_free(&frame);
+        if (aframe) g_ff.av_frame_free(&aframe);
+        frame = g_ff.av_frame_alloc();
+        aframe = alpha_plane ? g_ff.av_frame_alloc() : NULL;
+        if (!frame || (alpha_plane && !aframe)) { fed = false; break; }
+        frame->format = format; frame->width = width; frame->height = height;
+        if (alpha_plane) { aframe->format = grey->pix_fmt; aframe->width = width; aframe->height = height; }
+        fed = g_ff.av_frame_get_buffer(frame, 0) >= 0 && (!alpha_plane || g_ff.av_frame_get_buffer(aframe, 0) >= 0);
+        fed = fed && picture(context, i, bgra, &seconds) && ff_fill_frame(frame, bgra, width, height, flatten, &sws);
+        int64_t ms = (int64_t)llround((seconds > 0.0 ? seconds : 0.1) * 1000.0);
+        frame->pts = at;
+        frame->duration = ms;
+        if (times.count) { starts[i] = at; lengths[i] = ms; }
+        fed = fed && g_ff.avcodec_send_frame(colour, frame) >= 0 && ff_drain(colour, packet, mux, 0, &bytes, &size, &times);
+        if (fed && alpha_plane) {
+            ff_fill_alpha(aframe, bgra, width, height);
+            aframe->pts = at;
+            aframe->duration = ms;
+            fed = g_ff.avcodec_send_frame(grey, aframe) >= 0 && ff_drain(grey, packet, mux, 1, &bytes, &size, &times);
+        }
+        at += ms;
+    }
+    if (!fed) goto done;
+    if (g_ff.avcodec_send_frame(colour, NULL) < 0 || !ff_drain(colour, packet, mux, 0, &bytes, &size, &times)) goto done;
+    if (alpha_plane && (g_ff.avcodec_send_frame(grey, NULL) < 0 || !ff_drain(grey, packet, mux, 1, &bytes, &size, &times))) goto done;
+    if (mux) {
+        *why = N_("FFmpeg could not make the AVIF file");
+        bool written = g_ff.av_write_trailer(mux) >= 0;
         uint8_t *buffer = NULL;
         int length = g_ff.avio_close_dyn_buf(mux->pb, &buffer);
         mux->pb = NULL;
+        free(bytes);
+        bytes = NULL;
+        size = 0;
         if (written && buffer && length > 0 && (bytes = (uint8_t*)malloc((size_t)length)) != NULL) {
             memcpy(bytes, buffer, (size_t)length);
             size = (size_t)length;
         }
         if (buffer) g_ff.av_free(buffer);
-        if (!bytes) goto done;
     }
-    *out_size = size;
-    *why = NULL;
+    ok = bytes != NULL && size > 0;
 done:
-    if (mux) g_ff.avformat_free_context(mux);
-    if (first) g_ff.av_packet_free(&first);
+    if (mux) {
+        if (mux->pb) { uint8_t *buffer = NULL; g_ff.avio_close_dyn_buf(mux->pb, &buffer); if (buffer) g_ff.av_free(buffer); }
+        g_ff.avformat_free_context(mux);
+    }
+    if (sws) g_ff.sws_freeContext(sws);
+    free(starts);
+    free(lengths);
+    if (packet) g_ff.av_packet_free(&packet);
     if (frame) g_ff.av_frame_free(&frame);
-    if (codec) g_ff.avcodec_free_context(&codec);
-    if (*why) { free(bytes); bytes = NULL; }
+    if (aframe) g_ff.av_frame_free(&aframe);
+    if (colour) g_ff.avcodec_free_context(&colour);
+    if (grey) g_ff.avcodec_free_context(&grey);
+    free(bgra);
+    if (!ok) { free(bytes); return NULL; }
+    *why = NULL;
+    *out_size = size;
     return bytes;
+}
+
+/* One picture: the pixbuf's rows, straight BGRA. */
+typedef struct ff_one { const rubraview_pixbuf_t *px; } ff_one_t;
+
+static bool ff_one_picture(void *context, size_t index, uint8_t *bgra, double *seconds) {
+    const rubraview_pixbuf_t *px = ((ff_one_t*)context)->px;
+    (void)index;
+    *seconds = 0.0;
+    bool rgba = px->format == RUBRAVIEW_PIXFMT_RGBA8;
+    for (int32_t y = 0; y < px->height; ++y) {
+        const uint8_t *in = px->pixels + (size_t)y * (size_t)px->stride;
+        uint8_t *out = bgra + (size_t)y * (size_t)px->width * 4u;
+        if (!rgba) { memcpy(out, in, (size_t)px->width * 4u); continue; }
+        for (int32_t x = 0; x < px->width; ++x) {
+            out[x * 4] = in[x * 4 + 2]; out[x * 4 + 1] = in[x * 4 + 1]; out[x * 4 + 2] = in[x * 4]; out[x * 4 + 3] = in[x * 4 + 3];
+        }
+    }
+    return true;
+}
+
+uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *px, const rubraview_ffmpeg_still_t *how,
+                                           size_t *out_size, const char **why) {
+    if (!px || !px->pixels || px->width <= 0 || px->height <= 0 ||
+        (px->format != RUBRAVIEW_PIXFMT_BGRA8 && px->format != RUBRAVIEW_PIXFMT_RGBA8)) {
+        if (why) *why = N_("no picture to write");
+        return NULL;
+    }
+    ff_one_t one = { .px = px };
+    return rubraview_pal_ffmpeg_pictures_encode(px->width, px->height, 1, ff_one_picture, &one, how, out_size, why);
 }
 
 /* ---- RV-149: decoding on the graphics card (D3D11VA) ---- */
