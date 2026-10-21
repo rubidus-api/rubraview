@@ -446,7 +446,8 @@ typedef struct app_state {
     /* M5: the video on the current page, when it is one (D-8, D-9). */
     rubraview_media_t      *media;
     rubraview_media_info_t  media_info;
-    bool                    media_hdr_handed;  /* RV-150: Windows' decoder found it HDR and FFmpeg took it, to tone map it */
+    int32_t                 media_hdr_handed;  /* RV-150: 1 Windows' decoder found it HDR and FFmpeg took it, to tone map it;
+                                                  RV-152: 2 Windows named nothing (VP9, AV1) and FFmpeg found it HDR */
     rubraview_media_clock_t media_clock;
     int32_t                media_page;        /* -1 when no video is open */
     bool                   media_paused;
@@ -3215,15 +3216,16 @@ static void media_prepare(app_state_t *app) {
         why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
     }
     /* RV-150 (owner, 2026-10-21): Windows' decoder does not tone map an HDR film; FFmpeg does, when it is here */
-    app->media_hdr_handed = false;
-    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION && opened.info.hdr_transfer &&
+    app->media_hdr_handed = 0;
+    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
+        rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
         gpu.tone_mapping > 0 && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
         rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
         /* not when FFmpeg would lose the sound Windows plays */
         if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
             rubraview_pal_media_close(opened.media);
+            app->media_hdr_handed = opened.info.hdr_transfer ? 1 : 2;
             opened = other;
-            app->media_hdr_handed = true;
         } else if (other.media) {
             rubraview_pal_media_close(other.media);
         }
@@ -19815,8 +19817,10 @@ static void info_gather(app_state_t *app) {
                     else
                         rubraview_info_addf(a, &info, T("HDR"), T("%s, not tone mapped - %s"), kind,
                                             m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map"));
-                    if (app->media_hdr_handed)
+                    if (app->media_hdr_handed == 1)
                         rubraview_info_add(a, &info, T("Handed over"), TU8("Windows' decoder found it HDR; FFmpeg took it to tone map it"));
+                    else if (app->media_hdr_handed == 2)   /* RV-152 */
+                        rubraview_info_add(a, &info, T("Handed over"), TU8("Windows' decoder names no transfer for this codec; FFmpeg found it HDR and took it to tone map it"));
                 }
             }
             /* What the container and the codecs say of themselves, all of it (owner, 2026-10-11). */

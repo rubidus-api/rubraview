@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.28.0.exe              the viewer, as built
-dist/rubraview-v1.28.0/                 the release bundle
-dist/rubraview-v1.28.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.28.1.exe              the viewer, as built
+dist/rubraview-v1.28.1/                 the release bundle
+dist/rubraview-v1.28.1.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1292,8 +1292,9 @@ filename code page, the memory cap). Some worth knowing:
   peak its metadata gives, 1000 nits when it gives none; the white stands
   for 203 nits) and its BT.2020 colours are brought into sRGB, so it no
   longer looks grey and washed out. It needs FFmpeg: an HDR film that
-  Windows' decoder opens and names as HDR is handed to FFmpeg. A VP9 HDR
-  film Windows opens is not named HDR by it and stays as before.
+  Windows' decoder opens and names as HDR is handed to FFmpeg. A VP9 or AV1
+  film Windows names nothing for (VP9 in MP4) is looked at by FFmpeg too,
+  and handed over when FFmpeg finds it HDR.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,

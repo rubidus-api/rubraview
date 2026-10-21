@@ -370,6 +370,13 @@ const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t 
     return NULL;
 }
 
+bool rubraview_media_hdr_ask_ffmpeg(int32_t windows_transfer, uint32_t video_fourcc) {
+    if (windows_transfer == 1 || windows_transfer == 2) return true;
+    if (windows_transfer != 0) return false;
+    return video_fourcc == RUBRAVIEW_FOURCC('V', 'P', '9', '0') || video_fourcc == RUBRAVIEW_FOURCC('v', 'p', '0', '9') ||
+           video_fourcc == RUBRAVIEW_FOURCC('A', 'V', '0', '1') || video_fourcc == RUBRAVIEW_FOURCC('a', 'v', '0', '1');
+}
+
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds) {
     if (!(duration > 0.0)) return false;
     return position >= duration - 1.5 && stalled_seconds >= 3.0;

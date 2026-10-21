@@ -83,6 +83,13 @@ bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_
 #define RUBRAVIEW_HW_HDR_UNTONED 2   /* PQ or HLG, not tone mapped: kept on the processor */
 const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, int32_t hdr, bool api);
 
+/**
+ * RV-152 (D-182): whether a film Windows' decoder opened is worth asking FFmpeg about, to tone map it: Windows
+ * named its transfer PQ or HLG (`windows_transfer` 1 or 2), or named none and the codec is one it never names
+ * one for (VP9, AV1), where FFmpeg reads the stream's own colour tags.
+ */
+bool rubraview_media_hdr_ask_ffmpeg(int32_t windows_transfer, uint32_t video_fourcc);
+
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds);
 
 bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,
