@@ -630,6 +630,8 @@ bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step) {
             return step->values.resize_width > 0 && step->values.resize_height > 0;
         case RUBRAVIEW_STEP_EFFECT:
             return step->effect > RUBRAVIEW_EFFECT_NONE && step->effect < RUBRAVIEW_EFFECT_COUNT;
+        case RUBRAVIEW_STEP_PLUGIN:
+            return step->plugin[0] != '\0';
     }
     return false;
 }
@@ -813,6 +815,19 @@ float rubraview_edit_area_weight(const rubraview_edit_area_t *area, int32_t x, i
 
 static int32_t clamp_i(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
 
+static rubraview_plugin_runner_fn g_plugin_runner;
+static void *g_plugin_runner_user;
+
+void rubraview_edit_set_plugin_runner(rubraview_plugin_runner_fn runner, void *user) {
+    g_plugin_runner = runner;
+    g_plugin_runner_user = user;
+}
+
+static rubraview_pixbuf_t plugin_run(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src) {
+    rubraview_pixbuf_t empty = {0};
+    return g_plugin_runner ? g_plugin_runner(g_plugin_runner_user, arena, step, src) : empty;
+}
+
 rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubraview_edit_step_t *step,
                                              const rubraview_pixbuf_t *src, double scale) {
     rubraview_pixbuf_t empty = {0};
@@ -854,6 +869,7 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
     v.sharpen_radius = (float)(v.sharpen_radius * scale);
     if (v.sharpen_radius < 0.5f) v.sharpen_radius = 0.5f;
     bool effect = step->kind == RUBRAVIEW_STEP_EFFECT;
+    bool plugin = step->kind == RUBRAVIEW_STEP_PLUGIN;   /* RFC-0007: blended by the area as an effect is */
     double amount = step->amount;
     if (effect && rubraview_effect_amount_is_pixels((rubraview_effect_t)step->effect)) {
         amount *= scale;
@@ -862,7 +878,8 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
         if (fabs(amount) < fabs(lo) || (lo > 0.0 && amount < lo)) amount = amount < 0.0 ? -fabs(lo) : lo;
     }
     if (area.shape == RUBRAVIEW_AREA_ALL) {
-        return effect ? rubraview_effect_apply(arena, src, (rubraview_effect_t)step->effect, amount)
+        return plugin ? plugin_run(arena, step, src)
+             : effect ? rubraview_effect_apply(arena, src, (rubraview_effect_t)step->effect, amount)
                       : rubraview_edit_commit(arena, &v, src);
     }
 
@@ -876,8 +893,10 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
     if (!rubraview_pixbuf_is_valid(&out) || x1 <= x0 || y1 <= y0) return out;
     rubraview_pixbuf_t piece = rubraview_pixbuf_crop(arena, src, x0, y0, x1 - x0, y1 - y0);
     rubraview_pixbuf_t done = !rubraview_pixbuf_is_valid(&piece) ? empty
+        : plugin ? plugin_run(arena, step, &piece)
         : effect ? rubraview_effect_apply(arena, &piece, (rubraview_effect_t)step->effect, amount)
                  : rubraview_edit_commit(arena, &v, &piece);
+    if (plugin && !rubraview_pixbuf_is_valid(&done)) return empty;   /* it did not run: the step fails */
     if (!rubraview_pixbuf_is_valid(&done) || done.width != piece.width || done.height != piece.height) return out;
     for (int32_t y = y0; y < y1; ++y) {
         uint8_t *o = out.pixels + (size_t)y * (size_t)out.stride;

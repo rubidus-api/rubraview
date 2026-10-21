@@ -311,6 +311,7 @@ typedef enum rubraview_edit_step_kind {
     RUBRAVIEW_STEP_CROP,         /* to the area's rectangle */
     RUBRAVIEW_STEP_RESIZE,       /* the whole picture to values.resize_width x resize_height */
     RUBRAVIEW_STEP_EFFECT,       /* `effect` at `amount` (effects.h), on the area */
+    RUBRAVIEW_STEP_PLUGIN,       /* RFC-0007: a plug-in filter (`plugin`, its hash and values), on the area */
 } rubraview_edit_step_kind_t;
 
 typedef struct rubraview_edit_step {
@@ -319,7 +320,22 @@ typedef struct rubraview_edit_step {
     rubraview_edit_session_t   values;   /* what the step does (its crop and resize fields unused by ADJUST) */
     int32_t                    effect;   /* EFFECT: a rubraview_effect_t */
     double                     amount;
+    /* PLUGIN (RFC-0007, D-186): the DLL's name in the plug-in folder, its SHA-256 when the step was made (a
+       changed plug-in is not run for it), and its parameters' values */
+    char                       plugin[96];
+    uint8_t                    plugin_sha256[32];
+    double                     plugin_params[8];
+    int32_t                    plugin_param_count;
 } rubraview_edit_step_t;
+
+/**
+ * RFC-0007: what runs a plug-in step — the viewer's, which starts the plug-in's child process. The picture is
+ * the area's piece (or the whole); an empty pixbuf when it could not run, and the step then fails the save.
+ * The step's values are not scaled for a preview (a plug-in's numbers mean what it says they mean).
+ */
+typedef rubraview_pixbuf_t (*rubraview_plugin_runner_fn)(void *user, proven_arena_t *arena, const rubraview_edit_step_t *step,
+                                                         const rubraview_pixbuf_t *src);
+void rubraview_edit_set_plugin_runner(rubraview_plugin_runner_fn runner, void *user);
 
 #define RUBRAVIEW_EDIT_MAX_STEPS 64
 

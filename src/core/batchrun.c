@@ -1,5 +1,6 @@
 #include "rubraview/batchrun.h"
 #include "rubraview/effects.h"
+#include "rubraview/plugin.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
@@ -172,6 +173,13 @@ static bool parse_extra(u8str_t arg, u8str_t value, rubraview_batch_extra_params
             return true;
         }
         return false;
+    }
+    if (starts_with(arg, "--plugin=", &value))   /* RFC-0007: NAME or NAME:V1,V2,... */
+        return rubraview_plugin_arg_parse(value, x->plugin, sizeof(x->plugin), x->plugin_params, &x->plugin_param_count);
+    if (starts_with(arg, "--plugin-folder=", &value)) {
+        if (value.len == 0) return false;
+        x->plugin_folder = value;
+        return true;
     }
     if (starts_with(arg, "--border=", &value)) {   /* PX or PX,RRGGBB (white) */
         size_t n = split_commas(value, p, 2);
@@ -574,6 +582,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         }
         if (starts_with(arg, "--crop=", &value) || rubraview_u8_eq_lit(arg, "--autocrop") || rubraview_u8_eq_lit(arg, "--auto-colour") ||
             rubraview_u8_eq_lit(arg, "--negative") || starts_with(arg, "--effect=", &value) || starts_with(arg, "--border=", &value) ||
+            starts_with(arg, "--plugin=", &value) || starts_with(arg, "--plugin-folder=", &value) ||
             starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value) ||
             starts_with(arg, "--text=", &value) || starts_with(arg, "--text-font=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_EXTRA);

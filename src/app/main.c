@@ -125,6 +125,9 @@
 #include "rubraview/pal/pal_audio.h"
 #include "rubraview/mediaclock.h"
 #include "rubraview/tonemap.h"
+#include "rubraview/plugin.h"
+#include "rubraview/plugin_filter.h"
+#include "rubraview/pal/pal_plugin.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
 #include "rubraview/textview.h"
@@ -996,6 +999,8 @@ typedef struct app_state {
     uint32_t                  edit_rev, edit_shown_rev;
     int32_t                   typed_panel, typed_id;   /* a value typed: 1 the edit panel, 2 the numbers; its row */
     int32_t                   effect_choice;           /* the effect chosen (effects.h), shown on the preview until applied */
+    int32_t                   plugin_choice;           /* RFC-0007: 1.. a usable plug-in in the Edit window's list; 0 none */
+    double                    plugin_values[8];        /* its parameters as set there */
     double                    effect_amount;
     bool                      edit_compare;            /* the original shown instead, to compare */
     rubraview_export_options_t export_options;
@@ -14245,6 +14250,8 @@ enum {
     /* RV-137: the Edit window's rooms and the change list's buttons */
     PANEL_SP_CURVE, PANEL_SP_SEL, PANEL_SP_CHANGES, PANEL_CHANGES_REMOVE, PANEL_ALL_COPIES, PANEL_ALL_ORIGINALS,
     PANEL_SEL_MODE, PANEL_SEL_COPY, PANEL_EFFECT_GROUP,
+    PANEL_PLUGIN, PANEL_PLUGIN_P0, PANEL_PLUGIN_P1, PANEL_PLUGIN_P2, PANEL_PLUGIN_P3,   /* RFC-0007 */
+    PANEL_PLUGIN_P4, PANEL_PLUGIN_P5, PANEL_PLUGIN_P6, PANEL_PLUGIN_P7, PANEL_PLUGIN_APPLY,
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
@@ -14767,7 +14774,9 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
 static u8str_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
     char moved[80];
     const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
-                     : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect) : edit_adjust_words(s, moved, sizeof(moved));
+                     : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect)
+                     : s->kind == RUBRAVIEW_STEP_PLUGIN ? s->plugin   /* RFC-0007: the plug-in's file */
+                     : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
     int n;
@@ -14930,6 +14939,148 @@ static void edit_rows_detail(app_state_t *app) {
                                                                             : TU8("Done: next change a new step (Enter)"));
 }
 
+/* ---- RFC-0007 (RV-138, D-186): plug-in filters, found in their folder and run in a child process ---- */
+
+static rubraview_plugin_t g_plugins[RUBRAVIEW_PLUGIN_MAX];
+static size_t g_plugin_count;
+static char g_plugin_folder[520];
+static SRWLOCK g_plugin_lock = SRWLOCK_INIT;
+static _Thread_local const char *g_plugin_why;   /* the last run that failed on this thread: why */
+
+/* What a plug-in made, kept: drawing the preview again does not start it again. */
+typedef struct plugin_result {
+    char file[RUBRAVIEW_PLUGIN_FILE_BYTES];
+    uint8_t sha256[32];
+    double params[RUBRAVIEW_PLUGIN_PARAMS];
+    int32_t width, height;
+    uint64_t sum;
+    uint8_t *bgra;
+} plugin_result_t;
+static plugin_result_t g_plugin_results[4];
+static size_t g_plugin_result_next;
+static SRWLOCK g_plugin_results_lock = SRWLOCK_INIT;
+
+static void plugins_look(u8str_t folder) {
+    AcquireSRWLockExclusive(&g_plugin_lock);
+    size_t n = folder.len < sizeof(g_plugin_folder) ? folder.len : 0;
+    memcpy(g_plugin_folder, folder.ptr, n);
+    g_plugin_folder[n] = '\0';
+    g_plugin_count = n ? rubraview_pal_plugins_find(cstr(g_plugin_folder), g_plugins, RUBRAVIEW_PLUGIN_MAX) : 0;
+    ReleaseSRWLockExclusive(&g_plugin_lock);
+}
+
+/* Settings › Display › Plug-ins: on, and the folder (the default one when none is named). */
+static void plugins_from_settings(app_state_t *app) {
+    static int was_on = -1;
+    static char was_folder[520];
+    bool on = rubraview_settings_get(&app->settings, U8("edit"), U8("plugins")) > 0.5;
+    u8str_t folder = rubraview_settings_get_text(&app->settings, U8("edit"), U8("plugin_folder"));
+    char chosen[520] = "";
+    if (folder.len > 0 && folder.len < sizeof(chosen)) { memcpy(chosen, folder.ptr, folder.len); chosen[folder.len] = '\0'; }
+    else if (on) (void)rubraview_pal_plugins_default_folder(chosen, sizeof(chosen), true);
+    if (was_on == (int)on && strcmp(was_folder, chosen) == 0) return;
+    was_on = on;
+    snprintf(was_folder, sizeof(was_folder), "%s", chosen);
+    plugins_look(on ? cstr(chosen) : U8(""));
+    app->plugin_choice = 0;
+}
+
+static size_t plugins_usable(const rubraview_plugin_t **out, size_t capacity) {
+    size_t n = 0;
+    for (size_t i = 0; i < g_plugin_count && n < capacity; ++i) if (g_plugins[i].usable) out[n++] = &g_plugins[i];
+    return n;
+}
+
+static uint64_t bytes_sum(const uint8_t *p, size_t n) {   /* FNV-1a: the same picture or not */
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ULL; }
+    return h;
+}
+
+/* Esc while a plug-in works: cancel. */
+static bool plugin_tick(void *context, double progress) {
+    (void)context; (void)progress;
+    return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+}
+
+static rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src) {
+    (void)user;
+    rubraview_pixbuf_t empty = {0};
+    g_plugin_why = NULL;
+    if (!rubraview_pixbuf_is_valid(src) || (src->format != RUBRAVIEW_PIXFMT_RGBA8 && src->format != RUBRAVIEW_PIXFMT_BGRA8)) return empty;
+    rubraview_plugin_t plugin;
+    bool found = false;
+    AcquireSRWLockShared(&g_plugin_lock);
+    for (size_t i = 0; i < g_plugin_count && !found; ++i) {
+        if (rubraview_plugin_file_matches(g_plugins[i].file, cstr(step->plugin))) { plugin = g_plugins[i]; found = true; }
+    }
+    ReleaseSRWLockShared(&g_plugin_lock);
+    if (!found) { g_plugin_why = N_("the plug-in is not in the plug-in folder, or plug-ins are off"); return empty; }
+    if (!plugin.usable) { g_plugin_why = plugin.why; return empty; }
+    static const uint8_t NONE[32] = { 0 };
+    if (memcmp(step->plugin_sha256, NONE, 32) != 0 && memcmp(step->plugin_sha256, plugin.sha256, 32) != 0) {
+        g_plugin_why = N_("the plug-in has changed since this step was made");
+        return empty;
+    }
+    double values[RUBRAVIEW_PLUGIN_PARAMS];
+    memcpy(values, step->plugin_params, sizeof(values));
+    rubraview_plugin_params_clamp(&plugin, values, step->plugin_param_count);
+    size_t row = (size_t)src->width * 4u, bytes = row * (size_t)src->height;
+    uint8_t *in = (uint8_t*)malloc(bytes), *out = NULL;
+    if (!in) { g_plugin_why = N_("out of memory"); return empty; }
+    bool rgba = src->format == RUBRAVIEW_PIXFMT_RGBA8;
+    for (int32_t y = 0; y < src->height; ++y) {
+        const uint8_t *s = src->pixels + (size_t)y * (size_t)src->stride;
+        uint8_t *d = in + (size_t)y * row;
+        if (!rgba) { memcpy(d, s, row); continue; }
+        for (int32_t x = 0; x < src->width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+    }
+    uint64_t sum = bytes_sum(in, bytes);
+    AcquireSRWLockShared(&g_plugin_results_lock);
+    for (size_t i = 0; i < 4 && !out; ++i) {
+        const plugin_result_t *r = &g_plugin_results[i];
+        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->file, plugin.file) == 0 &&
+            memcmp(r->sha256, plugin.sha256, 32) == 0 && memcmp(r->params, values, sizeof(values)) == 0 && (out = (uint8_t*)malloc(bytes)) != NULL)
+            memcpy(out, r->bgra, bytes);
+    }
+    ReleaseSRWLockShared(&g_plugin_results_lock);
+    if (!out) {
+        out = (uint8_t*)malloc(bytes);
+        if (!out || !rubraview_pal_plugin_run(&plugin, values, in, src->width, src->height, out, plugin_tick, NULL, &g_plugin_why)) {
+            if (!g_plugin_why) g_plugin_why = N_("out of memory");
+            free(in);
+            free(out);
+            return empty;
+        }
+        uint8_t *kept = (uint8_t*)malloc(bytes);
+        if (kept) {
+            memcpy(kept, out, bytes);
+            AcquireSRWLockExclusive(&g_plugin_results_lock);
+            plugin_result_t *r = &g_plugin_results[g_plugin_result_next++ % 4];
+            free(r->bgra);
+            *r = (plugin_result_t){ .width = src->width, .height = src->height, .sum = sum, .bgra = kept };
+            snprintf(r->file, sizeof(r->file), "%s", plugin.file);
+            memcpy(r->sha256, plugin.sha256, 32);
+            memcpy(r->params, values, sizeof(values));
+            ReleaseSRWLockExclusive(&g_plugin_results_lock);
+        }
+    }
+    free(in);
+    rubraview_pixbuf_t made = rubraview_pixbuf_create(arena, src->width, src->height, src->format);
+    if (rubraview_pixbuf_is_valid(&made)) {
+        for (int32_t y = 0; y < made.height; ++y) {
+            const uint8_t *s = out + (size_t)y * row;
+            uint8_t *d = made.pixels + (size_t)y * (size_t)made.stride;
+            if (!rgba) { memcpy(d, s, row); continue; }
+            for (int32_t x = 0; x < made.width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+        }
+    }
+    free(out);
+    return made;
+}
+
+static void edit_rows_plugins(app_state_t *app);
+
 static void edit_rows_effect(app_state_t *app) {
     /* By kind (owner, 2026-10-18): the kind, then its effects; 0 is none. */
     if (app->effect_choice != RUBRAVIEW_EFFECT_NONE) app->effect_group = (int32_t)rubraview_effect_group_of((rubraview_effect_t)app->effect_choice);
@@ -14945,7 +15096,47 @@ static void edit_rows_effect(app_state_t *app) {
         rubraview_panel_add_slider(&app->panel, PANEL_EFFECT_AMOUNT, TU8("  amount"), app->effect_amount, lo, hi, 1.0);
     }
     rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
+    edit_rows_plugins(app);   /* RFC-0007 */
     rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
+}
+
+/* RFC-0007: the plug-ins found, the one chosen's parameters, and a button that makes it a step. */
+static void edit_rows_plugins(app_state_t *app) {
+    const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+    size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+    if (n == 0) return;
+    if (app->plugin_choice < 0 || (size_t)app->plugin_choice > n) app->plugin_choice = 0;
+    rubraview_panel_add_choice(&app->panel, PANEL_PLUGIN, TU8("Plug-in"), app->plugin_choice, (int32_t)n + 1);
+    if (app->plugin_choice == 0) return;
+    const rubraview_plugin_t *p = list[app->plugin_choice - 1];
+    for (int32_t i = 0; i < p->param_count; ++i) {
+        const rubraview_plugin_param_t *q = &p->params[i];
+        int32_t id = PANEL_PLUGIN_P0 + i;
+        static char labels[RUBRAVIEW_PLUGIN_PARAMS][80];   /* the rows' words live as long as the panel */
+        snprintf(labels[i], sizeof(labels[i]), "  %s", q->name);
+        u8str_t name = cstr(labels[i]);
+        if (q->kind == RVF_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->plugin_values[i] > 0.5);
+        else if (q->kind == RVF_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->plugin_values[i], (int32_t)q->max + 1);
+        else rubraview_panel_add_slider(&app->panel, id, name, app->plugin_values[i], q->min, q->max, q->kind == RVF_INT ? 1.0 : q->step);
+    }
+    rubraview_panel_add_button(&app->panel, PANEL_PLUGIN_APPLY, TU8("Run the plug-in: a step (Esc cancels)"));
+}
+
+/* The chosen plug-in, run on the picture as a step of its own. */
+static void edit_plugin_apply(app_state_t *app) {
+    const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+    size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+    if (app->plugin_choice <= 0 || (size_t)app->plugin_choice > n) { osd_say(app, TU8("choose a plug-in first")); return; }
+    const rubraview_plugin_t *p = list[app->plugin_choice - 1];
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_PLUGIN, .area = edit_area_now(app), .plugin_param_count = p->param_count };
+    snprintf(s.plugin, sizeof(s.plugin), "%s", p->file);
+    memcpy(s.plugin_sha256, p->sha256, 32);
+    memcpy(s.plugin_params, app->plugin_values, sizeof(s.plugin_params));
+    rubraview_plugin_params_clamp(p, s.plugin_params, p->param_count);
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    edit_steps_changed(app);
+    osd_say(app, TU8("plug-in applied (Ctrl+Z undoes it)"));
 }
 
 static void edit_rows_resize(app_state_t *app) {
@@ -15202,6 +15393,22 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
             break;
         }
         case PANEL_EFFECT_GROUP: word = effect_group_word(i); break;
+        case PANEL_PLUGIN: {   /* RFC-0007 */
+            const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+            size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+            word = i <= 0 ? T("none") : (size_t)i <= n ? list[i - 1]->name : NULL;
+            break;
+        }
+        case PANEL_PLUGIN_P0: case PANEL_PLUGIN_P1: case PANEL_PLUGIN_P2: case PANEL_PLUGIN_P3:
+        case PANEL_PLUGIN_P4: case PANEL_PLUGIN_P5: case PANEL_PLUGIN_P6: case PANEL_PLUGIN_P7: {
+            const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+            size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+            const rubraview_plugin_t *p = app->plugin_choice > 0 && (size_t)app->plugin_choice <= n ? list[app->plugin_choice - 1] : NULL;
+            int32_t k = row->id - PANEL_PLUGIN_P0;
+            if (p && k < p->param_count && p->params[k].kind == RVF_CHOICE &&
+                rubraview_plugin_choice_word(p->params[k].choices, i, buffer, size)) return cstr(buffer);
+            break;
+        }
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
         /* RV-129: the batch window */
@@ -16778,8 +16985,9 @@ static int save_job_work(save_job_t *job) {
             for (size_t i = 0; i < job->steps.cursor && result == SAVE_OK; ++i) {
                 proven_arena_t *lane = &lanes[i % 2u];
                 proven_arena_reset(lane);
+                g_plugin_why = NULL;
                 rubraview_pixbuf_t next = rubraview_edit_step_apply(lane, &job->steps.steps[i], &pixels, 1.0);
-                if (rubraview_pixbuf_is_valid(&next)) pixels = next; else result = SAVE_EDIT_FAILED;
+                if (rubraview_pixbuf_is_valid(&next)) pixels = next; else { result = SAVE_EDIT_FAILED; job->why = g_plugin_why; }
             }
         }
     }
@@ -17008,7 +17216,7 @@ static void save_job_poll(app_state_t *app, bool wait) {
         return;
     }
     if (job->over_original) (void)rubraview_pal_fs_delete(cstr(job->out));
-    if (!wait && job->result == SAVE_UNWRITABLE && job->why) {   /* RV-139 */
+    if (!wait && (job->result == SAVE_UNWRITABLE || job->result == SAVE_EDIT_FAILED) && job->why) {   /* RV-139; RFC-0007 */
         char line[256];
         snprintf(line, sizeof(line), T("not saved: %s"), rubraview_tr(job->why));
         osd_say(app, cstr(line));
@@ -17212,6 +17420,19 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             break;
         }
         case PANEL_EFFECT_AMOUNT: app->effect_amount = v; break;
+        case PANEL_PLUGIN: {   /* RFC-0007: another plug-in, its parameters at their defaults */
+            const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+            size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+            app->plugin_choice = (int32_t)lround(v);
+            if (app->plugin_choice < 0 || (size_t)app->plugin_choice > n) app->plugin_choice = 0;
+            if (app->plugin_choice > 0) rubraview_plugin_params_clamp(list[app->plugin_choice - 1], app->plugin_values, 0);
+            panel_build_edit(app);
+            break;
+        }
+        case PANEL_PLUGIN_P0: case PANEL_PLUGIN_P1: case PANEL_PLUGIN_P2: case PANEL_PLUGIN_P3:
+        case PANEL_PLUGIN_P4: case PANEL_PLUGIN_P5: case PANEL_PLUGIN_P6: case PANEL_PLUGIN_P7:
+            app->plugin_values[row->id - PANEL_PLUGIN_P0] = v;
+            break;
         case PANEL_COMPARE:     app->edit_compare = v > 0.5; break;
         case PANEL_GAMMA:       rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_MIDTONE_GAMMA, (float)v); break;
         case PANEL_BLUR:        rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BLUR_SIGMA, (float)v); break;
@@ -17311,6 +17532,7 @@ static void panel_button(app_state_t *app, int32_t index) {
             break;
         case PANEL_APPLY_SEL:    (void)edit_apply_pending(app, true); break;
         case PANEL_EFFECT_APPLY: edit_effect_apply(app); break;
+        case PANEL_PLUGIN_APPLY: edit_plugin_apply(app); break;   /* RFC-0007 */
         case PANEL_AUTO_COLOUR:  edit_auto_colour(app); break;
         case PANEL_CROP_SEL:     edit_crop_to_selection(app); break;
         case PANEL_RESIZE_APPLY: edit_resize_apply(app); break;
@@ -17862,6 +18084,8 @@ static void skip_dirs_table_rows(app_state_t *app) {
     for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {
         rubraview_settings_view_set_named_table_rows(&app->settings_view, cstr(FOLDER_LISTS[l].table), (int32_t)folder_list_count(app, l) + 2);
     }
+    /* RFC-0007: the plug-ins' heading and one row each (or one that says why there are none) */
+    rubraview_settings_view_set_named_table_rows(&app->settings_view, U8("plugins"), (int32_t)(g_plugin_count > 0 ? g_plugin_count : 1) + 1);
 }
 
 /* The eight folders of before go into the list, once, and are emptied in the file. */
@@ -17915,6 +18139,20 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
               : index == n + 1 ? (typing ? 0
                                   : snprintf(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
               : 0;
+        return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
+    }
+    if (rubraview_u8_eq_lit(source, "plugins")) {   /* RFC-0007: what the folder holds */
+        int w = 0;
+        bool on = rubraview_settings_get(&app->settings, U8("edit"), U8("plugins")) > 0.5;
+        if (index == 0) w = snprintf(buffer, capacity, "%s", T("Plug-in  (version, licence)  -  file"));
+        else if (!on) w = index == 1 ? snprintf(buffer, capacity, "%s", T("plug-ins are off")) : 0;
+        else if (g_plugin_count == 0) w = index == 1 ? snprintf(buffer, capacity, T("none in %s"), g_plugin_folder) : 0;
+        else if (index <= g_plugin_count) {
+            const rubraview_plugin_t *p = &g_plugins[index - 1];
+            w = p->usable ? snprintf(buffer, capacity, "%s  (%s, %s)  -  %s", p->name, p->version[0] ? p->version : "?",
+                                     p->licence[0] ? p->licence : T("licence not said"), p->file)
+                          : snprintf(buffer, capacity, T("%s  -  not used: %s"), p->file, p->why ? rubraview_tr(p->why) : "?");
+        }
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (!rubraview_u8_eq_lit(source, "keymap")) return 0;
@@ -18437,6 +18675,11 @@ static void ui_font_apply_all(app_state_t *app) {
 
 static void settings_took_effect(app_state_t *app) {
     ui_font_apply_all(app);
+    {   /* RFC-0007: plug-ins on or off, or another folder: looked for again */
+        size_t before = g_plugin_count;
+        plugins_from_settings(app);
+        if (app->settings_window && g_plugin_count != before) skip_dirs_table_rows(app);
+    }
     app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     /* Owner, 2026-09-15: always on top follows the setting, whichever way it was changed. */
@@ -23972,7 +24215,14 @@ static void edit_preview_update(app_state_t *app) {
     proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->edit_work_mem,
                                                                   .size = app->edit_work_bytes });
     double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
+    g_plugin_why = NULL;
     rubraview_pixbuf_t edited = rubraview_edit_steps_apply(&work, &app->edit_steps, &app->edit_small, ratio);
+    if (g_plugin_why) {   /* RFC-0007: a plug-in step that did not run is left out of the preview; said why */
+        char said[320];
+        snprintf(said, sizeof(said), T("the plug-in did not run: %s"), rubraview_tr(g_plugin_why));
+        osd_say(app, cstr(said));
+        g_plugin_why = NULL;
+    }
     if (!rubraview_pixbuf_is_valid(&edited)) return;
     /* Every change is a step already (owner, 2026-10-18): nothing is laid over the steps. */
     if (app->edit_compare) edited = rubraview_pixbuf_clone(&work, &app->edit_small);   /* the original, to compare */
@@ -27101,6 +27351,19 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
                 pixels = done;
             }
         }
+        if (extra->plugin[0]) {   /* RFC-0007: a plug-in, named on the command line */
+            rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_PLUGIN, .plugin_param_count = extra->plugin_param_count };
+            snprintf(step.plugin, sizeof(step.plugin), "%s", extra->plugin);
+            memcpy(step.plugin_params, extra->plugin_params, sizeof(step.plugin_params));
+            rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
+            if (!rubraview_pixbuf_is_valid(&done)) {
+                char said[400];
+                snprintf(said, sizeof(said), "the plug-in did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                batch_say(input->path, said);
+                return false;
+            }
+            pixels = done;
+        }
         if (extra->canvas_w > 0 && extra->canvas_h > 0) {
             rubraview_pixbuf_t placed = rubraview_batch_canvas(arena, &pixels, extra->canvas_w, extra->canvas_h, extra->canvas_rgb);
             if (!rubraview_pixbuf_is_valid(&placed)) { batch_say(input->path, "the canvas could not be made"); return false; }
@@ -27579,6 +27842,18 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     if (count == 0) {
         console_line("rubraview: nothing to do — no files matched");
         return 1;
+    }
+
+    /* RFC-0007: --plugin's folder (--plugin-folder, else the default one), looked in once */
+    for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
+        const rubraview_batch_action_t *a = &cli->job.actions[i];
+        if (a->kind != RUBRAVIEW_BATCH_EXTRA || !a->params.extra.plugin[0]) continue;
+        char folder[520] = "";
+        if (a->params.extra.plugin_folder.len > 0 && a->params.extra.plugin_folder.len < sizeof(folder))
+            memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.len);
+        else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
+        plugins_look(cstr(folder));
+        break;
     }
 
     /* --out= names a folder that may not be there yet: made first, or every file would fail
@@ -28476,6 +28751,18 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        opened from it must read as an empty folder, not stop the viewer
        behind Windows' "There is no disk in the drive" box. */
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
+
+    {   /* RFC-0007: a plug-in runs in a child of this program, and nothing else starts in that child */
+        int argc = 0;
+        LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (wargv && argc == 4 && wcscmp(wargv[1], L"--filter-host") == 0) {
+            int code = rubraview_pal_plugin_host_main(wargv[2], wargv[3]);
+            LocalFree(wargv);
+            return code;
+        }
+        if (wargv) LocalFree(wargv);
+    }
+    rubraview_edit_set_plugin_runner(plugin_runner, NULL);
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;

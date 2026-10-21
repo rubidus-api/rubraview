@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.31.0.exe              the viewer, as built
-dist/rubraview-v1.31.0/                 the release bundle
-dist/rubraview-v1.31.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.32.0.exe              the viewer, as built
+dist/rubraview-v1.32.0/                 the release bundle
+dist/rubraview-v1.32.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -533,6 +533,28 @@ Privacy clean on a JPEG that is otherwise unchanged does not re-encode
 the picture — the metadata is cut out and every pixel is left exactly as
 it was.
 
+### Plug-ins: filters from outside
+
+Settings › Display › **Plug-ins** (off until you turn it on) lets filters
+written by others into Edit and the batch. A plug-in is a 64-bit DLL named
+`*.rvf.dll` in the **Plug-in folder** (empty: `%LOCALAPPDATA%\Rubraview\plugins`,
+made when plug-ins are turned on). The settings page lists what it found —
+name, version, licence and file — and why one is not used (a 32-bit DLL,
+another interface version). In Edit, under the effects, **Plug-in** chooses
+one, its own parameters follow, and **Run the plug-in** makes it a step on
+the whole picture or the selection; `Esc` cancels a long run.
+
+Each plug-in runs in a process of its own, never in the viewer: one that
+crashes is said to have crashed, one that does not stop when cancelled is
+ended five seconds later, and the viewer goes on either way. A step
+remembers the plug-in's file and fingerprint (SHA-256): a plug-in replaced
+by another file is not run for an older step. A plug-in is somebody's
+product — check its licence before you use it, in the batch especially.
+
+Writing one: `docs/manual/plugins/` holds the interface
+(`include/rubraview/plugin_filter.h`, two functions over BGRA rows and up to
+eight parameters) and a complete sample, `posterise.c`.
+
 ## Sorting your files
 
 `Delete` sends the file to the recycle bin (`Shift+Delete` deletes for good,
@@ -696,6 +718,7 @@ waits for a key before it closes.
 | `--no-enlarge`, `--linear` | Leave a smaller picture its size; resize in linear light |
 | `--crop=X,Y,W,H`, `--autocrop` | Cut to a rectangle; cut off a plain border |
 | `--auto-colour`, `--negative`, `--effect=oil:4` | Correct the colours; a negative; any effect of Edit (its name in lower case, `radial-blur`, `red-eye`) |
+| `--plugin=posterise:6,1`, `--plugin-folder=D:\plug` | A plug-in by its file's name, its parameters in order (the rest at their defaults); the folder, else the default one |
 | `--canvas=1920x1080,000000`, `--border=8,FFFFFF` | Centred on a canvas; a frame round it |
 | `--watermark=FILE,br,50` | A picture laid over each, at a corner (`br` `bl` `tr` `tl` `c`), at an opacity |
 | `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name |

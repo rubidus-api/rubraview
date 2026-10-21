@@ -75,6 +75,11 @@ typedef struct rubraview_batch_extra_params {
     bool     negative;
     int32_t  effect;               /* rubraview/effects.h; 0 none */
     double   effect_amount;
+    /* RFC-0007 (D-186): a plug-in filter by its name in the plug-in folder (--plugin-folder, else the default) */
+    char     plugin[96];
+    double   plugin_params[8];
+    int32_t  plugin_param_count;
+    u8str_t  plugin_folder;
     int32_t  canvas_w, canvas_h;   /* > 0: the picture centred on a canvas this size (never cut) */
     uint32_t canvas_rgb;
     int32_t  border_px;            /* > 0: a frame this wide round it */

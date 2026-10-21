@@ -386,6 +386,12 @@ static const char *const PARTS[] = {
 "  note   \"card when it can run compute shaders; the CPU otherwise.\"\n"
 "  note   \"always: every such resize, in software when there is no card\"\n"
 "  note   \"(for testing). The result matches the CPU's to within one level.\"\n"
+"  section \"Plug-ins (filters from outside)\"\n"
+"  toggle edit.plugins             \"Plug-ins\"                = false wired\n"
+"  path   edit.plugin_folder       \"Plug-in folder\"          wired\n"
+"  note   \"A plug-in is someone else's code: it runs apart, in a process of its own. Put *.rvf.dll files\"\n"
+"  note   \"in the folder (empty: %LOCALAPPDATA%\\Rubraview\\plugins). They are under Edit > Effects.\"\n"
+"  table  plugins\n"
 "\n",
 "page cache \"Cache\"\n"
 "  section \"Memory\"\n"
@@ -441,6 +447,8 @@ static const char *const PARTS[] = {
 "help audio.bgm_pause_on_video \"On: background music pauses while a film with its own sound plays, and goes on after it.\"\n"
 "help video.decoder \"Which decoder tries a film first: Windows' own (Media Foundation) or FFmpeg, when its DLLs are there. The other is tried if the first cannot.\"\n"
 "help video.hardware_decode \"Lets the graphics card decode films, which saves the processor — with either decoder, Windows' or FFmpeg's (FFmpeg decodes an HDR film on the card only while HDR tone mapping is on). Off if films show wrong colours or freeze on this computer.\"\n"
+"help edit.plugins \"Filters from outside Rubraview (*.rvf.dll, 64-bit) in Edit > Effects and the batch (--plugin). Off until you turn it on: a plug-in is someone else's code; each runs in a process of its own, so one that crashes or hangs takes nothing with it. Check a plug-in's own licence before you use it.\"\n"
+"help edit.plugin_folder \"Where plug-ins are looked for, one level deep. Empty: %LOCALAPPDATA%\\Rubraview\\plugins, made when plug-ins are turned on.\"\n"
 "help video.hdr_output \"On a screen with Windows' HDR on, an HDR film goes out as HDR: its highlights up to the screen's own peak, its colours wider than sRGB, while the rest of the window stays at Windows' SDR brightness. auto: when the screen is HDR. always: even on an ordinary screen (for testing). It needs HDR tone mapping on.\"\n"
 "help video.hdr_tone_mapping \"An HDR film (HDR10 or HLG) brought to this screen: its brightest parts folded under the screen's white (BT.2390) and its colours into sRGB, on the graphics card, so it does not look grey and washed out. It needs FFmpeg; an HDR film Windows' decoder opens is handed to FFmpeg. Off: shown as before.\"\n"
 "help video.subtitle_fit \"A subtitle too long for its box: the box grows to hold it, or the letters shrink until it fits.\"\n",
