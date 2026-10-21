@@ -1899,9 +1899,26 @@ static bool save_jpeg_to_size(u8str_t path, const rubraview_pixbuf_t *pixels, co
     return true;
 }
 
+/* RV-139: why the last save on this thread failed, when it can say */
+static _Thread_local const char *g_save_why;
+
+const char *rubraview_pal_image_save_why(void) { return g_save_why; }
+
+/* RV-139 (D-184): AVIF and JPEG XL are the user's FFmpeg's to write. */
+static bool save_by_ffmpeg(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options, bool avif) {
+    size_t size = 0;
+    uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(pixels, avif, options->jpeg_quality, &size, &g_save_why);
+    if (!bytes) return false;
+    bool written = rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = (const char*)bytes, .len = size });
+    free(bytes);
+    if (!written) g_save_why = NULL;
+    return written;
+}
+
 bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options) {
+    g_save_why = NULL;
     if (!options) return false;
 
     rubraview_export_format_t format = options->format;
@@ -1918,6 +1935,8 @@ bool rubraview_pal_image_save(u8str_t path,
     }
 
     if (format == RUBRAVIEW_EXPORT_WEBP) return save_webp(path, pixels, options);
+    if (format == RUBRAVIEW_EXPORT_AVIF || format == RUBRAVIEW_EXPORT_JXL)
+        return save_by_ffmpeg(path, pixels, options, format == RUBRAVIEW_EXPORT_AVIF);
 
     if (format == RUBRAVIEW_EXPORT_JPEG && options->target_kb > 0) return save_jpeg_to_size(path, pixels, options);
 

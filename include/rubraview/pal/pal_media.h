@@ -127,6 +127,22 @@ rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void);
  * False when it is not a JPEG XL, is damaged, is larger than `max_side`
  * on a side, or there is no decoder. May be called from any thread.
  */
+/**
+ * RV-139 (D-184): which still pictures the user's FFmpeg can write — RUBRAVIEW_FFMPEG_WRITES_* — and the
+ * encoders' names into `names` ("libjxl, libaom-av1").
+ */
+#define RUBRAVIEW_FFMPEG_WRITES_JXL  1u
+#define RUBRAVIEW_FFMPEG_WRITES_AVIF 2u
+uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size);
+
+/**
+ * A picture (BGRA or RGBA rows) written as AVIF (`avif`: an AV1 encoder, 4:2:0, transparency over white, in
+ * FFmpeg's avif muxer) or JPEG XL (libjxl, alpha kept) at `quality` 1..100 (rubraview_export_jxl_distance /
+ * _av1_crf; 100 is lossless JPEG XL). The file's bytes (free()), or NULL and `why` (an N_ literal).
+ */
+uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *pixels, bool avif, int32_t quality,
+                                           size_t *out_size, const char **why);
+
 bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                      void *context, int32_t *out_width, int32_t *out_height);

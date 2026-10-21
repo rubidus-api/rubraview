@@ -1,6 +1,7 @@
 #include "rubraview/export.h"
 #include "rubraview/path.h"
 #include <string.h>
+#include <math.h>
 
 static int32_t clampi(int32_t v, int32_t lo, int32_t hi) {
     return v < lo ? lo : (v > hi ? hi : v);
@@ -40,7 +41,7 @@ void rubraview_export_clamp(rubraview_export_options_t *options) {
     options->webp_effort = clampi(options->webp_effort, 0, 6);
     options->png_compression = clampi(options->png_compression, 0, 9);
     if (!(options->dpi >= 1.0 && options->dpi <= 10000.0)) options->dpi = 0.0;   /* RV-134: none, or a sane one */
-    if ((int)options->format < 0 || (int)options->format > RUBRAVIEW_EXPORT_ICO) {
+    if ((int)options->format < 0 || (int)options->format >= RUBRAVIEW_EXPORT_FORMATS) {
         options->format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
     }
     if ((int)options->png_depth < 0 || (int)options->png_depth > RUBRAVIEW_PNG_GRAY8) {
@@ -105,6 +106,8 @@ u8str_t rubraview_export_extension(rubraview_export_format_t format) {
         case RUBRAVIEW_EXPORT_BMP:  return U8("bmp");
         case RUBRAVIEW_EXPORT_TIFF: return U8("tif");
         case RUBRAVIEW_EXPORT_ICO:  return U8("ico");
+        case RUBRAVIEW_EXPORT_AVIF: return U8("avif");
+        case RUBRAVIEW_EXPORT_JXL:  return U8("jxl");
         case RUBRAVIEW_EXPORT_SAME_AS_SOURCE:
         default: return (u8str_t){ .ptr = "", .len = 0 };
     }
@@ -121,7 +124,20 @@ rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename) {
     if (rubraview_u8_eq_lit_ci(ext, "bmp")) return RUBRAVIEW_EXPORT_BMP;
     if (rubraview_u8_eq_lit_ci(ext, "tif") || rubraview_u8_eq_lit_ci(ext, "tiff")) return RUBRAVIEW_EXPORT_TIFF;
     if (rubraview_u8_eq_lit_ci(ext, "ico")) return RUBRAVIEW_EXPORT_ICO;
+    if (rubraview_u8_eq_lit_ci(ext, "avif")) return RUBRAVIEW_EXPORT_AVIF;
+    if (rubraview_u8_eq_lit_ci(ext, "jxl")) return RUBRAVIEW_EXPORT_JXL;
     return RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
+}
+
+double rubraview_export_jxl_distance(int32_t quality) {
+    double q = quality < 1 ? 1.0 : quality > 100 ? 100.0 : (double)quality;
+    if (q >= 100.0) return 0.0;
+    return q >= 30.0 ? 0.1 + (100.0 - q) * 0.09 : 53.0 / 3000.0 * q * q - 23.0 / 20.0 * q + 25.0;
+}
+
+int32_t rubraview_export_av1_crf(int32_t quality) {
+    int32_t q = quality < 1 ? 1 : quality > 100 ? 100 : quality;
+    return (int32_t)lround((100.0 - (double)q) * 63.0 / 99.0);
 }
 
 size_t rubraview_export_ico_sizes(int32_t *out_sizes, size_t capacity) {
@@ -195,6 +211,9 @@ uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_
             return (webp_lossless ? 0u : (uint32_t)RUBRAVIEW_EXPORT_ROW_QUALITY) | RUBRAVIEW_EXPORT_ROW_WEBP | RUBRAVIEW_EXPORT_ROW_PRIVACY;
         case RUBRAVIEW_EXPORT_TIFF:
             return RUBRAVIEW_EXPORT_ROW_PRIVACY;
+        case RUBRAVIEW_EXPORT_AVIF:
+        case RUBRAVIEW_EXPORT_JXL:
+            return RUBRAVIEW_EXPORT_ROW_QUALITY;   /* RV-139: written without the file's details */
         default:
             return 0u;   /* GIF, BMP, ICO: nothing to choose */
     }

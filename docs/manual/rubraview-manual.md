@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.29.0.exe              the viewer, as built
-dist/rubraview-v1.29.0/                 the release bundle
-dist/rubraview-v1.29.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.30.0.exe              the viewer, as built
+dist/rubraview-v1.30.0/                 the release bundle
+dist/rubraview-v1.30.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -434,7 +434,13 @@ into the archive.
 `Ctrl+E` opens Export: pick a format, and the panel shows what that format
 has: JPEG its quality and progressive; PNG its level and colours; WebP its
 quality (not when lossless), lossless and effort; GIF, BMP and ICO
-nothing more ("as the file" shows the file's own format's). Tick **Privacy
+nothing more ("as the file" shows the file's own format's). **AVIF
+(FFmpeg)** and **JPEG XL (FFmpeg)** are written by FFmpeg's encoders,
+when the FFmpeg the viewer uses has them (BtbN's 9.0 build has libjxl,
+libaom, SVT-AV1 and rav1e; Settings › Video › FFmpeg names those it found):
+their quality only, 100 being lossless JPEG XL. AVIF is written 4:2:0
+without transparency (it is laid over white); JPEG XL keeps it. Neither
+carries the file's details. Tick **Privacy
 clean** (JPEG, PNG, WebP, TIFF) to strip GPS and camera details, and press
 Export. **PNG
 colours** writes a PNG with or without transparency, in 256 colours or in
@@ -661,7 +667,7 @@ waits for a key before it closes.
 | `--resize=50%` `--resize=1920x1080` `--resize=w800` `--resize=h600` | How to resize |
 | `--filter=lanczos3\|bicubic\|bilinear\|nearest` | How to resample |
 | (Settings › Display) | Bicubic and Lanczos resizes of large pictures run on the graphics card when there is one, with the same result |
-| `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico` | What to write |
+| `--format=jpg\|png\|webp\|gif\|bmp\|tif\|ico\|avif\|jxl` | What to write (AVIF and JPEG XL by FFmpeg) |
 | `--quality=1..100` | For JPEG and WebP |
 | `--progressive` | A progressive JPEG |
 | `--lossless`, `--effort=0..6` | A WebP with every pixel as it was; how hard to try for a small one (4 as it comes) |

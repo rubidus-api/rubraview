@@ -356,6 +356,7 @@ typedef struct save_job {
     HANDLE thread;
     volatile LONG done;
     int result;
+    const char *why;   /* RV-139: SAVE_UNWRITABLE, when the writer said why (an N_ literal) */
 } save_job_t;
 
 /* The owner (2026-10-18): Edit's steps onto every picture of the list, each
@@ -13089,9 +13090,12 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     ok = ok && rubraview_pal_fs_recycle(path) && rubraview_pal_fs_replace(out, path);
                     if (!ok && out.len > 0 && rubraview_pal_fs_exists(out) && rubraview_pal_fs_exists(path)) (void)rubraview_pal_fs_recycle(out);
                 } else if (ok) {
-                    /* in its own format when it can be written, else PNG */
+                    /* in its own format when it can be written, else PNG (RV-139: AVIF and JPEG XL when FFmpeg can) */
                     rubraview_export_options_t options = job->options;
                     rubraview_export_format_t f = rubraview_export_format_for_name(path);
+                    uint32_t ff = f == RUBRAVIEW_EXPORT_AVIF || f == RUBRAVIEW_EXPORT_JXL ? rubraview_pal_ffmpeg_image_encoders(NULL, 0) : 0u;
+                    if ((f == RUBRAVIEW_EXPORT_AVIF && !(ff & RUBRAVIEW_FFMPEG_WRITES_AVIF)) ||
+                        (f == RUBRAVIEW_EXPORT_JXL && !(ff & RUBRAVIEW_FFMPEG_WRITES_JXL))) f = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
                     if (f == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) f = RUBRAVIEW_EXPORT_PNG;
                     options.format = f;
                     u8str_t ext = rubraview_export_extension(f);
@@ -15176,7 +15180,8 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
     const char *const CROP[] = { T("free"), "1:1", "4:3", "16:9", T("the picture's") };
     const char *const BLUR[] = { T("soft (Gaussian)"), T("flat (box)") };
     const char *const SHARP[] = { T("unsharp mask"), T("Laplacian") };
-    const char *const FORMAT[] = { T("as the file"), T("JPEG"), T("PNG"), T("WebP"), T("GIF"), T("BMP"), T("TIFF"), T("ICO") };
+    const char *const FORMAT[RUBRAVIEW_EXPORT_FORMATS] = { T("as the file"), T("JPEG"), T("PNG"), T("WebP"), T("GIF"), T("BMP"), T("TIFF"), T("ICO"),
+                                                           T("AVIF (FFmpeg)"), T("JPEG XL (FFmpeg)") };   /* RV-139 */
     const char *const DEPTH[] = { T("colour + alpha (32)"), T("colour (24)"), T("a palette"), T("grey (8)") };
     /* RV-140 */
     const char *const SUBSAMPLING[] = { T("as the writer does (4:2:0)"), T("4:2:0 (smallest)"), T("4:2:2"), T("4:4:4 (sharpest colour)") };
@@ -15205,7 +15210,7 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
             break;
         }
         case PANEL_BATCH_FILTER:  word = i == 0 ? T("nearest (pixel art)") : i == 1 ? T("bilinear") : i == 2 ? T("bicubic") : i == 3 ? T("Lanczos-3 (sharpest)") : NULL; break;
-        case PANEL_BATCH_FORMAT:  word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
+        case PANEL_BATCH_FORMAT:  word = i >= 0 && i < RUBRAVIEW_EXPORT_FORMATS ? FORMAT[i] : NULL; break;
         case PANEL_BATCH_ROTATE: {
             const char *const TURN[] = { T("no"), T("a quarter right"), T("half round"), T("a quarter left"), T("as its EXIF says") };
             word = i >= 0 && i < 5 ? TURN[i] : NULL;
@@ -15235,7 +15240,7 @@ static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row
         case PANEL_RESIZE_SHARPEN: case PANEL_RESIZE_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_BLUR_KIND:    word = i >= 0 && i < 2 ? BLUR[i] : NULL; break;
         case PANEL_SHARPEN_KIND: word = i >= 0 && i < 2 ? SHARP[i] : NULL; break;
-        case PANEL_FORMAT:       word = i >= 0 && i < 8 ? FORMAT[i] : NULL; break;
+        case PANEL_FORMAT:       word = i >= 0 && i < RUBRAVIEW_EXPORT_FORMATS ? FORMAT[i] : NULL; break;
         case PANEL_PNG_DEPTH:    word = i >= 0 && i < 4 ? DEPTH[i] : NULL; break;
         case PANEL_JPEG_SUBSAMPLING: word = i >= 0 && i < 4 ? SUBSAMPLING[i] : NULL; break;
         case PANEL_PNG_FILTER:   word = i >= 0 && i < 7 ? PNG_FILTER[i] : NULL; break;
@@ -15358,7 +15363,7 @@ static void panel_open_export(app_state_t *app) {
     app->panel_is_print = false;
     app->panel_is_convert = false;
 
-    rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, TU8("Format"), (int32_t)app->export_options.format, 8);
+    rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, TU8("Format"), (int32_t)app->export_options.format, RUBRAVIEW_EXPORT_FORMATS);
     /* Only what the format chosen has use for (owner, 2026-10-15); "as the file" is the file's own. */
     int32_t page = current_page_index(app);
     u8str_t name = page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : U8("");
@@ -15458,7 +15463,7 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
                     (int)lround(b->text_size), (unsigned)TEXT_RGB[b->text_colour % 3]);
     }
     if (b->dpi >= 1.0) batch_token(tk, "--dpi=%d", (int)lround(b->dpi));
-    if (b->format > 0 && b->format <= RUBRAVIEW_EXPORT_ICO) {
+    if (b->format > 0 && b->format < RUBRAVIEW_EXPORT_FORMATS) {
         u8str_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
         batch_token(tk, "--format=%.*s", (int)ext.len, ext.ptr);
     }
@@ -15681,7 +15686,7 @@ static void panel_open_batch(app_state_t *app) {
         rubraview_panel_add_choice(pn, PANEL_BATCH_TEXT_COLOUR, TU8("  colour"), b->text_colour, 3);
     }
     rubraview_panel_add_separator(pn);
-    rubraview_panel_add_choice(pn, PANEL_BATCH_FORMAT, TU8("Format"), b->format, 8);
+    rubraview_panel_add_choice(pn, PANEL_BATCH_FORMAT, TU8("Format"), b->format, RUBRAVIEW_EXPORT_FORMATS);
     rubraview_panel_add_slider(pn, PANEL_BATCH_QUALITY, TU8("  quality"), b->quality, 1, 100, 1);
     {   /* RV-140: the format's own choices, as Export has them */
         rubraview_export_options_t o = b->more;
@@ -16772,7 +16777,7 @@ static int save_job_work(save_job_t *job) {
     if (result == SAVE_OK) {
         rubraview_export_options_t options = job->options;
         if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = job->source_format;
-        if (!rubraview_pal_image_save(out_path, &pixels, &options)) result = SAVE_UNWRITABLE;
+        if (!rubraview_pal_image_save(out_path, &pixels, &options)) { result = SAVE_UNWRITABLE; job->why = rubraview_pal_image_save_why(); }
         else (void)details_keep(source, out_path, save_job_named(job), options.format, &options);
     }
     free(steps_mem);
@@ -16990,7 +16995,11 @@ static void save_job_poll(app_state_t *app, bool wait) {
         return;
     }
     if (job->over_original) (void)rubraview_pal_fs_delete(cstr(job->out));
-    if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
+    if (!wait && job->result == SAVE_UNWRITABLE && job->why) {   /* RV-139 */
+        char line[256];
+        snprintf(line, sizeof(line), T("not saved: %s"), rubraview_tr(job->why));
+        osd_say(app, cstr(line));
+    } else if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
     free(job);
     app->save_job = NULL;
 }
@@ -17776,6 +17785,11 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
                      : place == 2 ? T("its DLLs were imported into the settings folder")
                      : place == 3 ? T("its DLLs are in the FFmpeg folder")
                      : T("not found (or not 9.x) - Media Foundation only"));
+        char encoders[96];   /* RV-139: what it can write pictures with */
+        if (place > 0 && n > 0 && (size_t)n < capacity && rubraview_pal_ffmpeg_image_encoders(encoders, sizeof(encoders)) && encoders[0]) {
+            int m = snprintf(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with %s"), encoders);
+            if (m > 0) n += m;
+        }
     } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
         n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
     } else if (rubraview_u8_eq_lit(source, "memory.use") && app->mem) {
@@ -27131,7 +27145,11 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
     }
 
     if (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) options.format = source_format;
-    if (!rubraview_pal_image_save(out_path, &pixels, &options)) { batch_say(input->path, "could not be written"); return false; }
+    if (!rubraview_pal_image_save(out_path, &pixels, &options)) {
+        const char *why = rubraview_pal_image_save_why();   /* RV-139 */
+        batch_say(input->path, why ? why : "could not be written");
+        return false;
+    }
     int kept = details_keep(input->path, out_path, out_path, options.format, &options);   /* 1.17.0 */
     if (kept == DETAILS_TXT) batch_say(out_path, "its details that it cannot hold are in a .txt beside it");
     if (kept == DETAILS_FAILED) batch_say(out_path, "its details could not be kept");

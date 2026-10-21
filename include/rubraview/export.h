@@ -31,7 +31,16 @@ typedef enum rubraview_export_format {
     RUBRAVIEW_EXPORT_BMP,
     RUBRAVIEW_EXPORT_TIFF,
     RUBRAVIEW_EXPORT_ICO,
+    RUBRAVIEW_EXPORT_AVIF,   /* RV-139 (D-184): written by the user's FFmpeg (an AV1 encoder, its avif muxer) */
+    RUBRAVIEW_EXPORT_JXL,    /* ...and by its libjxl */
 } rubraview_export_format_t;
+
+#define RUBRAVIEW_EXPORT_FORMATS 10   /* the choices, "as the file" first */
+
+/** RV-139: JPEG XL's distance for a quality 1..100 (libjxl's own mapping; 100 is 0, lossless). */
+double rubraview_export_jxl_distance(int32_t quality);
+/** RV-139: an AV1 encoder's CRF for a quality 1..100 (100 is 0, the best it does; 1 is 63). */
+int32_t rubraview_export_av1_crf(int32_t quality);
 
 typedef enum rubraview_png_depth {
     RUBRAVIEW_PNG_RGBA32 = 0,

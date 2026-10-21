@@ -216,6 +216,9 @@ bool rubraview_pal_image_save(u8str_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options);
 
+/** RV-139: why the last rubraview_pal_image_save on this thread failed (an N_ literal), or NULL. */
+const char *rubraview_pal_image_save_why(void);
+
 /**
  * RV-109: an animated GIF, WebP or PNG (a path, or bytes with an empty
  * path) written as an animated WebP, every frame at its own time, going
