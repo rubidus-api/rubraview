@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.27.0.exe              the viewer, as built
-dist/rubraview-v1.27.0/                 the release bundle
-dist/rubraview-v1.27.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.28.0.exe              the viewer, as built
+dist/rubraview-v1.28.0/                 the release bundle
+dist/rubraview-v1.28.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1280,7 +1280,10 @@ filename code page, the memory cap). Some worth knowing:
   insists on the card; `off` never uses it). It applies to both decoders:
   Windows' (Media Foundation) and, with Decoder set to `ffmpeg`, FFmpeg's,
   which then decodes through D3D11VA and has the card turn the pictures
-  into colour (FFmpeg decodes an HDR film, PQ or HLG, on the processor).
+  into colour. An HDR film (PQ or HLG) goes to the card too while **HDR
+  tone mapping** is on and the card gives it as 10-bit 4:2:0 (P010): the
+  tone mapping reads the card's picture there. With tone mapping off, or
+  another HDR format, FFmpeg decodes it on the processor.
   On the processor FFmpeg uses a thread a core. The information window's
   **Display** says which it is and, on the processor, why.
 - **Video** › **HDR tone mapping** (`bt2390`, the default, or `off`) brings

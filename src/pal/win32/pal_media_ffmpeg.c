@@ -111,7 +111,8 @@ typedef struct ff_media {
     /* RV-150 (D-180): an HDR film tone mapped to SDR by our shader, into the same shared slot textures */
     rubraview_hdr_pass_t *hdr_pass;          /* the decode thread's; NULL when not tone mapped */
     rubraview_tonemap_t tone;
-    int tone_format;                         /* the planes' AVPixelFormat the pass was set up for */
+    int tone_format;                         /* the film's AVPixelFormat (the decoder's own, in memory) */
+    int tone_test_p010;                      /* RV-151's VM check: RUBRAVIEW_HDR_P010=1 a texture array, 2 memory */
     bool tone_peak_read;                     /* the first picture's metadata was looked at */
     _Atomic(double) tone_peak;               /* what the caller is told */
     const char *hdr_why;                     /* HDR not tone mapped: why (an N_ literal) */
@@ -927,10 +928,16 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
             m->failure = rubraview_media_classify(true, true, false, fourcc);
             return false;
         }
-        /* RV-149: on the card where it is offered and can; an HDR film is decoded on the processor (the owner,
-           2026-10-21; RV-150 tone maps it on the card). Anything refused is decoded on the processor. */
+        /* RV-149: on the card where it is offered and can. RV-151 (D-181): an HDR film our shader tone maps too,
+           when the card gives it as P010 (10-bit 4:2:0); one shown as before stays on the processor. Anything
+           refused is decoded on the processor. */
         bool hdr = par->color_trc == AVCOL_TRC_SMPTE2084 || par->color_trc == AVCOL_TRC_ARIB_STD_B67;
-        m->hw_why = rubraview_ffmpeg_hw_refusal(m->gpu.mode, m->gpu.device != NULL, m->gpu.decoder_profiles, hdr, ff_hw_api());
+        if (hdr) ff_tone_setup(m, par);
+        m->hw_why = rubraview_ffmpeg_hw_refusal(m->gpu.mode, m->gpu.device != NULL, m->gpu.decoder_profiles,
+                                                !hdr ? RUBRAVIEW_HW_SDR : m->hdr_pass ? RUBRAVIEW_HW_HDR_TONED : RUBRAVIEW_HW_HDR_UNTONED,
+                                                ff_hw_api());
+        if (!m->hw_why && m->hdr_pass && par->format != AV_PIX_FMT_YUV420P10LE)
+            m->hw_why = N_("an HDR film other than 10-bit 4:2:0 is decoded on the processor");
         bool opened_video = false;
         if (!m->hw_why) {
             d->video = g_ff.avcodec_alloc_context3(decoder);
@@ -960,7 +967,6 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         }
         m->width = par->width;
         m->height = par->height;
-        if (hdr) ff_tone_setup(m, par);
         for (int i = 0; i < SLOT_COUNT; ++i) {
             m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)m->width, (size_t)m->height, 4u);
             if (!m->slots[i].pixels) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
@@ -1026,7 +1032,11 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         if (m->hdr_pass) {   /* RV-150 */
             in->hdr_tone_mapped = true;
             snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("our shader on the graphics card (Direct3D 11): BT.2390 tone mapping, BT.2020 to sRGB"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's"));
+            snprintf(in->path_handover, sizeof(in->path_handover), "%s",
+                     m->hw_attached ? N_("the card's picture (P010) copied on the card for the shader; a shared texture (keyed mutex), copied on the card into the page's")   /* RV-151 */
+                     : m->tone_test_p010 == 1 ? "RUBRAVIEW_HDR_P010: the planes packed as P010 into a texture array, then as the card's"
+                     : m->tone_test_p010 == 2 ? "RUBRAVIEW_HDR_P010: the planes packed as P010 in memory, then as the card's brought back"
+                     : N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's"));
         }
     }
     return true;
@@ -1153,11 +1163,12 @@ static void ff_light_levels(int type, const uint8_t *data, size_t size, double *
 
 static const char *ff_tone_open(ff_media_t *m, const AVCodecParameters *par) {
     if (m->gpu.tone_mapping <= RUBRAVIEW_TONEMAP_OFF) return N_("HDR tone mapping is off (Settings > Video)");
-    if (m->hw_attached) return N_("an HDR film decoded on the graphics card is not tone mapped yet");
     int bits = 0, sx = 0, sy = 0;
     if (!ff_tone_format(par->format, &bits, &sx, &sy)) return N_("this HDR film's picture format is not tone mapped");
     m->tone.bits = bits;
     m->tone_format = par->format;
+    const wchar_t *test = _wgetenv(L"RUBRAVIEW_HDR_P010");
+    m->tone_test_p010 = test && (test[0] == L'1' || test[0] == L'2') ? (int)(test[0] - L'0') : 0;
     const char *why = NULL;
     m->hdr_pass = rubraview_pal_hdr_pass_create(m->gpu.shader_device, &why);
     return m->hdr_pass ? NULL : why;
@@ -1180,11 +1191,18 @@ static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par) {
     atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
 }
 
-/* One HDR picture through the shader into the slot's texture. False: it goes the old way. */
+/* One HDR picture through the shader into the slot's texture: the decoder's planes in memory, or (RV-151) the
+   card's P010, in place or brought back. False: it goes the old way. */
 static bool ff_tone_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
-    int bits = 0, sx = 0, sy = 0;
-    if (f->format != m->tone_format || !ff_tone_format(f->format, &bits, &sx, &sy) || f->width != m->width || f->height != m->height)
+    if (f->width != m->width || f->height != m->height || !f->data[0]) return false;
+    int bits = 10, sx = 1, sy = 1;
+    bool card = f->format == AV_PIX_FMT_D3D11;
+    if (card) {
+        const AVHWFramesContext *frames = f->hw_frames_ctx ? (const AVHWFramesContext*)(const void*)f->hw_frames_ctx->data : NULL;
+        if (!frames || frames->sw_format != AV_PIX_FMT_P010 || !m->hw_device) return false;
+    } else if (f->format != AV_PIX_FMT_P010 && !ff_tone_format(f->format, &bits, &sx, &sy)) {
         return false;
+    }
     if (!m->tone_peak_read && m->tone.transfer == RUBRAVIEW_HDR_PQ) {   /* the film said nothing in its header */
         m->tone_peak_read = true;
         double max_cll = 0.0, mastering = 0.0;
@@ -1197,16 +1215,39 @@ static bool ff_tone_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
         atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
     }
     if (!ff_slot_texture(m, s, (ID3D11Device*)m->gpu.shader_device)) return false;
+    rubraview_tonemap_t tone = m->tone;
+    tone.bits = bits;
     rubraview_hdr_planes_t planes = {
         .data = { f->data[0], f->data[1], f->data[2] },
         .stride = { f->linesize[0], f->linesize[1], f->linesize[2] },
         .width = f->width, .height = f->height,
         .chroma_width = (f->width + (1 << sx) - 1) >> sx, .chroma_height = (f->height + (1 << sy) - 1) >> sy,
     };
-    if (planes.stride[0] <= 0 || planes.stride[1] <= 0 || planes.stride[2] <= 0) return false;
+    rubraview_hdr_p010_t p010 = {
+        .data = { f->data[0], f->data[1] }, .stride = { f->linesize[0], f->linesize[1] },
+        .width = f->width, .height = f->height,
+    };
+    if (card) {
+        p010.texture = (void*)f->data[0];
+        p010.slice = (uint32_t)(intptr_t)f->data[1];
+        p010.data[0] = p010.data[1] = NULL;
+    } else if (f->format != AV_PIX_FMT_P010 && (planes.stride[0] <= 0 || planes.stride[1] <= 0 || planes.stride[2] <= 0)) {
+        return false;
+    }
+    AVD3D11VADeviceContext *hw = card ? (AVD3D11VADeviceContext*)((AVHWDeviceContext*)(void*)m->hw_device->data)->hwctx : NULL;
     bool ok = false;
     if (IDXGIKeyedMutex_AcquireSync(s->mutex, 0, 500) == S_OK) {
-        ok = rubraview_pal_hdr_pass_run(m->hdr_pass, &planes, &m->tone, s->texture);
+        if (card) {
+            hw->lock(hw->lock_ctx);   /* FFmpeg's decoder uses the same context */
+            ok = rubraview_pal_hdr_pass_run_p010(m->hdr_pass, &p010, &tone, s->texture);
+            hw->unlock(hw->lock_ctx);
+        } else if (f->format == AV_PIX_FMT_P010) {
+            ok = rubraview_pal_hdr_pass_run_p010(m->hdr_pass, &p010, &tone, s->texture);
+        } else if (m->tone_test_p010) {
+            ok = rubraview_pal_hdr_pass_run_as_p010(m->hdr_pass, &planes, &tone, s->texture, m->tone_test_p010 == 2);
+        } else {
+            ok = rubraview_pal_hdr_pass_run(m->hdr_pass, &planes, &tone, s->texture);
+        }
         IDXGIKeyedMutex_ReleaseSync(s->mutex, 0);
     }
     return ok;
@@ -1306,9 +1347,9 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     const AVFrame *src = d->frame;
     m->slots[slot].on_gpu = false;
     if (m->hdr_pass && ff_tone_blit(m, d->frame, &m->slots[slot])) {
-        m->slots[slot].on_gpu = true;   /* RV-150 */
+        m->slots[slot].on_gpu = true;   /* RV-150; RV-151 the card's P010 where it is */
     } else if (d->frame->format == AV_PIX_FMT_D3D11) {
-        if (ff_vp_blit(m, d->frame, &m->slots[slot])) {
+        if (!m->hdr_pass && ff_vp_blit(m, d->frame, &m->slots[slot])) {   /* the video processor knows no PQ */
             m->slots[slot].on_gpu = true;
         } else {
             if (!d->swframe) d->swframe = g_ff.av_frame_alloc();
@@ -1316,6 +1357,7 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
             g_ff.av_frame_unref(d->swframe);
             if (g_ff.av_hwframe_transfer_data(d->swframe, d->frame, 0) < 0) return true;   /* this picture is dropped */
             src = d->swframe;
+            if (m->hdr_pass && ff_tone_blit(m, src, &m->slots[slot])) m->slots[slot].on_gpu = true;   /* RV-151 */
         }
     }
     if (!m->slots[slot].on_gpu) {

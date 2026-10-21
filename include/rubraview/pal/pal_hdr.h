@@ -34,6 +34,30 @@ rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const ch
 bool rubraview_pal_hdr_pass_run(rubraview_hdr_pass_t *pass, const rubraview_hdr_planes_t *planes,
                                 const rubraview_tonemap_t *tone, void *target);
 
+/**
+ * RV-151 (D-181): a P010 picture (ten bits high in each 16-bit sample; Y', then Cb Cr interleaved at half
+ * size), as FFmpeg's D3D11VA decoder gives it: a slice of a texture on the pass's device, copied on the card
+ * into the pass's own, or else the two planes in memory, uploaded.
+ */
+typedef struct rubraview_hdr_p010 {
+    void *texture;            /* an ID3D11Texture2D (DXGI_FORMAT_P010, maybe an array), or NULL for memory */
+    uint32_t slice;
+    const uint8_t *data[2];   /* in memory: Y', Cb Cr */
+    int32_t stride[2];
+    int32_t width, height;
+} rubraview_hdr_p010_t;
+
+/** False when this source cannot be read here (the card has no P010 views, another format, odd sizes):
+    the caller brings the picture to memory and tries again with `data`. */
+bool rubraview_pal_hdr_pass_run_p010(rubraview_hdr_pass_t *pass, const rubraview_hdr_p010_t *source,
+                                     const rubraview_tonemap_t *tone, void *target);
+
+/** The VM's check of the card's way (no decoder there): 10-bit 4:2:0 planes packed as P010 into slice 1 of
+    a two-slice texture, then run as the decoder's picture would be; `in_memory`: packed in memory instead,
+    as a picture brought back from the card is. False when it cannot. */
+bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *pass, const rubraview_hdr_planes_t *planes,
+                                        const rubraview_tonemap_t *tone, void *target, bool in_memory);
+
 void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *pass);
 
 #ifdef __cplusplus

@@ -52,6 +52,10 @@ double rubraview_hdr_peak(double max_cll, double mastering_max);
 /** One pixel: Y', Cb, Cr as codes normalised to the bit depth's largest (code / (2^bits - 1)), to sRGB 0..1. */
 void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, double cr, double out_rgb[3]);
 
+/** RV-151 (D-181): the factor that turns a 16-bit sample, as the shader reads it (0..1), back into a code:
+    FFmpeg's planar pictures keep a code in the sample's low bits, the card's P010 (and P016) in its high ones. */
+double rubraview_tonemap_sample_scale(int bits, bool high_bits);
+
 /** The setting's word: `[video] hdr_tone_mapping` 0 off, 1 bt2390. */
 #define RUBRAVIEW_TONEMAP_OFF 0
 #define RUBRAVIEW_TONEMAP_BT2390 1

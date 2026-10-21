@@ -361,11 +361,11 @@ double rubraview_media_redraw_wait(double seconds_since_render) {
 
 /* ---- RV-062: hardware decode ---- */
 
-const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, bool hdr, bool api) {
+const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, int32_t hdr, bool api) {
     if (mode <= 0 || mode > 2) return N_("GPU decoding is off (Settings > Video)");
     if (!has_device) return N_("no Direct3D 11 device for decoding was made");
     if (!rubraview_media_gpu_attach(mode, has_device, decoder_profiles)) return N_("the graphics card offers no video decoders");
-    if (hdr) return N_("an HDR film is decoded on the processor (its tone mapping runs on the card)");
+    if (hdr == RUBRAVIEW_HW_HDR_UNTONED) return N_("an HDR film that is not tone mapped is decoded on the processor");
     if (!api) return N_("these FFmpeg DLLs cannot decode on the graphics card");
     return NULL;
 }

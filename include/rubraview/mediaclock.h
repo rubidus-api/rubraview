@@ -75,9 +75,13 @@ bool rubraview_media_gpu_attach(int32_t mode, bool has_device, uint32_t decoder_
 /**
  * RV-149: why FFmpeg does not decode a film on the graphics card (an English N_ literal, translated where
  * shown), or NULL when it may: [video] hardware_decode `mode` off, no decode device, no decoders offered
- * (mode 1), an HDR film (`hdr`: PQ or HLG, kept on the processor), or DLLs without the hardware calls.
+ * (mode 1), an HDR film that is not tone mapped (`hdr`, below), or DLLs without the hardware calls.
+ * RV-151 (D-181): an HDR film our shader tone maps goes to the card as well; one shown as before stays.
  */
-const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, bool hdr, bool api);
+#define RUBRAVIEW_HW_SDR 0           /* not an HDR film */
+#define RUBRAVIEW_HW_HDR_TONED 1     /* PQ or HLG, tone mapped by our shader */
+#define RUBRAVIEW_HW_HDR_UNTONED 2   /* PQ or HLG, not tone mapped: kept on the processor */
+const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, int32_t hdr, bool api);
 
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds);
 

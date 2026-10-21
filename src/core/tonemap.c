@@ -107,3 +107,8 @@ void rubraview_tonemap_pixel(const rubraview_tonemap_t *t, double y, double cb, 
     out_rgb[1] = srgb_encode(g7);
     out_rgb[2] = srgb_encode(b7);
 }
+
+double rubraview_tonemap_sample_scale(int bits, bool high_bits) {
+    if (!high_bits || bits < 8 || bits > 16) return 65535.0;
+    return 65535.0 / (double)(1 << (16 - bits));
+}
