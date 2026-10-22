@@ -1971,3 +1971,14 @@ Do not store credentials, private infrastructure details, personal data, private
   - Kept from B: the child's error text is read only within its field (`%.*s`), so a plug-in child that leaves it unterminated cannot make the viewer read past it.
   - Learned on the way, for whoever looks again: frei0r's own 3.6.0 win64 zip is a debug build (every filter imports `vcruntime140d.dll`), so it runs only where Visual Studio is installed.
 - Consequences: RFC-0009 §3 withdrawn; C (G'MIC) and D (FFmpeg's filters) go on.
+
+## 2026-10-22: D-190 Internet radio in playlists (RV-157)
+
+- Status: Accepted (owner 2026-10-22: "mms 라디오 재생 기능도 포함시켜 주세요. mms 주소가 적힌 플레이리스트를 재생할 수 있게 ... 주소에 대해 제목을 따로 지정할 수 있는 목록 형식"; the shape is the recommendation, approved in advance by the standing "다 추천대로 진행").
+- Decision:
+  - A playlist entry that is an address (`http`, `https`, `mms`, `mmsh`, `mmst`; `stream.h`) is a station: a media page whose path is the address and whose name is the title the list gives it (else host and path, without a user, password or query). The list format with titles is Extended M3U (`#EXTINF:-1,Title`), already read and written; `.pls` (`FileN=`/`TitleN=`) and `.asx` / `.wax` / `.wvx` (each entry's first `<ref href>` and its `<title>`) are read. A list not in UTF-8 is read in its guessed code page. Save the list keeps addresses and titles.
+  - FFmpeg alone plays a station (Media Foundation refuses addresses in `rubraview_pal_media_open`): `protocol_whitelist` `http,https,tcp,tls,crypto,mmsh,mmst` (no `file`, `pipe`, `concat`, `subfile`, whatever a redirect names), 8 s to answer, `rw_timeout` 10 s, HTTP reconnects, an interrupt callback on the player's quit flag; `mms://` is tried as `mmsh://` then `mmst://` (FFmpeg has no `mms`). A station is live: no length, no seeking, nothing opened ahead of it, no tags, words or subtitles read, no second connection for subtitles.
+  - It is connected to off the main thread (`station_job_*`): the title says "connecting...", turning away lets the job go and its thread closes whatever it opens.
+  - Nothing on the disk or in the shell is asked about a station: thumbnails, the shell's picture and Explorer's reveal refuse addresses in the PAL.
+  - The FFmpeg messages that still named Settings › Video › Import (gone in 1.33.0) name Settings › External.
+- Consequences: `test_playlist` (stations in the three formats, the scheme rules, mms's pair), `test_pagesource` (stations kept in order by title), fuzz targets `pls` and `asx`. Seen on the VM with a live MP3 on the loopback: plays with "live" in the title, the window never hung while a refused mms and a black-holed address were tried, a redirect to a playable local MP3 was refused. MMS itself could not be tried against a server (none can be run here).

@@ -625,6 +625,7 @@ typedef struct app_state {
        music of §3.14.6. It is the same player, moved out of the page's
        hands rather than opened again. */
     rubraview_media_t         *bgm_media;
+    struct station_job        *station_job;   /* RV-157: a station being connected to, off this thread */
     rubraview_media_info_t     bgm_info;
     int32_t                    bgm_page;
     double                     bgm_position;
@@ -1585,6 +1586,7 @@ static DWORD WINAPI page_job_run(LPVOID param) {
 
 static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes);
 static void update_window_title(app_state_t *app);
+static int32_t station_connecting_page(const app_state_t *app);
 
 /* Each pass: a far page that has arrived becomes its texture. */
 static void page_job_poll(app_state_t *app) {
@@ -2345,11 +2347,15 @@ static void update_window_title(app_state_t *app) {
                also how a frame step can be checked from outside. */
             char at[32], total[32];
             u8str_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
-            u8str_t t = rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
+            u8str_t t = app->media_info.live ? TU8("live")   /* RV-157 */
+                      : rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
             n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s%s ",
                          (int)a.len, a.ptr, (int)t.len, t.ptr,
                          app->media_paused ? " paused" : "",
                          app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
+            if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
+        } else if (!app->media && page == station_connecting_page(app)) {
+            n = snprintf(title + used, sizeof(title) - used, "%s ", T("connecting..."));   /* RV-157 */
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         } else if (text_encoding_shown(app)) {
             /* RFC-0005 §6: what the text is read as. */
@@ -2389,7 +2395,10 @@ static void update_precache(app_state_t *app);
 static void media_after_end(app_state_t *app);
 static void ab_edit_close(app_state_t *app);
 
+static void station_job_leave(app_state_t *app);
+
 static void media_close(app_state_t *app) {
+    station_job_leave(app);   /* RV-157: a station still connecting belongs to the page being left */
     /* §3.14.6: a track that is still playing does not die because its
        page is leaving — it becomes the background music. This is here
        rather than in the caller so that no path can forget it. */
@@ -3192,11 +3201,93 @@ static void bgm_tick(app_state_t *app) {
     }
 }
 
+static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview_media_open_result_t opened,
+                        rubraview_media_failure_t why);
+
+/* ---- RV-157: a station connected to off the main thread ----
+   A station that does not answer holds FFmpeg for up to its time limit; the window does not wait with it. The
+   job is the page's: turning away lets it go, and a player it opens after that is closed by its own thread. */
+typedef struct station_job {
+    HANDLE thread;
+    volatile LONG state;              /* 0 connecting, 1 done (the main thread's to take), 2 let go (the thread's to close) */
+    int32_t page;
+    rubraview_window_t *wake;
+    rubraview_media_open_result_t result;
+    char path[RUBRAVIEW_STREAM_URL_MAX];
+} station_job_t;
+
+static DWORD WINAPI station_job_run(LPVOID arg) {
+    station_job_t *job = (station_job_t*)arg;
+    job->result = rubraview_pal_media_open((u8str_t){ .ptr = job->path, .len = strlen(job->path) }, RUBRAVIEW_BACKEND_FFMPEG, NULL);
+    if (InterlockedCompareExchange(&job->state, 1, 0) == 2) {
+        if (job->result.media) rubraview_pal_media_close(job->result.media);
+        free(job);
+        return 0;
+    }
+    rubraview_pal_window_wake(job->wake);
+    return 0;
+}
+
+static void station_job_leave(app_state_t *app) {
+    station_job_t *job = app->station_job;
+    if (!job) return;
+    app->station_job = NULL;
+    HANDLE thread = job->thread;
+    if (InterlockedCompareExchange(&job->state, 2, 0) == 1) {   /* it had finished: closed here */
+        WaitForSingleObject(thread, INFINITE);
+        if (job->result.media) rubraview_pal_media_close(job->result.media);
+        free(job);
+    }
+    CloseHandle(thread);   /* otherwise the thread closes what it opens, and frees the job */
+}
+
+static void station_job_start(app_state_t *app, int32_t index, u8str_t path) {
+    station_job_leave(app);
+    station_job_t *job = (station_job_t*)calloc(1, sizeof(*job));
+    if (job && path.len < sizeof(job->path)) {
+        memcpy(job->path, path.ptr, path.len);
+        job->page = index;
+        job->wake = app->window;
+        job->thread = CreateThread(NULL, 0, station_job_run, job, 0, NULL);
+    }
+    if (!job || !job->thread) {
+        free(job);
+        media_adopt(app, index, path, (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION },
+                    RUBRAVIEW_MEDIA_FAIL_STATION);
+        return;
+    }
+    app->station_job = job;
+    osd_say(app, TU8("connecting to the station..."));
+}
+
+static int32_t station_connecting_page(const app_state_t *app) {
+    return app->station_job ? app->station_job->page : -1;
+}
+
+/* Once a pass: a station that has answered (or not) becomes its page's player, when its page is still on screen. */
+static void station_job_poll(app_state_t *app) {
+    station_job_t *job = app->station_job;
+    if (!job || InterlockedCompareExchange(&job->state, 1, 1) != 1) return;
+    app->station_job = NULL;
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    rubraview_media_open_result_t opened = job->result;
+    int32_t page = job->page;
+    free(job);
+    if (page != current_page_index(app) || app->media || (size_t)page >= page_count(app)) {
+        if (opened.media) rubraview_pal_media_close(opened.media);
+        return;
+    }
+    media_adopt(app, page, app->source.pages[page].path, opened, RUBRAVIEW_MEDIA_FAIL_STATION);
+    update_window_title(app);
+}
+
 /* Opens the video when the page on screen is one, and closes the old one. */
 static void media_prepare(app_state_t *app) {
     text_prepare(app);   /* RFC-0005: a text page is read here too */
     int32_t index = current_page_index(app);
     if (app->media && index == app->media_page) return;
+    if (!app->media && app->station_job && app->station_job->page == index) return;   /* RV-157: still connecting */
 
     media_close(app);   /* which hands a playing track to the background */
 
@@ -3211,6 +3302,17 @@ static void media_prepare(app_state_t *app) {
     if (!is_media_path(path) || app->pages[index].skipped) {
         /* A picture or a comic makes no sound: the music has the floor. (D-98: nor does a film the layout leaves out.) */
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
+        return;
+    }
+
+    /* RV-157: a station is FFmpeg's alone, connected to in the background */
+    if (is_station_path(path)) {
+        if (!rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {   /* (this also loads FFmpeg here, not on the job's thread) */
+            media_adopt(app, index, path, (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG },
+                        RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG);
+            return;
+        }
+        station_job_start(app, index, path);
         return;
     }
 
@@ -3239,13 +3341,6 @@ static void media_prepare(app_state_t *app) {
                             : app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits : RUBRAVIEW_HDR_DEFAULT_PEAK;
         gpu.hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
     }
-    if (is_station_path(path)) {
-        /* RV-157: a station is FFmpeg's alone; what it says when it cannot is about the station */
-        bool ffmpeg = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
-        if (ffmpeg) opened = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
-        why = !ffmpeg ? RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG : RUBRAVIEW_MEDIA_FAIL_STATION;
-        count = 0;
-    }
     for (size_t i = 0; i < count; ++i) {
         opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
@@ -3266,6 +3361,12 @@ static void media_prepare(app_state_t *app) {
             rubraview_pal_media_close(other.media);
         }
     }
+    media_adopt(app, index, path, opened, why);
+}
+
+/* What was opened for page `index` becomes the page's player; nothing opened, and it is said why and passed. */
+static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview_media_open_result_t opened,
+                        rubraview_media_failure_t why) {
     if (!opened.media) {
         osd_say(app, why >= RUBRAVIEW_MEDIA_FAIL_STATION ? rubraview_media_failure_text(why)
                                                           : rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
@@ -29975,6 +30076,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             app.media_skip_pending = false;
             next_spread(&app);
         }
+        station_job_poll(&app);
         media_tick(&app);
         bgm_tick(&app);
 

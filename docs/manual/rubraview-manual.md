@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.33.0.exe              the viewer, as built
-dist/rubraview-v1.33.0/                 the release bundle
-dist/rubraview-v1.33.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.34.0.exe              the viewer, as built
+dist/rubraview-v1.34.0/                 the release bundle
+dist/rubraview-v1.34.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -62,6 +62,27 @@ place of what was open.
 A playlist file (`.m3u8`, `.m3u`, or `.rvlist`: one path a line) opens
 as the files it names, in its order; a path that is not whole is taken
 from the playlist's folder, and a file that is not there is left out.
+
+**Internet radio.** A playlist can also name radio stations by their
+address, each with its own title, and then it is a list of stations to
+choose from (`P` shows it). Write it as an Extended M3U, the format most
+players read:
+
+    #EXTM3U
+    #EXTINF:-1,My station
+    http://radio.example.com:8000/live
+    #EXTINF:-1,An old Windows Media station
+    mms://wm.example.com/live
+
+`-1` means a live stream with no length. `.pls` (`File1=`, `Title1=`)
+and Windows Media's `.asx` lists, as station sites hand them out, open
+too. Stations are played by FFmpeg (Settings › External); `http`,
+`https` and `mms` addresses are taken (MMS is tried over HTTP, then
+TCP). A station cannot be wound, and one that does not answer is given
+up after 8 seconds. **Save** in the list window writes the stations and
+their titles as an `.m3u8`. Playing a station connects to it over the
+network; Rubraview lets FFmpeg reach only network addresses for it,
+never a file on your PC.
 
 On the command line, `--sort=natural|lexical|modified|created|size|random`
 with `--descending` or `--ascending` orders this run's folders whatever
