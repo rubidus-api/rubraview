@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <wctype.h>
+#include "rubraview/stream.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/path.h"
 
@@ -1710,6 +1711,7 @@ bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
 bool rubraview_pal_shell_reveal(u8str_t path) {
     WCHAR wide[MAX_PATH * 2];
     if (path.len == 0 || path.len > INT_MAX) return false;
+    if (rubraview_stream_is_address(path)) return false;   /* RV-157: a station has no folder */
     int n = MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
     if (n <= 0) return false;
     wide[n] = L'\0';

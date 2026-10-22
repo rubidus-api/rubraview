@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rubraview/stream.h"
 #include "rubraview/pal/pal_thumbs.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/pal/pal_time.h"
@@ -84,6 +85,7 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t 
     char narrow[MAX_PATH * 4];
     WCHAR wide[MAX_PATH * 2];
     if (path.len == 0 || path.len >= sizeof(narrow)) return NULL;
+    if (rubraview_stream_is_address(path)) return NULL;   /* RV-157: a station is not the shell's to look at */
     memcpy(narrow, path.ptr, path.len);
     narrow[path.len] = '\0';
     /* The shell's parser, unlike CreateFile, does not take '/' for a
@@ -484,7 +486,7 @@ void rubraview_pal_thumbs_generation(rubraview_thumbs_t *t, uint32_t generation)
 
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *t, uint32_t generation, size_t index,
                                   bool folder, double aspect, u8str_t path) {
-    if (!t) return false;
+    if (!t || rubraview_stream_is_address(path)) return false;   /* RV-157: no picture made of a station */
     AcquireSRWLockExclusive(&t->lock);
     bool ok = rubraview_thumbq_push(&t->queue, generation, index, folder, aspect, path);
     ReleaseSRWLockExclusive(&t->lock);

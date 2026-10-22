@@ -1,4 +1,5 @@
 #include "rubraview/pagesource.h"
+#include "rubraview/stream.h"
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
 #include "rubraview/utf8.h"
@@ -61,6 +62,14 @@ rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena
             .path = index.paths[i],
             .entry_index = 0,
         };
+        /* RV-157: a station is shown by the title it came with (its entry's name), else by its address */
+        if (rubraview_stream_is_address(index.paths[i])) {
+            ref.name = rubraview_stream_display_name(index.paths[i]);
+            for (size_t k = 0; k < listing->count; ++k) {
+                const rubraview_fs_entry_t *e = &listing->entries[k];
+                if (e->path.ptr == index.paths[i].ptr && e->name.len > 0) { ref.name = e->name; break; }
+            }
+        }
         if (!ref_buf_push(arena, &buf, ref)) break;
     }
 

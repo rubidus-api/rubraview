@@ -95,6 +95,7 @@
 #include "rubraview/notices.h"
 #include <time.h>
 #include "rubraview/playlist.h"
+#include "rubraview/stream.h"
 #include "rubraview/help.h"
 #include "rubraview/default_keymap.h"
 #include "rubraview/pagesource.h"
@@ -138,6 +139,8 @@
 #define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
 #define AUDIO_FILTER "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
 #define MEDIA_FILTER VIDEO_FILTER ";" AUDIO_FILTER
+/* Playlists; RV-157: and the lists internet radio comes in (.pls, and Windows Media's .asx, .wax, .wvx). */
+#define LIST_FILTER "*.m3u8;*.m3u;*.rvlist;*.pls;*.asx;*.wax;*.wvx"
 /* RFC-0005: text files are pages too (the owner, 2026-10-17: .txt, .log, .nfo, .md). */
 #define TEXT_FILTER "*.txt;*.log;*.nfo;*.md"
 /* 1.25.0 (owner, 2026-10-20: "텍스트 뷰어를 사용할지 안할지 ... 텍스트 파일을 목록 등에서도 받지 않고 보여주지도 않음"):
@@ -1510,9 +1513,16 @@ static void unload_all_pages(app_state_t *app) {
     }
 }
 
-/* Whether a page is a video, opened by the media PAL rather than WIC. */
+/* Whether a page is a video, opened by the media PAL rather than WIC. RV-157: an internet radio
+   station is one too, played by FFmpeg alone. */
 static bool is_media_path(u8str_t path) {
-    return path.len > 0 && rubraview_glob_match_list(rubraview_path_basename(path), U8(MEDIA_FILTER));
+    return path.len > 0 && (rubraview_stream_is_address(path) ||
+                            rubraview_glob_match_list(rubraview_path_basename(path), U8(MEDIA_FILTER)));
+}
+
+/* RV-157: a page that is an internet radio address: nothing on the disk is asked about it. */
+static bool is_station_path(u8str_t path) {
+    return rubraview_stream_is_address(path);
 }
 
 /* ---- a page's bytes, and far pages off the main thread ---- */
@@ -3229,6 +3239,13 @@ static void media_prepare(app_state_t *app) {
                             : app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits : RUBRAVIEW_HDR_DEFAULT_PEAK;
         gpu.hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
     }
+    if (is_station_path(path)) {
+        /* RV-157: a station is FFmpeg's alone; what it says when it cannot is about the station */
+        bool ffmpeg = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+        if (ffmpeg) opened = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
+        why = !ffmpeg ? RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG : RUBRAVIEW_MEDIA_FAIL_STATION;
+        count = 0;
+    }
     for (size_t i = 0; i < count; ++i) {
         opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
@@ -3250,7 +3267,8 @@ static void media_prepare(app_state_t *app) {
         }
     }
     if (!opened.media) {
-        osd_say(app, rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
+        osd_say(app, why >= RUBRAVIEW_MEDIA_FAIL_STATION ? rubraview_media_failure_text(why)
+                                                          : rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
         app->notice_seconds = MEDIA_NOTICE_SECONDS;   /* long enough to read the HEVC line */
         app->pages[index].failed = true;
         app->media_skip_pending = true;   /* D-9: say so, then move on */
@@ -3297,8 +3315,9 @@ static void media_prepare(app_state_t *app) {
     if (opened.info.has_audio) {
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_SOUNDS, bgm_pause_for_sound(app)));
     }
-    if (!opened.info.has_video) music_load(app, path);
-    subtitle_load(app, path);
+    if (!opened.info.has_video && !opened.info.live) music_load(app, path);   /* RV-157: a station has no tags or words to read */
+    if (!opened.info.live) subtitle_load(app, path);
+    if (opened.info.live) osd_say(app, TU8("live: an internet radio station"));
     if (app->subtitle.count > 0) {
         char line[256];
         int n = snprintf(line, sizeof(line), T("subtitles: %.*s"),
@@ -3638,6 +3657,7 @@ static void music_promote_next(app_state_t *app) {
    start it when it is due, and hold both at the levels the plan says. */
 static void music_transition_tick(app_state_t *app) {
     if (!app->media || app->media_info.has_video || app->media_paused) return;
+    if (app->media_info.live) return;   /* RV-157: a station never ends on its own, so nothing follows it in time */
 
     rubraview_track_change_t how = {
         .gapless = rubraview_settings_get(&app->settings, U8("audio"), U8("gapless")) != 0.0,
@@ -3651,7 +3671,9 @@ static void music_transition_tick(app_state_t *app) {
     rubraview_track_plan_t plan = rubraview_track_plan(how, app->media_position,
                                                        app->media_info.duration_seconds, next >= 0);
 
-    if (plan.open_next && !app->next_media && next >= 0) {
+    if (plan.open_next && !app->next_media && next >= 0 && is_station_path(app->source.pages[next].path)) {
+        app->next_page = next;   /* RV-157: a station is not opened ahead; it is joined when it is reached */
+    } else if (plan.open_next && !app->next_media && next >= 0) {
         u8str_t path = app->source.pages[next].path;
         rubraview_media_backend_t order[2];
         size_t count = rubraview_media_backend_order(app->media_preferred,
@@ -3702,6 +3724,7 @@ static void media_ab_check(app_state_t *app) {
 
 static void media_seek_to(app_state_t *app, double seconds) {
     if (!app->media) return;
+    if (app->media_info.live) { osd_say(app, TU8("a live station cannot be wound")); return; }   /* RV-157 */
     double duration = app->media_info.duration_seconds;
     if (duration > 0.0 && seconds > duration) seconds = duration;
     if (seconds < 0.0) seconds = 0.0;
@@ -4897,7 +4920,7 @@ static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history)
     }
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     char kinds_buf[1024];
-    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;*.m3u8;*.m3u;*.rvlist"));
+    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER));
     /* A RAR set is one book (owner, 2026-10-01): its first volume stands for it. */
     if (!in_book) {
         size_t kept = 0;
@@ -6432,6 +6455,11 @@ static void list_save(app_state_t *app) {
     list.entries = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
     bool whole = list_saves_whole_paths(app);
     for (size_t i = 0; i < count; ++i) {
+        if (is_station_path(app->source.pages[i].path)) {   /* RV-157: the address as it is, with its title */
+            list.entries[i] = (rubraview_playlist_entry_t){ .path = app->source.pages[i].path, .duration_seconds = -1.0,
+                                                            .title = app->source.pages[i].name };
+            continue;
+        }
         u8str_t path = rubraview_pal_fs_absolute(app->arena, app->source.pages[i].path);
         list.entries[i] = (rubraview_playlist_entry_t){ .path = whole ? path : rubraview_path_relative(app->arena, dir, path),
                                                         .duration_seconds = -1.0 };
@@ -6452,7 +6480,7 @@ static void list_save(app_state_t *app) {
 }
 
 static void list_load(app_state_t *app) {
-    static const rubraview_file_filter_t FILTERS[] = { { "Lists (*.m3u8;*.m3u;*.rvlist)", "*.m3u8;*.m3u;*.rvlist" } };
+    static const rubraview_file_filter_t FILTERS[] = { { "Lists (*.m3u8;*.m3u;*.pls;*.asx;*.rvlist)", LIST_FILTER } };
     rubraview_file_dialog_opts_t opts = {
         .title = T("Open a list"), .filters = FILTERS, .filter_count = 1,
         .parent_window_handle = rubraview_pal_window_native_handle(app->window),
@@ -7137,7 +7165,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             /* RV-107: Windows' own dialog in place of the picker. */
             const rubraview_file_filter_t FILTERS[] = {
                 { T("Pictures, films, music, books"),
-                  IMAGE_FILTER ";" MEDIA_FILTER ";" TEXT_FILTER ";" ARCHIVE_FILTER ";*.cue;*.m3u8;*.m3u;*.rvlist" },
+                  IMAGE_FILTER ";" MEDIA_FILTER ";" TEXT_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER },
                 { T("All files"), "*.*" } };
             rubraview_file_dialog_opts_t opts = {
                 .title = T("Open"), .filters = FILTERS, .filter_count = 2, .allow_multi = true,
@@ -13898,6 +13926,9 @@ static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, si
     /* The folder of the first one is where Rename, Delete and a batch
        run work; a set of files has no folder of its own. */
     app->source_dir = rubraview_path_dirname(entries[0].path);
+    for (size_t i = 0; i < count; ++i) {   /* RV-157: a station has no folder; the first file's */
+        if (!is_station_path(entries[i].path)) { app->source_dir = rubraview_path_dirname(entries[i].path); break; }
+    }
     app->resume_offer = false;
     app->picker_open = false;
     int32_t first = start.len > 0 ? rubraview_page_source_find(&app->source, start) : -1;
@@ -13932,6 +13963,7 @@ static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t cou
 
 static bool path_is_listed_kind(u8str_t path) {
     char kinds_buf[1024];
+    if (is_station_path(path)) return true;   /* RV-157 */
     return rubraview_glob_match_list(rubraview_path_basename(path), kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER));
 }
 
@@ -26897,23 +26929,50 @@ static void folder_relist(app_state_t *app) {
 /* A playlist file (`.m3u8`, `.m3u`, `.rvlist`): its files, in its order.
    A path that is not whole is from the playlist's own folder. */
 static bool path_is_playlist(u8str_t path) {
-    return rubraview_glob_match_list(rubraview_path_basename(path), U8("*.m3u8;*.m3u;*.rvlist"));
+    return rubraview_glob_match_list(rubraview_path_basename(path), U8(LIST_FILTER));
+}
+
+/* RV-157: a list's text as UTF-8 — a .pls or .m3u from a station's site is often in its country's code page,
+   or UTF-16. Into the arena; empty when it cannot be read. */
+static u8str_t playlist_text_utf8(app_state_t *app, u8str_t raw) {
+    size_t bom = 0;
+    char tag[96];
+    const char *lang = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
+    rubraview_textenc_t enc = rubraview_textenc_guess((const uint8_t*)raw.ptr, raw.len, lang, &bom);
+    if (enc == RUBRAVIEW_TEXTENC_UTF8) return raw;   /* a BOM is the parser's to pass over */
+    char *text = NULL;
+    size_t len = 0;
+    if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
+        text = rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.len - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, &len);
+    } else {
+        text = rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.len - bom, rubraview_textenc_codepage(enc), &len);
+    }
+    if (!text) return raw;
+    u8str_t kept = app_keep(app, (u8str_t){ .ptr = text, .len = len });
+    free(text);
+    return kept;
 }
 
 static void open_playlist(app_state_t *app, u8str_t path) {
     u8str_t text = rubraview_pal_fs_read_file(app->arena, path, 8u * 1024u * 1024u);
     if (text.len == 0) { osd_say(app, TU8("the playlist is empty or could not be read")); return; }
-    rubraview_playlist_t list = rubraview_path_has_ext(rubraview_path_basename(path), ".rvlist")
-                              ? rubraview_playlist_parse_rvlist(app->arena, text)
-                              : rubraview_playlist_parse_m3u8(app->arena, text);
+    rubraview_playlist_t list = rubraview_playlist_parse_named(app->arena, rubraview_path_basename(path), playlist_text_utf8(app, text));
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, list.count ? list.count : 1, sizeof(rubraview_fs_entry_t));
     if (list.count == 0 || !proven_is_ok(res.err)) { osd_say(app, TU8("the playlist names no file")); return; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     u8str_t dir = rubraview_path_dirname(path);
-    size_t n = 0, missing = 0;
+    size_t n = 0, missing = 0, stations = 0;
     for (size_t i = 0; i < list.count; ++i) {
         u8str_t item = list.entries[i].path;
         if (item.len == 0) continue;
+        /* RV-157: an internet radio station, by the title the list gives it */
+        if (is_station_path(item)) {
+            u8str_t title = list.entries[i].title;
+            entries[n++] = (rubraview_fs_entry_t){ .name = title.len > 0 ? title : rubraview_stream_display_name(item), .path = item };
+            stations++;
+            continue;
+        }
+        if (rubraview_glob_match(item, U8("*://*"))) { missing++; continue; }   /* another kind of address: not ours to open */
         bool whole = item.ptr[0] == '/' || item.ptr[0] == '\\' || (item.len > 2 && item.ptr[1] == ':');
         if (!whole) item = rubraview_path_join(app->arena, dir, item);
         rubraview_fs_entry_t entry;
@@ -26925,11 +26984,16 @@ static void open_playlist(app_state_t *app, u8str_t path) {
         entries[n++] = entry;
     }
     if (n == 0) { osd_say(app, TU8("none of the playlist's files is there")); return; }
-    char line[96];
-    if (missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files, %zu not found"), n, missing);
+    char line[128];
+    if (stations > 0 && missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files and stations (%zu stations), %zu not found"), n, stations, missing);
+    else if (stations > 0) snprintf(line, sizeof(line), T("playlist: %zu files and stations (%zu stations)"), n, stations);
+    else if (missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files, %zu not found"), n, missing);
     else snprintf(line, sizeof(line), T("playlist: %zu files"), n);
     open_set_ordered(app, entries, n, cstr(line), true, (u8str_t){ .ptr = "", .len = 0 });
-    if (page_count(app) > 0) recent_note(app, path);
+    if (page_count(app) > 0) {
+        if (stations > 0) app->source_dir = dir;   /* a station has no folder: the list's own is where Rename and the rest look */
+        recent_note(app, path);
+    }
 }
 
 /* Finishes opening whichever source was just built: allocate the page
@@ -27006,6 +27070,14 @@ static void open_path(app_state_t *app, u8str_t path) {
         u8str_t audio = cue_audio_path(app, path);
         if (audio.len == 0) { osd_say(app, TU8("the cue sheet's audio file is not beside it")); return; }
         path = app_keep(app, audio);
+    }
+    if (is_station_path(path)) {   /* RV-157: an address given on its own (the command line): a list of one station */
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, 1, sizeof(rubraview_fs_entry_t));
+        if (!proven_is_ok(res.err)) return;
+        rubraview_fs_entry_t *one = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+        *one = (rubraview_fs_entry_t){ .name = rubraview_stream_display_name(path), .path = path };
+        open_set_ordered(app, one, 1, TU8("live: an internet radio station"), true, (u8str_t){ .ptr = "", .len = 0 });
+        return;
     }
     rubraview_fs_entry_t entry;
     if (!rubraview_pal_fs_stat(app->arena, path, &entry)) return;

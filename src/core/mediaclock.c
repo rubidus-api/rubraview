@@ -311,7 +311,7 @@ u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t ref
     if (jxl_state == 1) return TU8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)");
     if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) return TU8("JPEG XL: the FFmpeg 9.0 DLLs beside the program could not be loaded (all five are needed)");
     if (refusal == RUBRAVIEW_FFMPEG_OTHER_VERSION) return TU8("JPEG XL: the FFmpeg DLLs beside the program are not 9.0 (avcodec-63) and were not loaded");
-    return TU8("JPEG XL: no decoder for it in this Windows, and no FFmpeg (Settings › Video › Import)");
+    return TU8("JPEG XL: no decoder for it in this Windows, and no FFmpeg (Settings › External)");
 }
 
 u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
@@ -319,12 +319,16 @@ u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
         case RUBRAVIEW_MEDIA_FAIL_FILE:
             return TU8("could not read that file");
         case RUBRAVIEW_MEDIA_FAIL_CONTAINER:
-            return TU8("cannot play this kind of file — FFmpeg's DLLs would open it (Settings › Video › Import)");
+            return TU8("cannot play this kind of file — FFmpeg's DLLs would open it (Settings › External)");
         case RUBRAVIEW_MEDIA_FAIL_CODEC:
-            return TU8("cannot decode this video — FFmpeg's DLLs would play it (Settings › Video › Import)");
+            return TU8("cannot decode this video — FFmpeg's DLLs would play it (Settings › External)");
         case RUBRAVIEW_MEDIA_FAIL_HEVC:
             return TU8("HEVC video needs the \"HEVC Video Extensions\" ($0.99, Microsoft Store) "
-                      "or FFmpeg's DLLs (Settings › Video)");
+                      "or FFmpeg's DLLs (Settings › External)");
+        case RUBRAVIEW_MEDIA_FAIL_STATION:
+            return TU8("the station did not answer — the address, the network, or a station that has closed");
+        case RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG:
+            return TU8("internet radio is played by FFmpeg, which is not here (Settings › External)");
         case RUBRAVIEW_MEDIA_OPENED:
         default:
             return U8("");
@@ -333,6 +337,8 @@ u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
 
 static int failure_rank(rubraview_media_failure_t f) {
     switch (f) {
+        case RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG: return 6;
+        case RUBRAVIEW_MEDIA_FAIL_STATION:   return 5;
         case RUBRAVIEW_MEDIA_FAIL_HEVC:      return 4;
         case RUBRAVIEW_MEDIA_FAIL_CODEC:     return 3;
         case RUBRAVIEW_MEDIA_FAIL_CONTAINER: return 2;

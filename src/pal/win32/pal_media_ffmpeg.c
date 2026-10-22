@@ -25,6 +25,7 @@
 #include "rubraview/tonemap.h"
 #include "rubraview/pal/pal_hdr.h"
 #include "rubraview/export.h"
+#include "rubraview/stream.h"
 
 /*
  * The FFmpeg backend (D-8, RV-016). The DLLs are loaded at run time and
@@ -118,6 +119,9 @@ typedef struct ff_media {
     bool tone_peak_read;                     /* the first picture's metadata was looked at */
     _Atomic(double) tone_peak;               /* what the caller is told */
     const char *hdr_why;                     /* HDR not tone mapped: why (an N_ literal) */
+    /* RV-157: an internet radio station, opened over the network */
+    bool station;
+    ULONGLONG open_deadline_ms;              /* while opening one: when to give up (the decode thread's own) */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -140,6 +144,10 @@ typedef struct ff_api {
     void (*avio_context_free)(AVIOContext**);
     void *(*av_malloc)(size_t);
     void (*av_free)(void*);
+    /* RV-157, stations; any may be missing, and then a station is not opened */
+    int (*avformat_network_init)(void);
+    int (*av_dict_set)(AVDictionary**, const char*, const char*, int);
+    void (*av_dict_free)(AVDictionary**);
     /* avcodec */
     unsigned (*avcodec_version)(void);
     const AVCodec *(*avcodec_find_decoder)(enum AVCodecID);
@@ -306,6 +314,7 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND_OPTIONAL(util, av_chroma_location_name); BIND_OPTIONAL(util, av_channel_layout_describe);
     BIND_OPTIONAL(fmt, avformat_alloc_context); BIND_OPTIONAL(fmt, avio_alloc_context);
     BIND_OPTIONAL(fmt, avio_context_free); BIND_OPTIONAL(util, av_malloc); BIND_OPTIONAL(util, av_free);
+    BIND_OPTIONAL(fmt, avformat_network_init); BIND_OPTIONAL(util, av_dict_set); BIND_OPTIONAL(util, av_dict_free);
     BIND_OPTIONAL(util, av_hwdevice_ctx_alloc); BIND_OPTIONAL(util, av_hwdevice_ctx_init);
     BIND_OPTIONAL(util, av_buffer_ref); BIND_OPTIONAL(util, av_buffer_unref);
     BIND_OPTIONAL(util, av_hwframe_transfer_data); BIND_OPTIONAL(codec, avcodec_default_get_format);
@@ -923,15 +932,59 @@ static void ff_collect_details(ff_media_t *m, AVFormatContext *format) {
     for (unsigned i = 0; i < format->nb_streams && i < 24; ++i) ff_detail_stream(m, format, i);
 }
 
-static bool open_input(ff_media_t *m, ff_decode_t *d) {
-    if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) {
-        m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
-            ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
-        return false;
+/* RV-157: FFmpeg asks this while it waits on the network; non-zero stops it. Closing the player, or a
+   station that has not answered in time, does. */
+static int ff_interrupt(void *opaque) {
+    ff_media_t *m = (ff_media_t*)opaque;
+    if (atomic_load_explicit(&m->quit, memory_order_acquire)) return 1;
+    return m->open_deadline_ms != 0 && GetTickCount64() > m->open_deadline_ms;
+}
+
+#define STATION_OPEN_MS 8000u            /* all tries together, and reading enough to know the streams */
+#define STATION_RW_TIMEOUT_US "10000000" /* a station silent this long once playing is gone */
+
+/* A station: only the network's protocols (never file, pipe, concat or subfile, whatever a redirect or the
+   stream's own playlist names), a time limit, HTTP's reconnects; `mms://` tried as mmsh and then mmst. */
+static bool open_station(ff_media_t *m, ff_decode_t *d) {
+    static atomic_flag network_ready = ATOMIC_FLAG_INIT;
+    m->failure = RUBRAVIEW_MEDIA_FAIL_STATION;
+    if (!g_ff.avformat_alloc_context || !g_ff.av_dict_set || !g_ff.av_dict_free) return false;
+    if (g_ff.avformat_network_init && !atomic_flag_test_and_set(&network_ready)) g_ff.avformat_network_init();
+    char urls[2][RUBRAVIEW_STREAM_URL_MAX];
+    size_t n = rubraview_stream_ffmpeg_urls((u8str_t){ .ptr = m->path, .len = strlen(m->path) }, urls);
+    m->open_deadline_ms = GetTickCount64() + STATION_OPEN_MS;
+    for (size_t i = 0; i < n && !d->format && !ff_interrupt(m); ++i) {
+        AVFormatContext *format = g_ff.avformat_alloc_context();
+        if (!format) break;
+        format->interrupt_callback.callback = ff_interrupt;
+        format->interrupt_callback.opaque = m;
+        AVDictionary *options = NULL;
+        g_ff.av_dict_set(&options, "protocol_whitelist", RUBRAVIEW_STREAM_PROTOCOLS, 0);
+        g_ff.av_dict_set(&options, "rw_timeout", STATION_RW_TIMEOUT_US, 0);
+        g_ff.av_dict_set(&options, "reconnect", "1", 0);
+        g_ff.av_dict_set(&options, "reconnect_streamed", "1", 0);
+        g_ff.av_dict_set(&options, "reconnect_delay_max", "5", 0);
+        if (g_ff.avformat_open_input(&format, urls[i], NULL, &options) >= 0 && format) d->format = format;
+        g_ff.av_dict_free(&options);   /* what no protocol took */
     }
-    if (g_ff.avformat_find_stream_info(d->format, NULL) < 0) {
-        m->failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
-        return false;
+    bool read = d->format && g_ff.avformat_find_stream_info(d->format, NULL) >= 0;
+    m->open_deadline_ms = 0;   /* playing: only rw_timeout and closing stop it now */
+    return read;
+}
+
+static bool open_input(ff_media_t *m, ff_decode_t *d) {
+    if (m->station) {
+        if (!open_station(m, d)) return false;
+    } else {
+        if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) {
+            m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
+                ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
+            return false;
+        }
+        if (g_ff.avformat_find_stream_info(d->format, NULL) < 0) {
+            m->failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
+            return false;
+        }
     }
 
     m->video_stream = g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
@@ -1043,7 +1096,9 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         .audio_sample_rate = m->audio_rate,
         .audio_channels = m->audio_channels,
         .bitrate_kbps = d->format->bit_rate > 0 ? (uint32_t)(d->format->bit_rate / 1000) : 0,
+        .live = m->station,
     };
+    if (m->station) m->info.duration_seconds = 0.0;   /* a guess from the bit rate would be wrong for a live one */
     if (m->video_stream >= 0) {   /* 1.25.1: the way to the screen, for the information window */
         rubraview_media_info_t *in = &m->info;
         in->hardware_decode = m->hw_attached;
@@ -2014,6 +2069,7 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     if (m->gpu.shader_device) IUnknown_AddRef((IUnknown*)m->gpu.shader_device);   /* RV-150, the same way */
     memcpy(m->path, path.ptr, path.len);   /* FFmpeg takes UTF-8 paths on Windows */
     m->path[path.len] = '\0';
+    m->station = rubraview_stream_is_address(path);
     m->video_stream = -1;
     m->audio_stream = -1;
     m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
@@ -2082,7 +2138,7 @@ static size_t ff_frames_ready(void *handle) {
 
 static void ff_seek(void *handle, double seconds) {
     ff_media_t *m = (ff_media_t*)handle;
-    if (!m) return;
+    if (!m || m->station) return;   /* RV-157: a live station has nowhere to wind to */
     if (!(seconds > 0.0)) seconds = 0.0;
     atomic_store_explicit(&m->seek_target_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
     m->consumer_generation = atomic_fetch_add_explicit(&m->seek_generation, 1, memory_order_release) + 1;
@@ -2192,7 +2248,7 @@ static void ff_subtitle_payload(enum AVCodecID id, const uint8_t *data, int size
 static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int32_t stream_index) {
     u8str_t empty = { .ptr = "", .len = 0 };
     ff_media_t *m = (ff_media_t*)handle;
-    if (!m || !arena || stream_index < 0 || !g_ff.ok) return empty;
+    if (!m || !arena || stream_index < 0 || !g_ff.ok || m->station) return empty;   /* RV-157: not a second connection */
 
     AVFormatContext *format = NULL;
     if (g_ff.avformat_open_input(&format, m->path, NULL, NULL) < 0 || !format) return empty;

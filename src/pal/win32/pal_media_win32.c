@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #include <stdlib.h>
 #include "rubraview/pal/pal_media_backend.h"
+#include "rubraview/stream.h"
 
 /*
  * The public media PAL: which backend opened a file, and forwarding to it
@@ -28,6 +29,8 @@ rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_m
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     const rubraview_media_backend_api_t *api = backend_api(backend);
     if (!api || !api->open) return result;
+    /* RV-157: a station is FFmpeg's alone, which opens it with only the network's protocols allowed */
+    if (backend != RUBRAVIEW_BACKEND_FFMPEG && rubraview_stream_is_address(path)) return result;
 
     rubraview_media_info_t info = {0};
     void *impl = api->open(path, &result.failure, &info, gpu);

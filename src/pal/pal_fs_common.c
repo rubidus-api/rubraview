@@ -7,6 +7,7 @@
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/glob.h"
 #include "rubraview/path.h"
+#include "rubraview/stream.h"
 #include <string.h>
 
 rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
@@ -29,7 +30,8 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     for (size_t i = 0; i < listing->count; ++i) {
         const rubraview_fs_entry_t *e = &listing->entries[i];
         if (e->is_directory) continue;
-        if (!rubraview_glob_match_list(e->name, extension_filter)) continue;
+        /* RV-157: a station's name is its title, which says nothing of a kind */
+        if (!rubraview_glob_match_list(e->name, extension_filter) && !rubraview_stream_is_address(e->path)) continue;
 
         items[kept++] = (rubraview_sort_item_t){
             .name = e->name,

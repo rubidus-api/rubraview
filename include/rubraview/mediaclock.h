@@ -280,6 +280,8 @@ typedef enum rubraview_media_failure {
     RUBRAVIEW_MEDIA_FAIL_CONTAINER,   /* no backend knows the container */
     RUBRAVIEW_MEDIA_FAIL_CODEC,       /* the container opened, a stream has no decoder */
     RUBRAVIEW_MEDIA_FAIL_HEVC,        /* ...and that stream is HEVC (D-9: name both remedies) */
+    RUBRAVIEW_MEDIA_FAIL_STATION,     /* RV-157: an internet radio address that did not answer with sound */
+    RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG,   /* RV-157: a station, and no FFmpeg to play it with */
 } rubraview_media_failure_t;
 
 /** Four-character codes as backends report them, first byte in the low bits. */
