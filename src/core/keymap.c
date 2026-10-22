@@ -19,9 +19,9 @@ static rubraview_key_combo_t parse_combo(proven_u8str_view_t token) {
         proven_u8str_view_t rest = { .ptr = combo.key_name.ptr + plus + 1, .size = combo.key_name.size - plus - 1 };
 
         uint32_t mod = 0;
-        if (rubraview_u8_eq_lit_ci(word, "shift")) mod = RUBRAVIEW_MOD_SHIFT;
-        else if (rubraview_u8_eq_lit_ci(word, "ctrl") || rubraview_u8_eq_lit_ci(word, "control")) mod = RUBRAVIEW_MOD_CTRL;
-        else if (rubraview_u8_eq_lit_ci(word, "alt")) mod = RUBRAVIEW_MOD_ALT;
+        if (proven_u8str_view_eq_ascii_ci(word, PROVEN_LIT("shift"))) mod = RUBRAVIEW_MOD_SHIFT;
+        else if (proven_u8str_view_eq_ascii_ci(word, PROVEN_LIT("ctrl")) || proven_u8str_view_eq_ascii_ci(word, PROVEN_LIT("control"))) mod = RUBRAVIEW_MOD_CTRL;
+        else if (proven_u8str_view_eq_ascii_ci(word, PROVEN_LIT("alt"))) mod = RUBRAVIEW_MOD_ALT;
         else break; /* not a recognized modifier word: stop peeling */
 
         combo.modifiers |= mod;
@@ -56,7 +56,7 @@ static void parse_combo_list(proven_arena_t *arena, proven_u8str_view_t value, r
     size_t start = 0;
     for (size_t i = 0; i <= value.size; ++i) {
         if (i == value.size || value.ptr[i] == ',') {
-            proven_u8str_view_t token = proven_u8str_view_trim(rubraview_u8((const char *)value.ptr + start, i - start));
+            proven_u8str_view_t token = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)value.ptr + start, i - start));
             if (token.size > 0) {
                 combo_buf_push(arena, &buf, parse_combo(token));
             }

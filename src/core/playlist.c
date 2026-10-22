@@ -38,7 +38,7 @@ static void for_each_line(proven_u8str_view_t text, void (*on_line)(proven_u8str
         if (i == text.size || text.ptr[i] == '\n') {
             size_t line_end = i;
             if (line_end > line_start && text.ptr[line_end - 1] == '\r') line_end--;
-            proven_u8str_view_t line = proven_u8str_view_trim(rubraview_u8((const char *)text.ptr + line_start, line_end - line_start));
+            proven_u8str_view_t line = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)text.ptr + line_start, line_end - line_start));
             line_start = i + 1;
             if (line.size > 0) on_line(line, ctx);
         }
@@ -91,7 +91,7 @@ static void m3u8_line_cb(proven_u8str_view_t line, void *raw_ctx) {
 
         ctx->pending_duration = parse_double_or((proven_u8str_view_t){ .ptr = rest.ptr, .size = comma }, -1.0);
         ctx->pending_title = (comma < rest.size)
-            ? proven_u8str_view_trim(rubraview_u8((const char *)rest.ptr + comma + 1, rest.size - comma - 1))
+            ? proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)rest.ptr + comma + 1, rest.size - comma - 1))
             : PROVEN_LIT("");
         ctx->has_pending_extinf = true;
         return;
@@ -213,7 +213,7 @@ static void pls_line_cb(proven_u8str_view_t line, void *raw_ctx) {
     }
     ctx->items[ctx->count] = (pls_item_t){
         .number = (uint32_t)number, .order = (uint32_t)ctx->count, .key = key,
-        .value = proven_u8str_view_trim(rubraview_u8((const char *)line.ptr + at + 1, line.size - at - 1)),
+        .value = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)line.ptr + at + 1, line.size - at - 1)),
     };
     ctx->count++;
 }
@@ -247,9 +247,9 @@ rubraview_playlist_t rubraview_playlist_parse_pls(proven_arena_t *arena, proven_
 /* The text between two tags or in an attribute, its entities decoded and its
    spaces trimmed: into the arena when it holds one, else a view. */
 static proven_u8str_view_t xml_text(proven_arena_t *arena, const char *ptr, size_t len) {
-    proven_u8str_view_t t = proven_u8str_view_trim(rubraview_u8(ptr, len));
-    while (t.size > 0 && (t.ptr[0] == '\r' || t.ptr[0] == '\n')) { t.ptr++; t.size--; t = proven_u8str_view_trim(rubraview_u8((const char *)t.ptr, t.size)); }
-    while (t.size > 0 && (t.ptr[t.size - 1] == '\r' || t.ptr[t.size - 1] == '\n')) { t.size--; t = proven_u8str_view_trim(rubraview_u8((const char *)t.ptr, t.size)); }
+    proven_u8str_view_t t = proven_u8str_view_trim(proven_u8str_view_from_bytes(ptr, len));
+    while (t.size > 0 && (t.ptr[0] == '\r' || t.ptr[0] == '\n')) { t.ptr++; t.size--; t = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)t.ptr, t.size)); }
+    while (t.size > 0 && (t.ptr[t.size - 1] == '\r' || t.ptr[t.size - 1] == '\n')) { t.size--; t = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)t.ptr, t.size)); }
     if (t.size == 0 || !memchr(t.ptr, '&', t.size)) return t;   /* proven's empty view has no pointer */
     proven_result_mem_mut_t res = proven_arena_alloc(arena, t.size + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");

@@ -604,7 +604,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             size_t line_end = at;
             while (line_end < src.size && src.ptr[line_end] != '\n') line_end++;
             proven_u8str_view_t line = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + at, .size = line_end - at });
-            if (rubraview_u8_starts_with_ci(line, "format:")) { head_end = line_end < src.size ? line_end + 1 : line_end; break; }
+            if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("format:"))) { head_end = line_end < src.size ? line_end + 1 : line_end; break; }
             at = line_end + 1;
         }
         if (head_end == SIZE_MAX) { *out_why = N_("the SubStation file's events have no Format line"); return false; }
@@ -613,7 +613,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         for (size_t i = head_end; i < src.size; ) {
             size_t e = i;
             while (e < src.size && src.ptr[e] != '\n') e++;
-            if (rubraview_u8_starts_with_ci(proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + i, .size = e - i }), "dialogue:")) room++;
+            if (proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + i, .size = e - i }), PROVEN_LIT("dialogue:"))) room++;
             i = e + 1;
         }
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, room ? room : 1, sizeof(rubraview_mkv_put_cue_t));
@@ -625,7 +625,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             while (e < src.size && src.ptr[e] != '\n') e++;
             proven_u8str_view_t line = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + i, .size = e - i });
             i = e + 1;
-            if (!rubraview_u8_starts_with_ci(line, "dialogue:")) continue;
+            if (!proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("dialogue:"))) continue;
             proven_u8str_view_t rest = { .ptr = line.ptr + 9, .size = line.size - 9 };
             size_t commas[3], found = 0;
             for (size_t k = 0; k < rest.size && found < 3; ++k) if (rest.ptr[k] == ',') commas[found++] = k;

@@ -168,12 +168,12 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.size == 0) return crumbs;
 
-    crumbs.items[0].label = rubraview_u8(T("PC"), strlen(T("PC")));
+    crumbs.items[0].label = proven_u8str_view_from_bytes(T("PC"), strlen(T("PC")));
     crumbs.items[0].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
     crumbs.count = 1;
     if (rubraview_picker_is_places(path)) return crumbs;
     if (rubraview_picker_is_recent(path)) {
-        crumbs.items[1].label = rubraview_u8(T("Recent"), strlen(T("Recent")));
+        crumbs.items[1].label = proven_u8str_view_from_bytes(T("Recent"), strlen(T("Recent")));
         crumbs.items[1].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_RECENT);
         crumbs.count = 2;
         return crumbs;

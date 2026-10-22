@@ -17,7 +17,7 @@ static proven_u8str_view_t utf8_of(proven_arena_t *arena, const WCHAR *wide) {
     proven_result_mem_mut_t res = proven_arena_alloc(arena, (proven_size_t)len);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     WideCharToMultiByte(CP_UTF8, 0, wide, -1, (char *)res.value.ptr, len, NULL, NULL);
-    return rubraview_u8(res.value.ptr, (proven_size_t)(len - 1));
+    return proven_u8str_view_from_bytes(res.value.ptr, (proven_size_t)(len - 1));
 }
 
 static bool is_file(const WCHAR *path) {

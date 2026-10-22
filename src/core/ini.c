@@ -123,7 +123,7 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, proven_u8str_view
             /* Strip a trailing '\r' from CRLF line endings */
             if (line_end > line_start && text.ptr[line_end - 1] == '\r') line_end--;
 
-            proven_u8str_view_t line = proven_u8str_view_trim(rubraview_u8((const char *)text.ptr + line_start, line_end - line_start));
+            proven_u8str_view_t line = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)text.ptr + line_start, line_end - line_start));
             line_start = i + 1;
 
             if (line.size == 0) continue;
@@ -133,7 +133,7 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, proven_u8str_view
                 size_t close = 0;
                 while (close < line.size && line.ptr[close] != ']') close++;
                 if (close < line.size) {
-                    current_section = proven_u8str_view_trim(rubraview_u8((const char *)line.ptr + 1, close - 1));
+                    current_section = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)line.ptr + 1, close - 1));
                 }
                 continue;
             }
@@ -142,8 +142,8 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, proven_u8str_view
             while (eq < line.size && line.ptr[eq] != '=') eq++;
             if (eq >= line.size) continue; /* malformed line, skip leniently */
 
-            proven_u8str_view_t key = proven_u8str_view_trim(rubraview_u8((const char *)line.ptr, eq));
-            proven_u8str_view_t raw = proven_u8str_view_trim(rubraview_u8((const char *)line.ptr + eq + 1, line.size - eq - 1));
+            proven_u8str_view_t key = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)line.ptr, eq));
+            proven_u8str_view_t raw = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)line.ptr + eq + 1, line.size - eq - 1));
             if (key.size == 0) continue;
 
             rubraview_ini_kind_t kind = RUBRAVIEW_INI_STRING;

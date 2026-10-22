@@ -52,7 +52,7 @@ static proven_u8str_view_t parse_string(jparser_t *j) {
     if (j->p >= j->end) { j->failed = true; return PROVEN_LIT(""); }
     size_t len = (size_t)(j->p - start);
     j->p++;   /* the closing quote */
-    if (!escaped) return rubraview_u8(start, len);
+    if (!escaped) return proven_u8str_view_from_bytes(start, len);
     proven_result_mem_mut_t res = proven_arena_alloc(j->strings, len + 1);   /* never longer once decoded */
     if (!proven_is_ok(res.err)) { j->failed = j->full = true; return PROVEN_LIT(""); }
     uint8_t *out = res.value.ptr;
@@ -75,16 +75,18 @@ static proven_u8str_view_t parse_string(jparser_t *j) {
                     if (lo >= 0xDC00 && lo <= 0xDFFF) { cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); i += 6; }
                 }
                 if (cp >= 0xD800 && cp <= 0xDFFF) cp = 0xFFFD;
-                size_t at = n;
-                if (rubraview_utf8_encode((uint32_t)cp, out, len, &at) == 0) { j->failed = true; return PROVEN_LIT(""); }
-                n = at;
+                proven_byte_t u[4];
+                size_t k = proven_utf8_encode_one((proven_u32)cp, u);
+                if (k == 0 || n + k > len) { j->failed = true; return PROVEN_LIT(""); }
+                memcpy(out + n, u, k);
+                n += k;
                 break;
             }
             default: out[n++] = start[i]; break;   /* \" \\ \/ */
         }
     }
     out[n] = '\0';
-    return rubraview_u8(out, n);
+    return proven_u8str_view_from_bytes(out, n);
 }
 
 typedef struct jlist {
@@ -158,7 +160,7 @@ static jnode_t parse_value(jparser_t *j, int depth) {
         const proven_byte_t *start = j->p;
         while (j->p < j->end && *j->p != ',' && *j->p != '}' && *j->p != ']' && *j->p != ' ' &&
                *j->p != '\n' && *j->p != '\r' && *j->p != '\t') j->p++;
-        node.text = rubraview_u8(start, (size_t)(j->p - start));
+        node.text = proven_u8str_view_from_bytes(start, (size_t)(j->p - start));
         if (node.text.size == 0) { j->failed = true; return node; }
         node.type = c == 't' || c == 'f' ? J_BOOL : c == 'n' ? J_NULL : J_NUM;
     }
@@ -207,7 +209,7 @@ static proven_u8str_view_t plain(proven_arena_t *arena, proven_u8str_view_t s) {
         if (!done) out[n++] = s.ptr[i++];
     }
     out[n] = '\0';
-    return proven_u8str_view_trim(rubraview_u8(out, n));
+    return proven_u8str_view_trim(proven_u8str_view_from_bytes(out, n));
 }
 
 static double number_or(proven_u8str_view_t s, double fallback) {
@@ -376,7 +378,7 @@ size_t rubraview_gmic_split(proven_u8str_view_t line, proven_u8str_view_t *items
             else if (!quoted && (c == ' ' || c == '\t' || c == '\r' || c == '\n')) break;
         }
         if (n == cap) return 0;
-        items[n++] = rubraview_u8(line.ptr + start, i - start);
+        items[n++] = proven_u8str_view_from_bytes(line.ptr + start, i - start);
     }
     return n;
 }

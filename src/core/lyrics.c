@@ -117,13 +117,13 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, proven_u8str_vi
                 stamps[stamp_count++] = when;
             } else {
                 /* Not a time: one of the metadata tags. */
-                if (rubraview_u8_starts_with_ci(inside, "ti:")) {
+                if (proven_u8str_view_starts_with_ascii_ci(inside, PROVEN_LIT("ti:"))) {
                     lyrics.title = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
-                } else if (rubraview_u8_starts_with_ci(inside, "ar:")) {
+                } else if (proven_u8str_view_starts_with_ascii_ci(inside, PROVEN_LIT("ar:"))) {
                     lyrics.artist = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
-                } else if (rubraview_u8_starts_with_ci(inside, "al:")) {
+                } else if (proven_u8str_view_starts_with_ascii_ci(inside, PROVEN_LIT("al:"))) {
                     lyrics.album = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
-                } else if (rubraview_u8_starts_with_ci(inside, "offset:")) {
+                } else if (proven_u8str_view_starts_with_ascii_ci(inside, PROVEN_LIT("offset:"))) {
                     /* The tag is in milliseconds, and positive means
                        the words come *earlier*. */
                     double ms = 0.0;
@@ -256,7 +256,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
         line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
         while (r.pos < r.len) {
             proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
-            if (rubraview_u8_starts_with_ci(line, "track ")) track_count++;
+            if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("track "))) track_count++;
         }
     }
     if (track_count == 0) return sheet;
@@ -274,7 +274,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
         proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
         if (line.size == 0) continue;
 
-        if (rubraview_u8_starts_with_ci(line, "file ")) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("file "))) {
             proven_u8str_view_t rest = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + 5, .size = line.size - 5 });
             sheet.audio_file = quoted_or_rest(rest);
             /* Unquoted, the file's type (WAVE, MP3, ...) follows the name. */
@@ -286,7 +286,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
             continue;
         }
 
-        if (rubraview_u8_starts_with_ci(line, "track ")) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("track "))) {
             in_track = true;
             if (current >= track_count) break;
 
@@ -301,7 +301,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
             continue;
         }
 
-        if (rubraview_u8_starts_with_ci(line, "title ")) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("title "))) {
             proven_u8str_view_t value = quoted_or_rest((proven_u8str_view_t){ .ptr = line.ptr + 6, .size = line.size - 6 });
             /* Before the first TRACK, TITLE names the album. */
             if (in_track && current > 0) tracks[current - 1].title = value;
@@ -309,14 +309,14 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
             continue;
         }
 
-        if (rubraview_u8_starts_with_ci(line, "performer ")) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("performer "))) {
             proven_u8str_view_t value = quoted_or_rest((proven_u8str_view_t){ .ptr = line.ptr + 10, .size = line.size - 10 });
             if (in_track && current > 0) tracks[current - 1].performer = value;
             else sheet.album_performer = value;
             continue;
         }
 
-        if (rubraview_u8_starts_with_ci(line, "index ") && in_track && current > 0) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("index ")) && in_track && current > 0) {
             proven_u8str_view_t rest = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + 6, .size = line.size - 6 });
 
             int64_t index_number = 0;

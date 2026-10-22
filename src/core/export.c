@@ -121,15 +121,15 @@ rubraview_export_format_t rubraview_export_format_for_name(proven_u8str_view_t f
     proven_u8str_view_t ext = rubraview_path_ext(filename);
     if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
 
-    if (rubraview_u8_eq_lit_ci(ext, "jpg") || rubraview_u8_eq_lit_ci(ext, "jpeg") || rubraview_u8_eq_lit_ci(ext, "jpe")) return RUBRAVIEW_EXPORT_JPEG;
-    if (rubraview_u8_eq_lit_ci(ext, "png") || rubraview_u8_eq_lit_ci(ext, "apng")) return RUBRAVIEW_EXPORT_PNG;
-    if (rubraview_u8_eq_lit_ci(ext, "webp")) return RUBRAVIEW_EXPORT_WEBP;
-    if (rubraview_u8_eq_lit_ci(ext, "gif")) return RUBRAVIEW_EXPORT_GIF;
-    if (rubraview_u8_eq_lit_ci(ext, "bmp")) return RUBRAVIEW_EXPORT_BMP;
-    if (rubraview_u8_eq_lit_ci(ext, "tif") || rubraview_u8_eq_lit_ci(ext, "tiff")) return RUBRAVIEW_EXPORT_TIFF;
-    if (rubraview_u8_eq_lit_ci(ext, "ico")) return RUBRAVIEW_EXPORT_ICO;
-    if (rubraview_u8_eq_lit_ci(ext, "avif")) return RUBRAVIEW_EXPORT_AVIF;
-    if (rubraview_u8_eq_lit_ci(ext, "jxl")) return RUBRAVIEW_EXPORT_JXL;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("jpg")) || proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("jpeg")) || proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("jpe"))) return RUBRAVIEW_EXPORT_JPEG;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("png")) || proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("apng"))) return RUBRAVIEW_EXPORT_PNG;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("webp"))) return RUBRAVIEW_EXPORT_WEBP;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("gif"))) return RUBRAVIEW_EXPORT_GIF;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("bmp"))) return RUBRAVIEW_EXPORT_BMP;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("tif")) || proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("tiff"))) return RUBRAVIEW_EXPORT_TIFF;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("ico"))) return RUBRAVIEW_EXPORT_ICO;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("avif"))) return RUBRAVIEW_EXPORT_AVIF;
+    if (proven_u8str_view_eq_ascii_ci(ext, PROVEN_LIT("jxl"))) return RUBRAVIEW_EXPORT_JXL;
     return RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
 }
 

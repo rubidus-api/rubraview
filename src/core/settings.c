@@ -91,7 +91,7 @@ static bool choice_index(const rubraview_setting_def_t *def, proven_u8str_view_t
     for (size_t r = 0; r < sizeof(CHOICE_RENAMES) / sizeof(CHOICE_RENAMES[0]); ++r) {
         if (!proven_u8str_view_eq(def->section, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].section)) ||
             !proven_u8str_view_eq(def->key, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].key)) ||
-            !rubraview_u8_eq_lit_ci(word, CHOICE_RENAMES[r].old_word)) continue;
+            !proven_u8str_view_eq_ascii_ci(word, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].old_word))) continue;
         proven_u8str_view_t now = { .ptr = (const proven_byte_t *)CHOICE_RENAMES[r].new_word, .size = strlen(CHOICE_RENAMES[r].new_word) };
         return choice_index_exact(def, now, out);
     }

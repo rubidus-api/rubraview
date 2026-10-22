@@ -19,14 +19,9 @@ typedef proven_arena_t prv_arena_t;
    `PROVEN_LIT`, comparisons are proven's (`proven_u8str_view_eq`, `_starts_with`, `_find`, ...). A cast to
    `const char *` is made only where the bytes meet the CRT or Win32. */
 
-/* A view of `size` bytes at `ptr`, whichever character type the caller holds them as. */
-static inline proven_u8str_view_t rubraview_u8(const void *ptr, proven_size_t size) {
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)ptr, .size = size };
-}
-
 /* Text built in an arena by proven's growing string; false when the arena is full. */
 static inline bool rubraview_text_append(proven_arena_t *arena, proven_u8str_t *text, const void *bytes, proven_size_t size) {
-    return size == 0 || proven_is_ok(proven_u8str_append_grow(proven_arena_as_allocator(arena), text, rubraview_u8(bytes, size)));
+    return size == 0 || proven_is_ok(proven_u8str_append_grow(proven_arena_as_allocator(arena), text, proven_u8str_view_from_bytes(bytes, size)));
 }
 
 /* What was built, NUL-terminated in the arena; "" when nothing was. */
@@ -35,29 +30,12 @@ static inline proven_u8str_view_t rubraview_text_view(const proven_u8str_t *text
     return v.size > 0 ? v : PROVEN_LIT("");
 }
 
-/* ---- what proven has not got yet (asked of proven_c_lib, 2026-10-22): ASCII case set aside ---- */
+/* RV-160: proven v0.76.0 has what D-191 asked of it (ASCII case set aside: `proven_u8str_view_eq_ascii_ci`,
+   `_starts_with_ascii_ci`; `proven_u8str_view_from_bytes`; `proven_utf8_encode_one`, `proven_utf8_validate`). One
+   letter lowered, for sorting and grouping by it: */
 
 static inline char rubraview_ascii_lower(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-}
-
-/* ASCII letters ignore case; every other byte must match exactly. */
-static inline bool rubraview_u8_eq_lit_ci(proven_u8str_view_t s, const char *lit) {
-    size_t n = strlen(lit);
-    if (s.size != n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        if (rubraview_ascii_lower((char)s.ptr[i]) != rubraview_ascii_lower(lit[i])) return false;
-    }
-    return true;
-}
-
-static inline bool rubraview_u8_starts_with_ci(proven_u8str_view_t s, const char *prefix) {
-    size_t n = strlen(prefix);
-    if (s.size < n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        if (rubraview_ascii_lower((char)s.ptr[i]) != rubraview_ascii_lower(prefix[i])) return false;
-    }
-    return true;
 }
 
 /**

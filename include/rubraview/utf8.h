@@ -27,20 +27,7 @@ extern "C" {
  */
 uint32_t rubraview_utf8_decode(const uint8_t *s, size_t len, size_t *out_len);
 
-/**
- * Strict UTF-8 validation: every byte must belong to exactly one
- * well-formed, minimal-length sequence with no surrogate halves and no
- * codepoint above U+10FFFF. Empty input is valid.
- */
-bool rubraview_utf8_validate(proven_u8str_view_t bytes);
-
-/**
- * Append the UTF-8 encoding of a codepoint (U+0000..U+10FFFF, excluding
- * surrogate halves) to dst at *inout_pos, bounded by dst_cap. Returns the
- * number of bytes written (1-4), or 0 if the codepoint is invalid or the
- * buffer has insufficient room; *inout_pos is unchanged on failure.
- */
-size_t rubraview_utf8_encode(uint32_t codepoint, uint8_t *dst, size_t dst_cap, size_t *inout_pos);
+/* RV-160: whole-text validation and encoding are proven's (`proven_utf8_validate`, `proven_utf8_encode_one`). */
 
 #ifdef __cplusplus
 }

@@ -34,7 +34,7 @@ static bool find_scalar_element(proven_u8str_view_t xml, const char *tag, proven
         size_t content_start = i + (size_t)open_len;
         for (size_t j = content_start; j + (size_t)close_len <= xml.size; ++j) {
             if (memcmp(xml.ptr + j, close_buf, (size_t)close_len) == 0) {
-                *out_text = proven_u8str_view_trim(rubraview_u8((const char *)xml.ptr + content_start, j - content_start));
+                *out_text = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)xml.ptr + content_start, j - content_start));
                 return true;
             }
         }

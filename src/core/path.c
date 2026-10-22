@@ -307,5 +307,5 @@ proven_u8str_view_t rubraview_path_typed_folder(proven_u8str_view_t typed) {
     while (n > 0 && (p[0] == ' ' || p[0] == '"' || p[0] == '\t')) { p++; n--; }
     while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '"' || p[n - 1] == '\t')) n--;
     while (n > 1 && rubraview_path_is_sep(p[n - 1]) && !(n == 3 && p[1] == ':')) n--;
-    return rubraview_u8(n ? p : "", n);
+    return proven_u8str_view_from_bytes(n ? p : "", n);
 }

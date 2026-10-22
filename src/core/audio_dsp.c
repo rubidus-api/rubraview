@@ -305,7 +305,7 @@ bool rubraview_replaygain_parse_db(proven_u8str_view_t text, double *out_db) {
        number that is not a unit means it is not a gain. */
     while (used < text.size && (text.ptr[used] == ' ' || text.ptr[used] == '\t')) used++;
     proven_u8str_view_t unit = { .ptr = text.ptr + used, .size = text.size - used };
-    if (unit.size > 0 && !rubraview_u8_starts_with_ci(unit, "db")) return false;
+    if (unit.size > 0 && !proven_u8str_view_starts_with_ascii_ci(unit, PROVEN_LIT("db"))) return false;
 
     *out_db = value;
     return true;

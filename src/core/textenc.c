@@ -79,7 +79,7 @@ rubraview_textenc_t rubraview_textenc_from_word(proven_u8str_view_t word) {
    it is not one; -1 when it is cut short by the end. */
 /* One UTF-8 character's length at `b` by proven's decoder: -1 when the bytes end inside one, 0 when it is not one. */
 static int utf8_seq(const uint8_t *b, size_t left) {
-    proven_utf8_char_t c = proven_utf8_decode_next(rubraview_u8(b, left), 0);
+    proven_utf8_char_t c = proven_utf8_decode_next(proven_u8str_view_from_bytes(b, left), 0);
     if (c.err == PROVEN_OK) return (int)c.len;
     return c.err == PROVEN_ERR_NEED_MORE ? -1 : 0;
 }
@@ -94,11 +94,9 @@ bool rubraview_textenc_is_utf8(const uint8_t *b, size_t size, bool cut_ok) {
     return true;
 }
 
-/* `cp` (never a surrogate here) written as UTF-8 by the program's one encoder; its length. */
+/* `cp` (never a surrogate here) written as UTF-8 by proven's encoder; its length. */
 static size_t put_cp(char *out, uint32_t cp) {
-    size_t at = 0;
-    (void)rubraview_utf8_encode(cp, (uint8_t *)out, 4, &at);
-    return at;
+    return proven_utf8_encode_one(cp, (proven_byte_t *)out);
 }
 
 char *rubraview_textenc_utf16_to_utf8(const uint8_t *b, size_t size, bool big_endian, size_t *out_len) {

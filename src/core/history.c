@@ -406,7 +406,7 @@ size_t rubraview_folder_list_split(proven_u8str_view_t joined, proven_u8str_view
 
 /* Every piece of `joined` but `skip`, with `insert` at `at`, joined again. */
 static proven_u8str_view_t folder_list_build(char *buffer, size_t capacity, proven_u8str_view_t joined, size_t skip, proven_u8str_view_t insert, size_t at) {
-    proven_u8str_view_t none = rubraview_u8(buffer ? buffer : "", 0);
+    proven_u8str_view_t none = proven_u8str_view_from_bytes(buffer ? buffer : "", 0);
     if (!buffer || capacity == 0) return none;
     proven_u8str_view_t parts[256];
     size_t n = rubraview_folder_list_split(joined, parts, 256);

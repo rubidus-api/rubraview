@@ -6,7 +6,7 @@ rubraview_encoding_verdict_t rubraview_archive_filename_detect(proven_u8str_view
     if (utf8_flag) {
         return RUBRAVIEW_ENCODING_UTF8_FLAGGED;
     }
-    if (rubraview_utf8_validate(raw_name)) {
+    if ((proven_utf8_validate(raw_name, NULL) == PROVEN_OK)) {
         return RUBRAVIEW_ENCODING_UTF8_VALID;
     }
     return RUBRAVIEW_ENCODING_NEEDS_FALLBACK;

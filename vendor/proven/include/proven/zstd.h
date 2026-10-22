@@ -1,0 +1,207 @@
+#ifndef PROVEN_ZSTD_H
+#define PROVEN_ZSTD_H
+
+#include "proven/types.h"
+#include "proven/error.h"
+#include "proven/memory.h"
+#include "proven/allocator.h"
+
+/**
+ * @file zstd.h
+ * @brief Zstandard decompression and compression (RFC 8878).
+ *
+ * Zstandard is a newer compression format than DEFLATE: HTTP's `Content-Encoding: zstd`
+ * (RFC 9659), `.zst` files, and some package and archive formats. It decodes faster than
+ * DEFLATE and its compressors trade speed for size over a wider range.
+ *
+ * Decompression first: the decoder works as deflate.h's does - a state object, and a
+ * step that takes what input there is and fills what output space there is - with two
+ * differences that the format makes necessary:
+ *
+ *   - **A step may allocate.** Zstandard reads parts of each block from its end, so a block
+ *     (at most 128 KiB compressed) is held whole before it is decoded, and its output is
+ *     decoded whole too, next to the history that later blocks refer to - the frame's
+ *     window. These buffers grow as a frame's output grows, never past what the frame's
+ *     header says it needs, and are kept for the next frame. At most, a decoder holds its
+ *     window limit plus 384 KiB plus about 16 KiB of tables. A step can therefore return
+ *     PROVEN_ERR_NOMEM.
+ *   - **Output can be held back** by up to one block: a block's bytes appear once it is
+ *     decoded, and wait in the decoder while the output space given is too small.
+ *
+ * **The window limit is the caller's.** Each frame states how far back it refers, up to
+ * terabytes; a frame that needs more than the decoder's limit is refused before anything is
+ * allocated for it. RFC 9659 has HTTP's `zstd` coding limited to 8 MiB (8,388,608 bytes),
+ * which is the default here. Frames that need a dictionary are refused: content that is sent
+ * over HTTP does not use one (RFC 8878, section 7.2).
+ *
+ * A Zstandard stream is a sequence of frames. Skippable frames (magic numbers 0x184D2A50 to
+ * 0x184D2A5F) are read past without producing anything. Malformed input is an error, never a
+ * read or a write outside the buffers, and the output is bounded by the caller as with
+ * deflate.h.
+ *
+ * Pure computation: allocation through the allocator given, no OS; part of the freestanding
+ * profile.
+ */
+
+/** @brief The default window limit: 8 MiB, which RFC 9659 requires an HTTP decoder to accept. */
+#define PROVEN_ZSTD_WINDOW_DEFAULT ((proven_u64)8 * 1024 * 1024)
+
+/** @brief A decompressor. Opaque; about 16 KiB when made, growing as described above. */
+typedef struct proven_zstd_decoder proven_zstd_decoder_t;
+
+/**
+ * @brief Make a decompressor.
+ * @param window_max The largest window a frame may need: 0 for PROVEN_ZSTD_WINDOW_DEFAULT;
+ *                   otherwise at least 1 KiB (the smallest window a frame can state) and at
+ *                   most 2 GiB.
+ * @return PROVEN_ERR_INVALID_ARG for a bad allocator, limit or out pointer; PROVEN_ERR_NOMEM.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_decoder_create(proven_allocator_t alloc, proven_u64 window_max, proven_zstd_decoder_t **out);
+
+/** @brief Free a decompressor and its buffers. NULL is allowed. */
+void proven_zstd_decoder_destroy(proven_zstd_decoder_t *z);
+
+/** @brief Forget the stream in progress and expect the beginning of a frame. The buffers are
+ *         kept. */
+void proven_zstd_decoder_reset(proven_zstd_decoder_t *z);
+
+/**
+ * @brief Decompress: consume some of `in`, produce some of `out`.
+ *
+ * Call it again with the rest of the input, or with more output space, until `*done`.
+ * `*done` is true when the input given so far has ended where a frame ends - a frame that
+ * produces data, or a skippable one - and all of its data has been produced. The step stops
+ * there: input after a frame's end is not consumed by that call, and `*consumed` says where
+ * the frame ended. To go on with the frames that follow, call it again with that input; the
+ * next frame begins without a reset, and `*done` is false until it ends.
+ *
+ * @param z         The decompressor.
+ * @param in        Compressed bytes; may be empty.
+ * @param consumed  Out: how many of them were taken.
+ * @param out       Space for decompressed bytes; may be empty. Only the first `*produced`
+ *                  bytes are written to.
+ * @param produced  Out: how many were written.
+ * @param done      Out: true at the end of a frame, as above.
+ * @return PROVEN_OK, also when no progress was possible; PROVEN_ERR_INVALID_FORMAT for data
+ *         that is not Zstandard, is damaged, or whose checksum or stated size does not match;
+ *         PROVEN_ERR_OUT_OF_BOUNDS for a frame whose window is above the limit;
+ *         PROVEN_ERR_UNSUPPORTED for a frame that needs a dictionary; PROVEN_ERR_NOMEM;
+ *         PROVEN_ERR_INVALID_ARG. After an error every call returns that error until reset.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_decode(proven_zstd_decoder_t *z, proven_mem_view_t in, proven_size_t *consumed,
+                                proven_mem_mut_t out, proven_size_t *produced, bool *done);
+
+/**
+ * @brief Decompress every frame of a whole buffer into a buffer of the caller's.
+ *
+ * The size of `out` is the limit: a stream that would produce more is refused, however
+ * small it is itself. The window limit is the default.
+ *
+ * @param written  Out: how many bytes were produced.
+ * @return PROVEN_ERR_OUT_OF_BOUNDS when the data does not fit in `out` (or a window is above
+ *         the limit); PROVEN_ERR_INVALID_FORMAT also for an empty `in` and when `in` ends
+ *         inside a frame; otherwise as proven_zstd_decode.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_decode_all(proven_allocator_t alloc, proven_mem_view_t in, proven_mem_mut_t out, proven_size_t *written);
+
+// -----------------------------------------------------------------------------
+// Compression
+// -----------------------------------------------------------------------------
+
+/*
+ * The encoder works as deflate.h's compressor does: an options struct, a state object, and a
+ * step with a flush. Its output is a Zstandard frame that any decoder reads - libzstd's, this
+ * library's - and not the bytes libzstd would have written for the same input.
+ *
+ * Nine levels, as libzstd's first nine. Levels 1 to 3 are single-pass: level 1 looks up one
+ * earlier position per position, by a hash of the next six bytes in a table of 2^14 entries;
+ * levels 2 and 3 look up two, by hashes of eight bytes and of six (2^14 and 2^13 entries) or
+ * five (2^17 and 2^16). Levels 4 to 9 keep every position in a hash chain (2^17 entries and a
+ * chain of 2^16 or 2^17) and look at the first 4, 8, 12, 12, 24 and 32 of it: levels 4 and 5
+ * take the best match found ("greedy"), 6 also looks one byte on for a better one ("lazy"),
+ * 7 to 9 two bytes ("lazy2"). Level 6 is about gzip level 6's size at three times its speed.
+ * All try the repeat offsets first and skip ahead faster the longer they find nothing. Each block's
+ * literals are Huffman-coded and its sequences FSE-coded, each table chosen per block by what
+ * it would cost: the predefined one, one written for the block, the previous block's, or a
+ * single symbol. A block that does not shrink is stored as it is.
+ *
+ * **Memory**, at most: the hash tables (64 KiB at level 1, 96 KiB at 2, 768 KiB at 3 and 4,
+ * 1 MiB at 5 to 9 - and zeroed when an encoder is made or reset), about
+ * 500 KiB for one block (its sequences, literals and output), and, for a stream, an input
+ * buffer of the window and half a window (or of the window and 128 KiB, if that is more):
+ * 768 KiB at the default window. Buffers grow with the input. proven_zstd_encode_all needs no
+ * input buffer, and sizes its tables and block buffers to the input: a few kilobytes for a
+ * short one.
+ */
+
+/** @brief When an encoder must hand over what it has. */
+typedef enum {
+    PROVEN_ZSTD_FLUSH_NONE = 0,    /**< more input will come: output appears as blocks fill */
+    PROVEN_ZSTD_FLUSH_BLOCK = 1,   /**< everything given so far becomes decodable; the frame goes on */
+    PROVEN_ZSTD_FLUSH_FINISH = 2   /**< this was the last input: end the frame */
+} proven_zstd_flush_t;
+
+/** @brief What an encoder is made with. Zero-initialise, set `alloc`, and set what applies. */
+typedef struct {
+    proven_allocator_t alloc;      /**< required */
+    int level;                     /**< 1 (fastest) to 9 (smallest); 0: 3, as libzstd's default */
+    int window_log;                /**< how far back a match may reach, as a power of two: 10 to 23 (8 MiB, the most RFC 9659 lets an HTTP client be asked for); 0: 19 (512 KiB) */
+    bool checksum;                 /**< end each frame with the low 32 bits of its XXH64 */
+} proven_zstd_encoder_options_t;
+
+/** @brief A compressor. Opaque. */
+typedef struct proven_zstd_encoder proven_zstd_encoder_t;
+
+/**
+ * @brief Make a compressor. Its hash tables are allocated here; its buffers as input comes.
+ * @return PROVEN_ERR_INVALID_ARG for a bad allocator, level, window or out pointer;
+ *         PROVEN_ERR_NOMEM.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_encoder_create(const proven_zstd_encoder_options_t *options, proven_zstd_encoder_t **out);
+
+/** @brief Free a compressor and its buffers. NULL is allowed. */
+void proven_zstd_encoder_destroy(proven_zstd_encoder_t *z);
+
+/** @brief Forget everything and start a new frame with the same options. The buffers are kept. */
+void proven_zstd_encoder_reset(proven_zstd_encoder_t *z);
+
+/**
+ * @brief Compress: consume some of `in`, produce some of `out`.
+ *
+ * With `PROVEN_ZSTD_FLUSH_BLOCK` or `PROVEN_ZSTD_FLUSH_FINISH`, call it again with more output
+ * space - and the same flush - until all of `in` is consumed and nothing more is produced (for
+ * FINISH: until `*done`). A FLUSH_BLOCK ends what was given so far as one or more blocks; the
+ * frame goes on, and a decoder can give back everything up to that point. A frame made by
+ * steps does not state its size; it states the window, which a decoder must hold.
+ *
+ * @param done Out: true once a FINISH has been carried out and all output has been produced.
+ * @return PROVEN_OK, also when no progress was possible; PROVEN_ERR_INVALID_ARG;
+ *         PROVEN_ERR_INVALID_STATE for input after the frame was finished (reset first);
+ *         PROVEN_ERR_NOMEM, after which the compressor must be reset.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_encode(proven_zstd_encoder_t *z, proven_mem_view_t in, proven_size_t *consumed,
+                                proven_mem_mut_t out, proven_size_t *produced, proven_zstd_flush_t flush, bool *done);
+
+/** @brief The most bytes compressing `input_size` bytes in one FINISH, or with
+ *         proven_zstd_encode_all, can produce. Data that does not compress grows slightly. */
+[[nodiscard]]
+proven_size_t proven_zstd_encode_bound(proven_size_t input_size);
+
+/**
+ * @brief Compress a whole buffer into one frame, in a buffer of the caller's.
+ *
+ * The frame states its size, and when that is no more than the window, its window is the
+ * size: a decoder then holds no more than the data.
+ *
+ * @return PROVEN_ERR_OUT_OF_BOUNDS when `out` is too small (proven_zstd_encode_bound is always
+ *         enough); otherwise as proven_zstd_encoder_create.
+ */
+[[nodiscard]]
+proven_err_t proven_zstd_encode_all(const proven_zstd_encoder_options_t *options, proven_mem_view_t in, proven_mem_mut_t out, proven_size_t *written);
+
+#endif

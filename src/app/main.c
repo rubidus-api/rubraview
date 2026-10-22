@@ -15916,7 +15916,7 @@ static bool ffmpeg_button(app_state_t *app, int32_t id) {
     char graph[RUBRAVIEW_EDIT_COMMAND_MAX];
     size_t n = rubraview_ffilter_graph(f, app->ffmpeg_values, texts, graph, sizeof(graph));
     if (n == 0) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
-    ffmpeg_push(app, rubraview_u8(graph, n));
+    ffmpeg_push(app, proven_u8str_view_from_bytes(graph, n));
     return true;
 }
 
@@ -27669,7 +27669,7 @@ static bool open_archive(app_state_t *app, proven_u8str_view_t archive_path) {
     app->archive_bytes = bytes;
     app->list_is_set = false;
     static char kinds_buf[512];   /* lasting: the source may keep the kinds it was opened with */
-    proven_u8str_view_t given = rubraview_u8(app->open_password ? app->open_password : "", app->open_password ? app->open_password_len : 0);
+    proven_u8str_view_t given = proven_u8str_view_from_bytes(app->open_password ? app->open_password : "", app->open_password ? app->open_password_len : 0);
     rubraview_codepage_t names = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
     app->source = rubraview_page_source_from_archive_password(app->arena,
                                                               (const uint8_t*)bytes.ptr, bytes.size,

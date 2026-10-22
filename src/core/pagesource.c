@@ -263,7 +263,7 @@ static proven_u8str_view_t ps_display_name(proven_arena_t *arena, const fulta_ar
     }
     if (override_choice != RUBRAVIEW_CODEPAGE_AUTO || format == FULTA_ARC_FORMAT_7Z || !en->name_raw) return name;
     proven_u8str_view_t raw = { .ptr = (const proven_byte_t *)(const char*)en->name_raw, .size = en->name_raw_size };
-    if (raw.size == 0 || rubraview_utf8_validate(raw)) return name;
+    if (raw.size == 0 || (proven_utf8_validate(raw, NULL) == PROVEN_OK)) return name;
     uint32_t codepage = 0;
     if (!rubraview_archive_filename_plan(raw, false, RUBRAVIEW_CODEPAGE_AUTO, &codepage)) return name;
     proven_u8str_view_t decoded = rubraview_pal_transcode_codepage(arena, raw, codepage);
@@ -587,7 +587,7 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
 proven_u8str_view_t rubraview_page_source_format_name(const rubraview_page_source_t *source) {
     if (!source || !source->arc) return PROVEN_LIT("");
     const char *name = fulta_arc_format_name(fulta_arc_format(source->arc));
-    return rubraview_u8(name ? name : "", name ? strlen(name) : 0);
+    return proven_u8str_view_from_bytes(name ? name : "", name ? strlen(name) : 0);
 }
 
 static bool ps_any_flag(const rubraview_page_source_t *source, uint32_t flag) {

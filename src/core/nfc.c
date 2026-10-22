@@ -134,7 +134,7 @@ proven_u8str_view_t rubraview_nfc_fold(proven_arena_t *arena, proven_u8str_view_
 
     size_t pos = 0;
     for (size_t c = 0; c < composed_count; ++c) {
-        rubraview_utf8_encode(composed[c], out_res.value.ptr, max_bytes, &pos);
+        pos += proven_utf8_encode_one(composed[c], (proven_byte_t *)out_res.value.ptr + pos);   /* room for four a point */
     }
 
     /* Shrink the tail allocation to the exact byte count (it is the most

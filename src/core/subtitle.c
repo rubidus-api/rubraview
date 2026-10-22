@@ -181,7 +181,7 @@ static size_t html_entity(const char *p, size_t len, char out[4], size_t *took) 
     };
     for (size_t k = 0; k < sizeof(NAMED) / sizeof(NAMED[0]); ++k) {
         size_t n = strlen(NAMED[k].name);
-        if (len < 1 + n || !rubraview_u8_starts_with_ci((proven_u8str_view_t){ .ptr = (const proven_byte_t *)p + 1, .size = len - 1 }, NAMED[k].name)) continue;
+        if (len < 1 + n || !proven_u8str_view_starts_with_ascii_ci((proven_u8str_view_t){ .ptr = (const proven_byte_t *)p + 1, .size = len - 1 }, proven_u8str_view_from_cstr(NAMED[k].name))) continue;
         size_t end = 1 + n;
         if (end < len && p[end] == ';') end++;
         else if (!NAMED[k].bare) continue;
@@ -203,7 +203,7 @@ static bool smi_blank(proven_u8str_view_t raw) {
         char c = raw.ptr[i];
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
         if (c == '<') { while (i < raw.size && raw.ptr[i] != '>') i++; continue; }
-        if (c == '&' && rubraview_u8_starts_with_ci((proven_u8str_view_t){ .ptr = raw.ptr + i + 1, .size = raw.size - i - 1 }, "nbsp")) {
+        if (c == '&' && proven_u8str_view_starts_with_ascii_ci((proven_u8str_view_t){ .ptr = raw.ptr + i + 1, .size = raw.size - i - 1 }, PROVEN_LIT("nbsp"))) {
             i += 4;
             if (i + 1 < raw.size && raw.ptr[i + 1] == ';') i++;
             nbsp = true;
@@ -232,12 +232,12 @@ static proven_u8str_view_t strip_markup_as(proven_arena_t *arena, proven_u8str_v
             /* `<br>` and `<br/>` are the one tag that means something. */
             proven_u8str_view_t rest = { .ptr = text.ptr + i, .size = text.size - i };
             if (html) {
-                if (rubraview_u8_starts_with_ci(rest, "<br") || is_paragraph_tag(rest)) {
+                if (proven_u8str_view_starts_with_ascii_ci(rest, PROVEN_LIT("<br")) || is_paragraph_tag(rest)) {
                     while (written > 0 && out[written - 1] == ' ') written--;
                     /* No line before the first words, and one break however many tags ask. */
                     if (written > 0 && out[written - 1] != '\n') out[written++] = '\n';
                 }
-            } else if (rubraview_u8_starts_with_ci(rest, "<br")) {
+            } else if (proven_u8str_view_starts_with_ascii_ci(rest, PROVEN_LIT("<br"))) {
                 if (written == 0 || out[written - 1] != '\n') out[written++] = '\n';
             }
             while (i < text.size && text.ptr[i] != '>') i++;
@@ -306,8 +306,8 @@ static void parse_srt_like(proven_arena_t *arena, proven_u8str_view_t text, cue_
         if (line.size == 0) continue;
 
         /* WebVTT's own header lines are not cues. */
-        if (rubraview_u8_starts_with_ci(line, "WEBVTT") || rubraview_u8_starts_with_ci(line, "NOTE") ||
-            rubraview_u8_starts_with_ci(line, "STYLE") || rubraview_u8_starts_with_ci(line, "REGION")) {
+        if (proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("WEBVTT")) || proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("NOTE")) ||
+            proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("STYLE")) || proven_u8str_view_starts_with_ascii_ci(line, PROVEN_LIT("REGION"))) {
             continue;
         }
 
@@ -428,7 +428,7 @@ static void parse_smi(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
         if (text.ptr[i] != '<') { i++; continue; }
 
         proven_u8str_view_t rest = { .ptr = text.ptr + i, .size = text.size - i };
-        if (!rubraview_u8_starts_with_ci(rest, "<sync")) { i++; continue; }
+        if (!proven_u8str_view_starts_with_ascii_ci(rest, PROVEN_LIT("<sync"))) { i++; continue; }
 
         /* Close the caption that was open. */
         if (open_at >= 0.0 && i > body_start) {
@@ -462,7 +462,7 @@ static void parse_smi(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
         double start_ms = -1.0;
         for (size_t k = i; k + 6 < tag_end; ++k) {
             proven_u8str_view_t at = { .ptr = text.ptr + k, .size = tag_end - k };
-            if (!rubraview_u8_starts_with_ci(at, "start")) continue;
+            if (!proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("start"))) continue;
             size_t v = k + 5;
             while (v < tag_end && (text.ptr[v] == ' ' || text.ptr[v] == '=' || text.ptr[v] == '"')) v++;
             size_t digits = v;
@@ -482,8 +482,8 @@ static void parse_smi(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
            one's. */
         for (size_t look = tag_end + 1; look < text.size && look < tag_end + 200; ++look) {
             proven_u8str_view_t at = { .ptr = text.ptr + look, .size = text.size - look };
-            if (rubraview_u8_starts_with_ci(at, "<sync")) break;
-            if (!rubraview_u8_starts_with_ci(at, "class")) continue;
+            if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("<sync"))) break;
+            if (!proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("class"))) continue;
 
             size_t v = look + 5;
             while (v < text.size && (text.ptr[v] == ' ' || text.ptr[v] == '=' || text.ptr[v] == '"')) v++;
@@ -506,7 +506,7 @@ static void parse_smi(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
         /* the last caption stops where the body does: its words and its block are not the file's closing tags */
         size_t stop = text.size;
         for (size_t k = body_start; k + 6 <= text.size; ++k) {
-            if (text.ptr[k] == '<' && rubraview_u8_starts_with_ci((proven_u8str_view_t){ .ptr = text.ptr + k, .size = text.size - k }, "</body")) { stop = k; break; }
+            if (text.ptr[k] == '<' && proven_u8str_view_starts_with_ascii_ci((proven_u8str_view_t){ .ptr = text.ptr + k, .size = text.size - k }, PROVEN_LIT("</body"))) { stop = k; break; }
         }
         proven_u8str_view_t raw = { .ptr = text.ptr + body_start, .size = text.size - body_start };
         proven_u8str_view_t body = strip_markup_as(arena, raw, false, true);
@@ -575,7 +575,7 @@ static void parse_ass(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
     while (!at_end(&s)) {
         size_t line_pos = s.pos;
         proven_u8str_view_t line = next_line(&s);
-        if (!rubraview_u8_starts_with_ci(proven_u8str_view_trim(line), "dialogue:")) continue;
+        if (!proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_trim(line), PROVEN_LIT("dialogue:"))) continue;
 
         proven_u8str_view_t rest = proven_u8str_view_trim(line);
         rest.ptr += 9;   /* past "Dialogue:" */
@@ -619,14 +619,14 @@ rubraview_subtitle_format_t rubraview_subtitle_format_for_name(proven_u8str_view
     proven_u8str_view_t ext = rubraview_path_ext(filename);
     if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
 
-    if (rubraview_u8_starts_with_ci(ext, "srt") && ext.size == 3) return RUBRAVIEW_SUBTITLE_SRT;
-    if (rubraview_u8_starts_with_ci(ext, "smi") && ext.size == 3) return RUBRAVIEW_SUBTITLE_SMI;
-    if (rubraview_u8_starts_with_ci(ext, "sami") && ext.size == 4) return RUBRAVIEW_SUBTITLE_SMI;
-    if (rubraview_u8_starts_with_ci(ext, "vtt") && ext.size == 3) return RUBRAVIEW_SUBTITLE_VTT;
-    if (rubraview_u8_starts_with_ci(ext, "ass") && ext.size == 3) return RUBRAVIEW_SUBTITLE_ASS;
-    if (rubraview_u8_starts_with_ci(ext, "ssa") && ext.size == 3) return RUBRAVIEW_SUBTITLE_ASS;
-    if (rubraview_u8_starts_with_ci(ext, "idx") && ext.size == 3) return RUBRAVIEW_SUBTITLE_VOBSUB;
-    if (rubraview_u8_starts_with_ci(ext, "sup") && ext.size == 3) return RUBRAVIEW_SUBTITLE_PGS;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("srt")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_SRT;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("smi")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_SMI;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("sami")) && ext.size == 4) return RUBRAVIEW_SUBTITLE_SMI;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("vtt")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_VTT;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("ass")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_ASS;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("ssa")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_ASS;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("idx")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_VOBSUB;
+    if (proven_u8str_view_starts_with_ascii_ci(ext, PROVEN_LIT("sup")) && ext.size == 3) return RUBRAVIEW_SUBTITLE_PGS;
     return RUBRAVIEW_SUBTITLE_UNKNOWN;
 }
 
@@ -637,12 +637,12 @@ static rubraview_subtitle_format_t sniff(proven_u8str_view_t text) {
 
     for (size_t i = 0; i + 6 < text.size && i < 4096; ++i) {
         proven_u8str_view_t at = { .ptr = text.ptr + i, .size = text.size - i };
-        if (rubraview_u8_starts_with_ci(at, "WEBVTT")) return RUBRAVIEW_SUBTITLE_VTT;
-        if (rubraview_u8_starts_with_ci(at, "<SAMI")) return RUBRAVIEW_SUBTITLE_SMI;
-        if (rubraview_u8_starts_with_ci(at, "<SYNC")) return RUBRAVIEW_SUBTITLE_SMI;
-        if (rubraview_u8_starts_with_ci(at, "[Script Info]")) return RUBRAVIEW_SUBTITLE_ASS;
-        if (rubraview_u8_starts_with_ci(at, "Dialogue:")) return RUBRAVIEW_SUBTITLE_ASS;
-        if (rubraview_u8_starts_with_ci(at, "-->")) return RUBRAVIEW_SUBTITLE_SRT;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("WEBVTT"))) return RUBRAVIEW_SUBTITLE_VTT;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("<SAMI"))) return RUBRAVIEW_SUBTITLE_SMI;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("<SYNC"))) return RUBRAVIEW_SUBTITLE_SMI;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("[Script Info]"))) return RUBRAVIEW_SUBTITLE_ASS;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("Dialogue:"))) return RUBRAVIEW_SUBTITLE_ASS;
+        if (proven_u8str_view_starts_with_ascii_ci(at, PROVEN_LIT("-->"))) return RUBRAVIEW_SUBTITLE_SRT;
     }
     return RUBRAVIEW_SUBTITLE_UNKNOWN;
 }
@@ -1142,8 +1142,8 @@ static size_t smi_insert_at(const rubraview_subtitle_track_t *track, const patch
     for (size_t i = 0; i + 5 < t.size; ++i) {
         if (t.ptr[i] != '<') continue;
         proven_u8str_view_t rest = { .ptr = t.ptr + i, .size = t.size - i };
-        if (rubraview_u8_starts_with_ci(rest, "</body")) return i;
-        if (!rubraview_u8_starts_with_ci(rest, "<sync")) continue;
+        if (proven_u8str_view_starts_with_ascii_ci(rest, PROVEN_LIT("</body"))) return i;
+        if (!proven_u8str_view_starts_with_ascii_ci(rest, PROVEN_LIT("<sync"))) continue;
         bool cut = false;
         for (size_t k = 0; k < count && !cut; ++k) cut = patches[k].cut && i >= patches[k].at && i < patches[k].at + patches[k].len;
         if (cut) continue;
@@ -1151,7 +1151,7 @@ static size_t smi_insert_at(const rubraview_subtitle_track_t *track, const patch
         while (stop < t.size && t.ptr[stop] != '>') stop++;
         double ms = -1.0;
         for (; v + 5 < stop; ++v) {
-            if (!rubraview_u8_starts_with_ci((proven_u8str_view_t){ .ptr = t.ptr + v, .size = stop - v }, "start")) continue;
+            if (!proven_u8str_view_starts_with_ascii_ci((proven_u8str_view_t){ .ptr = t.ptr + v, .size = stop - v }, PROVEN_LIT("start"))) continue;
             size_t d = v + 5;
             while (d < stop && (t.ptr[d] == ' ' || t.ptr[d] == '=' || t.ptr[d] == '"')) d++;
             ms = 0.0;

@@ -162,7 +162,7 @@ static proven_u8str_view_t copy_text(proven_arena_t *arena, const char *s) {
     if (!proven_is_ok(r.err)) return PROVEN_LIT("");
     memcpy(r.value.ptr, s, n);
     ((char *)r.value.ptr)[n] = '\0';
-    return rubraview_u8(r.value.ptr, n);
+    return proven_u8str_view_from_bytes(r.value.ptr, n);
 }
 
 static bool slider_range(double min, double max) {

@@ -305,7 +305,7 @@ static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
     size_t pos = 0;
     if (cap == 0) return;
     while (n > 0 && s[n - 1] == 0) --n;
-    bool utf8 = rubraview_utf8_validate((proven_u8str_view_t){ (const proven_byte_t *)(const char*)s, n });
+    bool utf8 = (proven_utf8_validate((proven_u8str_view_t){ (const proven_byte_t *)(const char*)s, n }, NULL) == PROVEN_OK);
     for (size_t i = 0; i < n;) {
         uint32_t cp;
         size_t used = 1;
@@ -313,7 +313,11 @@ static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
         else cp = s[i];
         if (cp == 0) break;
         if (cp < 0x20 || cp == 0x7F) cp = ' ';
-        if (rubraview_utf8_encode(cp, (uint8_t*)dst, cap - 1, &pos) == 0) break;
+        proven_byte_t u[4];
+        size_t k = proven_utf8_encode_one(cp, u);
+        if (k == 0 || pos + k > cap - 1) break;
+        memcpy(dst + pos, u, k);
+        pos += k;
         i += used;
     }
     while (pos > 0 && dst[pos - 1] == ' ') --pos;
@@ -344,7 +348,11 @@ static void entry_comment(const tiff_ctx_t *t, size_t entry, char *dst, size_t c
                 if (lo >= 0xDC00 && lo < 0xE000) { u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00); i += 2; }
             }
             if (u < 0x20) u = ' ';
-            if (rubraview_utf8_encode(u, (uint8_t*)dst, cap - 1, &pos) == 0) break;
+            proven_byte_t b[4];
+            size_t k = proven_utf8_encode_one(u, b);
+            if (k == 0 || pos + k > cap - 1) break;
+            memcpy(dst + pos, b, k);
+            pos += k;
         }
         while (pos > 0 && dst[pos - 1] == ' ') --pos;
         dst[pos] = '\0';
