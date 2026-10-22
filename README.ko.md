@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.32.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.32.0/rubraview-v1.32.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.32.0/rubraview-v1.32.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.33.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.33.0/rubraview-v1.33.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.33.0/rubraview-v1.33.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -331,19 +331,13 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip` 을 받으세요. 반드시 **9.0**
 이어야 하고 이름에 **shared** 가 있어야 합니다. `shared` 가 없는 판에는 실행
 파일만 있고 DLL 이 없으며, 다른 판은 DLL 이름의 번호가 달라 루브라뷰가 쓰지
-않습니다. 압축 속 `bin` 폴더의 다섯 개를 `rubraview.exe` 옆에 복사하고
-루브라뷰를 다시 실행하면 됩니다. `lib` 폴더의 `.dll.a`, `.lib` 는 FFmpeg 을
-링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
+않습니다. 압축을 원하는 곳에 푼 다음, 설정(`F10`) › External(외부 도구) ›
+**FFmpeg folder** 에 그 `bin` 폴더를 지정하면 바로 쓰입니다. (`rubraview.exe`
+옆에 두어도 되며, 이때는 다시 실행해야 합니다.) `lib` 폴더의 `.dll.a`, `.lib`
+는 FFmpeg 을 링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.
 
-루브라뷰가 대신 넣게 할 수도 있습니다. 설정(`F10`) › Video ›
-**Import FFmpeg's DLLs...** 에서 그 `bin` 폴더를 고르면 다섯 개를
-`rubraview.exe` 옆에 복사합니다. 그 폴더에 파일을 넣을 수 없으면(Microsoft
-Store 판, Program Files) 설정 폴더에 복사하고, 루브라뷰는 거기서도 읽습니다.
-복사하면 바로 쓰입니다. 아니면 DLL 을 원하는 폴더에 두고 같은 쪽의
-**FFmpeg folder** 에 그 폴더를 적어도 됩니다.
-
-설정 › Video 에서 인식 여부를 보여 주고, 같은 안내를 그 쪽 아래에도 적어
-두었습니다.
+설정 › External 에서 인식 여부와 위치를 보여 주고, 내려받는 곳의 링크도
+있습니다. 루브라뷰는 FFmpeg 을 함께 배포하지 않습니다.
 
 ## 문서
 

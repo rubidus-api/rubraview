@@ -227,16 +227,16 @@ static const char *const FF_PLAIN[FF_DLLS] = {
     "avutil.dll", "swresample.dll", "swscale.dll", "avcodec.dll", "avformat.dll",
 };
 
-/* The other places they may be, after the program's own folder: [0] the
-   one Import copies them to when that folder cannot be written (the
-   settings folder's ffmpeg), [1] the one the user named (video.ffmpeg_dir);
+/* The other places they may be besides the program's own folder: [0] the
+   one an older version's Import copied them to (the settings folder's
+   ffmpeg), [1] the one the user named (video.ffmpeg_dir), looked in first;
    L"" for none. And the two the last failed load looked in. All under
    g_ff_lock. */
 static SRWLOCK g_ff_lock = SRWLOCK_INIT;
 static WCHAR g_ff_dirs[2][MAX_PATH];
 static WCHAR g_ff_tried_dirs[2][MAX_PATH];
 static atomic_bool g_ff_ready;
-static int g_ff_place;   /* 1: beside the program, 2: imported, 3: the chosen folder */
+static int g_ff_place;   /* 1: beside the program, 2: an older Import's copy, 3: the chosen folder */
 
 /* `dir` NULL: beside the program (and the system's folders), as before
    there was a choice. Otherwise only that folder, by full path, and
@@ -346,12 +346,14 @@ static bool ff_load_from(const WCHAR *dir) {
     return false;
 }
 
+/* RFC-0009 (owner 2026-10-22: "위치 지정 방법으로 통일"): the folder the
+   user named first, then beside the program, then the settings folder's
+   copy an Import of an older version made (none is made any more). */
 static bool ff_load_once(void) {
     int place = 0;
-    if (ff_load_from(NULL)) place = 1;
-    for (int i = 0; i < 2 && !place; i++) {
-        if (g_ff_dirs[i][0] && folder_has_all(g_ff_dirs[i]) && ff_load_from(g_ff_dirs[i])) place = 2 + i;
-    }
+    if (g_ff_dirs[1][0] && folder_has_all(g_ff_dirs[1]) && ff_load_from(g_ff_dirs[1])) place = 3;
+    if (!place && ff_load_from(NULL)) place = 1;
+    if (!place && g_ff_dirs[0][0] && folder_has_all(g_ff_dirs[0]) && ff_load_from(g_ff_dirs[0])) place = 2;
     if (!place) return false;
     g_ff.av_log_set_level(AV_LOG_ERROR);
     g_ff_place = place;
@@ -362,7 +364,7 @@ static bool ff_load_once(void) {
 /* Whoever asks first: the film's thread, or (RV-110) any of the threads
    that read pictures ahead. A load that worked holds for the run; one that
    did not is tried again only when the folders are given again (a setting
-   changed, Import), so the settings page, which asks on every frame, does
+   changed), so the settings page, which asks on every frame, does
    not knock each time. */
 static bool ff_load(void) {
     if (atomic_load_explicit(&g_ff_ready, memory_order_acquire)) return true;
@@ -393,7 +395,7 @@ void rubraview_pal_ffmpeg_set_folders(u8str_t imported, u8str_t chosen) {
     folder_wide(chosen, wide[1]);
     AcquireSRWLockExclusive(&g_ff_lock);
     memcpy(g_ff_dirs, wide, sizeof(wide));
-    /* Told again, as after Import filled a folder already named: none is
+    /* Told again, as after the folder was named or filled: none is
        loaded, so the next ask looks once more. */
     if (!g_ff.ok) g_ff.tried = false;
     ReleaseSRWLockExclusive(&g_ff_lock);
@@ -427,17 +429,22 @@ static rubraview_ffmpeg_refusal_t refusal_in(WCHAR *path, size_t n) {
 rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void) {
     if (ff_load()) return RUBRAVIEW_FFMPEG_NOT_REFUSED;
     WCHAR path[MAX_PATH + 32];
-    DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
-    while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
     rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
-    if (n > 0 && n < MAX_PATH) state = refusal_in(path, n);
-    /* None beside the program: the imported set, then the chosen folder's. */
-    for (int i = 0; i < 2 && state == RUBRAVIEW_FFMPEG_NOT_REFUSED; i++) {
-        AcquireSRWLockShared(&g_ff_lock);
-        size_t d = wcslen(g_ff_dirs[i]);
-        if (d > 0 && d < MAX_PATH - 1) { memcpy(path, g_ff_dirs[i], d * sizeof(WCHAR)); path[d++] = L'\\'; }
-        else d = 0;
-        ReleaseSRWLockShared(&g_ff_lock);
+    /* In the order they are loaded from: the chosen folder, beside the program, an older Import's copy. */
+    static const int ORDER[3] = { 1, -1, 0 };
+    for (int k = 0; k < 3 && state == RUBRAVIEW_FFMPEG_NOT_REFUSED; k++) {
+        size_t d = 0;
+        if (ORDER[k] < 0) {
+            DWORD n = GetModuleFileNameW(NULL, path, MAX_PATH);
+            while (n > 0 && n < MAX_PATH && path[n - 1] != L'\\') --n;
+            d = n > 0 && n < MAX_PATH ? n : 0;
+        } else {
+            AcquireSRWLockShared(&g_ff_lock);
+            d = wcslen(g_ff_dirs[ORDER[k]]);
+            if (d > 0 && d < MAX_PATH - 1) { memcpy(path, g_ff_dirs[ORDER[k]], d * sizeof(WCHAR)); path[d++] = L'\\'; }
+            else d = 0;
+            ReleaseSRWLockShared(&g_ff_lock);
+        }
         if (d) state = refusal_in(path, d);
     }
     return state;

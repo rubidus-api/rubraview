@@ -18015,10 +18015,11 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
                      : T("from the zip or the installer: register below"));
     } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
         int place = rubraview_pal_ffmpeg_place();
+        /* RFC-0009: found where it is named, else beside the program, else where an older Import put it. */
         n = snprintf(buffer, capacity, "%s",
-                     place == 1 ? T("its DLLs are beside the program")
-                     : place == 2 ? T("its DLLs were imported into the settings folder")
-                     : place == 3 ? T("its DLLs are in the FFmpeg folder")
+                     place == 3 ? T("its DLLs are in the FFmpeg folder")
+                     : place == 1 ? T("its DLLs are beside the program")
+                     : place == 2 ? T("its DLLs are where an older version's Import put them")
                      : T("not found (or not 9.x) - Media Foundation only"));
         char encoders[96];   /* RV-139: what it can write pictures with */
         if (place > 0 && n > 0 && (size_t)n < capacity && rubraview_pal_ffmpeg_image_encoders(encoders, sizeof(encoders)) && encoders[0]) {
@@ -18777,32 +18778,6 @@ static int import_files(app_state_t *app, const u8str_t *from, const u8str_t *na
     return import_into(app, imported_folder(app, sub), from, names, count) ? 2 : 0;
 }
 
-static void ffmpeg_import(app_state_t *app) {
-    rubraview_file_dialog_opts_t opts = {
-        .title = T("Choose the folder with FFmpeg's DLLs (its bin)"), .folder_mode = true,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
-    };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (!picked.accepted || picked.count == 0) return;
-    u8str_t from[RUBRAVIEW_FFMPEG_DLLS], names[RUBRAVIEW_FFMPEG_DLLS];
-    for (size_t i = 0; i < RUBRAVIEW_FFMPEG_DLLS; i++) {
-        names[i] = cstr(rubraview_pal_ffmpeg_dll_name(i));
-        from[i] = rubraview_path_join(app->arena, picked.paths[0], names[i]);
-        if (!rubraview_pal_fs_exists(from[i])) {
-            settings_say(app, T("that folder does not hold FFmpeg 9.0's five DLLs; nothing copied"));
-            return;
-        }
-    }
-    bool loaded = rubraview_pal_ffmpeg_place() != 0;
-    int where = import_files(app, from, names, RUBRAVIEW_FFMPEG_DLLS, "ffmpeg", false);
-    settings_took_effect(app);   /* tried again now, while none is loaded */
-    settings_say(app, where == 0 ? T("FFmpeg could not be copied (is it in use?)")
-                      : loaded ? T("FFmpeg imported; the one in use stays until the next start")
-                      : rubraview_pal_ffmpeg_place() != 0 ? T("FFmpeg imported and in use")
-                      : T("FFmpeg copied, but it would not load: not 9.0, or not the shared build"));
-    app->settings_dirty = true;
-}
-
 static void lang_import(app_state_t *app) {
     const rubraview_file_filter_t FILTERS[] = { { T("Language pack (*.txt)"), "*.txt" } };
     rubraview_file_dialog_opts_t opts = {
@@ -19223,8 +19198,6 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, written ? T("every reading place is forgotten") : T("forgotten here; the history file could not be written"));
             } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
                 keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
-            } else if (rubraview_u8_eq_lit(node->name, "ffmpeg.import")) {
-                ffmpeg_import(app);
             } else if (rubraview_u8_eq_lit(node->name, "lang.import")) {
                 lang_import(app);
             }

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.32.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.32.0/rubraview-v1.32.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.32.0/rubraview-v1.32.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.33.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.33.0/rubraview-v1.33.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.33.0/rubraview-v1.33.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -334,20 +334,14 @@ Get them from [BtbN's Windows builds](https://github.com/BtbN/FFmpeg-Builds/rele
 the file named `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`. It must be
 **9.0** and the name must say **shared**: a build without `shared` holds
 only the programs, and another version names its DLLs differently, so
-Rubraview will not use them. Copy the five files out of the zip's `bin` folder and put
-them beside `rubraview.exe`, then start Rubraview again. The
+Rubraview will not use them. Unpack the zip where you like, then name its
+`bin` folder in Settings (`F10`) › External › **FFmpeg folder**; it is
+used at once. (Beside `rubraview.exe` works too, after a restart.) The
 `lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
 not for running it — leave them.
 
-Or let Rubraview put them in place: Settings (`F10`) › Video ›
-**Import FFmpeg's DLLs...** asks for that `bin` folder and copies the five
-beside `rubraview.exe`, or, where that folder takes no files (the Microsoft
-Store's copy, Program Files), into the settings folder, where Rubraview
-reads them too; they are used at once. Or leave them in a folder of your
-own and name it in **FFmpeg folder** on the same page.
-
-Settings › Video says whether they were found, and repeats all of this at
-the bottom of the page.
+Settings › External says whether they were found and where, with a
+link to the download page. Rubraview ships none of FFmpeg.
 
 ## Documentation
 

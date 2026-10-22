@@ -35,6 +35,7 @@ typedef enum rubraview_settings_tab {
     RUBRAVIEW_TAB_VIDEO,
     RUBRAVIEW_TAB_TEXT,       /* RFC-0005 */
     RUBRAVIEW_TAB_DISPLAY,
+    RUBRAVIEW_TAB_TOOLS,      /* RFC-0009: External (tools from outside) */
     RUBRAVIEW_TAB_CACHE,
     RUBRAVIEW_TAB_KEYS,
     RUBRAVIEW_TAB_COUNT,

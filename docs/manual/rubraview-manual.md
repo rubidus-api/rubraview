@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.32.0.exe              the viewer, as built
-dist/rubraview-v1.32.0/                 the release bundle
-dist/rubraview-v1.32.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.33.0.exe              the viewer, as built
+dist/rubraview-v1.33.0/                 the release bundle
+dist/rubraview-v1.33.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -437,7 +437,7 @@ quality (not when lossless), lossless and effort; GIF, BMP and ICO
 nothing more ("as the file" shows the file's own format's). **AVIF
 (FFmpeg)** and **JPEG XL (FFmpeg)** are written by FFmpeg's encoders,
 when the FFmpeg the viewer uses has them (BtbN's 9.0 build has libjxl,
-libaom, SVT-AV1 and rav1e; Settings › Video › FFmpeg names those it found):
+libaom, SVT-AV1 and rav1e; Settings › External › FFmpeg names those it found):
 their quality (100 being lossless JPEG XL) and, for AVIF, **AVIF colour**
 (4:2:0, or 4:4:4 for the sharpest colour) and **AVIF depth** (8 or 10
 bits). Transparency is kept in both (AVIF's needs libaom; another AV1
@@ -495,8 +495,8 @@ encoded again: the picture is exactly the same.
 AVIF pictures (`.avif`) are read by Rubraview itself, on any Windows —
 stills and animations, with their transparency, 10-bit ones shown as 8.
 JPEG XL (`.jxl`) is read by Windows, when a JPEG XL codec is installed
-in it, or else by FFmpeg, when its DLLs are beside `rubraview.exe`
-(Settings > Video, "Adding FFmpeg") and were built with libjxl; without
+in it, or else by FFmpeg, when its DLLs are found (Settings > External,
+"FFmpeg") and were built with libjxl; without
 either a `.jxl` says what is missing. The DLLs must be FFmpeg 9.0's
 (`avcodec-63.dll` and its fellows): an older set is not loaded, and a
 picture or a film that needed it says that the DLLs beside the program
@@ -535,7 +535,7 @@ it was.
 
 ### Plug-ins: filters from outside
 
-Settings › Display › **Plug-ins** (off until you turn it on) lets filters
+Settings › External › **Plug-ins** (off until you turn it on) lets filters
 written by others into Edit and the batch. A plug-in is a 64-bit DLL named
 `*.rvf.dll` in the **Plug-in folder** (empty: `%LOCALAPPDATA%\Rubraview\plugins`,
 made when plug-ins are turned on). The settings page lists what it found —
@@ -1343,15 +1343,17 @@ filename code page, the memory cap). Some worth knowing:
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,
   `jpn`), chosen when a film has it.
-- **Video › Adding FFmpeg** — FFmpeg's five DLLs (version 9.0, the
-  *shared* build; **Get it** opens BtbN's download page in the browser)
-  beside `rubraview.exe`, or: **Import FFmpeg's DLLs...**
-  copies them out of the folder you choose (the zip's `bin`) to beside the
-  program, or to the settings folder's `ffmpeg` where the program's folder
-  takes no files (the Microsoft Store's copy, Program Files), and uses them
-  at once; **FFmpeg folder** names a folder of your own to read them from.
-  The program's folder is looked in first, then the imported copy, then
-  that folder; each must hold all five.
+- **External** — what Rubraview can use but does not ship, each in
+  a section of its own: a **Get it** link that opens its makers' download
+  page in the browser, a note of which file to take, and the place you put
+  it. Nothing is copied anywhere; each tool's licence is its own.
+  - **FFmpeg** — FFmpeg 9.0's *shared* build (BtbN's
+    `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`; the LGPL build is
+    enough). **FFmpeg folder** names its `bin` folder, which must hold all
+    five DLLs. Empty, or when that folder does not hold them: beside
+    `rubraview.exe`, then the settings folder's `ffmpeg`, where versions
+    before 1.33.0 imported a copy. The line above says which was found.
+  - **Rubraview plug-ins** — see "Plug-ins: filters from outside".
 - **Viewer › Behind and between pages** — dark, black, grey or white.
 - **General › Open with Windows' own dialog** — `Ctrl+O` then opens
   Windows' dialog, not the picker.

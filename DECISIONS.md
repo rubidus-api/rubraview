@@ -1939,3 +1939,25 @@ Do not store credentials, private infrastructure details, personal data, private
   - Batch: `--plugin=NAME[:V1,...]`, `--plugin-folder=`; written on the command line, it needs no setting.
   - The sample, `docs/manual/plugins/posterise.c`, ships as source.
 - Consequences: host tests (SHA-256 against FIPS 180-4, the shared block, descriptions and values, `--plugin`, the step and its runner). VM (2026-10-22): the sample in the batch equal to the computed posterisation; a crashing plug-in said "it crashed" with no Windows error box; a hanging one ended 5 s after Esc; a 32-bit DLL refused; an unknown name said; Settings' table and Edit's rows, run as a step with the preview changed. Not done: `.8bf` (RFC-0008); a plug-in's own windows.
+
+## 2026-10-22: D-187 Outside tools on one page, each where the user puts it (RFC-0009 A, RV-155)
+
+- Status: Accepted (owner 2026-10-22: "브라우저를 열 수 있는 링크만 제공해요 ... import 보다는 위치 지정 방법으로 통일하는 것이 가장 깔끔해 보여요. 각 플러그인이나 외부 라이브러리 별로 각자 따로 설정할 수 있게요", then "모두 추천대로 해 주세요"). RFC-0009; plan `docs/plans/active/2026-10-22-RV-155-external-tools.md`.
+- Decision:
+  - Settings › **External** (a page of its own, `RUBRAVIEW_TAB_TOOLS`) holds every outside tool, one section each: what was found, a **Get it** link that only opens the makers' page in the browser, which file to take, and where it is. Rubraview ships, mirrors and copies none of them; each one's licence is its own (RFC-0009 §1).
+  - FFmpeg moves there from Video, the Rubraview plug-ins from Display. The keys stay (`video.ffmpeg_dir`, `edit.plugins`, `edit.plugin_folder`): no settings file changes.
+  - FFmpeg's **Import** is gone. FFmpeg is looked for in the folder named, then beside the program, then in the settings folder's `ffmpeg` that an Import of an older version filled (still read, never written); the status line names which.
+  - One release with D-188 (RFC-0009's order put the hostile-input checks first; both were ready together).
+- Consequences: `test_settings_doc` (the page, no `ffmpeg.import`, room for the tools to come), `test_ui_settings` (the FFmpeg notes on the page), `test_settings` (eleven pages). VM: the page, and FFmpeg found from each of the three places.
+
+## 2026-10-22: D-188 Hostile input: our own fuzzer in every gate (RV-156)
+
+- Status: Accepted (owner 2026-10-22: "파일을 읽거나 처리할 때, 잘못된 데이터를 일부러 집어넣어 공격하는 것에 대한 검증 시스템을 넣어주세요", with "모두 추천대로"). Plan `docs/plans/active/2026-10-22-RV-156-hostile-input.md`.
+- Decision:
+  - No libFuzzer on the build host (clang's sanitizer runtime is not installed), so a small coverage-guided fuzzer of our own: the core built with `-fsanitize-coverage=trace-pc` and ASan + UBSan (`halt_on_error`); `tests/fuzz/driver.c` keeps inputs that reach new edges and mutates them (bits, bytes, boundary values in both byte orders, length fields, cuts, insertions, repeats, splices, text separators); an input that runs past 2 s is a finding; every finding is written to `build/fuzz/found/` with the command that replays it.
+  - Each input sits in a buffer of exactly its size; arena allocations are wrapped at link time (`--wrap=proven_arena_alloc_aligned`, `..._realloc_aligned`) so the arena's unused bytes stay poisoned and a read past an arena allocation is caught too.
+  - 29 targets: every reader of outside bytes in `src/core` (EXIF / IPTC / privacy strip, the details reader and writers, the details .txt, AVIF, APNG, BigTIFF, jpegtran, Matroska, MP4, PGS, VobSub, subtitles, music tags, lyrics and cue sheets, ComicInfo, INI, settings, language packs, text encodings, the text view, archive names, playlists, history, favourites, keymaps, toolboxes, a plug-in child's answer, the command line). Seeds in `tests/fuzz/corpus/`, made by `tests/fuzz/make-seeds.py` and the unit tests' builders; a fixed finding stays there as a seed.
+  - `make test` ends with `fuzz-smoke` (every target, seed 1, 1000 runs or 1 s each, about 12 s); `scripts/fuzz.sh <target|all> <seconds>` runs long.
+  - What it cannot reach: Windows' codecs (WIC, Media Foundation), the user's FFmpeg, and a plug-in DLL, which is code — for those the child process, its job object and plug-ins off by default are the defence.
+  - Found and fixed in the first runs: a WebP whose first chunk said VP8X with fewer than ten bytes (a copy of minus one byte); an AVIF whose iinf, pitm or iref box was shorter than its fields (a copy of minus six); libjpeg's memory destination freeing the buffer it had handed back once it grew it, so a damaged JPEG that failed after that was freed twice (now our own destination).
+- Consequences: test index T232–T233; LESSONS check on counts and sizes read from a file.

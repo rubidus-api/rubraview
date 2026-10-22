@@ -654,10 +654,12 @@ static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, con
 
     const uint8_t *first = b + 12;
     uint32_t first_len = le32(first + 4);
-    if ((size_t)first_len > file.len - 20) return r;
+    /* RV-156: the chunk and its pad byte inside the file, and a VP8X its ten bytes. */
+    if ((size_t)first_len + (first_len & 1u) > file.len - 20) return r;
     uint8_t flags = 0;
     uint32_t w = 0, h = 0;
     bool extended = memcmp(first, "VP8X", 4) == 0;
+    if (extended && first_len < 10) return r;
     if (!extended) {
         const uint8_t *p = first + 8;
         if (memcmp(first, "VP8 ", 4) == 0 && first_len >= 10) {
@@ -831,6 +833,10 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
     if (!bmff_find(b, from, end, "iinf", &iinf) || !bmff_find(b, from, end, "iloc", &iloc) ||
         !bmff_find(b, from, end, "pitm", &pitm) || !iloc_read(arena, b, &iloc, &l)) return r;
     bool has_iref = bmff_find(b, from, end, "iref", &iref);
+    /* RV-156: every field read below inside its box: the meta box's version, pitm's item, iref's version. */
+    size_t pitm_body = pitm.size - pitm.head;
+    if (meta.size < 12 || pitm_body < 6 || (b[pitm.at + pitm.head] != 0 && pitm_body < 8)) return r;
+    if (has_iref && iref.size - iref.head < 4) return r;
     if (has_iref && b[iref.at + iref.head] != 0) return r;   /* 32-bit references: not written here */
     uint32_t primary = b[pitm.at + pitm.head] == 0 ? be16(b + pitm.at + pitm.head + 4) : be32(b + pitm.at + pitm.head + 4);
     uint32_t next = 0;
@@ -854,6 +860,7 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
         for (size_t at = from; bmff_at(b, end, at, &c); at += c.size) {
             if (memcmp(c.type, "iinf", 4) == 0) {
                 size_t p = c.at + c.head;
+                if (c.size - c.head < 6 || (b[p] != 0 && c.size - c.head < 8)) return r;   /* RV-156 */
                 int v = b[p];
                 size_t count = v == 0 ? be16(b + p + 4) : be32(b + p + 4);
                 size_t body_at = p + 4 + (v == 0 ? 2u : 4u);

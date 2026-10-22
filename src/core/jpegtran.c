@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include "jpeglib.h"
 #include "transupp.h"
+#include "jerror.h"
 
 /* libjpeg reports errors by longjmp'ing out of its own call stack, so
    the error handler is replaced with one that comes back here instead
@@ -104,6 +105,45 @@ bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
 }
 
 /*
+ * RV-156: our own growing destination. libjpeg's jpeg_mem_dest frees the
+ * buffer it handed back once it has grown it, and keeps the new one where
+ * only it can see; a damaged file that failed after that left the caller
+ * freeing the old one twice. This one keeps the buffer where the error
+ * path can free it.
+ */
+typedef struct jt_dest {
+    struct jpeg_destination_mgr pub;
+    unsigned char *buffer;
+    size_t cap, used;
+} jt_dest_t;
+
+static void jt_dest_init(j_compress_ptr cinfo) {
+    jt_dest_t *d = (jt_dest_t*)cinfo->dest;
+    d->cap = 64u * 1024u;
+    d->buffer = malloc(d->cap);
+    if (!d->buffer) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 0);
+    d->pub.next_output_byte = d->buffer;
+    d->pub.free_in_buffer = d->cap;
+}
+
+static boolean jt_dest_grow(j_compress_ptr cinfo) {
+    jt_dest_t *d = (jt_dest_t*)cinfo->dest;
+    size_t cap = d->cap * 2u;
+    unsigned char *grown = cap > d->cap ? realloc(d->buffer, cap) : NULL;
+    if (!grown) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 1);
+    d->pub.next_output_byte = grown + d->cap;
+    d->pub.free_in_buffer = cap - d->cap;
+    d->buffer = grown;
+    d->cap = cap;
+    return TRUE;
+}
+
+static void jt_dest_term(j_compress_ptr cinfo) {
+    jt_dest_t *d = (jt_dest_t*)cinfo->dest;
+    d->used = d->cap - d->pub.free_in_buffer;
+}
+
+/*
  * The part that calls into libjpeg, kept in a function of its own.
  *
  * libjpeg reports an error by longjmp'ing back to the setjmp above it,
@@ -129,11 +169,11 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     jvirt_barray_ptr *coefficients = NULL;
     jvirt_barray_ptr *out_coefficients = NULL;
     jpeg_transform_info info;
-    /* libjpeg writes both of these through pointers, so they live in
-       memory rather than in a register and survive the longjmp; the two
+    /* libjpeg writes the destination through a pointer, so it lives in
+       memory rather than in a register and survives the longjmp; the two
        flags below do not, and are volatile for that reason. */
-    unsigned char *out_buffer = NULL;
-    unsigned long out_size = 0;
+    jt_dest_t out = { .pub = { .init_destination = jt_dest_init, .empty_output_buffer = jt_dest_grow,
+                               .term_destination = jt_dest_term } };
     volatile bool src_created = false, dst_created = false;
 
     memset(&info, 0, sizeof(info));
@@ -151,7 +191,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     dst_err.pub.output_message = jt_output_message;
 
     if (setjmp(src_err.escape) || setjmp(dst_err.escape)) {
-        if (out_buffer) free(out_buffer);
+        free(out.buffer);
         if (dst_created) jpeg_destroy_compress(&dst);
         if (src_created) jpeg_destroy_decompress(&src);
         result.err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT;
@@ -203,7 +243,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     if (optimise) dst.optimize_coding = TRUE;
     if (restart_rows > 0) dst.restart_in_rows = restart_rows;
 
-    jpeg_mem_dest(&dst, &out_buffer, &out_size);
+    dst.dest = &out.pub;
     jpeg_write_coefficients(&dst, out_coefficients);
     jcopy_markers_execute(&src, &dst, copy_markers ? JCOPYOPT_ALL : JCOPYOPT_NONE);
     jtransform_execute_transform(&src, &dst, coefficients, &info);
@@ -215,19 +255,20 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     jpeg_destroy_decompress(&src);
     src_created = false;
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)out_size + 1);
+    size_t out_size = out.used;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, out_size + 1);
     if (!proven_is_ok(res.err)) {
-        free(out_buffer);
+        free(out.buffer);
         result.err = RUBRAVIEW_JPEGTRAN_ERR_OUT_OF_MEMORY;
         return result;
     }
     char *copy = (char*)(void*)res.value.ptr;
-    memcpy(copy, out_buffer, out_size);
+    memcpy(copy, out.buffer, out_size);
     copy[out_size] = '\0';
-    free(out_buffer);
+    free(out.buffer);
 
     result.err = RUBRAVIEW_JPEGTRAN_OK;
-    result.data = (u8str_t){ .ptr = copy, .len = (size_t)out_size };
+    result.data = (u8str_t){ .ptr = copy, .len = out_size };
     return result;
 }
 
