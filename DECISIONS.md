@@ -1961,3 +1961,13 @@ Do not store credentials, private infrastructure details, personal data, private
   - What it cannot reach: Windows' codecs (WIC, Media Foundation), the user's FFmpeg, and a plug-in DLL, which is code — for those the child process, its job object and plug-ins off by default are the defence.
   - Found and fixed in the first runs: a WebP whose first chunk said VP8X with fewer than ten bytes (a copy of minus one byte); an AVIF whose iinf, pitm or iref box was shorter than its fields (a copy of minus six); libjpeg's memory destination freeing the buffer it had handed back once it grew it, so a damaged JPEG that failed after that was freed twice (now our own destination).
 - Consequences: test index T232–T233; LESSONS check on counts and sizes read from a file.
+
+## 2026-10-22: D-189 frei0r is not built in (RFC-0009 B withdrawn, RV-155)
+
+- Status: Accepted (owner 2026-10-22, while B was being verified: "frei0r 이거는 GPL 이니까 우리가 연결해서 쓰면 안되지 않을까? 독립 exe 형식일 때 연결해서 쓰는게 아니라면 말이지. 잘 생각해 보고, 웬만하면 넣지 말자").
+- Decision:
+  - frei0r's filters are DLLs that a host loads and calls, sharing its structures: even in our child process that is our program linked with GPL code, which the FSF counts as one combined program. Rubraview stays out of that: no frei0r host, no frei0r section, no `--frei0r`. The work done (a folder described by one child, parameter rows, padding to eight) was verified on the VM and is not shipped; it is kept as a patch outside the trees, not in them.
+  - The line for RFC-0009's other tools: a tool run as a program of its own and talked to through files and its command line (G'MIC's `gmic.exe`) is fine; a library loaded into our process is fine only under a licence that allows it (FFmpeg's LGPL build, as now).
+  - Kept from B: the child's error text is read only within its field (`%.*s`), so a plug-in child that leaves it unterminated cannot make the viewer read past it.
+  - Learned on the way, for whoever looks again: frei0r's own 3.6.0 win64 zip is a debug build (every filter imports `vcruntime140d.dll`), so it runs only where Visual Studio is installed.
+- Consequences: RFC-0009 §3 withdrawn; C (G'MIC) and D (FFmpeg's filters) go on.

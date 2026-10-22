@@ -128,7 +128,7 @@ static bool child_run(HANDLE mapping, rubraview_plugin_shared_t *shared, const c
     if (shared->state == RUBRAVIEW_PLUGIN_DONE && code == 0) return true;
     if (cancelled_at) { *why = N_("cancelled"); return false; }
     if (shared->state == RUBRAVIEW_PLUGIN_FAILED && shared->error[0]) {
-        snprintf(g_why, sizeof(g_why), "%s", shared->error);
+        snprintf(g_why, sizeof(g_why), "%.*s", (int)sizeof(shared->error), shared->error);   /* the child's words: never past their field (D-189) */
         *why = g_why;
         return false;
     }
