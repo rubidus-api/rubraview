@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.35.0.exe              the viewer, as built
-dist/rubraview-v1.35.0/                 the release bundle
-dist/rubraview-v1.35.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.36.0.exe              the viewer, as built
+dist/rubraview-v1.36.0/                 the release bundle
+dist/rubraview-v1.36.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -575,6 +575,35 @@ product — check its licence before you use it, in the batch especially.
 Writing one: `docs/manual/plugins/` holds the interface
 (`include/rubraview/plugin_filter.h`, two functions over BGRA rows and up to
 eight parameters) and a complete sample, `posterise.c`.
+
+### G'MIC: a thousand filters
+
+[G'MIC](https://gmic.eu) is a free image processor with about a thousand
+filters. Rubraview does not ship it; it runs G'MIC's own program, so you
+choose which version you use and its licence is between you and G'MIC.
+
+1. Get the **command-line** zip for Windows from gmic.eu/download.html
+   (`gmic_..._cli_win64.zip`; Settings › External › G'MIC has the link)
+   and unpack it anywhere.
+2. In Settings › External › G'MIC, name `gmic.exe` or its folder.
+3. Press **Make the filter list**, once. G'MIC fetches its filter
+   definitions from gmic.eu and lists them; it takes a few minutes, and the
+   status line says when it is done. Press it again after updating G'MIC.
+
+In Edit, **G'MIC** chooses a category, **filter** one of its filters, and
+the filter's own settings follow as rows (a text, a colour or a point is
+typed in the box). **Run G'MIC** makes it a step — on the whole picture, or
+on the selection — that the preview shows and Save writes; `Esc` stops a
+long run. Some filters change the picture's size. **Type a G'MIC command...**
+runs any G'MIC command line (`blur 3`, `fx_watercolor 1,1,0`); G'MIC's own
+error is shown when it refuses one.
+
+In the batch: `--gmic="<command>" --gmic-exe=<gmic.exe or its folder>`.
+
+G'MIC runs as a program of its own with your rights, given only the
+picture as a file in the temporary folder, and is ended with everything it
+started if it does not finish in ten minutes. A command you type can do
+whatever G'MIC can do, so type only commands you understand.
 
 ## Sorting your files
 

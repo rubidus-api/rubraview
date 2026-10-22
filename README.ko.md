@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.35.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.35.0/rubraview-v1.35.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.35.0/rubraview-v1.35.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.36.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.36.0/rubraview-v1.36.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.36.0/rubraview-v1.36.0.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -30,6 +30,8 @@
 - **코덱 설치 없이 AVIF 읽기**: 내장 디코더(libavif + dav1d)가 AVIF 정지 그림과 움직이는 그림을 투명도까지 읽습니다. JPEG XL 은 Windows 에 그 코덱이 설치돼 있거나 FFmpeg DLL 을 프로그램 옆에 두면 열립니다. 움직이는 JPEG XL 은 FFmpeg 으로 재생됩니다. 4 GB 미만의 BigTIFF 도 일반 TIFF 처럼 열립니다.
 - **코덱 설치 없이 WebP 쓰기**: 내보내기와 `--batch --format=webp` 가 내장 libwebp 로 손실·무손실 WebP 를 씁니다. 움직이는 GIF·PNG·WebP 는 움직이는 WebP 가 됩니다.
 - **동영상 재생**: 분리된 PAL 을 통한 FFmpeg(`libavcodec`/`libavformat`) 연결로 재생, 한 프레임씩 이동, 정지 화면 저장.
+- **재생목록으로 인터넷 라디오 듣기**: `.m3u8` / `.m3u` 에 방송 주소(`http`, `https`, `mms`)와 제목(`#EXTINF:-1,제목`)을 적거나 `.pls`, `.asx` 를 열면 재생목록(`P`)에 방송국이 나오고, FFmpeg 가 네트워크만 쓰도록 제한한 채 재생합니다.
+- **편집 창의 G'MIC 필터**: 설정 › 외부 도구에서 G'MIC 의 명령줄 프로그램을 지정하면 약 천 개의 필터를 분류별로 골라 각자의 설정으로 실행하거나 G'MIC 명령을 직접 입력할 수 있습니다. G'MIC 은 우리 프로그램 안이 아니라 자기 프로그램으로 실행됩니다.
 - **선택 영역 위의 단계로 편집**: 사각형이나 타원(부드러운 가장자리)을 끌고, 크기를 바꾸고, 숫자로 입력합니다. 톤·색 균형·자동 색 보정·효과 21가지·자르기·크기 조정이 그 위의 단계가 되어 저장 전까지 실행 취소·다시 실행됩니다. 원본에 저장(옛 파일은 휴지통)과 사본 저장이 따로 있습니다.
 - **원하는 대로 크기 조정**: 퍼센트, 픽셀, 또는 DPI 기준 cm·mm·인치 길이. HD~8K, 긴 변, 메가픽셀. 선형 광으로 줄이기, 이후 선명하게(Nearest·Bilinear·Bicubic·Lanczos-3).
 - **일괄 처리**: 여러 스레드로, 창에서도 명령줄에서도. 크기, 자르기, 여백 자르기, 자동 색 보정, 모든 효과, 캔버스, 테두리, 워터마크, 번호·바꾸기가 있는 이름, 날짜 유지. 선택을 시험하고, 기억하고, 저장하고, 불러옵니다.

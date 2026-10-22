@@ -45,7 +45,7 @@ typedef struct rubraview_panel_row {
     double  extent;         /* spacers only: their height */
 } rubraview_panel_row_t;
 
-#define RUBRAVIEW_PANEL_MAX_ROWS 64
+#define RUBRAVIEW_PANEL_MAX_ROWS 128   /* RFC-0009 C: G'MIC adds up to thirty rows to Edit's */
 #define RUBRAVIEW_PANEL_MAX_COLUMNS 4
 
 typedef struct rubraview_panel {

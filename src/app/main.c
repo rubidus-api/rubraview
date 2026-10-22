@@ -129,6 +129,8 @@
 #include "rubraview/plugin.h"
 #include "rubraview/plugin_filter.h"
 #include "rubraview/pal/pal_plugin.h"
+#include "rubraview/pal/pal_gmic.h"
+#include "rubraview/gmic.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
 #include "rubraview/textview.h"
@@ -1005,6 +1007,14 @@ typedef struct app_state {
     int32_t                   effect_choice;           /* the effect chosen (effects.h), shown on the preview until applied */
     int32_t                   plugin_choice;           /* RFC-0007: 1.. a usable plug-in in the Edit window's list; 0 none */
     double                    plugin_values[8];        /* its parameters as set there */
+    /* RFC-0009 C: G'MIC in the Edit window */
+    int32_t                   gmic_category;           /* 1.. a category of the filter list; 0 none */
+    int32_t                   gmic_filter;             /* the filter within it, from 0 */
+    double                    gmic_values[RUBRAVIEW_GMIC_MAX_SHOWN];
+    char                      gmic_texts[RUBRAVIEW_GMIC_MAX_SHOWN][256];
+    int32_t                   gmic_typing;             /* the box takes a parameter's text (its index), or -1 a whole command */
+    bool                      rename_is_gmic;
+    char                      gmic_last_typed[RUBRAVIEW_EDIT_GMIC_MAX];
     double                    effect_amount;
     bool                      edit_compare;            /* the original shown instead, to compare */
     rubraview_export_options_t export_options;
@@ -1475,6 +1485,8 @@ static void edit_effect_apply(app_state_t *app);
 static void edit_auto_colour(app_state_t *app);
 static const char *effect_word(int32_t e);
 static void edit_value_typed(app_state_t *app);
+static void gmic_typed(app_state_t *app);
+static const char *gmic_step_name(const rubraview_edit_step_t *step);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
 static void new_window(app_state_t *app);
@@ -13562,6 +13574,7 @@ static void rename_end(app_state_t *app) {
     app->rename_is_target = false;
     app->rename_is_find = false;
     app->rename_is_value = false;
+    app->rename_is_gmic = false;
     app->batch_typing = 0;
     app->rename_is_apply = false;
     app->target_offered_len = 0;
@@ -13898,6 +13911,7 @@ static void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
     if (app->rename_is_value) { edit_value_typed(app); return; }
+    if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
     if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_apply) { apply_all_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
@@ -14385,6 +14399,8 @@ enum {
     PANEL_SEL_MODE, PANEL_SEL_COPY, PANEL_EFFECT_GROUP,
     PANEL_PLUGIN, PANEL_PLUGIN_P0, PANEL_PLUGIN_P1, PANEL_PLUGIN_P2, PANEL_PLUGIN_P3,   /* RFC-0007 */
     PANEL_PLUGIN_P4, PANEL_PLUGIN_P5, PANEL_PLUGIN_P6, PANEL_PLUGIN_P7, PANEL_PLUGIN_APPLY,
+    PANEL_GMIC_CATEGORY, PANEL_GMIC_FILTER, PANEL_GMIC_TYPE, PANEL_GMIC_APPLY,   /* RFC-0009 C */
+    PANEL_GMIC_P0 = 800,       /* + the parameter's row, below PANEL_CLS_FOLDER */
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
@@ -14909,6 +14925,7 @@ static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_
     const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
                      : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect)
                      : s->kind == RUBRAVIEW_STEP_PLUGIN ? s->plugin   /* RFC-0007: the plug-in's file */
+                     : s->kind == RUBRAVIEW_STEP_GMIC ? gmic_step_name(s)   /* RFC-0009 C: its filter's name, or the command */
                      : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
@@ -15072,6 +15089,9 @@ static void edit_rows_detail(app_state_t *app) {
                                                                             : TU8("Done: next change a new step (Enter)"));
 }
 
+static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src);
+static void edit_rows_gmic(app_state_t *app);
+
 /* ---- RFC-0007 (RV-138, D-186): plug-in filters, found in their folder and run in a child process ---- */
 
 static rubraview_plugin_t g_plugins[RUBRAVIEW_PLUGIN_MAX];
@@ -15139,6 +15159,7 @@ static bool plugin_tick(void *context, double progress) {
 static rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src) {
     (void)user;
     rubraview_pixbuf_t empty = {0};
+    if (step->kind == RUBRAVIEW_STEP_GMIC) return rubraview_pixbuf_is_valid(src) ? gmic_runner(arena, step, src) : empty;   /* RFC-0009 C */
     g_plugin_why = NULL;
     if (!rubraview_pixbuf_is_valid(src) || (src->format != RUBRAVIEW_PIXFMT_RGBA8 && src->format != RUBRAVIEW_PIXFMT_BGRA8)) return empty;
     rubraview_plugin_t plugin;
@@ -15230,6 +15251,7 @@ static void edit_rows_effect(app_state_t *app) {
     }
     rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
     edit_rows_plugins(app);   /* RFC-0007 */
+    edit_rows_gmic(app);      /* RFC-0009 C */
     rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
 }
 
@@ -15270,6 +15292,443 @@ static void edit_plugin_apply(app_state_t *app) {
     if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
     edit_steps_changed(app);
     osd_say(app, TU8("plug-in applied (Ctrl+Z undoes it)"));
+}
+
+/* ---- RFC-0009 C: G'MIC, run by the user's own gmic.exe (a program of its own: D-189's line) ---- */
+
+#define PANEL_GMIC_ROWS 24   /* parameters shown; the rest run at their defaults */
+
+static char g_gmic_exe[520];                 /* the program found where Settings › External names it; "" none */
+static char g_gmic_where[520];               /* what was named, as it was read */
+static void *g_gmic_mem;                     /* the filter list's arena */
+static proven_arena_t g_gmic_arena;
+static rubraview_gmic_catalog_t g_gmic;      /* the filter list; empty until it is made and read */
+static const char *g_gmic_list_why;          /* why there is none (an N_ literal), or NULL */
+static _Thread_local char g_gmic_said[512];  /* what G'MIC said when a run failed */
+
+/* The filter list as G'MIC wrote it, kept beside the settings. */
+static proven_u8str_view_t gmic_list_path(app_state_t *app) {
+    return rubraview_path_join(app->arena, rubraview_path_dirname(app->settings_path), PROVEN_LIT("gmic-filters.json"));
+}
+
+/* The list read from where it is kept; false (and why) when it is not there or not G'MIC's. */
+static bool gmic_list_load(app_state_t *app) {
+    proven_u8str_view_t path = gmic_list_path(app);
+    free(g_gmic_mem);
+    g_gmic_mem = NULL;
+    g_gmic = (rubraview_gmic_catalog_t){0};
+    g_gmic_list_why = N_("no filter list yet: press Make the filter list");
+    rubraview_fs_entry_t entry;
+    if (!rubraview_pal_fs_stat(app->arena, path, &entry) || entry.size_bytes == 0) return false;
+    if (entry.size_bytes > 64u << 20) { g_gmic_list_why = N_("the filter list is too large"); return false; }
+    size_t room = (size_t)entry.size_bytes * 3u + (8u << 20);   /* the text, and what is read out of it */
+    g_gmic_mem = malloc(room);
+    if (!g_gmic_mem) { g_gmic_list_why = N_("out of memory"); return false; }
+    g_gmic_arena = proven_arena_create((proven_mem_mut_t){ .ptr = g_gmic_mem, .size = room });
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(&g_gmic_arena, path, (size_t)entry.size_bytes);
+    const char *why = NULL;
+    g_gmic = rubraview_gmic_catalog_parse(&g_gmic_arena, text, &why);
+    if (g_gmic.filter_count == 0) {
+        free(g_gmic_mem);
+        g_gmic_mem = NULL;
+        g_gmic = (rubraview_gmic_catalog_t){0};
+        g_gmic_list_why = why ? why : N_("the filter list names no filter");
+        return false;
+    }
+    g_gmic_list_why = NULL;
+    return true;
+}
+
+/* Settings › External › G'MIC: the program looked for again when another place is named. */
+static void gmic_from_settings(app_state_t *app) {
+    proven_u8str_view_t where = rubraview_settings_get_text(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("path"));
+    char named[520] = "";
+    if (where.size < sizeof(named)) { memcpy(named, where.ptr, where.size); named[where.size] = '\0'; }
+    static bool looked;
+    if (looked && strcmp(named, g_gmic_where) == 0) return;
+    looked = true;
+    snprintf(g_gmic_where, sizeof(g_gmic_where), "%s", named);
+    proven_u8str_view_t exe = rubraview_pal_gmic_find(app->arena, cstr(named));
+    snprintf(g_gmic_exe, sizeof(g_gmic_exe), "%.*s", (int)exe.size, (const char *)exe.ptr);
+    if (g_gmic_exe[0] && g_gmic.filter_count == 0) (void)gmic_list_load(app);
+    app->gmic_category = 0;
+}
+
+/* ---- the filter list made, off the main thread: `gmic up` (G'MIC fetches its filters), then the list ---- */
+
+typedef struct gmic_list_job {
+    HANDLE thread;
+    volatile LONG done;
+    rubraview_window_t *wake;
+    char exe[520], out[600];
+    bool ok;
+    char said[512];
+} gmic_list_job_t;
+static gmic_list_job_t *g_gmic_job;
+
+static DWORD WINAPI gmic_list_run(LPVOID arg) {
+    gmic_list_job_t *job = (gmic_list_job_t *)arg;
+    proven_u8str_view_t exe = cstr(job->exe);
+    const proven_u8str_view_t up[] = { PROVEN_LIT("up") };
+    rubraview_gmic_exec_t r = rubraview_pal_gmic_exec(exe, up, 1, 5u * 60u * 1000u, NULL, NULL);
+    if (r.ok) {
+        const proven_u8str_view_t list[] = { PROVEN_LIT("-v"), PROVEN_LIT("-1"), PROVEN_LIT("parse_gui"), PROVEN_LIT("json"),
+                                             PROVEN_LIT("ot"), cstr(job->out) };
+        r = rubraview_pal_gmic_exec(exe, list, 6, 15u * 60u * 1000u, NULL, NULL);
+    }
+    job->ok = r.ok;
+    snprintf(job->said, sizeof(job->said), "%s", r.said);
+    InterlockedExchange(&job->done, 1);
+    rubraview_pal_window_wake(job->wake);
+    return 0;
+}
+
+static void gmic_list_make(app_state_t *app) {
+    if (g_gmic_job) { settings_say(app, T("the filter list is being made")); return; }
+    if (!g_gmic_exe[0]) { settings_say(app, T("name gmic.exe or its folder first")); return; }
+    gmic_list_job_t *job = (gmic_list_job_t *)calloc(1, sizeof(*job));
+    proven_u8str_view_t out = rubraview_pal_gmic_temp(app->arena, 0, true);
+    if (!job || out.size < 4 || out.size >= sizeof(job->out)) { free(job); settings_say(app, T("the filter list could not be made")); return; }
+    snprintf(job->exe, sizeof(job->exe), "%s", g_gmic_exe);
+    snprintf(job->out, sizeof(job->out), "%.*s.json", (int)(out.size - 4), (const char *)out.ptr);   /* ...-out.png -> ...-out.json */
+    job->wake = app->window;
+    job->thread = CreateThread(NULL, 0, gmic_list_run, job, 0, NULL);
+    if (!job->thread) { free(job); settings_say(app, T("the filter list could not be made")); return; }
+    g_gmic_job = job;
+    settings_say(app, T("G'MIC is fetching its filters and listing them: a few minutes"));
+}
+
+/* Once a pass: the list made is moved beside the settings and read. */
+static void gmic_list_poll(app_state_t *app) {
+    gmic_list_job_t *job = g_gmic_job;
+    if (!job || InterlockedCompareExchange(&job->done, 1, 1) != 1) return;
+    g_gmic_job = NULL;
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    proven_u8str_view_t made = cstr(job->out), kept = gmic_list_path(app);
+    bool ok = job->ok && rubraview_pal_fs_exists(made);
+    if (ok) {
+        (void)rubraview_pal_fs_delete(kept);
+        ok = rubraview_pal_fs_move(made, kept) && gmic_list_load(app);
+    }
+    char line[240];   /* the settings window's message line */
+    char said[160];
+    snprintf(said, sizeof(said), "%s", job->said[0] ? job->said + (strlen(job->said) > 150 ? strlen(job->said) - 150 : 0) : T("G'MIC said nothing"));
+    if (ok) snprintf(line, sizeof(line), T("G'MIC's filter list: %d filters (Edit > G'MIC)"), g_gmic.filter_count);
+    else snprintf(line, sizeof(line), T("the filter list could not be made: %s"), said);
+    (void)rubraview_pal_fs_delete(made);
+    free(job);
+    osd_say(app, cstr(line));
+    if (app->settings_window) settings_say(app, line);
+}
+
+/* ---- the Edit window's rows ---- */
+
+/* The `k`th filter of category `category` (from 1); NULL past its end. */
+static const rubraview_gmic_filter_t *gmic_filter_in(int32_t category, int32_t k, int32_t *count) {
+    const rubraview_gmic_filter_t *found = NULL;
+    int32_t n = 0;
+    for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
+        if (g_gmic.filters[i].category != category - 1) continue;
+        if (n == k) found = &g_gmic.filters[i];
+        n++;
+    }
+    if (count) *count = n;
+    return found;
+}
+
+static const rubraview_gmic_filter_t *gmic_chosen(const app_state_t *app) {
+    return app->gmic_category > 0 ? gmic_filter_in(app->gmic_category, app->gmic_filter, NULL) : NULL;
+}
+
+/* The parameters shown, in their order: the index of the `row`th one that is not hidden; -1 past them. */
+static int32_t gmic_param_of_row(const rubraview_gmic_filter_t *f, int32_t row) {
+    for (int32_t i = 0, n = 0; f && i < f->param_count && i < RUBRAVIEW_GMIC_MAX_SHOWN; ++i) {
+        if (f->params[i].hidden) continue;
+        if (n++ == row) return i;
+    }
+    return -1;
+}
+
+static void gmic_defaults(app_state_t *app) {
+    const rubraview_gmic_filter_t *f = gmic_chosen(app);
+    for (int32_t i = 0; f && i < f->param_count && i < RUBRAVIEW_GMIC_MAX_SHOWN; ++i) {
+        app->gmic_values[i] = f->params[i].value;
+        snprintf(app->gmic_texts[i], sizeof(app->gmic_texts[i]), "%.*s", (int)f->params[i].text.size, (const char *)f->params[i].text.ptr);
+    }
+}
+
+static bool gmic_is_typed(rubraview_gmic_kind_t kind) {
+    return kind == RUBRAVIEW_GMIC_TEXT || kind == RUBRAVIEW_GMIC_FILE || kind == RUBRAVIEW_GMIC_FOLDER ||
+           kind == RUBRAVIEW_GMIC_COLOR || kind == RUBRAVIEW_GMIC_POINT;
+}
+
+static void edit_rows_gmic(app_state_t *app) {
+    if (!g_gmic_exe[0]) return;
+    if (g_gmic.filter_count > 0) {
+        if (app->gmic_category < 0 || app->gmic_category > g_gmic.category_count) app->gmic_category = 0;
+        rubraview_panel_add_choice(&app->panel, PANEL_GMIC_CATEGORY, TU8("G'MIC"), app->gmic_category, g_gmic.category_count + 1);
+        if (app->gmic_category > 0) {
+            int32_t count = 0;
+            (void)gmic_filter_in(app->gmic_category, 0, &count);
+            if (app->gmic_filter < 0 || app->gmic_filter >= count) app->gmic_filter = 0;
+            rubraview_panel_add_choice(&app->panel, PANEL_GMIC_FILTER, TU8("  filter"), app->gmic_filter, count);
+            const rubraview_gmic_filter_t *f = gmic_chosen(app);
+            static char labels[PANEL_GMIC_ROWS][120];   /* the rows' words live as long as the panel */
+            for (int32_t row = 0; row < PANEL_GMIC_ROWS; ++row) {
+                int32_t i = gmic_param_of_row(f, row);
+                if (i < 0) break;
+                const rubraview_gmic_param_t *q = &f->params[i];
+                int32_t id = PANEL_GMIC_P0 + row;
+                if (gmic_is_typed(q->kind)) {
+                    snprintf(labels[row], sizeof(labels[row]), "  %.*s: %s", (int)q->name.size, (const char *)q->name.ptr, app->gmic_texts[i]);
+                    rubraview_panel_add_button(&app->panel, id, cstr(labels[row]));
+                    continue;
+                }
+                snprintf(labels[row], sizeof(labels[row]), "  %.*s", (int)q->name.size, (const char *)q->name.ptr);
+                proven_u8str_view_t name = cstr(labels[row]);
+                if (q->kind == RUBRAVIEW_GMIC_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->gmic_values[i] > 0.5);
+                else if (q->kind == RUBRAVIEW_GMIC_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->gmic_values[i], q->choice_count);
+                else if (q->kind == RUBRAVIEW_GMIC_INT || q->kind == RUBRAVIEW_GMIC_FLOAT)
+                    rubraview_panel_add_slider(&app->panel, id, name, app->gmic_values[i], q->min, q->max,
+                                               q->kind == RUBRAVIEW_GMIC_INT ? 1.0 : (q->max - q->min) / 100.0);
+            }
+            rubraview_panel_add_button(&app->panel, PANEL_GMIC_APPLY, TU8("Run G'MIC: a step (Esc cancels)"));
+        }
+    }
+    rubraview_panel_add_button(&app->panel, PANEL_GMIC_TYPE, TU8("Type a G'MIC command..."));
+}
+
+/* A choice row's words: the categories, the filters of the one chosen, a parameter's choices. */
+static proven_u8str_view_t gmic_choice_word(const app_state_t *app, int32_t id, int32_t i, char *buffer, size_t size) {
+    proven_u8str_view_t w = PROVEN_LIT("");
+    if (id == PANEL_GMIC_CATEGORY) {
+        if (i <= 0) return cstr(T("none"));
+        if (i <= g_gmic.category_count) w = g_gmic.categories[i - 1];
+    } else if (id == PANEL_GMIC_FILTER) {
+        const rubraview_gmic_filter_t *f = gmic_filter_in(app->gmic_category, i, NULL);
+        if (f) w = f->name;
+    } else {
+        const rubraview_gmic_filter_t *f = gmic_chosen(app);
+        int32_t p = gmic_param_of_row(f, id - PANEL_GMIC_P0);
+        if (p >= 0 && f->params[p].kind == RUBRAVIEW_GMIC_CHOICE && i >= 0 && i < f->params[p].choice_count) w = f->params[p].choices[i];
+    }
+    snprintf(buffer, size, "%.*s", (int)w.size, (const char *)w.ptr);
+    return cstr(buffer);
+}
+
+/* A row's value changed; true when it was one of G'MIC's. */
+static bool gmic_row_changed(app_state_t *app, int32_t id, double v) {
+    if (id == PANEL_GMIC_CATEGORY || id == PANEL_GMIC_FILTER) {
+        if (id == PANEL_GMIC_CATEGORY) { app->gmic_category = (int32_t)lround(v); app->gmic_filter = 0; }
+        else app->gmic_filter = (int32_t)lround(v);
+        gmic_defaults(app);
+        panel_build_edit(app);
+        return true;
+    }
+    if (id < PANEL_GMIC_P0 || id >= PANEL_GMIC_P0 + PANEL_GMIC_ROWS) return false;
+    int32_t p = gmic_param_of_row(gmic_chosen(app), id - PANEL_GMIC_P0);
+    if (p >= 0) app->gmic_values[p] = v;
+    return true;
+}
+
+/* The box for a parameter's text (its index), or for a whole command (-1). */
+static void gmic_type_begin(app_state_t *app, int32_t param) {
+    if (app->rename_active) rename_end(app);
+    const char *now = param >= 0 ? app->gmic_texts[param] : app->gmic_last_typed;
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, cstr(now));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_gmic = true;
+    app->gmic_typing = param;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, param >= 0 ? TU8("type it, then Enter (Esc leaves it)")
+                            : TU8("a G'MIC command, run on the picture with your rights (Enter runs it, Esc leaves it)"));
+}
+
+/* A button of G'MIC's pressed; true when it was one. */
+static bool gmic_button(app_state_t *app, int32_t id) {
+    if (id == PANEL_GMIC_TYPE) { gmic_type_begin(app, -1); return true; }
+    if (id >= PANEL_GMIC_P0 && id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS) {
+        int32_t p = gmic_param_of_row(gmic_chosen(app), id - PANEL_GMIC_P0);
+        if (p >= 0) gmic_type_begin(app, p);
+        return true;
+    }
+    if (id != PANEL_GMIC_APPLY) return false;
+    const rubraview_gmic_filter_t *f = gmic_chosen(app);
+    if (!f) { osd_say(app, TU8("choose a G'MIC filter first")); return true; }
+    proven_u8str_view_t texts[RUBRAVIEW_GMIC_MAX_SHOWN];
+    for (int32_t i = 0; i < RUBRAVIEW_GMIC_MAX_SHOWN; ++i) texts[i] = cstr(app->gmic_texts[i]);
+    char args[RUBRAVIEW_GMIC_ARGS_MAX];
+    size_t n = rubraview_gmic_args(f, app->gmic_values, texts, args, sizeof(args));
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
+    int w = snprintf(s.gmic, sizeof(s.gmic), "%.*s%s%s", (int)f->command.size, (const char *)f->command.ptr, n ? " " : "", args);
+    if (w <= 0 || (size_t)w >= sizeof(s.gmic)) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
+    (void)edit_apply_pending(app, false);
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return true;
+    edit_steps_changed(app);
+    osd_say(app, TU8("G'MIC applied (Ctrl+Z undoes it)"));
+    return true;
+}
+
+/* Enter in the box: a parameter's text kept, or the command typed made a step. */
+static void gmic_typed(app_state_t *app) {
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    int32_t param = app->gmic_typing;
+    rename_end(app);
+    if (param >= 0 && param < RUBRAVIEW_GMIC_MAX_SHOWN) {
+        snprintf(app->gmic_texts[param], sizeof(app->gmic_texts[param]), "%.*s", (int)text.size, (const char *)text.ptr);
+        panel_build_edit(app);
+        return;
+    }
+    text = proven_u8str_view_trim(text);
+    if (text.size == 0) return;
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
+    if (text.size >= sizeof(s.gmic)) { osd_say(app, TU8("the command is too long for a step")); return; }
+    memcpy(s.gmic, text.ptr, text.size);
+    snprintf(app->gmic_last_typed, sizeof(app->gmic_last_typed), "%s", s.gmic);
+    (void)edit_apply_pending(app, false);
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    edit_steps_changed(app);
+    osd_say(app, TU8("G'MIC applied (Ctrl+Z undoes it)"));
+}
+
+/* A G'MIC step as the change list names it: the filter its command is, by its name; else the command typed. */
+static const char *gmic_step_name(const rubraview_edit_step_t *step) {
+    static char name[160];
+    proven_u8str_view_t items[RUBRAVIEW_GMIC_MAX_ITEMS];
+    if (rubraview_gmic_split(proven_u8str_view_from_cstr(step->gmic), items, RUBRAVIEW_GMIC_MAX_ITEMS) >= 1) {
+        for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
+            if (!proven_u8str_view_eq(g_gmic.filters[i].command, items[0])) continue;
+            snprintf(name, sizeof(name), "G'MIC %.*s", (int)g_gmic.filters[i].name.size, (const char *)g_gmic.filters[i].name.ptr);
+            return name;
+        }
+    }
+    return step->gmic;
+}
+
+/* ---- running a step: the picture to a file, gmic.exe on it, its file read back ---- */
+
+static bool gmic_tick(void *context) {
+    (void)context;
+    return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+}
+
+typedef struct gmic_result {
+    char command[RUBRAVIEW_EDIT_GMIC_MAX];
+    int32_t width, height, out_width, out_height;
+    uint64_t sum;
+    uint8_t *rgba;
+} gmic_result_t;
+static gmic_result_t g_gmic_results[4];
+static size_t g_gmic_result_next;
+static SRWLOCK g_gmic_results_lock = SRWLOCK_INIT;
+
+/* `src` as RGBA, tightly packed. */
+static uint8_t *gmic_rgba_of(const rubraview_pixbuf_t *src) {
+    size_t row = (size_t)src->width * 4u;
+    uint8_t *out = (uint8_t *)rubraview_malloc_product(row, (size_t)src->height, 1);
+    if (!out) return NULL;
+    bool bgra = src->format == RUBRAVIEW_PIXFMT_BGRA8;
+    for (int32_t y = 0; y < src->height; ++y) {
+        const uint8_t *s = src->pixels + (size_t)y * (size_t)src->stride;
+        uint8_t *d = out + (size_t)y * row;
+        if (!bgra) { memcpy(d, s, row); continue; }
+        for (int32_t x = 0; x < src->width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+    }
+    return out;
+}
+
+/* RGBA as a pixbuf of `format`, in the arena. */
+static rubraview_pixbuf_t gmic_pixbuf_of(proven_arena_t *arena, const uint8_t *rgba, int32_t w, int32_t h, rubraview_pixel_format_t format) {
+    rubraview_pixbuf_t out = rubraview_pixbuf_create(arena, w, h, format);
+    if (!rubraview_pixbuf_is_valid(&out)) return out;
+    for (int32_t y = 0; y < h; ++y) {
+        const uint8_t *s = rgba + (size_t)y * (size_t)w * 4u;
+        uint8_t *d = out.pixels + (size_t)y * (size_t)out.stride;
+        if (format != RUBRAVIEW_PIXFMT_BGRA8) { memcpy(d, s, (size_t)w * 4u); continue; }
+        for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+    }
+    return out;
+}
+
+static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src) {
+    rubraview_pixbuf_t empty = {0};
+    g_plugin_why = NULL;
+    if (!g_gmic_exe[0]) { g_plugin_why = N_("G'MIC is not found (Settings › External)"); return empty; }
+    uint8_t *in = gmic_rgba_of(src);
+    if (!in) { g_plugin_why = N_("out of memory"); return empty; }
+    size_t bytes = (size_t)src->width * 4u * (size_t)src->height;
+    uint64_t sum = bytes_sum(in, bytes);
+    rubraview_pixbuf_t done = empty;
+    AcquireSRWLockShared(&g_gmic_results_lock);
+    for (size_t i = 0; i < 4 && !done.pixels; ++i) {
+        const gmic_result_t *r = &g_gmic_results[i];
+        if (r->rgba && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->command, step->gmic) == 0)
+            done = gmic_pixbuf_of(arena, r->rgba, r->out_width, r->out_height, src->format);
+    }
+    ReleaseSRWLockShared(&g_gmic_results_lock);
+    if (done.pixels) { free(in); return done; }
+
+    static volatile LONG run_number;
+    uint32_t tag = (uint32_t)InterlockedIncrement(&run_number);
+    proven_u8str_view_t in_path = rubraview_pal_gmic_temp(arena, tag, false), out_path = rubraview_pal_gmic_temp(arena, tag, true);
+    rubraview_pixbuf_t whole = { .pixels = in, .width = src->width, .height = src->height, .stride = src->width * 4,
+                                 .format = RUBRAVIEW_PIXFMT_RGBA8 };
+    rubraview_export_options_t png = rubraview_export_defaults();
+    png.format = RUBRAVIEW_EXPORT_PNG;
+    png.png_compression = 1;   /* speed: the file lives a moment */
+    if (in_path.size == 0 || !rubraview_pal_image_save(in_path, &whole, &png)) {
+        free(in);
+        g_plugin_why = N_("the picture could not be handed to G'MIC");
+        return empty;
+    }
+    free(in);
+    proven_u8str_view_t items[RUBRAVIEW_GMIC_MAX_ITEMS];
+    size_t n = rubraview_gmic_split(cstr(step->gmic), items + 1, RUBRAVIEW_GMIC_MAX_ITEMS - 3);
+    rubraview_gmic_exec_t r = { .ok = false };
+    if (n > 0) {
+        items[0] = in_path;
+        items[n + 1] = PROVEN_LIT("-o");
+        items[n + 2] = out_path;
+        r = rubraview_pal_gmic_exec(cstr(g_gmic_exe), items, n + 3, 10u * 60u * 1000u, gmic_tick, NULL);
+    }
+    (void)rubraview_pal_fs_delete(in_path);
+    rubraview_pixbuf_t back = r.ok ? rubraview_pal_image_read_pixels(arena, out_path, NULL, 0, false) : empty;
+    (void)rubraview_pal_fs_delete(out_path);
+    if (!rubraview_pixbuf_is_valid(&back)) {
+        if (r.cancelled) g_plugin_why = N_("cancelled");
+        else if (r.cut) g_plugin_why = N_("G'MIC did not finish in time; it was ended");
+        else if (n == 0) g_plugin_why = N_("the G'MIC command is empty or too long");
+        else {
+            /* its last line says what went wrong */
+            const char *say = r.said;
+            size_t len = strlen(say);
+            while (len > 0 && (say[len - 1] == '\n' || say[len - 1] == ' ')) len--;
+            size_t start = len;
+            while (start > 0 && say[start - 1] != '\n') start--;
+            snprintf(g_gmic_said, sizeof(g_gmic_said), "G'MIC: %.*s", (int)(len - start), say + start);
+            g_plugin_why = len > 0 ? g_gmic_said : N_("G'MIC gave no picture back");
+        }
+        return empty;
+    }
+    if (back.format != src->format && (back.format == RUBRAVIEW_PIXFMT_RGBA8 || back.format == RUBRAVIEW_PIXFMT_BGRA8)) {
+        uint8_t *rgba = gmic_rgba_of(&back);
+        if (rgba) { back = gmic_pixbuf_of(arena, rgba, back.width, back.height, src->format); free(rgba); }
+    }
+    uint8_t *kept = rubraview_pixbuf_is_valid(&back) ? gmic_rgba_of(&back) : NULL;
+    if (kept) {
+        AcquireSRWLockExclusive(&g_gmic_results_lock);
+        gmic_result_t *slot = &g_gmic_results[g_gmic_result_next++ % 4];
+        free(slot->rgba);
+        *slot = (gmic_result_t){ .width = src->width, .height = src->height, .out_width = back.width, .out_height = back.height,
+                                 .sum = sum, .rgba = kept };
+        snprintf(slot->command, sizeof(slot->command), "%s", step->gmic);
+        ReleaseSRWLockExclusive(&g_gmic_results_lock);
+    }
+    return back;
 }
 
 static void edit_rows_resize(app_state_t *app) {
@@ -15517,6 +15976,7 @@ static proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubravi
     const char *const PRESET[] = { T("none"), T("picture"), T("photo"), T("drawing"), T("icon"), T("text") };
     int32_t i = (int32_t)row->value;
     const char *word = NULL;
+    if (row->id >= PANEL_GMIC_P0 && row->id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS) return gmic_choice_word(app, row->id, i, buffer, size);
     switch (row->id) {
         case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
         case PANEL_EFFECT: {   /* within the kind chosen */
@@ -15543,6 +16003,7 @@ static proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubravi
             break;
         }
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
+        case PANEL_GMIC_CATEGORY: case PANEL_GMIC_FILTER: return gmic_choice_word(app, row->id, i, buffer, size);   /* RFC-0009 C */
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
         /* RV-129: the batch window */
         case PANEL_BATCH_SIZE_BY: {
@@ -17526,6 +17987,7 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
         return;
     }
 
+    if (gmic_row_changed(app, row->id, v)) return;   /* RFC-0009 C: its parameters' rows */
     switch (row->id) {
         case PANEL_EXPOSURE:    rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_EXPOSURE, (float)v); break;
         case PANEL_BRIGHTNESS:  rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BRIGHTNESS, (float)v); break;
@@ -17652,6 +18114,8 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
 
 static void panel_button(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->panel.row_count) return;
+    if (app->panel.rows[index].id >= PANEL_GMIC_P0 && app->panel.rows[index].id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS &&
+        gmic_button(app, app->panel.rows[index].id)) return;   /* RFC-0009 C: a text, a colour or a point typed */
     switch (app->panel.rows[index].id) {
         case PANEL_RESET:
             /* Everything since the panel opened: the steps, the values, the selection. */
@@ -17666,6 +18130,7 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_APPLY_SEL:    (void)edit_apply_pending(app, true); break;
         case PANEL_EFFECT_APPLY: edit_effect_apply(app); break;
         case PANEL_PLUGIN_APPLY: edit_plugin_apply(app); break;   /* RFC-0007 */
+        case PANEL_GMIC_APPLY: case PANEL_GMIC_TYPE: (void)gmic_button(app, app->panel.rows[index].id); break;   /* RFC-0009 C */
         case PANEL_AUTO_COLOUR:  edit_auto_colour(app); break;
         case PANEL_CROP_SEL:     edit_crop_to_selection(app); break;
         case PANEL_RESIZE_APPLY: edit_resize_apply(app); break;
@@ -18159,6 +18624,13 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
             int m = snprintf(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with %s"), encoders);
             if (m > 0) n += m;
         }
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("gmic.status"))) {   /* RFC-0009 C */
+        if (!g_gmic_exe[0]) n = snprintf(buffer, capacity, "%s", g_gmic_where[0] ? T("gmic.exe is not in the place named") : T("not set: name gmic.exe or its folder below"));
+        else if (g_gmic_job) n = snprintf(buffer, capacity, "%s", T("found; the filter list is being made (a few minutes)"));
+        else if (g_gmic.filter_count > 0)
+            n = snprintf(buffer, capacity, T("found; %d filters in %d categories (G'MIC %.*s), under Edit"), g_gmic.filter_count,
+                         g_gmic.category_count, (int)g_gmic.version.size, (const char *)g_gmic.version.ptr);
+        else n = snprintf(buffer, capacity, T("found; %s"), g_gmic_list_why ? rubraview_tr(g_gmic_list_why) : T("no filter list yet"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("gpu.adapter"))) {
         n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("memory.use")) && app->mem) {
@@ -18814,6 +19286,7 @@ static void settings_took_effect(app_state_t *app) {
         plugins_from_settings(app);
         if (app->settings_window && g_plugin_count != before) skip_dirs_table_rows(app);
     }
+    gmic_from_settings(app);   /* RFC-0009 C */
     app->media_preferred = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     /* Owner, 2026-09-15: always on top follows the setting, whichever way it was changed. */
@@ -19307,6 +19780,13 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, rubraview_pal_shell_open_web("https://github.com/BtbN/FFmpeg-Builds/releases")
                                       ? T("the FFmpeg download page is opening in the browser")
                                       : T("the browser could not be started"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("gmic.download"))) {
+                /* RFC-0009 C: G'MIC's makers' page; nothing is fetched by us */
+                settings_say(app, rubraview_pal_shell_open_web("https://gmic.eu/download.html")
+                                      ? T("the G'MIC download page is opening in the browser")
+                                      : T("the browser could not be started"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("gmic.list"))) {
+                gmic_list_make(app);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.restart"))) {
                 restart_now(app);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.clear_thumbs"))) {
@@ -24323,9 +24803,9 @@ static void edit_preview_update(app_state_t *app) {
     double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
     g_plugin_why = NULL;
     rubraview_pixbuf_t edited = rubraview_edit_steps_apply(&work, &app->edit_steps, &app->edit_small, ratio);
-    if (g_plugin_why) {   /* RFC-0007: a plug-in step that did not run is left out of the preview; said why */
+    if (g_plugin_why) {   /* RFC-0007, RFC-0009 C: a step that did not run is left out of the preview; said why */
         char said[320];
-        snprintf(said, sizeof(said), T("the plug-in did not run: %s"), rubraview_tr(g_plugin_why));
+        snprintf(said, sizeof(said), T("a step did not run: %s"), rubraview_tr(g_plugin_why));   /* a plug-in's, or G'MIC's */
         osd_say(app, cstr(said));
         g_plugin_why = NULL;
     }
@@ -27510,6 +27990,18 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
             }
             pixels = done;
         }
+        if (extra->gmic.size > 0) {   /* RFC-0009 C: a G'MIC command, by gmic.exe */
+            rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_GMIC };
+            memcpy(step.gmic, extra->gmic.ptr, extra->gmic.size < sizeof(step.gmic) ? extra->gmic.size : sizeof(step.gmic) - 1);
+            rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
+            if (!rubraview_pixbuf_is_valid(&done)) {
+                char said[700];
+                snprintf(said, sizeof(said), "G'MIC did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                batch_say(input->path, said);
+                return false;
+            }
+            pixels = done;
+        }
         if (extra->canvas_w > 0 && extra->canvas_h > 0) {
             rubraview_pixbuf_t placed = rubraview_batch_canvas(arena, &pixels, extra->canvas_w, extra->canvas_h, extra->canvas_rgb);
             if (!rubraview_pixbuf_is_valid(&placed)) { batch_say(input->path, "the canvas could not be made"); return false; }
@@ -27999,6 +28491,20 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
             memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
         else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
         plugins_look(cstr(folder));
+        break;
+    }
+    /* RFC-0009 C: --gmic's program, named by --gmic-exe */
+    for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
+        const rubraview_batch_action_t *a = &cli->job.actions[i];
+        if (a->kind != RUBRAVIEW_BATCH_EXTRA || a->params.extra.gmic.size == 0) continue;
+        if (a->params.extra.gmic_exe.size > 0) {
+            proven_u8str_view_t exe = rubraview_pal_gmic_find(arena, a->params.extra.gmic_exe);
+            snprintf(g_gmic_exe, sizeof(g_gmic_exe), "%.*s", (int)exe.size, (const char *)exe.ptr);
+        }
+        if (!g_gmic_exe[0]) {
+            console_line("rubraview: --gmic needs --gmic-exe=<gmic.exe or its folder>, and it was not found there");
+            return 1;
+        }
         break;
     }
 
@@ -30077,6 +30583,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             next_spread(&app);
         }
         station_job_poll(&app);
+        gmic_list_poll(&app);   /* RFC-0009 C */
         media_tick(&app);
         bgm_tick(&app);
 

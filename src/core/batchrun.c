@@ -176,6 +176,16 @@ static bool parse_extra(proven_u8str_view_t arg, proven_u8str_view_t value, rubr
     }
     if (starts_with(arg, "--plugin=", &value))   /* RFC-0007: NAME or NAME:V1,V2,... */
         return rubraview_plugin_arg_parse(value, x->plugin, sizeof(x->plugin), x->plugin_params, &x->plugin_param_count);
+    if (starts_with(arg, "--gmic=", &value)) {   /* RFC-0009 C: "COMMAND ARGS ...", a step's length at most */
+        if (proven_u8str_view_trim(value).size == 0 || value.size >= 1024) return false;
+        x->gmic = value;
+        return true;
+    }
+    if (starts_with(arg, "--gmic-exe=", &value)) {
+        if (value.size == 0) return false;
+        x->gmic_exe = value;
+        return true;
+    }
     if (starts_with(arg, "--plugin-folder=", &value)) {
         if (value.size == 0) return false;
         x->plugin_folder = value;
@@ -583,6 +593,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (starts_with(arg, "--crop=", &value) || proven_u8str_view_eq(arg, PROVEN_LIT("--autocrop")) || proven_u8str_view_eq(arg, PROVEN_LIT("--auto-colour")) ||
             proven_u8str_view_eq(arg, PROVEN_LIT("--negative")) || starts_with(arg, "--effect=", &value) || starts_with(arg, "--border=", &value) ||
             starts_with(arg, "--plugin=", &value) || starts_with(arg, "--plugin-folder=", &value) ||
+            starts_with(arg, "--gmic=", &value) || starts_with(arg, "--gmic-exe=", &value) ||
             starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value) ||
             starts_with(arg, "--text=", &value) || starts_with(arg, "--text-font=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_EXTRA);
