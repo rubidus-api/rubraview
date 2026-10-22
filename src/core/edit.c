@@ -633,7 +633,8 @@ bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step) {
         case RUBRAVIEW_STEP_PLUGIN:
             return step->plugin[0] != '\0';
         case RUBRAVIEW_STEP_GMIC:
-            return step->gmic[0] != '\0';
+        case RUBRAVIEW_STEP_FFMPEG:
+            return step->command[0] != '\0';
     }
     return false;
 }
@@ -871,8 +872,8 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
     v.sharpen_radius = (float)(v.sharpen_radius * scale);
     if (v.sharpen_radius < 0.5f) v.sharpen_radius = 0.5f;
     bool effect = step->kind == RUBRAVIEW_STEP_EFFECT;
-    /* RFC-0007: blended by the area as an effect is; RFC-0009 C: a G'MIC step runs the same way */
-    bool plugin = step->kind == RUBRAVIEW_STEP_PLUGIN || step->kind == RUBRAVIEW_STEP_GMIC;
+    /* RFC-0007: blended by the area as an effect is; RFC-0009 C and D: G'MIC and FFmpeg steps run the same way */
+    bool plugin = step->kind == RUBRAVIEW_STEP_PLUGIN || step->kind == RUBRAVIEW_STEP_GMIC || step->kind == RUBRAVIEW_STEP_FFMPEG;
     double amount = step->amount;
     if (effect && rubraview_effect_amount_is_pixels((rubraview_effect_t)step->effect)) {
         amount *= scale;

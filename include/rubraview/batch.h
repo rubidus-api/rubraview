@@ -83,6 +83,8 @@ typedef struct rubraview_batch_extra_params {
     /* RFC-0009 C: a G'MIC command run by gmic.exe (--gmic-exe= names it) */
     proven_u8str_view_t  gmic;
     proven_u8str_view_t  gmic_exe;
+    /* RFC-0009 D: an FFmpeg filter graph, by avfilter of the FFmpeg Settings › External names */
+    proven_u8str_view_t  ffmpeg_filter;
     int32_t  canvas_w, canvas_h;   /* > 0: the picture centred on a canvas this size (never cut) */
     uint32_t canvas_rgb;
     int32_t  border_px;            /* > 0: a frame this wide round it */

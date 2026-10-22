@@ -10,9 +10,14 @@ run time with `GetProcAddress`.
   retrieved 2026-09-24). ffmpeg.org publishes no checksum file beside it,
   and this box has no `gpg` for the `.asc`, so the headers were checked
   against the same tag on GitHub (`n9.0.2`): all five libraries' public
-  headers are byte for byte identical in both copies.
+  headers are byte for byte identical in both copies. libavfilter's five
+  (`avfilter.h`, `buffersink.h`, `buffersrc.h`, `version.h`,
+  `version_major.h`) were added 2026-10-22 from the same tarball (checksum
+  matched again) for FFmpeg's filters in Edit (RFC-0009 D); its DLL,
+  `avfilter-12.dll`, is optional: without it only the filters are missing.
 - Contents: the headers each library's `Makefile` installs, for libavutil,
-  libavcodec, libavformat, libswscale and libswresample, unmodified.
+  libavcodec, libavformat, libswscale, libswresample and libavfilter,
+  unmodified.
 - Added here, not from the tarball: `include/libavutil/avconfig.h`, which
   FFmpeg's `configure` generates (x86-64 values), because the headers are
   vendored without building FFmpeg.

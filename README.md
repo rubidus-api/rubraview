@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.36.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.36.0/rubraview-v1.36.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.36.0/rubraview-v1.36.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.37.0** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.37.0/rubraview-v1.37.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.37.0/rubraview-v1.37.0.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -32,6 +32,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
 - **Internet Radio From A Playlist**: station addresses (`http`, `https`, `mms`) in an `.m3u8` / `.m3u` with a title each (`#EXTINF:-1,Title`), or in a `.pls` or `.asx`, listed in the playlist (`P`) and played by FFmpeg, which may reach only the network for them.
 - **G'MIC's Filters In Edit**: with G'MIC's own command-line program named in Settings › External, about a thousand filters by category with their own settings, or any G'MIC command typed; run as G'MIC's program, never inside ours.
+- **FFmpeg's Filters In Edit**: with `avfilter-12.dll` in the FFmpeg folder, about 160 FFmpeg video filters by name with their own options, or any filter graph typed; `--ffmpeg-filter` in the batch.
 - **Edit As Steps On A Selection**: a rectangle or an ellipse (with a soft edge) dragged, sized and typed; tones, colour balance, automatic colour, 21 effects, crop and resize as steps on it, undone and redone until saved; save over the original (to the Recycle Bin) or a copy.
 - **Resize Your Way**: percent, pixels, or a length in cm, mm or inches at a DPI; HD to 8K, long side, megapixels; in linear light; sharpen after (Nearest, Bilinear, Bicubic, Lanczos-3).
 - **Batch Processing Engine**: multi-threaded, from a window or the command line: sizes, crop, cut borders, automatic colour, any effect, canvas, border, watermark, names with counters and replacing, dates kept; the choices tried, remembered, saved and loaded.

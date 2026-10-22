@@ -1,6 +1,7 @@
 #include "rubraview/batchrun.h"
 #include "rubraview/effects.h"
 #include "rubraview/plugin.h"
+#include "rubraview/ffilter.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
@@ -179,6 +180,11 @@ static bool parse_extra(proven_u8str_view_t arg, proven_u8str_view_t value, rubr
     if (starts_with(arg, "--gmic=", &value)) {   /* RFC-0009 C: "COMMAND ARGS ...", a step's length at most */
         if (proven_u8str_view_trim(value).size == 0 || value.size >= 1024) return false;
         x->gmic = value;
+        return true;
+    }
+    if (starts_with(arg, "--ffmpeg-filter=", &value)) {   /* RFC-0009 D: a graph, a step's length at most, no refused filter */
+        if (proven_u8str_view_trim(value).size == 0 || value.size >= 1024 || rubraview_ffilter_refused(value)) return false;
+        x->ffmpeg_filter = value;
         return true;
     }
     if (starts_with(arg, "--gmic-exe=", &value)) {
@@ -593,7 +599,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         if (starts_with(arg, "--crop=", &value) || proven_u8str_view_eq(arg, PROVEN_LIT("--autocrop")) || proven_u8str_view_eq(arg, PROVEN_LIT("--auto-colour")) ||
             proven_u8str_view_eq(arg, PROVEN_LIT("--negative")) || starts_with(arg, "--effect=", &value) || starts_with(arg, "--border=", &value) ||
             starts_with(arg, "--plugin=", &value) || starts_with(arg, "--plugin-folder=", &value) ||
-            starts_with(arg, "--gmic=", &value) || starts_with(arg, "--gmic-exe=", &value) ||
+            starts_with(arg, "--gmic=", &value) || starts_with(arg, "--gmic-exe=", &value) || starts_with(arg, "--ffmpeg-filter=", &value) ||
             starts_with(arg, "--canvas=", &value) || starts_with(arg, "--watermark=", &value) ||
             starts_with(arg, "--text=", &value) || starts_with(arg, "--text-font=", &value)) {
             rubraview_batch_action_t *a = action_for(&result, RUBRAVIEW_BATCH_EXTRA);

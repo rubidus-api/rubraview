@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.36.0.exe              the viewer, as built
-dist/rubraview-v1.36.0/                 the release bundle
-dist/rubraview-v1.36.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.37.0.exe              the viewer, as built
+dist/rubraview-v1.37.0/                 the release bundle
+dist/rubraview-v1.37.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -604,6 +604,30 @@ G'MIC runs as a program of its own with your rights, given only the
 picture as a file in the temporary folder, and is ended with everything it
 started if it does not finish in ten minutes. A command you type can do
 whatever G'MIC can do, so type only commands you understand.
+
+### FFmpeg's filters
+
+FFmpeg's own video filters (about 160 in the LGPL build) are in Edit too,
+once `avfilter-12.dll` is in the FFmpeg folder beside the other five (it is
+in the same zip). Settings › External › FFmpeg › **Filters** says how many
+were found, or why there are none.
+
+In Edit, **FFmpeg filters** chooses a group by letter (`a – c`), **filter**
+one of its filters (with what it does), and its options follow as rows; a
+size, a colour or an expression is typed in the box, and an option left
+alone keeps FFmpeg's default. **Run the FFmpeg filter** makes it a step, on
+the whole picture or on the selection; some filters change the size.
+**Type an FFmpeg filter graph...** runs any graph — `unsharp=5:5:1.0`,
+`hflip,scale=iw/2:ih/2`, `colorlevels=rimin=0.1` — and FFmpeg's own words
+are shown when it refuses one. (`eq` and some others are in FFmpeg's GPL
+build only.)
+
+In the batch: `--ffmpeg-filter="<graph>"`.
+
+The filters run inside Rubraview, as FFmpeg's decoders do, so a slow one
+cannot be stopped with `Esc`. Filters that would open files or addresses
+(`movie`, `amovie`), listen on the network (`zmq`, `azmq`) or load other
+code (`frei0r`, `ladspa`, `lv2`) are refused wherever they appear in a graph.
 
 ## Sorting your files
 

@@ -131,6 +131,8 @@
 #include "rubraview/pal/pal_plugin.h"
 #include "rubraview/pal/pal_gmic.h"
 #include "rubraview/gmic.h"
+#include "rubraview/pal/pal_ffilter.h"
+#include "rubraview/ffilter.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
 #include "rubraview/textview.h"
@@ -1014,7 +1016,15 @@ typedef struct app_state {
     char                      gmic_texts[RUBRAVIEW_GMIC_MAX_SHOWN][256];
     int32_t                   gmic_typing;             /* the box takes a parameter's text (its index), or -1 a whole command */
     bool                      rename_is_gmic;
-    char                      gmic_last_typed[RUBRAVIEW_EDIT_GMIC_MAX];
+    char                      gmic_last_typed[RUBRAVIEW_EDIT_COMMAND_MAX];
+    /* RFC-0009 D: FFmpeg's filters in the Edit window */
+    int32_t                   ffmpeg_group;            /* 1.. a group of the list; 0 none */
+    int32_t                   ffmpeg_filter;           /* the filter within it, from 0 */
+    double                    ffmpeg_values[RUBRAVIEW_FFILTER_MAX_SHOWN];
+    char                      ffmpeg_texts[RUBRAVIEW_FFILTER_MAX_SHOWN][256];
+    int32_t                   ffmpeg_typing;           /* the box takes an option's text (its index), or -1 a whole graph */
+    bool                      rename_is_ffmpeg;
+    char                      ffmpeg_last_typed[RUBRAVIEW_EDIT_COMMAND_MAX];
     double                    effect_amount;
     bool                      edit_compare;            /* the original shown instead, to compare */
     rubraview_export_options_t export_options;
@@ -1487,6 +1497,7 @@ static const char *effect_word(int32_t e);
 static void edit_value_typed(app_state_t *app);
 static void gmic_typed(app_state_t *app);
 static const char *gmic_step_name(const rubraview_edit_step_t *step);
+static void ffmpeg_typed(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
 static void new_window(app_state_t *app);
@@ -13575,6 +13586,7 @@ static void rename_end(app_state_t *app) {
     app->rename_is_find = false;
     app->rename_is_value = false;
     app->rename_is_gmic = false;
+    app->rename_is_ffmpeg = false;
     app->batch_typing = 0;
     app->rename_is_apply = false;
     app->target_offered_len = 0;
@@ -13912,6 +13924,7 @@ static void rename_commit(app_state_t *app) {
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
     if (app->rename_is_value) { edit_value_typed(app); return; }
     if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
+    if (app->rename_is_ffmpeg) { ffmpeg_typed(app); return; }   /* RFC-0009 D */
     if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_apply) { apply_all_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
@@ -14400,7 +14413,9 @@ enum {
     PANEL_PLUGIN, PANEL_PLUGIN_P0, PANEL_PLUGIN_P1, PANEL_PLUGIN_P2, PANEL_PLUGIN_P3,   /* RFC-0007 */
     PANEL_PLUGIN_P4, PANEL_PLUGIN_P5, PANEL_PLUGIN_P6, PANEL_PLUGIN_P7, PANEL_PLUGIN_APPLY,
     PANEL_GMIC_CATEGORY, PANEL_GMIC_FILTER, PANEL_GMIC_TYPE, PANEL_GMIC_APPLY,   /* RFC-0009 C */
-    PANEL_GMIC_P0 = 800,       /* + the parameter's row, below PANEL_CLS_FOLDER */
+    PANEL_FFMPEG_GROUP, PANEL_FFMPEG_FILTER, PANEL_FFMPEG_TYPE, PANEL_FFMPEG_APPLY,   /* RFC-0009 D */
+    PANEL_GMIC_P0 = 800,       /* + the parameter's row, below PANEL_FFMPEG_P0 */
+    PANEL_FFMPEG_P0 = 850,     /* + the option's row, below PANEL_CLS_FOLDER */
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
@@ -14926,6 +14941,7 @@ static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_
                      : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect)
                      : s->kind == RUBRAVIEW_STEP_PLUGIN ? s->plugin   /* RFC-0007: the plug-in's file */
                      : s->kind == RUBRAVIEW_STEP_GMIC ? gmic_step_name(s)   /* RFC-0009 C: its filter's name, or the command */
+                     : s->kind == RUBRAVIEW_STEP_FFMPEG ? s->command   /* RFC-0009 D: the graph */
                      : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
@@ -15091,6 +15107,8 @@ static void edit_rows_detail(app_state_t *app) {
 
 static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src);
 static void edit_rows_gmic(app_state_t *app);
+static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src);
+static void edit_rows_ffmpeg(app_state_t *app);
 
 /* ---- RFC-0007 (RV-138, D-186): plug-in filters, found in their folder and run in a child process ---- */
 
@@ -15160,6 +15178,7 @@ static rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const
     (void)user;
     rubraview_pixbuf_t empty = {0};
     if (step->kind == RUBRAVIEW_STEP_GMIC) return rubraview_pixbuf_is_valid(src) ? gmic_runner(arena, step, src) : empty;   /* RFC-0009 C */
+    if (step->kind == RUBRAVIEW_STEP_FFMPEG) return rubraview_pixbuf_is_valid(src) ? ffmpeg_runner(arena, step, src) : empty;   /* RFC-0009 D */
     g_plugin_why = NULL;
     if (!rubraview_pixbuf_is_valid(src) || (src->format != RUBRAVIEW_PIXFMT_RGBA8 && src->format != RUBRAVIEW_PIXFMT_BGRA8)) return empty;
     rubraview_plugin_t plugin;
@@ -15252,6 +15271,7 @@ static void edit_rows_effect(app_state_t *app) {
     rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
     edit_rows_plugins(app);   /* RFC-0007 */
     edit_rows_gmic(app);      /* RFC-0009 C */
+    edit_rows_ffmpeg(app);    /* RFC-0009 D */
     rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
 }
 
@@ -15564,8 +15584,8 @@ static bool gmic_button(app_state_t *app, int32_t id) {
     char args[RUBRAVIEW_GMIC_ARGS_MAX];
     size_t n = rubraview_gmic_args(f, app->gmic_values, texts, args, sizeof(args));
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
-    int w = snprintf(s.gmic, sizeof(s.gmic), "%.*s%s%s", (int)f->command.size, (const char *)f->command.ptr, n ? " " : "", args);
-    if (w <= 0 || (size_t)w >= sizeof(s.gmic)) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
+    int w = snprintf(s.command, sizeof(s.command), "%.*s%s%s", (int)f->command.size, (const char *)f->command.ptr, n ? " " : "", args);
+    if (w <= 0 || (size_t)w >= sizeof(s.command)) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
     (void)edit_apply_pending(app, false);
     if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return true;
     edit_steps_changed(app);
@@ -15586,9 +15606,9 @@ static void gmic_typed(app_state_t *app) {
     text = proven_u8str_view_trim(text);
     if (text.size == 0) return;
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
-    if (text.size >= sizeof(s.gmic)) { osd_say(app, TU8("the command is too long for a step")); return; }
-    memcpy(s.gmic, text.ptr, text.size);
-    snprintf(app->gmic_last_typed, sizeof(app->gmic_last_typed), "%s", s.gmic);
+    if (text.size >= sizeof(s.command)) { osd_say(app, TU8("the command is too long for a step")); return; }
+    memcpy(s.command, text.ptr, text.size);
+    snprintf(app->gmic_last_typed, sizeof(app->gmic_last_typed), "%s", s.command);
     (void)edit_apply_pending(app, false);
     if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
     edit_steps_changed(app);
@@ -15599,14 +15619,14 @@ static void gmic_typed(app_state_t *app) {
 static const char *gmic_step_name(const rubraview_edit_step_t *step) {
     static char name[160];
     proven_u8str_view_t items[RUBRAVIEW_GMIC_MAX_ITEMS];
-    if (rubraview_gmic_split(proven_u8str_view_from_cstr(step->gmic), items, RUBRAVIEW_GMIC_MAX_ITEMS) >= 1) {
+    if (rubraview_gmic_split(proven_u8str_view_from_cstr(step->command), items, RUBRAVIEW_GMIC_MAX_ITEMS) >= 1) {
         for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
             if (!proven_u8str_view_eq(g_gmic.filters[i].command, items[0])) continue;
             snprintf(name, sizeof(name), "G'MIC %.*s", (int)g_gmic.filters[i].name.size, (const char *)g_gmic.filters[i].name.ptr);
             return name;
         }
     }
-    return step->gmic;
+    return step->command;
 }
 
 /* ---- running a step: the picture to a file, gmic.exe on it, its file read back ---- */
@@ -15617,7 +15637,7 @@ static bool gmic_tick(void *context) {
 }
 
 typedef struct gmic_result {
-    char command[RUBRAVIEW_EDIT_GMIC_MAX];
+    char command[RUBRAVIEW_EDIT_COMMAND_MAX];
     int32_t width, height, out_width, out_height;
     uint64_t sum;
     uint8_t *rgba;
@@ -15666,7 +15686,7 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
     AcquireSRWLockShared(&g_gmic_results_lock);
     for (size_t i = 0; i < 4 && !done.pixels; ++i) {
         const gmic_result_t *r = &g_gmic_results[i];
-        if (r->rgba && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->command, step->gmic) == 0)
+        if (r->rgba && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->command, step->command) == 0)
             done = gmic_pixbuf_of(arena, r->rgba, r->out_width, r->out_height, src->format);
     }
     ReleaseSRWLockShared(&g_gmic_results_lock);
@@ -15687,7 +15707,7 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
     }
     free(in);
     proven_u8str_view_t items[RUBRAVIEW_GMIC_MAX_ITEMS];
-    size_t n = rubraview_gmic_split(cstr(step->gmic), items + 1, RUBRAVIEW_GMIC_MAX_ITEMS - 3);
+    size_t n = rubraview_gmic_split(cstr(step->command), items + 1, RUBRAVIEW_GMIC_MAX_ITEMS - 3);
     rubraview_gmic_exec_t r = { .ok = false };
     if (n > 0) {
         items[0] = in_path;
@@ -15725,10 +15745,280 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
         free(slot->rgba);
         *slot = (gmic_result_t){ .width = src->width, .height = src->height, .out_width = back.width, .out_height = back.height,
                                  .sum = sum, .rgba = kept };
-        snprintf(slot->command, sizeof(slot->command), "%s", step->gmic);
+        snprintf(slot->command, sizeof(slot->command), "%s", step->command);
         ReleaseSRWLockExclusive(&g_gmic_results_lock);
     }
     return back;
+}
+
+/* ---- RFC-0009 D: FFmpeg's filters, by avfilter of the FFmpeg Settings › External names (inside the program, as
+   FFmpeg's decoders are: D-8) ---- */
+
+#define PANEL_FFMPEG_ROWS 24   /* options shown; the rest keep FFmpeg's defaults */
+#define FFMPEG_GROUP_SIZE 24
+
+static void *g_ffm_mem;                      /* the list's room */
+static proven_arena_t g_ffm_arena;
+static rubraview_ffilter_catalog_t g_ffm;    /* the filters; empty until avfilter is loaded and asked */
+static int32_t g_ffm_first[RUBRAVIEW_FFILTER_MAX_GROUPS];
+static int32_t g_ffm_groups;
+static bool g_ffm_asked;
+static _Thread_local char g_ffm_said[512];   /* what FFmpeg said when a run failed */
+
+/* The list, made once avfilter is there; asked again only after a failed try when FFmpeg is found anew. */
+static bool ffmpeg_list_ready(void) {
+    if (g_ffm.filter_count > 0) return true;
+    if (rubraview_pal_ffilter_state() != RUBRAVIEW_FFILTER_READY || g_ffm_asked) return false;
+    g_ffm_asked = true;
+    size_t room = 8u << 20;
+    g_ffm_mem = malloc(room);
+    if (!g_ffm_mem) return false;
+    g_ffm_arena = proven_arena_create((proven_mem_mut_t){ .ptr = g_ffm_mem, .size = room });
+    if (!rubraview_pal_ffilter_list(&g_ffm_arena, &g_ffm)) {
+        free(g_ffm_mem);
+        g_ffm_mem = NULL;
+        g_ffm = (rubraview_ffilter_catalog_t){0};
+        return false;
+    }
+    g_ffm_groups = rubraview_ffilter_groups(&g_ffm, FFMPEG_GROUP_SIZE, g_ffm_first, RUBRAVIEW_FFILTER_MAX_GROUPS);
+    return true;
+}
+
+/* The `k`th filter of group `group` (from 1); NULL past its end. */
+static const rubraview_ffilter_t *ffmpeg_filter_in(int32_t group, int32_t k, int32_t *count) {
+    if (count) *count = 0;
+    if (group < 1 || group > g_ffm_groups) return NULL;
+    int32_t a = g_ffm_first[group - 1], b = group < g_ffm_groups ? g_ffm_first[group] : g_ffm.filter_count;
+    if (count) *count = b - a;
+    return k >= 0 && a + k < b ? &g_ffm.filters[a + k] : NULL;
+}
+
+static const rubraview_ffilter_t *ffmpeg_chosen(const app_state_t *app) {
+    return app->ffmpeg_group > 0 ? ffmpeg_filter_in(app->ffmpeg_group, app->ffmpeg_filter, NULL) : NULL;
+}
+
+static void ffmpeg_defaults(app_state_t *app) {
+    const rubraview_ffilter_t *f = ffmpeg_chosen(app);
+    for (int32_t i = 0; f && i < f->option_count && i < RUBRAVIEW_FFILTER_MAX_SHOWN; ++i) {
+        app->ffmpeg_values[i] = f->options[i].value;
+        snprintf(app->ffmpeg_texts[i], sizeof(app->ffmpeg_texts[i]), "%.*s", (int)f->options[i].text.size, (const char *)f->options[i].text.ptr);
+    }
+}
+
+static void edit_rows_ffmpeg(app_state_t *app) {
+    if (!ffmpeg_list_ready()) return;
+    if (app->ffmpeg_group < 0 || app->ffmpeg_group > g_ffm_groups) app->ffmpeg_group = 0;
+    rubraview_panel_add_choice(&app->panel, PANEL_FFMPEG_GROUP, TU8("FFmpeg filters"), app->ffmpeg_group, g_ffm_groups + 1);
+    if (app->ffmpeg_group > 0) {
+        int32_t count = 0;
+        (void)ffmpeg_filter_in(app->ffmpeg_group, 0, &count);
+        if (app->ffmpeg_filter < 0 || app->ffmpeg_filter >= count) app->ffmpeg_filter = 0;
+        rubraview_panel_add_choice(&app->panel, PANEL_FFMPEG_FILTER, TU8("  filter"), app->ffmpeg_filter, count);
+        const rubraview_ffilter_t *f = ffmpeg_chosen(app);
+        static char labels[PANEL_FFMPEG_ROWS][120];   /* the rows' words live as long as the panel */
+        for (int32_t i = 0; f && i < f->option_count && i < PANEL_FFMPEG_ROWS; ++i) {
+            const rubraview_ffilter_option_t *q = &f->options[i];
+            int32_t id = PANEL_FFMPEG_P0 + i;
+            if (q->kind == RUBRAVIEW_FFILTER_TEXT) {
+                snprintf(labels[i], sizeof(labels[i]), "  %.*s: %s", (int)q->name.size, (const char *)q->name.ptr,
+                         app->ffmpeg_texts[i][0] ? app->ffmpeg_texts[i] : T("(FFmpeg's default)"));
+                rubraview_panel_add_button(&app->panel, id, cstr(labels[i]));
+                continue;
+            }
+            snprintf(labels[i], sizeof(labels[i]), "  %.*s", (int)q->name.size, (const char *)q->name.ptr);
+            proven_u8str_view_t name = cstr(labels[i]);
+            if (q->kind == RUBRAVIEW_FFILTER_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->ffmpeg_values[i] > 0.5);
+            else if (q->kind == RUBRAVIEW_FFILTER_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->ffmpeg_values[i], q->choice_count);
+            else rubraview_panel_add_slider(&app->panel, id, name, app->ffmpeg_values[i], q->min, q->max,
+                                            q->kind == RUBRAVIEW_FFILTER_INT ? 1.0 : (q->max - q->min) / 100.0);
+        }
+        rubraview_panel_add_button(&app->panel, PANEL_FFMPEG_APPLY, TU8("Run the FFmpeg filter: a step"));
+    }
+    rubraview_panel_add_button(&app->panel, PANEL_FFMPEG_TYPE, TU8("Type an FFmpeg filter graph..."));
+}
+
+/* A choice row's words: the groups, the filters of the one chosen (with what they do), an option's choices. */
+static proven_u8str_view_t ffmpeg_choice_word(const app_state_t *app, int32_t id, int32_t i, char *buffer, size_t size) {
+    buffer[0] = '\0';
+    if (id == PANEL_FFMPEG_GROUP) {
+        if (i <= 0) return cstr(T("none"));
+        rubraview_ffilter_group_name(&g_ffm, g_ffm_first, g_ffm_groups, i - 1, buffer, size);
+    } else if (id == PANEL_FFMPEG_FILTER) {
+        const rubraview_ffilter_t *f = ffmpeg_filter_in(app->ffmpeg_group, i, NULL);
+        if (f) snprintf(buffer, size, "%.*s \xE2\x80\x94 %.*s", (int)f->name.size, (const char *)f->name.ptr,
+                        (int)(f->description.size < 60 ? f->description.size : 60), (const char *)f->description.ptr);
+    } else {
+        const rubraview_ffilter_t *f = ffmpeg_chosen(app);
+        int32_t p = id - PANEL_FFMPEG_P0;
+        if (f && p >= 0 && p < f->option_count && f->options[p].kind == RUBRAVIEW_FFILTER_CHOICE && i >= 0 && i < f->options[p].choice_count)
+            snprintf(buffer, size, "%.*s", (int)f->options[p].choices[i].size, (const char *)f->options[p].choices[i].ptr);
+    }
+    return cstr(buffer);
+}
+
+/* A row's value changed; true when it was one of FFmpeg's. */
+static bool ffmpeg_row_changed(app_state_t *app, int32_t id, double v) {
+    if (id == PANEL_FFMPEG_GROUP || id == PANEL_FFMPEG_FILTER) {
+        if (id == PANEL_FFMPEG_GROUP) { app->ffmpeg_group = (int32_t)lround(v); app->ffmpeg_filter = 0; }
+        else app->ffmpeg_filter = (int32_t)lround(v);
+        ffmpeg_defaults(app);
+        panel_build_edit(app);
+        return true;
+    }
+    if (id < PANEL_FFMPEG_P0 || id >= PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS) return false;
+    app->ffmpeg_values[id - PANEL_FFMPEG_P0] = v;
+    return true;
+}
+
+/* The box for an option's text (its index), or for a whole graph (-1). */
+static void ffmpeg_type_begin(app_state_t *app, int32_t option) {
+    if (app->rename_active) rename_end(app);
+    const char *now = option >= 0 ? app->ffmpeg_texts[option] : app->ffmpeg_last_typed;
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, cstr(now));
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_ffmpeg = true;
+    app->ffmpeg_typing = option;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, option >= 0 ? TU8("type it, then Enter (Esc leaves it)")
+                             : TU8("an FFmpeg filter graph such as unsharp=5:5:1.0 (Enter runs it, Esc leaves it)"));
+}
+
+/* The graph made a step. */
+static void ffmpeg_push(app_state_t *app, proven_u8str_view_t graph) {
+    const char *refused = rubraview_ffilter_refused(graph);
+    if (refused) {
+        char line[160];
+        snprintf(line, sizeof(line), T("the filter %s is not allowed here"), refused);
+        osd_say(app, cstr(line));
+        return;
+    }
+    rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_FFMPEG, .area = edit_area_now(app) };
+    if (graph.size == 0 || graph.size >= sizeof(s.command)) { osd_say(app, TU8("the filter graph is too long for a step")); return; }
+    memcpy(s.command, graph.ptr, graph.size);
+    (void)edit_apply_pending(app, false);
+    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    edit_steps_changed(app);
+    osd_say(app, TU8("FFmpeg filter applied (Ctrl+Z undoes it)"));
+}
+
+/* A button of FFmpeg's pressed; true when it was one. */
+static bool ffmpeg_button(app_state_t *app, int32_t id) {
+    if (id == PANEL_FFMPEG_TYPE) { ffmpeg_type_begin(app, -1); return true; }
+    if (id >= PANEL_FFMPEG_P0 && id < PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS) { ffmpeg_type_begin(app, id - PANEL_FFMPEG_P0); return true; }
+    if (id != PANEL_FFMPEG_APPLY) return false;
+    const rubraview_ffilter_t *f = ffmpeg_chosen(app);
+    if (!f) { osd_say(app, TU8("choose an FFmpeg filter first")); return true; }
+    proven_u8str_view_t texts[RUBRAVIEW_FFILTER_MAX_SHOWN];
+    for (int32_t i = 0; i < RUBRAVIEW_FFILTER_MAX_SHOWN; ++i) texts[i] = cstr(app->ffmpeg_texts[i]);
+    char graph[RUBRAVIEW_EDIT_COMMAND_MAX];
+    size_t n = rubraview_ffilter_graph(f, app->ffmpeg_values, texts, graph, sizeof(graph));
+    if (n == 0) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
+    ffmpeg_push(app, rubraview_u8(graph, n));
+    return true;
+}
+
+/* Enter in the box: an option's text kept, or the graph typed made a step. */
+static void ffmpeg_typed(app_state_t *app) {
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    int32_t option = app->ffmpeg_typing;
+    rename_end(app);
+    if (option >= 0 && option < RUBRAVIEW_FFILTER_MAX_SHOWN) {
+        snprintf(app->ffmpeg_texts[option], sizeof(app->ffmpeg_texts[option]), "%.*s", (int)text.size, (const char *)text.ptr);
+        panel_build_edit(app);
+        return;
+    }
+    text = proven_u8str_view_trim(text);
+    if (text.size == 0) return;
+    snprintf(app->ffmpeg_last_typed, sizeof(app->ffmpeg_last_typed), "%.*s", (int)text.size, (const char *)text.ptr);
+    ffmpeg_push(app, text);
+}
+
+/* ---- running a step: in the program, one frame through the graph ---- */
+
+typedef struct ffmpeg_result {
+    char graph[RUBRAVIEW_EDIT_COMMAND_MAX];
+    int32_t width, height, out_width, out_height;
+    uint64_t sum;
+    uint8_t *bgra;
+} ffmpeg_result_t;
+static ffmpeg_result_t g_ffm_results[4];
+static size_t g_ffm_result_next;
+static SRWLOCK g_ffm_results_lock = SRWLOCK_INIT;
+
+/* `src` as BGRA, tightly packed; or BGRA back as a pixbuf of `format` (the two swaps are one). */
+static uint8_t *ffmpeg_bgra_of(const uint8_t *pixels, int32_t w, int32_t h, size_t stride, bool swap) {
+    size_t row = (size_t)w * 4u;
+    uint8_t *out = (uint8_t *)rubraview_malloc_product(row, (size_t)h, 1);
+    if (!out) return NULL;
+    for (int32_t y = 0; y < h; ++y) {
+        const uint8_t *s = pixels + (size_t)y * stride;
+        uint8_t *d = out + (size_t)y * row;
+        if (!swap) { memcpy(d, s, row); continue; }
+        for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+    }
+    return out;
+}
+
+static rubraview_pixbuf_t ffmpeg_pixbuf_of(proven_arena_t *arena, const uint8_t *bgra, int32_t w, int32_t h, rubraview_pixel_format_t format) {
+    rubraview_pixbuf_t out = rubraview_pixbuf_create(arena, w, h, format);
+    if (!rubraview_pixbuf_is_valid(&out)) return out;
+    bool swap = format != RUBRAVIEW_PIXFMT_BGRA8;
+    for (int32_t y = 0; y < h; ++y) {
+        const uint8_t *s = bgra + (size_t)y * (size_t)w * 4u;
+        uint8_t *d = out.pixels + (size_t)y * (size_t)out.stride;
+        if (!swap) { memcpy(d, s, (size_t)w * 4u); continue; }
+        for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
+    }
+    return out;
+}
+
+static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src) {
+    rubraview_pixbuf_t empty = {0};
+    g_plugin_why = NULL;
+    if (src->format != RUBRAVIEW_PIXFMT_RGBA8 && src->format != RUBRAVIEW_PIXFMT_BGRA8) { g_plugin_why = N_("not an 8-bit picture"); return empty; }
+    if (rubraview_pal_ffilter_state() != RUBRAVIEW_FFILTER_READY) {
+        g_plugin_why = N_("FFmpeg's filters are not there: avfilter-12.dll beside FFmpeg (Settings › External)");
+        return empty;
+    }
+    uint8_t *in = ffmpeg_bgra_of(src->pixels, src->width, src->height, (size_t)src->stride, src->format != RUBRAVIEW_PIXFMT_BGRA8);
+    if (!in) { g_plugin_why = N_("out of memory"); return empty; }
+    uint64_t sum = bytes_sum(in, (size_t)src->width * 4u * (size_t)src->height);
+    rubraview_pixbuf_t done = empty;
+    AcquireSRWLockShared(&g_ffm_results_lock);
+    for (size_t i = 0; i < 4 && !done.pixels; ++i) {
+        const ffmpeg_result_t *r = &g_ffm_results[i];
+        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->graph, step->command) == 0)
+            done = ffmpeg_pixbuf_of(arena, r->bgra, r->out_width, r->out_height, src->format);
+    }
+    ReleaseSRWLockShared(&g_ffm_results_lock);
+    if (done.pixels) { free(in); return done; }
+
+    uint8_t *out = NULL;
+    int32_t ow = 0, oh = 0;
+    char said[400];
+    bool ok = rubraview_pal_ffilter_run(step->command, in, src->width, src->height, &out, &ow, &oh, said, sizeof(said));
+    free(in);
+    if (!ok) {
+        snprintf(g_ffm_said, sizeof(g_ffm_said), "FFmpeg: %s", said[0] ? said : "no picture came back");
+        g_plugin_why = g_ffm_said;
+        return empty;
+    }
+    done = ffmpeg_pixbuf_of(arena, out, ow, oh, src->format);
+    if (rubraview_pixbuf_is_valid(&done)) {
+        AcquireSRWLockExclusive(&g_ffm_results_lock);
+        ffmpeg_result_t *slot = &g_ffm_results[g_ffm_result_next++ % 4];
+        free(slot->bgra);
+        *slot = (ffmpeg_result_t){ .width = src->width, .height = src->height, .out_width = ow, .out_height = oh, .sum = sum, .bgra = out };
+        snprintf(slot->graph, sizeof(slot->graph), "%s", step->command);
+        ReleaseSRWLockExclusive(&g_ffm_results_lock);
+    } else {
+        free(out);
+        g_plugin_why = N_("out of memory");
+    }
+    return done;
 }
 
 static void edit_rows_resize(app_state_t *app) {
@@ -15977,6 +16267,7 @@ static proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubravi
     int32_t i = (int32_t)row->value;
     const char *word = NULL;
     if (row->id >= PANEL_GMIC_P0 && row->id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS) return gmic_choice_word(app, row->id, i, buffer, size);
+    if (row->id >= PANEL_FFMPEG_P0 && row->id < PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS) return ffmpeg_choice_word(app, row->id, i, buffer, size);
     switch (row->id) {
         case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
         case PANEL_EFFECT: {   /* within the kind chosen */
@@ -16004,6 +16295,7 @@ static proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubravi
         }
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
         case PANEL_GMIC_CATEGORY: case PANEL_GMIC_FILTER: return gmic_choice_word(app, row->id, i, buffer, size);   /* RFC-0009 C */
+        case PANEL_FFMPEG_GROUP: case PANEL_FFMPEG_FILTER: return ffmpeg_choice_word(app, row->id, i, buffer, size);   /* RFC-0009 D */
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
         /* RV-129: the batch window */
         case PANEL_BATCH_SIZE_BY: {
@@ -17988,6 +18280,7 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
     }
 
     if (gmic_row_changed(app, row->id, v)) return;   /* RFC-0009 C: its parameters' rows */
+    if (ffmpeg_row_changed(app, row->id, v)) return;   /* RFC-0009 D: its options' rows */
     switch (row->id) {
         case PANEL_EXPOSURE:    rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_EXPOSURE, (float)v); break;
         case PANEL_BRIGHTNESS:  rubraview_edit_set_slider(&app->edit, RUBRAVIEW_SLIDER_BRIGHTNESS, (float)v); break;
@@ -18116,6 +18409,8 @@ static void panel_button(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->panel.row_count) return;
     if (app->panel.rows[index].id >= PANEL_GMIC_P0 && app->panel.rows[index].id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS &&
         gmic_button(app, app->panel.rows[index].id)) return;   /* RFC-0009 C: a text, a colour or a point typed */
+    if (app->panel.rows[index].id >= PANEL_FFMPEG_P0 && app->panel.rows[index].id < PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS &&
+        ffmpeg_button(app, app->panel.rows[index].id)) return;   /* RFC-0009 D: an option typed */
     switch (app->panel.rows[index].id) {
         case PANEL_RESET:
             /* Everything since the panel opened: the steps, the values, the selection. */
@@ -18131,6 +18426,7 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_EFFECT_APPLY: edit_effect_apply(app); break;
         case PANEL_PLUGIN_APPLY: edit_plugin_apply(app); break;   /* RFC-0007 */
         case PANEL_GMIC_APPLY: case PANEL_GMIC_TYPE: (void)gmic_button(app, app->panel.rows[index].id); break;   /* RFC-0009 C */
+        case PANEL_FFMPEG_APPLY: case PANEL_FFMPEG_TYPE: (void)ffmpeg_button(app, app->panel.rows[index].id); break;   /* RFC-0009 D */
         case PANEL_AUTO_COLOUR:  edit_auto_colour(app); break;
         case PANEL_CROP_SEL:     edit_crop_to_selection(app); break;
         case PANEL_RESIZE_APPLY: edit_resize_apply(app); break;
@@ -18624,6 +18920,16 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
             int m = snprintf(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with %s"), encoders);
             if (m > 0) n += m;
         }
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("ffmpeg.filters"))) {   /* RFC-0009 D */
+        rubraview_ffilter_state_t s = rubraview_pal_ffilter_state();
+        if (s == RUBRAVIEW_FFILTER_READY && ffmpeg_list_ready())
+            n = snprintf(buffer, capacity, T("%d filters, under Edit"), g_ffm.filter_count);
+        else
+            n = snprintf(buffer, capacity, "%s",
+                         s == RUBRAVIEW_FFILTER_NO_FFMPEG ? T("none: FFmpeg is not found")
+                         : s == RUBRAVIEW_FFILTER_OTHER_VERSION ? T("none: its avfilter DLL is not FFmpeg 9.0's")
+                         : s == RUBRAVIEW_FFILTER_READY ? T("none: avfilter lists no filter")
+                         : T("none: avfilter-12.dll is not beside FFmpeg's other DLLs"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("gmic.status"))) {   /* RFC-0009 C */
         if (!g_gmic_exe[0]) n = snprintf(buffer, capacity, "%s", g_gmic_where[0] ? T("gmic.exe is not in the place named") : T("not set: name gmic.exe or its folder below"));
         else if (g_gmic_job) n = snprintf(buffer, capacity, "%s", T("found; the filter list is being made (a few minutes)"));
@@ -27992,11 +28298,23 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         }
         if (extra->gmic.size > 0) {   /* RFC-0009 C: a G'MIC command, by gmic.exe */
             rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_GMIC };
-            memcpy(step.gmic, extra->gmic.ptr, extra->gmic.size < sizeof(step.gmic) ? extra->gmic.size : sizeof(step.gmic) - 1);
+            memcpy(step.command, extra->gmic.ptr, extra->gmic.size < sizeof(step.command) ? extra->gmic.size : sizeof(step.command) - 1);
             rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
             if (!rubraview_pixbuf_is_valid(&done)) {
                 char said[700];
                 snprintf(said, sizeof(said), "G'MIC did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                batch_say(input->path, said);
+                return false;
+            }
+            pixels = done;
+        }
+        if (extra->ffmpeg_filter.size > 0) {   /* RFC-0009 D: an FFmpeg filter graph, by avfilter */
+            rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_FFMPEG };
+            memcpy(step.command, extra->ffmpeg_filter.ptr, extra->ffmpeg_filter.size < sizeof(step.command) ? extra->ffmpeg_filter.size : sizeof(step.command) - 1);
+            rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
+            if (!rubraview_pixbuf_is_valid(&done)) {
+                char said[700];
+                snprintf(said, sizeof(said), "the FFmpeg filter did not run: %s", g_plugin_why ? g_plugin_why : "?");
                 batch_say(input->path, said);
                 return false;
             }

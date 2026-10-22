@@ -312,11 +312,12 @@ typedef enum rubraview_edit_step_kind {
     RUBRAVIEW_STEP_RESIZE,       /* the whole picture to values.resize_width x resize_height */
     RUBRAVIEW_STEP_EFFECT,       /* `effect` at `amount` (effects.h), on the area */
     RUBRAVIEW_STEP_PLUGIN,       /* RFC-0007: a plug-in filter (`plugin`, its hash and values), on the area */
-    RUBRAVIEW_STEP_GMIC,         /* RFC-0009 C: a G'MIC command (`gmic`), run by the user's gmic.exe, on the area */
+    RUBRAVIEW_STEP_GMIC,         /* RFC-0009 C: a G'MIC command (`command`), run by the user's gmic.exe, on the area */
+    RUBRAVIEW_STEP_FFMPEG,       /* RFC-0009 D: an FFmpeg filter graph (`command`), run by avfilter, on the area */
 } rubraview_edit_step_kind_t;
 
-/** A G'MIC step's command and its arguments, NUL included. */
-#define RUBRAVIEW_EDIT_GMIC_MAX 1024
+/** A G'MIC step's command and its arguments, or an FFmpeg step's filter graph, NUL included. */
+#define RUBRAVIEW_EDIT_COMMAND_MAX 1024
 
 typedef struct rubraview_edit_step {
     rubraview_edit_step_kind_t kind;
@@ -330,13 +331,15 @@ typedef struct rubraview_edit_step {
     uint8_t                    plugin_sha256[32];
     double                     plugin_params[8];
     int32_t                    plugin_param_count;
-    /* GMIC (RFC-0009 C): the command and its arguments as G'MIC is given them ("fx_array_mirror 1,0,2") */
-    char                       gmic[RUBRAVIEW_EDIT_GMIC_MAX];
+    /* GMIC (RFC-0009 C): the command and its arguments as G'MIC is given them ("fx_array_mirror 1,0,2");
+       FFMPEG (RFC-0009 D): the filter graph as avfilter is given it ("unsharp=5:5:1.0") */
+    char                       command[RUBRAVIEW_EDIT_COMMAND_MAX];
 } rubraview_edit_step_t;
 
 /**
  * RFC-0007: what runs a plug-in step — the viewer's, which starts the plug-in's child process (RFC-0009 C: and a
- * G'MIC step, by the user's gmic.exe; a G'MIC step on the whole picture may give it another size). The picture is
+ * G'MIC step, by the user's gmic.exe, and RFC-0009 D an FFmpeg filter step, by avfilter; either on the whole
+ * picture may give it another size). The picture is
  * the area's piece (or the whole); an empty pixbuf when it could not run, and the step then fails the save.
  * The step's values are not scaled for a preview (a plug-in's numbers mean what it says they mean).
  */
