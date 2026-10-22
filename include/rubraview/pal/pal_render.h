@@ -46,7 +46,7 @@ typedef struct rubraview_src_rect {
  *
  * Returns an empty slice when nothing has failed.
  */
-u8str_t rubraview_pal_render_last_error(void);
+proven_u8str_view_t rubraview_pal_render_last_error(void);
 
 /** The same, as a number: the HRESULT the OS returned, or 0. */
 uint32_t rubraview_pal_render_last_hresult(void);
@@ -57,7 +57,7 @@ uint32_t rubraview_pal_render_last_hresult(void);
  * difference between "the GPU path" and "the software fallback" is
  * exactly the sort of thing that explains a slow or wrong picture.
  */
-u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
+proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
 
 /* D-179: how the swap chain hands a frame to the compositor. */
 enum { RUBRAVIEW_PRESENT_COPY = 0, RUBRAVIEW_PRESENT_FLIP_DISCARD = 1, RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL = 2 };
@@ -233,28 +233,28 @@ typedef enum rubraview_text_align {
  * family the machine does not have is drawn in what DirectWrite falls
  * back to.
  */
-void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family);
+void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, proven_u8str_view_t family);
 
 /** RV-136: the same, with a weight (100..900, 0 for 400) and italic. */
-void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic);
+void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, proven_u8str_view_t family, int32_t weight, bool italic);
 
 /**
  * RV-136: the program's own face — what draw_text and the measures use
  * when no other family is set (Settings › General › UI font). An empty
  * family is Segoe UI.
  */
-void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic);
+void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, proven_u8str_view_t family, int32_t weight, bool italic);
 
 /** 1.25.0: the face of the fixed-width text (the settings window); empty is Consolas. A face whose letters are not all
     one width still lays out on the grid, its letters each in a cell. */
-void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, u8str_t family);
+void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, proven_u8str_view_t family);
 /** 1.25.0: room drawn above each fixed-width line, so a taller row holds its text in its middle. */
 void rubraview_pal_render_set_mono_pad(rubraview_renderer_t *renderer, double pad);
 
 /** One font family the machine has: its name in the user's language and its English one (stored). */
 typedef struct rubraview_font_family {
-    u8str_t shown;
-    u8str_t name;
+    proven_u8str_view_t shown;
+    proven_u8str_view_t name;
 } rubraview_font_family_t;
 
 /**
@@ -264,7 +264,7 @@ typedef struct rubraview_font_family {
 size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_t **out);
 
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
-                                    u8str_t text,
+                                    proven_u8str_view_t text,
                                     rubraview_pal_rect_t rect,
                                     double font_size,
                                     uint32_t argb,
@@ -292,13 +292,13 @@ bool rubraview_pal_render_draw_icon(rubraview_renderer_t *renderer, uint32_t cod
    A test's trigger — a real loss cannot be caused on demand. */
 void rubraview_pal_render_force_lost(rubraview_renderer_t *renderer);
 
-bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, double font_size,
                                        double *out_width);
 
 /* How wide and tall `text` is as draw_text lays it out in a rectangle
    `wrap_width` wide: wrapped there, its own line ends kept (D-92: the
    subtitle box is made to hold its text). False when it cannot tell. */
-bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, proven_u8str_view_t text, double font_size,
                                                double wrap_width, double *out_width, double *out_height);
 
 bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_size,
@@ -307,7 +307,7 @@ bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_
 /* ---- RFC-0005: a paragraph of a text file, laid out once and drawn often ---- */
 
 typedef struct rubraview_text_style {
-    u8str_t family;        /* "" for the program's face */
+    proven_u8str_view_t family;        /* "" for the program's face */
     double  size;          /* in DIPs */
     double  line_spacing;  /* a line's height as a multiple of the size (1.5 = 150 %) */
     double  width;         /* the column's width: lines wrap there when `wrap` */
@@ -325,7 +325,7 @@ typedef struct rubraview_text_mark {
 } rubraview_text_mark_t;
 
 /** `text` (UTF-8, one paragraph) laid out by DirectWrite; NULL when it cannot be. Kept across a lost device. */
-rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, u8str_t text,
+rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, proven_u8str_view_t text,
                                                       const rubraview_text_style_t *style);
 void rubraview_pal_text_block_free(rubraview_text_block_t *block);
 /** Its size as laid out: the widest line, and the height of all its lines. */
@@ -346,7 +346,7 @@ size_t rubraview_pal_text_block_hit(const rubraview_text_block_t *block, double 
 bool rubraview_pal_text_block_line_of(const rubraview_text_block_t *block, size_t at, double *top, double *height);
 
 /** One line of fixed-width text, its top-left at (x, y), never wrapped. */
-bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t text,
+bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, proven_u8str_view_t text,
                                          double x, double y, double font_size, uint32_t argb);
 
 #ifdef __cplusplus

@@ -4,13 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 
-bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, u8str_t filename, uint64_t file_size) {
+bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, proven_u8str_view_t filename, uint64_t file_size) {
     if (!job) return false;
 
-    if (job->include_pattern.len > 0 && !rubraview_glob_match_list(filename, job->include_pattern)) {
+    if (job->include_pattern.size > 0 && !rubraview_glob_match_list(filename, job->include_pattern)) {
         return false;
     }
-    if (job->exclude_pattern.len > 0 && rubraview_glob_match_list(filename, job->exclude_pattern)) {
+    if (job->exclude_pattern.size > 0 && rubraview_glob_match_list(filename, job->exclude_pattern)) {
         return false;
     }
     if (job->min_size_bytes > 0 && file_size < job->min_size_bytes) {
@@ -22,131 +22,92 @@ bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, u8str_t file
     return true;
 }
 
-typedef struct byte_buf {
-    uint8_t *data;
-    size_t len, cap;
-} byte_buf_t;
-
-static bool byte_buf_reserve(proven_arena_t *arena, byte_buf_t *b, size_t extra) {
-    if (b->len + extra <= b->cap) return true;
-    size_t new_cap = b->cap == 0 ? 128 : b->cap * 2;
-    while (new_cap < b->len + extra) new_cap *= 2;
-
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, new_cap);
-    if (!proven_is_ok(res.err)) return false;
-    if (b->data && b->len > 0) memcpy(res.value.ptr, b->data, b->len);
-    b->data = res.value.ptr;
-    b->cap = new_cap;
-    return true;
+proven_u8str_view_t rubraview_batch_format_name(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext, int32_t width, int32_t height, proven_u8str_view_t date_str) {
+    return rubraview_batch_format_name_ex(arena, pattern, name_stem, ext, width, height, date_str, 1, PROVEN_LIT(""));
 }
 
-static bool byte_buf_append(proven_arena_t *arena, byte_buf_t *b, const char *s, size_t n) {
-    if (n == 0) return true;
-    if (!byte_buf_reserve(arena, b, n)) return false;
-    memcpy(b->data + b->len, s, n);
-    b->len += n;
-    return true;
-}
-
-static bool byte_buf_append_str(proven_arena_t *arena, byte_buf_t *b, u8str_t s) {
-    return byte_buf_append(arena, b, s.ptr, s.len);
-}
-
-u8str_t rubraview_batch_format_name(proven_arena_t *arena, u8str_t pattern, u8str_t name_stem, u8str_t ext, int32_t width, int32_t height, u8str_t date_str) {
-    return rubraview_batch_format_name_ex(arena, pattern, name_stem, ext, width, height, date_str, 1, (u8str_t){ .ptr = "", .len = 0 });
-}
-
-u8str_t rubraview_batch_format_name_ex(proven_arena_t *arena, u8str_t pattern, u8str_t name_stem, u8str_t ext,
-                                       int32_t width, int32_t height, u8str_t date_str, int64_t counter, u8str_t parent) {
-    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext,
+                                       int32_t width, int32_t height, proven_u8str_view_t date_str, int64_t counter, proven_u8str_view_t parent) {
+    if (!arena) return PROVEN_LIT("");
 
     /* rubraview_path_ext keeps the leading dot; the {ext} token does not. */
-    u8str_t ext_no_dot = ext;
-    if (ext_no_dot.len > 0 && ext_no_dot.ptr[0] == '.') {
+    proven_u8str_view_t ext_no_dot = ext;
+    if (ext_no_dot.size > 0 && ext_no_dot.ptr[0] == '.') {
         ext_no_dot.ptr += 1;
-        ext_no_dot.len -= 1;
+        ext_no_dot.size -= 1;
     }
 
-    byte_buf_t buf = {0};
+    proven_u8str_t buf = {0};
     size_t i = 0;
-    while (i < pattern.len) {
+    while (i < pattern.size) {
         if (pattern.ptr[i] != '{') {
-            byte_buf_append(arena, &buf, pattern.ptr + i, 1);
+            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, 1);
             i++;
             continue;
         }
 
         size_t close = i + 1;
-        while (close < pattern.len && pattern.ptr[close] != '}') close++;
-        if (close >= pattern.len) {
+        while (close < pattern.size && pattern.ptr[close] != '}') close++;
+        if (close >= pattern.size) {
             /* No matching '}': copy the rest through unchanged. */
-            byte_buf_append(arena, &buf, pattern.ptr + i, pattern.len - i);
+            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, pattern.size - i);
             break;
         }
 
-        const char *tok = pattern.ptr + i + 1;
+        const char *tok = (const char *)pattern.ptr + i + 1;
         size_t tok_len = close - i - 1;
 
-        if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "name")) {
-            byte_buf_append_str(arena, &buf, name_stem);
-        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "ext")) {
-            byte_buf_append_str(arena, &buf, ext_no_dot);
+        if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("name"))) {
+            rubraview_text_append(arena, &buf, (name_stem).ptr, (name_stem).size);
+        } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("ext"))) {
+            rubraview_text_append(arena, &buf, (ext_no_dot).ptr, (ext_no_dot).size);
         } else if (tok_len == 1 && tok[0] == 'w') {
             char num[16];
             int n = snprintf(num, sizeof(num), "%d", width);
-            if (n > 0) byte_buf_append(arena, &buf, num, (size_t)n);
+            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
         } else if (tok_len == 1 && tok[0] == 'h') {
             char num[16];
             int n = snprintf(num, sizeof(num), "%d", height);
-            if (n > 0) byte_buf_append(arena, &buf, num, (size_t)n);
-        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "date")) {
-            byte_buf_append_str(arena, &buf, date_str);
-        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = tok, .len = tok_len }, "parent")) {
-            byte_buf_append_str(arena, &buf, parent);
+            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
+        } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("date"))) {
+            rubraview_text_append(arena, &buf, (date_str).ptr, (date_str).size);
+        } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("parent"))) {
+            rubraview_text_append(arena, &buf, (parent).ptr, (parent).size);
         } else if (tok_len >= 1 && tok[0] == 'n' && (tok_len == 1 || (tok_len == 3 && tok[1] == ':' && tok[2] >= '1' && tok[2] <= '9'))) {
             /* RV-129: the counter, {n:3} padded with zeros to three digits */
             char num[32];
             int pad = tok_len == 3 ? tok[2] - '0' : 0;
             int n = snprintf(num, sizeof(num), "%0*lld", pad, (long long)counter);
-            if (n > 0) byte_buf_append(arena, &buf, num, (size_t)n);
+            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
         } else {
             /* Unrecognized token: copy the whole "{...}" through unchanged. */
-            byte_buf_append(arena, &buf, pattern.ptr + i, close - i + 1);
+            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, close - i + 1);
         }
 
         i = close + 1;
     }
 
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, buf.len + 1);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
-    if (buf.len > 0) memcpy(res.value.ptr, buf.data, buf.len);
-    res.value.ptr[buf.len] = '\0';
-
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = buf.len };
+    return rubraview_text_view(&buf);
 }
 
 /* ---- RV-129 ---- */
 
-u8str_t rubraview_batch_replace_all(proven_arena_t *arena, u8str_t text, u8str_t from, u8str_t to) {
-    if (!arena || from.len == 0 || text.len < from.len) return text;
-    byte_buf_t buf = {0};
+proven_u8str_view_t rubraview_batch_replace_all(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t from, proven_u8str_view_t to) {
+    if (!arena || from.size == 0 || text.size < from.size) return text;
+    proven_u8str_t buf = {0};
     bool any = false;
-    for (size_t i = 0; i < text.len;) {
-        if (i + from.len <= text.len && memcmp(text.ptr + i, from.ptr, from.len) == 0) {
-            byte_buf_append_str(arena, &buf, to);
-            i += from.len;
+    for (size_t i = 0; i < text.size;) {
+        if (i + from.size <= text.size && memcmp(text.ptr + i, from.ptr, from.size) == 0) {
+            rubraview_text_append(arena, &buf, (to).ptr, (to).size);
+            i += from.size;
             any = true;
         } else {
-            byte_buf_append(arena, &buf, text.ptr + i, 1);
+            rubraview_text_append(arena, &buf, (const char *)text.ptr + i, 1);
             ++i;
         }
     }
     if (!any) return text;
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, buf.len + 1);
-    if (!proven_is_ok(res.err)) return text;
-    if (buf.len) memcpy(res.value.ptr, buf.data, buf.len);
-    res.value.ptr[buf.len] = '\0';
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = buf.len };
+    return rubraview_text_view(&buf);
 }
 
 void rubraview_batch_resize_target(const rubraview_batch_resize_params_t *r, int32_t src_w, int32_t src_h,

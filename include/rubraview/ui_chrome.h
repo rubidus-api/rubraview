@@ -46,8 +46,8 @@ double rubraview_osd_opacity(const rubraview_osd_t *osd);
  * §3.1: the status line — file name, resolution, zoom, index and total.
  * Written into `buffer`, returned as a NUL-terminated slice.
  */
-u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
-                             u8str_t file_name, int32_t width, int32_t height,
+proven_u8str_view_t rubraview_osd_format(char *buffer, size_t buffer_size,
+                             proven_u8str_view_t file_name, int32_t width, int32_t height,
                              double zoom_percent, size_t index, size_t total);
 
 /**
@@ -56,10 +56,10 @@ u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
  * points, never cut in half. A name that fits in head + tail + 3 is
  * returned whole (pointing at `text`, not copied).
  */
-u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text, size_t head_chars, size_t tail_chars);
+proven_u8str_view_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, proven_u8str_view_t text, size_t head_chars, size_t tail_chars);
 
 /** How many UTF-8 code points `text` holds. */
-size_t rubraview_utf8_chars(u8str_t text);
+size_t rubraview_utf8_chars(proven_u8str_view_t text);
 
 /**
  * The right half of the information bar (owner, 2026-10-16), read towards
@@ -69,7 +69,7 @@ size_t rubraview_utf8_chars(u8str_t text);
  * song playing says where it is of how long, "01:14 / 04:56", between the
  * size and the place (owner, 2026-10-16); a `duration` of 0 leaves it out.
  */
-u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
+proven_u8str_view_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
                             int32_t width, int32_t height, uint64_t bytes, bool reduced,
                             double position, double duration);
 

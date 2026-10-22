@@ -39,15 +39,15 @@ typedef struct rubraview_tags_source {
 
 typedef struct rubraview_tags {
     /* What the OSD says. Empty when the file does not say. */
-    u8str_t  title;
-    u8str_t  artist;
-    u8str_t  album;
-    u8str_t  year;
-    u8str_t  track_number;     /* "7" or "7/12", as written */
-    u8str_t  genre;
+    proven_u8str_view_t  title;
+    proven_u8str_view_t  artist;
+    proven_u8str_view_t  album;
+    proven_u8str_view_t  year;
+    proven_u8str_view_t  track_number;     /* "7" or "7/12", as written */
+    proven_u8str_view_t  genre;
 
     /* What the file is. Zero when it does not say. */
-    u8str_t  codec;            /* "FLAC", "MP3", "AAC", "Vorbis", "Opus", "WAV" */
+    proven_u8str_view_t  codec;            /* "FLAC", "MP3", "AAC", "Vorbis", "Opus", "WAV" */
     uint32_t sample_rate;
     uint32_t channels;
     uint32_t bits_per_sample;  /* 0 for a compressed format that does not say */
@@ -58,7 +58,7 @@ typedef struct rubraview_tags {
        image loader. `art_size` is 0 when the file carries none. */
     const uint8_t *art;
     size_t         art_size;
-    u8str_t        art_mime;
+    proven_u8str_view_t        art_mime;
 
     /* ReplayGain (owner, 2026-09-30): REPLAYGAIN_* in Vorbis comments, or
        in ID3v2 TXXX frames; nothing set when the file does not say. */
@@ -68,7 +68,7 @@ typedef struct rubraview_tags {
        USLT, a Vorbis LYRICS / UNSYNCEDLYRICS comment or MP4's ©lyr as
        text (which may itself be LRC), and ID3's SYLT as timed lines
        (millisecond stamps only; MPEG-frame stamps are left out). */
-    u8str_t                 lyrics_text;
+    proven_u8str_view_t                 lyrics_text;
     rubraview_lyric_line_t *synced_lyrics;
     size_t                  synced_lyrics_count;
 } rubraview_tags_t;
@@ -84,7 +84,7 @@ typedef struct rubraview_tags {
 rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_source_t source);
 
 /** Is this a name a music file would have? — for the caller's own sorting. */
-bool rubraview_tags_is_music_name(u8str_t filename);
+bool rubraview_tags_is_music_name(proven_u8str_view_t filename);
 
 #ifdef __cplusplus
 }

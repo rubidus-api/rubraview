@@ -215,9 +215,9 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "zoom_reset", "Zoom back to 100%: the size the fit option gives, centred" },
 };
 
-const char *rubraview_action_words(u8str_t action) {
+const char *rubraview_action_words(proven_u8str_view_t action) {
     for (size_t i = 0; i < sizeof(WORDS) / sizeof(WORDS[0]); ++i) {
-        if (strlen(WORDS[i].action) == action.len && memcmp(WORDS[i].action, action.ptr, action.len) == 0) return WORDS[i].words;
+        if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(WORDS[i].action))) return WORDS[i].words;
     }
     return NULL;
 }

@@ -21,7 +21,7 @@ extern "C" {
 bool rubraview_pal_process_ui_language(char *buf, size_t cap);
 
 /** This program's own executable, as a full path. Empty when it cannot be had. */
-u8str_t rubraview_pal_process_executable(proven_arena_t *arena);
+proven_u8str_view_t rubraview_pal_process_executable(proven_arena_t *arena);
 
 /**
  * RV-113 (2): whether this copy runs from an MSIX package (the Microsoft
@@ -35,13 +35,13 @@ bool rubraview_pal_process_packaged(char *family, size_t cap);
  * own, not waited for. The first token must be the executable, quoted if
  * it holds spaces. False when the process could not be started.
  */
-bool rubraview_pal_process_start_console(u8str_t command_line);
+bool rubraview_pal_process_start_console(proven_u8str_view_t command_line);
 
 /**
  * Start `command_line` as a separate process with no console, not waited
  * for: a window program such as this one again. As above otherwise.
  */
-bool rubraview_pal_process_start(u8str_t command_line);
+bool rubraview_pal_process_start(proven_u8str_view_t command_line);
 
 #ifdef __cplusplus
 }

@@ -26,19 +26,19 @@ typedef enum rubraview_manga_mode {
 
 typedef struct rubraview_comicinfo_page {
     int32_t image_index; /* the Page element's Image attribute, or -1 if absent/unparseable */
-    u8str_t type;         /* the raw Type attribute value (e.g. "FrontCover"), or empty if absent */
+    proven_u8str_view_t type;         /* the raw Type attribute value (e.g. "FrontCover"), or empty if absent */
 } rubraview_comicinfo_page_t;
 
 typedef struct rubraview_comicinfo {
     rubraview_manga_mode_t manga;
-    u8str_t title;
-    u8str_t series;
+    proven_u8str_view_t title;
+    proven_u8str_view_t series;
     int32_t volume; /* -1 if absent/unparseable */
     rubraview_comicinfo_page_t *pages;
     size_t   page_count;
 } rubraview_comicinfo_t;
 
-rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, u8str_t xml);
+rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, proven_u8str_view_t xml);
 
 /**
  * §3.8.5 point 2 and 3: let the archive's own metadata configure the

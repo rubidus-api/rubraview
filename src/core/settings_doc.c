@@ -22,7 +22,7 @@ typedef enum token_kind {
 
 typedef struct token {
     token_kind_t kind;
-    u8str_t text;
+    proven_u8str_view_t text;
 } token_t;
 
 #define MAX_TOKENS 48
@@ -46,14 +46,14 @@ static bool fail(parser_t *p, const char *message) {
 
 static bool word_is(token_t t, const char *word) {
     size_t n = strlen(word);
-    return t.kind == TOKEN_WORD && t.text.len == n && memcmp(t.text.ptr, word, n) == 0;
+    return t.kind == TOKEN_WORD && t.text.size == n && memcmp(t.text.ptr, word, n) == 0;
 }
 
 /* Splits one line. A `#` outside quotes ends it. */
-static int tokenize(parser_t *p, u8str_t line, token_t *out) {
+static int tokenize(parser_t *p, proven_u8str_view_t line, token_t *out) {
     int count = 0;
     size_t i = 0;
-    while (i < line.len) {
+    while (i < line.size) {
         char c = line.ptr[i];
         if (c == ' ' || c == '\t' || c == '\r') { ++i; continue; }
         if (c == '#') break;
@@ -61,54 +61,54 @@ static int tokenize(parser_t *p, u8str_t line, token_t *out) {
 
         if (c == '"') {
             size_t start = ++i;
-            while (i < line.len && line.ptr[i] != '"') ++i;
-            if (i >= line.len) { fail(p, "a quoted text is not closed"); return -1; }
-            out[count++] = (token_t){ TOKEN_QUOTED, { .ptr = line.ptr + start, .len = i - start } };
+            while (i < line.size && line.ptr[i] != '"') ++i;
+            if (i >= line.size) { fail(p, "a quoted text is not closed"); return -1; }
+            out[count++] = (token_t){ TOKEN_QUOTED, { .ptr = line.ptr + start, .size = i - start } };
             ++i;
             continue;
         }
         if (c == '{') {
             size_t start = ++i;
-            while (i < line.len && line.ptr[i] != '}') ++i;
-            if (i >= line.len) { fail(p, "a {source} is not closed"); return -1; }
-            out[count++] = (token_t){ TOKEN_SOURCE, { .ptr = line.ptr + start, .len = i - start } };
+            while (i < line.size && line.ptr[i] != '}') ++i;
+            if (i >= line.size) { fail(p, "a {source} is not closed"); return -1; }
+            out[count++] = (token_t){ TOKEN_SOURCE, { .ptr = line.ptr + start, .size = i - start } };
             ++i;
             continue;
         }
-        if (c == '=') { out[count++] = (token_t){ TOKEN_EQUALS, { .ptr = line.ptr + i, .len = 1 } }; ++i; continue; }
-        if (c == '|') { out[count++] = (token_t){ TOKEN_BAR, { .ptr = line.ptr + i, .len = 1 } }; ++i; continue; }
+        if (c == '=') { out[count++] = (token_t){ TOKEN_EQUALS, { .ptr = line.ptr + i, .size = 1 } }; ++i; continue; }
+        if (c == '|') { out[count++] = (token_t){ TOKEN_BAR, { .ptr = line.ptr + i, .size = 1 } }; ++i; continue; }
 
         size_t start = i;
-        while (i < line.len && line.ptr[i] != ' ' && line.ptr[i] != '\t' && line.ptr[i] != '\r' &&
+        while (i < line.size && line.ptr[i] != ' ' && line.ptr[i] != '\t' && line.ptr[i] != '\r' &&
                line.ptr[i] != '"' && line.ptr[i] != '=' && line.ptr[i] != '|' && line.ptr[i] != '#') {
             ++i;
         }
-        out[count++] = (token_t){ TOKEN_WORD, { .ptr = line.ptr + start, .len = i - start } };
+        out[count++] = (token_t){ TOKEN_WORD, { .ptr = line.ptr + start, .size = i - start } };
     }
     return count;
 }
 
-static bool number(u8str_t text, double *out) {
+static bool number(proven_u8str_view_t text, double *out) {
     return rubraview_parse_double(text, out);
 }
 
 /* `lo..hi` */
-static bool range(u8str_t text, double *lo, double *hi) {
-    for (size_t i = 0; i + 1 < text.len; ++i) {
+static bool range(proven_u8str_view_t text, double *lo, double *hi) {
+    for (size_t i = 0; i + 1 < text.size; ++i) {
         if (text.ptr[i] == '.' && text.ptr[i + 1] == '.') {
-            return number((u8str_t){ .ptr = text.ptr, .len = i }, lo) &&
-                   number((u8str_t){ .ptr = text.ptr + i + 2, .len = text.len - i - 2 }, hi);
+            return number((proven_u8str_view_t){ .ptr = text.ptr, .size = i }, lo) &&
+                   number((proven_u8str_view_t){ .ptr = text.ptr + i + 2, .size = text.size - i - 2 }, hi);
         }
     }
     return false;
 }
 
 /* `section.key`, each part a name settings.ini can hold (D-13). */
-static bool place(u8str_t text, u8str_t *section, u8str_t *key) {
-    for (size_t i = 0; i < text.len; ++i) {
+static bool place(proven_u8str_view_t text, proven_u8str_view_t *section, proven_u8str_view_t *key) {
+    for (size_t i = 0; i < text.size; ++i) {
         if (text.ptr[i] != '.') continue;
-        *section = (u8str_t){ .ptr = text.ptr, .len = i };
-        *key = (u8str_t){ .ptr = text.ptr + i + 1, .len = text.len - i - 1 };
+        *section = (proven_u8str_view_t){ .ptr = text.ptr, .size = i };
+        *key = (proven_u8str_view_t){ .ptr = text.ptr + i + 1, .size = text.size - i - 1 };
         return rubraview_ini_name_ok(*section) && rubraview_ini_name_ok(*key);
     }
     return false;
@@ -121,11 +121,11 @@ static bool add_node(parser_t *p, rubraview_settings_node_t node) {
     return true;
 }
 
-static const char *copy_word(parser_t *p, u8str_t word) {
-    proven_result_mem_mut_t res = proven_arena_alloc(p->arena, word.len + 1);
+static const char *copy_word(parser_t *p, proven_u8str_view_t word) {
+    proven_result_mem_mut_t res = proven_arena_alloc(p->arena, word.size + 1);
     if (!proven_is_ok(res.err)) return NULL;
-    memcpy(res.value.ptr, word.ptr, word.len);
-    res.value.ptr[word.len] = '\0';
+    memcpy(res.value.ptr, word.ptr, word.size);
+    res.value.ptr[word.size] = '\0';
     return (const char*)res.value.ptr;
 }
 
@@ -141,16 +141,16 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
         .label = t[2].text, .tab = (rubraview_settings_tab_t)p->page, .type = type,
         .step = type == RUBRAVIEW_SETTING_BOOL || type == RUBRAVIEW_SETTING_CHOICE ? 1.0 : 0.0,
         .max_value = type == RUBRAVIEW_SETTING_BOOL ? 1.0 : 0.0,
-        .unit = { .ptr = "", .len = 0 },
+        .unit = PROVEN_LIT(""),
     };
     if (!place(t[1].text, &def.section, &def.key)) {
         return fail(p, "section.key must be two names of a-z, 0-9, _ and -");
     }
     for (size_t i = 0; i < p->doc.def_count; ++i) {
         const rubraview_setting_def_t *other = &p->doc.defs[i];
-        if (other->section.len == def.section.len && other->key.len == def.key.len &&
-            memcmp(other->section.ptr, def.section.ptr, def.section.len) == 0 &&
-            memcmp(other->key.ptr, def.key.ptr, def.key.len) == 0) {
+        if (other->section.size == def.section.size && other->key.size == def.key.size &&
+            memcmp(other->section.ptr, def.section.ptr, def.section.size) == 0 &&
+            memcmp(other->key.ptr, def.key.ptr, def.key.size) == 0) {
             return fail(p, "this section.key is already on a page");
         }
     }
@@ -162,7 +162,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
     while (i < n) {
         if (t[i].kind == TOKEN_EQUALS) {
             if (i + 1 >= n || t[i + 1].kind != TOKEN_WORD) return fail(p, "`=` needs a default after it");
-            u8str_t v = t[i + 1].text;
+            proven_u8str_view_t v = t[i + 1].text;
             if (type == RUBRAVIEW_SETTING_BOOL) {
                 if (word_is(t[i + 1], "true")) def.default_value = 1.0;
                 else if (word_is(t[i + 1], "false")) def.default_value = 0.0;
@@ -170,7 +170,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
             } else if (type == RUBRAVIEW_SETTING_CHOICE) {
                 bool found = false;
                 for (int k = 0; k < choice_count; ++k) {
-                    if (strlen(choices[k]) == v.len && memcmp(choices[k], v.ptr, v.len) == 0) {
+                    if (strlen(choices[k]) == v.size && memcmp(choices[k], v.ptr, v.size) == 0) {
                         def.default_value = (double)k;
                         found = true;
                     }
@@ -260,7 +260,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
     });
 }
 
-static bool one_line(parser_t *p, u8str_t line) {
+static bool one_line(parser_t *p, proven_u8str_view_t line) {
     token_t t[MAX_TOKENS];
     int n = tokenize(p, line, t);
     if (n < 0) return false;
@@ -312,14 +312,14 @@ static bool one_line(parser_t *p, u8str_t line) {
     }
     if (word_is(t[0], "help")) {
         /* help section.key "a fuller explanation": the tooltip on that setting's name. */
-        u8str_t section, key;
+        proven_u8str_view_t section, key;
         if (n != 3 || t[1].kind != TOKEN_WORD || t[2].kind != TOKEN_QUOTED || !place(t[1].text, &section, &key)) {
             return fail(p, "help needs section.key and its \"text\"");
         }
         for (size_t i = 0; i < p->doc.def_count; ++i) {
             rubraview_setting_def_t *d = &p->doc.defs[i];
-            if (d->section.len == section.len && d->key.len == key.len && memcmp(d->section.ptr, section.ptr, section.len) == 0 &&
-                memcmp(d->key.ptr, key.ptr, key.len) == 0) {
+            if (d->section.size == section.size && d->key.size == key.size && memcmp(d->section.ptr, section.ptr, section.size) == 0 &&
+                memcmp(d->key.ptr, key.ptr, key.size) == 0) {
                 d->help = t[2].text;
                 return true;
             }
@@ -352,7 +352,7 @@ static bool one_line(parser_t *p, u8str_t line) {
     return fail(p, "not a kind of line this document knows");
 }
 
-rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, u8str_t text) {
+rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, proven_u8str_view_t text) {
     parser_t p = { .arena = arena, .page = -1, .line = 0 };
     if (!arena) {
         p.doc.error = "no memory to parse into";
@@ -368,10 +368,10 @@ rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, u8s
     p.doc.nodes = (rubraview_settings_node_t*)(void*)nodes.value.ptr;
 
     size_t start = 0;
-    for (size_t i = 0; i <= text.len; ++i) {
-        if (i < text.len && text.ptr[i] != '\n') continue;
+    for (size_t i = 0; i <= text.size; ++i) {
+        if (i < text.size && text.ptr[i] != '\n') continue;
         p.line++;
-        if (!one_line(&p, (u8str_t){ .ptr = text.ptr + start, .len = i - start })) break;
+        if (!one_line(&p, (proven_u8str_view_t){ .ptr = text.ptr + start, .size = i - start })) break;
         start = i + 1;
     }
     if (!p.doc.error && p.doc.page_count == 0) {
@@ -397,10 +397,10 @@ const rubraview_settings_doc_t *rubraview_settings_document(void) {
     return &g_doc;
 }
 
-u8str_t rubraview_settings_page_title(size_t page) {
+proven_u8str_view_t rubraview_settings_page_title(size_t page) {
     const rubraview_settings_doc_t *doc = rubraview_settings_document();
     for (size_t i = 0; i < doc->node_count; ++i) {
         if (doc->nodes[i].kind == RUBRAVIEW_NODE_PAGE && doc->nodes[i].page == (int32_t)page) return doc->nodes[i].text;
     }
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }

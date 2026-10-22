@@ -48,13 +48,13 @@ typedef enum rubraview_arcedit_target {
  * (`x.part1.rar`, `x.7z.001`, `x.vol1.egg` give `x.zip`). Written with
  * its NUL when `cap` holds it; returns the length, 0 when it does not fit.
  */
-size_t rubraview_arcedit_converted_name(u8str_t archive_name, rubraview_arcedit_target_t target, char *dst, size_t cap);
+size_t rubraview_arcedit_converted_name(proven_u8str_view_t archive_name, rubraview_arcedit_target_t target, char *dst, size_t cap);
 
 /**
  * An entry's name with its last part replaced: `ch1/003.jpg` and
  * `cover.jpg` give `ch1/cover.jpg`. Same return as above.
  */
-size_t rubraview_arcedit_sibling_name(u8str_t entry_name, u8str_t new_base, char *dst, size_t cap);
+size_t rubraview_arcedit_sibling_name(proven_u8str_view_t entry_name, proven_u8str_view_t new_base, char *dst, size_t cap);
 
 typedef enum rubraview_arcedit_op {
     RUBRAVIEW_ARCEDIT_DELETE = 0,

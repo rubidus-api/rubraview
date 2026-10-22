@@ -116,14 +116,14 @@ void rubraview_plugin_params_clamp(const rubraview_plugin_t *plugin, double *val
 
 static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
-bool rubraview_plugin_file_matches(const char *file, u8str_t name) {
-    if (!file || name.len == 0) return false;
+bool rubraview_plugin_file_matches(const char *file, proven_u8str_view_t name) {
+    if (!file || name.size == 0) return false;
     size_t n = strlen(file);
     static const char SUFFIX[] = ".rvf.dll";
     size_t stem = n >= sizeof(SUFFIX) - 1 && strcmp(file + n - (sizeof(SUFFIX) - 1), SUFFIX) == 0 ? n - (sizeof(SUFFIX) - 1) : n;
     for (size_t k = 0; k < 2; ++k) {
         size_t want = k == 0 ? n : stem;
-        if (name.len != want) continue;
+        if (name.size != want) continue;
         bool same = true;
         for (size_t i = 0; i < want && same; ++i) same = lower(file[i]) == lower(name.ptr[i]);
         if (same) return true;
@@ -131,19 +131,19 @@ bool rubraview_plugin_file_matches(const char *file, u8str_t name) {
     return false;
 }
 
-bool rubraview_plugin_arg_parse(u8str_t value, char *name, size_t capacity, double *params, int32_t *count) {
+bool rubraview_plugin_arg_parse(proven_u8str_view_t value, char *name, size_t capacity, double *params, int32_t *count) {
     if (!name || capacity == 0 || !params || !count) return false;
     size_t colon = 0;
-    while (colon < value.len && value.ptr[colon] != ':') colon++;
+    while (colon < value.size && value.ptr[colon] != ':') colon++;
     if (colon == 0 || colon + 1 > capacity) return false;
     memcpy(name, value.ptr, colon);
     name[colon] = '\0';
     *count = 0;
-    if (colon >= value.len) return true;
+    if (colon >= value.size) return true;
     size_t at = colon + 1;
-    while (at <= value.len) {
+    while (at <= value.size) {
         size_t end = at;
-        while (end < value.len && value.ptr[end] != ',') end++;
+        while (end < value.size && value.ptr[end] != ',') end++;
         if (end == at || *count >= RUBRAVIEW_PLUGIN_PARAMS || end - at >= 32) return false;
         char number[32];
         memcpy(number, value.ptr + at, end - at);
@@ -153,7 +153,7 @@ bool rubraview_plugin_arg_parse(u8str_t value, char *name, size_t capacity, doub
         if (!stop || *stop != '\0' || !isfinite(v)) return false;
         params[(*count)++] = v;
         at = end + 1;
-        if (end == value.len) break;
+        if (end == value.size) break;
     }
     return true;
 }

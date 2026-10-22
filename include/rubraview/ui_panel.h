@@ -35,7 +35,7 @@ typedef enum rubraview_row_kind {
 typedef struct rubraview_panel_row {
     rubraview_row_kind_t kind;
     int32_t id;             /* the caller's own meaning */
-    u8str_t label;
+    proven_u8str_view_t label;
 
     double  value;          /* sliders: the current value; toggles: 0 or 1; choices: the index */
     double  min_value, max_value;   /* sliders only */
@@ -49,7 +49,7 @@ typedef struct rubraview_panel_row {
 #define RUBRAVIEW_PANEL_MAX_COLUMNS 4
 
 typedef struct rubraview_panel {
-    u8str_t title;
+    proven_u8str_view_t title;
     rubraview_panel_row_t rows[RUBRAVIEW_PANEL_MAX_ROWS];
     size_t  row_count;
 
@@ -85,15 +85,15 @@ typedef struct rubraview_panel {
  * sized to its rows. The right edge is where §3.13 puts the workbench,
  * and it is the side that does not fight the reading area.
  */
-rubraview_panel_t rubraview_panel_create(u8str_t title, double dpi_scale);
+rubraview_panel_t rubraview_panel_create(proven_u8str_view_t title, double dpi_scale);
 
 /** Add a row. Returns false when the panel is full. */
-bool rubraview_panel_add_slider(rubraview_panel_t *panel, int32_t id, u8str_t label,
+bool rubraview_panel_add_slider(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label,
                                 double value, double min_value, double max_value, double step);
-bool rubraview_panel_add_toggle(rubraview_panel_t *panel, int32_t id, u8str_t label, bool on);
-bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, u8str_t label,
+bool rubraview_panel_add_toggle(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label, bool on);
+bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label,
                                 int32_t index, int32_t choice_count);
-bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, u8str_t label);
+bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label);
 bool rubraview_panel_add_separator(rubraview_panel_t *panel);
 /** RV-137: room `height` tall for the caller to draw in, found by its id. */
 bool rubraview_panel_add_spacer(rubraview_panel_t *panel, int32_t id, double height);

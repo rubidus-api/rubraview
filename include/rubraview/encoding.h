@@ -27,7 +27,7 @@ typedef enum rubraview_encoding_verdict {
     RUBRAVIEW_ENCODING_NEEDS_FALLBACK,   /* not flagged and not valid UTF-8: needs RV-046 */
 } rubraview_encoding_verdict_t;
 
-rubraview_encoding_verdict_t rubraview_archive_filename_detect(u8str_t raw_name, bool utf8_flag);
+rubraview_encoding_verdict_t rubraview_archive_filename_detect(proven_u8str_view_t raw_name, bool utf8_flag);
 
 /**
  * §3.8.3's explicit override list, as offered under
@@ -47,7 +47,7 @@ typedef enum rubraview_codepage {
 uint32_t rubraview_codepage_id(rubraview_codepage_t codepage);
 
 /** The label shown on the override's menu tile. */
-u8str_t rubraview_codepage_label(rubraview_codepage_t codepage);
+proven_u8str_view_t rubraview_codepage_label(rubraview_codepage_t codepage);
 
 /**
  * Decide how an archive entry's name should be read, combining the
@@ -59,7 +59,7 @@ u8str_t rubraview_codepage_label(rubraview_codepage_t codepage);
  * point of an override — while AUTO trusts the flag and the validator
  * first, exactly as §3.8.3 steps 1 and 2 describe.
  */
-bool rubraview_archive_filename_plan(u8str_t raw_name, bool utf8_flag,
+bool rubraview_archive_filename_plan(proven_u8str_view_t raw_name, bool utf8_flag,
                                      rubraview_codepage_t override_choice,
                                      uint32_t *out_codepage_id);
 

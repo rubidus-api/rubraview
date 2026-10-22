@@ -37,12 +37,12 @@ typedef enum rubraview_key_mod {
 
 typedef struct rubraview_key_combo {
     uint32_t modifiers; /* bitmask of rubraview_key_mod_t */
-    u8str_t  key_name;  /* symbolic name, e.g. "Right", "Space", "BracketLeft" */
+    proven_u8str_view_t  key_name;  /* symbolic name, e.g. "Right", "Space", "BracketLeft" */
 } rubraview_key_combo_t;
 
 typedef struct rubraview_key_binding {
-    u8str_t context; /* the ini section this action was bound under ("" = global) */
-    u8str_t action;  /* the ini key, e.g. "next_page" */
+    proven_u8str_view_t context; /* the ini section this action was bound under ("" = global) */
+    proven_u8str_view_t action;  /* the ini key, e.g. "next_page" */
     rubraview_key_combo_t *combos;
     size_t                 combo_count;
 } rubraview_key_binding_t;
@@ -52,7 +52,7 @@ typedef struct rubraview_keymap {
     size_t                    count;
 } rubraview_keymap_t;
 
-rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_text);
+rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, proven_u8str_view_t ini_text);
 
 /**
  * Reverse lookup: given the currently active context and a pressed key
@@ -61,18 +61,18 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
  * ("") section — a context-specific binding always wins over a global
  * one for the same key combo.
  */
-u8str_t rubraview_keymap_find_action(const rubraview_keymap_t *keymap, u8str_t context, rubraview_key_combo_t combo);
+proven_u8str_view_t rubraview_keymap_find_action(const rubraview_keymap_t *keymap, proven_u8str_view_t context, rubraview_key_combo_t combo);
 
 /**
  * Forward lookup: the binding (and its full combo list) for a given
  * (context, action) pair, or NULL if unbound.
  */
-const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_keymap_t *keymap, u8str_t context, u8str_t action);
+const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_keymap_t *keymap, proven_u8str_view_t context, proven_u8str_view_t action);
 
 /* ---- §3.22.2 tab 8: changing bindings in place (D-14) ---- */
 
 /** A combo as keymap.ini spells it, "Ctrl+Shift+O"; returns the text written. */
-u8str_t rubraview_key_combo_format(char *buffer, size_t capacity, rubraview_key_combo_t combo);
+proven_u8str_view_t rubraview_key_combo_format(char *buffer, size_t capacity, rubraview_key_combo_t combo);
 
 /** Whether two combos are the same key (names compare without case). */
 bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b);
@@ -88,7 +88,7 @@ bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b)
  * meanings (Space pauses a GIF and turns a page), so that is not a clash.
  * Neither is the same context, which is always a clash.
  */
-bool rubraview_keymap_contexts_meet(u8str_t a, u8str_t b);
+bool rubraview_keymap_contexts_meet(proven_u8str_view_t a, proven_u8str_view_t b);
 
 /** A copy that shares nothing mutable with `source` — what Revert goes back to. */
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source);
@@ -121,7 +121,7 @@ bool rubraview_keymap_unbind_last(rubraview_keymap_t *keymap, size_t index);
  * order of first appearance, the global one as `[ui]`, every value a
  * quoted comma-separated list. Parsing the result gives an equal keymap.
  */
-u8str_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap);
+proven_u8str_view_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap);
 
 #ifdef __cplusplus
 }

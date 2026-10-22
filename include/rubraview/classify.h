@@ -19,15 +19,15 @@ extern "C" {
 #define RUBRAVIEW_CLASSIFY_MAX 8192u
 
 typedef struct rubraview_classify {
-    u8str_t paths[RUBRAVIEW_CLASSIFY_MAX];
+    proven_u8str_view_t paths[RUBRAVIEW_CLASSIFY_MAX];
     uint8_t folders[RUBRAVIEW_CLASSIFY_MAX];   /* 1 .. 9 */
     size_t  count;
 } rubraview_classify_t;
 
 /** The folder (1-9) `path` is set aside for; 0 for none. */
-int32_t rubraview_classify_folder_of(const rubraview_classify_t *c, u8str_t path);
+int32_t rubraview_classify_folder_of(const rubraview_classify_t *c, proven_u8str_view_t path);
 /** Set `path` aside for `folder` (1-9), or take its mark off (0). False when full or the folder is out of range. */
-bool rubraview_classify_set(rubraview_classify_t *c, u8str_t path, int32_t folder);
+bool rubraview_classify_set(rubraview_classify_t *c, proven_u8str_view_t path, int32_t folder);
 /** How many are set aside for `folder`; 0 counts them all. */
 size_t rubraview_classify_count(const rubraview_classify_t *c, int32_t folder);
 /** Take the `index`th mark off, the order of the rest kept (after its file was put in place). */

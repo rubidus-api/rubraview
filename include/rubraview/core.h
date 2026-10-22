@@ -14,59 +14,50 @@ extern "C" {
 
 typedef proven_arena_t prv_arena_t;
 
-typedef struct u8str {
-    const char   *ptr;
-    proven_size_t len;
-} u8str_t;
+/* RV-159 (owner, 2026-10-22: "proven c lib 의 문자열 스타일을 적극적으로 도입하여 활용하고, 중복된 유사한 구현은
+   proven 쪽으로 합쳐 하나로"): text is proven's view, `proven_u8str_view_t` (bytes and a size), literals are
+   `PROVEN_LIT`, comparisons are proven's (`proven_u8str_view_eq`, `_starts_with`, `_find`, ...). A cast to
+   `const char *` is made only where the bytes meet the CRT or Win32. */
 
-#define U8(lit) ((u8str_t){ .ptr = ("" lit), .len = sizeof("" lit) - 1 })
-
-/* ---- views: one set of comparisons for the whole program ----
-   An empty view may carry a NULL pointer, and memcmp must not be handed
-   one even for zero bytes; these check the length first. */
-
-static inline bool rubraview_u8_eq(u8str_t a, u8str_t b) {
-    return a.len == b.len && (a.len == 0 || memcmp(a.ptr, b.ptr, a.len) == 0);
+/* A view of `size` bytes at `ptr`, whichever character type the caller holds them as. */
+static inline proven_u8str_view_t rubraview_u8(const void *ptr, proven_size_t size) {
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)ptr, .size = size };
 }
 
-static inline bool rubraview_u8_eq_lit(u8str_t s, const char *lit) {
-    size_t n = strlen(lit);
-    return s.len == n && (n == 0 || memcmp(s.ptr, lit, n) == 0);
+/* Text built in an arena by proven's growing string; false when the arena is full. */
+static inline bool rubraview_text_append(proven_arena_t *arena, proven_u8str_t *text, const void *bytes, proven_size_t size) {
+    return size == 0 || proven_is_ok(proven_u8str_append_grow(proven_arena_as_allocator(arena), text, rubraview_u8(bytes, size)));
 }
+
+/* What was built, NUL-terminated in the arena; "" when nothing was. */
+static inline proven_u8str_view_t rubraview_text_view(const proven_u8str_t *text) {
+    proven_u8str_view_t v = proven_u8str_as_view(text);
+    return v.size > 0 ? v : PROVEN_LIT("");
+}
+
+/* ---- what proven has not got yet (asked of proven_c_lib, 2026-10-22): ASCII case set aside ---- */
 
 static inline char rubraview_ascii_lower(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
 }
 
 /* ASCII letters ignore case; every other byte must match exactly. */
-static inline bool rubraview_u8_eq_lit_ci(u8str_t s, const char *lit) {
+static inline bool rubraview_u8_eq_lit_ci(proven_u8str_view_t s, const char *lit) {
     size_t n = strlen(lit);
-    if (s.len != n) return false;
+    if (s.size != n) return false;
     for (size_t i = 0; i < n; ++i) {
-        if (rubraview_ascii_lower(s.ptr[i]) != rubraview_ascii_lower(lit[i])) return false;
+        if (rubraview_ascii_lower((char)s.ptr[i]) != rubraview_ascii_lower(lit[i])) return false;
     }
     return true;
 }
 
-static inline bool rubraview_u8_starts_with(u8str_t s, const char *prefix) {
+static inline bool rubraview_u8_starts_with_ci(proven_u8str_view_t s, const char *prefix) {
     size_t n = strlen(prefix);
-    return s.len >= n && (n == 0 || memcmp(s.ptr, prefix, n) == 0);
-}
-
-static inline bool rubraview_u8_starts_with_ci(u8str_t s, const char *prefix) {
-    size_t n = strlen(prefix);
-    if (s.len < n) return false;
+    if (s.size < n) return false;
     for (size_t i = 0; i < n; ++i) {
-        if (rubraview_ascii_lower(s.ptr[i]) != rubraview_ascii_lower(prefix[i])) return false;
+        if (rubraview_ascii_lower((char)s.ptr[i]) != rubraview_ascii_lower(prefix[i])) return false;
     }
     return true;
-}
-
-/* The same bytes as proven's view type, for proven's own algorithms
-   (the parser, the scanner). u8str_t stays char-typed because WinAPI
-   and the rest of the viewer speak char; D-32. */
-static inline proven_u8str_view_t rubraview_u8_view(u8str_t s) {
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s.ptr, .size = s.len };
 }
 
 /**

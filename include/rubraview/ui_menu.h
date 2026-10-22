@@ -19,8 +19,8 @@ extern "C" {
  */
 
 typedef struct rubraview_menu_item {
-    u8str_t label;          /* tile caption, e.g. "Layout" */
-    u8str_t action;         /* action id dispatched on tap; empty for a submenu */
+    proven_u8str_view_t label;          /* tile caption, e.g. "Layout" */
+    proven_u8str_view_t action;         /* action id dispatched on tap; empty for a submenu */
     int32_t first_child;    /* index of the first child item, or -1 for a leaf */
     int32_t child_count;
 } rubraview_menu_item_t;
@@ -62,7 +62,7 @@ typedef enum rubraview_menu_result {
  * Tap a visible tile: descends into a submenu, goes back a level, or
  * reports the leaf's action id.
  */
-rubraview_menu_result_t rubraview_menu_activate(rubraview_menu_state_t *state, int32_t tile_index, u8str_t *out_action);
+rubraview_menu_result_t rubraview_menu_activate(rubraview_menu_state_t *state, int32_t tile_index, proven_u8str_view_t *out_action);
 
 /** Go up one level; false at the root. */
 bool rubraview_menu_back(rubraview_menu_state_t *state);
@@ -74,7 +74,7 @@ void rubraview_menu_reset(rubraview_menu_state_t *state);
  * §3.6.2: the breadcrumb, e.g. "Menu > Adjust > Tone Curves", written
  * into `buffer` and returned as a slice. Always NUL-terminated.
  */
-u8str_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size);
+proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size);
 
 #ifdef __cplusplus
 }

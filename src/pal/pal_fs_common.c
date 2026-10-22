@@ -12,8 +12,8 @@
 
 rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
                                                       const rubraview_fs_listing_t *listing,
-                                                      u8str_t current_file_path,
-                                                      u8str_t extension_filter,
+                                                      proven_u8str_view_t current_file_path,
+                                                      proven_u8str_view_t extension_filter,
                                                       rubraview_sort_mode_t mode,
                                                       bool ascending) {
     rubraview_sibling_index_t result = {0};
@@ -49,9 +49,9 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
     rubraview_shuffle_state_t shuffle = { .seed = 0x9E3779B97F4A7C15ULL };
     rubraview_sort_items(items, kept, mode, ascending, &shuffle);
 
-    proven_result_mem_mut_t out_res = rubraview_arena_alloc_array(arena, kept, sizeof(u8str_t));
+    proven_result_mem_mut_t out_res = rubraview_arena_alloc_array(arena, kept, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(out_res.err)) return result;
-    u8str_t *ordered_paths = (u8str_t*)(void*)out_res.value.ptr;
+    proven_u8str_view_t *ordered_paths = (proven_u8str_view_t*)(void*)out_res.value.ptr;
 
     for (size_t i = 0; i < kept; ++i) {
         ordered_paths[i] = listing->entries[items[i].tag].path;
@@ -68,11 +68,11 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
        over, and then no whole path would ever match. Every entry is in
        the one folder, so the name is enough. An exact match wins; only
        without one is case ignored, as Windows ignores it. */
-    u8str_t wanted = rubraview_path_basename(current_file_path);
-    for (int pass = 0; pass < 2 && !result.found && wanted.len > 0; ++pass) {
+    proven_u8str_view_t wanted = rubraview_path_basename(current_file_path);
+    for (int pass = 0; pass < 2 && !result.found && wanted.size > 0; ++pass) {
         for (size_t i = 0; i < kept; ++i) {
-            u8str_t name = listing->entries[items[i].tag].name;
-            if (pass == 0 ? rubraview_u8_eq(name, wanted) : rubraview_path_same(name, wanted)) {
+            proven_u8str_view_t name = listing->entries[items[i].tag].name;
+            if (pass == 0 ? proven_u8str_view_eq(name, wanted) : rubraview_path_same(name, wanted)) {
                 result.current = i;
                 result.found = true;
                 break;

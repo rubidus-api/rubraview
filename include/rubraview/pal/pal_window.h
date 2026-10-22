@@ -138,7 +138,7 @@ bool rubraview_pal_instance_claim(void);
  * Returns false when there is nothing to hand it to, in which case the
  * caller should start normally rather than exiting.
  */
-bool rubraview_pal_instance_hand_over(u8str_t path);
+bool rubraview_pal_instance_hand_over(proven_u8str_view_t path);
 
 /** §3.19.2: accept files dropped on this window. */
 void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept);
@@ -159,18 +159,18 @@ void rubraview_pal_window_text_input(rubraview_window_t *window, bool on);
  * leave none behind, which is why both derive the names the same way
  * (rubraview_shell_progid).
  */
-bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list);
-bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list);
+bool rubraview_pal_shell_register(proven_u8str_view_t extensions_semicolon_list);
+bool rubraview_pal_shell_unregister(proven_u8str_view_t extensions_semicolon_list);
 
 /** The same for this user (HKCU) or for every user of the computer (HKLM).
  *  For every user the process must be an administrator's; false when it is not. */
-bool rubraview_pal_shell_register_for(u8str_t extensions_semicolon_list, bool all_users);
-bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool all_users);
+bool rubraview_pal_shell_register_for(proven_u8str_view_t extensions_semicolon_list, bool all_users);
+bool rubraview_pal_shell_unregister_for(proven_u8str_view_t extensions_semicolon_list, bool all_users);
 
 /** Runs this program again as an administrator (Windows asks first) with
  *  `arguments`, waits for it, and gives its exit code. False when it did
  *  not run — the question was refused. */
-bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code);
+bool rubraview_pal_shell_run_elevated(proven_u8str_view_t arguments, int *out_exit_code);
 
 /* ---- D-86: Explorer's right-click menu ---- */
 
@@ -190,7 +190,7 @@ typedef enum rubraview_shell_menu_result {
  * process) the Windows 11 menu is registered as well, when its two files
  * are beside the program.
  */
-rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selection, bool all_users);
+rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(proven_u8str_view_t selection, bool all_users);
 
 /**
  * D-154: other copies of Rubraview on this machine than the one running —
@@ -252,7 +252,7 @@ int rubraview_pal_instance_take_config_changed(void);
  * the defaults). False when the reader cancelled or the job could not
  * start; `out_printed` is how many pictures went out.
  */
-bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
+bool rubraview_pal_print_pictures(void *parent_window_handle, const proven_u8str_view_t *paths, size_t count,
                                   const rubraview_print_options_t *options, size_t *out_printed);
 
 /* 1.19.0: the printers, their papers and the sheet, for Rubraview's own print panel and its preview. */
@@ -263,19 +263,19 @@ typedef struct rubraview_printer_paper {
 } rubraview_printer_paper_t;
 
 /** The printers this user can print on; `*out_default` the index of Windows' default, or -1. */
-size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capacity, int32_t *out_default);
+size_t rubraview_pal_printers(proven_arena_t *arena, proven_u8str_view_t *out, size_t capacity, int32_t *out_default);
 /** A printer's papers; `*out_default_id` the one its driver has now (0 when not known). */
-size_t rubraview_pal_printer_papers(u8str_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id);
+size_t rubraview_pal_printer_papers(proven_u8str_view_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id);
 /** The sheet as the printer has it for that paper (0: its own) and that way up (0 its own, 1 portrait, 2 landscape). */
-bool rubraview_pal_printer_sheet(u8str_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out);
+bool rubraview_pal_printer_sheet(proven_u8str_view_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out);
 /** Printed there, as chosen, with no dialog; `copies` of the document. */
-bool rubraview_pal_print_pictures_on(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
-                                     const u8str_t *paths, size_t count, const rubraview_print_options_t *options,
+bool rubraview_pal_print_pictures_on(proven_u8str_view_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
+                                     const proven_u8str_view_t *paths, size_t count, const rubraview_print_options_t *options,
                                      size_t *out_printed);
 
 /** An Explorer window on the file's folder with the file picked out.
  *  False when there is no such file to show. */
-bool rubraview_pal_shell_reveal(u8str_t path);
+bool rubraview_pal_shell_reveal(proven_u8str_view_t path);
 
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
@@ -309,7 +309,7 @@ void rubraview_pal_window_wake(rubraview_window_t *window);
    terminated; returns its length, 0 when there is none. And putting text
    there. For the rename box's Ctrl+C / Ctrl+X / Ctrl+V. */
 size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, size_t cap);
-bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text);
+bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, proven_u8str_view_t text);
 
 /** RV-108: a picture on the clipboard — BGRA rows, top first — as other programs paste it. */
 bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t *bgra,

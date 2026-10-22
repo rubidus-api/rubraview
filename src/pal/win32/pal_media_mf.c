@@ -182,24 +182,24 @@ static void fail(mf_media_t *m, rubraview_media_failure_t failure) {
 /* Media Foundation speaks UTF-16 everywhere; the rest of the program
    speaks UTF-8. An empty or over-long name comes back empty rather than
    cut in the middle of a character. */
-static u8str_t mf_utf8(char *buffer, size_t capacity, const WCHAR *wide) {
-    u8str_t empty = { .ptr = buffer, .len = 0 };
+static proven_u8str_view_t mf_utf8(char *buffer, size_t capacity, const WCHAR *wide) {
+    proven_u8str_view_t empty = { .ptr = (const proven_byte_t *)buffer, .size = 0 };
     buffer[0] = '\0';
     if (!wide || !wide[0]) return empty;
     int n = WideCharToMultiByte(CP_UTF8, 0, wide, -1, buffer, (int)capacity, NULL, NULL);
     if (n <= 1) return empty;
-    return (u8str_t){ .ptr = buffer, .len = (size_t)(n - 1) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)(n - 1) };
 }
 
 /* A stream attribute that is a string, or nothing. */
-static u8str_t mf_stream_string(IMFSourceReader *reader, DWORD stream, const GUID *key,
+static proven_u8str_view_t mf_stream_string(IMFSourceReader *reader, DWORD stream, const GUID *key,
                                 char *buffer, size_t capacity) {
-    u8str_t empty = { .ptr = buffer, .len = 0 };
+    proven_u8str_view_t empty = { .ptr = (const proven_byte_t *)buffer, .size = 0 };
     buffer[0] = '\0';
     PROPVARIANT pv;
     PropVariantInit(&pv);
     HRESULT hr = IMFSourceReader_GetPresentationAttribute(reader, stream, key, &pv);
-    u8str_t out = empty;
+    proven_u8str_view_t out = empty;
     if (SUCCEEDED(hr) && pv.vt == VT_LPWSTR) out = mf_utf8(buffer, capacity, pv.pwszVal);
     PropVariantClear(&pv);
     return out;
@@ -208,7 +208,7 @@ static u8str_t mf_stream_string(IMFSourceReader *reader, DWORD stream, const GUI
 /* The codec, for a label. Video subtypes carry a printable FOURCC in
    their first field; audio subtypes carry a small number instead, so
    those are named from a short table. */
-static u8str_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity) {
+static proven_u8str_view_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity) {
     static const struct { uint32_t id; const char *name; } AUDIO[] = {
         { 0x0001, "pcm" },   { 0x0003, "float" }, { 0x0055, "mp3" },
         { 0x0160, "wma" },   { 0x0161, "wma" },   { 0x0162, "wma" }, { 0x0163, "wma" },
@@ -222,7 +222,7 @@ static u8str_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity)
             if (len >= capacity) len = capacity - 1;
             memcpy(buffer, AUDIO[i].name, len);
             buffer[len] = '\0';
-            return (u8str_t){ .ptr = buffer, .len = len };
+            return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
         }
     }
     char chars[4] = { (char)(id & 0xFF), (char)((id >> 8) & 0xFF),
@@ -230,13 +230,13 @@ static u8str_t mf_codec_name(const GUID *subtype, char *buffer, size_t capacity)
     for (size_t i = 0; i < 4; ++i) {
         if (chars[i] < 0x20 || chars[i] > 0x7E) {
             buffer[0] = '\0';
-            return (u8str_t){ .ptr = buffer, .len = 0 };
+            return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 };
         }
     }
-    if (capacity < 5) { buffer[0] = '\0'; return (u8str_t){ .ptr = buffer, .len = 0 }; }
+    if (capacity < 5) { buffer[0] = '\0'; return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 }; }
     memcpy(buffer, chars, 4);
     buffer[4] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = 4 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 4 };
 }
 
 /* ---- what the file says about itself, for the information window ---- */
@@ -289,13 +289,13 @@ static const char *mf_codec_words(const GUID *subtype) {
 
 static void mf_detail_codec(rubraview_details_t *d, const GUID *subtype, bool video) {
     char code[16];
-    u8str_t four = mf_codec_name(subtype, code, sizeof(code));
+    proven_u8str_view_t four = mf_codec_name(subtype, code, sizeof(code));
     const char *words = mf_codec_words(subtype);
-    if (words && four.len && video) rubraview_details_add(d, "Codec", "%s (%s)", words, code);
+    if (words && four.size && video) rubraview_details_add(d, "Codec", "%s (%s)", words, code);
     else if (words) rubraview_details_add(d, "Codec", "%s", words);
-    else if (four.len) rubraview_details_add(d, "Codec", "%s", code);
+    else if (four.size) rubraview_details_add(d, "Codec", "%s", code);
     if (!video && (uint32_t)subtype->Data1 <= 0xFFFF) rubraview_details_add(d, "Format tag", "0x%04X", (unsigned)subtype->Data1);
-    if (!words && !four.len) {
+    if (!words && !four.size) {
         rubraview_details_add(d, "Codec", "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}", (unsigned long)subtype->Data1,
                               subtype->Data2, subtype->Data3, subtype->Data4[0], subtype->Data4[1], subtype->Data4[2],
                               subtype->Data4[3], subtype->Data4[4], subtype->Data4[5], subtype->Data4[6], subtype->Data4[7]);
@@ -423,10 +423,10 @@ static void mf_detail_stream(mf_media_t *m, IMFSourceReader *reader, DWORD strea
     bool video = IsEqualGUID(&major, &MFMediaType_Video), audio = IsEqualGUID(&major, &MFMediaType_Audio);
     rubraview_details_heading(d, "%s stream %u", video ? "Picture" : audio ? "Sound" : "Other", (unsigned)stream);
     char text[64];
-    u8str_t language = mf_stream_string(reader, stream, &MF_SD_LANGUAGE, text, sizeof(text));
-    if (language.len) rubraview_details_add(d, "Language", "%s", text);
-    u8str_t title = mf_stream_string(reader, stream, &MF_SD_STREAM_NAME, text, sizeof(text));
-    if (title.len) rubraview_details_add(d, "Name", "%s", text);
+    proven_u8str_view_t language = mf_stream_string(reader, stream, &MF_SD_LANGUAGE, text, sizeof(text));
+    if (language.size) rubraview_details_add(d, "Language", "%s", text);
+    proven_u8str_view_t title = mf_stream_string(reader, stream, &MF_SD_STREAM_NAME, text, sizeof(text));
+    if (title.size) rubraview_details_add(d, "Name", "%s", text);
     if (audio || video) rubraview_details_add(d, "Played", "%s", playing ? "yes" : "no");
     if (video) mf_detail_video(m, type, &subtype, seconds);
     else if (audio) mf_detail_audio(m, type, &subtype, seconds);
@@ -1389,10 +1389,10 @@ static void mf_close(void *handle) {
     free(media);
 }
 
-static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                      const rubraview_media_gpu_t *gpu) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
-    if (!mf_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+    if (!mf_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
     if (m) InitializeSRWLock(&m->audio_lock);
@@ -1401,8 +1401,8 @@ static void *mf_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, m->path, (int)(sizeof(m->path) / sizeof(m->path[0]))) <= 0) {
         free(m);
         return NULL;

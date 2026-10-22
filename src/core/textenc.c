@@ -1,4 +1,6 @@
 #include "rubraview/textenc.h"
+#include "rubraview/utf8.h"
+#include "proven/utf.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -63,10 +65,10 @@ const char *rubraview_textenc_word(rubraview_textenc_t enc) {
     return enc < RUBRAVIEW_TEXTENC_COUNT ? ENCODINGS[enc].word : "auto";
 }
 
-rubraview_textenc_t rubraview_textenc_from_word(u8str_t word) {
+rubraview_textenc_t rubraview_textenc_from_word(proven_u8str_view_t word) {
     for (int i = 0; i < RUBRAVIEW_TEXTENC_COUNT; ++i) {
         size_t n = strlen(ENCODINGS[i].word);
-        if (word.len == n && memcmp(word.ptr, ENCODINGS[i].word, n) == 0) return (rubraview_textenc_t)i;
+        if (word.size == n && memcmp(word.ptr, ENCODINGS[i].word, n) == 0) return (rubraview_textenc_t)i;
     }
     return RUBRAVIEW_TEXTENC_AUTO;
 }
@@ -75,23 +77,11 @@ rubraview_textenc_t rubraview_textenc_from_word(u8str_t word) {
 
 /* The length of the UTF-8 sequence at `b` (at most `left` bytes), 0 when
    it is not one; -1 when it is cut short by the end. */
+/* One UTF-8 character's length at `b` by proven's decoder: -1 when the bytes end inside one, 0 when it is not one. */
 static int utf8_seq(const uint8_t *b, size_t left) {
-    uint8_t c = b[0];
-    int n;
-    uint32_t min;
-    if (c < 0x80) return 1;
-    if (c >= 0xC2 && c <= 0xDF) { n = 2; min = 0x80; }
-    else if (c >= 0xE0 && c <= 0xEF) { n = 3; min = 0x800; }
-    else if (c >= 0xF0 && c <= 0xF4) { n = 4; min = 0x10000; }
-    else return 0;
-    uint32_t cp = c & (n == 2 ? 0x1F : n == 3 ? 0x0F : 0x07);
-    for (int i = 1; i < n; ++i) {
-        if ((size_t)i >= left) return -1;
-        if ((b[i] & 0xC0) != 0x80) return 0;
-        cp = (cp << 6) | (b[i] & 0x3F);
-    }
-    if (cp < min || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return 0;
-    return n;
+    proven_utf8_char_t c = proven_utf8_decode_next(rubraview_u8(b, left), 0);
+    if (c.err == PROVEN_OK) return (int)c.len;
+    return c.err == PROVEN_ERR_NEED_MORE ? -1 : 0;
 }
 
 bool rubraview_textenc_is_utf8(const uint8_t *b, size_t size, bool cut_ok) {
@@ -104,16 +94,11 @@ bool rubraview_textenc_is_utf8(const uint8_t *b, size_t size, bool cut_ok) {
     return true;
 }
 
+/* `cp` (never a surrogate here) written as UTF-8 by the program's one encoder; its length. */
 static size_t put_cp(char *out, uint32_t cp) {
-    if (cp < 0x80) { out[0] = (char)cp; return 1; }
-    if (cp < 0x800) { out[0] = (char)(0xC0 | (cp >> 6)); out[1] = (char)(0x80 | (cp & 0x3F)); return 2; }
-    if (cp < 0x10000) {
-        out[0] = (char)(0xE0 | (cp >> 12)); out[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    out[0] = (char)(0xF0 | (cp >> 18)); out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[3] = (char)(0x80 | (cp & 0x3F));
-    return 4;
+    size_t at = 0;
+    (void)rubraview_utf8_encode(cp, (uint8_t *)out, 4, &at);
+    return at;
 }
 
 char *rubraview_textenc_utf16_to_utf8(const uint8_t *b, size_t size, bool big_endian, size_t *out_len) {

@@ -10,12 +10,12 @@
 #define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg"
 #define COMICINFO_NAME "ComicInfo.xml"
 
-static bool name_is_comicinfo(u8str_t name) {
-    u8str_t base = rubraview_path_basename(name);
-    if (base.len != sizeof(COMICINFO_NAME) - 1) return false;
+static bool name_is_comicinfo(proven_u8str_view_t name) {
+    proven_u8str_view_t base = rubraview_path_basename(name);
+    if (base.size != sizeof(COMICINFO_NAME) - 1) return false;
     /* The manifest sits in the archive root but archivers differ on
        case, so match it case-insensitively. */
-    for (size_t i = 0; i < base.len; ++i) {
+    for (size_t i = 0; i < base.size; ++i) {
         char a = base.ptr[i], b = COMICINFO_NAME[i];
         if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
         if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
@@ -45,14 +45,14 @@ static bool ref_buf_push(proven_arena_t *arena, ref_buf_t *b, rubraview_page_ref
 
 rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena,
                                                             const rubraview_fs_listing_t *listing,
-                                                            u8str_t extension_filter,
+                                                            proven_u8str_view_t extension_filter,
                                                             rubraview_sort_mode_t mode,
                                                             bool ascending) {
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_FOLDER };
     if (!arena || !listing || listing->count == 0) return source;
 
     rubraview_sibling_index_t index = rubraview_fs_index_siblings(
-        arena, listing, (u8str_t){ .ptr = "", .len = 0 }, extension_filter, mode, ascending);
+        arena, listing, PROVEN_LIT(""), extension_filter, mode, ascending);
     if (index.count == 0) return source;
 
     ref_buf_t buf = {0};
@@ -67,7 +67,7 @@ rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena
             ref.name = rubraview_stream_display_name(index.paths[i]);
             for (size_t k = 0; k < listing->count; ++k) {
                 const rubraview_fs_entry_t *e = &listing->entries[k];
-                if (e->path.ptr == index.paths[i].ptr && e->name.len > 0) { ref.name = e->name; break; }
+                if (e->path.ptr == index.paths[i].ptr && e->name.size > 0) { ref.name = e->name; break; }
             }
         }
         if (!ref_buf_push(arena, &buf, ref)) break;
@@ -128,7 +128,7 @@ static fulta_arc_err_t ps_volume_open(void *ctx, uint32_t index, const char *nam
     ps_volume_t *v = (ps_volume_t*)calloc(1, sizeof(*v));
     if (!v) return FULTA_ARC_ERR_NOMEM;
     v->io = io;
-    if (!rubraview_pal_fs_map((u8str_t){ .ptr = name, .len = strlen(name) }, &v->map)) { free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
+    if (!rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = strlen(name) }, &v->map)) { free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
     if (v->map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&v->map); free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
     atomic_fetch_add(&io->volumes, 1);
     atomic_fetch_add(&io->volume_bytes, v->map.size);
@@ -149,11 +149,11 @@ static int ps_cancelled(void *ctx) {
     return atomic_load(&((struct rubraview_page_source_io*)ctx)->cancel) ? 1 : 0;
 }
 
-static char *ps_strdup(u8str_t s) {
-    char *out = (char*)malloc(s.len + 1);
+static char *ps_strdup(proven_u8str_view_t s) {
+    char *out = (char*)malloc(s.size + 1);
     if (!out) return NULL;
-    if (s.len) memcpy(out, s.ptr, s.len);
-    out[s.len] = '\0';
+    if (s.size) memcpy(out, s.ptr, s.size);
+    out[s.size] = '\0';
     return out;
 }
 
@@ -172,7 +172,7 @@ static void ps_io_free(struct rubraview_page_source_io *io) {
 /* ---- a RAR set's volume names (RARLAB's own naming, from its manual) ----
    `x.part2.rar` is a later volume of `x.part1.rar` (the digits keep their
    width); `x.r00`, `x.r01`, ... `x.s00` follow `x.rar`. */
-static bool ext_is(u8str_t name, size_t at, const char *lower3) {
+static bool ext_is(proven_u8str_view_t name, size_t at, const char *lower3) {
     for (size_t i = 0; i < 3; ++i) {
         char c = name.ptr[at + i];
         if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
@@ -182,9 +182,9 @@ static bool ext_is(u8str_t name, size_t at, const char *lower3) {
 }
 
 /* Where the digits of `.partN.rar` are, or false. */
-static bool rar_part_digits(u8str_t name, size_t *out_at, size_t *out_len) {
-    if (name.len < 10 || name.ptr[name.len - 4] != '.' || !ext_is(name, name.len - 3, "rar")) return false;
-    size_t end = name.len - 4, at = end;
+static bool rar_part_digits(proven_u8str_view_t name, size_t *out_at, size_t *out_len) {
+    if (name.size < 10 || name.ptr[name.size - 4] != '.' || !ext_is(name, name.size - 3, "rar")) return false;
+    size_t end = name.size - 4, at = end;
     while (at > 0 && name.ptr[at - 1] >= '0' && name.ptr[at - 1] <= '9') at--;
     if (at == end || at < 5 || name.ptr[at - 5] != '.') return false;
     static const char part[4] = { 'p', 'a', 'r', 't' };
@@ -199,15 +199,15 @@ static bool rar_part_digits(u8str_t name, size_t *out_at, size_t *out_len) {
 }
 
 /* `.r00` to `.z99` after a `.rar`: the old numbering's later volumes. */
-static bool rar_old_later(u8str_t name) {
-    if (name.len < 5 || name.ptr[name.len - 4] != '.') return false;
-    char c = name.ptr[name.len - 3];
+static bool rar_old_later(proven_u8str_view_t name) {
+    if (name.size < 5 || name.ptr[name.size - 4] != '.') return false;
+    char c = name.ptr[name.size - 3];
     if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-    char d1 = name.ptr[name.len - 2], d2 = name.ptr[name.len - 1];
+    char d1 = name.ptr[name.size - 2], d2 = name.ptr[name.size - 1];
     return c >= 'r' && c <= 'z' && d1 >= '0' && d1 <= '9' && d2 >= '0' && d2 <= '9';
 }
 
-bool rubraview_page_source_is_later_volume(u8str_t name) {
+bool rubraview_page_source_is_later_volume(proven_u8str_view_t name) {
     size_t at = 0, len = 0;
     if (rar_part_digits(name, &at, &len)) {
         bool first = name.ptr[at + len - 1] == '1';
@@ -218,7 +218,7 @@ bool rubraview_page_source_is_later_volume(u8str_t name) {
 }
 
 /* The first volume's path for a later volume's, in `out` (malloc); NULL when `path` is not one. */
-static char *rar_first_volume_path(u8str_t path) {
+static char *rar_first_volume_path(proven_u8str_view_t path) {
     size_t at = 0, len = 0;
     if (!rubraview_page_source_is_later_volume(path)) return NULL;
     char *out = ps_strdup(path);
@@ -226,7 +226,7 @@ static char *rar_first_volume_path(u8str_t path) {
     if (rar_part_digits(path, &at, &len)) {
         for (size_t i = 0; i < len; ++i) out[at + i] = i + 1 == len ? '1' : '0';
     } else {
-        memcpy(out + path.len - 3, "rar", 3);
+        memcpy(out + path.size - 3, "rar", 3);
     }
     return out;
 }
@@ -249,31 +249,31 @@ static fulta_arc_codepage_t ps_codepage(rubraview_codepage_t choice) {
     }
 }
 
-static u8str_t ps_display_name(proven_arena_t *arena, const fulta_arc_entry_t *en, fulta_arc_format_t format,
+static proven_u8str_view_t ps_display_name(proven_arena_t *arena, const fulta_arc_entry_t *en, fulta_arc_format_t format,
                                rubraview_codepage_t override_choice) {
     /* Copied into the arena: a page's name outlives the archive it came from
        (FultaArc frees its own when the archive closes). */
-    u8str_t name = { .ptr = "", .len = 0 };
+    proven_u8str_view_t name = PROVEN_LIT("");
     size_t given = en->name ? strlen(en->name) : 0;
     proven_result_mem_mut_t own = proven_arena_alloc(arena, given + 1);
     if (proven_is_ok(own.err)) {
         if (given) memcpy(own.value.ptr, en->name, given);
         ((char*)own.value.ptr)[given] = '\0';
-        name = (u8str_t){ .ptr = (const char*)own.value.ptr, .len = given };
+        name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)own.value.ptr, .size = given };
     }
     if (override_choice != RUBRAVIEW_CODEPAGE_AUTO || format == FULTA_ARC_FORMAT_7Z || !en->name_raw) return name;
-    u8str_t raw = { .ptr = (const char*)en->name_raw, .len = en->name_raw_size };
-    if (raw.len == 0 || rubraview_utf8_validate(raw)) return name;
+    proven_u8str_view_t raw = { .ptr = (const proven_byte_t *)(const char*)en->name_raw, .size = en->name_raw_size };
+    if (raw.size == 0 || rubraview_utf8_validate(raw)) return name;
     uint32_t codepage = 0;
     if (!rubraview_archive_filename_plan(raw, false, RUBRAVIEW_CODEPAGE_AUTO, &codepage)) return name;
-    u8str_t decoded = rubraview_pal_transcode_codepage(arena, raw, codepage);
-    if (decoded.len == 0) return name;                 /* a platform with no tables: FultaArc's reading stands */
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, decoded.len + 1);
+    proven_u8str_view_t decoded = rubraview_pal_transcode_codepage(arena, raw, codepage);
+    if (decoded.size == 0) return name;                 /* a platform with no tables: FultaArc's reading stands */
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, decoded.size + 1);
     if (!proven_is_ok(res.err)) return name;
     char *out = (char*)res.value.ptr;
-    for (size_t i = 0; i < decoded.len; ++i) out[i] = decoded.ptr[i] == '\\' ? '/' : decoded.ptr[i];
-    out[decoded.len] = '\0';
-    return (u8str_t){ .ptr = out, .len = decoded.len };
+    for (size_t i = 0; i < decoded.size; ++i) out[i] = decoded.ptr[i] == '\\' ? '/' : decoded.ptr[i];
+    out[decoded.size] = '\0';
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = decoded.size };
 }
 
 /* ---- reading an entry ---- */
@@ -361,9 +361,9 @@ static uint64_t ps_entry_cost(const rubraview_page_source_t *source, size_t entr
     return cost;
 }
 
-static u8str_t ps_read_entry(proven_arena_t *arena, rubraview_page_source_t *source, size_t entry, uint32_t max_entry_bytes,
+static proven_u8str_view_t ps_read_entry(proven_arena_t *arena, rubraview_page_source_t *source, size_t entry, uint32_t max_entry_bytes,
                              fulta_arc_err_t *out_err) {
-    u8str_t none = { .ptr = "", .len = 0 };
+    proven_u8str_view_t none = PROVEN_LIT("");
     const fulta_arc_entry_t *en = fulta_arc_entry(source->arc, entry);
     *out_err = FULTA_ARC_ERR_INVALID_ARG;
     if (!en || (en->flags & (FULTA_ARC_ENTRY_DIR | FULTA_ARC_ENTRY_UNKNOWN_SIZE))) return none;
@@ -380,7 +380,7 @@ static u8str_t ps_read_entry(proven_arena_t *arena, rubraview_page_source_t *sou
     *out_err = ps_extract(source, entry, out, (size_t)en->size, &len);
     if (*out_err != FULTA_ARC_OK) return none;
     out[len] = 0;                                            /* §7.2.3: a text parser may take it as it is */
-    return (u8str_t){ .ptr = (const char*)out, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)out, .size = len };
 }
 
 static bool err_is_password(fulta_arc_err_t err) {
@@ -389,23 +389,23 @@ static bool err_is_password(fulta_arc_err_t err) {
 
 rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
                                                             const uint8_t *data, size_t size,
-                                                            u8str_t archive_path,
-                                                            u8str_t extension_filter,
+                                                            proven_u8str_view_t archive_path,
+                                                            proven_u8str_view_t extension_filter,
                                                             rubraview_codepage_t override_choice,
                                                             uint32_t max_entry_bytes,
                                                             uint64_t max_block_bytes) {
     return rubraview_page_source_from_archive_password(arena, data, size, archive_path, extension_filter, override_choice,
-                                                       max_entry_bytes, max_block_bytes, (u8str_t){ .ptr = "", .len = 0 });
+                                                       max_entry_bytes, max_block_bytes, PROVEN_LIT(""));
 }
 
 rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
                                                                      const uint8_t *data, size_t size,
-                                                                     u8str_t archive_path,
-                                                                     u8str_t extension_filter,
+                                                                     proven_u8str_view_t archive_path,
+                                                                     proven_u8str_view_t extension_filter,
                                                                      rubraview_codepage_t override_choice,
                                                                      uint32_t max_entry_bytes,
                                                                      uint64_t max_block_bytes,
-                                                                     u8str_t password) {
+                                                                     proven_u8str_view_t password) {
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE, .archive_path = archive_path };
     if (!arena || !data || size == 0) return source;
     (void)max_block_bytes;   /* the old 7z reader's block held in memory; FultaArc streams and holds none */
@@ -414,13 +414,13 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     if (!io) return source;
     source.io = io;
     io->first_bytes = size;
-    if (password.len > 0) io->password = ps_strdup(password);
+    if (password.size > 0) io->password = ps_strdup(password);
 
     /* A set opened by a later volume's name is read from its first (owner, 2026-10-01). */
     rubraview_fs_mapping_t whole = { .data = data, .size = size };
     io->name = rar_first_volume_path(archive_path);
     if (io->name) {
-        if (rubraview_pal_fs_map((u8str_t){ .ptr = io->name, .len = strlen(io->name) }, &io->first) &&
+        if (rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)io->name, .size = strlen(io->name) }, &io->first) &&
             io->first.size <= (uint64_t)SIZE_MAX) {
             io->first_mapped = true;
             whole = io->first;
@@ -438,7 +438,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     if (!io->first_mapped) io->first = whole;
     fulta_arc_source_t src = { .ctx = &io->first, .size = whole.size, .read_at = ps_mem_read, .close = NULL };
     fulta_arc_options_t opt = {
-        .name = archive_path.len > 0 ? io->name : NULL,
+        .name = archive_path.size > 0 ? io->name : NULL,
         .volume = ps_volume_open, .volume_ctx = io,
         .password = ps_password, .password_ctx = io,
         .codepage = ps_codepage(override_choice),
@@ -450,7 +450,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
         source.arc = NULL;
         if (err_is_password(err)) {                            /* its headers are locked */
             source.needs_password = true;
-            source.password_wrong = password.len > 0;
+            source.password_wrong = password.size > 0;
         }
         return source;
     }
@@ -470,7 +470,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     for (size_t i = 0; i < count; ++i) {
         const fulta_arc_entry_t *en = fulta_arc_entry(source.arc, i);
         if (!en || (en->flags & (FULTA_ARC_ENTRY_DIR | FULTA_ARC_ENTRY_UNSUPPORTED))) continue;
-        u8str_t name = ps_display_name(arena, en, format, override_choice);
+        proven_u8str_view_t name = ps_display_name(arena, en, format, override_choice);
         if (name_is_comicinfo(name)) { comicinfo = i; continue; }
         if (!rubraview_glob_match_list(rubraview_path_basename(name), extension_filter)) continue;
         if ((en->flags & FULTA_ARC_ENTRY_ENCRYPTED) && locked == SIZE_MAX) locked = i;
@@ -487,14 +487,14 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
        book that cannot be read says so instead of opening blank. */
     if (locked != SIZE_MAX) {
         fulta_arc_err_t tried = FULTA_ARC_ERR_PASSWORD_NEEDED;
-        if (password.len > 0) {
+        if (password.size > 0) {
             atomic_store(&io->done, 0);
             tried = ps_extract(&source, locked, NULL, 0, NULL);
         }
         if (tried != FULTA_ARC_OK) {
             if (err_is_password(tried) || tried == FULTA_ARC_ERR_CHECKSUM || tried == FULTA_ARC_ERR_CORRUPT) {
                 source.needs_password = true;
-                source.password_wrong = password.len > 0;
+                source.password_wrong = password.size > 0;
             }
             return source;
         }
@@ -503,7 +503,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     /* §3.8.5: the manifest is read now, while the archive is open. */
     if (comicinfo != SIZE_MAX) {
         fulta_arc_err_t xml_err = FULTA_ARC_OK;
-        u8str_t xml = ps_read_entry(arena, &source, comicinfo, max_entry_bytes, &xml_err);
+        proven_u8str_view_t xml = ps_read_entry(arena, &source, comicinfo, max_entry_bytes, &xml_err);
         if (xml_err == FULTA_ARC_OK) {
             source.has_comicinfo = true;
             source.comicinfo_xml = xml;
@@ -517,7 +517,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
 
     ref_buf_t buf = {0};
     for (size_t i = 0; i < kept; ++i) {
-        rubraview_page_ref_t ref = { .name = items[i].name, .path = { .ptr = "", .len = 0 }, .entry_index = (size_t)items[i].tag };
+        rubraview_page_ref_t ref = { .name = items[i].name, .path = PROVEN_LIT(""), .entry_index = (size_t)items[i].tag };
         if (!ref_buf_push(arena, &buf, ref)) break;
     }
     source.pages = buf.data;
@@ -525,14 +525,14 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     return source;
 }
 
-u8str_t rubraview_page_source_first_volume(const rubraview_page_source_t *source) {
-    if (!source || !source->io || !source->io->name) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = source->io->name, .len = strlen(source->io->name) };
+proven_u8str_view_t rubraview_page_source_first_volume(const rubraview_page_source_t *source) {
+    if (!source || !source->io || !source->io->name) return PROVEN_LIT("");
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)source->io->name, .size = strlen(source->io->name) };
 }
 
-u8str_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
+proven_u8str_view_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
                                          fulta_arc_format_t format, rubraview_codepage_t override_choice) {
-    if (!arena || !entry) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!arena || !entry) return PROVEN_LIT("");
     return ps_display_name(arena, entry, format, override_choice);
 }
 
@@ -554,20 +554,20 @@ rubraview_page_bytes_t rubraview_page_source_read(proven_arena_t *arena,
                                                    rubraview_page_source_t *source,
                                                    size_t index,
                                                    uint32_t max_entry_bytes) {
-    rubraview_page_bytes_t result = { .data = { .ptr = "", .len = 0 }, .from_disk = false, .ok = false };
+    rubraview_page_bytes_t result = { .data = PROVEN_LIT(""), .from_disk = false, .ok = false };
     if (!source || index >= source->page_count) return result;
 
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_FOLDER) {
         /* Nothing to decompress: the caller opens the path itself, which
            lets the image PAL decode straight from the file. */
         result.from_disk = true;
-        result.ok = source->pages[index].path.len > 0;
+        result.ok = source->pages[index].path.size > 0;
         return result;
     }
     if (!source->arc || !arena) return result;
 
     fulta_arc_err_t err = FULTA_ARC_OK;
-    u8str_t data = ps_read_entry(arena, source, source->pages[index].entry_index, max_entry_bytes, &err);
+    proven_u8str_view_t data = ps_read_entry(arena, source, source->pages[index].entry_index, max_entry_bytes, &err);
     if (err != FULTA_ARC_OK) return result;
     result.data = data;
     result.ok = true;
@@ -584,10 +584,10 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
     return en ? en->size : 0;
 }
 
-u8str_t rubraview_page_source_format_name(const rubraview_page_source_t *source) {
-    if (!source || !source->arc) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_page_source_format_name(const rubraview_page_source_t *source) {
+    if (!source || !source->arc) return PROVEN_LIT("");
     const char *name = fulta_arc_format_name(fulta_arc_format(source->arc));
-    return (u8str_t){ .ptr = name ? name : "", .len = name ? strlen(name) : 0 };
+    return rubraview_u8(name ? name : "", name ? strlen(name) : 0);
 }
 
 static bool ps_any_flag(const rubraview_page_source_t *source, uint32_t flag) {
@@ -640,17 +640,17 @@ void rubraview_page_source_progress(const rubraview_page_source_t *source, uint6
     if (out_total) *out_total = atomic_load(&source->io->total);
 }
 
-int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path) {
-    if (!source || path.len == 0) return -1;
+int32_t rubraview_page_source_find(const rubraview_page_source_t *source, proven_u8str_view_t path) {
+    if (!source || path.size == 0) return -1;
 
-    u8str_t wanted = rubraview_path_basename(path);
-    if (wanted.len == 0) return -1;
+    proven_u8str_view_t wanted = rubraview_path_basename(path);
+    if (wanted.size == 0) return -1;
 
     /* The name alone is what is compared. A full path, a relative path
        and a bare filename all name the same picture once the folder is
        open, and only the name survives all three. */
     for (size_t i = 0; i < source->page_count; ++i) {
-        u8str_t candidate = source->pages[i].path.len > 0
+        proven_u8str_view_t candidate = source->pages[i].path.size > 0
                               ? rubraview_path_basename(source->pages[i].path)
                               : source->pages[i].name;
         if (rubraview_path_same(candidate, wanted)) return (int32_t)i;
@@ -658,17 +658,17 @@ int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_
     return -1;
 }
 
-u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
+proven_u8str_view_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
                                               const rubraview_fs_listing_t *listing,
-                                              u8str_t current_archive_path,
+                                              proven_u8str_view_t current_archive_path,
                                               bool forward) {
-    u8str_t none = { .ptr = "", .len = 0 };
+    proven_u8str_view_t none = PROVEN_LIT("");
     if (!arena || !listing || listing->count == 0) return none;
 
     /* Order the directory's archives the way the reader sees them, then
        step one place — that is what makes Vol 01 run into Vol 02. */
     rubraview_sibling_index_t archives = rubraview_fs_index_siblings(
-        arena, listing, current_archive_path, U8(ARCHIVE_FILTER), RUBRAVIEW_SORT_NAME_NATURAL, true);
+        arena, listing, current_archive_path, PROVEN_LIT(ARCHIVE_FILTER), RUBRAVIEW_SORT_NAME_NATURAL, true);
     if (archives.count == 0 || !archives.found) return none;
 
     /* A RAR set is one book (owner, 2026-10-01): its later volumes are stepped over. */
@@ -681,11 +681,11 @@ u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
 }
 
 size_t rubraview_page_source_sibling_folders(proven_arena_t *arena, const rubraview_fs_listing_t *listing,
-                                             u8str_t current_dir, bool forward, u8str_t *out, size_t max) {
+                                             proven_u8str_view_t current_dir, bool forward, proven_u8str_view_t *out, size_t max) {
     if (!arena || !listing || !out || max == 0 || listing->count == 0) return 0;
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing->count, sizeof(u8str_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing->count, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(res.err)) return 0;
-    u8str_t *dirs = (u8str_t*)(void*)res.value.ptr;
+    proven_u8str_view_t *dirs = (proven_u8str_view_t*)(void*)res.value.ptr;
     size_t n = 0;
     for (size_t i = 0; i < listing->count; ++i) {
         if (listing->entries[i].is_directory) dirs[n++] = listing->entries[i].path;

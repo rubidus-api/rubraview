@@ -18,8 +18,8 @@ extern "C" {
 
 typedef struct rubraview_info_line {
     bool    heading;
-    u8str_t label;   /* the heading's title, or the pair's label */
-    u8str_t value;
+    proven_u8str_view_t label;   /* the heading's title, or the pair's label */
+    proven_u8str_view_t value;
 } rubraview_info_line_t;
 
 typedef struct rubraview_info {
@@ -29,7 +29,7 @@ typedef struct rubraview_info {
 
 void rubraview_info_heading(proven_arena_t *arena, rubraview_info_t *info, const char *title);
 /* An empty value adds nothing: a line saying nothing is noise. */
-void rubraview_info_add(proven_arena_t *arena, rubraview_info_t *info, const char *label, u8str_t value);
+void rubraview_info_add(proven_arena_t *arena, rubraview_info_t *info, const char *label, proven_u8str_view_t value);
 void rubraview_info_addf(proven_arena_t *arena, rubraview_info_t *info, const char *label, const char *format, ...);
 
 /* Everything an EXIF block says, a line each, in words. */
@@ -41,7 +41,7 @@ void rubraview_info_add_iptc(proven_arena_t *arena, rubraview_info_t *info, cons
 /* The rows: a heading as it is, a pair as two spaces, the label padded to
    `label_cols`, then the value. Returns how many (at most `capacity`). */
 size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, int32_t label_cols,
-                           u8str_t *rows, size_t capacity);
+                           proven_u8str_view_t *rows, size_t capacity);
 
 /* Formatters; each writes into `buf` and returns the length. */
 size_t rubraview_info_bytes(char *buf, size_t cap, uint64_t bytes);                 /* "3.45 MB (3,617,412 bytes)" */

@@ -31,7 +31,7 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_aren
     };
 }
 
-bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char *out, size_t cap) {
+bool rubraview_pal_choose_font(void *parent_window_handle, proven_u8str_view_t current, char *out, size_t cap) {
     (void)parent_window_handle;
     (void)current;
     if (out && cap) out[0] = '\0';

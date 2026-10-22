@@ -31,7 +31,7 @@ extern "C" {
  * allocation (folding can shrink byte length, so it cannot be done
  * losslessly in place on the source bytes).
  */
-u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in);
+proven_u8str_view_t rubraview_nfc_fold(proven_arena_t *arena, proven_u8str_view_t utf8_in);
 
 #ifdef __cplusplus
 }

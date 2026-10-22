@@ -85,14 +85,14 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
  * `hh:mm:ss.mmm`, or `mm:ss.mmm` for anything under an hour — what the
  * HUD shows. Writes into `buffer` and returns the slice.
  */
-u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds);
+proven_u8str_view_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds);
 
 /**
  * The film's line in the toolbox (owner, 2026-09-29): "00:02 / 00:10   vol
  * 100%", then the speed when it is not 1x and "A-B" or "A-" while a repeat
  * is set (a point below 0 is unset). NUL-terminated.
  */
-u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+proven_u8str_view_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
                                int volume, bool muted, double speed, double ab_a, double ab_b);
 
 /**
@@ -110,7 +110,7 @@ u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position
  * text is not a time: a field is either a time or it is not, and a
  * half-read one would move the loop somewhere nobody asked for.
  */
-bool rubraview_parse_timecode(u8str_t text, double *out_seconds);
+bool rubraview_parse_timecode(proven_u8str_view_t text, double *out_seconds);
 
 /**
  * A time as the A-B box shows it, in three fields (owner, 2026-10-15):
@@ -126,7 +126,7 @@ void rubraview_timecode_split(double seconds, int32_t *out_hours, int32_t *out_m
  * decimals; minutes or seconds past 59 just add up. False, `*out`
  * untouched, when a field is not a number.
  */
-bool rubraview_timecode_join(u8str_t hours, u8str_t minutes, u8str_t seconds, double *out);
+bool rubraview_timecode_join(proven_u8str_view_t hours, proven_u8str_view_t minutes, proven_u8str_view_t seconds, double *out);
 
 /* ---- §3.16.2 track switching ---- */
 
@@ -139,9 +139,9 @@ typedef enum rubraview_track_kind {
 typedef struct rubraview_track {
     rubraview_track_kind_t kind;
     int32_t  stream_index;   /* the container's own numbering */
-    u8str_t  language;       /* "kor", "eng", "jpn"; empty when unlabelled */
-    u8str_t  title;          /* "Commentary", "Director's cut" */
-    u8str_t  codec;          /* "aac", "flac", "subrip" */
+    proven_u8str_view_t  language;       /* "kor", "eng", "jpn"; empty when unlabelled */
+    proven_u8str_view_t  title;          /* "Commentary", "Director's cut" */
+    proven_u8str_view_t  codec;          /* "aac", "flac", "subrip" */
     int32_t  channels;       /* audio only */
     bool     is_default;     /* the container's own default flag */
     bool     is_forced;      /* subtitles: forced narrative signs */
@@ -172,7 +172,7 @@ bool rubraview_tracks_add(rubraview_track_set_t *set, rubraview_track_t track);
  * signs in a film someone is watching in the original language.
  */
 int32_t rubraview_tracks_choose(const rubraview_track_set_t *set, rubraview_track_kind_t kind,
-                                u8str_t preferred_language);
+                                proven_u8str_view_t preferred_language);
 
 /**
  * Step to the next track of one kind. Subtitles include "off" in the
@@ -185,7 +185,7 @@ int32_t rubraview_tracks_next(const rubraview_track_set_t *set, rubraview_track_
 size_t rubraview_tracks_count(const rubraview_track_set_t *set, rubraview_track_kind_t kind);
 
 /** A human label: "#2  Korean (AAC 2.0)". */
-u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
+proven_u8str_view_t rubraview_track_label(char *buffer, size_t buffer_size,
                               const rubraview_track_set_t *set, int32_t index);
 
 #ifdef __cplusplus

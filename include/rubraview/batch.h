@@ -79,17 +79,17 @@ typedef struct rubraview_batch_extra_params {
     char     plugin[96];
     double   plugin_params[8];
     int32_t  plugin_param_count;
-    u8str_t  plugin_folder;
+    proven_u8str_view_t  plugin_folder;
     int32_t  canvas_w, canvas_h;   /* > 0: the picture centred on a canvas this size (never cut) */
     uint32_t canvas_rgb;
     int32_t  border_px;            /* > 0: a frame this wide round it */
     uint32_t border_rgb;
-    u8str_t  watermark;            /* a picture's path, laid over the result */
+    proven_u8str_view_t  watermark;            /* a picture's path, laid over the result */
     rubraview_batch_corner_t watermark_corner;
     int32_t  watermark_opacity;    /* 1 .. 100 */
     /* RV-134: words drawn on each picture ({name} {ext} {n} {n:3} {parent} {date} {w} {h}), last of all */
-    u8str_t  text;
-    u8str_t  text_font;            /* a family Windows has; empty: Segoe UI */
+    proven_u8str_view_t  text;
+    proven_u8str_view_t  text_font;            /* a family Windows has; empty: Segoe UI */
     rubraview_batch_corner_t text_corner;
     int32_t  text_size;            /* the letters' height, % of the picture's shorter side, 1 .. 50 */
     uint32_t text_rgb;
@@ -136,7 +136,7 @@ typedef struct rubraview_batch_privacy_params {
 } rubraview_batch_privacy_params_t;
 
 typedef struct rubraview_batch_convert_params {
-    u8str_t target_ext; /* e.g. "jpg", "png", "webp" */
+    proven_u8str_view_t target_ext; /* e.g. "jpg", "png", "webp" */
     int32_t quality;    /* 1-100; meaning is format-dependent */
 } rubraview_batch_convert_params_t;
 
@@ -155,18 +155,18 @@ typedef struct rubraview_batch_action {
 typedef struct rubraview_batch_job {
     rubraview_batch_action_t *actions;
     size_t action_count;
-    u8str_t include_pattern; /* ';'-separated glob list (rubraview/glob.h); empty = include everything */
-    u8str_t exclude_pattern; /* ';'-separated glob list; empty = exclude nothing */
+    proven_u8str_view_t include_pattern; /* ';'-separated glob list (rubraview/glob.h); empty = include everything */
+    proven_u8str_view_t exclude_pattern; /* ';'-separated glob list; empty = exclude nothing */
     uint64_t min_size_bytes; /* 0 = no lower bound */
     uint64_t max_size_bytes; /* 0 = no upper bound */
-    u8str_t naming_pattern;  /* e.g. "{name}_thumb.{ext}"; see rubraview_batch_format_name */
+    proven_u8str_view_t naming_pattern;  /* e.g. "{name}_thumb.{ext}"; see rubraview_batch_format_name */
     int32_t counter_start;   /* RV-129: {n} of the first file written; 0 is taken as 1 */
-    u8str_t replace_from;    /* RV-129: in each name's stem, every `replace_from` becomes `replace_to` */
-    u8str_t replace_to;
+    proven_u8str_view_t replace_from;    /* RV-129: in each name's stem, every `replace_from` becomes `replace_to` */
+    proven_u8str_view_t replace_to;
 } rubraview_batch_job_t;
 
 /** Whether `filename` (with `file_size` bytes) passes the job's include/exclude/size filters. */
-bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, u8str_t filename, uint64_t file_size);
+bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, proven_u8str_view_t filename, uint64_t file_size);
 
 /**
  * Expand a naming pattern's tokens: `{name}` (stem), `{ext}` (without
@@ -174,17 +174,17 @@ bool rubraview_batch_file_matches(const rubraview_batch_job_t *job, u8str_t file
  * supplied, e.g. "2026-09-08"). Any other `{...}` token, or a `{`
  * without a matching `}`, is copied through unchanged.
  */
-u8str_t rubraview_batch_format_name(proven_arena_t *arena, u8str_t pattern, u8str_t name_stem, u8str_t ext, int32_t width, int32_t height, u8str_t date_str);
+proven_u8str_view_t rubraview_batch_format_name(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext, int32_t width, int32_t height, proven_u8str_view_t date_str);
 
 /**
  * RV-129: the same with {n} (the counter), {n:3} (padded with zeros to
  * three digits), and {parent} (the name of the folder the file is in).
  */
-u8str_t rubraview_batch_format_name_ex(proven_arena_t *arena, u8str_t pattern, u8str_t name_stem, u8str_t ext,
-                                       int32_t width, int32_t height, u8str_t date_str, int64_t counter, u8str_t parent);
+proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext,
+                                       int32_t width, int32_t height, proven_u8str_view_t date_str, int64_t counter, proven_u8str_view_t parent);
 
 /** RV-129: every `from` in `text` replaced by `to` (a new string; `text` itself when `from` is empty or absent). */
-u8str_t rubraview_batch_replace_all(proven_arena_t *arena, u8str_t text, u8str_t from, u8str_t to);
+proven_u8str_view_t rubraview_batch_replace_all(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t from, proven_u8str_view_t to);
 
 #ifdef __cplusplus
 }

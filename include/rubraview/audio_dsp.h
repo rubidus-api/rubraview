@@ -80,7 +80,7 @@ typedef enum rubraview_eq_preset {
 
 /** A preset's ten gains, in decibels. */
 void rubraview_eq_preset_gains(rubraview_eq_preset_t preset, float *out_gains_db);
-u8str_t rubraview_eq_preset_name(rubraview_eq_preset_t preset);
+proven_u8str_view_t rubraview_eq_preset_name(rubraview_eq_preset_t preset);
 
 /* One peaking-EQ biquad, and its running state. */
 typedef struct rubraview_biquad {
@@ -137,7 +137,7 @@ double rubraview_replaygain_factor(const rubraview_replaygain_t *tags,
                                    double preamp_db);
 
 /** Parse a ReplayGain tag value such as "-7.230000 dB". */
-bool rubraview_replaygain_parse_db(u8str_t text, double *out_db);
+bool rubraview_replaygain_parse_db(proven_u8str_view_t text, double *out_db);
 
 /**
  * §3.14.5's night mode: a soft-knee compressor above `threshold_db`.

@@ -148,9 +148,9 @@
 static bool g_text_on = true;
 #define TEXT_KINDS (g_text_on ? ";" TEXT_FILTER : "")
 /* `base` with the text kinds after it when they are shown; `buf` holds it. */
-static u8str_t kinds_with_text(char *buf, size_t cap, const char *base) {
+static proven_u8str_view_t kinds_with_text(char *buf, size_t cap, const char *base) {
     int n = snprintf(buf, cap, "%s%s", base, TEXT_KINDS);
-    return (u8str_t){ .ptr = buf, .len = n > 0 && (size_t)n < cap ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 && (size_t)n < cap ? (size_t)n : 0 };
 }
 /* How far the picture's clock may run on from the last thing the sound
    thread reported, before it waits for the next report. */
@@ -232,9 +232,9 @@ static rubraview_tile_metrics_t tile_metrics(double dpi_scale) {
 /* The boxes' tiles and menu tree come from their document (RFC-0002,
    D-15): src/core/default_boxes_doc.c. */
 
-/* U8() only works on string literals; this is its runtime counterpart. */
-static u8str_t cstr(const char *s) {
-    return (u8str_t){ .ptr = s, .len = strlen(s) };
+/* PROVEN_LIT() only works on string literals; this is its runtime counterpart. */
+static proven_u8str_view_t cstr(const char *s) {
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = strlen(s) };
 }
 
 /* D-99: how long one viewer waits for another to finish with a state file
@@ -409,13 +409,13 @@ typedef struct app_state {
     /* §3.22.2 / D-14: keymap.ini sits with settings.ini; what it held when
        the settings window opened is what Revert goes back to. */
     rubraview_keymap_t keymap_saved;
-    u8str_t            keymap_path;
+    proven_u8str_view_t            keymap_path;
     int32_t            key_capture;       /* a Keys row waiting for its new key (1..), or 0 */
 
     /* Pages come from a folder or a CBZ through the same source (§3.8.1). */
     rubraview_page_source_t source;
-    u8str_t                 source_dir;   /* the directory the source lives in */
-    u8str_t                 archive_bytes;/* the archive's bytes (its mapping), empty for a folder */
+    proven_u8str_view_t                 source_dir;   /* the directory the source lives in */
+    proven_u8str_view_t                 archive_bytes;/* the archive's bytes (its mapping), empty for a folder */
     rubraview_fs_mapping_t  archive_map;  /* the archive, mapped read-only (owner, 2026-09-28: comics of several GB) */
     app_page_t *pages;
 
@@ -428,9 +428,9 @@ typedef struct app_state {
     size_t                  pending_decode[PENDING_DECODE_MAX];
     size_t                  pending_decode_count;
     rubraview_history_t     history;
-    u8str_t                 history_path;
+    proven_u8str_view_t                 history_path;
     rubraview_recent_t      recent;         /* D-104: File > Recent, kept in recent.ini */
-    u8str_t                 recent_path;
+    proven_u8str_view_t                 recent_path;
     rubraview_config_mode_t config_mode;
     rubraview_page_info_t  *comic_page_flags; /* §3.8.5 cover marks, applied on every relayout */
 
@@ -496,7 +496,7 @@ typedef struct app_state {
     uint8_t                fav_kind[RUBRAVIEW_FAVORITES_MAX];   /* 0 gone, 1 folder, 2 file */
     bool                   fav_checked[RUBRAVIEW_FAVORITES_MAX];
     size_t                 fav_checked_n;
-    struct recent_row { u8str_t path; int64_t opened; uint64_t size; bool there; bool checked; } recent_rows[RECENT_KEPT];
+    struct recent_row { proven_u8str_view_t path; int64_t opened; uint64_t size; bool there; bool checked; } recent_rows[RECENT_KEPT];
     size_t                 recent_row_count;
     int32_t                listwin_shown_page;   /* the page it last scrolled to, to follow a new one */
     /* D-111: the list changed from its window. */
@@ -527,12 +527,12 @@ typedef struct app_state {
        given back. */
     char                   cue_scan_dir[1024];
     size_t                 cue_scan_dir_len;
-    u8str_t               *cue_scan_paths;
+    proven_u8str_view_t               *cue_scan_paths;
     size_t                 cue_scan_count;
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
-    u8str_t               *batch_list;           /* "Convert..." on chosen files: the batch panel runs on these */
+    proven_u8str_view_t               *batch_list;           /* "Convert..." on chosen files: the batch panel runs on these */
     size_t                 batch_list_count;
     /* What plays after a film or a song ends (owner, 2026-09-29): the page
        decided for `follow_for` in `follow_mode`, and the shuffle's flags. */
@@ -576,12 +576,12 @@ typedef struct app_state {
     /* §3.16.1 / R135: the external subtitle file that goes with the
        video on screen. Empty when the film has none. */
     rubraview_subtitle_track_t subtitle;
-    u8str_t                    subtitle_name;   /* what to say in the OSD */
+    proven_u8str_view_t                    subtitle_name;   /* what to say in the OSD */
     /* A DVD's picture subtitles (owner, 2026-09-23). The index is held
        whole; one picture at a time is decoded into `vobsub_pixels` and
        uploaded, and the texture is kept while that subtitle is up. */
     rubraview_vobsub_track_t   vobsub;
-    u8str_t                    vobsub_sub;          /* the `.sub` file's bytes (its mapping) */
+    proven_u8str_view_t                    vobsub_sub;          /* the `.sub` file's bytes (its mapping) */
     rubraview_fs_mapping_t     vobsub_map;
     uint8_t                   *vobsub_pixels;
     rubraview_texture_t       *vobsub_texture;
@@ -591,7 +591,7 @@ typedef struct app_state {
     /* A Blu-ray's picture subtitles (owner, 2026-09-24). The same shape
        as the DVD's above, over a `.sup` file instead of an index pair. */
     rubraview_pgs_track_t      pgs;
-    u8str_t                    pgs_bytes;           /* the `.sup` file itself (its mapping) */
+    proven_u8str_view_t                    pgs_bytes;           /* the `.sup` file itself (its mapping) */
     rubraview_fs_mapping_t     pgs_map;
     uint8_t                   *pgs_pixels;
     rubraview_texture_t       *pgs_texture;
@@ -673,7 +673,7 @@ typedef struct app_state {
     int32_t                    tmenu_focus;
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
     bool                       slidepop_open, slidepop_typing;
-    u8str_t                    hint;               /* RV-116: what the box part under the pointer does */
+    proven_u8str_view_t                    hint;               /* RV-116: what the box part under the pointer does */
     char                       hint_text[320];     /* what `hint` points at: a tile's words and keys */
     double                     hint_since;         /* when the pointer came to rest on it */
     double                     slidepop_x, slidepop_y;
@@ -742,7 +742,7 @@ typedef struct app_state {
     rubraview_window_t        *fontpick_window;
     rubraview_renderer_t      *fontpick_renderer;
     bool                       fontpick_open, fontpick_dirty;
-    u8str_t                    fontpick_section, fontpick_key;   /* the setting it chooses for */
+    proven_u8str_view_t                    fontpick_section, fontpick_key;   /* the setting it chooses for */
     rubraview_font_family_t   *fontpick_all;
     size_t                     fontpick_all_count;
     uint32_t                  *fontpick_list;                    /* the families the words typed find */
@@ -804,7 +804,7 @@ typedef struct app_state {
     size_t                         subtitle_count;
     /* §3.16.1: a sync the reader set by hand belongs to that film, not
        to the moment — playing it again must not throw it away. */
-    u8str_t                        subtitle_offset_for;
+    proven_u8str_view_t                        subtitle_offset_for;
     double                         subtitle_offset_seconds;
     char                           subtitle_label[96];   /* what the OSD calls the track in use */
     /* D-33: the subtitle box, the Sub tile's taps, and the list of tracks
@@ -957,7 +957,7 @@ typedef struct app_state {
     char                      print_temp[1024];        /* D-89: an archive page laid out as a file to print */
     bool                      print_going;
     bool                      print_with_dialog;   /* 1.19.0: Windows' dialog asked for */
-    u8str_t                  *print_list;        /* what the print panel's button prints */
+    proven_u8str_view_t                  *print_list;        /* what the print panel's button prints */
     size_t                    print_list_count;
     /* 1.19.0: the printer, paper and way up chosen in the panel, and its preview */
     char                      print_printer_names[32][256];
@@ -1083,7 +1083,7 @@ typedef struct app_state {
     char                   spath_buffer[1024];
     char                   spath_composing[64];
     size_t                 spath_composing_length;
-    u8str_t                spath_section, spath_key;
+    proven_u8str_view_t                spath_section, spath_key;
     int32_t                spath_list_index;   /* a folder of a list (`recent.skip_dirs`) being typed, or -1 */
     int32_t                spath_list;         /* which of FOLDER_LISTS that list is */
     rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
@@ -1126,14 +1126,14 @@ typedef struct app_state {
     uint32_t                 share_seen_total; /* D-105: the settings' revision when they were last seen to change */
     double                   share_changed_at;
     bool                     share_failed;     /* the file could not be written: not tried again until something changes */
-    u8str_t                  settings_path;
-    u8str_t                  config_beside;   /* the executable's own folder: portable mode's home */
+    proven_u8str_view_t                  settings_path;
+    proven_u8str_view_t                  config_beside;   /* the executable's own folder: portable mode's home */
     bool                     packaged;        /* RV-113 (2): run from the Store's MSIX */
     rubraview_other_copies_t other_copies;    /* D-154: the MSI's or the Store's copy beside this one */
     bool                     copies_told;
     int32_t                  settings_last_setting;   /* the def the settings' focus was last on, -1 none */
     char                     package_family[160];
-    u8str_t                  layout_path;      /* §3.6: where the floating boxes were left */
+    proven_u8str_view_t                  layout_path;      /* §3.6: where the floating boxes were left */
     /* §3.22.1 / D-13: a window of its own, laid out by the interpreter
        from the settings document. */
     /* The help (owner, 2026-09-23): a window of its own that the reader
@@ -1151,7 +1151,7 @@ typedef struct app_state {
     int32_t                    info_scroll;
     void                      *info_mem;
     proven_arena_t             info_arena;       /* the rows, made again when the file changes */
-    u8str_t                   *info_rows;
+    proven_u8str_view_t                   *info_rows;
     bool                      *info_heading;
     size_t                     info_count;
     int64_t                    info_key;         /* which page and film the rows are of */
@@ -1170,7 +1170,7 @@ typedef struct app_state {
     /* Its text as rows on the grid it is drawn on, for marking and copying
        (owner, 2026-09-29), as the settings and information windows do. */
     char                     (*help_row_text)[256];
-    u8str_t                    help_rows[2048];
+    proven_u8str_view_t                    help_rows[2048];
     rubraview_grid_selection_t help_sel;
     bool                       help_selecting;
     char                       help_message[48];
@@ -1210,7 +1210,7 @@ typedef struct app_state {
     bool                   speed_pressed, speed_dragged;   /* D-110: the speed tile held; dragged, it is not a tap */
     bool                   speed_press_detached;
     double                 speed_press_y, speed_press_base;
-    u8str_t                picker_dir;
+    proven_u8str_view_t                picker_dir;
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
     /* The picker's own memory (2026-09-29): every folder shown took a
        listing from the working arena for good. Two arenas take turns: a
@@ -1224,7 +1224,7 @@ typedef struct app_state {
     size_t                *picker_page_of;  /* then: each tile's page, NOT_A_PAGE for a folder */
     size_t                 picker_page_skip;/* tiles before the book's own (`..`) */
     rubraview_favorites_t  favorites;       /* D-43: the reader's own, first on the places bar */
-    u8str_t                favorites_path;
+    proven_u8str_view_t                favorites_path;
     rubraview_fs_listing_t picker_listing;
     size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
@@ -1278,11 +1278,11 @@ typedef struct app_state {
     rubraview_confirm_t    picker_confirm;
 } app_state_t;
 
-static void open_path(app_state_t *app, u8str_t path);
-static void recent_note(app_state_t *app, u8str_t path);
+static void open_path(app_state_t *app, proven_u8str_view_t path);
+static void recent_note(app_state_t *app, proven_u8str_view_t path);
 static void recent_note_shown(app_state_t *app);
-static void recent_sync(app_state_t *app, u8str_t opened, bool clear);
-static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count);
+static void recent_sync(app_state_t *app, proven_u8str_view_t opened, bool clear);
+static void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
 static void recentwin_build(app_state_t *app);
 static void recentwin_toggle(app_state_t *app);
 static void favwin_build(app_state_t *app);
@@ -1299,12 +1299,12 @@ static void tiles_reset(app_state_t *app);
 /* The workbench and the two dialogs are defined further down, next to
    the drawing they belong with; the key handler above needs to name
    them. */
-static bool open_folder(app_state_t *app, u8str_t dir);
+static bool open_folder(app_state_t *app, proven_u8str_view_t dir);
 static void folder_relist(app_state_t *app);
-static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t count, const char *what);
-static bool path_is_listed_kind(u8str_t path);
-static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said,
-                             bool as_given, u8str_t start);
+static void open_paths_as_set(app_state_t *app, const proven_u8str_view_t *paths, size_t count, const char *what);
+static bool path_is_listed_kind(proven_u8str_view_t path);
+static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said,
+                             bool as_given, proven_u8str_view_t start);
 static void source_close(app_state_t *app);
 static void triage_delete(app_state_t *app, bool permanent);
 static void triage_undo(app_state_t *app);
@@ -1312,18 +1312,18 @@ static void triage_curate(app_state_t *app, int32_t digit);
 static void classify_mark(app_state_t *app, int32_t digit);
 static void batch_typed(app_state_t *app);
 static void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
-static bool filing_exists(void *ctx, u8str_t path);
+static bool filing_exists(void *ctx, proven_u8str_view_t path);
 static void classify_toggle(app_state_t *app);
 static bool classify_press(app_state_t *app, double px, double py);
 static void filing_put(app_state_t *app, bool moving);
 static void rename_begin(app_state_t *app);
 static void rename_commit(app_state_t *app);
-static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong);
+static void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong);
 static void secure_wipe(void *p, size_t n);
 static void password_commit(app_state_t *app);
-static void password_remember(app_state_t *app, u8str_t password);
+static void password_remember(app_state_t *app, proven_u8str_view_t password);
 static void picker_path_begin(app_state_t *app);
-static u8str_t app_keep(app_state_t *app, u8str_t text);
+static proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
 static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending);
 static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo);
 static bool settings_row_is_text(const app_state_t *app, int32_t row);
@@ -1340,7 +1340,7 @@ static void files_show(app_state_t *app);
 static void subs_show(app_state_t *app);
 static void subs_close(app_state_t *app);
 static bool subs_may_leave(app_state_t *app);
-static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text);
+static void append_arg(char *buf, size_t cap, size_t *pos, proven_u8str_view_t text);
 static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text);
 static void slides_follow_screen(app_state_t *app);
 static bool popups_key(app_state_t *app, rubraview_key_combo_t combo);
@@ -1348,7 +1348,7 @@ static bool hint_shown(const app_state_t *app);
 static bool slide_ready(const app_state_t *app);
 static void takeout_begin(app_state_t *app);
 static void reopen_after_removal(app_state_t *app, size_t removed_index);
-static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback);
+static void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
 static void files_close(app_state_t *app);
 static void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 static void draw_eqwin(app_state_t *app, double win_w, double win_h);
@@ -1366,28 +1366,28 @@ static bool crop_point_to_image(app_state_t *app, double px, double py, int32_t 
 static bool point_in_curve_widget(const app_state_t *app, double px, double py);
 static void append_number(char *buf, size_t cap, size_t *pos, size_t value);
 static void history_remember(app_state_t *app);
-static bool open_archive(app_state_t *app, u8str_t archive_path);
+static bool open_archive(app_state_t *app, proven_u8str_view_t archive_path);
 static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 static void append_text(char *buf, size_t cap, size_t *pos, const char *text);
-static void osd_say(app_state_t *app, u8str_t text);
+static void osd_say(app_state_t *app, proven_u8str_view_t text);
 static void panel_build_edit(app_state_t *app);
 static void strip_follow(app_state_t *app, size_t page);
 static bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
 static void chrome_hide(app_state_t *app, bool hide);
-static void open_playlist(app_state_t *app, u8str_t path);
-static bool path_is_playlist(u8str_t path);
+static void open_playlist(app_state_t *app, proven_u8str_view_t path);
+static bool path_is_playlist(proven_u8str_view_t path);
 static void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);
 static void speed_tile_move(app_state_t *app, double y, bool detached);
 static void speed_tile_release(app_state_t *app, bool detached);
-static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width, double size);
+static proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
 static void settings_open(app_state_t *app);
 static void settings_close(app_state_t *app);
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
 static void skip_dirs_take_old(app_state_t *app);
-static bool is_text_path(u8str_t path);
+static bool is_text_path(proven_u8str_view_t path);
 static void text_prepare(app_state_t *app);
 static void text_close(app_state_t *app);
-static bool text_action(app_state_t *app, u8str_t action);
+static bool text_action(app_state_t *app, proven_u8str_view_t action);
 static bool text_active(const app_state_t *app);
 static bool text_wheel(app_state_t *app, double notches, uint32_t mods);
 static bool text_press(app_state_t *app, double x, double y, uint32_t mods);
@@ -1398,18 +1398,18 @@ static bool text_pages_mode(const app_state_t *app);
 static int text_percent(const app_state_t *app);
 static bool text_moving(const app_state_t *app);
 static void text_find_step(app_state_t *app, bool forward);
-static bool recent_kept_out(const app_state_t *app, u8str_t path);
+static bool recent_kept_out(const app_state_t *app, proven_u8str_view_t path);
 static const char *text_encoding_shown(const app_state_t *app);
-static void shell_menu_take_old(app_state_t *app, u8str_t text);
+static void shell_menu_take_old(app_state_t *app, proven_u8str_view_t text);
 static void target_begin(app_state_t *app, bool moving, bool from_picker);
 static void target_commit(app_state_t *app);
 static void target_browse(app_state_t *app);
-static void filing_put_to(app_state_t *app, u8str_t dir, bool moving);
+static void filing_put_to(app_state_t *app, proven_u8str_view_t dir, bool moving);
 static void skip_dirs_table_rows(app_state_t *app);
 static void layout_save(app_state_t *app);
 static void settings_took_effect(app_state_t *app);
 static void ui_font_apply_all(app_state_t *app);
-static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key);
+static void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_view_t key);
 static void fontpick_close(app_state_t *app);
 static void edit_window_layout(app_state_t *app);
 static void edit_window_show(app_state_t *app);
@@ -1417,14 +1417,14 @@ static void edit_window_close(app_state_t *app);
 static void changes_remove_checked(app_state_t *app);
 static void edit_steps_changed(app_state_t *app);
 static void edit_preview_close(app_state_t *app);
-static bool edit_denies(u8str_t action);
+static bool edit_denies(proven_u8str_view_t action);
 static void sel_mode_set(app_state_t *app, bool on);
 static void fontpick_reveal(app_state_t *app);
 static void media_ab_check(app_state_t *app);
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
 static void audio_track_set(app_state_t *app, int32_t next);
-static bool chooser_open_tile(app_state_t *app, u8str_t action, double x, double y, double above_y);
-static bool chooser_wheel_tile(app_state_t *app, u8str_t action, double notches);
+static bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y);
+static bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches);
 static void ctx_open_at(app_state_t *app, double x, double y);
 static double name_scale(const app_state_t *app);
 static bool settings_scrollbar(const app_state_t *app, rubraview_pal_rect_t *track, rubraview_pal_rect_t *thumb);
@@ -1434,7 +1434,7 @@ static double place_size(app_state_t *app, int which);
 enum { PF_NONE = 0, PF_TITLE, PF_MENU, PF_NAME, PF_LIST, PF_BUTTONS };
 static double chooser_main_x(app_state_t *app);
 #define TITLEBAR_ON 0xFF2D4A6Eu   /* 1.25.0: the ground of a title bar or widget button that is on */
-static void draw_text_weight(app_state_t *app, u8str_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold);
+static void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold);
 static bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo);
 static bool tmenu_press(app_state_t *app, double x, double y);
 static double chooser_main_y(app_state_t *app);
@@ -1480,8 +1480,8 @@ static void panel_open_batch(app_state_t *app);
 static void new_window(app_state_t *app);
 static void panel_write_archive_page(app_state_t *app, bool over);
 static void panel_run_batch(app_state_t *app);
-static void print_paths(app_state_t *app, const u8str_t *paths, size_t count);
-static u8str_t current_file_path(app_state_t *app);
+static void print_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
+static proven_u8str_view_t current_file_path(app_state_t *app);
 static bool on_archive_page(const app_state_t *app);
 static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size);
 static void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
@@ -1496,8 +1496,8 @@ static size_t page_count(const app_state_t *app) {
     return app->source.page_count;
 }
 
-static u8str_t page_display_name(const app_state_t *app, size_t index) {
-    if (index >= app->source.page_count) return (u8str_t){ .ptr = "", .len = 0 };
+static proven_u8str_view_t page_display_name(const app_state_t *app, size_t index) {
+    if (index >= app->source.page_count) return PROVEN_LIT("");
     return app->source.pages[index].name;
 }
 
@@ -1516,13 +1516,13 @@ static void unload_all_pages(app_state_t *app) {
 
 /* Whether a page is a video, opened by the media PAL rather than WIC. RV-157: an internet radio
    station is one too, played by FFmpeg alone. */
-static bool is_media_path(u8str_t path) {
-    return path.len > 0 && (rubraview_stream_is_address(path) ||
-                            rubraview_glob_match_list(rubraview_path_basename(path), U8(MEDIA_FILTER)));
+static bool is_media_path(proven_u8str_view_t path) {
+    return path.size > 0 && (rubraview_stream_is_address(path) ||
+                            rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT(MEDIA_FILTER)));
 }
 
 /* RV-157: a page that is an internet radio address: nothing on the disk is asked about it. */
-static bool is_station_path(u8str_t path) {
+static bool is_station_path(proven_u8str_view_t path) {
     return rubraview_stream_is_address(path);
 }
 
@@ -1556,7 +1556,7 @@ static uint64_t page_read_cost(app_state_t *app, size_t index) {
    and allocates nothing. */
 static rubraview_page_bytes_t page_read_owned(rubraview_page_source_t *source, SRWLOCK *lock, size_t index, void **out_mem) {
     *out_mem = NULL;
-    rubraview_page_bytes_t none = { .data = { .ptr = "", .len = 0 }, .from_disk = false, .ok = false };
+    rubraview_page_bytes_t none = { .data = PROVEN_LIT(""), .from_disk = false, .ok = false };
     AcquireSRWLockExclusive(lock);
     rubraview_page_bytes_t bytes = none;
     if (source->kind == RUBRAVIEW_PAGE_SOURCE_FOLDER) {
@@ -1667,19 +1667,19 @@ static app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool 
    that can, in the file's bytes (mapped, for a file of a folder); nothing
    is decoded. `bytes` may be NULL when the caller has none in hand. */
 static bool page_moves(app_state_t *app, size_t index, const rubraview_page_bytes_t *bytes) {
-    u8str_t path = app->source.pages[index].path;
-    u8str_t name = path.len > 0 ? path : app->source.pages[index].name;
+    proven_u8str_view_t path = app->source.pages[index].path;
+    proven_u8str_view_t name = path.size > 0 ? path : app->source.pages[index].name;
     if (!rubraview_path_has_ext(name, ".gif") && !rubraview_path_has_ext(name, ".webp") &&
         !rubraview_path_has_ext(name, ".png") && !rubraview_path_has_ext(name, ".apng") &&
         !rubraview_path_has_ext(name, ".avif") && !rubraview_path_has_ext(name, ".jxl")) return false;
-    if (path.len > 0) {
+    if (path.size > 0) {
         rubraview_fs_mapping_t map = {0};
         bool moves = rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX &&
                      rubraview_image_is_animated(map.data, (size_t)map.size);
         rubraview_pal_fs_unmap(&map);
         return moves;
     }
-    return bytes && bytes->ok && rubraview_image_is_animated((const uint8_t*)bytes->data.ptr, bytes->data.len);
+    return bytes && bytes->ok && rubraview_image_is_animated((const uint8_t*)bytes->data.ptr, bytes->data.size);
 }
 
 static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes) {
@@ -1689,7 +1689,7 @@ static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, ru
     rubraview_image_load_result_t loaded = bytes.from_disk
         ? rubraview_pal_image_load_texture(app->renderer, app->source.pages[index].path, true)
         : rubraview_pal_image_load_texture_from_memory(app->renderer,
-                                                       (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
+                                                       (const uint8_t*)bytes.data.ptr, bytes.data.size, true);
     if (!loaded.ok) {
         page->failed = true;
         return;
@@ -1733,7 +1733,7 @@ static bool anim_plays(const app_state_t *app) {
 
 /* What happens at its end: 0 round again, 1 stop there, 2 the next file. */
 static int anim_end_mode(const app_state_t *app) {
-    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("animation_end")));
+    int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("animation_end")));
     return mode >= 0 && mode <= 2 ? mode : 0;
 }
 
@@ -1804,17 +1804,17 @@ static void picture_copy(app_state_t *app) {
     if (!memory) { osd_say(app, TU8("there is not memory enough to copy this picture")); return; }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
     rubraview_pixbuf_t full = {0};
-    u8str_t path = app->source.pages[page].path;
-    if (path.len > 0) {
+    proven_u8str_view_t path = app->source.pages[page].path;
+    if (path.size > 0) {
         full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, 0, 0);
     } else {
         rubraview_page_bytes_t bytes = { .ok = false };
         AcquireSRWLockExclusive(&app->source_lock);
         bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
         ReleaseSRWLockExclusive(&app->source_lock);
-        if (bytes.ok && bytes.data.len > 0) {
-            full = rubraview_pal_image_read_pixels_within(&scratch, (u8str_t){ .ptr = "", .len = 0 },
-                                                          (const uint8_t*)bytes.data.ptr, bytes.data.len, true, 0, 0);
+        if (bytes.ok && bytes.data.size > 0) {
+            full = rubraview_pal_image_read_pixels_within(&scratch, PROVEN_LIT(""),
+                                                          (const uint8_t*)bytes.data.ptr, bytes.data.size, true, 0, 0);
         }
     }
     rubraview_pixbuf_t bgra = !rubraview_pixbuf_is_valid(&full) || full.format == RUBRAVIEW_PIXFMT_BGRA8
@@ -1835,20 +1835,20 @@ static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int
         return;
     }
     int32_t page = app->media ? app->media_page : app->anim_page;
-    if (page < 0 || (size_t)page >= page_count(app) || app->source.archive_path.len > 0) {
+    if (page < 0 || (size_t)page >= page_count(app) || app->source.archive_path.size > 0) {
         osd_say(app, TU8("a frame is saved beside its file; this one is in an archive (Ctrl+C copies it)"));
         return;
     }
-    u8str_t path = app->source.pages[page].path;
-    u8str_t name = rubraview_path_basename(path);
-    size_t stem = name.len;
-    for (size_t i = name.len; i > 0; --i) if (name.ptr[i - 1] == '.') { stem = i - 1; break; }
+    proven_u8str_view_t path = app->source.pages[page].path;
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    size_t stem = name.size;
+    for (size_t i = name.size; i > 0; --i) if (name.ptr[i - 1] == '.') { stem = i - 1; break; }
     double at = app->media ? app->media_position : play_position(app);
     char file[512];
     int n = snprintf(file, sizeof(file), "%.*s_%02d-%02d-%03d.png", (int)(stem < 400 ? stem : 400), name.ptr,
                      (int)(at / 60.0), (int)fmod(at, 60.0), (int)(fmod(at, 1.0) * 1000.0));
     if (n <= 0) return;
-    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), (u8str_t){ .ptr = file, .len = (size_t)n });
+    proven_u8str_view_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)file, .size = (size_t)n });
     /* The frame as the writer wants it: its own rows, alpha full. */
     uint8_t *copy = (uint8_t*)rubraview_malloc_product((size_t)width, 4u, (size_t)height);
     if (!copy) return;
@@ -1862,9 +1862,9 @@ static void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int
     options.format = RUBRAVIEW_EXPORT_PNG;
     bool written = rubraview_pal_image_save(target, &pixels, &options);
     free(copy);
-    if (wanted == FRAME_EDIT && written && target.len < sizeof(app->edit_after)) {
-        memcpy(app->edit_after, target.ptr, target.len);   /* Edit opens once it is the page on screen */
-        app->edit_after[target.len] = '\0';
+    if (wanted == FRAME_EDIT && written && target.size < sizeof(app->edit_after)) {
+        memcpy(app->edit_after, target.ptr, target.size);   /* Edit opens once it is the page on screen */
+        app->edit_after[target.size] = '\0';
         reopen_on_path(app, app_keep(app, target), (size_t)page + 1);
     }
     char line[600];
@@ -1951,10 +1951,10 @@ static void show_frame(app_state_t *app, size_t frame_index) {
     if (app->anim_reader) { anim_show(app, frame_index); return; }
     app_page_t *page = &app->pages[app->anim_page];
 
-    u8str_t path = app->source.pages[app->anim_page].path;
-    rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    proven_u8str_view_t path = app->source.pages[app->anim_page].path;
+    rubraview_page_bytes_t bytes = { .data = PROVEN_LIT(""), .from_disk = true, .ok = false };
     void *mem = NULL;
-    if (path.len == 0) {
+    if (path.size == 0) {
         if (page_read_cost(app, (size_t)app->anim_page) > PAGE_JOB_MIN_COST) return;
         bytes = page_read_owned(&app->source, &app->source_lock, (size_t)app->anim_page, &mem);
         if (!bytes.ok) return;
@@ -1962,7 +1962,7 @@ static void show_frame(app_state_t *app, size_t frame_index) {
 
     double delay = 0.0;
     rubraview_image_load_result_t loaded = rubraview_pal_image_load_frame(
-        app->renderer, path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+        app->renderer, path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
         frame_index, true, &delay);
     free(mem);
     if (!loaded.ok) return;
@@ -1991,14 +1991,14 @@ static void animation_prepare(app_state_t *app) {
     if (page_index < 0 || (size_t)page_index >= page_count(app)) return;
 
     if (app->pages[page_index].skipped) return;   /* D-98 */
-    u8str_t path = app->source.pages[page_index].path;
+    proven_u8str_view_t path = app->source.pages[page_index].path;
     /* A film or a track is no picture to look for frames in. Looking read
        the whole file, twice, before it played — minutes over a network
        share (owner, 2026-10-11; since D-82, 0.0.39). */
     if (is_media_path(path) || is_text_path(path) || is_text_path(app->source.pages[page_index].name)) return;
-    rubraview_page_bytes_t bytes = { .data = { .ptr = "", .len = 0 }, .from_disk = true, .ok = false };
+    rubraview_page_bytes_t bytes = { .data = PROVEN_LIT(""), .from_disk = true, .ok = false };
     void *mem = NULL;
-    if (path.len == 0) {
+    if (path.size == 0) {
         /* A far page in a streamed block is not read twice to look for frames. */
         if (page_read_cost(app, (size_t)page_index) > PAGE_JOB_MIN_COST) return;
         bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page_index, &mem);
@@ -2027,7 +2027,7 @@ static void animation_prepare(app_state_t *app) {
     size_t timed_count = 0;
     int32_t canvas_w = 0, canvas_h = 0;
     const rubraview_frame_t *timed_frames = NULL;
-    app->anim_reader = rubraview_pal_anim_open(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+    app->anim_reader = rubraview_pal_anim_open(path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
                                                &timed_frames, &timed_count, &canvas_w, &canvas_h);
     if (app->anim_reader) {
         free(mem);
@@ -2056,7 +2056,7 @@ static void animation_prepare(app_state_t *app) {
             int n = snprintf(line, sizeof(line), T("showing the first %zu pictures — the rest does not fit in memory"),
                              timed_count);
             if (n > 0) {
-                osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+                osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
                 app->notice_seconds = MEDIA_NOTICE_SECONDS;
             }
         }
@@ -2068,7 +2068,7 @@ static void animation_prepare(app_state_t *app) {
         app->anim_frames = (rubraview_frame_t*)calloc(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
         if (!app->anim_frames) { free(mem); return; }
     }
-    size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.len,
+    size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
                                                   app->anim_frames, ANIM_MAX_FRAMES);
     free(mem);
     if (count <= 1) return;               /* an ordinary image */
@@ -2230,7 +2230,7 @@ static size_t spread_index_for_page(const app_state_t *app, int32_t page_index) 
 }
 
 static void rebuild_layout(app_state_t *app);
-static bool is_media_path(u8str_t path);
+static bool is_media_path(proven_u8str_view_t path);
 
 /* The spread for a page the reader chose by name — in a list, on the page
    bar, by opening it. A film or an animation chosen so is shown whatever
@@ -2292,8 +2292,8 @@ static void zoom_leave_real_fit(app_state_t *app) {
 
 static void zoom_say(app_state_t *app) {
     char line[24];
-    u8str_t text = at_real_size(app) ? TU8("0% (real size)") : rubraview_scale_caption(line, sizeof(line), app->zoom);
-    if (text.len > 0) osd_say(app, text);
+    proven_u8str_view_t text = at_real_size(app) ? TU8("0% (real size)") : rubraview_scale_caption(line, sizeof(line), app->zoom);
+    if (text.size > 0) osd_say(app, text);
     note_activity(app);
 }
 
@@ -2327,10 +2327,10 @@ static void update_window_title(app_state_t *app) {
     char title[768];
     size_t used = 0;
     if (app->picker_open) {   /* 1.24.0 (owner, 2026-10-19): "Rubraview - <the folder>" */
-        u8str_t name = rubraview_picker_is_places(app->picker_dir) ? TU8("PC")
+        proven_u8str_view_t name = rubraview_picker_is_places(app->picker_dir) ? TU8("PC")
                      : rubraview_picker_is_recent(app->picker_dir) ? TU8("Recent") : rubraview_path_basename(app->picker_dir);
-        if (name.len == 0) name = app->picker_dir;
-        snprintf(title, sizeof(title), "Rubraview - %.*s", (int)(name.len < 600 ? name.len : 600), name.ptr);
+        if (name.size == 0) name = app->picker_dir;
+        snprintf(title, sizeof(title), "Rubraview - %.*s", (int)(name.size < 600 ? name.size : 600), name.ptr);
         rubraview_pal_window_set_title(app->window, title);
         return;
     }
@@ -2338,19 +2338,19 @@ static void update_window_title(app_state_t *app) {
     if (page >= 0 && (size_t)page < page_count(app)) {
         /* The name the status line shows, not the path: an archive page
            has no path of its own (found by T037). */
-        u8str_t name = page_display_name(app, (size_t)page);
+        proven_u8str_view_t name = page_display_name(app, (size_t)page);
         int n = snprintf(title, sizeof(title), "%.*s (%d/%zu) ",
-                         (int)name.len, name.ptr, (int)page + 1, page_count(app));
+                         (int)name.size, name.ptr, (int)page + 1, page_count(app));
         used = n > 0 ? ((size_t)n < sizeof(title) ? (size_t)n : sizeof(title) - 1) : 0;
         if (app->media && page == app->media_page) {
             /* A video shows where it is, to the millisecond — which is
                also how a frame step can be checked from outside. */
             char at[32], total[32];
-            u8str_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
-            u8str_t t = app->media_info.live ? TU8("live")   /* RV-157 */
+            proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
+            proven_u8str_view_t t = app->media_info.live ? TU8("live")   /* RV-157 */
                       : rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
             n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s%s ",
-                         (int)a.len, a.ptr, (int)t.len, t.ptr,
+                         (int)a.size, a.ptr, (int)t.size, t.ptr,
                          app->media_paused ? " paused" : "",
                          app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
@@ -2364,10 +2364,10 @@ static void update_window_title(app_state_t *app) {
         } else if (anim_plays(app) && page == app->anim_page) {
             /* D-82: an animation says where it is as a film does. */
             char at[32], total[32];
-            u8str_t a = rubraview_format_timecode(at, sizeof(at), rubraview_animation_position(&app->animation), true);
-            u8str_t t = rubraview_format_timecode(total, sizeof(total), rubraview_animation_cycle_seconds(&app->animation), true);
+            proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), rubraview_animation_position(&app->animation), true);
+            proven_u8str_view_t t = rubraview_format_timecode(total, sizeof(total), rubraview_animation_cycle_seconds(&app->animation), true);
             n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
-                         (int)a.len, a.ptr, (int)t.len, t.ptr, app->animation.paused ? " paused" : "");
+                         (int)a.size, a.ptr, (int)t.size, t.ptr, app->animation.paused ? " paused" : "");
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
@@ -2377,11 +2377,11 @@ static void update_window_title(app_state_t *app) {
 
 /* ---- video pages (M5 slice 1: D-8, D-9) ---- */
 
-static void osd_say(app_state_t *app, u8str_t text);
+static void osd_say(app_state_t *app, proven_u8str_view_t text);
 
 static void vobsub_clear(app_state_t *app);
 static void pgs_clear(app_state_t *app);
-static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubraview_export_format_t format,
+static int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 static void subs_drop(app_state_t *app);
 static proven_arena_t *subs_arena(app_state_t *app, size_t need);
@@ -2439,7 +2439,7 @@ static void media_close(app_state_t *app) {
     pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
     subs_drop(app);
-    app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
+    app->subtitle_name = PROVEN_LIT("");
     app->tracks = rubraview_tracks_create();
     app->subtitle_count = 0;
 }
@@ -2526,7 +2526,7 @@ static proven_arena_t *media_arena(app_state_t *app, size_t need) {
 
 /* The equaliser window's bands (owner, 2026-10-01): `audio.eq_band1..10`
    in the settings, the Custom preset's gains. */
-static u8str_t eq_band_key(size_t band) {
+static proven_u8str_view_t eq_band_key(size_t band) {
     static const char *const KEYS[RUBRAVIEW_EQ_BANDS] = {
         "eq_band1", "eq_band2", "eq_band3", "eq_band4", "eq_band5",
         "eq_band6", "eq_band7", "eq_band8", "eq_band9", "eq_band10",
@@ -2535,15 +2535,15 @@ static u8str_t eq_band_key(size_t band) {
 }
 
 static double eq_band_db(const app_state_t *app, size_t band) {
-    return rubraview_settings_get(&app->settings, U8("audio"), eq_band_key(band));
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), eq_band_key(band));
 }
 
 static int eq_preset_now(const app_state_t *app) {
-    int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
+    int preset = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset")));
     return preset >= 0 && preset < RUBRAVIEW_EQWIN_PRESETS ? preset : 0;
 }
 
-static u8str_t eq_preset_label(int preset) {
+static proven_u8str_view_t eq_preset_label(int preset) {
     return preset == RUBRAVIEW_EQWIN_CUSTOM ? TU8("Custom") : rubraview_eq_preset_name((rubraview_eq_preset_t)preset);
 }
 
@@ -2561,14 +2561,14 @@ static void eq_shown_gains(const app_state_t *app, float *out) {
    handed to the sound output (owner, 2026-09-30). */
 static void audio_chain_update(app_state_t *app) {
     rubraview_audio_chain_config_t config = { .eq_preset = RUBRAVIEW_EQ_FLAT, .night_mode = false, .gain = 1.0 };
-    int preset = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("eq_preset")));
+    int preset = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset")));
     config.eq_preset = preset >= 0 && preset < RUBRAVIEW_EQ_PRESET_COUNT ? (rubraview_eq_preset_t)preset : RUBRAVIEW_EQ_FLAT;
     if (preset == RUBRAVIEW_EQWIN_CUSTOM) {   /* the window's own ten gains (owner, 2026-10-01) */
         config.eq_custom = true;
         for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) config.eq_gains_db[b] = (float)eq_band_db(app, b);
     }
-    config.night_mode = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5;
-    int rg = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("replaygain")));
+    config.night_mode = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode")) > 0.5;
+    int rg = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("replaygain")));
     const rubraview_tags_t *tags = app->bgm_media && !app->media ? &app->bgm_tags : &app->music_tags;
     if (rg > 0) config.gain = rubraview_replaygain_factor(&tags->replaygain, (rubraview_replaygain_mode_t)rg, 0.0);
     rubraview_pal_audio_set_chain(&config);
@@ -2579,7 +2579,7 @@ static void audio_chain_update(app_state_t *app) {
    costs a few thousand pixels rather than a few million. */
 static void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) {
     if (!tags->art || tags->art_size == 0) return;
-    rubraview_pixbuf_t art = rubraview_pal_image_read_pixels(app->arena, (u8str_t){ .ptr = "", .len = 0 },
+    rubraview_pixbuf_t art = rubraview_pal_image_read_pixels(app->arena, PROVEN_LIT(""),
                                                              tags->art, tags->art_size, false);
     if (!rubraview_pixbuf_is_valid(&art)) return;
 
@@ -2600,40 +2600,40 @@ static void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) 
 }
 
 /* Read the file's own words once per track. */
-static void music_load(app_state_t *app, u8str_t path) {
+static void music_load(app_state_t *app, proven_u8str_view_t path) {
     music_clear(app);
-    if (path.len == 0) return;
-    u8str_t head = rubraview_pal_fs_read_file(media_arena(app, MUSIC_MAX_HEAD_BYTES + 4096u), path, MUSIC_MAX_HEAD_BYTES);
-    if (head.len == 0) return;      /* a record too large for the head budget: no tags, and it still plays */
-    app->music_tags = rubraview_tags_read(media_arena(app, head.len + (1u << 20)), (rubraview_tags_source_t){
-        .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
+    if (path.size == 0) return;
+    proven_u8str_view_t head = rubraview_pal_fs_read_file(media_arena(app, MUSIC_MAX_HEAD_BYTES + 4096u), path, MUSIC_MAX_HEAD_BYTES);
+    if (head.size == 0) return;      /* a record too large for the head budget: no tags, and it still plays */
+    app->music_tags = rubraview_tags_read(media_arena(app, head.size + (1u << 20)), (rubraview_tags_source_t){
+        .head = (const uint8_t*)head.ptr, .head_size = head.size, .file_size = head.size });
     app->music_tags_read = true;
     music_make_backdrop(app, &app->music_tags);
     /* A `.lrc` of the same name beside it: the words, in time. Else the
        words the file carries (owner, 2026-10-01): SYLT's timed lines,
        then USLT / LYRICS / ©lyr text, which is read as LRC when it is. */
     proven_arena_t *ma = media_arena(app, 3u << 20);   /* the words: a megabyte at most, and their parse */
-    u8str_t lrc = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".lrc"), 1024u * 1024u);
-    if (lrc.len > 0) app->music_lyrics = rubraview_lyrics_parse(ma, lrc);
+    proven_u8str_view_t lrc = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".lrc"), 1024u * 1024u);
+    if (lrc.size > 0) app->music_lyrics = rubraview_lyrics_parse(ma, lrc);
     if (app->music_lyrics.count == 0 && app->music_tags.synced_lyrics_count > 0) {
         app->music_lyrics = rubraview_lyrics_from_lines(ma, app->music_tags.synced_lyrics,
                                                         app->music_tags.synced_lyrics_count);
     }
-    if (app->music_lyrics.count == 0 && app->music_tags.lyrics_text.len > 0) {
+    if (app->music_lyrics.count == 0 && app->music_tags.lyrics_text.size > 0) {
         app->music_lyrics = rubraview_lyrics_from_text(ma, app->music_tags.lyrics_text);
     }
     ma = media_arena(app, 3u << 20);   /* the sheet: the same */
     /* A `.cue` of the same name: one file cut into the record's tracks.
        Else a sheet of any name beside it whose FILE names this file
        (owner, 2026-10-01: `CDImage.cue` for `Album.flac`). */
-    u8str_t cue = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".cue"), 1024u * 1024u);
-    if (cue.len > 0) app->music_cue = rubraview_cue_parse(ma, cue, app->music_tags.duration_seconds);
+    proven_u8str_view_t cue = rubraview_pal_fs_read_file(ma, rubraview_path_with_ext(ma, path, ".cue"), 1024u * 1024u);
+    if (cue.size > 0) app->music_cue = rubraview_cue_parse(ma, cue, app->music_tags.duration_seconds);
     if (app->music_cue.count < 2) {
         app->music_cue = (rubraview_cue_sheet_t){0};
-        u8str_t dir = rubraview_path_dirname(path);
-        if (dir.len == 0) dir = U8(".");
-        if (dir.len >= sizeof(app->cue_scan_dir) || dir.len != app->cue_scan_dir_len ||
-            memcmp(dir.ptr, app->cue_scan_dir, dir.len) != 0) {
+        proven_u8str_view_t dir = rubraview_path_dirname(path);
+        if (dir.size == 0) dir = PROVEN_LIT(".");
+        if (dir.size >= sizeof(app->cue_scan_dir) || dir.size != app->cue_scan_dir_len ||
+            memcmp(dir.ptr, app->cue_scan_dir, dir.size) != 0) {
             /* A folder not listed yet: its sheets, kept for the tracks after this one. */
             app->cue_scan_count = 0;
             app->cue_scan_paths = NULL;
@@ -2641,27 +2641,27 @@ static void music_load(app_state_t *app, u8str_t path) {
             rubraview_fs_listing_t beside = rubraview_pal_fs_list_dir(app->arena, dir);
             size_t sheets = 0;
             for (size_t i = 0; i < beside.count; ++i) {
-                if (!beside.entries[i].is_directory && rubraview_glob_match_list(beside.entries[i].name, U8("*.cue"))) sheets++;
+                if (!beside.entries[i].is_directory && rubraview_glob_match_list(beside.entries[i].name, PROVEN_LIT("*.cue"))) sheets++;
             }
             if (sheets > 64) sheets = 64;
-            proven_result_mem_mut_t res = sheets ? rubraview_arena_alloc_array(app->arena, sheets, sizeof(u8str_t))
+            proven_result_mem_mut_t res = sheets ? rubraview_arena_alloc_array(app->arena, sheets, sizeof(proven_u8str_view_t))
                                                  : (proven_result_mem_mut_t){ .err = PROVEN_OK };
             if (sheets && proven_is_ok(res.err)) {
-                app->cue_scan_paths = (u8str_t*)(void*)res.value.ptr;
+                app->cue_scan_paths = (proven_u8str_view_t*)(void*)res.value.ptr;
                 for (size_t i = 0; i < beside.count && app->cue_scan_count < sheets; ++i) {
                     const rubraview_fs_entry_t *e = &beside.entries[i];
-                    if (e->is_directory || !rubraview_glob_match_list(e->name, U8("*.cue"))) continue;
+                    if (e->is_directory || !rubraview_glob_match_list(e->name, PROVEN_LIT("*.cue"))) continue;
                     app->cue_scan_paths[app->cue_scan_count++] = app_keep(app, e->path);
                 }
             }
-            if (dir.len < sizeof(app->cue_scan_dir)) {
-                memcpy(app->cue_scan_dir, dir.ptr, dir.len);
-                app->cue_scan_dir_len = dir.len;
+            if (dir.size < sizeof(app->cue_scan_dir)) {
+                memcpy(app->cue_scan_dir, dir.ptr, dir.size);
+                app->cue_scan_dir_len = dir.size;
             }
         }
         for (size_t i = 0; i < app->cue_scan_count; ++i) {
             proven_arena_t *sa = media_arena(app, 3u << 20);   /* each sheet read for this track only */
-            u8str_t text = rubraview_pal_fs_read_file(sa, app->cue_scan_paths[i], 1024u * 1024u);
+            proven_u8str_view_t text = rubraview_pal_fs_read_file(sa, app->cue_scan_paths[i], 1024u * 1024u);
             rubraview_cue_sheet_t sheet = rubraview_cue_parse(sa, text, app->music_tags.duration_seconds);
             if (sheet.count >= 2 && rubraview_cue_names_audio(&sheet, rubraview_path_basename(path))) {
                 app->music_cue = sheet;
@@ -2675,27 +2675,27 @@ static void music_load(app_state_t *app, u8str_t path) {
 /* A `.cue` opened on its own (owner, 2026-10-01) plays the audio it
    names — beside it, or with another extension of that name when the
    record was converted after the sheet was written. "" when there is none. */
-static u8str_t cue_audio_path(app_state_t *app, u8str_t cue_path) {
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, cue_path, 1024u * 1024u);
+static proven_u8str_view_t cue_audio_path(app_state_t *app, proven_u8str_view_t cue_path) {
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, cue_path, 1024u * 1024u);
     rubraview_cue_sheet_t sheet = rubraview_cue_parse(app->arena, text, 0.0);
-    if (sheet.audio_file.len == 0) return U8("");
-    u8str_t named = sheet.audio_file;
-    for (size_t i = named.len; i > 0; --i) {
-        if (named.ptr[i - 1] == '/' || named.ptr[i - 1] == '\\') { named = (u8str_t){ named.ptr + i, named.len - i }; break; }
+    if (sheet.audio_file.size == 0) return PROVEN_LIT("");
+    proven_u8str_view_t named = sheet.audio_file;
+    for (size_t i = named.size; i > 0; --i) {
+        if (named.ptr[i - 1] == '/' || named.ptr[i - 1] == '\\') { named = (proven_u8str_view_t){ named.ptr + i, named.size - i }; break; }
     }
-    u8str_t dir = rubraview_path_dirname(cue_path);
-    u8str_t audio = rubraview_path_join(app->arena, dir, named);
+    proven_u8str_view_t dir = rubraview_path_dirname(cue_path);
+    proven_u8str_view_t audio = rubraview_path_join(app->arena, dir, named);
     rubraview_fs_entry_t found;
     if (rubraview_pal_fs_stat(app->arena, audio, &found) && !found.is_directory) return audio;
     static const char *const EXTS[] = { ".flac", ".wav", ".ape", ".wv", ".mp3", ".m4a", ".ogg", ".opus", ".tta" };
     for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); ++i) {
-        u8str_t other = rubraview_path_with_ext(app->arena, audio, EXTS[i]);
+        proven_u8str_view_t other = rubraview_path_with_ext(app->arena, audio, EXTS[i]);
         if (rubraview_pal_fs_stat(app->arena, other, &found) && !found.is_directory) return other;
     }
-    return U8("");
+    return PROVEN_LIT("");
 }
 
-static rubraview_texture_t *audio_page_picture(app_state_t *app, u8str_t path, int32_t *out_w, int32_t *out_h) {
+static rubraview_texture_t *audio_page_picture(app_state_t *app, proven_u8str_view_t path, int32_t *out_w, int32_t *out_h) {
     rubraview_texture_t *texture = NULL;
     int32_t w = 0, h = 0;
     uint8_t *pixels = rubraview_pal_shell_thumbnail_bgra(path, 512, &w, &h);
@@ -2777,18 +2777,18 @@ static app_page_t *media_page_ready(app_state_t *app) {
 #define PGS_MAX_SUP_BYTES    (1024ull * 1024u * 1024u)
 
 /* A subtitle picture file, mapped; empty when it cannot be, or is too large. */
-static u8str_t map_subtitle_file(u8str_t path, rubraview_fs_mapping_t *map, uint64_t cap) {
+static proven_u8str_view_t map_subtitle_file(proven_u8str_view_t path, rubraview_fs_mapping_t *map, uint64_t cap) {
     rubraview_pal_fs_unmap(map);
-    if (!rubraview_pal_fs_map(path, map)) return (u8str_t){ .ptr = "", .len = 0 };
-    if (map->size > cap) { rubraview_pal_fs_unmap(map); return (u8str_t){ .ptr = "", .len = 0 }; }
-    return (u8str_t){ .ptr = (const char*)map->data, .len = (size_t)map->size };
+    if (!rubraview_pal_fs_map(path, map)) return PROVEN_LIT("");
+    if (map->size > cap) { rubraview_pal_fs_unmap(map); return PROVEN_LIT(""); }
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)map->data, .size = (size_t)map->size };
 }
 #define SUBTITLE_MAX_CANDIDATES 8
 
 /* §3.16.1 / R135: the subtitle files that share the film's name. The
    folder is listed rather than reused from the page list, because a
    .srt is not a page — the page source never saw it. */
-static size_t subtitle_candidates(proven_arena_t *arena, u8str_t video_path,
+static size_t subtitle_candidates(proven_arena_t *arena, proven_u8str_view_t video_path,
                                   rubraview_subtitle_candidate_t *out, size_t capacity,
                                   const char **out_why) {
     if (out_why) *out_why = T("no subtitle file beside the video");
@@ -2796,9 +2796,9 @@ static size_t subtitle_candidates(proven_arena_t *arena, u8str_t video_path,
         rubraview_pal_fs_list_dir(arena, rubraview_path_dirname(video_path));
     if (listing.count == 0) { if (out_why) *out_why = T("the folder could not be listed"); return 0; }
 
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing.count, sizeof(u8str_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, listing.count, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(res.err)) { if (out_why) *out_why = T("out of memory"); return 0; }
-    u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
+    proven_u8str_view_t *paths = (proven_u8str_view_t*)(void*)res.value.ptr;
     size_t sibling_count = 0;
     for (size_t i = 0; i < listing.count; ++i) {
         if (listing.entries[i].is_directory) continue;
@@ -2812,16 +2812,16 @@ static rubraview_subtitle_track_t subtitle_read(proven_arena_t *arena,
                                                 rubraview_subtitle_candidate_t candidate,
                                                 const char **out_why) {
     rubraview_subtitle_track_t empty = {0};
-    u8str_t text = rubraview_pal_fs_read_file(arena, candidate.path, SUBTITLE_MAX_BYTES);
-    if (text.len == 0) { if (out_why) *out_why = T("the subtitle file could not be read"); return empty; }
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, candidate.path, SUBTITLE_MAX_BYTES);
+    if (text.size == 0) { if (out_why) *out_why = T("the subtitle file could not be read"); return empty; }
     /* A Korean .smi is nearly always CP949, and the parser reads UTF-8.
        The archive-name check is a UTF-8 validator, so it answers this
        question too; bytes that are not UTF-8 are read in the machine's
        own code page (0). */
     bool transcoded = false;
     if (rubraview_archive_filename_detect(text, false) == RUBRAVIEW_ENCODING_NEEDS_FALLBACK) {
-        u8str_t converted = rubraview_pal_transcode_codepage(arena, text, 0);
-        if (converted.len > 0) { text = converted; transcoded = true; }
+        proven_u8str_view_t converted = rubraview_pal_transcode_codepage(arena, text, 0);
+        if (converted.size > 0) { text = converted; transcoded = true; }
     }
     rubraview_subtitle_track_t track = rubraview_subtitle_parse(arena, text, candidate.format);
     /* RV-115: where it came from and how it was read, for saving it again. */
@@ -2833,10 +2833,10 @@ static rubraview_subtitle_track_t subtitle_read(proven_arena_t *arena,
 }
 
 /* What `--probe-media` reports: the first subtitle file, read. */
-static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t video_path,
-                                                u8str_t *out_name, const char **out_why) {
+static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, proven_u8str_view_t video_path,
+                                                proven_u8str_view_t *out_name, const char **out_why) {
     rubraview_subtitle_track_t empty = {0};
-    if (out_name) *out_name = (u8str_t){ .ptr = "", .len = 0 };
+    if (out_name) *out_name = PROVEN_LIT("");
     rubraview_subtitle_candidate_t found[SUBTITLE_MAX_CANDIDATES];
     size_t count = subtitle_candidates(arena, video_path, found, SUBTITLE_MAX_CANDIDATES, out_why);
     if (count == 0) return empty;
@@ -2849,7 +2849,7 @@ static rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, u8str_t v
    it — into one list, and turns on the subtitle the reader would want
    (§3.16.2). Subtitles are "off" as well as every file: that is a
    choice, so it is in the cycle. */
-static void tracks_prepare(app_state_t *app, u8str_t video_path) {
+static void tracks_prepare(app_state_t *app, proven_u8str_view_t video_path) {
     app->tracks = rubraview_tracks_create();
     app->subtitle_last = -1;
     if (app->media) rubraview_pal_media_tracks(app->media, &app->tracks);
@@ -2869,10 +2869,10 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
     app->subtitle_count = 0;
     for (size_t i = 0; i < found_count && app->subtitle_count < SUBTITLE_MAX_CANDIDATES; ++i) {
         size_t languages = 1;
-        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        proven_u8str_view_t tags[SUBTITLE_MAX_CANDIDATES];
         if (found[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
             proven_arena_t *pa = scratch_begin(app, &sc, VOBSUB_MAX_IDX_BYTES + 1024u);
-            u8str_t idx_text = rubraview_pal_fs_read_file(pa, found[i].path, VOBSUB_MAX_IDX_BYTES);
+            proven_u8str_view_t idx_text = rubraview_pal_fs_read_file(pa, found[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (n > 0) languages = n;
             scratch_end(app, &sc);
@@ -2896,13 +2896,13 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
 
     static const char *const FORMAT_NAME[] = { "?", "srt", "smi", "vtt", "ass", "idx", "sup" };
     for (size_t i = 0; i < app->subtitle_count; ++i) {
-        u8str_t language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path);
-        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        proven_u8str_view_t language = rubraview_subtitle_language_tag(video_path, app->subtitle_files[i].path);
+        proven_u8str_view_t tags[SUBTITLE_MAX_CANDIDATES];
         size_t which = (size_t)app->subtitle_vobsub_stream[i];
         if (app->subtitle_files[i].format == RUBRAVIEW_SUBTITLE_VOBSUB) {
             /* The index names its own languages; the file's name does not. */
             proven_arena_t *pa = scratch_begin(app, &sc, VOBSUB_MAX_IDX_BYTES + 1024u);
-            u8str_t idx_text = rubraview_pal_fs_read_file(pa, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
+            proven_u8str_view_t idx_text = rubraview_pal_fs_read_file(pa, app->subtitle_files[i].path, VOBSUB_MAX_IDX_BYTES);
             size_t n = rubraview_vobsub_languages(idx_text, tags, SUBTITLE_MAX_CANDIDATES);
             if (which < n) language = app_keep(app, tags[which]);
             scratch_end(app, &sc);
@@ -2912,7 +2912,7 @@ static void tracks_prepare(app_state_t *app, u8str_t video_path) {
             proven_arena_t *pa = scratch_begin(app, &sc, SUBTITLE_PARSE_BYTES);
             rubraview_subtitle_track_t peek = subtitle_read(pa, app->subtitle_files[i], NULL);
             size_t n = rubraview_subtitle_languages(&peek, tags, SUBTITLE_MAX_CANDIDATES);
-            if (which < n && tags[which].len > 0) language = app_keep(app, tags[which]);
+            if (which < n && tags[which].size > 0) language = app_keep(app, tags[which]);
             scratch_end(app, &sc);
         }
         rubraview_track_t track = {
@@ -2936,23 +2936,23 @@ static void vobsub_clear(app_state_t *app) {
     app->vobsub_texture_cue = -1;
     app->vobsub_texture_w = app->vobsub_texture_h = 0;
     app->vobsub = (rubraview_vobsub_track_t){0};
-    app->vobsub_sub = (u8str_t){ .ptr = "", .len = 0 };
+    app->vobsub_sub = PROVEN_LIT("");
     rubraview_pal_fs_unmap(&app->vobsub_map);
 }
 
 /* `movie.idx` names the index; its pictures are in `movie.sub` beside it. */
-static void vobsub_load(app_state_t *app, u8str_t idx_path, size_t language) {
+static void vobsub_load(app_state_t *app, proven_u8str_view_t idx_path, size_t language) {
     vobsub_clear(app);
     proven_arena_t *sa = subs_arena(app, 4u * VOBSUB_MAX_IDX_BYTES);
-    u8str_t idx_text = rubraview_pal_fs_read_file(sa, idx_path, VOBSUB_MAX_IDX_BYTES);
-    if (idx_text.len == 0) return;
+    proven_u8str_view_t idx_text = rubraview_pal_fs_read_file(sa, idx_path, VOBSUB_MAX_IDX_BYTES);
+    if (idx_text.size == 0) return;
 
     /* The whole path, not just the name: the viewer is not always
        started in the film's folder. */
-    u8str_t sub_path = rubraview_path_with_ext(sa, idx_path, ".sub");
-    if (sub_path.len == 0) return;
+    proven_u8str_view_t sub_path = rubraview_path_with_ext(sa, idx_path, ".sub");
+    if (sub_path.size == 0) return;
     app->vobsub_sub = map_subtitle_file(sub_path, &app->vobsub_map, VOBSUB_MAX_SUB_BYTES);
-    if (app->vobsub_sub.len == 0) {
+    if (app->vobsub_sub.size == 0) {
         osd_say(app, TU8("the .sub file beside the index is missing"));
         return;
     }
@@ -2971,14 +2971,14 @@ static void pgs_clear(app_state_t *app) {
     app->pgs_texture_cue = -1;
     app->pgs_texture_w = app->pgs_texture_h = 0;
     app->pgs = (rubraview_pgs_track_t){0};
-    app->pgs_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    app->pgs_bytes = PROVEN_LIT("");
     rubraview_pal_fs_unmap(&app->pgs_map);
 }
 
-static void pgs_load(app_state_t *app, u8str_t sup_path) {
+static void pgs_load(app_state_t *app, proven_u8str_view_t sup_path) {
     pgs_clear(app);
     app->pgs_bytes = map_subtitle_file(sup_path, &app->pgs_map, PGS_MAX_SUP_BYTES);
-    if (app->pgs_bytes.len == 0) {
+    if (app->pgs_bytes.size == 0) {
         osd_say(app, TU8("the subtitle file could not be read"));
         return;
     }
@@ -2987,14 +2987,14 @@ static void pgs_load(app_state_t *app, u8str_t sup_path) {
         if (!proven_is_ok(mem.err)) return;
         app->pgs_pixels = (uint8_t*)mem.value.ptr;
     }
-    app->pgs = rubraview_pgs_index(subs_arena(app, 16u << 20), (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.len);
+    app->pgs = rubraview_pgs_index(subs_arena(app, 16u << 20), (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.size);
 }
 
 /* The sync the reader set by hand for this film comes back — for a text
    track and for a picture one alike, since one offset moves them all. */
 static void subtitle_restore_offset(app_state_t *app) {
     if (app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
-        rubraview_u8_eq(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
+        proven_u8str_view_eq(app->subtitle_offset_for, app->source.pages[app->media_page].path)) {
         app->subtitle.offset_seconds = app->subtitle_offset_seconds;
     }
 }
@@ -3006,7 +3006,7 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     pgs_clear(app);
     app->subtitle = (rubraview_subtitle_track_t){0};
     subs_drop(app);
-    app->subtitle_name = (u8str_t){ .ptr = "", .len = 0 };
+    app->subtitle_name = PROVEN_LIT("");
     app->tracks.current_subtitle = -1;
     if (index < 0 || (size_t)index >= app->tracks.count) return;
     const rubraview_track_t *track = &app->tracks.tracks[index];
@@ -3018,9 +3018,9 @@ static void subtitle_select(app_state_t *app, int32_t index) {
             vobsub_load(app, app->subtitle_files[track->stream_index].path,
                         (size_t)app->subtitle_vobsub_stream[track->stream_index]);
             if (app->vobsub.count == 0) return;
-            u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+            proven_u8str_view_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
                                                           &app->tracks, index);
-            app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
+            app->subtitle_name = track->title.size > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
             subtitle_restore_offset(app);
             return;
@@ -3028,16 +3028,16 @@ static void subtitle_select(app_state_t *app, int32_t index) {
         if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_PGS) {
             pgs_load(app, app->subtitle_files[track->stream_index].path);
             if (app->pgs.count == 0) return;
-            u8str_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+            proven_u8str_view_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
                                                           &app->tracks, index);
-            app->subtitle_name = track->title.len > 0 ? track->title : picture_label;
+            app->subtitle_name = track->title.size > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
             subtitle_restore_offset(app);
             return;
         }
         app->subtitle = subtitle_read(subs_arena(app, SUBTITLE_PARSE_BYTES), app->subtitle_files[track->stream_index], NULL);
         /* One file, several languages: show the one this track stands for. */
-        u8str_t tags[SUBTITLE_MAX_CANDIDATES];
+        proven_u8str_view_t tags[SUBTITLE_MAX_CANDIDATES];
         size_t n = rubraview_subtitle_languages(&app->subtitle, tags, SUBTITLE_MAX_CANDIDATES);
         size_t which = (size_t)app->subtitle_vobsub_stream[track->stream_index];
         if (n > 1 && which < n) app->subtitle.shown_language = tags[which];
@@ -3046,8 +3046,8 @@ static void subtitle_select(app_state_t *app, int32_t index) {
            whole container once, so say what is happening first. */
         osd_say(app, TU8("reading the subtitles out of the file"));
         proven_arena_t *sa = subs_arena(app, 2u * SUBTITLE_PARSE_BYTES);
-        u8str_t text = rubraview_pal_media_read_subtitle_stream(app->media, sa, track->stream_index);
-        if (text.len == 0) {
+        proven_u8str_view_t text = rubraview_pal_media_read_subtitle_stream(app->media, sa, track->stream_index);
+        if (text.size == 0) {
             osd_say(app, TU8("this backend cannot read that subtitle stream"));
             return;
         }
@@ -3056,22 +3056,22 @@ static void subtitle_select(app_state_t *app, int32_t index) {
     if (app->subtitle.count == 0) return;
     /* A stream inside a file often has no name of its own, so the OSD
        uses the same label the track menu shows. */
-    u8str_t label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+    proven_u8str_view_t label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
                                           &app->tracks, index);
-    app->subtitle_name = track->title.len > 0 ? track->title : label;
+    app->subtitle_name = track->title.size > 0 ? track->title : label;
     app->tracks.current_subtitle = index;
     subtitle_restore_offset(app);
 }
 
-static void subtitle_load(app_state_t *app, u8str_t video_path) {
+static void subtitle_load(app_state_t *app, proven_u8str_view_t video_path) {
     tracks_prepare(app, video_path);
     /* §3.16.2: the preferred language decides; with none set, the first
        file wins. Parsing happens now, and only for the one chosen. */
     subtitle_select(app, rubraview_tracks_choose(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE,
-                                                 rubraview_settings_get_text(&app->settings, U8("video"), U8("subtitle_language"))));
+                                                 rubraview_settings_get_text(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_language"))));
     /* RV-107: and the sound in the language asked for, when the film has one. */
-    u8str_t sound = rubraview_settings_get_text(&app->settings, U8("video"), U8("audio_language"));
-    if (sound.len > 0 && app->media) {
+    proven_u8str_view_t sound = rubraview_settings_get_text(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("audio_language"));
+    if (sound.size > 0 && app->media) {
         int32_t want = rubraview_tracks_choose(&app->tracks, RUBRAVIEW_TRACK_AUDIO, sound);
         if (want >= 0 && want != app->tracks.current_audio && (size_t)want < app->tracks.count &&
             rubraview_pal_media_select_audio_track(app->media, app->tracks.tracks[want].stream_index)) {
@@ -3083,7 +3083,7 @@ static void subtitle_load(app_state_t *app, u8str_t video_path) {
 /* ---- RV-081: music that outlives its page ---- */
 
 static bool bgm_pause_for_sound(const app_state_t *app) {
-    return rubraview_settings_get(&app->settings, U8("audio"), U8("bgm_pause_on_video")) != 0.0;
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("bgm_pause_on_video")) != 0.0;
 }
 
 static void bgm_do(app_state_t *app, rubraview_bgm_action_t action) {
@@ -3201,7 +3201,7 @@ static void bgm_tick(app_state_t *app) {
     }
 }
 
-static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview_media_open_result_t opened,
+static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t path, rubraview_media_open_result_t opened,
                         rubraview_media_failure_t why);
 
 /* ---- RV-157: a station connected to off the main thread ----
@@ -3218,7 +3218,7 @@ typedef struct station_job {
 
 static DWORD WINAPI station_job_run(LPVOID arg) {
     station_job_t *job = (station_job_t*)arg;
-    job->result = rubraview_pal_media_open((u8str_t){ .ptr = job->path, .len = strlen(job->path) }, RUBRAVIEW_BACKEND_FFMPEG, NULL);
+    job->result = rubraview_pal_media_open((proven_u8str_view_t){ .ptr = (const proven_byte_t *)job->path, .size = strlen(job->path) }, RUBRAVIEW_BACKEND_FFMPEG, NULL);
     if (InterlockedCompareExchange(&job->state, 1, 0) == 2) {
         if (job->result.media) rubraview_pal_media_close(job->result.media);
         free(job);
@@ -3241,11 +3241,11 @@ static void station_job_leave(app_state_t *app) {
     CloseHandle(thread);   /* otherwise the thread closes what it opens, and frees the job */
 }
 
-static void station_job_start(app_state_t *app, int32_t index, u8str_t path) {
+static void station_job_start(app_state_t *app, int32_t index, proven_u8str_view_t path) {
     station_job_leave(app);
     station_job_t *job = (station_job_t*)calloc(1, sizeof(*job));
-    if (job && path.len < sizeof(job->path)) {
-        memcpy(job->path, path.ptr, path.len);
+    if (job && path.size < sizeof(job->path)) {
+        memcpy(job->path, path.ptr, path.size);
         job->page = index;
         job->wake = app->window;
         job->thread = CreateThread(NULL, 0, station_job_run, job, 0, NULL);
@@ -3298,7 +3298,7 @@ static void media_prepare(app_state_t *app) {
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
         return;
     }
-    u8str_t path = app->source.pages[index].path;
+    proven_u8str_view_t path = app->source.pages[index].path;
     if (!is_media_path(path) || app->pages[index].skipped) {
         /* A picture or a comic makes no sound: the music has the floor. (D-98: nor does a film the layout leaves out.) */
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_PAGE_QUIET, bgm_pause_for_sound(app)));
@@ -3327,14 +3327,14 @@ static void media_prepare(app_state_t *app) {
        says — off (the default until it has been measured on a real card),
        on where the card offers decoders, or always (diagnostic). */
     rubraview_media_gpu_t gpu = {
-        .mode = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hardware_decode"))),
+        .mode = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode"))),
     };
     if (gpu.mode > 0) gpu.device = rubraview_pal_render_video_device(app->renderer, &gpu.decoder_profiles);
     /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
-    gpu.tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_tone_mapping")));
+    gpu.tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_tone_mapping")));
     if (gpu.tone_mapping > 0) gpu.shader_device = gpu.device ? gpu.device : rubraview_pal_render_video_device(app->renderer, NULL);
     /* RV-153: [video] hdr_output — an HDR film tone mapped for the HDR screen the window is on (always: any screen) */
-    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
     rubraview_pal_render_hdr_display(app->renderer, &app->media_hdr_screen);
     if (gpu.tone_mapping > 0 && !app->hdr_output_refused && (hdr_out == 2 || (hdr_out == 1 && app->media_hdr_screen.hdr))) {
         gpu.hdr_screen_peak = !app->media_hdr_screen.hdr ? app->media_hdr_screen.sdr_white_nits
@@ -3365,7 +3365,7 @@ static void media_prepare(app_state_t *app) {
 }
 
 /* What was opened for page `index` becomes the page's player; nothing opened, and it is said why and passed. */
-static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview_media_open_result_t opened,
+static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t path, rubraview_media_open_result_t opened,
                         rubraview_media_failure_t why) {
     if (!opened.media) {
         osd_say(app, why >= RUBRAVIEW_MEDIA_FAIL_STATION ? rubraview_media_failure_text(why)
@@ -3410,7 +3410,7 @@ static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview
         int n = rubraview_pal_audio_last_failure(why, sizeof(why))
             ? snprintf(line, sizeof(line), T("no sound: the device would not open (%s)"), why)
             : snprintf(line, sizeof(line), T("no sound: the device would not open"));
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     }
     /* §3.14.6: something with sound of its own is on screen now. */
     if (opened.info.has_audio) {
@@ -3422,8 +3422,8 @@ static void media_adopt(app_state_t *app, int32_t index, u8str_t path, rubraview
     if (app->subtitle.count > 0) {
         char line[256];
         int n = snprintf(line, sizeof(line), T("subtitles: %.*s"),
-                         (int)app->subtitle_name.len, app->subtitle_name.ptr);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+                         (int)app->subtitle_name.size, app->subtitle_name.ptr);
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     }
     if (!media_page_ready(app)) {
         media_close(app);
@@ -3597,7 +3597,7 @@ static void media_tick(app_state_t *app) {
                case the position stops moving. */
             if (app->music_end_seen == 0.0) app->music_end_seen = now;
             double waited = now - app->music_end_seen;
-            double crossfade = rubraview_settings_get(&app->settings, U8("audio"), U8("crossfade_seconds"));
+            double crossfade = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("crossfade_seconds"));
             if (!app->music_overlapping || waited > crossfade + 1.0) {
                 music_promote_next(app);
                 return;
@@ -3633,7 +3633,7 @@ static bool page_plays(void *ctx, size_t index) {
 }
 
 static rubraview_repeat_mode_t repeat_mode(const app_state_t *app) {
-    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("at_end")));
+    int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end")));
     return mode >= 0 && mode < RUBRAVIEW_REPEAT_MODE_COUNT ? (rubraview_repeat_mode_t)mode : RUBRAVIEW_REPEAT_NEXT;
 }
 
@@ -3694,7 +3694,7 @@ static int32_t music_next_page(app_state_t *app) {
        it is prepared under this one only when it is a track, not the same one. */
     int32_t next = media_follow_page(app);
     if (next < 0 || next == app->media_page) return -1;
-    u8str_t path = app->source.pages[next].path;
+    proven_u8str_view_t path = app->source.pages[next].path;
     if (!is_media_path(path) || !rubraview_tags_is_music_name(rubraview_path_basename(path))) return -1;
     return next;
 }
@@ -3761,8 +3761,8 @@ static void music_transition_tick(app_state_t *app) {
     if (app->media_info.live) return;   /* RV-157: a station never ends on its own, so nothing follows it in time */
 
     rubraview_track_change_t how = {
-        .gapless = rubraview_settings_get(&app->settings, U8("audio"), U8("gapless")) != 0.0,
-        .crossfade_seconds = rubraview_settings_get(&app->settings, U8("audio"), U8("crossfade_seconds")),
+        .gapless = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("gapless")) != 0.0,
+        .crossfade_seconds = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("crossfade_seconds")),
     };
     int32_t next = music_next_page(app);
     /* The track that was waiting is no longer the one that follows —
@@ -3775,7 +3775,7 @@ static void music_transition_tick(app_state_t *app) {
     if (plan.open_next && !app->next_media && next >= 0 && is_station_path(app->source.pages[next].path)) {
         app->next_page = next;   /* RV-157: a station is not opened ahead; it is joined when it is reached */
     } else if (plan.open_next && !app->next_media && next >= 0) {
-        u8str_t path = app->source.pages[next].path;
+        proven_u8str_view_t path = app->source.pages[next].path;
         rubraview_media_backend_t order[2];
         size_t count = rubraview_media_backend_order(app->media_preferred,
                                                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
@@ -3967,7 +3967,7 @@ static void go_to_spread(app_state_t *app, size_t index) {
         static const rubraview_transition_kind_t KINDS[] = { RUBRAVIEW_TRANSITION_CUT, RUBRAVIEW_TRANSITION_CROSSFADE,
                                                              RUBRAVIEW_TRANSITION_SLIDE_LEFT, RUBRAVIEW_TRANSITION_ZOOM_FADE,
                                                              RUBRAVIEW_TRANSITION_DISSOLVE };
-        int turn = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition")));
+        int turn = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("transition")));
         app->transition.kind = rubraview_transition_for_interval(
             KINDS[turn >= 0 && turn < 5 ? turn : 1],
             app->slideshow_running ? app->slideshow.interval_seconds : 1.0, 0.5);
@@ -3999,7 +3999,7 @@ static bool open_sibling_folder(app_state_t *app, bool forward);
    next or the previous folder or archive (from its last page going back),
    or go round within what is open. */
 static void past_the_end(app_state_t *app, bool forward) {
-    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("at_ends")));
+    int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("at_ends")));
     if (mode == 2 && app->layout.count > 1) {
         go_to_spread(app, forward ? 0 : app->layout.count - 1);
         update_precache(app);
@@ -4007,7 +4007,7 @@ static void past_the_end(app_state_t *app, bool forward) {
         return;
     }
     if (mode == 1) {
-        bool opened = app->source.archive_path.len > 0 ? open_sibling_archive(app, forward)
+        bool opened = app->source.archive_path.size > 0 ? open_sibling_archive(app, forward)
                     : !app->list_is_set ? open_sibling_folder(app, forward) : false;
         if (opened) return;
         osd_say(app, forward ? TU8("the last, and nothing after it to open")
@@ -4052,7 +4052,7 @@ static void prev_spread(app_state_t *app) {
     past_the_end(app, false);
 }
 
-static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+static proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
                                  bool *out_enabled, bool *out_current);
 
 static void toggle_slideshow(app_state_t *app) {
@@ -4084,7 +4084,7 @@ static void toggle_slideshow(app_state_t *app) {
 #define PICKER_TILE 160.0
 
 static bool picker_details(const app_state_t *app) {
-    return rubraview_settings_get(&app->settings, U8("files"), U8("picker_details")) > 0.5;
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_details")) > 0.5;
 }
 
 /* 1.24.0 (owner, 2026-10-19: "화면 좌우 폭에 따라 가로에 몇개씩 보여주는지가 적절하게"): as many tiles a row
@@ -4117,13 +4117,13 @@ static double picker_grid_top(const app_state_t *app, double dpi) {
 
 /* A chip in the path or the places bar, as wide as its label. 1.24.0 (owner, 2026-10-19: narrower, but not
    too small for a finger): its letters counted (a Hangul or a Han one as two), a little room, 44 at least. */
-static double picker_chip_width(u8str_t label, double dpi) {
+static double picker_chip_width(proven_u8str_view_t label, double dpi) {
     double units = 0.0;
-    for (size_t i = 0; i < label.len;) {
+    for (size_t i = 0; i < label.size;) {
         unsigned char b = (unsigned char)label.ptr[i];
         size_t n = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
         uint32_t cp = b < 0x80 ? b : 0;
-        if (n == 3 && i + 2 < label.len) cp = ((uint32_t)(b & 0x0F) << 12) | ((uint32_t)(label.ptr[i + 1] & 0x3F) << 6) | (uint32_t)(label.ptr[i + 2] & 0x3F);
+        if (n == 3 && i + 2 < label.size) cp = ((uint32_t)(b & 0x0F) << 12) | ((uint32_t)(label.ptr[i + 1] & 0x3F) << 6) | (uint32_t)(label.ptr[i + 2] & 0x3F);
         units += cp >= 0x1100 && n >= 3 ? 1.9 : 1.0;
         i += n;
     }
@@ -4133,7 +4133,7 @@ static double picker_chip_width(u8str_t label, double dpi) {
 
 /* The places bar's items in order: the reader's favourites (D-43), then
    the PC page's places. False past the end. */
-typedef struct picker_bar_item { u8str_t label, path; bool favorite; } picker_bar_item_t;
+typedef struct picker_bar_item { proven_u8str_view_t label, path; bool favorite; } picker_bar_item_t;
 
 static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out) {
     if (index < app->favorites.count) {
@@ -4143,7 +4143,7 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
     }
     index -= app->favorites.count;
     if (index == 0) {   /* the recent files, a place of their own (owner, 2026-10-16) */
-        *out = (picker_bar_item_t){ TU8("Recent"), U8(RUBRAVIEW_PICKER_RECENT), false };
+        *out = (picker_bar_item_t){ TU8("Recent"), PROVEN_LIT(RUBRAVIEW_PICKER_RECENT), false };
         return true;
     }
     index -= 1;
@@ -4154,24 +4154,24 @@ static bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_ite
 
 /* The star after the path: lit when the folder on screen is a favourite.
    None on the PC page, which is not a folder. */
-static u8str_t picker_star_label(const app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) return U8("");
-    return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? U8("\xE2\x98\x85") : U8("\xE2\x98\x86");
+static proven_u8str_view_t picker_star_label(const app_state_t *app) {
+    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) return PROVEN_LIT("");
+    return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? PROVEN_LIT("\xE2\x98\x85") : PROVEN_LIT("\xE2\x98\x86");
 }
 
-static void osd_say(app_state_t *app, u8str_t text);
+static void osd_say(app_state_t *app, proven_u8str_view_t text);
 
 /* The star pressed, or Ctrl+D: the folder on screen in or out, and the
    file written at once, so a crash later does not lose it. */
-static bool favorite_toggle_path(app_state_t *app, u8str_t path);
+static bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path);
 static void picker_toggle_favorite(app_state_t *app) {
     if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) ||
-        app->picker_dir.len == 0 || app->picker_in_book) return;
+        app->picker_dir.size == 0 || app->picker_in_book) return;
     (void)favorite_toggle_path(app, app->picker_dir);
 }
 
 static void favorites_save(app_state_t *app) {
-    if (app->favorites_path.len == 0) return;
+    if (app->favorites_path.size == 0) return;
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
     bool written = rubraview_pal_fs_write_file_atomic(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites));
     if (locked) rubraview_pal_config_unlock();
@@ -4221,9 +4221,9 @@ static size_t favorite_drop_index(const app_state_t *app, double x, double dpi, 
 /* A right press on a favourite (owner, 2026-09-30): the rename box with its name, all of it chosen. */
 static void favorite_rename_begin(app_state_t *app, size_t index) {
     if (index >= app->favorites.count || app->rename_active) return;
-    u8str_t now = rubraview_favorites_title(&app->favorites, index);
+    proven_u8str_view_t now = rubraview_favorites_title(&app->favorites, index);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, now.len < sizeof(app->rename_buffer) ? now : U8(""));
+    rubraview_textedit_set(&app->rename_edit, now.size < sizeof(app->rename_buffer) ? now : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_favorite = (int32_t)index;
@@ -4232,12 +4232,12 @@ static void favorite_rename_begin(app_state_t *app, size_t index) {
     osd_say(app, TU8("a name for this favourite; empty gives the folder's name back"));
 }
 
-static void rename_insert(app_state_t *app, u8str_t text);
+static void rename_insert(app_state_t *app, proven_u8str_view_t text);
 static void rename_end(app_state_t *app);
 static void favorite_rename_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     size_t index = (size_t)app->rename_favorite;
-    u8str_t name = app_keep(app, rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t name = app_keep(app, rubraview_textedit_text(&app->rename_edit));
     rename_end(app);
     if (rubraview_favorites_rename(&app->favorites, index, name)) {
         favorites_save(app);
@@ -4312,9 +4312,9 @@ static rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, 
 enum { PICKER_TOOL_ALL = 0, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
        PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW, PICKER_TOOL_COUNT };
 
-static u8str_t picker_tool_label(const app_state_t *app, int which, char *buf, size_t cap) {
-    int key = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
-    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+static proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *buf, size_t cap) {
+    int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     int n = 0;
     switch (which) {
         case PICKER_TOOL_ALL:        n = snprintf(buf, cap, "%s", T("All")); break;
@@ -4330,7 +4330,7 @@ static u8str_t picker_tool_label(const app_state_t *app, int which, char *buf, s
         case PICKER_TOOL_VIEW:       n = snprintf(buf, cap, "%s", picker_details(app) ? T("Tiles") : T("Details")); break;
         default: break;
     }
-    return (u8str_t){ .ptr = buf, .len = n > 0 ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
 }
 
 /* Where the tool row's chip `which` is; the all box is a square with a word. */
@@ -4467,11 +4467,11 @@ static void tiles_give_archive_page(app_state_t *app, struct tile_set *ts, int32
         AcquireSRWLockExclusive(&app->source_lock);
         rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)index, MAX_PAGE_BYTES);
         ReleaseSRWLockExclusive(&app->source_lock);
-        if (bytes.ok && bytes.data.len > 0) {
-            copy = (uint8_t*)malloc(bytes.data.len);
+        if (bytes.ok && bytes.data.size > 0) {
+            copy = (uint8_t*)malloc(bytes.data.size);
             if (copy) {
-                memcpy(copy, bytes.data.ptr, bytes.data.len);
-                copy_size = bytes.data.len;
+                memcpy(copy, bytes.data.ptr, bytes.data.size);
+                copy_size = bytes.data.size;
             }
         }
         free(mem);
@@ -4485,8 +4485,8 @@ static void tiles_give_archive_page(app_state_t *app, struct tile_set *ts, int32
    whose picture changes under the tiles. */
 static bool enlarge_sharp(const app_state_t *app, int32_t index) {
     if (app->force_nearest || app->anim_active || index == app->media_page) return false;
-    if (rubraview_settings_get(&app->settings, U8("viewer"), U8("enlarge")) < 0.5) return false;
-    return (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("interpolation"))) >= 2;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("enlarge")) < 0.5) return false;
+    return (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("interpolation"))) >= 2;
 }
 
 /* After a reduced page is drawn: the tiles on screen, sharper, over it,
@@ -4508,7 +4508,7 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
         if (ts->page == index && ts->page_texture) tile_set_reset(ts);   /* back at its own size: the tiles are of no use */
         return;
     }
-    u8str_t path = app->source.pages[index].path;
+    proven_u8str_view_t path = app->source.pages[index].path;
     if (!ts->tiles) {
         ts->tiles = rubraview_pal_tiles_start(thumbs_wake, app->window);
         if (!ts->tiles) return;
@@ -4519,7 +4519,7 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
         tile_set_reset(ts);
         ts->page = index;
         ts->page_texture = page->texture;
-        if (path.len > 0) {
+        if (path.size > 0) {
             rubraview_pal_tiles_source(ts->tiles, ts->generation, path, true, pw, ph);
         } else {
             tiles_give_archive_page(app, ts, index, pw, ph);
@@ -4570,11 +4570,11 @@ static void draw_page_tiles(app_state_t *app, int which, int32_t index, const ap
 /* The owner (2026-10-18): folders that show no thumbnail, typed as the folders kept out of Recent
    are. 1.20.0 ("그 폴더와 그 폴더의 하위 폴더 썸네일만 안 보이게"): only those folders' own tiles,
    and the tiles of the folders in them; the files inside show theirs. */
-static bool thumb_kept_out(const app_state_t *app, u8str_t path, bool is_directory) {
-    u8str_t dirs[64];
-    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, U8("thumbs"), U8("skip_dirs")), dirs, 64);
+static bool thumb_kept_out(const app_state_t *app, proven_u8str_view_t path, bool is_directory) {
+    proven_u8str_view_t dirs[64];
+    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(&app->settings, PROVEN_LIT("thumbs"), PROVEN_LIT("skip_dirs")), dirs, 64);
     if (n > 64) n = 64;
-    return n > 0 && path.len > 0 && rubraview_thumb_folder_kept_out(path, is_directory, dirs, n);
+    return n > 0 && path.size > 0 && rubraview_thumb_folder_kept_out(path, is_directory, dirs, n);
 }
 
 static void picker_thumbs_step(app_state_t *app) {
@@ -4583,7 +4583,7 @@ static void picker_thumbs_step(app_state_t *app) {
     if (!app->thumbs) {
         /* A folder's picture: its first image, else its first film —
            not a sound file, which seldom has one (rbmedia, 2026-09-25). */
-        app->thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(VIDEO_FILTER), U8(ARCHIVE_FILTER),
+        app->thumbs = rubraview_pal_thumbs_start(PROVEN_LIT(IMAGE_FILTER), PROVEN_LIT(VIDEO_FILTER), PROVEN_LIT(ARCHIVE_FILTER),
                                                  thumbs_wake, app->window);
         if (!app->thumbs) return;
         rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
@@ -4624,7 +4624,7 @@ static void picker_thumbs_step(app_state_t *app) {
         struct picker_thumb *t = &app->picker_thumbs[index];
         if (t->state != 0 && t->state != 3) continue;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
-        if (entry->is_directory && rubraview_u8_eq_lit(entry->name, "..")) { t->state = 2; continue; }
+        if (entry->is_directory && proven_u8str_view_eq(entry->name, PROVEN_LIT(".."))) { t->state = 2; continue; }
         /* A drive's first picture is not looked for: an empty reader or a
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
@@ -4642,10 +4642,10 @@ static void picker_thumbs_step(app_state_t *app) {
             book_reads++;
             void *mem = NULL;
             rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, page, &mem);
-            uint8_t *copy = pb.ok && pb.data.len > 0 ? (uint8_t*)malloc(pb.data.len) : NULL;
-            if (copy) memcpy(copy, pb.data.ptr, pb.data.len);
+            uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)malloc(pb.data.size) : NULL;
+            if (copy) memcpy(copy, pb.data.ptr, pb.data.size);
             free(mem);
-            if (copy && rubraview_pal_thumbs_request_bytes(app->thumbs, app->picker_generation, index, tw / th, copy, pb.data.len)) {
+            if (copy && rubraview_pal_thumbs_request_bytes(app->thumbs, app->picker_generation, index, tw / th, copy, pb.data.size)) {
                 t->state = 3;
             } else {
                 t->state = 2;
@@ -4716,7 +4716,7 @@ static void strip_follow(app_state_t *app, size_t page) {
 static void strip_peek(app_state_t *app) {
     if (page_count(app) < 2) return;
     /* 1.22.0 (owner, 2026-10-19: "마우스 휠로 이미지 파일 사이를 이동할 때 하단에 보이는 썸네일 ... 끄고 킬 수 있게") */
-    if (rubraview_settings_get(&app->settings, U8("viewer"), U8("wheel_strip")) <= 0.5) return;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_strip")) <= 0.5) return;
     app->strip_peek_until = rubraview_pal_time_now_seconds() + STRIP_PEEK_SECONDS;
 }
 
@@ -4735,7 +4735,7 @@ static void strip_step(app_state_t *app, double dt) {
     if (app->strip_cell_count != page_count(app)) strip_cells_reset(app);
     if (!app->strip_cells) return;
     if (!app->strip_thumbs) {
-        app->strip_thumbs = rubraview_pal_thumbs_start(U8(IMAGE_FILTER), U8(VIDEO_FILTER), U8(ARCHIVE_FILTER),
+        app->strip_thumbs = rubraview_pal_thumbs_start(PROVEN_LIT(IMAGE_FILTER), PROVEN_LIT(VIDEO_FILTER), PROVEN_LIT(ARCHIVE_FILTER),
                                                        thumbs_wake, app->window);
         if (!app->strip_thumbs) return;
         rubraview_pal_thumbs_generation(app->strip_thumbs, app->strip_generation);
@@ -4767,8 +4767,8 @@ static void strip_step(app_state_t *app, double dt) {
         if (index >= app->strip_cell_count) continue;
         struct picker_thumb *t = &app->strip_cells[index];
         if (t->state != 0) continue;
-        u8str_t path = app->source.pages[index].path;
-        if (path.len > 0) {
+        proven_u8str_view_t path = app->source.pages[index].path;
+        if (path.size > 0) {
             t->state = rubraview_pal_thumbs_request(app->strip_thumbs, app->strip_generation, index, false, 1.0, path) ? 3 : 2;
             continue;
         }
@@ -4778,10 +4778,10 @@ static void strip_step(app_state_t *app, double dt) {
         book_reads++;
         void *mem = NULL;
         rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, index, &mem);
-        uint8_t *copy = pb.ok && pb.data.len > 0 ? (uint8_t*)malloc(pb.data.len) : NULL;
-        if (copy) memcpy(copy, pb.data.ptr, pb.data.len);
+        uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)malloc(pb.data.size) : NULL;
+        if (copy) memcpy(copy, pb.data.ptr, pb.data.size);
         free(mem);
-        t->state = copy && rubraview_pal_thumbs_request_bytes(app->strip_thumbs, app->strip_generation, index, 1.0, copy, pb.data.len) ? 3 : 2;
+        t->state = copy && rubraview_pal_thumbs_request_bytes(app->strip_thumbs, app->strip_generation, index, 1.0, copy, pb.data.size) ? 3 : 2;
     }
 }
 
@@ -4824,24 +4824,24 @@ static proven_arena_t *picker_next_arena(app_state_t *app) {
 
 /* A string kept past the listing it came from (an undo entry, a
    favourite, a path being opened), copied into the working arena. */
-static u8str_t app_keep(app_state_t *app, u8str_t text) {
-    if (text.len == 0) return text;
+static proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text) {
+    if (text.size == 0) return text;
     /* RFC-0006 (RV-141): room is made in the session's region; when there is none, nothing
        is kept and that is said — the text handed in is never given back as if it were kept,
        since a caller's stack buffer would then be held after it is gone. */
-    if (app->mem && !rubraview_region_ensure(&app->mem->persist, text.len + 1)) { app->mem->full = true; return U8(""); }
-    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, text.len + 1);
-    if (!proven_is_ok(res.err)) { if (app->mem) app->mem->full = true; return U8(""); }
-    memcpy(res.value.ptr, text.ptr, text.len);
-    res.value.ptr[text.len] = '\0';
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = text.len };
+    if (app->mem && !rubraview_region_ensure(&app->mem->persist, text.size + 1)) { app->mem->full = true; return PROVEN_LIT(""); }
+    proven_result_mem_mut_t res = proven_arena_alloc(app->arena, text.size + 1);
+    if (!proven_is_ok(res.err)) { if (app->mem) app->mem->full = true; return PROVEN_LIT(""); }
+    memcpy(res.value.ptr, text.ptr, text.size);
+    res.value.ptr[text.size] = '\0';
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = text.size };
 }
 
 /* The recent files as a listing (owner, 2026-10-16): newest first, each read from the
    disk so the details have its size and dates; one gone since is left out. */
 static rubraview_fs_listing_t recent_listing(app_state_t *app, proven_arena_t *pa) {
     rubraview_fs_listing_t out = {0};
-    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);   /* another viewer's too (D-104) */
+    recent_sync(app, PROVEN_LIT(""), false);   /* another viewer's too (D-104) */
     size_t newest[RECENT_KEPT];
     size_t shown = rubraview_recent_newest(&app->recent, newest, RECENT_KEPT);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, shown ? shown : 1, sizeof(rubraview_fs_entry_t));
@@ -4858,8 +4858,8 @@ static rubraview_fs_listing_t recent_listing(app_state_t *app, proven_arena_t *p
 /* The details view's order (owner, 2026-10-16): the column chosen, kept in
    Settings › Files; every array that follows the listing is put in the same order. */
 static void picker_apply_sort(app_state_t *app) {
-    int32_t choice = (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort")));
-    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+    int32_t choice = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort")));
+    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     size_t n = app->picker_listing.count;
     if (choice <= 0 || n < 2 || rubraview_picker_is_places(app->picker_dir)) return;   /* as the folder has it */
     size_t *order = (size_t*)malloc(n * sizeof(size_t));
@@ -4898,35 +4898,35 @@ static void picker_apply_sort(app_state_t *app) {
 
 /* A column's name pressed: by it, rising; pressed again, falling. Kept in Settings › Files. */
 static bool picker_is_up(const app_state_t *app, size_t index);
-static void picker_filter_set(app_state_t *app, u8str_t text);
+static void picker_filter_set(app_state_t *app, proven_u8str_view_t text);
 static void picker_filter_forget(app_state_t *app);
 static void ctx_close(app_state_t *app);
 static void picker_activate(app_state_t *app, size_t index);
 static void slidepop_close(app_state_t *app);
 static void listwin_sync(app_state_t *app);
-static void list_insert_paths(app_state_t *app, const u8str_t *paths, size_t count, size_t to);
+static void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, size_t to);
 static size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
 
 /* 1.24.0: by a column, rising or falling, chosen outright. */
 static void picker_sort_set(app_state_t *app, int key, bool desc) {
-    rubraview_settings_set(&app->settings, U8("files"), U8("picker_sort"), (double)(key + 1));
-    rubraview_settings_set(&app->settings, U8("files"), U8("picker_sort_desc"), desc ? 1.0 : 0.0);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"), (double)(key + 1));
+    rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc"), desc ? 1.0 : 0.0);
     settings_write_if_changed(app, false);
     char kept[sizeof(app->picker_filter)];
     memcpy(kept, app->picker_filter, sizeof(kept));
-    if (kept[0]) picker_filter_set(app, U8(""));   /* 1.22.0: the whole folder sorted, then filtered again */
+    if (kept[0]) picker_filter_set(app, PROVEN_LIT(""));   /* 1.22.0: the whole folder sorted, then filtered again */
     picker_apply_sort(app);
     if (kept[0]) picker_filter_set(app, cstr(kept));
     else app->picker_full = app->picker_listing;
     char line[64];
     int n = snprintf(line, sizeof(line), T("by %s, %s"), rubraview_picker_sort_name((rubraview_picker_sort_key_t)key),
                      desc ? "falling" : "rising");
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static void picker_sort_by(app_state_t *app, int key) {
-    int now = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
-    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+    int now = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     picker_sort_set(app, key, now == key ? !desc : false);
 }
 
@@ -4934,21 +4934,21 @@ static void picker_sort_by(app_state_t *app, int key) {
 #define PICKER_HIST 24
 #define PICKER_HIST_PATH 1024
 
-static void picker_hist_push(app_state_t *app, bool forward, u8str_t dir) {
-    if (dir.len == 0 || dir.len >= PICKER_HIST_PATH) return;
+static void picker_hist_push(app_state_t *app, bool forward, proven_u8str_view_t dir) {
+    if (dir.size == 0 || dir.size >= PICKER_HIST_PATH) return;
     if (!app->picker_hist) app->picker_hist = calloc(2 * PICKER_HIST, PICKER_HIST_PATH);
     if (!app->picker_hist) return;
     char (*stack)[PICKER_HIST_PATH] = app->picker_hist + (forward ? PICKER_HIST : 0);
     int32_t *n = forward ? &app->picker_fwd_n : &app->picker_back_n;
     if (*n == PICKER_HIST) { memmove(stack[0], stack[1], (PICKER_HIST - 1) * PICKER_HIST_PATH); --*n; }   /* the oldest goes */
-    memcpy(stack[*n], dir.ptr, dir.len);
-    stack[*n][dir.len] = '\0';
+    memcpy(stack[*n], dir.ptr, dir.size);
+    stack[*n][dir.size] = '\0';
     ++*n;
 }
 
-static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history);
+static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history);
 
-static void picker_navigate(app_state_t *app, u8str_t dir) {
+static void picker_navigate(app_state_t *app, proven_u8str_view_t dir) {
     picker_navigate_to(app, dir, false);
 }
 
@@ -4964,19 +4964,19 @@ static void picker_history_go(app_state_t *app, bool forward) {
 }
 
 static void picker_go_up(app_state_t *app) {
-    u8str_t parent = rubraview_picker_parent(app->picker_dir);
-    if (parent.len == 0) return;
+    proven_u8str_view_t parent = rubraview_picker_parent(app->picker_dir);
+    if (parent.size == 0) return;
     picker_navigate(app, parent);
     app->picker.focus = 0;
 }
 
-static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history) {
+static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history) {
     /* Where it was, kept before the listing's memory turns over; another folder goes on the way back. */
     char was[PICKER_HIST_PATH];
-    size_t was_len = app->picker_dir.len < sizeof(was) ? app->picker_dir.len : 0;
+    size_t was_len = app->picker_dir.size < sizeof(was) ? app->picker_dir.size : 0;
     if (was_len) memcpy(was, app->picker_dir.ptr, was_len);
-    if (!from_history && app->picker_open && was_len && !rubraview_path_same((u8str_t){ .ptr = was, .len = was_len }, dir)) {
-        picker_hist_push(app, false, (u8str_t){ .ptr = was, .len = was_len });
+    if (!from_history && app->picker_open && was_len && !rubraview_path_same((proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len }, dir)) {
+        picker_hist_push(app, false, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len });
         app->picker_fwd_n = 0;
     }
     proven_arena_t *pa = picker_next_arena(app);
@@ -4987,7 +4987,7 @@ static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history)
     bool recent = rubraview_picker_is_recent(dir);
     /* Inside the book being read (owner, 2026-09-28): its own folders and
        pages, a level at a time, in the order they are read. */
-    u8str_t inner = { .ptr = "", .len = 0 };
+    proven_u8str_view_t inner = PROVEN_LIT("");
     bool in_book = !places && !recent && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
                    rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
     rubraview_archive_level_t level = {0};
@@ -5031,7 +5031,7 @@ static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history)
         }
         listing.count = kept;
     }
-    if (listing.count == 0 && rubraview_picker_parent(dir).len == 0) {
+    if (listing.count == 0 && rubraview_picker_parent(dir).size == 0) {
         if (hidden > 0) osd_say(app, TU8("nothing in that folder can be opened here"));
         return;
     }
@@ -5082,17 +5082,17 @@ static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history)
     /* `..` first, wherever there is a folder above this one (owner,
        2026-09-23). `Ctrl+Backspace` did this already, but not by touch.
        Above a drive is the PC page, so every folder has one. */
-    u8str_t parent = rubraview_picker_parent(dir);
+    proven_u8str_view_t parent = rubraview_picker_parent(dir);
     app->picker_in_book = in_book;
     app->picker_page_of = level.page_of;
     app->picker_page_skip = 0;
-    if (parent.len > 0) {
+    if (parent.size > 0) {
         proven_result_mem_mut_t up_res =
             rubraview_arena_alloc_array(pa, (listing.count + 1), sizeof(rubraview_fs_entry_t));
         if (proven_is_ok(up_res.err)) {
             rubraview_fs_entry_t *with_up = (rubraview_fs_entry_t*)(void*)up_res.value.ptr;
             with_up[0] = (rubraview_fs_entry_t){
-                .name = U8(".."),
+                .name = PROVEN_LIT(".."),
                 .path = parent,
                 .is_directory = true,
             };
@@ -5137,8 +5137,8 @@ static void picker_navigate_to(app_state_t *app, u8str_t dir, bool from_history)
 }
 
 /* The extension of the item the focus is on, ".jpg" and such. */
-static u8str_t picker_focus_extension(const app_state_t *app) {
-    u8str_t none = { .ptr = "", .len = 0 };
+static proven_u8str_view_t picker_focus_extension(const app_state_t *app) {
+    proven_u8str_view_t none = PROVEN_LIT("");
     if (app->picker.focus < app->picker_listing.count) {
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[app->picker.focus];
         if (!entry->is_directory) return rubraview_path_ext(entry->name);
@@ -5158,7 +5158,7 @@ static void ext_switch(app_state_t *app, int32_t row);
 static void rename_extension_apply(app_state_t *app);
 static void text_find_step(app_state_t *app, bool forward);
 static void rename_picker_commit(app_state_t *app);
-static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said);
+static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said);
 
 /* The picked files, gathered as a listing the page source can take. */
 
@@ -5203,25 +5203,25 @@ static void picker_make_playlist(app_state_t *app) {
     n = files;
     list.count = n;
 
-    u8str_t text = rubraview_playlist_serialize_m3u8(app->arena, &list);
-    if (text.len == 0) { osd_say(app, TU8("could not write the playlist")); return; }
+    proven_u8str_view_t text = rubraview_playlist_serialize_m3u8(app->arena, &list);
+    if (text.size == 0) { osd_say(app, TU8("could not write the playlist")); return; }
 
     char name[32];
-    u8str_t target = { .ptr = "", .len = 0 };
+    proven_u8str_view_t target = PROVEN_LIT("");
     for (int number = 1; number <= 9999; ++number) {
         int written = snprintf(name, sizeof(name), "Playlist%04d.m3u8", number);
         if (written <= 0) return;
-        u8str_t candidate = rubraview_path_join(app->arena, app->picker_dir,
-                                                (u8str_t){ .ptr = name, .len = (size_t)written });
+        proven_u8str_view_t candidate = rubraview_path_join(app->arena, app->picker_dir,
+                                                (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)written });
         rubraview_fs_entry_t taken;
         if (!rubraview_pal_fs_stat(app->arena, candidate, &taken)) { target = candidate; break; }
     }
-    if (target.len == 0) { osd_say(app, TU8("too many playlists in this folder")); return; }
+    if (target.size == 0) { osd_say(app, TU8("too many playlists in this folder")); return; }
     if (!rubraview_pal_fs_write_file(target, text)) { osd_say(app, TU8("could not write the playlist")); return; }
 
     char line[96];
     int written = snprintf(line, sizeof(line), T("%zu file(s) in %s"), n, name);
-    open_set_from_entries(app, entries, n, written > 0 ? (u8str_t){ .ptr = line, .len = (size_t)written }
+    open_set_from_entries(app, entries, n, written > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written }
                                                        : TU8("playlist opened"));
 }
 
@@ -5237,7 +5237,7 @@ static void picker_recycle(app_state_t *app) {
         rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, now);
         char line[96];
         int written = snprintf(line, sizeof(line), T("press Recycle again to bin %zu file(s)"), n);
-        if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+        if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
         return;
     }
     rubraview_confirm_clear(&app->picker_confirm);
@@ -5256,12 +5256,12 @@ static void picker_recycle(app_state_t *app) {
     }
     char line[96];
     int written = snprintf(line, sizeof(line), T("%zu file(s) in the recycle bin"), done);
-    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+    if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     picker_navigate(app, app->picker_dir);
 }
 
 /* Move or copy the picked files into a folder. */
-static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) {
+static void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool moving) {
     rubraview_fs_entry_t *entries = NULL;
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
@@ -5270,8 +5270,8 @@ static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) 
     size_t done = 0;
     uint32_t batch = ++app->undo_batch;   /* 1.23.0: one undo for all of them */
     for (size_t i = 0; i < n; ++i) {
-        u8str_t target = rubraview_path_join(app->arena, target_dir, entries[i].name);
-        if (target.len == 0) continue;
+        proven_u8str_view_t target = rubraview_path_join(app->arena, target_dir, entries[i].name);
+        if (target.size == 0) continue;
         bool ok = moving ? rubraview_pal_fs_move(entries[i].path, target)
                          : entries[i].is_directory ? rubraview_pal_fs_copy_tree(entries[i].path, target)   /* 1.22.0 */
                                                    : rubraview_pal_fs_copy(entries[i].path, target);
@@ -5286,20 +5286,20 @@ static void picker_curate_to(app_state_t *app, u8str_t target_dir, bool moving) 
     }
     char line[128];
     int written = snprintf(line, sizeof(line), T("%zu file(s) %s %.*s"), done, moving ? T("moved to") : T("copied to"),
-                           (int)target_dir.len, target_dir.ptr);
-    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+                           (int)target_dir.size, target_dir.ptr);
+    if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     if (moving) picker_navigate(app, app->picker_dir);
 }
 
 /* Move or copy the picked files into the curation folder a digit names. */
 static void picker_curate(app_state_t *app, int32_t digit, bool moving) {
-    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
-    if (target_dir.len == 0) { osd_say(app, TU8("no folder is bound to that number")); return; }
+    proven_u8str_view_t target_dir = rubraview_curation_target(&app->curation, digit);
+    if (target_dir.size == 0) { osd_say(app, TU8("no folder is bound to that number")); return; }
     picker_curate_to(app, target_dir, moving);
 }
 
 static bool curation_has_numbers(const app_state_t *app) {
-    for (int32_t d = 1; d <= 9; ++d) if (rubraview_curation_target(&app->curation, d).len > 0) return true;
+    for (int32_t d = 1; d <= 9; ++d) if (rubraview_curation_target(&app->curation, d).size > 0) return true;
     return false;
 }
 
@@ -5309,7 +5309,7 @@ static bool curation_has_numbers(const app_state_t *app) {
 
 static bool picker_is_up(const app_state_t *app, size_t index) {
     return index < app->picker_listing.count && app->picker_listing.entries[index].is_directory &&
-           rubraview_u8_eq_lit(app->picker_listing.entries[index].name, "..");
+           proven_u8str_view_eq(app->picker_listing.entries[index].name, PROVEN_LIT(".."));
 }
 
 static size_t picker_picked_count(const app_state_t *app) {
@@ -5361,28 +5361,28 @@ static void picker_filter_forget(app_state_t *app) {
     app->picker_filter[0] = '\0';
 }
 
-static bool name_holds(u8str_t name, u8str_t part) {
-    if (part.len == 0) return true;
-    for (size_t i = 0; i + part.len <= name.len; ++i) {
+static bool name_holds(proven_u8str_view_t name, proven_u8str_view_t part) {
+    if (part.size == 0) return true;
+    for (size_t i = 0; i + part.size <= name.size; ++i) {
         size_t k = 0;
-        for (; k < part.len; ++k) {
+        for (; k < part.size; ++k) {
             char a = name.ptr[i + k], b = part.ptr[k];
             if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
             if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
             if (a != b) break;
         }
-        if (k == part.len) return true;
+        if (k == part.size) return true;
     }
     return false;
 }
 
 /* The rows whose names hold `text` (the case of letters aside), `..` always; empty: all of them. What
    was picked stays picked, shown or not, and is there again when the filter is cleared. */
-static void picker_filter_set(app_state_t *app, u8str_t text) {
+static void picker_filter_set(app_state_t *app, proven_u8str_view_t text) {
     if (app->picker_in_book || !app->picker_full.entries) return;
     picker_filter_sync(app);
     picker_filter_free(app);
-    size_t keep = text.len < sizeof(app->picker_filter) ? text.len : sizeof(app->picker_filter) - 1;
+    size_t keep = text.size < sizeof(app->picker_filter) ? text.size : sizeof(app->picker_filter) - 1;
     memcpy(app->picker_filter, text.ptr, keep);
     app->picker_filter[keep] = '\0';
     if (keep == 0) {
@@ -5403,11 +5403,11 @@ static void picker_filter_set(app_state_t *app, u8str_t text) {
         picker_reinstall(app);
         return;
     }
-    u8str_t part = { .ptr = app->picker_filter, .len = keep };
+    proven_u8str_view_t part = { .ptr = (const proven_byte_t *)app->picker_filter, .size = keep };
     size_t k = 0;
     for (size_t i = 0; i < n; ++i) {
         const rubraview_fs_entry_t *e = &app->picker_full.entries[i];
-        bool up = e->is_directory && rubraview_u8_eq_lit(e->name, "..");
+        bool up = e->is_directory && proven_u8str_view_eq(e->name, PROVEN_LIT(".."));
         if (!up && !name_holds(e->name, part)) continue;
         app->picker_filtered[k] = *e;
         app->picker_filtered_selected[k] = app->picker_full_selected ? app->picker_full_selected[i] : false;
@@ -5436,15 +5436,15 @@ static void picker_filter_begin(app_state_t *app) {
 /* Each pass while the filter is typed: the rows follow what is in the box. */
 static void picker_filter_follow(app_state_t *app) {
     if (!app->picker_open || !app->rename_active || !app->rename_is_filter) return;
-    u8str_t typed = rubraview_textedit_text(&app->rename_edit);
-    if (!rubraview_u8_eq(typed, cstr(app->picker_filter))) picker_filter_set(app, typed);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    if (!proven_u8str_view_eq(typed, cstr(app->picker_filter))) picker_filter_set(app, typed);
 }
 
 /* The filter's chip at the path bar's right end: the words, and where its X is. */
-static rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, u8str_t *out_label, char *buf, size_t cap) {
+static rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap) {
     int n = app->picker_filter[0] ? snprintf(buf, cap, T("Filter: %s   \xC3\x97"), app->picker_filter)
                                   : snprintf(buf, cap, "%s", T("Filter names (Ctrl+F)"));
-    *out_label = (u8str_t){ .ptr = buf, .len = n > 0 ? (size_t)n : 0 };
+    *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
     double w = picker_chip_width(*out_label, dpi);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
     return (rubraview_pal_rect_t){ win_w - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
@@ -5472,7 +5472,7 @@ static void draw_picker_check(app_state_t *app, size_t index, double win_w, doub
     bool on = app->picker_selected && app->picker_selected[index];
     rubraview_pal_render_fill_rect(app->renderer, box, on ? 0xFF2E7BD6u : 0xB0101010u, 3.0 * dpi);
     rubraview_pal_render_stroke_rect(app->renderer, box, on ? 0xFFFFFFFFu : 0xC0FFFFFFu, 1.5 * dpi, 3.0 * dpi);
-    if (on) rubraview_pal_render_draw_text(app->renderer, U8("\xE2\x9C\x93"), box, box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
+    if (on) rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x9C\x93"), box, box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
 }
 
 /* Every row (folders too, not `..`) picked, or, when all are, none. */
@@ -5488,14 +5488,14 @@ static void picker_select_everything(app_state_t *app) {
     for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = !all && !picker_is_up(app, i);
     char line[64];
     int k = all ? snprintf(line, sizeof(line), "%s", T("nothing picked")) : snprintf(line, sizeof(line), T("%zu picked"), rows);
-    if (k > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)k });
+    if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
 }
 
 /* The pictures, films, songs and text files here picked at once; again, let go (owner: "누를 때마다 토글"). */
 static void picker_select_media(app_state_t *app) {
     if (!app->picker_selected || app->picker_in_book) return;
     char kinds_buf[1024];
-    const char *const KINDS = kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
+    const char *const KINDS = (const char * const)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
     size_t found = 0, on = 0;
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
         const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
@@ -5511,7 +5511,7 @@ static void picker_select_media(app_state_t *app) {
     }
     char line[96];
     int k = snprintf(line, sizeof(line), pick ? T("%zu pictures, films, songs and texts picked") : T("%zu let go"), found);
-    if (k > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)k });
+    if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
 }
 
 /* The picked files, and in a picked folder its pictures, films, music and text, joined to the list on screen. */
@@ -5520,10 +5520,10 @@ static void picker_add_to_list(app_state_t *app) {
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
     size_t cap = 4096, count = 0;
-    u8str_t *paths = (u8str_t *)malloc(cap * sizeof(u8str_t));
+    proven_u8str_view_t *paths = (proven_u8str_view_t *)malloc(cap * sizeof(proven_u8str_view_t));
     if (!paths) return;
     char kinds_buf[1024];
-    const char *const KINDS = kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
+    const char *const KINDS = (const char * const)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
     for (size_t i = 0; i < n && count < cap; ++i) {
         if (!entries[i].is_directory) { paths[count++] = app_keep(app, entries[i].path); continue; }
         rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(app->arena, entries[i].path);
@@ -5539,7 +5539,7 @@ static void picker_add_to_list(app_state_t *app) {
     list_insert_paths(app, paths, count, page_count(app));
     char line[64];
     int k = snprintf(line, sizeof(line), T("%zu added to the list"), count);
-    if (k > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)k });
+    if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
     free(paths);
 }
 
@@ -5549,16 +5549,16 @@ static void picker_copy_paths(app_state_t *app) {
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) return;
     size_t len = 0;
-    for (size_t i = 0; i < n; ++i) len += entries[i].path.len + 2u;
+    for (size_t i = 0; i < n; ++i) len += entries[i].path.size + 2u;
     char *text = (char *)malloc(len + 1u);
     if (!text) return;
     size_t at = 0;
     for (size_t i = 0; i < n; ++i) {
-        memcpy(text + at, entries[i].path.ptr, entries[i].path.len);
-        at += entries[i].path.len;
+        memcpy(text + at, entries[i].path.ptr, entries[i].path.size);
+        at += entries[i].path.size;
         if (i + 1 < n) { text[at++] = '\r'; text[at++] = '\n'; }
     }
-    bool ok = rubraview_pal_clipboard_set_text(app->window, (u8str_t){ .ptr = text, .len = at });
+    bool ok = rubraview_pal_clipboard_set_text(app->window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = at });
     free(text);
     osd_say(app, ok ? (n == 1 ? TU8("its whole path is on the clipboard") : TU8("their whole paths are on the clipboard"))
                     : TU8("the clipboard would not take it"));
@@ -5575,7 +5575,7 @@ static void picker_context(app_state_t *app, size_t index, double x, double y) {
     app->picker.focus = index;
     ctx_close(app);
     slidepop_close(app);
-    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), many ? U8("pickermany") : U8("pickerone"));
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), many ? PROVEN_LIT("pickermany") : PROVEN_LIT("pickerone"));
     if (!list || list->tile_count <= 0) return;
     app->ctx_open = true;
     app->ctx_in_files = false;
@@ -5623,7 +5623,7 @@ static void picker_open_picked(app_state_t *app) {
     char line[64];
     int k = snprintf(line, sizeof(line), T("%zu files opened together"), files);
     app->picker_open = false;
-    open_set_from_entries(app, entries, files, (u8str_t){ .ptr = line, .len = k > 0 ? (size_t)k : 0 });
+    open_set_from_entries(app, entries, files, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = k > 0 ? (size_t)k : 0 });
 }
 
 static void picker_button(app_state_t *app, picker_button_t button) {
@@ -5661,14 +5661,14 @@ static void picker_button(app_state_t *app, picker_button_t button) {
                          ? TU8("tap two files: everything between them turns over") : TU8("a tap opens again"));
             break;
         case PICKER_BTN_SAME_TYPE: {
-            u8str_t ext = picker_focus_extension(app);
-            if (ext.len == 0) { osd_say(app, TU8("put the focus on a file first")); break; }
+            proven_u8str_view_t ext = picker_focus_extension(app);
+            if (ext.size == 0) { osd_say(app, TU8("put the focus on a file first")); break; }
             if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) {
                 rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
             }
             size_t n = rubraview_picker_select_extension(&app->picker, ext, true);
-            int written = snprintf(line, sizeof(line), T("%zu %.*s file(s) picked"), n, (int)ext.len, ext.ptr);
-            if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+            int written = snprintf(line, sizeof(line), T("%zu %.*s file(s) picked"), n, (int)ext.size, ext.ptr);
+            if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
             break;
         }
         case PICKER_BTN_MEDIA:
@@ -5703,12 +5703,12 @@ static void picker_button(app_state_t *app, picker_button_t button) {
                 if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
                 char line[48];
                 int k = snprintf(line, sizeof(line), T("%zu files picked"), rubraview_picker_select_all(&app->picker));
-                if (k > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)k });
+                if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
             }
             break;
         case PICKER_BTN_VIEW: {
             bool details = !picker_details(app);
-            rubraview_settings_set(&app->settings, U8("files"), U8("picker_details"), details ? 1.0 : 0.0);
+            rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_details"), details ? 1.0 : 0.0);
             picker_layout(app);
             rubraview_picker_reveal_focus(&app->picker);
             /* The pictures are asked for again at the new shape. */
@@ -5727,19 +5727,19 @@ static void picker_button(app_state_t *app, picker_button_t button) {
 }
 
 static void picker_open(app_state_t *app) {
-    u8str_t dir = app->picker_dir;
-    if (dir.len == 0) {
+    proven_u8str_view_t dir = app->picker_dir;
+    if (dir.size == 0) {
         /* Nothing open: the PC page, not the folder the viewer happened
            to be started in (owner, 2026-09-28). */
-        dir = app->source_dir.len > 0 ? app->source_dir : U8(RUBRAVIEW_PICKER_PLACES);
+        dir = app->source_dir.size > 0 ? app->source_dir : PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
     }
     /* Reading a book: the picker opens inside it, at the page's own folder,
        on the page (owner, 2026-09-28). */
     int32_t reading = current_page_index(app);
-    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.len > 0 && reading >= 0 &&
-        (app->picker_dir.len == 0 || !rubraview_picker_inside_archive(app->picker_dir, app->source.archive_path, NULL))) {
-        u8str_t folder = rubraview_path_dirname(app->source.pages[reading].name);
-        dir = folder.len > 0 ? rubraview_path_join(app->arena, app->source.archive_path, folder) : app->source.archive_path;
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.size > 0 && reading >= 0 &&
+        (app->picker_dir.size == 0 || !rubraview_picker_inside_archive(app->picker_dir, app->source.archive_path, NULL))) {
+        proven_u8str_view_t folder = rubraview_path_dirname(app->source.pages[reading].name);
+        dir = folder.size > 0 ? rubraview_path_join(app->arena, app->source.archive_path, folder) : app->source.archive_path;
     }
     if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
     picker_navigate(app, dir);
@@ -5760,9 +5760,9 @@ static void picker_open(app_state_t *app) {
 static bool picker_enter_book(app_state_t *app, size_t index) {
     if (index >= app->picker_listing.count) return false;
     const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
-    if (entry->is_directory || !rubraview_glob_match_list(entry->name, U8(ARCHIVE_FILTER))) return false;
+    if (entry->is_directory || !rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER))) return false;
     open_path(app, entry->path);
-    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len == 0) return false;
+    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.size == 0) return false;
     picker_navigate(app, app->source.archive_path);
     app->picker.focus = 0;
     app->picker_open = true;
@@ -5816,7 +5816,7 @@ static void menu_rebuild(app_state_t *app) {
     rubraview_recent_entry_t recent[RECENT_MAX];
     size_t recent_count = 0;
     /* D-104: the files opened lately, newest first; another viewer's too. */
-    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);
+    recent_sync(app, PROVEN_LIT(""), false);
     size_t newest[RECENT_MAX];
     size_t shown = rubraview_recent_newest(&app->recent, newest, RECENT_MAX);
     for (size_t r = 0; r < shown; ++r) {
@@ -5827,7 +5827,7 @@ static void menu_rebuild(app_state_t *app) {
         memcpy(text.value.ptr, action, (size_t)n + 1);
         recent[recent_count++] = (rubraview_recent_entry_t){
             .label = rubraview_path_basename(app->recent.list.entries[newest[r]].path),
-            .action = { .ptr = (const char*)text.value.ptr, .len = (size_t)n },
+            .action = { .ptr = (const proven_byte_t *)(const char*)text.value.ptr, .size = (size_t)n },
         };
     }
     app->menu_when = boxes_when(app);
@@ -5844,7 +5844,7 @@ static const char *toolbox_profile_name(const app_state_t *app) {
     if (text_active(app)) return "text";
     if (app->media) return app->media_info.has_video ? "video" : "music";
     if (app->anim_active) return app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION ? "animation" : "multipage";
-    if (app->source.archive_path.len > 0) return "archive";
+    if (app->source.archive_path.size > 0) return "archive";
     return "image";
 }
 
@@ -5854,7 +5854,7 @@ static void toolbox_refresh(app_state_t *app) {
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     int32_t count = 0;
     const rubraview_toolbox_profile_t *parts[2] = {
-        app->slideshow_running ? rubraview_boxes_profile(doc, U8("slideshow")) : NULL,
+        app->slideshow_running ? rubraview_boxes_profile(doc, PROVEN_LIT("slideshow")) : NULL,
         rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app))),
     };
     /* D-124: the groups, in order: the slide show's own first, then the profile's. */
@@ -5865,9 +5865,9 @@ static void toolbox_refresh(app_state_t *app) {
         for (int32_t i = 0; i < parts[p]->tile_count && count < RUBRAVIEW_TOOLBOX_MAX_TILES; ++i) {
             const rubraview_box_tile_t *tile = &doc->tiles[parts[p]->first_tile + i];
             /* The slide show's own Stop tile stands in for the profile's Slides tile. */
-            if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "toggle_slideshow")) continue;
+            if (p == 1 && parts[0] && proven_u8str_view_eq(tile->action, PROVEN_LIT("toggle_slideshow"))) continue;
             /* D-123: and its Delay tile for the speed tile, while it runs. */
-            if (p == 1 && parts[0] && rubraview_u8_eq_lit(tile->action, "media_speed_cycle")) continue;
+            if (p == 1 && parts[0] && proven_u8str_view_eq(tile->action, PROVEN_LIT("media_speed_cycle"))) continue;
             if (edit_panel_open(app) && edit_denies(tile->action)) continue;   /* RV-137: not while Edit is open */
             if (((int32_t)p != last_part || tile->group != last_group) && groups < RUBRAVIEW_TOOLBOX_MAX_GROUPS) groups++;
             last_part = (int32_t)p;
@@ -5906,7 +5906,7 @@ static void speed_set(app_state_t *app, double speed) {
     char text[16];
     speed_text(text, sizeof(text), speed);
     int n = snprintf(line, sizeof(line), T("speed %s"), text);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static int speed_text(char *buffer, size_t size, double speed) {
@@ -5925,7 +5925,7 @@ static void interval_set(app_state_t *app, double seconds) {
     char line[40];
     if (rubraview_slideshow_interval_text(text, sizeof(text), app->slideshow.interval_seconds) <= 0) return;
     int n = snprintf(line, sizeof(line), T("slide delay %s"), text);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 /* A toggle tile says what a tap will do; a tile that can do nothing now is dimmed. */
@@ -5934,7 +5934,7 @@ static void interval_set(app_state_t *app, double seconds) {
 static rubraview_action_facts_t action_facts(const app_state_t *app) {
     return (rubraview_action_facts_t){
         .has_page = page_count(app) > 0,
-        .archive_series = app->source.archive_path.len > 0,
+        .archive_series = app->source.archive_path.size > 0,
         .media = app->media != NULL,
         .video = app->media != NULL && app->media_info.has_video,
         .frames = app->anim_active,
@@ -5954,16 +5954,16 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
         .filmstrip = app->filmstrip.visible,
         .osd = app->osd.always_on,
         .toolbox_pinned = app->toolbox.pinned,
-        .titlebar_pinned = rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5,
-        .wheel_strip = rubraview_settings_get(&app->settings, U8("viewer"), U8("wheel_strip")) > 0.5,
+        .titlebar_pinned = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
+        .wheel_strip = rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_strip")) > 0.5,
         .toolbox_detached = app->toolbox.state == RUBRAVIEW_BOX_DETACHED,
         .fullscreen = rubraview_pal_window_is_fullscreen(app->window),
         .nearest = app->force_nearest,
         .pixel_grid = app->pixel_grid,
         .spread_detect = app->spread_detect,
         .fit_lock = app->fit_lock,
-        .always_on_top = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5,
-        .muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5,
+        .always_on_top = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5,
+        .muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5,
         .layout = app->layout_opts.mode,
         .fit = app->fit_mode,
         .rtl = app->layout_opts.direction == RUBRAVIEW_READING_RTL,
@@ -5976,8 +5976,8 @@ static rubraview_action_facts_t action_facts(const app_state_t *app) {
    own pixels, so while the edit panel is open the shape is the file's. */
 static void aspect_refresh(app_state_t *app) {
     double ratio = edit_panel_open(app) ? 0.0
-        : rubraview_aspect_ratio(app->aspect, rubraview_settings_get(&app->settings, U8("viewer"), U8("aspect_width")),
-                                 rubraview_settings_get(&app->settings, U8("viewer"), U8("aspect_height")), app->aspect_side);
+        : rubraview_aspect_ratio(app->aspect, rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("aspect_width")),
+                                 rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("aspect_height")), app->aspect_side);
     double w = 0.0, h = 0.0;
     rubraview_orientation_apply_size(app->orientation, 1.0, 2.0, &w, &h);
     bool turned = w > h;
@@ -5996,10 +5996,10 @@ static void aspect_set(app_state_t *app, rubraview_aspect_t aspect, bool side) {
     double ratio = g_view_ratio;
     int n = ratio > 0.0 ? snprintf(line, sizeof(line), T("shape: %s%s (%.3g:1)"), rubraview_aspect_label(aspect), app->aspect_side ? T(", on its side") : "", ratio)
                         : snprintf(line, sizeof(line), T("shape: the file's own"));
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 }
 
-static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);
+static proven_u8str_view_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);
 
 /* The owner (2026-10-18): "툴바 아이콘 위의 텍스트는 언제나 영어로 ... 아이콘 안의 텍스트만
    영어로 해야 넘치지 않아요" — a tile's own words are English whatever the language, so
@@ -6016,16 +6016,16 @@ static const char *fit_action_of(rubraview_fit_mode_t fit) {
     }
 }
 
-static u8str_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
+static proven_u8str_view_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
     const rubraview_lang_t *pack = rubraview_lang_current();
     rubraview_lang_use(NULL);
-    u8str_t caption = toolbox_caption_in(app, tile_in, out_enabled);
+    proven_u8str_view_t caption = toolbox_caption_in(app, tile_in, out_enabled);
     rubraview_lang_use(pack);
     /* 1.25.0 (owner, 2026-10-20: "아이콘에는 단축키를 표시하지 말고 툴팁이나 ... 에만"): the keys are in the tooltip only. */
     return caption;
 }
 
-static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
+static proven_u8str_view_t toolbox_caption_in(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled) {
     rubraview_box_tile_t shown = *tile_in;
     shown.caption = rubraview_tr_ctx_u8("toolbox", tile_in->caption);   /* English here: see toolbox_caption */
     const rubraview_box_tile_t *tile = &shown;
@@ -6037,59 +6037,59 @@ static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_ti
         static char named[48];
         return rubraview_tile_caption(tile->caption, false, st.mark, st.value, named, sizeof(named));
     }
-    if (rubraview_u8_eq_lit(tile->action, "zoom_reset") || rubraview_u8_eq_lit(tile->action, "zoom_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("zoom_reset")) || proven_u8str_view_eq(tile->action, PROVEN_LIT("zoom_cycle"))) {
         /* D-97: the zoom now, where 100% is the size the fit option gives. D-109: the one
            tile that says it goes its round on a tap (`zoom_cycle`). */
         static char percent[16];   /* drawn before the next call */
         /* Real size is not a point on that scale: the owner's name for it is 0%. */
         if (app->fit_mode == RUBRAVIEW_FIT_ACTUAL_SIZE && fabs(app->zoom - 1.0) < 0.0005) return TU8("Real\nsize");   /* 0 %, on two rows (owner, 2026-10-15) */
-        u8str_t text = rubraview_scale_caption(percent, sizeof(percent), app->zoom);
-        return text.len > 0 ? text : tile->caption;
+        proven_u8str_view_t text = rubraview_scale_caption(percent, sizeof(percent), app->zoom);
+        return text.size > 0 ? text : tile->caption;
     }
-    if (rubraview_u8_eq_lit(tile->action, "fit_cycle")) return cstr(rubraview_fit_tile_name(app->fit_mode));
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("fit_cycle"))) return cstr(rubraview_fit_tile_name(app->fit_mode));
     /* 1.25.0 (owner, 2026-10-20): the encoding the text is read in, short, on two rows: EUC / KR, SHFT / JIS */
-    if (rubraview_u8_eq_lit(tile->action, "text_encoding") && app->text) return cstr(rubraview_textenc_short((rubraview_textenc_t)text_enc_now(app)));
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("text_encoding")) && app->text) return cstr(rubraview_textenc_short((rubraview_textenc_t)text_enc_now(app)));
     /* Two pages (owner, 2026-10-17): a wide page alone by its shape, or always two. */
-    if (rubraview_u8_eq_lit(tile->action, "toggle_spread_detect")) return app->spread_detect ? TU8("Wide\nalone") : TU8("Always\ntwo");
-    if (rubraview_u8_eq_lit(tile->action, "text_wrap")) return TU8("Word\nwrap");   /* on two rows (owner, 2026-10-17) */
-    if (rubraview_u8_eq_lit(tile->action, "media_ab_edit")) return TU8("Set\nA-B");   /* on two rows (owner, 2026-10-15) */
-    if (rubraview_u8_eq_lit(tile->action, "media_play_pause")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("toggle_spread_detect"))) return app->spread_detect ? TU8("Wide\nalone") : TU8("Always\ntwo");
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("text_wrap"))) return TU8("Word\nwrap");   /* on two rows (owner, 2026-10-17) */
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_ab_edit"))) return TU8("Set\nA-B");   /* on two rows (owner, 2026-10-15) */
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_play_pause"))) {
         bool paused = app->media ? app->media_paused : app->animation.paused;
         return paused ? TU8("Play") : TU8("Pause");
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_mute")) {
-        return rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5 ? TU8("Unmute") : TU8("Mute");
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_mute"))) {
+        return rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5 ? TU8("Unmute") : TU8("Mute");
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_speed_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_speed_cycle"))) {
         static char speed[16];   /* drawn before the next call */
         int n = speed_text(speed, sizeof(speed), app->media_speed > 0.0 ? app->media_speed : 1.0);
-        return n > 0 ? (u8str_t){ .ptr = speed, .len = (size_t)n } : tile->caption;
+        return n > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)speed, .size = (size_t)n } : tile->caption;
     }
-    if (rubraview_u8_eq_lit(tile->action, "interval_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("interval_cycle"))) {
         static char delay[16];   /* drawn before the next call */
         int n = rubraview_slideshow_interval_text(delay, sizeof(delay), app->slideshow.interval_seconds);
-        return n > 0 ? (u8str_t){ .ptr = delay, .len = (size_t)n } : tile->caption;
+        return n > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)delay, .size = (size_t)n } : tile->caption;
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_repeat_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_repeat_cycle"))) {
         /* "To Next" on two lines (owner, 2026-10-11): "Next" alone read as the next-file button. */
         if (anim_plays(app)) return anim_end_mode(app) == 0 ? TU8("Loop") : anim_end_mode(app) == 1 ? TU8("Once") : TU8("To\nNext");
         if (repeat_mode(app) == RUBRAVIEW_REPEAT_NEXT) return TU8("To\nNext");
         return cstr(rubraview_repeat_caption(repeat_mode(app)));
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_eq_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_eq_cycle"))) {
         int preset = eq_preset_now(app);
         return preset <= 0 ? TU8("EQ") : eq_preset_label(preset);
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_night_toggle")) {
-        return rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) > 0.5 ? TU8("Night on") : TU8("Night");
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_night_toggle"))) {
+        return rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode")) > 0.5 ? TU8("Night on") : TU8("Night");
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_visualizer_cycle")) {
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_visualizer_cycle"))) {
         const char *const V[] = { T("Viz"), T("Bars"), T("Wave") };
-        int v = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")));
+        int v = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer")));
         return cstr(V[v >= 0 && v < 3 ? v : 0]);
     }
-    if (rubraview_u8_eq_lit(tile->action, "media_ab_cycle")) {
-        return app->ab_a < 0.0 ? U8("A-B") : app->ab_b < 0.0 ? TU8("Set B") : TU8("A-B off");
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_ab_cycle"))) {
+        return app->ab_a < 0.0 ? PROVEN_LIT("A-B") : app->ab_b < 0.0 ? TU8("Set B") : TU8("A-B off");
     }
     return tile->caption;
 }
@@ -6097,17 +6097,17 @@ static u8str_t toolbox_caption_in(const app_state_t *app, const rubraview_box_ti
 /* The volume as the OSD says it: "volume 70%" or "muted (70%)". */
 static void media_say_volume(app_state_t *app) {
     char line[48];
-    int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
-    bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+    int volume = (int)rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"));
+    bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
     int n = muted ? snprintf(line, sizeof(line), T("muted (%d%%)"), volume)
                   : snprintf(line, sizeof(line), T("volume %d%%"), volume);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 /* D-16: one step of moving or sizing the window from the keyboard. The
    frame stays on a screen (the PAL pulls it back) and never smaller than
    a usable minimum; a fullscreen window is left alone. */
-static bool window_nudge(app_state_t *app, u8str_t action) {
+static bool window_nudge(app_state_t *app, proven_u8str_view_t action) {
     static const struct { const char *name; int dx, dy, dw, dh; } STEPS[] = {
         { "window_move_left", -1, 0, 0, 0 }, { "window_move_right", 1, 0, 0, 0 },
         { "window_move_up", 0, -1, 0, 0 },   { "window_move_down", 0, 1, 0, 0 },
@@ -6115,7 +6115,7 @@ static bool window_nudge(app_state_t *app, u8str_t action) {
         { "window_shorter", 0, 0, 0, -1 },   { "window_taller", 0, 0, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(STEPS) / sizeof(STEPS[0]); ++i) {
-        if (!rubraview_u8_eq_lit(action, STEPS[i].name)) continue;
+        if (!proven_u8str_view_eq(action, proven_u8str_view_from_cstr(STEPS[i].name))) continue;
         if (rubraview_pal_window_is_fullscreen(app->window)) return true;
         int32_t x = 0, y = 0, w = 0, h = 0;
         if (!rubraview_pal_window_get_frame(app->window, &x, &y, &w, &h)) return true;
@@ -6139,12 +6139,12 @@ static bool window_nudge(app_state_t *app, u8str_t action) {
 /* The OSD line for the subtitles now in use. */
 static void subtitle_say(app_state_t *app) {
     char label[160];
-    u8str_t text = app->tracks.current_subtitle >= 0
+    proven_u8str_view_t text = app->tracks.current_subtitle >= 0
                        ? rubraview_track_label(label, sizeof(label), &app->tracks, app->tracks.current_subtitle)
                        : TU8("off");
     char line[192];
-    int n = snprintf(line, sizeof(line), T("subtitles %.*s"), (int)text.len, text.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    int n = snprintf(line, sizeof(line), T("subtitles %.*s"), (int)text.size, text.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 /* The subtitle tracks in list order; returns how many. */
@@ -6274,7 +6274,7 @@ static void listwin_toggle(app_state_t *app) {
 /* A book's pages are not a list of files: only a folder's files or a
    playlist can be reordered, taken out of the list or added to. */
 static bool list_editable(const app_state_t *app) {
-    return page_count(app) > 0 && app->source.archive_path.len == 0;
+    return page_count(app) > 0 && app->source.archive_path.size == 0;
 }
 
 /* The window's shape for what is open, and a check mark for every page. */
@@ -6293,12 +6293,12 @@ static void listwin_sync(app_state_t *app) {
    the rows a list shows are a view of its pages. Without a filter or a hidden extension
    row `i` is page `i`; with one, rows may not be carried (their order is the pages'). ---- */
 
-static bool list_ext_is_off(const app_state_t *app, u8str_t ext) {
+static bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext) {
     for (size_t k = 0; k < app->list_ext_off_n; ++k) {
-        u8str_t off = cstr(app->list_ext_off[k]);
-        if (off.len != ext.len) continue;
+        proven_u8str_view_t off = cstr(app->list_ext_off[k]);
+        if (off.size != ext.size) continue;
         bool same = true;
-        for (size_t i = 0; i < ext.len && same; ++i) same = rubraview_ascii_lower(off.ptr[i]) == rubraview_ascii_lower(ext.ptr[i]);
+        for (size_t i = 0; i < ext.size && same; ++i) same = rubraview_ascii_lower(off.ptr[i]) == rubraview_ascii_lower(ext.ptr[i]);
         if (same) return true;
     }
     return false;
@@ -6318,15 +6318,15 @@ static void list_map_build(app_state_t *app) {
         app->list_map = grown;
         app->list_map_cap = count ? count : 1;
     }
-    u8str_t part = cstr(app->list_filter);
+    proven_u8str_view_t part = cstr(app->list_filter);
     size_t n = 0;
     for (size_t i = 0; i < count; ++i) {
-        u8str_t name = page_display_name(app, i);
+        proven_u8str_view_t name = page_display_name(app, i);
         if (app->list_ext_off_n > 0) {
-            u8str_t e = rubraview_path_ext(app->source.pages[i].path);
-            if (list_ext_is_off(app, e.len > 0 ? e : U8("."))) continue;
+            proven_u8str_view_t e = rubraview_path_ext(app->source.pages[i].path);
+            if (list_ext_is_off(app, e.size > 0 ? e : PROVEN_LIT("."))) continue;
         }
-        if (part.len > 0 && !name_holds(name, part)) continue;
+        if (part.size > 0 && !name_holds(name, part)) continue;
         app->list_map[n++] = i;
     }
     app->list_map_n = n;
@@ -6364,9 +6364,9 @@ static void list_view_changed(app_state_t *app) {
     app->files_followed = -1;
 }
 
-static void list_filter_set(app_state_t *app, u8str_t text) {
-    size_t keep = text.len < sizeof(app->list_filter) ? text.len : sizeof(app->list_filter) - 1;
-    while (keep > 0 && keep < text.len && ((unsigned char)text.ptr[keep] & 0xC0u) == 0x80u) --keep;   /* whole characters */
+static void list_filter_set(app_state_t *app, proven_u8str_view_t text) {
+    size_t keep = text.size < sizeof(app->list_filter) ? text.size : sizeof(app->list_filter) - 1;
+    while (keep > 0 && keep < text.size && ((unsigned char)text.ptr[keep] & 0xC0u) == 0x80u) --keep;   /* whole characters */
     if (keep == strlen(app->list_filter) && memcmp(app->list_filter, text.ptr, keep) == 0) return;
     memcpy(app->list_filter, text.ptr, keep);
     app->list_filter[keep] = '\0';
@@ -6422,7 +6422,7 @@ static void list_apply(app_state_t *app, const size_t *order, size_t n, const ru
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
 
     int32_t at = current_page_index(app);
-    u8str_t start = { .ptr = "", .len = 0 };
+    proven_u8str_view_t start = PROVEN_LIT("");
     bool reading_stays = false;
     size_t next_added = 0, after = SIZE_MAX;
     for (size_t i = 0; i < n; ++i) {
@@ -6489,7 +6489,7 @@ static void list_move(app_state_t *app, const bool *moving, size_t to) {
 
 /* Files from outside go into the list before what is row `to`: those
    the viewer opens, that are not in it already. */
-static void list_insert_paths(app_state_t *app, const u8str_t *paths, size_t count, size_t to) {
+static void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, size_t to) {
     size_t have = page_count(app);
     if (to > have) to = have;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(rubraview_fs_entry_t));
@@ -6529,7 +6529,7 @@ static void list_insert_paths(app_state_t *app, const u8str_t *paths, size_t cou
 
 /* Settings > Files: a saved list names its files from its own folder, or whole. */
 static bool list_saves_whole_paths(const app_state_t *app) {
-    return lround(rubraview_settings_get(&app->settings, U8("files"), U8("list_paths"))) == 1;
+    return lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("list_paths"))) == 1;
 }
 
 static const rubraview_file_filter_t LIST_FILTERS[] = {
@@ -6545,10 +6545,10 @@ static void list_save(app_state_t *app) {
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
     if (!picked.accepted || picked.count == 0) return;
-    u8str_t target = picked.paths[0];
+    proven_u8str_view_t target = picked.paths[0];
     if (!path_is_playlist(target)) target = rubraview_path_with_ext(app->arena, target, ".m3u8");
     target = rubraview_pal_fs_absolute(app->arena, target);
-    u8str_t dir = rubraview_path_dirname(target);
+    proven_u8str_view_t dir = rubraview_path_dirname(target);
 
     rubraview_playlist_t list = {0};
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_playlist_entry_t));
@@ -6561,21 +6561,21 @@ static void list_save(app_state_t *app) {
                                                             .title = app->source.pages[i].name };
             continue;
         }
-        u8str_t path = rubraview_pal_fs_absolute(app->arena, app->source.pages[i].path);
+        proven_u8str_view_t path = rubraview_pal_fs_absolute(app->arena, app->source.pages[i].path);
         list.entries[i] = (rubraview_playlist_entry_t){ .path = whole ? path : rubraview_path_relative(app->arena, dir, path),
                                                         .duration_seconds = -1.0 };
     }
     list.count = count;
-    u8str_t text = rubraview_path_has_ext(rubraview_path_basename(target), ".rvlist")
+    proven_u8str_view_t text = rubraview_path_has_ext(rubraview_path_basename(target), ".rvlist")
                  ? rubraview_playlist_serialize_rvlist(app->arena, &list)
                  : rubraview_playlist_serialize_m3u8(app->arena, &list);
-    if (text.len == 0 || !rubraview_pal_fs_write_file(target, text)) {
+    if (text.size == 0 || !rubraview_pal_fs_write_file(target, text)) {
         osd_say(app, TU8("could not write the list"));
         return;
     }
     char line[160];
-    u8str_t name = rubraview_path_basename(target);
-    snprintf(line, sizeof(line), T("%zu files in %.*s, %s paths"), count, (int)(name.len < 80 ? name.len : 80), name.ptr,
+    proven_u8str_view_t name = rubraview_path_basename(target);
+    snprintf(line, sizeof(line), T("%zu files in %.*s, %s paths"), count, (int)(name.size < 80 ? name.size : 80), name.ptr,
              whole ? T("whole") : T("relative"));
     osd_say(app, cstr(line));
 }
@@ -6598,10 +6598,10 @@ static void list_row_menu(app_state_t *app, size_t row, double x, double y, bool
    the picker, at the folder of the file on screen, picking; its Add to the list joins them to the list. */
 static void list_add_picked(app_state_t *app, rubraview_window_t *owner) {
     (void)owner;
-    u8str_t here = current_file_path(app);
-    u8str_t dir = here.len > 0 ? rubraview_path_dirname(here) : app->source_dir;
-    if (app->source.archive_path.len > 0) dir = rubraview_path_dirname(app->source.archive_path);
-    if (dir.len > 0) app->picker_dir = app_keep(app, dir);
+    proven_u8str_view_t here = current_file_path(app);
+    proven_u8str_view_t dir = here.size > 0 ? rubraview_path_dirname(here) : app->source_dir;
+    if (app->source.archive_path.size > 0) dir = rubraview_path_dirname(app->source.archive_path);
+    if (dir.size > 0) app->picker_dir = app_keep(app, dir);
     if (app->picker_open) app->picker_open = false;
     picker_open(app);
     if (!app->picker_open) return;
@@ -6616,21 +6616,21 @@ static void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *ow
     size_t count = page_count(app);
     if (row >= count || !list_editable(app)) return;
     char path[1024];
-    u8str_t from = app->source.pages[row].path;
-    if (from.len == 0 || from.len >= sizeof(path)) return;
-    memcpy(path, from.ptr, from.len);                       /* the list it points into is made again below */
-    path[from.len] = '\0';
-    u8str_t name = rubraview_path_basename((u8str_t){ .ptr = path, .len = from.len });
+    proven_u8str_view_t from = app->source.pages[row].path;
+    if (from.size == 0 || from.size >= sizeof(path)) return;
+    memcpy(path, from.ptr, from.size);                       /* the list it points into is made again below */
+    path[from.size] = '\0';
+    proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = from.size });
     char text[1400];
     int n = snprintf(text, sizeof(text), T("Move this file to the recycle bin?\n\n%.*s\n\nIt leaves the list and its folder; "
-                     "the recycle bin can give it back."), (int)(name.len < 600 ? name.len : 600), name.ptr);
+                     "the recycle bin can give it back."), (int)(name.size < 600 ? name.size : 600), name.ptr);
     WCHAR wide[1500];
     if (n <= 0 || MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1500) <= 0) return;
     int answer = MessageBoxW((HWND)rubraview_pal_window_native_handle(owner), wide, L"Rubraview - delete a file",
                              MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     if (answer != IDYES) { osd_say(app, TU8("not deleted")); return; }
     if (app->media && app->media_page == (int32_t)row) media_close(app);   /* a film playing holds its file */
-    u8str_t gone = { .ptr = path, .len = from.len };
+    proven_u8str_view_t gone = { .ptr = (const proven_byte_t *)path, .size = from.size };
     if (!rubraview_pal_fs_recycle(gone)) {
         osd_say(app, TU8("could not move it to the recycle bin (is it open in another program?)"));
         return;
@@ -6646,8 +6646,8 @@ static void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *ow
         }
     }
     char line[700];
-    int m = snprintf(line, sizeof(line), T("moved to the recycle bin: %.*s"), (int)(name.len < 600 ? name.len : 600), name.ptr);
-    if (m > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
+    int m = snprintf(line, sizeof(line), T("moved to the recycle bin: %.*s"), (int)(name.size < 600 ? name.size : 600), name.ptr);
+    if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
 }
 
 /* A press on either list (RV-117: the floating one, or the file window's,
@@ -6669,7 +6669,7 @@ static bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, doub
         else if (part == RUBRAVIEW_LISTWIN_SORT) chooser_open_listsort(app, where, t.x, t.y + t.height, t.y);
         else if (part == RUBRAVIEW_LISTWIN_ORDER) list_sort(app, app->list_sort_key > 0 ? app->list_sort_key : 1, !app->list_sort_desc);
         else if (rubraview_rect_contains((rubraview_rect_t){ t.x + t.width - t.height, t.y, t.height, t.height }, x, y) && app->list_filter[0])
-            list_filter_set(app, U8(""));   /* its X */
+            list_filter_set(app, PROVEN_LIT(""));   /* its X */
         else list_filter_begin(app, in_files);
         if (in_files) app->files_dirty = true;
         return true;
@@ -6724,7 +6724,7 @@ static bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, doub
         case RUBRAVIEW_LISTWIN_APPLY: apply_all_begin(app); break;
         case RUBRAVIEW_LISTWIN_PATHS: {
             bool whole = !list_saves_whole_paths(app);
-            rubraview_settings_set(&app->settings, U8("files"), U8("list_paths"), whole ? 1.0 : 0.0);
+            rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("list_paths"), whole ? 1.0 : 0.0);
             osd_say(app, whole ? TU8("a saved list will name its files by their whole paths")
                                : TU8("a saved list will name its files from its own folder"));
             break;
@@ -6814,11 +6814,11 @@ static void eqwin_set_band(app_state_t *app, size_t band, double db) {
         float shown[RUBRAVIEW_EQ_BANDS];
         eq_shown_gains(app, shown);
         for (size_t b = 0; b < RUBRAVIEW_EQ_BANDS; ++b) {
-            rubraview_settings_set(&app->settings, U8("audio"), eq_band_key(b), (double)shown[b]);
+            rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), eq_band_key(b), (double)shown[b]);
         }
-        rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)RUBRAVIEW_EQWIN_CUSTOM);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset"), (double)RUBRAVIEW_EQWIN_CUSTOM);
     }
-    rubraview_settings_set(&app->settings, U8("audio"), eq_band_key(band), db);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), eq_band_key(band), db);
     audio_chain_update(app);
 }
 
@@ -6830,7 +6830,7 @@ static bool eqwin_press(app_state_t *app, double x, double y, bool right) {
         case RUBRAVIEW_EQWIN_CLOSE: app->eqwin.open = false; return true;
         case RUBRAVIEW_EQWIN_TITLE: rubraview_eqwin_drag_begin(&app->eqwin, x, y); return true;
         case RUBRAVIEW_EQWIN_PRESET:
-            rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)index);
+            rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset"), (double)index);
             audio_chain_update(app);
             return true;
         case RUBRAVIEW_EQWIN_SLIDER:
@@ -6872,8 +6872,8 @@ static bool cue_step(app_state_t *app, int direction) {
     app->media_position = cue->tracks[target].start_seconds;
     char line[160];
     int n = snprintf(line, sizeof(line), "%d / %zu  %.*s", cue->tracks[target].number, cue->count,
-                     (int)cue->tracks[target].title.len, cue->tracks[target].title.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
+                     (int)cue->tracks[target].title.size, cue->tracks[target].title.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
     return true;
 }
 
@@ -6900,7 +6900,7 @@ static void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool 
         int32_t other = app->layout.spreads[app->spread_index].right_index;
         if (other >= 0 && other < page) page = other;
     }
-    rubraview_settings_set(&app->settings, U8("viewer"), U8("layout"), (double)(int)choice);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("layout"), (double)(int)choice);
     settings_took_effect(app);
     rebuild_layout(app);
     if (page >= 0) app->spread_index = spread_index_for_page(app, page);
@@ -6957,7 +6957,7 @@ static void pan_key(app_state_t *app, int dx, int dy) {
    ... 안보이게"): what does not work while Edit is open — another view of the page, a show,
    another screen, the file itself changed or moved, a film's or a text's own controls. Hidden
    from the toolbox, and said when a key or the menu asks for it. */
-static bool edit_denies(u8str_t action) {
+static bool edit_denies(proven_u8str_view_t action) {
     static const char *const NO[] = {
         "rotate_cw", "rotate_ccw", "rotate_180", "flip_horizontal", "flip_vertical", "toggle_layout", "toggle_spread_detect",
         "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
@@ -6965,19 +6965,19 @@ static bool edit_denies(u8str_t action) {
         "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
         "next_audio_track", "next_subtitle_track", "toggle_classify",
     };
-    for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (rubraview_u8_eq_lit(action, NO[i])) return true;
+    for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(NO[i]))) return true;
     static const char *const PREFIX[] = { "media_", "anim_", "subpage_", "text_", "zoom_strip" };
     for (size_t i = 0; i < sizeof(PREFIX) / sizeof(PREFIX[0]); ++i) {
         size_t n = strlen(PREFIX[i]);
-        if (action.len >= n && memcmp(action.ptr, PREFIX[i], n) == 0) return true;
+        if (action.size >= n && memcmp(action.ptr, PREFIX[i], n) == 0) return true;
     }
     return false;
 }
 
 /* While Edit is open the pages turned are pictures only: a film, a sound, a text is passed over. */
 static bool edit_page_is_picture(const app_state_t *app, size_t i) {
-    u8str_t path = app->source.pages[i].path.len > 0 ? app->source.pages[i].path : app->source.pages[i].name;
-    return !is_media_path(path) && !is_text_path(path) && rubraview_glob_match_list(rubraview_path_basename(path), U8(IMAGE_FILTER));
+    proven_u8str_view_t path = app->source.pages[i].path.size > 0 ? app->source.pages[i].path : app->source.pages[i].name;
+    return !is_media_path(path) && !is_text_path(path) && rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT(IMAGE_FILTER));
 }
 
 static bool edit_turn(app_state_t *app, int dir, bool to_end) {
@@ -6996,34 +6996,34 @@ static bool edit_turn(app_state_t *app, int dir, bool to_end) {
     return true;
 }
 
-static void handle_action(app_state_t *app, u8str_t action) {
+static void handle_action(app_state_t *app, proven_u8str_view_t action) {
     if (text_action(app, action)) return;   /* RFC-0005 */
-    if (action.len == 0) return;
+    if (action.size == 0) return;
     if (edit_panel_open(app) && edit_denies(action)) {
         osd_say(app, TU8("not while Edit is open (E closes it)"));
         return;
     }
     if (edit_panel_open(app)) {   /* pictures only, the rest passed over */
-        if (rubraview_u8_eq_lit(action, "next_page") && edit_turn(app, +1, false)) return;
-        if (rubraview_u8_eq_lit(action, "prev_page") && edit_turn(app, -1, false)) return;
-        if (rubraview_u8_eq_lit(action, "first_page") && edit_turn(app, -1, true)) return;
-        if (rubraview_u8_eq_lit(action, "last_page") && edit_turn(app, +1, true)) return;
+        if (proven_u8str_view_eq(action, PROVEN_LIT("next_page")) && edit_turn(app, +1, false)) return;
+        if (proven_u8str_view_eq(action, PROVEN_LIT("prev_page")) && edit_turn(app, -1, false)) return;
+        if (proven_u8str_view_eq(action, PROVEN_LIT("first_page")) && edit_turn(app, -1, true)) return;
+        if (proven_u8str_view_eq(action, PROVEN_LIT("last_page")) && edit_turn(app, +1, true)) return;
     }
     note_activity(app);
     /* D-88: while the archive on screen is being written again nothing is
        opened, closed or changed; Esc stops the writing, and a quit does too. */
-    if (app->arc_job && !rubraview_u8_eq_lit(action, "quit")) {
+    if (app->arc_job && !proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
         osd_say(app, TU8("the archive is being written (Esc stops it)"));
         return;
     }
     /* D-89: with the question of what the archive becomes open, doing something else is "no". */
-    if (app->arc_ask == ARC_ASK_FORMAT && !rubraview_u8_eq_lit(action, "quit")) panel_close(app);
+    if (app->arc_ask == ARC_ASK_FORMAT && !proven_u8str_view_eq(action, PROVEN_LIT("quit"))) panel_close(app);
 
-    if (rubraview_u8_eq_lit(action, "quit")) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
         /* Esc closes what is open before it closes the program. */
         if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
             atomic_store(&app->arc_job->job.cancel, true);
-            osd_say(app, U8("stopping..."));
+            osd_say(app, PROVEN_LIT("stopping..."));
             return;
         }
         if (app->settings_open) { settings_close(app); return; }
@@ -7047,77 +7047,77 @@ static void handle_action(app_state_t *app, u8str_t action) {
         }
         if (!subs_may_leave(app)) return;
         rubraview_pal_window_request_close(app->window);
-    } else if (rubraview_u8_eq_lit(action, "next_page") && cue_step(app, +1)) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_page")) && cue_step(app, +1)) {
         /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
-    } else if (rubraview_u8_eq_lit(action, "prev_page") && cue_step(app, -1)) {
-    } else if (rubraview_u8_eq_lit(action, "next_page")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_page")) && cue_step(app, -1)) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_page"))) {
         next_spread(app);
-    } else if (rubraview_u8_eq_lit(action, "prev_page")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_page"))) {
         prev_spread(app);
-    } else if (rubraview_u8_eq_lit(action, "media_eq_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_cycle"))) {
         int preset = (eq_preset_now(app) + 1) % RUBRAVIEW_EQWIN_PRESETS;
-        rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), (double)preset);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset"), (double)preset);
         audio_chain_update(app);
         char line[64];
-        u8str_t name = eq_preset_label(preset);
-        int n = snprintf(line, sizeof(line), T("equaliser: %.*s"), (int)name.len, name.ptr);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (rubraview_u8_eq_lit(action, "media_eq_window")) {
+        proven_u8str_view_t name = eq_preset_label(preset);
+        int n = snprintf(line, sizeof(line), T("equaliser: %.*s"), (int)name.size, name.ptr);
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_window"))) {
         eqwin_toggle(app);
-    } else if (rubraview_u8_eq_lit(action, "media_night_toggle")) {
-        bool on = rubraview_settings_get(&app->settings, U8("audio"), U8("night_mode")) < 0.5;
-        rubraview_settings_set(&app->settings, U8("audio"), U8("night_mode"), on ? 1.0 : 0.0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_night_toggle"))) {
+        bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode")) < 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode"), on ? 1.0 : 0.0);
         audio_chain_update(app);
         osd_say(app, on ? TU8("night mode: loud passages brought down") : TU8("night mode off"));
-    } else if (rubraview_u8_eq_lit(action, "media_visualizer_cycle")) {
-        int v = ((int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer"))) + 1) % 3;
-        rubraview_settings_set(&app->settings, U8("audio"), U8("visualizer"), (double)v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_visualizer_cycle"))) {
+        int v = ((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer"))) + 1) % 3;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer"), (double)v);
         const char *const SAY[] = { T("analyser off"), T("analyser: spectrum"), T("analyser: oscilloscope") };
         osd_say(app, cstr(SAY[v]));
-    } else if (rubraview_u8_eq_lit(action, "first_page")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("first_page"))) {
         go_to_spread(app, 0);
-    } else if (rubraview_u8_eq_lit(action, "last_page")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("last_page"))) {
         go_to_spread(app, app->layout.count > 0 ? app->layout.count - 1 : 0);
-    } else if (rubraview_u8_eq_lit(action, "fit_window")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_window"))) {
         app->fit_mode = RUBRAVIEW_FIT_WINDOW; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "fit_width")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_width"))) {
         app->fit_mode = RUBRAVIEW_FIT_WIDTH; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "fit_height")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_height"))) {
         app->fit_mode = RUBRAVIEW_FIT_HEIGHT; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "actual_size")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("actual_size"))) {
         if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) app->fit_beside_real = app->fit_mode;
         app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "smart_fit")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("smart_fit"))) {
         app->fit_mode = RUBRAVIEW_FIT_SMART; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "fit_stretch")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_stretch"))) {
         app->fit_mode = RUBRAVIEW_FIT_STRETCH; reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "fit_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_cycle"))) {
         /* the one fit tile (owner, 2026-10-15): window, width, height, smart, stretch */
         app->fit_mode = rubraview_fit_cycle_next(app->fit_mode); reset_view(app);
         const char *const SAID[] = { [RUBRAVIEW_FIT_WINDOW] = T("fit: the window"), [RUBRAVIEW_FIT_WIDTH] = T("fit: the width"),
                                             [RUBRAVIEW_FIT_HEIGHT] = T("fit: the height"), [RUBRAVIEW_FIT_SMART] = T("fit: smart (never enlarged)"),
                                             [RUBRAVIEW_FIT_STRETCH] = T("fit: stretched to fill") };
         if ((size_t)app->fit_mode < sizeof(SAID) / sizeof(SAID[0]) && SAID[app->fit_mode]) osd_say(app, cstr(SAID[app->fit_mode]));
-    } else if (rubraview_u8_eq_lit(action, "toggle_fit_lock")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_fit_lock"))) {
         app->fit_lock = !app->fit_lock;
-    } else if (rubraview_u8_eq_lit(action, "skip_forward")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("skip_forward"))) {
         go_to_spread(app, app->spread_index + 10);
-    } else if (rubraview_u8_eq_lit(action, "skip_backward")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("skip_backward"))) {
         go_to_spread(app, app->spread_index > 10 ? app->spread_index - 10 : 0);
-    } else if (rubraview_u8_eq_lit(action, "up_to_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("up_to_folder"))) {
         /* §3.7.2: ascend to the parent directory, shown in the picker so
            the reader can choose what to open next. */
-        u8str_t here = app->picker_dir;
-        if (here.len == 0) here = app->source_dir;
-        u8str_t parent = rubraview_picker_parent(here);
-        if (parent.len > 0) {
+        proven_u8str_view_t here = app->picker_dir;
+        if (here.size == 0) here = app->source_dir;
+        proven_u8str_view_t parent = rubraview_picker_parent(here);
+        if (parent.size > 0) {
             picker_navigate(app, parent);
             app->picker.focus = 0;
             app->picker_open = app->picker_listing.count > 0;
         }
-    } else if (rubraview_u8_eq_lit(action, "open_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_folder"))) {
         picker_open(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_spread_detect")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_spread_detect"))) {
         /* §3.3.4: with detection off, a wide scan pairs like any other
            page instead of standing alone. */
         app->spread_detect = !app->spread_detect;
@@ -7125,30 +7125,30 @@ static void handle_action(app_state_t *app, u8str_t action) {
         app->needs_relayout = true;
         osd_say(app, app->spread_detect ? TU8("two pages: a wide page stands alone, by its shape")
                                         : TU8("two pages: always two, whatever their shape"));
-    } else if (rubraview_u8_eq_lit(action, "interval_up")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_up"))) {
         interval_set(app, app->slideshow.interval_seconds + 0.5);
-    } else if (rubraview_u8_eq_lit(action, "interval_down")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_down"))) {
         interval_set(app, app->slideshow.interval_seconds - 0.5);
-    } else if (rubraview_u8_eq_lit(action, "interval_up_fine")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_up_fine"))) {
         interval_set(app, app->slideshow.interval_seconds + 0.1);
-    } else if (rubraview_u8_eq_lit(action, "interval_down_fine")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_down_fine"))) {
         interval_set(app, app->slideshow.interval_seconds - 0.1);
-    } else if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_cycle"))) {
         interval_set(app, rubraview_slideshow_interval_cycle(app->slideshow.interval_seconds));
-    } else if (rubraview_u8_eq_lit(action, "zoom_reset")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_reset"))) {
         reset_view(app);   /* D-97: 100% is the fitted size; the fit option stays */
-    } else if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_cycle"))) {
         zoom_cycle(app);
-    } else if (rubraview_u8_eq_lit(action, "pan_left") || rubraview_u8_eq_lit(action, "pan_right") ||
-               rubraview_u8_eq_lit(action, "pan_up") || rubraview_u8_eq_lit(action, "pan_down")) {
-        pan_key(app, rubraview_u8_eq_lit(action, "pan_left") ? -1 : rubraview_u8_eq_lit(action, "pan_right") ? 1 : 0,
-                rubraview_u8_eq_lit(action, "pan_up") ? -1 : rubraview_u8_eq_lit(action, "pan_down") ? 1 : 0);
-    } else if (rubraview_u8_eq_lit(action, "zoom_in")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("pan_left")) || proven_u8str_view_eq(action, PROVEN_LIT("pan_right")) ||
+               proven_u8str_view_eq(action, PROVEN_LIT("pan_up")) || proven_u8str_view_eq(action, PROVEN_LIT("pan_down"))) {
+        pan_key(app, proven_u8str_view_eq(action, PROVEN_LIT("pan_left")) ? -1 : proven_u8str_view_eq(action, PROVEN_LIT("pan_right")) ? 1 : 0,
+                proven_u8str_view_eq(action, PROVEN_LIT("pan_up")) ? -1 : proven_u8str_view_eq(action, PROVEN_LIT("pan_down")) ? 1 : 0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_in"))) {
         zoom_step(app, true);
-    } else if (rubraview_u8_eq_lit(action, "zoom_out")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_out"))) {
         zoom_step(app, false);
-    } else if (rubraview_u8_eq_lit(action, "rotate_cw") || rubraview_u8_eq_lit(action, "rotate_ccw") ||
-               rubraview_u8_eq_lit(action, "flip_horizontal") || rubraview_u8_eq_lit(action, "flip_vertical")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw")) || proven_u8str_view_eq(action, PROVEN_LIT("rotate_ccw")) ||
+               proven_u8str_view_eq(action, PROVEN_LIT("flip_horizontal")) || proven_u8str_view_eq(action, PROVEN_LIT("flip_vertical"))) {
         /* Turning changes which pages pair, so the spreads are made again
            and the page that was on screen is found among them: of two,
            the earlier one, whichever side it was on. */
@@ -7158,11 +7158,11 @@ static void handle_action(app_state_t *app, u8str_t action) {
             if (other >= 0 && other < page) page = other;
         }
         bool turn = true;
-        if (rubraview_u8_eq_lit(action, "rotate_cw")) {
+        if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw"))) {
             app->orientation = rubraview_orientation_rotate_cw(app->orientation);
-        } else if (rubraview_u8_eq_lit(action, "rotate_ccw")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_ccw"))) {
             app->orientation = rubraview_orientation_rotate_ccw(app->orientation);
-        } else if (rubraview_u8_eq_lit(action, "flip_horizontal")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("flip_horizontal"))) {
             app->orientation = rubraview_orientation_flip_h(app->orientation);
             turn = false;
         } else {
@@ -7172,16 +7172,16 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rebuild_layout(app);
         if (page >= 0) app->spread_index = spread_index_for_page(app, page);
         if (turn) reset_view(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_pixel_grid")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_pixel_grid"))) {
         app->pixel_grid = !app->pixel_grid;
-    } else if (rubraview_u8_eq_lit(action, "toggle_nearest")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_nearest"))) {
         app->force_nearest = !app->force_nearest;
-    } else if (rubraview_u8_eq_lit(action, "center_picture")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("center_picture"))) {
         /* 1.25.0 (owner, 2026-10-20): the picture's middle on the window's, its size as it is */
         app->pan_x = 0.0;
         app->pan_y = 0.0;
         note_activity(app);
-    } else if (rubraview_u8_eq_lit(action, "align_widget")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("align_widget"))) {
         /* 1.25.0 (owner, 2026-10-20: "플로팅 바를 우측 하단으로, 하단 Information bar가 있을 경우 그 위에"): the Floating
            Widget back in its corner, inside the window, over the information bar when it is shown */
         int32_t ww = 0, wh = 0;
@@ -7192,77 +7192,77 @@ static void handle_action(app_state_t *app, u8str_t action) {
         rubraview_box_snap_home(&app->toolbox, &m, (double)ww, (double)wh);
         if (app->osd.always_on) app->toolbox.anchor_y -= 28.0 * dpi;
         osd_say(app, TU8("the Floating Widget is back in its corner"));
-    } else if (rubraview_u8_eq_lit(action, "toggle_osd")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_osd"))) {
         app->osd.always_on = !app->osd.always_on;
-    } else if (rubraview_u8_eq_lit(action, "toggle_filmstrip")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_filmstrip"))) {
         app->filmstrip.visible = !app->filmstrip.visible;
         int32_t page = current_page_index(app);
         if (page >= 0) strip_follow(app, (size_t)page);
-    } else if (rubraview_u8_eq_lit(action, "layout_single")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_single"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_SINGLE, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_dual")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_dual"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_dual_rtl")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_dual_rtl"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_book")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_book"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_book_rtl")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_book_rtl"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_webtoon")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_webtoon"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_WEBTOON, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_comic")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_comic"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC, false);
-    } else if (rubraview_u8_eq_lit(action, "layout_comic_rtl")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_comic_rtl"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL, false);
-    } else if (rubraview_u8_eq_lit(action, "aspect_original")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_original"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_ORIGINAL, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_4_3")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_4_3"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_4_3, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_5_4")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_5_4"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_5_4, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_3_2")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_3_2"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_3_2, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_16_10")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_16_10"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_16_10, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_16_9")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_16_9"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_16_9, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_185")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_185"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_CINEMA_FLAT, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_21_9")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_21_9"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_21_9, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_239")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_239"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_CINEMA_SCOPE, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_1_1")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_1_1"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_1_1, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_paper")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_paper"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_PAPER, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_letter")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_letter"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_LETTER, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_custom")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_custom"))) {
         aspect_set(app, RUBRAVIEW_ASPECT_CUSTOM, app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_cycle"))) {
         aspect_set(app, rubraview_aspect_next(app->aspect), app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "aspect_flip")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("aspect_flip"))) {
         aspect_set(app, app->aspect, !app->aspect_side);
-    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_toolbox"))) {
         /* A toolbox that is its own window is put back, not shown twice. */
-        if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, U8("toggle_toolbox_detach"));
+        if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) handle_action(app, PROVEN_LIT("toggle_toolbox_detach"));
         else rubraview_box_click_anchor(&app->toolbox);
-    } else if (rubraview_u8_eq_lit(action, "open_favorites")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_favorites"))) {
         favwin_toggle(app);   /* 1.24.0 */
-    } else if (rubraview_u8_eq_lit(action, "toggle_favorite")) {
-        u8str_t here = current_file_path(app);   /* 1.24.0: the file on screen in or out of the favourites */
-        if (here.len == 0) osd_say(app, TU8("open a file first"));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_favorite"))) {
+        proven_u8str_view_t here = current_file_path(app);   /* 1.24.0: the file on screen in or out of the favourites */
+        if (here.size == 0) osd_say(app, TU8("open a file first"));
         else { (void)favorite_toggle_path(app, here); if (app->favwin.open) favwin_build(app); }
-    } else if (rubraview_u8_eq_lit(action, "open_recent_list")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_recent_list"))) {
         /* The owner (2026-10-17): a list window of their own, with when, how large and where
            (the open-file screen's Recent page is still there, as tiles). */
         recentwin_toggle(app);
-    } else if (rubraview_u8_eq_lit(action, "open_picker")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_picker"))) {
         app->picker_add_mode = false;   /* 1.22.0 */
         if (app->picker_open) {
             app->picker_open = false;
-        } else if (rubraview_settings_get(&app->settings, U8("general"), U8("native_dialog")) > 0.5) {
+        } else if (rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("native_dialog")) > 0.5) {
             /* RV-107: Windows' own dialog in place of the picker. */
             const rubraview_file_filter_t FILTERS[] = {
                 { T("Pictures, films, music, books"),
@@ -7278,72 +7278,72 @@ static void handle_action(app_state_t *app, u8str_t action) {
         } else {
             picker_open(app);
         }
-    } else if (rubraview_u8_eq_lit(action, "list_open") || rubraview_u8_eq_lit(action, "list_copy_path") ||
-               rubraview_u8_eq_lit(action, "list_reveal") || rubraview_u8_eq_lit(action, "list_take_out") ||
-               rubraview_u8_eq_lit(action, "list_delete_file")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_open")) || proven_u8str_view_eq(action, PROVEN_LIT("list_copy_path")) ||
+               proven_u8str_view_eq(action, PROVEN_LIT("list_reveal")) || proven_u8str_view_eq(action, PROVEN_LIT("list_take_out")) ||
+               proven_u8str_view_eq(action, PROVEN_LIT("list_delete_file"))) {
         /* RV-117: a file of a list, right-clicked on its row */
         size_t row = app->list_ctx_row;
         rubraview_window_t *owner = app->ctx_in_files && app->files_window ? app->files_window : app->window;
         if (row >= page_count(app)) {
             osd_say(app, TU8("that file is no longer in the list"));
-        } else if (rubraview_u8_eq_lit(action, "list_open")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_open"))) {
             if ((int32_t)row != current_page_index(app)) {
                 go_to_spread(app, spread_for_chosen_page(app, (int32_t)row));
                 update_precache(app);
             }
-        } else if (rubraview_u8_eq_lit(action, "list_copy_path")) {
-            u8str_t whole = rubraview_pal_fs_absolute(app->arena, app->source.pages[row].path);
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_copy_path"))) {
+            proven_u8str_view_t whole = rubraview_pal_fs_absolute(app->arena, app->source.pages[row].path);
             osd_say(app, rubraview_pal_clipboard_set_text(owner, whole) ? TU8("its whole path is on the clipboard")
                                                                          : TU8("the path could not be copied"));
-        } else if (rubraview_u8_eq_lit(action, "list_reveal")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_reveal"))) {
             if (!rubraview_pal_shell_reveal(app->source.pages[row].path)) osd_say(app, TU8("Explorer could not show the file"));
-        } else if (rubraview_u8_eq_lit(action, "list_take_out")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_take_out"))) {
             bool *one = (bool*)calloc(page_count(app), sizeof(bool));
             if (one) { one[row] = true; list_remove(app, one); free(one); }
         } else {
             list_delete_row(app, row, owner);
         }
         app->files_dirty = true;
-    } else if (rubraview_u8_eq_lit(action, "reveal_in_explorer")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("reveal_in_explorer"))) {
         /* Owner, 2026-10-09: the file on screen picked out in Explorer; a
            page inside an archive has no file of its own, so the archive. */
         int32_t at = current_page_index(app);
-        u8str_t path = app->source.archive_path.len > 0 ? app->source.archive_path
-                     : (at >= 0 && (size_t)at < page_count(app)) ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
-        if (path.len == 0) osd_say(app, TU8("there is no file to show"));
+        proven_u8str_view_t path = app->source.archive_path.size > 0 ? app->source.archive_path
+                     : (at >= 0 && (size_t)at < page_count(app)) ? app->source.pages[at].path : PROVEN_LIT("");
+        if (path.size == 0) osd_say(app, TU8("there is no file to show"));
         else if (!rubraview_pal_shell_reveal(path)) osd_say(app, TU8("Explorer could not show the file"));
-    } else if ((rubraview_u8_eq_lit(action, "delete_file") || rubraview_u8_eq_lit(action, "purge_file")) && on_archive_page(app)) {
+    } else if ((proven_u8str_view_eq(action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(action, PROVEN_LIT("purge_file"))) && on_archive_page(app)) {
         /* D-88: a page of an archive; there is no bin inside one, so either key asks. */
         arc_edit_on_page(app, RUBRAVIEW_ARCEDIT_DELETE, NULL);
-    } else if (rubraview_u8_eq_lit(action, "delete_file")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("delete_file"))) {
         triage_delete(app, false);
-    } else if (rubraview_u8_eq_lit(action, "purge_file")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("purge_file"))) {
         /* §3.18.1: a permanent delete asks first, every time. */
         app->confirm_purge = true;
-    } else if (rubraview_u8_eq_lit(action, "undo")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("undo"))) {
         if (!arc_undo(app)) triage_undo(app);
-    } else if (rubraview_u8_eq_lit(action, "rename_file")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("rename_file"))) {
         rename_begin(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_file_list")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_file_list"))) {
         files_show(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_subtitle_window")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_subtitle_window"))) {
         subs_show(app);
-    } else if (rubraview_u8_eq_lit(action, "extract_subtitles")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("extract_subtitles"))) {
         takeout_begin(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_classify")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_classify"))) {
         classify_toggle(app);
-    } else if (rubraview_u8_eq_lit(action, "copy_to_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_to_folder"))) {
         filing_put(app, false);
-    } else if (rubraview_u8_eq_lit(action, "move_to_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"))) {
         filing_put(app, true);
-    } else if (rubraview_u8_eq_lit(action, "copy_to_other_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_to_other_folder"))) {
         target_begin(app, false, false);
-    } else if (rubraview_u8_eq_lit(action, "move_to_other_folder")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("move_to_other_folder"))) {
         target_begin(app, true, false);
-    } else if (rubraview_u8_eq_lit(action, "open_settings")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_settings"))) {
         if (app->settings_open) settings_close(app);
         else settings_open(app);
-    } else if (rubraview_u8_eq_lit(action, "open_edit")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_edit"))) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
         else if (app->media && !(app->media_info.has_video && app->media_page >= 0)) osd_say(app, TU8("Edit is for pictures"));
         else if (app->media && !app->media_paused) osd_say(app, TU8("pause the film first (Space): E then edits the frame on screen"));
@@ -7353,20 +7353,20 @@ static void handle_action(app_state_t *app, u8str_t action) {
             app->frame_wanted = FRAME_EDIT;
             media_seek_to(app, app->media_position);
         } else panel_open_edit(app);
-    } else if (rubraview_u8_eq_lit(action, "copy_frame") || rubraview_u8_eq_lit(action, "save_frame")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_frame")) || proven_u8str_view_eq(action, PROVEN_LIT("save_frame"))) {
         /* RV-108: of a film or an animation; a still picture has Export. */
         bool film = app->media && app->media_info.has_video && app->media_page >= 0;
-        if (!film && !anim_plays(app) && rubraview_u8_eq_lit(action, "copy_frame")) {
+        if (!film && !anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("copy_frame"))) {
             picture_copy(app);   /* RV-116: a still picture, whole, as its file holds it */
         } else if (!film && !anim_plays(app)) {
             osd_say(app, TU8("that is for a film or an animation: Ctrl+E exports a picture"));
         } else {
-            app->frame_wanted = rubraview_u8_eq_lit(action, "copy_frame") ? FRAME_COPY : FRAME_SAVE;
+            app->frame_wanted = proven_u8str_view_eq(action, PROVEN_LIT("copy_frame")) ? FRAME_COPY : FRAME_SAVE;
             /* Playing, the next frame is taken; standing still, the frame is asked for again. */
             if (film && app->media_paused) media_seek_to(app, app->media_position);
             else if (!film) show_frame(app, app->animation.current);
         }
-    } else if (rubraview_u8_eq_lit(action, "quick_export") || rubraview_u8_eq_lit(action, "save_as")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("quick_export")) || proven_u8str_view_eq(action, PROVEN_LIT("save_as"))) {
         if (app->panel.open && app->panel_is_export) panel_close(app);
         else {
             /* From Edit (owner, 2026-10-18): the edits are in what Export writes, and Edit comes back after it. */
@@ -7374,102 +7374,102 @@ static void handle_action(app_state_t *app, u8str_t action) {
             if (edit_panel_open(app)) { edit_live_close(app); sel_mode_set(app, false); edit_window_close(app); }
             panel_open_export(app);
         }
-    } else if (rubraview_u8_eq_lit(action, "new_window")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("new_window"))) {
         new_window(app);
-    } else if (rubraview_u8_eq_lit(action, "open_batch")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_batch"))) {
         app->batch_list_count = 0;   /* opened by hand: on the folder being read */
         if (app->panel.open && app->panel_is_batch) panel_close(app);
         else panel_open_batch(app);
-    } else if (rubraview_u8_eq_lit(action, "print")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("print"))) {
         /* D-86, D-87: the picture on screen; how is chosen first, then the system's print dialog. */
-        u8str_t path = current_file_path(app);
+        proven_u8str_view_t path = current_file_path(app);
         if (app->panel.open && app->panel_is_print) panel_close(app);
         else if (on_archive_page(app)) print_archive_page(app);
-        else if (path.len == 0) osd_say(app, TU8("there is no picture to print"));
+        else if (path.size == 0) osd_say(app, TU8("there is no picture to print"));
         else print_paths(app, &path, 1);
-    } else if (app->media && (rubraview_u8_eq_lit(action, "media_play_pause") || rubraview_u8_eq_lit(action, "anim_toggle_pause"))) {
+    } else if (app->media && (proven_u8str_view_eq(action, PROVEN_LIT("media_play_pause")) || proven_u8str_view_eq(action, PROVEN_LIT("anim_toggle_pause")))) {
         media_toggle_pause(app);   /* anim_toggle_pause: the name before D-16, in keymap.ini files saved earlier */
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_stop")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_stop"))) {
         /* Stop: back to the start and paused, the first frame on screen. */
         if (!app->media_paused) media_toggle_pause(app);
         media_seek_to(app, 0.0);
         osd_say(app, TU8("stopped"));
-    } else if (rubraview_u8_eq_lit(action, "media_volume_up") || rubraview_u8_eq_lit(action, "media_volume_down")) {
-        double volume = rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
-        rubraview_settings_set(&app->settings, U8("audio"), U8("volume"),
-                               volume + (rubraview_u8_eq_lit(action, "media_volume_up") ? 5.0 : -5.0));
-        rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), 0.0);   /* turning it up or down unmutes */
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_volume_up")) || proven_u8str_view_eq(action, PROVEN_LIT("media_volume_down"))) {
+        double volume = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"));
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"),
+                               volume + (proven_u8str_view_eq(action, PROVEN_LIT("media_volume_up")) ? 5.0 : -5.0));
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 0.0);   /* turning it up or down unmutes */
         settings_took_effect(app);
         media_say_volume(app);
-    } else if (rubraview_u8_eq_lit(action, "media_mute")) {
-        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
-        rubraview_settings_set(&app->settings, U8("audio"), U8("mute"), muted ? 0.0 : 1.0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_mute"))) {
+        bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), muted ? 0.0 : 1.0);
         settings_took_effect(app);
         media_say_volume(app);
-    } else if (action.len > 12 && memcmp(action.ptr, "open_recent:", 12) == 0) {
+    } else if (action.size > 12 && memcmp(action.ptr, "open_recent:", 12) == 0) {
         /* File › Recent: the entry's index in the reading history. */
         /* Read inside the view: an action is a slice, not a C string. */
         int64_t index = -1;
-        if (rubraview_parse_i64((u8str_t){ .ptr = action.ptr + 12, .len = action.len - 12 }, &index) &&
+        if (rubraview_parse_i64((proven_u8str_view_t){ .ptr = action.ptr + 12, .size = action.size - 12 }, &index) &&
             index >= 0 && (size_t)index < app->recent.list.count) {
-            u8str_t path = app_keep(app, app->recent.list.entries[index].path);
+            proven_u8str_view_t path = app_keep(app, app->recent.list.entries[index].path);
             if (rubraview_pal_fs_exists(path)) open_path(app, path);
             else osd_say(app, TU8("that file is no longer there"));
         }
-    } else if (rubraview_u8_eq_lit(action, "recent_clear")) {
-        recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, true);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("recent_clear"))) {
+        recent_sync(app, PROVEN_LIT(""), true);
         menu_rebuild(app);
         osd_say(app, TU8("the recent list is empty"));
-    } else if (rubraview_u8_eq_lit(action, "toggle_always_on_top")) {
-        bool on = rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5;
-        rubraview_settings_set(&app->settings, U8("general"), U8("always_on_top"), on ? 0.0 : 1.0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_always_on_top"))) {
+        bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top"), on ? 0.0 : 1.0);
         settings_took_effect(app);
         osd_say(app, on ? TU8("no longer on top of other windows") : TU8("always on top of other windows"));
-    } else if (rubraview_u8_eq_lit(action, "toggle_wheel_strip")) {
-        bool on = rubraview_settings_get(&app->settings, U8("viewer"), U8("wheel_strip")) > 0.5;
-        rubraview_settings_set(&app->settings, U8("viewer"), U8("wheel_strip"), on ? 0.0 : 1.0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_wheel_strip"))) {
+        bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_strip")) > 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_strip"), on ? 0.0 : 1.0);
         if (on) app->strip_peek_until = 0.0;   /* one up now goes */
         osd_say(app, on ? TU8("no thumbnails while the wheel turns pages") : TU8("thumbnails while the wheel turns pages"));
-    } else if (rubraview_u8_starts_with(action, "picker_") && app->picker_open) {   /* 1.22.0: a tile's right click */
+    } else if (proven_u8str_view_starts_with(action, PROVEN_LIT("picker_")) && app->picker_open) {   /* 1.22.0: a tile's right click */
         size_t at = app->picker_ctx_index;
-        if (rubraview_u8_eq_lit(action, "picker_open_item")) { if (at < app->picker_listing.count) picker_activate(app, at); }
-        else if (rubraview_u8_eq_lit(action, "picker_look_inside")) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not a book")); }
-        else if (rubraview_u8_eq_lit(action, "picker_add_to_list")) picker_add_to_list(app);
-        else if (rubraview_u8_eq_lit(action, "picker_make_playlist")) picker_make_playlist(app);
-        else if (rubraview_u8_eq_lit(action, "picker_copy_paths")) picker_copy_paths(app);
-        else if (rubraview_u8_eq_lit(action, "picker_reveal")) {
+        if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not a book")); }
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_add_to_list"))) picker_add_to_list(app);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_make_playlist"))) picker_make_playlist(app);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths"))) picker_copy_paths(app);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_reveal"))) {
             if (at < app->picker_listing.count) (void)rubraview_pal_shell_reveal(app->picker_listing.entries[at].path);
         }
-        else if (rubraview_u8_eq_lit(action, "picker_rename")) rename_picker_begin(app, at);
-        else if (rubraview_u8_eq_lit(action, "picker_change_ext")) picker_button(app, PICKER_BTN_EXTENSION);   /* 1.24.0: off the bottom */
-        else if (rubraview_u8_eq_lit(action, "picker_favorite")) {   /* 1.24.0: a file or a folder in or out of the favourites */
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_rename"))) rename_picker_begin(app, at);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_change_ext"))) picker_button(app, PICKER_BTN_EXTENSION);   /* 1.24.0: off the bottom */
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_favorite"))) {   /* 1.24.0: a file or a folder in or out of the favourites */
             if (at < app->picker_listing.count) { (void)favorite_toggle_path(app, app->picker_listing.entries[at].path); if (app->favwin.open) favwin_build(app); }
         }
-        else if (rubraview_u8_eq_lit(action, "picker_copy_to")) picker_button(app, PICKER_BTN_COPY);
-        else if (rubraview_u8_eq_lit(action, "picker_move_to")) picker_button(app, PICKER_BTN_MOVE);
-        else if (rubraview_u8_eq_lit(action, "picker_recycle")) {
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_to"))) picker_button(app, PICKER_BTN_COPY);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_move_to"))) picker_button(app, PICKER_BTN_MOVE);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"))) {
             /* asked on the list (a second click); here it goes */
             rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, rubraview_pal_time_now_seconds());
             picker_recycle(app);
         }
-        else if (rubraview_u8_eq_lit(action, "picker_deselect_all")) {
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all"))) {
             for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
             osd_say(app, TU8("nothing picked"));
         }
-    } else if (rubraview_u8_eq_lit(action, "toggle_titlebar_pin")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_titlebar_pin"))) {
         /* 1.20.0 (owner, 2026-10-18: "툴바에 상단 타이틀바 자체를 고정하는 pin"): the title bar stays */
-        bool on = rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5;
-        rubraview_settings_set(&app->settings, U8("general"), U8("titlebar_pinned"), on ? 0.0 : 1.0);
+        bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned"), on ? 0.0 : 1.0);
         osd_say(app, on ? TU8("the title bar comes and goes") : TU8("the title bar stays"));
-    } else if (rubraview_u8_eq_lit(action, "hide_boxes")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("hide_boxes"))) {
         /* D-110: asked again (a key), they come back as a click brings them. */
         chrome_hide(app, !app->chrome_hidden);
         osd_say(app, app->chrome_hidden ? TU8("hidden: click the picture to bring the title bar and the Floating Widget back")
                                         : TU8("the title bar and the Floating Widget are back"));
-    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox_pin")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_toolbox_pin"))) {
         rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
         osd_say(app, app->toolbox.pinned ? TU8("Toolbar pinned open") : TU8("Toolbar unpinned"));
-    } else if (rubraview_u8_eq_lit(action, "toggle_toolbox_detach")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_toolbox_detach"))) {
         if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) {
             int32_t w = 0, h = 0;
             rubraview_pal_window_get_size(app->window, &w, &h);
@@ -7482,7 +7482,7 @@ static void handle_action(app_state_t *app, u8str_t action) {
             toolbox_detach(app, fx + fw - (int32_t)(360.0 * rubraview_pal_window_dpi_scale(app->window)),
                            fy + fh / 2, false);
         }
-    } else if (rubraview_u8_eq_lit(action, "open_keys")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_keys"))) {
         settings_open(app);
         if (app->settings_open) {
             rubraview_settings_view_set_page(&app->settings_view, RUBRAVIEW_TAB_KEYS);
@@ -7490,74 +7490,74 @@ static void handle_action(app_state_t *app, u8str_t action) {
             skip_dirs_table_rows(app);
             app->settings_dirty = true;
         }
-    } else if (rubraview_u8_eq_lit(action, "toggle_help")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_help"))) {
         help_show(app);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle"))) {
         /* D-82: an animation's own end — round again, stop there, the next file. */
         int mode = (anim_end_mode(app) + 1) % 3;
-        rubraview_settings_set(&app->settings, U8("viewer"), U8("animation_end"), (double)mode);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("animation_end"), (double)mode);
         osd_say(app, mode == 0 ? TU8("an animation goes round and round")
                    : mode == 1 ? TU8("an animation plays once and stops")
                                : TU8("after an animation, the next file"));
-    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle"))) {
         /* What happens at the end of a film or a song (owner, 2026-09-29). */
         rubraview_repeat_mode_t mode = rubraview_repeat_cycle(repeat_mode(app));
-        rubraview_settings_set(&app->settings, U8("audio"), U8("at_end"), (double)mode);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end"), (double)mode);
         app->follow_for = -1;   /* decided again, in the new mode */
         osd_say(app, cstr(rubraview_repeat_sentence(mode)));
-    } else if (rubraview_u8_eq_lit(action, "toggle_playlist")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_playlist"))) {
         listwin_toggle(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_info")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_info"))) {
         info_show(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_miniplayer")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_miniplayer"))) {
         mini_show(app);
-    } else if (rubraview_u8_eq_lit(action, "boxes_opacity_100") || rubraview_u8_eq_lit(action, "boxes_opacity_80") ||
-               rubraview_u8_eq_lit(action, "boxes_opacity_60") || rubraview_u8_eq_lit(action, "boxes_opacity_40")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_100")) || proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_80")) ||
+               proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_60")) || proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_40"))) {
         double percent = 100.0;
-        if (!rubraview_parse_double((u8str_t){ .ptr = action.ptr + 14, .len = action.len - 14 }, &percent)) percent = 100.0;
-        rubraview_settings_set(&app->settings, U8("ui"), U8("menubox_opacity"), percent);
-        rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_opacity"), percent);
+        if (!rubraview_parse_double((proven_u8str_view_t){ .ptr = action.ptr + 14, .size = action.size - 14 }, &percent)) percent = 100.0;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("menubox_opacity"), percent);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"), percent);
         char line[32];
         int n = snprintf(line, sizeof(line), T("Floating Widget %d%%"), (int)percent);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     } else if (window_nudge(app, action)) {
         /* D-16: Ctrl + arrows size the window, Alt + arrows move it. */
-    } else if (app->media && rubraview_u8_eq_lit(action, "anim_step_forward")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("anim_step_forward"))) {
         media_step(app, true);
-    } else if (app->media && rubraview_u8_eq_lit(action, "anim_step_back")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("anim_step_back"))) {
         media_step(app, false);
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward"))) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back"))) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward_long")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_long"))) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_LONG);
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_long"))) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_LONG);
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_forward_fine")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_fine"))) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_FINE);   /* RV-107 */
-    } else if (app->media && rubraview_u8_eq_lit(action, "media_seek_back_fine")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_fine"))) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_FINE);
-    } else if (app->media && rubraview_u8_eq_lit(action, "next_audio_track")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track"))) {
         /* §3.16.2: the next sound track of the same file, without
            stopping the picture. */
         int32_t next = rubraview_tracks_next(&app->tracks, RUBRAVIEW_TRACK_AUDIO,
                                              app->tracks.current_audio);
         if (next < 0 || next == app->tracks.current_audio) osd_say(app, TU8("this file has only one sound track"));
         else audio_track_set(app, next);
-    } else if (rubraview_u8_eq_lit(action, "debug_lose_device")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("debug_lose_device"))) {
         /* A test's trigger (RV-062): the next frame acts as if the graphics
            device had been lost. Bound by no default key. */
         rubraview_pal_render_force_lost(app->renderer);
-    } else if (app->media && rubraview_u8_eq_lit(action, "toggle_subtitles")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("toggle_subtitles"))) {
         /* D-33: from the menu or a key; the Sub tile's taps come through
            sub_tile_result, which also tells a double tap from a single. */
         subtitles_toggle(app);
-    } else if (app->media && rubraview_u8_eq_lit(action, "choose_subtitle_track")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("choose_subtitle_track"))) {
         int32_t w = 0, h = 0;
         rubraview_pal_window_get_size(app->window, &w, &h);
         sub_list_open_at(app, w * 0.5, h * 0.75);
-    } else if (app->media && rubraview_u8_eq_lit(action, "next_subtitle_track")) {
+    } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("next_subtitle_track"))) {
         /* §3.16.2: the subtitle files beside the film, and off. */
         if (rubraview_tracks_count(&app->tracks, RUBRAVIEW_TRACK_SUBTITLE) == 0) {
             osd_say(app, TU8("this video has no subtitles, in it or beside it"));
@@ -7566,15 +7566,15 @@ static void handle_action(app_state_t *app, u8str_t action) {
                                                  app->tracks.current_subtitle);
             subtitle_select(app, next);
             char label[160];
-            u8str_t text = rubraview_track_label(label, sizeof(label), &app->tracks,
+            proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &app->tracks,
                                                  app->tracks.current_subtitle);
             char line[192];
-            int n = snprintf(line, sizeof(line), T("subtitles %.*s"), (int)text.len, text.ptr);
-            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+            int n = snprintf(line, sizeof(line), T("subtitles %.*s"), (int)text.size, text.ptr);
+            if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         }
-    } else if (app->media && (rubraview_u8_eq_lit(action, "subtitle_earlier") || rubraview_u8_eq_lit(action, "subtitle_later") ||
-                              rubraview_u8_eq_lit(action, "subtitle_earlier_fine") || rubraview_u8_eq_lit(action, "subtitle_later_fine") ||
-                              rubraview_u8_eq_lit(action, "subtitle_sync_reset"))) {
+    } else if (app->media && (proven_u8str_view_eq(action, PROVEN_LIT("subtitle_earlier")) || proven_u8str_view_eq(action, PROVEN_LIT("subtitle_later")) ||
+                              proven_u8str_view_eq(action, PROVEN_LIT("subtitle_earlier_fine")) || proven_u8str_view_eq(action, PROVEN_LIT("subtitle_later_fine")) ||
+                              proven_u8str_view_eq(action, PROVEN_LIT("subtitle_sync_reset")))) {
         /* §3.16.1: half a second at a time, and the OSD says where the
            track now sits so the reader can aim. */
         /* A DVD's or a Blu-ray's pictures are subtitles too, and they are
@@ -7583,10 +7583,10 @@ static void handle_action(app_state_t *app, u8str_t action) {
             osd_say(app, TU8("no subtitles are showing"));
         } else {
             /* Half a second (Z / X), a tenth (Shift), or back to the file's own times (Alt+Z) (owner, 2026-10-16). */
-            if (rubraview_u8_eq_lit(action, "subtitle_sync_reset")) rubraview_subtitle_sync_reset(&app->subtitle);
-            else if (rubraview_u8_eq_lit(action, "subtitle_earlier_fine")) rubraview_subtitle_shift(&app->subtitle, -0.1);
-            else if (rubraview_u8_eq_lit(action, "subtitle_later_fine")) rubraview_subtitle_shift(&app->subtitle, 0.1);
-            else rubraview_subtitle_nudge(&app->subtitle, rubraview_u8_eq_lit(action, "subtitle_later"));
+            if (proven_u8str_view_eq(action, PROVEN_LIT("subtitle_sync_reset"))) rubraview_subtitle_sync_reset(&app->subtitle);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("subtitle_earlier_fine"))) rubraview_subtitle_shift(&app->subtitle, -0.1);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("subtitle_later_fine"))) rubraview_subtitle_shift(&app->subtitle, 0.1);
+            else rubraview_subtitle_nudge(&app->subtitle, proven_u8str_view_eq(action, PROVEN_LIT("subtitle_later")));
             app->subs_dirty = true;   /* the list's Save lights: the offset can be written in */
             if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
                 app->subtitle_offset_for = app->source.pages[app->media_page].path;
@@ -7595,27 +7595,27 @@ static void handle_action(app_state_t *app, u8str_t action) {
             char line[96];
             int n = app->subtitle.offset_seconds == 0.0 ? snprintf(line, sizeof(line), T("subtitles in the file's own time"))
                                                         : snprintf(line, sizeof(line), T("subtitles %+.1f s"), app->subtitle.offset_seconds);
-            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+            if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         }
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_stop")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_stop"))) {
         /* D-82: an animation takes a film's keys and tiles from here on. */
         rubraview_animation_stop(&app->animation);
         show_frame(app, 0);
         update_window_title(app);
         osd_say(app, TU8("stopped"));
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward"))) {
         play_seek(app, play_position(app) + MEDIA_SEEK_STEP);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back"))) {
         play_seek(app, play_position(app) - MEDIA_SEEK_STEP);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward_long")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_long"))) {
         play_seek(app, play_position(app) + MEDIA_SEEK_LONG);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back_long")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_long"))) {
         play_seek(app, play_position(app) - MEDIA_SEEK_LONG);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_forward_fine")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_fine"))) {
         play_seek(app, play_position(app) + MEDIA_SEEK_FINE);
-    } else if (anim_plays(app) && rubraview_u8_eq_lit(action, "media_seek_back_fine")) {
+    } else if (anim_plays(app) && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_fine"))) {
         play_seek(app, play_position(app) - MEDIA_SEEK_FINE);
-    } else if (!app->media && !anim_plays(app) && app->bgm_media && rubraview_u8_eq_lit(action, "media_play_pause")) {
+    } else if (!app->media && !anim_plays(app) && app->bgm_media && proven_u8str_view_eq(action, PROVEN_LIT("media_play_pause"))) {
         /* §3.14.6: with a picture on screen and music behind it, the
            play key is the music's — and the listener's own pause
            outranks the arbiter from then on. */
@@ -7626,54 +7626,54 @@ static void handle_action(app_state_t *app, u8str_t action) {
                                   pausing ? RUBRAVIEW_BGM_READER_PAUSED : RUBRAVIEW_BGM_READER_RESUMED,
                                   bgm_pause_for_sound(app));
         osd_say(app, pausing ? TU8("the music is paused") : TU8("the music plays on"));
-    } else if (rubraview_u8_eq_lit(action, "anim_toggle_pause") || rubraview_u8_eq_lit(action, "media_play_pause")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("anim_toggle_pause")) || proven_u8str_view_eq(action, PROVEN_LIT("media_play_pause"))) {
         bool ended = app->animation.ended;
         if (app->animation.paused) rubraview_animation_resume(&app->animation);
         else rubraview_animation_pause(&app->animation);
         if (ended) show_frame(app, app->animation.current);   /* played again: from the first frame */
         update_window_title(app);
-    } else if (rubraview_u8_eq_lit(action, "subpage_next") && app->anim_active &&
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("subpage_next")) && app->anim_active &&
                app->animation.current + 1 >= app->animation.frame_count) {
         next_spread(app);   /* past a multi-page file's last page: the next file (owner, 2026-10-14) */
-    } else if (rubraview_u8_eq_lit(action, "subpage_prev") && app->anim_active && app->animation.current == 0) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("subpage_prev")) && app->anim_active && app->animation.current == 0) {
         prev_spread(app);
-    } else if (rubraview_u8_eq_lit(action, "anim_step_forward") || rubraview_u8_eq_lit(action, "subpage_next")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("anim_step_forward")) || proven_u8str_view_eq(action, PROVEN_LIT("subpage_next"))) {
         rubraview_animation_step(&app->animation, true);
         show_frame(app, app->animation.current);
         update_window_title(app);
-    } else if (rubraview_u8_eq_lit(action, "anim_step_back") || rubraview_u8_eq_lit(action, "subpage_prev")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("anim_step_back")) || proven_u8str_view_eq(action, PROVEN_LIT("subpage_prev"))) {
         rubraview_animation_step(&app->animation, false);
         show_frame(app, app->animation.current);
         update_window_title(app);
     } else if ((app->media || anim_plays(app)) &&
-               (rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "anim_speed_down") ||
-                rubraview_u8_eq_lit(action, "media_speed_up") || rubraview_u8_eq_lit(action, "media_speed_down") ||
-                rubraview_u8_eq_lit(action, "media_speed_reset") || rubraview_u8_eq_lit(action, "media_speed_cycle"))) {
+               (proven_u8str_view_eq(action, PROVEN_LIT("anim_speed_up")) || proven_u8str_view_eq(action, PROVEN_LIT("anim_speed_down")) ||
+                proven_u8str_view_eq(action, PROVEN_LIT("media_speed_up")) || proven_u8str_view_eq(action, PROVEN_LIT("media_speed_down")) ||
+                proven_u8str_view_eq(action, PROVEN_LIT("media_speed_reset")) || proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle")))) {
         /* D-15: 0.25x to 4x a quarter at a time; the tile cycles the usual ones. */
         double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
-        if (rubraview_u8_eq_lit(action, "media_speed_reset")) {
+        if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_reset"))) {
             speed = 1.0;
-        } else if (rubraview_u8_eq_lit(action, "media_speed_cycle")) {
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle"))) {
             static const double CYCLE[] = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
             size_t next = 0;
             for (size_t i = 0; i < 6; ++i) if (fabs(CYCLE[i] - speed) < 1e-6) next = (i + 1) % 6;
             /* D-110: a speed the drag or the wheel left between the steps goes to 1x first. */
             speed = CYCLE[next];
         } else {
-            bool up = rubraview_u8_eq_lit(action, "anim_speed_up") || rubraview_u8_eq_lit(action, "media_speed_up");
+            bool up = proven_u8str_view_eq(action, PROVEN_LIT("anim_speed_up")) || proven_u8str_view_eq(action, PROVEN_LIT("media_speed_up"));
             speed += up ? 0.25 : -0.25;
         }
         speed_set(app, speed);
-    } else if (rubraview_u8_eq_lit(action, "media_ab_edit")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_ab_edit"))) {
         ab_edit_begin(app);
     } else if ((app->media || anim_plays(app)) &&
-               (rubraview_u8_eq_lit(action, "media_ab_a") || rubraview_u8_eq_lit(action, "media_ab_b") ||
-                rubraview_u8_eq_lit(action, "media_ab_clear") || rubraview_u8_eq_lit(action, "media_ab_cycle"))) {
+               (proven_u8str_view_eq(action, PROVEN_LIT("media_ab_a")) || proven_u8str_view_eq(action, PROVEN_LIT("media_ab_b")) ||
+                proven_u8str_view_eq(action, PROVEN_LIT("media_ab_clear")) || proven_u8str_view_eq(action, PROVEN_LIT("media_ab_cycle")))) {
         /* D-15 A-B repeat. The tile walks A, then B, then off. */
         char line[64];
         int n = 0;
-        bool set_a = rubraview_u8_eq_lit(action, "media_ab_a") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a < 0.0);
-        bool set_b = rubraview_u8_eq_lit(action, "media_ab_b") || (rubraview_u8_eq_lit(action, "media_ab_cycle") && app->ab_a >= 0.0 && app->ab_b < 0.0);
+        bool set_a = proven_u8str_view_eq(action, PROVEN_LIT("media_ab_a")) || (proven_u8str_view_eq(action, PROVEN_LIT("media_ab_cycle")) && app->ab_a < 0.0);
+        bool set_b = proven_u8str_view_eq(action, PROVEN_LIT("media_ab_b")) || (proven_u8str_view_eq(action, PROVEN_LIT("media_ab_cycle")) && app->ab_a >= 0.0 && app->ab_b < 0.0);
         if (set_a || set_b) {
             /* The point just taken wins; the other goes to the end or the start (owner, 2026-10-15). */
             rubraview_ab_take(&app->ab_a, &app->ab_b, play_position(app), set_a, play_duration(app));
@@ -7683,34 +7683,34 @@ static void handle_action(app_state_t *app, u8str_t action) {
             app->ab_a = app->ab_b = -1.0;
             n = snprintf(line, sizeof(line), T("repeat off"));
         }
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (rubraview_u8_eq_lit(action, "anim_speed_up")) {
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("anim_speed_up"))) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, true);
-    } else if (rubraview_u8_eq_lit(action, "anim_speed_down")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("anim_speed_down"))) {
         app->animation.speed = rubraview_animation_step_speed(app->animation.speed, false);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_auto")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_auto"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_AUTO);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_utf8")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_utf8"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_UTF8);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_korean")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_korean"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_KOREAN);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_japanese")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_japanese"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_JAPANESE);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_chinese_simplified")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_chinese_simplified"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_SIMPLIFIED_CHINESE);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_chinese_traditional")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_chinese_traditional"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_TRADITIONAL_CHINESE);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_western")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_western"))) {
         archive_names_reread(app, RUBRAVIEW_CODEPAGE_WESTERN);
-    } else if (rubraview_u8_eq_lit(action, "archive_names_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("archive_names_cycle"))) {
         /* the code pages in their menu order, round again after Western */
         int now = app->names_codepage >= 0 ? app->names_codepage : (int)app->archive_codepage;
         archive_names_reread(app, (rubraview_codepage_t)((now + 1) % ((int)RUBRAVIEW_CODEPAGE_WESTERN + 1)));
-    } else if (rubraview_u8_eq_lit(action, "next_archive")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_archive"))) {
         if (!open_sibling_archive(app, true)) osd_say(app, TU8("no next archive beside this one"));
-    } else if (rubraview_u8_eq_lit(action, "prev_archive")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_archive"))) {
         if (!open_sibling_archive(app, false)) osd_say(app, TU8("no previous archive beside this one"));
-    } else if (rubraview_u8_eq_lit(action, "resume_accept")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("resume_accept"))) {
         /* §3.17.1: the prompt is answered by opening the remembered page. */
         if (app->resume_offer) {
             app->resume_offer = false;
@@ -7718,12 +7718,12 @@ static void handle_action(app_state_t *app, u8str_t action) {
             go_to_spread(app, target);
             update_precache(app);
         }
-    } else if (rubraview_u8_eq_lit(action, "toggle_slideshow")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_slideshow"))) {
         toggle_slideshow(app);
-    } else if (rubraview_u8_eq_lit(action, "toggle_fullscreen")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_fullscreen"))) {
         rubraview_pal_window_set_fullscreen(app->window,
                                             !rubraview_pal_window_is_fullscreen(app->window));
-    } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
         /* One page, two pages, a book (the cover alone), the webtoon strip,
            comic (wide scans in halves) — two pages, the book and comic each
            followed by itself read right to left — and round again (owner,
@@ -7757,7 +7757,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (key_is(combo, "Up"))    { if (!app->picker_in_book) picker_go_up(app); return true; }
     }
 
-    if (combo.key_name.len == 1) {
+    if (combo.key_name.size == 1) {
         char c = combo.key_name.ptr[0];
         if (app->picker_has_pending && c == '0') {
             app->picker_has_pending = false;
@@ -7768,7 +7768,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
             /* A number with no folder behind it leaves the picker waiting
                rather than letting the next one fall through to §3.18.3's
                own meaning, which would move the page on screen. */
-            if (rubraview_curation_target(&app->curation, c - '0').len == 0) {
+            if (rubraview_curation_target(&app->curation, c - '0').size == 0) {
                 osd_say(app, TU8("no folder is bound to that number - Settings > Files, or 0 for another folder"));
                 return true;
             }
@@ -7788,39 +7788,39 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     size_t count = app->picker_listing.count;
     if (count == 0) { app->picker_open = false; return true; }
 
-    if (rubraview_u8_eq_lit(combo.key_name, "Right")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Right"))) {
         if (app->picker.focus + 1 < count) app->picker.focus++;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Left")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Left"))) {
         if (app->picker.focus > 0) app->picker.focus--;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Down")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Down"))) {
         app->picker.focus = (app->picker.focus + columns < count)
             ? app->picker.focus + columns : count - 1;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Up")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Up"))) {
         app->picker.focus = (app->picker.focus >= columns) ? app->picker.focus - columns : 0;
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Enter")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Enter"))) {
         if ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && picker_enter_book(app, app->picker.focus)) return true;
         picker_activate(app, app->picker.focus);
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Escape")) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Escape"))) {
         app->picker_open = false;
         return true;
     }
-    if (rubraview_u8_eq_lit(combo.key_name, "Backspace")) {
-        u8str_t parent = rubraview_picker_parent(app->picker_dir);
-        if (parent.len > 0) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Backspace"))) {
+        proven_u8str_view_t parent = rubraview_picker_parent(app->picker_dir);
+        if (parent.size > 0) {
             picker_navigate(app, parent);
             app->picker.focus = 0;
         }
@@ -7831,27 +7831,27 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 
 static bool key_is(rubraview_key_combo_t combo, const char *name) {
     size_t n = strlen(name);
-    return combo.key_name.len == n && memcmp(combo.key_name.ptr, name, n) == 0;
+    return combo.key_name.size == n && memcmp(combo.key_name.ptr, name, n) == 0;
 }
 
 /* Typed, composed or pasted text into the rename box: control bytes and
    anything that is not UTF-8 are left out (rubraview_rename_append's rule),
    then it goes in at the caret in place of the selection. */
-static void rename_insert(app_state_t *app, u8str_t text) {
-    if (text.len == 0) return;
+static void rename_insert(app_state_t *app, proven_u8str_view_t text) {
+    if (text.size == 0) return;
     char clean[sizeof(app->rename_buffer)];
     size_t length = 0;
     (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
-    (void)rubraview_textedit_insert(&app->rename_edit, (u8str_t){ .ptr = clean, .len = length });
+    (void)rubraview_textedit_insert(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = length });
 }
 
 /* Text for a box: whole UTF-8 characters, no control characters. */
-static void textbox_insert(rubraview_textedit_t *te, u8str_t text) {
-    if (text.len == 0) return;
+static void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text) {
+    if (text.size == 0) return;
     char clean[1024];
     size_t length = 0;
     (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
-    (void)rubraview_textedit_insert(te, (u8str_t){ .ptr = clean, .len = length });
+    (void)rubraview_textedit_insert(te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = length });
 }
 
 /* The editing keys of a text box (the rename box, the picker's path, the
@@ -7878,14 +7878,14 @@ static bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, ru
     } else if (ctrl && key_is(combo, "A")) {
         rubraview_textedit_select_all(te);
     } else if (ctrl && (key_is(combo, "C") || key_is(combo, "X"))) {
-        u8str_t chosen = rubraview_textedit_selection(te);
-        if (chosen.len > 0 && rubraview_pal_clipboard_set_text(window, chosen) && key_is(combo, "X")) {
+        proven_u8str_view_t chosen = rubraview_textedit_selection(te);
+        if (chosen.size > 0 && rubraview_pal_clipboard_set_text(window, chosen) && key_is(combo, "X")) {
             rubraview_textedit_backspace(te);   /* removes the selection */
         }
     } else if (ctrl && key_is(combo, "V")) {
         char pasted[1024];
         size_t n = rubraview_pal_clipboard_get_text(window, pasted, sizeof(pasted));
-        textbox_insert(te, (u8str_t){ .ptr = pasted, .len = n });
+        textbox_insert(te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)pasted, .size = n });
     } else {
         return false;
     }
@@ -7905,25 +7905,25 @@ static void restart_now(app_state_t *app) {
     app->confirm_restart = false;
     if (!subs_may_leave(app)) return;   /* subtitle changes not saved: asked, as quitting asks */
     settings_write_if_changed(app, false);
-    u8str_t here = current_file_path(app);
-    if (app->source.archive_path.len > 0) here = app->source.archive_path;
-    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    proven_u8str_view_t here = current_file_path(app);
+    if (app->source.archive_path.size > 0) here = app->source.archive_path;
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
     char line[4096];
     size_t pos = 0;
     line[0] = '\0';
-    if (exe.len > 0) {
+    if (exe.size > 0) {
         append_arg(line, sizeof(line), &pos, exe);
         append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
         /* A book (an archive) comes back on its page; a folder's file is named itself. */
         int32_t page = current_page_index(app);
-        if (here.len > 0 && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && page > 0) {
+        if (here.size > 0 && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && page > 0) {
             char word[32];
             snprintf(word, sizeof(word), "--page=%d", (int)page + 1);
             append_arg_cstr(line, sizeof(line), &pos, word);
         }
-        if (here.len > 0) append_arg(line, sizeof(line), &pos, here);
+        if (here.size > 0) append_arg(line, sizeof(line), &pos, here);
     }
-    if (exe.len == 0 || !rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) {
+    if (exe.size == 0 || !rubraview_pal_process_start((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) {
         osd_say(app, TU8("Rubraview could not be started again"));
         return;
     }
@@ -7934,7 +7934,7 @@ static void restart_now(app_state_t *app) {
 static void memory_watch(app_state_t *app, double now) {
     if (!app->mem || app->restart_offered || now - app->memory_checked_at < 0.5) return;
     app->memory_checked_at = now;
-    double test_mb = rubraview_settings_get(&app->settings, U8("debug"), U8("memory_restart_mb"));
+    double test_mb = rubraview_settings_get(&app->settings, PROVEN_LIT("debug"), PROVEN_LIT("memory_restart_mb"));
     if (test_mb > 0.0) app->mem->heap_restart_at = (size_t)test_mb << 20;   /* a test's limit, on all the program holds */
     if (rubraview_mem_pressure(app->mem) == RUBRAVIEW_MEM_OK) return;
     app->restart_offered = true;
@@ -7946,8 +7946,8 @@ static void rename_cancel(app_state_t *app) {
     if (app->rename_is_password) osd_say(app, TU8("not opened: it needs its password"));
     bool filter = app->rename_is_filter, listfilter = app->rename_is_listfilter;
     rename_end(app);
-    if (filter) picker_filter_set(app, U8(""));   /* 1.22.0: Esc lets every name show again */
-    if (listfilter) list_filter_set(app, U8(""));
+    if (filter) picker_filter_set(app, PROVEN_LIT(""));   /* 1.22.0: Esc lets every name show again */
+    if (listfilter) list_filter_set(app, PROVEN_LIT(""));
 }
 
 /* 1.24.0 (owner, 2026-10-19: "단축키만 있는게 아니라 버튼으로도 각 기능이나 입력, 취소가 버튼으로"): the box's buttons and,
@@ -8036,18 +8036,18 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        §3.7.2 gives 1-5 to the fit modes, and an unconfigured viewer must
        keep them; a reader who has set up triage folders has said which
        meaning they want. */
-    if (combo.modifiers == RUBRAVIEW_MOD_NONE && combo.key_name.len == 1 && !app->picker_open) {
+    if (combo.modifiers == RUBRAVIEW_MOD_NONE && combo.key_name.size == 1 && !app->picker_open) {
         /* Not while the picker is open: there a number answers its own
            "Move to" or "Copy to", and curating the page behind it would
            move a file the reader is not looking at (2026-09-23). */
         char c = combo.key_name.ptr[0];
         if (c >= '1' && c <= '9') {
             int32_t digit = c - '0';
-            if (app->classify_panel.open && rubraview_curation_target(&app->curation, digit).len > 0) {
+            if (app->classify_panel.open && rubraview_curation_target(&app->curation, digit).size > 0) {
                 classify_mark(app, digit);   /* RV-133: set aside, not moved yet */
                 return true;
             }
-            if (rubraview_curation_target(&app->curation, digit).len > 0) {
+            if (rubraview_curation_target(&app->curation, digit).size > 0) {
                 triage_curate(app, digit);
                 return true;
             }
@@ -8110,8 +8110,8 @@ static rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, i
 
 /* A point in three fields, hours, minutes and seconds (owner, 2026-10-15). An unset
    point is three empty fields rather than noughts: nought is a time. */
-static u8str_t ab_part(const app_state_t *app, int32_t side, int32_t part) {
-    return (u8str_t){ .ptr = app->ab_edit_text[side][part], .len = app->ab_edit_length[side][part] };
+static proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part) {
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->ab_edit_text[side][part], .size = app->ab_edit_length[side][part] };
 }
 
 static void ab_part_set(app_state_t *app, int32_t side, int32_t part, const char *text) {
@@ -8197,7 +8197,7 @@ static bool ab_edit_commit(app_state_t *app) {
     int n = a < 0.0 ? snprintf(line, sizeof(line), T("repeat off"))
           : b < 0.0 ? snprintf(line, sizeof(line), T("repeat from %.3f s"), a)
                     : snprintf(line, sizeof(line), T("repeating %.3f - %.3f s"), a, b);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     return true;
 }
 
@@ -8231,7 +8231,7 @@ static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        (owner, 2026-09-30); a point still empty starts from where the film is. */
     if (key_is(combo, "Left") || key_is(combo, "Right")) {
         int32_t f = app->ab_edit_field;
-        double step = rubraview_settings_get(&app->settings, U8("video"), U8("ab_step_seconds"));
+        double step = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("ab_step_seconds"));
         double now = app->media_position;
         double typed = -1.0;
         if (ab_edit_value(app, f, &typed) && typed >= 0.0) now = typed;
@@ -8255,9 +8255,9 @@ static bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
 }
 
 /* The characters themselves: digits, a point in the seconds, and a colon to go on to the next field. */
-static void ab_edit_text_typed(app_state_t *app, u8str_t text) {
+static void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text) {
     static const size_t MOST[3] = { 3, 3, 6 };   /* 999 hours; 999 minutes add up; 59.999 */
-    for (size_t i = 0; i < text.len; ++i) {
+    for (size_t i = 0; i < text.size; ++i) {
         char c = text.ptr[i];
         int32_t f = app->ab_edit_field, p = app->ab_edit_part;
         if (c == ':') {
@@ -8292,7 +8292,7 @@ static rubraview_edit_session_t edit_whole(const app_state_t *app) {
 static int32_t px_edit_value(const app_state_t *app, int32_t field) {
     if (!app->px_edit_crop) {   /* a size: pixels, or a length in any unit (RV-128) */
         int32_t whole = field == 0 ? app->edit.image_width : app->edit.image_height, px = 0;
-        u8str_t typed = { .ptr = app->px_edit_text[field], .len = app->px_edit_length[field] };
+        proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)app->px_edit_text[field], .size = app->px_edit_length[field] };
         return rubraview_resize_parse_length(typed, whole, app->edit.resize_dpi, &px) ? px : 0;
     }
     int32_t v = 0;
@@ -8359,7 +8359,7 @@ static void px_edit_follow(app_state_t *app) {
     }
 }
 
-static u8str_t crop_button_label(const app_state_t *app);
+static proven_u8str_view_t crop_button_label(const app_state_t *app);
 static bool px_edit_commit(app_state_t *app) {
     if (app->px_edit_crop) {
         if (!rubraview_edit_crop_set(&app->edit, px_edit_value(app, 0), px_edit_value(app, 1), px_edit_value(app, 2), px_edit_value(app, 3))) {
@@ -8371,7 +8371,7 @@ static bool px_edit_commit(app_state_t *app) {
         char line[80];
         const rubraview_crop_rect_t *c = &app->edit.crop;
         int n = snprintf(line, sizeof(line), T("cut at %d, %d: %d x %d pixels"), (int)c->x, (int)c->y, (int)c->width, (int)c->height);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return true;
     }
     int32_t f = app->px_edit_field;
@@ -8388,7 +8388,7 @@ static bool px_edit_commit(app_state_t *app) {
     app->edit_shown_valid = false;
     char line[64];
     int n = snprintf(line, sizeof(line), T("saved at %d x %d pixels"), (int)w, (int)h);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     return true;
 }
 
@@ -8416,9 +8416,9 @@ static bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     return true;   /* the digits arrive as text; the rest is swallowed */
 }
 
-static void px_edit_text_typed(app_state_t *app, u8str_t text) {
+static void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text) {
     int32_t f = app->px_edit_field;
-    for (size_t i = 0; i < text.len; ++i) {
+    for (size_t i = 0; i < text.size; ++i) {
         char c = text.ptr[i];
         bool digit = c >= '0' && c <= '9';
         /* RV-128: a size may be typed with its unit: 21cm, 210 mm, 8.5in, 50% */
@@ -8573,7 +8573,7 @@ static void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const ru
     bool hot = box->grip_active || rubraview_rect_contains(gr, app->pointer_x, app->pointer_y);
     rubraview_pal_render_fill_rect(app->renderer, grip, hot ? COLOR_TILE_FILL : fill, 2.0);
     rubraview_pal_render_stroke_rect(app->renderer, grip, border, 1.0, 2.0);
-    rubraview_pal_render_draw_text(app->renderer, U8("R"), grip, gr.height * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* 1.25.0: R, resize */
+    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("R"), grip, gr.height * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* 1.25.0: R, resize */
     if (!box->grip_active) return;
     rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
     char line[64];
@@ -8589,7 +8589,7 @@ static void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const ru
                                  w, gr.height * 0.5 };
     if (tip.x < 0.0) tip.x = 0.0;
     rubraview_pal_render_fill_rect(app->renderer, tip, COLOR_BOX_FILL, 3.0);
-    rubraview_pal_render_draw_text(app->renderer, (u8str_t){ line, (size_t)n }, tip, gr.height * 0.28, COLOR_TEXT,
+    rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)n }, tip, gr.height * 0.28, COLOR_TEXT,
                                    RUBRAVIEW_TEXT_CENTER);
 }
 
@@ -8670,9 +8670,9 @@ static void toolbox_dock(app_state_t *app, double client_x, double client_y) {
 
 /* ---- the seek buttons' choices (owner, 2026-10-09) ---- */
 
-static bool seek_tile_action(u8str_t action, bool *out_forward) {
-    if (rubraview_u8_eq_lit(action, "media_seek_forward")) { *out_forward = true; return true; }
-    if (rubraview_u8_eq_lit(action, "media_seek_back")) { *out_forward = false; return true; }
+static bool seek_tile_action(proven_u8str_view_t action, bool *out_forward) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward"))) { *out_forward = true; return true; }
+    if (proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back"))) { *out_forward = false; return true; }
     return false;
 }
 
@@ -8711,7 +8711,7 @@ static void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detache
         rubraview_pal_render_stroke_rect(r, rect, on ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 3.0);
         char caption[8];
         int n = snprintf(caption, sizeof(caption), "%s%s", app->seekfan.forward ? "+" : "-", rubraview_seekfan_label(i));
-        if (n > 0) rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = caption, .len = (size_t)n }, rect,
+        if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)caption, .size = (size_t)n }, rect,
                                                   rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
@@ -8733,7 +8733,7 @@ static void draw_toolbox_window(app_state_t *app) {
         rubraview_pal_window_get_frame(app->toolbox_window, &fx, &fy, &fw, &fh);
         rubraview_pal_window_set_frame(app->toolbox_window, fx, fy, want_w, want_h);
     }
-    double opacity = rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_opacity"));
+    double opacity = rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"));
     if (opacity != app->toolbox_window_opacity) {
         rubraview_pal_window_set_opacity(app->toolbox_window, opacity);
         app->toolbox_window_opacity = opacity;
@@ -8744,7 +8744,7 @@ static void draw_toolbox_window(app_state_t *app) {
     rubraview_pal_rect_t right = { m.anchor_size, 0.0, m.anchor_size, m.anchor_size };
     rubraview_pal_render_stroke_rect(r, left, COLOR_BOX_BORDER, 1.0, 2.0);
     rubraview_pal_render_fill_rect(r, right, COLOR_TILE_FILL, 2.0);
-    rubraview_pal_render_draw_text(r, U8("T"), left, m.anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(r, PROVEN_LIT("T"), left, m.anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     rubraview_pal_render_draw_text(r, TU8("Dock"), right, m.anchor_size * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     rubraview_toolbox_layout_t l = toolbox_window_layout(app, &m);
     rubraview_action_facts_t facts = action_facts(app);
@@ -8847,7 +8847,7 @@ static void toolbox_window_pump(app_state_t *app) {
                     if (!rubraview_rect_contains(toolbox_window_tile(app, &m, i), event.mouse.x, event.mouse.y)) continue;
                     bool enabled = true;
                     (void)toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
-                    if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) {
+                    if (enabled && proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("toggle_subtitles"))) {
                         /* D-33: decided on release, a double tap or a hold */
                         sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
                     } else if (enabled && seek_tile_action(app->toolbox_tiles[i].action, &(bool){ false })) {
@@ -8857,9 +8857,9 @@ static void toolbox_window_pump(app_state_t *app) {
                         app->seekfan_detached = true;
                         rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                                 toolbox_window_tile(app, &m, i));
-                    } else if (enabled && (rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "media_speed_cycle") ||
-                                           rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "interval_cycle"))) {
-                        speed_tile_press(app, event.mouse.y, true, rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "interval_cycle"));
+                    } else if (enabled && (proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("media_speed_cycle")) ||
+                                           proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("interval_cycle")))) {
+                        speed_tile_press(app, event.mouse.y, true, proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("interval_cycle")));
                     } else if (enabled && chooser_open_tile(app, app->toolbox_tiles[i].action, chooser_main_x(app), chooser_main_y(app),
                                                             chooser_main_y(app))) {
                         /* 1.24.0: a one-of-many tile lists its choices, over the picture */
@@ -8901,10 +8901,10 @@ static void audio_track_set(app_state_t *app, int32_t next) {
        the old track had already decoded is thrown away. */
     media_seek_to(app, app->media_position);
     char label[160];
-    u8str_t text = rubraview_track_label(label, sizeof(label), &app->tracks, next);
+    proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &app->tracks, next);
     char line[192];
-    int n = snprintf(line, sizeof(line), T("sound %.*s"), (int)text.len, text.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    int n = snprintf(line, sizeof(line), T("sound %.*s"), (int)text.size, text.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
@@ -8921,7 +8921,7 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (!ctrl && key_is(combo, "Enter")) { (void)edit_apply_pending(app, true); return; }
     }
     /* D-33: Escape closes the list of subtitle tracks, and only that. */
-    if (app->sub_list_open && rubraview_u8_eq_lit(combo.key_name, "Escape") && combo.modifiers == 0) {
+    if (app->sub_list_open && proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Escape")) && combo.modifiers == 0) {
         app->sub_list_open = false;
         return;
     }
@@ -8930,8 +8930,8 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     /* §3.7.1: the slide show's own bindings win while it is running,
        then the viewing context, then the global section. */
     if (app->slideshow_running) {
-        u8str_t action = rubraview_keymap_find_action(&app->keymap, U8("slideshow"), combo);
-        if (action.len > 0) { handle_action(app, action); return; }
+        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("slideshow"), combo);
+        if (action.size > 0) { handle_action(app, action); return; }
     }
 
     /* §3.20: while an animated image or a multi-page file is the page
@@ -8941,20 +8941,20 @@ static void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
        src/core/default_keymap.c. */
     /* RFC-0005: a text page's own keys first. */
     if (text_active(app)) {
-        u8str_t action = rubraview_keymap_find_action(&app->keymap, U8("text"), combo);
-        if (action.len > 0) { handle_action(app, action); return; }
+        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("text"), combo);
+        if (action.size > 0) { handle_action(app, action); return; }
     }
 
     if (app->anim_active || app->media) {
-        u8str_t context = (app->media || app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION)
-                            ? U8("media") : U8("subpage");
-        u8str_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
-        if (action.len > 0) { handle_action(app, action); return; }
+        proven_u8str_view_t context = (app->media || app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION)
+                            ? PROVEN_LIT("media") : PROVEN_LIT("subpage");
+        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
+        if (action.size > 0) { handle_action(app, action); return; }
     }
 
-    u8str_t action = rubraview_keymap_find_action(&app->keymap, U8("navigation"), combo);
-    if (action.len == 0) action = rubraview_keymap_find_action(&app->keymap, U8("view"), combo);
-    if (action.len == 0) action = rubraview_keymap_find_action(&app->keymap, U8("slideshow"), combo);
+    proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("navigation"), combo);
+    if (action.size == 0) action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("view"), combo);
+    if (action.size == 0) action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("slideshow"), combo);
     handle_action(app, action);
 }
 
@@ -8996,7 +8996,7 @@ static void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent) {
         case RUBRAVIEW_INTENT_TOGGLE_OVERLAY:
             break;   /* 1.25.0: a click opens no toolbar */
         case RUBRAVIEW_INTENT_CENTER_PICTURE:
-            handle_action(app, U8("center_picture"));
+            handle_action(app, PROVEN_LIT("center_picture"));
             break;
         default: break;
     }
@@ -9073,13 +9073,13 @@ static bool titlebar_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_FULLSCREEN:
             rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
             return true;
-        case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, U8("toggle_always_on_top")); return true;
-        case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, U8("hide_boxes")); return true;
-        case RUBRAVIEW_TITLEBAR_SETTINGS:   handle_action(app, U8("open_settings")); return true;   /* 1.24.0 */
-        case RUBRAVIEW_TITLEBAR_BARPIN:     handle_action(app, U8("toggle_titlebar_pin")); return true;   /* 1.25.0 */
+        case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, PROVEN_LIT("toggle_always_on_top")); return true;
+        case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, PROVEN_LIT("hide_boxes")); return true;
+        case RUBRAVIEW_TITLEBAR_SETTINGS:   handle_action(app, PROVEN_LIT("open_settings")); return true;   /* 1.24.0 */
+        case RUBRAVIEW_TITLEBAR_BARPIN:     handle_action(app, PROVEN_LIT("toggle_titlebar_pin")); return true;   /* 1.25.0 */
         case RUBRAVIEW_TITLEBAR_MENU:       app->tmenu_open = !app->tmenu_open; app->tmenu_focus = -1; return true;   /* 1.25.0 */
         case RUBRAVIEW_TITLEBAR_NAME:       /* 1.25.0: the name opens the open-file screen (inside a book being read) */
-            if (!app->picker_open) handle_action(app, U8("open_picker"));
+            if (!app->picker_open) handle_action(app, PROVEN_LIT("open_picker"));
             return true;
         case RUBRAVIEW_TITLEBAR_OPEN:
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
@@ -9172,8 +9172,8 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
            its tile says "Delete?"; a second tap on it within five seconds
            acts. Any other tap disarms it. */
         const rubraview_menu_item_t *item = rubraview_menu_item_at(&app->menu, tile);
-        bool clears = item && rubraview_u8_eq_lit(item->action, "recent_clear");   /* D-104: asks first too */
-        if (item && (clears || rubraview_u8_eq_lit(item->action, "delete_file"))) {
+        bool clears = item && proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear"));   /* D-104: asks first too */
+        if (item && (clears || proven_u8str_view_eq(item->action, PROVEN_LIT("delete_file")))) {
             if (!rubraview_confirm_press(&app->menu_confirm, item - app->menu.tree->items,
                                          rubraview_pal_time_now_seconds())) {
                 osd_say(app, clears ? TU8("tap Clear again to empty the recent list")
@@ -9183,7 +9183,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         } else {
             rubraview_confirm_clear(&app->menu_confirm);
         }
-        u8str_t action;
+        proven_u8str_view_t action;
         rubraview_menu_result_t result = rubraview_menu_activate(&app->menu, tile, &action);
         if (result == RUBRAVIEW_MENU_ACTIVATED) {
             if (app->menubox.headless) rubraview_box_dismiss(&app->menubox);   /* a choice made: the bar's menu folds */
@@ -9201,7 +9201,7 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
         if (tile < app->toolbox_tile_count) {
             bool enabled = true;
             (void)toolbox_caption(app, &app->toolbox_tiles[tile], &enabled);
-            if (enabled && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_subtitles")) {
+            if (enabled && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("toggle_subtitles"))) {
                 /* D-33: a tap toggles, a double tap or a hold chooses —
                    so this tile is decided on release, not on the press. */
                 sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));
@@ -9213,10 +9213,10 @@ static bool handle_chrome_click(app_state_t *app, double x, double y) {
                 app->seekfan_detached = false;
                 rubraview_seekfan_press(&app->seekfan, forward, rubraview_pal_time_now_seconds(),
                                         rubraview_box_tile_rect(&app->toolbox, &metrics, tile));
-            } else if (enabled && (rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "media_speed_cycle") ||
-                                   rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "interval_cycle"))) {
+            } else if (enabled && (proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("media_speed_cycle")) ||
+                                   proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("interval_cycle")))) {
                 /* D-110: a tap or a drag, known on release. D-123: the Delay tile the same way. */
-                speed_tile_press(app, y, false, rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "interval_cycle"));
+                speed_tile_press(app, y, false, proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("interval_cycle")));
             } else if (enabled) {
                 /* 1.24.0: a one-of-many tile lists its choices, over it (under it when there is no room above) */
                 rubraview_rect_t at = rubraview_box_tile_rect(&app->toolbox, &metrics, tile);
@@ -9258,13 +9258,13 @@ static const app_state_t *g_caption_app;
    the Back tile at index 0 below the root (§3.6.2). A submenu ends in
    ">", a toggle says whether it is on, the choice in use is marked, and
    what cannot act on the page on screen is dimmed. */
-static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+static proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
                                  bool *out_enabled, bool *out_current) {
     if (out_enabled) *out_enabled = true;
     if (out_current) *out_current = false;
     if (rubraview_menu_has_back_tile(menu) && tile == 0) return TU8("< Back");
     const rubraview_menu_item_t *item = rubraview_menu_item_at(menu, tile);
-    if (!item) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!item) return PROVEN_LIT("");
     bool submenu = item->child_count > 0;
     rubraview_action_state_t st = { .enabled = true, .mark = RUBRAVIEW_MARK_NONE };
     if (!submenu && g_caption_app) {
@@ -9275,19 +9275,19 @@ static u8str_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t til
     if (out_current) *out_current = st.mark == RUBRAVIEW_MARK_CURRENT;
     if (g_caption_app && rubraview_confirm_armed(&g_caption_app->menu_confirm, item - menu->tree->items,
                                                  rubraview_pal_time_now_seconds())) {
-        return rubraview_u8_eq_lit(item->action, "recent_clear") ? TU8("Clear?") : TU8("Delete?");
+        return proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
     }
     return rubraview_tile_caption(item->label, submenu, st.mark, st.value, scratch, scratch_size);
 }
 
-static u8str_t box_opacity_key(const rubraview_box_t *box) {
-    return box->kind == RUBRAVIEW_BOX_MENU ? U8("menubox_opacity") : U8("toolbox_opacity");
+static proven_u8str_view_t box_opacity_key(const rubraview_box_t *box) {
+    return box->kind == RUBRAVIEW_BOX_MENU ? PROVEN_LIT("menubox_opacity") : PROVEN_LIT("toolbox_opacity");
 }
 
 static double box_opacity(const app_state_t *app, const rubraview_box_t *box) {
     /* Spelled out, not through box_opacity_key: check-settings.py finds reads by their literal keys. */
-    return box->kind == RUBRAVIEW_BOX_MENU ? rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_opacity"))
-                                           : rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_opacity"));
+    return box->kind == RUBRAVIEW_BOX_MENU ? rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("menubox_opacity"))
+                                           : rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"));
 }
 
 /* D-15: Alt + wheel over a box. Returns true when the wheel was spent on it. */
@@ -9302,22 +9302,22 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
     char line[64];
     int n = 0;
     if (half == RUBRAVIEW_ANCHOR_CLICK && (modifiers & RUBRAVIEW_MOD_ALT)) {
-        double next = rubraview_box_opacity_step(rubraview_settings_get(&app->settings, U8("ui"), U8("widget_opacity")), notches);
-        rubraview_settings_set(&app->settings, U8("ui"), U8("widget_opacity"), next);
-        rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_opacity"), next);   /* its toolbar with it */
+        double next = rubraview_box_opacity_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity")), notches);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity"), next);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"), next);   /* its toolbar with it */
         n = snprintf(line, sizeof(line), T("Floating Widget %d%%"), (int)next);
     } else if (half == RUBRAVIEW_ANCHOR_CLICK) {
         rubraview_tile_metrics_t sized = rubraview_box_metrics(b, &metrics);
         rubraview_box_set_size(b, sized.strip_columns + (notches > 0.0 ? 1 : -1), b->scale > 0.0 ? b->scale : 1.0);
-        rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_columns"), (double)b->columns);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_columns"), (double)b->columns);
         n = snprintf(line, sizeof(line), T("%d buttons a row"), rubraview_box_metrics(b, &metrics).strip_columns);
     } else {
         double scale = (b->scale > 0.0 ? b->scale : 1.0) + (notches > 0.0 ? 0.1 : -0.1);
         rubraview_box_set_size(b, b->columns, scale);
-        rubraview_settings_set(&app->settings, U8("ui"), U8("toolbox_size"), b->scale * 100.0);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_size"), b->scale * 100.0);
         n = snprintf(line, sizeof(line), T("buttons %d%%"), (int)lround(b->scale * 100.0));
     }
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     note_activity(app);
     return true;
 }
@@ -9331,10 +9331,10 @@ static bool box_wheel_opacity(app_state_t *app, double x, double y, double notch
         if (boxes[i]->state == RUBRAVIEW_BOX_DETACHED) continue;
         if (!rubraview_rect_contains(rubraview_box_bounds(boxes[i], &metrics), x, y)) continue;
         double next = rubraview_box_opacity_step(box_opacity(app, boxes[i]), notches);
-        rubraview_settings_set(&app->settings, U8("ui"), box_opacity_key(boxes[i]), next);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), box_opacity_key(boxes[i]), next);
         char line[48];
         int n = snprintf(line, sizeof(line), "%s %d%%", boxes[i]->kind == RUBRAVIEW_BOX_MENU ? T("menu box") : "toolbox", (int)next);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         note_activity(app);
         return true;
     }
@@ -9392,7 +9392,7 @@ static void speed_tile_release(app_state_t *app, bool detached) {
     if (!app->speed_pressed || app->speed_press_detached != detached) return;
     app->speed_pressed = false;
     if (!app->speed_dragged) {   /* 1.24.0: a tap lists the speeds (or the delays); a drag still slides */
-        u8str_t action = app->speed_press_interval ? U8("interval_cycle") : U8("media_speed_cycle");
+        proven_u8str_view_t action = app->speed_press_interval ? PROVEN_LIT("interval_cycle") : PROVEN_LIT("media_speed_cycle");
         double x = detached ? chooser_main_x(app) : app->pointer_x, y = detached ? chooser_main_y(app) : app->pointer_y;
         if (!chooser_open_tile(app, action, x, y, y)) handle_action(app, action);
     }
@@ -9407,17 +9407,17 @@ static bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches
     if (tile < 0) return false;
     toolbox_refresh(app);
     if (tile >= app->toolbox_tile_count) return false;
-    u8str_t action = app->toolbox_tiles[tile].action;
-    if (rubraview_u8_eq_lit(action, "media_speed_cycle") && (app->media || anim_plays(app))) {
+    proven_u8str_view_t action = app->toolbox_tiles[tile].action;
+    if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle")) && (app->media || anim_plays(app))) {
         speed_nudge(app, app->media_speed > 0.0 ? app->media_speed : 1.0, notches > 0.0 ? 1 : -1);   /* D-110 */
         return true;
     }
-    if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("interval_cycle"))) {
         interval_nudge(app, app->slideshow.interval_seconds, notches > 0.0 ? 1 : -1);   /* D-123 */
         return true;
     }
-    if (!rubraview_u8_eq_lit(action, "zoom_cycle") && !rubraview_u8_eq_lit(action, "zoom_reset") &&
-        !rubraview_u8_eq_lit(action, "zoom_in") && !rubraview_u8_eq_lit(action, "zoom_out")) {
+    if (!proven_u8str_view_eq(action, PROVEN_LIT("zoom_cycle")) && !proven_u8str_view_eq(action, PROVEN_LIT("zoom_reset")) &&
+        !proven_u8str_view_eq(action, PROVEN_LIT("zoom_in")) && !proven_u8str_view_eq(action, PROVEN_LIT("zoom_out"))) {
         /* 1.25.0 (owner, 2026-10-20): over a tile that chooses one of several, the wheel goes to the one before
            or after (its tile changing with it); a click still lists them */
         return chooser_wheel_tile(app, action, notches);
@@ -9476,24 +9476,24 @@ static int strip_place_text(const app_state_t *app, int32_t hovered, char *place
     if (app->media && !app->pagebar_dragging && hovered < 0 && app->media_info.duration_seconds > 0.0) {
         /* The film's time, its volume, speed and repeat: once on the bottom
            strip, which is gone (owner, 2026-09-29). */
-        int volume = (int)rubraview_settings_get(&app->settings, U8("audio"), U8("volume"));
-        bool muted = rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5;
+        int volume = (int)rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"));
+        bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
         n = (int)rubraview_media_status(place, size, app->media_position, app->media_info.duration_seconds,
-                                        volume, muted, app->media_speed, app->ab_a, app->ab_b).len;
+                                        volume, muted, app->media_speed, app->ab_a, app->ab_b).size;
         /* The sync moved by hand stays in sight while it is not nought (owner, 2026-10-16). */
         char sync[32];
-        u8str_t moved = rubraview_subtitle_offset_text(sync, sizeof(sync), app->subtitle.offset_seconds);
-        if (moved.len > 0 && n > 0 && (size_t)n + 3 + moved.len < size) {
-            n += snprintf(place + n, size - (size_t)n, "   %.*s", (int)moved.len, moved.ptr);
+        proven_u8str_view_t moved = rubraview_subtitle_offset_text(sync, sizeof(sync), app->subtitle.offset_seconds);
+        if (moved.size > 0 && n > 0 && (size_t)n + 3 + moved.size < size) {
+            n += snprintf(place + n, size - (size_t)n, "   %.*s", (int)moved.size, moved.ptr);
         }
     }
     if (anim_plays(app) && !app->pagebar_dragging && hovered < 0) {
         /* D-82: an animation's time, and its speed when that is not 1x. */
         char at[32], total[32], speed[16] = "";
-        u8str_t a = rubraview_format_timecode(at, sizeof(at), play_position(app), false);
-        u8str_t t = rubraview_format_timecode(total, sizeof(total), play_duration(app), false);
+        proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), play_position(app), false);
+        proven_u8str_view_t t = rubraview_format_timecode(total, sizeof(total), play_duration(app), false);
         if (fabs(app->animation.speed - 1.0) > 1e-6) speed_text(speed, sizeof(speed), app->animation.speed);
-        n = snprintf(place, size, "%.*s / %.*s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr,
+        n = snprintf(place, size, "%.*s / %.*s%s%s%s", (int)a.size, a.ptr, (int)t.size, t.ptr,
                      speed[0] ? "  " : "", speed, app->ab_a < 0.0 ? "" : app->ab_b < 0.0 ? "  A-" : "  A-B");
         if (n < 0 || (size_t)n >= size) n = 0;
     }
@@ -9513,12 +9513,12 @@ static void strip_title_plan(app_state_t *app) {
     shape.count = app->toolbox_tile_count;
     rubraview_toolbox_layout_t l = rubraview_toolbox_layout_shaped(&sized, &shape);   /* its width follows its lines */
     double width = l.title.width, line = sized.title_height, font = line * 0.72;
-    u8str_t name = page_count(app) > 0 ? page_display_name(app, (size_t)current_page_index(app)) : (u8str_t){ .ptr = "", .len = 0 };
+    proven_u8str_view_t name = page_count(app) > 0 ? page_display_name(app, (size_t)current_page_index(app)) : PROVEN_LIT("");
     char place[96];
     int n = strip_place_text(app, -1, place, sizeof(place));
 
     uint64_t key = 1469598103934665603ull;
-    for (size_t i = 0; i < name.len; ++i) key = (key ^ (uint8_t)name.ptr[i]) * 1099511628211ull;
+    for (size_t i = 0; i < name.size; ++i) key = (key ^ (uint8_t)name.ptr[i]) * 1099511628211ull;
     key = (key ^ (uint64_t)(width * 16.0)) * 1099511628211ull;
     key = (key ^ (uint64_t)(line * 16.0)) * 1099511628211ull;
     key = (key ^ (uint64_t)n) * 1099511628211ull;
@@ -9528,11 +9528,11 @@ static void strip_title_plan(app_state_t *app) {
         bool below = false, cut_name = false;
         double one_w = 0.0, w = 0.0, h = 0.0, row = 0.0;
         double place_w = n > 0 ? strip_place_width(n, line) + line * 0.5 : 0.0;
-        bool measured = name.len > 0 && width > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &one_w);
+        bool measured = name.size > 0 && width > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &one_w);
         if (measured && one_w + place_w > width) {
             /* The name does not fit beside the place: it gets the whole width, and rows. */
             below = n > 0;
-            if (rubraview_pal_render_measure_text_wrapped(app->renderer, U8("Ag"), font, width, &w, &row) && row > 0.0 &&
+            if (rubraview_pal_render_measure_text_wrapped(app->renderer, PROVEN_LIT("Ag"), font, width, &w, &row) && row > 0.0 &&
                 rubraview_pal_render_measure_text_wrapped(app->renderer, name, font, width, &w, &h)) {
                 lines = (int32_t)floor(h / row + 0.5);
             }
@@ -9542,18 +9542,18 @@ static void strip_title_plan(app_state_t *app) {
                 lines = RUBRAVIEW_TOOLBOX_MAX_NAME_LINES;
                 static const char DOTS[] = "\xE2\x80\xA6";
                 size_t cap = sizeof(app->strip_name) - sizeof(DOTS);
-                size_t low = 0, high = name.len < cap ? name.len : cap;
+                size_t low = 0, high = name.size < cap ? name.size : cap;
                 while (low < high) {
                     size_t mid = (low + high + 1) / 2, cut = mid;
-                    while (cut > 0 && cut < name.len && ((uint8_t)name.ptr[cut] & 0xC0) == 0x80) cut--;   /* not inside a character */
+                    while (cut > 0 && cut < name.size && ((uint8_t)name.ptr[cut] & 0xC0) == 0x80) cut--;   /* not inside a character */
                     memcpy(app->strip_name, name.ptr, cut);
                     memcpy(app->strip_name + cut, DOTS, sizeof(DOTS));
-                    bool fits = rubraview_pal_render_measure_text_wrapped(app->renderer, (u8str_t){ app->strip_name, cut + sizeof(DOTS) - 1 },
+                    bool fits = rubraview_pal_render_measure_text_wrapped(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)app->strip_name, cut + sizeof(DOTS) - 1 },
                                                                           font, width, &w, &h) && h <= row * ((double)lines + 0.5);
                     if (fits) low = mid;
                     else high = cut > 0 ? cut - 1 : 0;
                 }
-                while (low > 0 && low < name.len && ((uint8_t)name.ptr[low] & 0xC0) == 0x80) low--;
+                while (low > 0 && low < name.size && ((uint8_t)name.ptr[low] & 0xC0) == 0x80) low--;
                 memcpy(app->strip_name, name.ptr, low);
                 memcpy(app->strip_name + low, DOTS, sizeof(DOTS));
                 cut_name = true;
@@ -9592,7 +9592,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, track.height * 0.5);
     }
     rubraview_pal_rect_t name = { ox + l->title.x, oy + l->title.y, l->title.width, l->title.height };
-    u8str_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? rubraview_tr_ctx_u8("toolbox", app->toolbox_tiles[hovered].caption)
+    proven_u8str_view_t label = hovered >= 0 && hovered < app->toolbox_tile_count ? rubraview_tr_ctx_u8("toolbox", app->toolbox_tiles[hovered].caption)
                                                                       : page_display_name(app, (size_t)current_page_index(app));
     char said[160];
     if (hovered >= 0 && hovered < app->toolbox_tile_count) {
@@ -9611,7 +9611,7 @@ static void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rub
         double w = strip_place_width(n, line);
         bool below = app->strip_place_below && l->title_lines > 1;
         rubraview_pal_rect_t right = { name.x + name.width - w, below ? name.y + name.height - line : name.y, w, line };
-        rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = place, .len = (size_t)n }, right,
+        rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)place, .size = (size_t)n }, right,
                                        line * 0.72, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
         if (below) name.height -= line;
         else name.width -= w + line * 0.5;
@@ -9627,10 +9627,10 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
     rubraview_pal_render_fill_rect(r, tile, hovered ? 0xE0343434u : fill, 3.0);
     rubraview_pal_render_stroke_rect(r, tile, hovered ? COLOR_TILE_CURRENT : border, 1.0, 3.0);
     bool enabled = true;
-    u8str_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
+    proven_u8str_view_t caption = toolbox_caption(app, &app->toolbox_tiles[i], &enabled);
     uint32_t ink = enabled ? COLOR_TEXT : 0x70F0F0F0u;
     uint32_t icon = rubraview_action_icon(app->toolbox_tiles[i].action, facts);
-    if (icon && rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "fit_cycle")) {
+    if (icon && proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("fit_cycle"))) {
         /* The fit's sign above and its short name below, both changing with the fit (owner, 2026-10-15). */
         rubraview_pal_rect_t top = { tile.x, tile.y + tile.height * 0.06, tile.width, tile.height * 0.58 };
         rubraview_pal_rect_t bottom = { tile.x, tile.y + tile.height * 0.60, tile.width, tile.height * 0.36 };
@@ -9639,7 +9639,7 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
             return;
         }
     }
-    if (rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "center_picture")) {
+    if (proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("center_picture"))) {
         /* 1.25.0: a square with a cross through its middle */
         double side = tile.height * 0.42, cx = tile.x + tile.width * 0.5, cy = tile.y + tile.height * 0.5, th = fmax(1.2, tile.height * 0.045);
         rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ cx - side * 0.5, cy - side * 0.5, side, side }, ink, th, 1.0);
@@ -9651,7 +9651,7 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
     /* A word longer than five letters ("Stretch") is drawn smaller to stay inside; a caption
        of two rows ("Real\nsize") keeps its size (owner, 2026-10-15). */
     size_t longest = 0, run = 0;
-    for (size_t k = 0; k < caption.len; ++k) {
+    for (size_t k = 0; k < caption.size; ++k) {
         if (caption.ptr[k] == '\n') run = 0;
         else if (((uint8_t)caption.ptr[k] & 0xC0) != 0x80 && ++run > longest) longest = run;
     }
@@ -9666,13 +9666,13 @@ static void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubravi
    remembered by the words and the tile's size, so a frame measures nothing. */
 /* A Korean word is never split between its syllables (DirectWrite would,
    "최근 파 / 일"): a word joiner (U+2060) between each two of a word. */
-static u8str_t tile_caption_keep_words(u8str_t caption, char *buf, size_t cap) {
+static proven_u8str_view_t tile_caption_keep_words(proven_u8str_view_t caption, char *buf, size_t cap) {
     size_t n = 0;
     bool last_hangul = false;
-    for (size_t i = 0; i < caption.len;) {
+    for (size_t i = 0; i < caption.size;) {
         unsigned char c = (unsigned char)caption.ptr[i];
         size_t len = c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
-        if (i + len > caption.len) len = caption.len - i;
+        if (i + len > caption.size) len = caption.size - i;
         bool hangul = len == 3 && c >= 0xEA && c <= 0xED;
         if (hangul && last_hangul) {
             if (n + 3 >= cap) return caption;
@@ -9685,13 +9685,13 @@ static u8str_t tile_caption_keep_words(u8str_t caption, char *buf, size_t cap) {
         last_hangul = hangul;
         i += len;
     }
-    return (u8str_t){ .ptr = buf, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n };
 }
 
-static double tile_caption_size(app_state_t *app, u8str_t caption, rubraview_pal_rect_t tile, double size) {
+static double tile_caption_size(app_state_t *app, proven_u8str_view_t caption, rubraview_pal_rect_t tile, double size) {
     static struct { uint64_t key; double size; } memo[128];
     uint64_t key = 1469598103934665603ull;
-    for (size_t i = 0; i < caption.len; ++i) key = (key ^ (unsigned char)caption.ptr[i]) * 1099511628211ull;
+    for (size_t i = 0; i < caption.size; ++i) key = (key ^ (unsigned char)caption.ptr[i]) * 1099511628211ull;
     key ^= (uint64_t)lround(tile.width * 8.0) << 40 ^ (uint64_t)lround(tile.height * 8.0) << 20 ^ (uint64_t)lround(size * 64.0);
     size_t slot = (size_t)(key % 128u);
     if (memo[slot].key == key && memo[slot].size > 0.0) return memo[slot].size;
@@ -9700,12 +9700,12 @@ static double tile_caption_size(app_state_t *app, u8str_t caption, rubraview_pal
         double w = 0.0, h = 0.0, word = 0.0;
         if (!rubraview_pal_render_measure_text_wrapped(app->renderer, caption, size, room_w, &w, &h)) break;
         bool fits = h <= room_h;
-        for (size_t a = 0; fits && a < caption.len;) {   /* no word broken across lines */
+        for (size_t a = 0; fits && a < caption.size;) {   /* no word broken across lines */
             size_t b = a;
-            while (b < caption.len && caption.ptr[b] != ' ') ++b;
+            while (b < caption.size && caption.ptr[b] != ' ') ++b;
             bool breaks = false;   /* Chinese and Japanese break between any two characters; Korean, Latin and Persian keep the word */
             for (size_t c = a; c < b; ++c) breaks = breaks || ((unsigned char)caption.ptr[c] >= 0xE3 && (unsigned char)caption.ptr[c] <= 0xE9);
-            if (b > a && !breaks && rubraview_pal_render_measure_text(app->renderer, (u8str_t){ caption.ptr + a, b - a }, size, &word) && word > room_w) fits = false;
+            if (b > a && !breaks && rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ caption.ptr + a, b - a }, size, &word) && word > room_w) fits = false;
             a = b + 1;
         }
         if (fits) break;
@@ -9759,7 +9759,7 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
 
     if (!box->headless) {
         /* 1.25.0: F and T at the Floating Widget's own opacity (Settings › Display) */
-        double wo = rubraview_settings_get(&app->settings, U8("ui"), U8("widget_opacity"));
+        double wo = rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity"));
         rubraview_pal_render_fill_rect(app->renderer, left, rubraview_box_fade(COLOR_BOX_FILL, wo), 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, left, rubraview_box_fade(COLOR_BOX_BORDER, wo), 1.0, 2.0);
         rubraview_pal_render_fill_rect(app->renderer, right, rubraview_box_fade(COLOR_TILE_FILL, wo), 2.0);
@@ -9768,9 +9768,9 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
         /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
         /* 1.25.0 (owner, 2026-10-20): F (the Floating Widget) and T (its toolbar) */
         rubraview_pal_render_draw_text(app->renderer,
-                                       box->kind == RUBRAVIEW_BOX_MENU ? U8("M") : U8("F"),
+                                       box->kind == RUBRAVIEW_BOX_MENU ? PROVEN_LIT("M") : PROVEN_LIT("F"),
                                        left, metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS), COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        rubraview_pal_render_draw_text(app->renderer, U8("T"), right,
+        rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("T"), right,
                                        metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS), COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
@@ -9786,7 +9786,7 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
         /* 1.25.0: P, lit and bold while on */
         rubraview_pal_render_fill_rect(app->renderer, pin, pinned ? TITLEBAR_ON : box_fill, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, pin, box_border, 1.0, 2.0);
-        draw_text_weight(app, U8("P"), pin, pr.height * 0.42, pinned ? COLOR_TEXT : 0xC8F0F0F0u, pinned);
+        draw_text_weight(app, PROVEN_LIT("P"), pin, pr.height * 0.42, pinned ? COLOR_TEXT : 0xC8F0F0F0u, pinned);
         draw_box_grip(app, box, metrics, box_fill, box_border);
     }
 
@@ -9809,7 +9809,7 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
         }
         rubraview_pal_render_fill_rect(app->renderer, tile, tile_fill, 0.0);
         rubraview_pal_render_stroke_rect(app->renderer, tile, box_border, 1.0, 0.0);
-        u8str_t caption = { .ptr = "", .len = 0 };
+        proven_u8str_view_t caption = PROVEN_LIT("");
         bool enabled = true, current = false;
         char scratch[64];
         if (menu) {
@@ -9821,8 +9821,8 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
             rubraview_pal_render_stroke_rect(app->renderer, tile, COLOR_TILE_CURRENT, 2.0, 0.0);
         }
         char joined[384];
-        if (caption.len > 0) caption = tile_caption_keep_words(caption, joined, sizeof(joined));
-        if (caption.len > 0) {
+        if (caption.size > 0) caption = tile_caption_keep_words(caption, joined, sizeof(joined));
+        if (caption.size > 0) {
             rubraview_pal_render_draw_text(app->renderer, caption, tile, tile_caption_size(app, caption, tile, t.height * 0.22),
                                            enabled ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
@@ -9832,9 +9832,9 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
 /* §3.15.2's three tiers: breadcrumb header, virtualised tile grid,
    action bar. Tiles are large enough to hit with a thumb over Remote
    Desktop, which is the whole reason this picker exists. */
-static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                        double size, double outline, uint32_t argb, rubraview_text_align_t align);
-static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+static void draw_outlined_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb);
 
 /* How a page is scaled on screen: Settings › Viewer › Scaling filter,
@@ -9847,7 +9847,7 @@ static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rub
    still gets nearest. */
 static rubraview_interpolation_t page_interpolation(const app_state_t *app) {
     if (app->force_nearest) return RUBRAVIEW_INTERP_NEAREST;
-    switch ((int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("interpolation")))) {
+    switch ((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("interpolation")))) {
         case 0:  return RUBRAVIEW_INTERP_NEAREST;
         case 1:  return RUBRAVIEW_INTERP_LINEAR;
         default: return RUBRAVIEW_INTERP_HIGH_QUALITY_CUBIC;
@@ -9871,13 +9871,13 @@ static double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT] = { 0.0, 62.0, 84.0, 140.0, 1
 static int g_col_order[RUBRAVIEW_PICKER_SORT_COUNT - 1] = { 1, 2, 3, 4, 5, 6 };
 
 /* "62,84,140,140,110,80;1,2,3,4,5,6" back into the widths and order; anything else leaves them. */
-static void picker_columns_read(u8str_t text) {
+static void picker_columns_read(proven_u8str_view_t text) {
     double w[RUBRAVIEW_PICKER_SORT_COUNT] = { 0.0 };
     int order[RUBRAVIEW_PICKER_SORT_COUNT - 1];
     char buf[160];
-    if (text.len == 0 || text.len >= sizeof(buf)) return;
-    memcpy(buf, text.ptr, text.len);
-    buf[text.len] = '\0';
+    if (text.size == 0 || text.size >= sizeof(buf)) return;
+    memcpy(buf, text.ptr, text.size);
+    buf[text.size] = '\0';
     char *at = buf;
     for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
         char *end = NULL;
@@ -9905,7 +9905,7 @@ static void picker_columns_write(app_state_t *app) {
         n += (size_t)snprintf(buf + n, sizeof(buf) - n, "%s%.0f", k > 1 ? "," : "", g_col_w[k]);
     for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j)
         n += (size_t)snprintf(buf + n, sizeof(buf) - n, "%s%d", j == 0 ? ";" : ",", g_col_order[j]);
-    rubraview_settings_set_text(&app->settings, U8("files"), U8("picker_columns"), app_keep(app, (u8str_t){ .ptr = buf, .len = n }));
+    rubraview_settings_set_text(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_columns"), app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n }));
 }
 
 static picker_columns_t picker_detail_columns(double win_w, double dpi) {
@@ -10046,7 +10046,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_rect_t name = { name_x, y, cols.x[0] + cols.w[0] - name_x - 8.0 * dpi, cell };
         rubraview_pal_render_draw_text(app->renderer, files_fit_text(fit, sizeof(fit), entry->name, name.width, font), name,
                                        font, entry->is_directory ? 0xFFB8D8FFu : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        bool up = entry->is_directory && rubraview_u8_eq_lit(entry->name, "..");
+        bool up = entry->is_directory && proven_u8str_view_eq(entry->name, PROVEN_LIT(".."));
         /* A folder, a drive or a page of a book has no size or date to give. */
         bool no_file = entry->is_directory || (entry->size_bytes == 0 && entry->mtime == 0);
         rubraview_picker_media_t media = (app->picker_thumbs && index < app->picker_thumb_count)
@@ -10070,12 +10070,12 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                     break;
                 }
                 case RUBRAVIEW_PICKER_SORT_LENGTH:
-                    if (media.seconds > 0.0) n = rubraview_format_timecode(cellbuf, sizeof(cellbuf), media.seconds, false).len;
+                    if (media.seconds > 0.0) n = rubraview_format_timecode(cellbuf, sizeof(cellbuf), media.seconds, false).size;
                     break;
                 default: break;
             }
             double pad = align == RUBRAVIEW_TEXT_RIGHT ? 14.0 * dpi : 4.0 * dpi;
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ cellbuf, n },
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)cellbuf, n },
                                            (rubraview_pal_rect_t){ cols.x[k], y, cols.w[k] - pad, cell }, font, ink, align);
         }
     }
@@ -10150,8 +10150,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         double hy = header_h - PICKER_DETAIL_HEAD * dpi, hh = PICKER_DETAIL_HEAD * dpi, font = 13.0 * dpi;
         rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, hy, win_w, hh }, COLOR_BAR_FILL, 0.0);
         /* A click on a column's name sorts by it; again, the other way round (owner, 2026-10-16). */
-        int sorted = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
-        bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+        int sorted = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+        bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
         for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
             if (cols.w[k] <= 0.0) continue;
             char head[48];
@@ -10164,7 +10164,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             if (app->pointer_y >= hy && app->pointer_y < hy + hh && app->pointer_x >= cols.x[k] && app->pointer_x < cols.x[k] + cols.w[k]) {
                 rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_FILL, 0.0);
             }
-            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ head, (size_t)n }, at, font,
+            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)n }, at, font,
                                                       k == sorted ? COLOR_TEXT : COLOR_BOX_BORDER, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);
         }
         /* 1.24.0: the tool row over the heads — the all box, the ways of picking, sorting, the view */
@@ -10183,7 +10183,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_render_fill_rect(app->renderer, t, lit ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
             rubraview_pal_render_stroke_rect(app->renderer, t, COLOR_BOX_BORDER, 1.0, 3.0);
             char buf[96];
-            u8str_t label = picker_tool_label(app, k, buf, sizeof(buf));
+            proven_u8str_view_t label = picker_tool_label(app, k, buf, sizeof(buf));
             rubraview_pal_rect_t words = t;
             if (k == PICKER_TOOL_ALL) {   /* the box: all, some (a dash) or none */
                 double side = 18.0 * dpi;
@@ -10191,7 +10191,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                 bool all = rows > 0 && on == rows;
                 rubraview_pal_render_fill_rect(app->renderer, box, on > 0 ? 0xFF2E7BD6u : 0xB0101010u, 3.0 * dpi);
                 rubraview_pal_render_stroke_rect(app->renderer, box, on > 0 ? 0xFFFFFFFFu : 0xC0FFFFFFu, 1.5 * dpi, 3.0 * dpi);
-                if (on > 0) rubraview_pal_render_draw_text(app->renderer, all ? U8("\xE2\x9C\x93") : U8("\xE2\x80\x93"), box,
+                if (on > 0) rubraview_pal_render_draw_text(app->renderer, all ? PROVEN_LIT("\xE2\x9C\x93") : PROVEN_LIT("\xE2\x80\x93"), box,
                                                            box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
                 words.x += 22.0 * dpi;
                 words.width -= 22.0 * dpi;
@@ -10213,7 +10213,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     /* 1.24.0: back, up, forward (owner, 2026-10-19), dim when there is nowhere to go */
     {
         static const char *const NAV[3] = { "\xE2\x97\x80", "\xE2\x96\xB2", "\xE2\x96\xB6" };
-        bool can[3] = { app->picker_back_n > 0, rubraview_picker_parent(app->picker_dir).len > 0 && !app->picker_in_book, app->picker_fwd_n > 0 };
+        bool can[3] = { app->picker_back_n > 0, rubraview_picker_parent(app->picker_dir).size > 0 && !app->picker_in_book, app->picker_fwd_n > 0 };
         for (int k = 0; k < 3; ++k) {
             rubraview_pal_rect_t b = picker_nav_rect(app, dpi, k);
             bool over = pal_rect_has(b, app->pointer_x, app->pointer_y) && can[k];
@@ -10233,8 +10233,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         crumb_x += w + 4.0 * dpi;
     }
-    u8str_t star = picker_star_label(app);
-    if (star.len > 0) {
+    proven_u8str_view_t star = picker_star_label(app);
+    if (star.size > 0) {
         double w = picker_chip_width(star, dpi);
         rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
         bool lit = rubraview_favorites_contains(&app->favorites, app->picker_dir);
@@ -10245,7 +10245,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
     /* 1.22.0: the filter's chip at the bar's right end */
     char filter_buf[200];
-    u8str_t filter_label;
+    proven_u8str_view_t filter_label;
     rubraview_pal_rect_t filter_chip = picker_filter_chip(app, win_w, dpi, &filter_label, filter_buf, sizeof(filter_buf));
     if (!app->picker_in_book && !app->rename_is_path && !app->rename_is_filter) {
         rubraview_pal_render_fill_rect(app->renderer, filter_chip, app->picker_filter[0] ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
@@ -10326,7 +10326,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                            app->picker_listing.count, hidden, selected, (unsigned long long)bytes);
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
-                                       (u8str_t){ .ptr = status, .len = (size_t)written },
+                                       (proven_u8str_view_t){ .ptr = (const proven_byte_t *)status, .size = (size_t)written },
                                        bar, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* a status line's size (owner, 2026-10-12: it was 32) */
     }
 
@@ -10342,12 +10342,12 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
    they came apart into four ghost copies (VM, 2026-09-13), so it is
    eight directions, and a second ring at half the distance once the
    outline is wide enough to show a gap. */
-static void draw_outlined_text(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+static void draw_outlined_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb) {
     draw_outlined_text_aligned(renderer, text, rect, size, outline, argb, RUBRAVIEW_TEXT_CENTER);
 }
 
-static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, u8str_t text, rubraview_pal_rect_t rect,
+static void draw_outlined_text_aligned(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                        double size, double outline, uint32_t argb, rubraview_text_align_t align) {
     static const double DX[8] = { -1.0, 0.0, 1.0, -1.0, 1.0, -1.0, 0.0, 1.0 };
     static const double DY[8] = { -1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0 };
@@ -10377,7 +10377,7 @@ static void draw_vobsub(app_state_t *app) {
     if (index != app->vobsub_texture_cue) {
         /* A new one: decode it, and make a texture of its own size. */
         if (!rubraview_vobsub_decode(&app->vobsub, (size_t)index, (const uint8_t*)app->vobsub_sub.ptr,
-                                     app->vobsub_sub.len, app->vobsub_pixels, &app->vobsub_cue)) {
+                                     app->vobsub_sub.size, app->vobsub_pixels, &app->vobsub_cue)) {
             app->vobsub_texture_cue = index;   /* a torn one: do not try it again every frame */
             if (app->vobsub_texture) { rubraview_pal_texture_destroy(app->vobsub_texture); app->vobsub_texture = NULL; }
             return;
@@ -10425,7 +10425,7 @@ static void draw_pgs(app_state_t *app) {
 
     if (index != app->pgs_texture_cue) {
         if (!rubraview_pgs_decode(&app->pgs, (size_t)index, (const uint8_t*)app->pgs_bytes.ptr,
-                                  app->pgs_bytes.len, app->pgs_pixels, &app->pgs_cue)) {
+                                  app->pgs_bytes.size, app->pgs_pixels, &app->pgs_cue)) {
             app->pgs_texture_cue = index;      /* a torn one: do not try it again every frame */
             if (app->pgs_texture) { rubraview_pal_texture_destroy(app->pgs_texture); app->pgs_texture = NULL; }
             return;
@@ -10471,7 +10471,7 @@ static double subtitle_window_scale(double win_h) {
 }
 
 static double subtitle_font_px(app_state_t *app, double win_h) {
-    double wanted = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size"));
+    double wanted = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_size"));
     if (wanted <= 0.0) wanted = 24.0;
     return wanted * rubraview_pal_window_dpi_scale(app->window) * subtitle_window_scale(win_h);
 }
@@ -10480,7 +10480,7 @@ static double subtitle_font_px(app_state_t *app, double win_h) {
 static const rubraview_subtitle_cue_t *subtitle_cue_now(app_state_t *app) {
     if (!app->media || app->subtitle.count == 0) return NULL;
     const rubraview_subtitle_cue_t *cue = rubraview_subtitle_at(&app->subtitle, app->media_position);
-    return (cue && cue->text.len > 0) ? cue : NULL;
+    return (cue && cue->text.size > 0) ? cue : NULL;
 }
 
 /* D-92: where the box is and what it does with a long subtitle, from
@@ -10490,26 +10490,26 @@ static rubraview_subbox_place_t subbox_place(app_state_t *app) {
     rubraview_settings_t *st = &app->settings;
     if (app->subbox.placed) {
         app->subbox.placed = false;
-        rubraview_settings_set(st, U8("video"), U8("subtitle_align"), (double)RUBRAVIEW_SUBBOX_ALIGN_MIDDLE);
-        rubraview_settings_set(st, U8("video"), U8("subtitle_valign"), (double)RUBRAVIEW_SUBBOX_ALIGN_END);
-        rubraview_settings_set(st, U8("video"), U8("subtitle_x"), floor((app->subbox.left + app->subbox.width * 0.5) * 100.0 + 0.5));
-        rubraview_settings_set(st, U8("video"), U8("subtitle_y"), floor(app->subbox.bottom * 100.0 + 0.5));
-        rubraview_settings_set(st, U8("video"), U8("subtitle_width"), floor(app->subbox.width * 100.0 + 0.5));
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_align"), (double)RUBRAVIEW_SUBBOX_ALIGN_MIDDLE);
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_valign"), (double)RUBRAVIEW_SUBBOX_ALIGN_END);
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_x"), floor((app->subbox.left + app->subbox.width * 0.5) * 100.0 + 0.5));
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_y"), floor(app->subbox.bottom * 100.0 + 0.5));
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_width"), floor(app->subbox.width * 100.0 + 0.5));
         settings_took_effect(app);
     }
     return (rubraview_subbox_place_t){
-        .x = rubraview_settings_get(st, U8("video"), U8("subtitle_x")) / 100.0,
-        .y = rubraview_settings_get(st, U8("video"), U8("subtitle_y")) / 100.0,
-        .width = rubraview_settings_get(st, U8("video"), U8("subtitle_width")) / 100.0,
-        .height = rubraview_settings_get(st, U8("video"), U8("subtitle_height")) / 100.0,
-        .align = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_align"))),
-        .valign = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_valign"))),
-        .fit = rubraview_settings_get(st, U8("video"), U8("subtitle_fit")) > 0.5 ? RUBRAVIEW_SUBBOX_FIT_SHRINK
+        .x = rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_x")) / 100.0,
+        .y = rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_y")) / 100.0,
+        .width = rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_width")) / 100.0,
+        .height = rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_height")) / 100.0,
+        .align = (int)lround(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_align"))),
+        .valign = (int)lround(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_valign"))),
+        .fit = rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_fit")) > 0.5 ? RUBRAVIEW_SUBBOX_FIT_SHRINK
                                                                                  : RUBRAVIEW_SUBBOX_FIT_GROW,
     };
 }
 
-struct subbox_measure { rubraview_renderer_t *renderer; u8str_t text; };
+struct subbox_measure { rubraview_renderer_t *renderer; proven_u8str_view_t text; };
 
 static bool subbox_measure_text(void *context, double font, double wrap_width, double *out_width, double *out_height) {
     struct subbox_measure *m = (struct subbox_measure*)context;
@@ -10519,7 +10519,7 @@ static bool subbox_measure_text(void *context, double font, double wrap_width, d
 /* RV-107: Settings > Video > Subtitle font. Set while a subtitle is
    measured and drawn, and taken back: the rest of the program keeps its face. */
 static void subtitle_face(app_state_t *app, bool on) {
-    rubraview_font_spec_t face = rubraview_font_spec_parse(on ? rubraview_settings_get_text(&app->settings, U8("video"), U8("subtitle_font")) : U8(""));
+    rubraview_font_spec_t face = rubraview_font_spec_parse(on ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_font")) : PROVEN_LIT(""));
     rubraview_pal_render_set_text_font(app->renderer, face.family, face.weight, face.italic);   /* RV-136: its weight and italic too */
 }
 
@@ -10546,15 +10546,15 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     double limit = win_h - (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
     rubraview_subbox_place_t place = subbox_place(app);
     const rubraview_subtitle_cue_t *cue = subtitle_cue_now(app);
-    if (kept.valid && kept.cue == cue && kept.generation == g_subs_generation && kept.text == (cue ? cue->text.ptr : NULL) &&
-        kept.text_len == (cue ? cue->text.len : 0) && kept.win_w == win_w &&
+    if (kept.valid && kept.cue == cue && kept.generation == g_subs_generation && kept.text == (cue ? (const char *)cue->text.ptr : NULL) &&
+        kept.text_len == (cue ? cue->text.size : 0) && kept.win_w == win_w &&
         kept.win_h == win_h && kept.font == font && kept.limit == limit && kept.style == g_subtitle_style &&
         kept.place.x == place.x && kept.place.y == place.y && kept.place.width == place.width &&
         kept.place.height == place.height && kept.place.align == place.align &&
         kept.place.valign == place.valign && kept.place.fit == place.fit) {
         return kept.layout;
     }
-    struct subbox_measure measure = { .renderer = app->renderer, .text = cue ? cue->text : U8("") };
+    struct subbox_measure measure = { .renderer = app->renderer, .text = cue ? cue->text : PROVEN_LIT("") };
     subtitle_face(app, true);
     /* No smaller than a size that can still be read: ten points' worth here. */
     double min_font = 10.0 * dpi * subtitle_window_scale(win_h);
@@ -10563,8 +10563,8 @@ static rubraview_subbox_layout_t subbox_layout(app_state_t *app, double win_w, d
     subtitle_face(app, false);
     kept.valid = true;
     kept.cue = cue;
-    kept.text = cue ? cue->text.ptr : NULL;
-    kept.text_len = cue ? cue->text.len : 0;
+    kept.text = cue ? (const char *)cue->text.ptr : NULL;
+    kept.text_len = cue ? cue->text.size : 0;
     kept.generation = g_subs_generation;
     kept.win_w = win_w; kept.win_h = win_h; kept.font = font; kept.limit = limit; kept.style = g_subtitle_style;
     kept.place = place;
@@ -10598,7 +10598,7 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     rubraview_pal_rect_t body = { box.x, box.y, box.width, box.height };
 
     /* The translucent pane: `video.subtitle_background` percent of black. */
-    double percent = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_background"));
+    double percent = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_background"));
     if (percent < 0.0) percent = 0.0;
     if (percent > 100.0) percent = 100.0;
     uint32_t alpha = (uint32_t)(percent * 2.55 + 0.5);
@@ -10626,13 +10626,13 @@ static void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
     /* D-92: the box was laid out to hold this text; it is drawn where the
        layout put it, aligned as the box is anchored. */
     rubraview_pal_rect_t rect = { placed.text.x, placed.text.y, placed.text.width, placed.text.height };
-    int across = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_align")));
+    int across = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_align")));
     rubraview_text_align_t align = across == RUBRAVIEW_SUBBOX_ALIGN_START ? RUBRAVIEW_TEXT_LEFT
                                  : across == RUBRAVIEW_SUBBOX_ALIGN_END ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_CENTER;
 
     /* R135 asks for a two-pixel outline, and §3.22.2.5 lets the reader
        change it (0 turns it off). */
-    double outline = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
+    double outline = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_outline")) * dpi;
     /* A font shrunk to fit keeps an outline in proportion, not one that fills its letters. */
     double asked = subtitle_font_px(app, (double)win_h);
     if (asked > 0.0 && font < asked) outline *= font / asked;
@@ -10666,8 +10666,8 @@ static void draw_sub_list(app_state_t *app) {
         if ((int32_t)r == hover) rubraview_pal_render_fill_rect(app->renderer, cell, 0x40FFFFFFu, 3.0 * dpi);
         if (current) rubraview_pal_render_stroke_rect(app->renderer, cell, COLOR_TILE_CURRENT, 2.0 * dpi, 3.0 * dpi);
         char label[160];
-        u8str_t text = r == 0 ? TU8("Off")
-                              : (r - 1 < n ? rubraview_track_label(label, sizeof(label), &app->tracks, tracks[r - 1]) : U8(""));
+        proven_u8str_view_t text = r == 0 ? TU8("Off")
+                              : (r - 1 < n ? rubraview_track_label(label, sizeof(label), &app->tracks, tracks[r - 1]) : PROVEN_LIT(""));
         rubraview_pal_render_draw_text(app->renderer, text, cell, row_h * 0.4, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
@@ -10676,18 +10676,18 @@ static void draw_sub_list(app_state_t *app) {
 
 #define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
 
-typedef struct ctx_row { u8str_t caption, action; int32_t group; } ctx_row_t;
+typedef struct ctx_row { proven_u8str_view_t caption, action; int32_t group; } ctx_row_t;
 
 /* 1.21.0 (owner, 2026-10-18: "우클릭 메뉴에서, 툴바 버튼으로 호출 가능한 기능들은 빼 주세요"): is this action
    a tile of the toolbox for what is on screen? Then the right click leaves it out. Open file stays
    (owner, 2026-10-19: "파일 열기도 우클릭 컨텍스트 메뉴에 있어야 해요"). */
-static bool ctx_on_toolbox(const app_state_t *app, u8str_t action) {
-    if (action.len == 0) return false;
+static bool ctx_on_toolbox(const app_state_t *app, proven_u8str_view_t action) {
+    if (action.size == 0) return false;
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     const rubraview_toolbox_profile_t *p = rubraview_boxes_profile(doc, cstr(toolbox_profile_name(app)));
     if (!p) return false;
     for (int32_t i = 0; i < p->tile_count; ++i)
-        if (rubraview_u8_eq(doc->tiles[p->first_tile + i].action, action)) return true;
+        if (proven_u8str_view_eq(doc->tiles[p->first_tile + i].action, action)) return true;
     return false;
 }
 
@@ -10795,13 +10795,13 @@ static void ctx_choose(app_state_t *app, int32_t row) {
     if (row < 0 || (size_t)row >= n || !enabled[row]) return;
     ctx_row_t rows[CTX_MAX];
     (void)ctx_row_list(app, rows);
-    bool clears = rubraview_u8_eq_lit(rows[row].action, "recent_clear");
-    if ((clears || rubraview_u8_eq_lit(rows[row].action, "delete_file") || rubraview_u8_eq_lit(rows[row].action, "picker_recycle")) &&
+    bool clears = proven_u8str_view_eq(rows[row].action, PROVEN_LIT("recent_clear"));
+    if ((clears || proven_u8str_view_eq(rows[row].action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(rows[row].action, PROVEN_LIT("picker_recycle"))) &&
         !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
         osd_say(app, clears ? TU8("click Clear again to empty the recent list") : TU8("click Delete again to move it to the recycle bin"));
         return;
     }
-    u8str_t action = rows[row].action;
+    proven_u8str_view_t action = rows[row].action;
     ctx_close(app);
     handle_action(app, action);
 }
@@ -10844,9 +10844,9 @@ static void draw_ctxmenu_on_in(app_state_t *app, rubraview_renderer_t *r, double
         const ctx_row_t *item = &rows[i];
         rubraview_action_state_t st = rubraview_action_state(item->action, &facts);
         char scratch[160];
-        u8str_t text;
+        proven_u8str_view_t text;
         if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
-            text = rubraview_u8_eq_lit(item->action, "recent_clear") ? TU8("Clear?") : TU8("Delete?");
+            text = proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
         } else {
             text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, scratch, sizeof(scratch));
         }
@@ -10863,7 +10863,7 @@ static void draw_ctxmenu(app_state_t *app) {
 static void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files) {
     ctx_close(app);
     slidepop_close(app);
-    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), U8("listrow"));
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("listrow"));
     if (!list || list->tile_count <= 0) return;
     app->ctx_open = true;
     app->ctx_list = list;
@@ -10875,10 +10875,10 @@ static void list_row_menu(app_state_t *app, size_t row, double x, double y, bool
 }
 
 /* What the field says when it is not being typed in: the delay, "3.5". */
-static u8str_t slidepop_delay_text(const app_state_t *app, char *buffer, size_t size) {
-    if (app->slidepop_typing) return (u8str_t){ .ptr = app->slidepop_text, .len = app->slidepop_len };
+static proven_u8str_view_t slidepop_delay_text(const app_state_t *app, char *buffer, size_t size) {
+    if (app->slidepop_typing) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->slidepop_text, .size = app->slidepop_len };
     int n = snprintf(buffer, size, "%.1f s", app->slideshow.interval_seconds);
-    return (u8str_t){ .ptr = buffer, .len = n > 0 ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? (size_t)n : 0 };
 }
 
 static void slidepop_type_end(app_state_t *app, bool keep) {
@@ -10886,7 +10886,7 @@ static void slidepop_type_end(app_state_t *app, bool keep) {
     app->slidepop_typing = false;
     double seconds = 0.0;
     if (!keep) return;
-    if (rubraview_subwin_amount((u8str_t){ .ptr = app->slidepop_text, .len = app->slidepop_len }, &seconds)) {
+    if (rubraview_subwin_amount((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->slidepop_text, .size = app->slidepop_len }, &seconds)) {
         interval_set(app, seconds);
     } else {
         osd_say(app, TU8("the delay is a number of seconds, 0.1 to 300"));
@@ -10894,7 +10894,7 @@ static void slidepop_type_end(app_state_t *app, bool keep) {
 }
 
 static int slidepop_transition(const app_state_t *app) {
-    int turn = (int)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition")));
+    int turn = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("transition")));
     return turn >= 0 && turn < 4 ? turn : 1;
 }
 
@@ -10921,10 +10921,10 @@ static void draw_slidepop(app_state_t *app) {
         rubraview_pal_rect_t box = { pr.x, pr.y, pr.width, pr.height };
         bool current = false;
         char buffer[24];
-        u8str_t text = U8("");
+        proven_u8str_view_t text = PROVEN_LIT("");
         switch ((rubraview_slidepop_part_t)p) {
-            case RUBRAVIEW_SLIDEPOP_DELAY_DOWN:  text = U8("-"); break;
-            case RUBRAVIEW_SLIDEPOP_DELAY_UP:    text = U8("+"); break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_DOWN:  text = PROVEN_LIT("-"); break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_UP:    text = PROVEN_LIT("+"); break;
             case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, buffer, sizeof(buffer)); current = app->slidepop_typing; break;
             case RUBRAVIEW_SLIDEPOP_FX_CUT:      text = TU8("Cut");   current = fx == 0; break;
             case RUBRAVIEW_SLIDEPOP_FX_FADE:     text = TU8("Fade");  current = fx == 1; break;
@@ -10970,7 +10970,7 @@ static void slidepop_press(app_state_t *app, double x, double y) {
             const char *const SAY[4] = { T("slides change at once"), T("slides fade into the next"),
                                                 T("slides slide in"), T("slides zoom and fade") };
             int fx = (int)(part - RUBRAVIEW_SLIDEPOP_FX_CUT);
-            rubraview_settings_set(&app->settings, U8("viewer"), U8("transition"), (double)fx);   /* Settings › Viewer › Turning a page */
+            rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("transition"), (double)fx);   /* Settings › Viewer › Turning a page */
             settings_took_effect(app);
             osd_say(app, cstr(SAY[fx]));
             break;
@@ -10985,7 +10985,7 @@ static void slidepop_press(app_state_t *app, double x, double y) {
             slidepop_close(app);
             if (app->slideshow_running) toggle_slideshow(app);
             break;
-        case RUBRAVIEW_SLIDEPOP_FULL:  handle_action(app, U8("toggle_fullscreen")); break;
+        case RUBRAVIEW_SLIDEPOP_FULL:  handle_action(app, PROVEN_LIT("toggle_fullscreen")); break;
         case RUBRAVIEW_SLIDEPOP_CLOSE: slidepop_close(app); break;
         default: break;
     }
@@ -11018,7 +11018,7 @@ static bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
             if (key_is(combo, "Escape")) { slidepop_type_end(app, false); return true; }
             if (key_is(combo, "Enter")) { slidepop_type_end(app, true); return true; }
             if (key_is(combo, "Backspace")) { if (app->slidepop_len > 0) app->slidepop_len--; return true; }
-            if (combo.key_name.len == 1 || key_is(combo, "Period") || key_is(combo, "Comma")) {
+            if (combo.key_name.size == 1 || key_is(combo, "Period") || key_is(combo, "Comma")) {
                 char c = key_is(combo, "Period") ? '.' : key_is(combo, "Comma") ? ',' : combo.key_name.ptr[0];
                 if (((c >= '0' && c <= '9') || c == '.' || c == ',') && app->slidepop_len + 1 < sizeof(app->slidepop_text)) {
                     app->slidepop_text[app->slidepop_len++] = c;
@@ -11045,15 +11045,15 @@ static bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
 #define HINT_DELAY 0.6
 
 static bool hint_shown(const app_state_t *app) {
-    return app->hint.len > 0 && rubraview_pal_time_now_seconds() - app->hint_since >= HINT_DELAY;
+    return app->hint.size > 0 && rubraview_pal_time_now_seconds() - app->hint_since >= HINT_DELAY;
 }
 
 /* RV-116: the hint, below and right of the pointer, turned to stay in the window. */
 /* A tile's or a menu item's hint (owner, 2026-10-17): what it does, and its
    keys, "Toolbox (T, Ctrl+T)". Its words are the hint when it has one, else
    the action's description as the key list has it. */
-static u8str_t hint_with_keys(app_state_t *app, u8str_t action, const char *said, char *buffer, size_t capacity) {
-    if (action.len == 0 || capacity < 8) return U8("");
+static proven_u8str_view_t hint_with_keys(app_state_t *app, proven_u8str_view_t action, const char *said, char *buffer, size_t capacity) {
+    if (action.size == 0 || capacity < 8) return PROVEN_LIT("");
     const char *words = said ? said : rubraview_action_words(action);
     if (words && !said) words = rubraview_tr(words);
     size_t at = 0;
@@ -11062,25 +11062,25 @@ static u8str_t hint_with_keys(app_state_t *app, u8str_t action, const char *said
     size_t keys = 0;
     for (size_t b = 0; b < app->keymap.count && keys < 3; ++b) {
         const rubraview_key_binding_t *binding = &app->keymap.bindings[b];
-        if (!rubraview_u8_eq(binding->action, action)) continue;
+        if (!proven_u8str_view_eq(binding->action, action)) continue;
         for (size_t c = 0; c < binding->combo_count && keys < 3; ++c) {
             char combo[48];
-            u8str_t k = rubraview_key_combo_format(combo, sizeof(combo), binding->combos[c]);
-            if (k.len == 0) continue;
-            n = snprintf(buffer + at, capacity - at, "%s%.*s", keys == 0 ? (at > 0 ? "  (" : "(") : ", ", (int)k.len, k.ptr);
+            proven_u8str_view_t k = rubraview_key_combo_format(combo, sizeof(combo), binding->combos[c]);
+            if (k.size == 0) continue;
+            n = snprintf(buffer + at, capacity - at, "%s%.*s", keys == 0 ? (at > 0 ? "  (" : "(") : ", ", (int)k.size, k.ptr);
             if (n > 0) at += (size_t)n < capacity - at ? (size_t)n : capacity - at - 1;
             keys++;
         }
     }
     if (keys > 0 && at + 1 < capacity) { buffer[at++] = ')'; buffer[at] = '\0'; }
-    return (u8str_t){ .ptr = buffer, .len = at };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = at };
 }
 
 static void draw_hint(app_state_t *app, double win_w, double win_h) {
     if (!hint_shown(app) || app->tmenu_open) return;   /* 1.25.0: never over the ☰ pull-down's rows */
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double font = 13.0 * dpi;
-    double w = (double)app->hint.len * font * 0.52 + 20.0 * dpi;
+    double w = (double)app->hint.size * font * 0.52 + 20.0 * dpi;
     double tw = 0.0, th = 0.0;
     if (rubraview_pal_render_measure_text(app->renderer, app->hint, font, &tw)) w = tw + 20.0 * dpi;
     double h = 28.0 * dpi;
@@ -11106,7 +11106,7 @@ static bool sub_tile_anchor(app_state_t *app, double *x, double *y) {
     if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED) return false;
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
     for (int32_t i = 0; i < app->toolbox_tile_count; ++i) {
-        if (!rubraview_u8_eq_lit(app->toolbox_tiles[i].action, "toggle_subtitles")) continue;
+        if (!proven_u8str_view_eq(app->toolbox_tiles[i].action, PROVEN_LIT("toggle_subtitles"))) continue;
         rubraview_rect_t r = rubraview_box_tile_rect(&app->toolbox, &metrics, i);
         if (r.width <= 0.0) return false;
         *x = r.x + r.width * 0.5;
@@ -11180,11 +11180,11 @@ static void subbox_drag_motion(app_state_t *app, double x, double y) {
     rubraview_subbox_place_t place = subbox_place(app);
     rubraview_subbox_place_from_rect(&place, moved, (double)win_w, (double)win_h, resizing);
     rubraview_settings_t *st = &app->settings;
-    rubraview_settings_set(st, U8("video"), U8("subtitle_x"), floor(place.x * 100.0 + 0.5));
-    rubraview_settings_set(st, U8("video"), U8("subtitle_y"), floor(place.y * 100.0 + 0.5));
+    rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_x"), floor(place.x * 100.0 + 0.5));
+    rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_y"), floor(place.y * 100.0 + 0.5));
     if (resizing) {
-        rubraview_settings_set(st, U8("video"), U8("subtitle_width"), floor(place.width * 100.0 + 0.5));
-        rubraview_settings_set(st, U8("video"), U8("subtitle_height"), floor(place.height * 100.0 + 0.5));
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_width"), floor(place.width * 100.0 + 0.5));
+        rubraview_settings_set(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_height"), floor(place.height * 100.0 + 0.5));
     }
     settings_took_effect(app);
 }
@@ -11195,7 +11195,7 @@ static void subbox_drag_motion(app_state_t *app, double x, double y) {
 /* 1.25.0 (owner, 2026-10-20: "툴바의 진행막대 위에서 휠을 돌리면 파일이름/안내메시지 글꼴 크기"): how large the
    toolbar's file name and the messages are, from Settings › Display. */
 static double name_scale(const app_state_t *app) {
-    double k = rubraview_settings_get(&app->settings, U8("display"), U8("name_scale")) / 100.0;
+    double k = rubraview_settings_get(&app->settings, PROVEN_LIT("display"), PROVEN_LIT("name_scale")) / 100.0;
     return k < 0.6 ? 0.6 : k > 2.0 ? 2.0 : k;
 }
 
@@ -11207,7 +11207,7 @@ static void draw_notice(app_state_t *app, double win_w, double win_h, double chr
         rubraview_pal_rect_t box = { win_w * 0.2, win_h * 0.08, win_w * 0.6, box_h };
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BAR_FILL, 3.0);
         rubraview_pal_render_draw_text(app->renderer,
-                                       (u8str_t){ .ptr = app->notice, .len = app->notice_length },
+                                       (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->notice, .size = app->notice_length },
                                        box, 15.0 * chrome_dpi * k, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         place_font_end(app, before);
     }
@@ -11240,9 +11240,9 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
                 bool on = k == app->ext_at;
                 rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
                 char line[128];
-                u8str_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
-                int n = snprintf(line, sizeof(line), "%s   \xE2\x86\x92   %.*s", app->ext_from[k], (int)(to.len < 64 ? to.len : 64), to.ptr);
-                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+                proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
+                int n = snprintf(line, sizeof(line), "%s   \xE2\x86\x92   %.*s", app->ext_from[k], (int)(to.size < 64 ? to.size : 64), to.ptr);
+                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                                           (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
                                                           16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
             }
@@ -11313,15 +11313,15 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
             sel_b = 3 * at_b;
             rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
             char title[1200];
-            u8str_t name = rubraview_path_basename((u8str_t){ .ptr = app->password_for, .len = app->password_for_len });
-            int tn = snprintf(title, sizeof(title), T("Password for %.*s"), (int)name.len, name.ptr);
-            if (tn > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = title, .len = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
+            proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
+            int tn = snprintf(title, sizeof(title), T("Password for %.*s"), (int)name.size, name.ptr);
+            if (tn > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)title, .size = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
                                                        label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         double size = 18.0 * dpi, pad = 14.0 * dpi;
         double full = 0.0, to_caret = 0.0;
-        (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = total }, size, &full);
-        (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = caret + comp }, size, &to_caret);
+        (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total }, size, &full);
+        (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret + comp }, size, &to_caret);
         /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
         double inner = box.width - 2.0 * pad;
         double x0 = full <= inner && !app->rename_is_path ? box.x + (box.width - full) * 0.5 : box.x + pad;
@@ -11331,14 +11331,14 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
             /* the composing text sits at the caret, which is one end of the selection */
             size_t da = a >= caret ? a + comp : a, db = b >= caret ? b + comp : b;
             double xa = 0.0, xb = 0.0;
-            (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = da }, size, &xa);
-            (void)rubraview_pal_render_measure_text(app->renderer, (u8str_t){ .ptr = shown, .len = db }, size, &xb);
+            (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = da }, size, &xa);
+            (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = db }, size, &xb);
             rubraview_pal_rect_t shade = { x0 + xa, box.y + box.height * 0.2, xb - xa, box.height * 0.6 };
             rubraview_pal_render_fill_rect(app->renderer, shade, 0xA05B9BD5u, 2.0);
         }
         rubraview_pal_rect_t line = { x0, box.y, full + 4.0 * dpi, box.height };
         if (total > 0) {
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = total },
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total },
                                            line, size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
         if (fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5) {
@@ -11382,7 +11382,7 @@ static void draw_rename_box(app_state_t *app, double win_w, double win_h, double
 static void draw_answer_close(app_state_t *app, rubraview_pal_rect_t box, double dpi) {
     rubraview_pal_rect_t x = answer_box_close(app, box);
     if (pal_rect_has(x, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, x, COLOR_CLOSE_HOVER, 2.0);
-    rubraview_pal_render_draw_text(app->renderer, U8("X"), x, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), x, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 }
 
 static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
@@ -11410,16 +11410,16 @@ static void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, doubl
     for (int32_t side = 0; side < 2; ++side) {
         rubraview_pal_rect_t first = ab_part_rect(app, side, 0);
         rubraview_pal_rect_t label = { first.x - AB_LABEL_W * dpi, first.y, AB_LABEL_W * dpi, first.height };
-        rubraview_pal_render_draw_text(app->renderer, side == 0 ? U8("A") : U8("B"), label, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer, side == 0 ? PROVEN_LIT("A") : PROVEN_LIT("B"), label, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         for (int32_t part = 0; part < 3; ++part) {
             rubraview_pal_rect_t r = ab_part_rect(app, side, part);
             bool here = app->ab_edit_field == side && app->ab_edit_part == part;
             rubraview_pal_render_fill_rect(app->renderer, r, here ? 0xFF3A3A3Au : COLOR_TILE_FILL, 3.0);
             rubraview_pal_render_stroke_rect(app->renderer, r, here ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, here ? 2.0 : 1.0, 3.0);
             char shown[16];
-            u8str_t t = ab_part(app, side, part);
-            int n = snprintf(shown, sizeof(shown), "%.*s%s", (int)t.len, t.ptr, here && caret_lit && !app->ab_edit_fresh ? "|" : "");
-            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = shown, .len = (size_t)n }, r, 17.0 * dpi,
+            proven_u8str_view_t t = ab_part(app, side, part);
+            int n = snprintf(shown, sizeof(shown), "%.*s%s", (int)t.size, t.ptr, here && caret_lit && !app->ab_edit_fresh ? "|" : "");
+            if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = (size_t)n }, r, 17.0 * dpi,
                                                       COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             rubraview_pal_rect_t unit = { r.x + r.width, r.y, AB_UNIT_W * dpi, r.height };
             rubraview_pal_render_draw_text(app->renderer, cstr(UNIT[part]), unit, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
@@ -11453,7 +11453,7 @@ static void draw_px_edit_box(app_state_t *app, double win_w, double win_h, doubl
         }
         if (at > (int)sizeof(line) - 1) at = (int)sizeof(line) - 1;
         rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)at }, top, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)at }, top, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
         rubraview_pal_render_draw_text(app->renderer, TU8("Pixels from the top left  ·  Tab next  ·  Enter cuts  ·  Esc  ·  or drag on the picture"),
                                        hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
@@ -11466,7 +11466,7 @@ static void draw_px_edit_box(app_state_t *app, double win_w, double win_h, doubl
                      app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ");
     if (n > 0) {
         rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                        top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
@@ -11728,7 +11728,7 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_fill_rect(app->renderer, body, rubraview_box_fade(COLOR_BOX_FILL, opacity * 0.75), 4.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 4.0);
 
-    const char *what = app->list_is_set ? T("Playlist") : app->source.archive_path.len > 0 ? T("In this archive") : T("In this folder");
+    const char *what = app->list_is_set ? T("Playlist") : app->source.archive_path.size > 0 ? T("In this archive") : T("In this folder");
     char title[96];
     int n = current >= 0 ? snprintf(title, sizeof(title), "%s   %d / %zu", what, current + 1, page_count(app))
                          : snprintf(title, sizeof(title), "%s   %zu", what, page_count(app));
@@ -11737,14 +11737,14 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     if (n >= (int)sizeof(title)) n = (int)sizeof(title) - 1;
     double buttons = lw->title_height * (lw->editable ? 2.0 : 1.0);
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - buttons - lw->row_height * 0.4, lw->title_height };
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ title, (size_t)n }, head, lw->title_height * 0.45,
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45,
                                               COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
-    rubraview_pal_render_draw_text(app->renderer, U8("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 
     double head_h = rubraview_listwin_head_height(lw);
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
@@ -11773,11 +11773,11 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
         else if (i == hovered) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_FILL, 2.0);
         if (lw->editable) draw_list_row_parts(app, app->renderer, lw, i, count, app->pointer_x, app->pointer_y, page);
         char line[512], fit[512];
-        u8str_t name = page_display_name(app, page);
-        int m = snprintf(line, sizeof(line), "%4zu   %.*s", page + 1, (int)(name.len < 480 ? name.len : 480), name.ptr);
+        proven_u8str_view_t name = page_display_name(app, page);
+        int m = snprintf(line, sizeof(line), "%4zu   %.*s", page + 1, (int)(name.size < 480 ? name.size : 480), name.ptr);
         rubraview_pal_rect_t text = { text_x + lw->row_height * 0.3, row.y, lw->x + lw->width - text_x - lw->row_height * 0.6, row.height };
         if (m > 0) rubraview_pal_render_draw_text(app->renderer,
-                                                  files_fit_text(fit, sizeof(fit), (u8str_t){ line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) },
+                                                  files_fit_text(fit, sizeof(fit), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) },
                                                                  text.width, small),
                                                   text, small, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
@@ -11801,7 +11801,7 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
    the bar's Remove and Clear all take files off the list only. */
 
 static void recentwin_build(app_state_t *app) {
-    recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, false);   /* what other viewers opened, too */
+    recent_sync(app, PROVEN_LIT(""), false);   /* what other viewers opened, too */
     size_t newest[RECENT_KEPT];
     size_t n = rubraview_recent_newest(&app->recent, newest, RECENT_KEPT);
     app->recent_row_count = 0;
@@ -11872,11 +11872,11 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     char title[96];
     int n = snprintf(title, sizeof(title), T("Recent files   %zu"), count);
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height * 2.0 - lw->row_height * 0.4, lw->title_height };
-    if (n > 0) rubraview_pal_render_draw_text(rr, (u8str_t){ title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
-    rubraview_pal_render_draw_text(rr, U8("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(rr, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
 
     /* the bar: all, Remove (the checked), Clear all */
@@ -11910,7 +11910,7 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
                     small, false, COLOR_TEXT);
         uint32_t ink = row->there ? COLOR_TEXT : COLOR_BOX_BORDER;   /* gone from the disk: dimmed */
         char fit[512], when[40], size[32];
-        u8str_t name = rubraview_path_basename(row->path), dir = rubraview_path_dirname(row->path);
+        proven_u8str_view_t name = rubraview_path_basename(row->path), dir = rubraview_path_dirname(row->path);
         info_local_time(when, sizeof(when), row->opened);
         when[16] = '\0';   /* to the minute */
         if (row->there) recent_size_text(size, sizeof(size), row->size); else snprintf(size, sizeof(size), "%s", T("gone"));
@@ -11964,7 +11964,7 @@ static bool recentwin_press(app_state_t *app, double x, double y) {
             }
             break;
         case RUBRAVIEW_LISTWIN_DEL: {
-            u8str_t gone[RECENT_KEPT];
+            proven_u8str_view_t gone[RECENT_KEPT];
             size_t n = 0;
             for (size_t i = 0; i < count; ++i) if (app->recent_rows[i].checked) gone[n++] = app->recent_rows[i].path;
             if (n == 0) { osd_say(app, TU8("tick the files to take off first")); break; }
@@ -11976,7 +11976,7 @@ static bool recentwin_press(app_state_t *app, double x, double y) {
         }
         case RUBRAVIEW_LISTWIN_SAVE:   /* Clear all */
             if (count == 0) break;
-            recent_sync(app, (u8str_t){ .ptr = "", .len = 0 }, true);
+            recent_sync(app, PROVEN_LIT(""), true);
             recentwin_build(app);
             menu_rebuild(app);
             osd_say(app, TU8("the recent list is empty"));
@@ -11984,7 +11984,7 @@ static bool recentwin_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_LISTWIN_ROW:
         case RUBRAVIEW_LISTWIN_ROW_UP: case RUBRAVIEW_LISTWIN_ROW_DOWN:   /* no arrows here: the name starts there */
             if (index < count) {
-                u8str_t path = app->recent_rows[index].path;
+                proven_u8str_view_t path = app->recent_rows[index].path;
                 if (!rubraview_pal_fs_exists(path)) { osd_say(app, TU8("that file is no longer there")); break; }
                 lw->open = false;
                 open_path(app, path);
@@ -12017,16 +12017,16 @@ static bool recentwin_release(app_state_t *app) {
    open-file screen, a file in the viewer. The bar: all, Add this (the file on screen), Remove. ---- */
 
 /* In or out of the favourites, written at once (another viewer's changes read first, D-99). */
-static bool favorite_toggle_path(app_state_t *app, u8str_t path) {
-    if (path.len == 0) return false;
+static bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path) {
+    if (path.size == 0) return false;
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    if (app->favorites_path.len > 0) {
-        u8str_t text = rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u);
-        if (text.len > 0) app->favorites = rubraview_favorites_parse(app->arena, text);
+    if (app->favorites_path.size > 0) {
+        proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u);
+        if (text.size > 0) app->favorites = rubraview_favorites_parse(app->arena, text);
     }
     bool was = rubraview_favorites_contains(&app->favorites, path);
     bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app_keep(app, path));
-    bool written = (!was && !now) || app->favorites_path.len == 0 ||
+    bool written = (!was && !now) || app->favorites_path.size == 0 ||
         rubraview_pal_fs_write_file_atomic(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites));
     if (locked) rubraview_pal_config_unlock();
     if (!was && !now) { osd_say(app, TU8("favourites are full")); return false; }
@@ -12094,11 +12094,11 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     char title[96];
     int n = snprintf(title, sizeof(title), T("Favourites   %zu"), count);
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height * 2.0 - lw->row_height * 0.4, lw->title_height };
-    if (n > 0) rubraview_pal_render_draw_text(rr, (u8str_t){ title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
-    rubraview_pal_render_draw_text(rr, U8("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(rr, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
@@ -12106,9 +12106,9 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     char del[48];
     if (checked > 0) snprintf(del, sizeof(del), T("Remove (%zu)"), checked); else snprintf(del, sizeof(del), "%s", T("Remove"));
     list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL), count > 0 && checked == count, checked > 0);
-    u8str_t here = current_file_path(app);
+    proven_u8str_view_t here = current_file_path(app);
     list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), T("Add this file"), small, false,
-                here.len > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+                here.size > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
     list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false,
                 checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
     double head_h = rubraview_listwin_head_height(lw);
@@ -12133,7 +12133,7 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
         int kind = app->fav_kind[i];
         uint32_t ink = kind ? COLOR_TEXT : COLOR_BOX_BORDER;   /* gone from the disk: dimmed */
         char fit[512];
-        u8str_t name = rubraview_favorites_title(&app->favorites, i), dir = rubraview_path_dirname(app->favorites.paths[i]);
+        proven_u8str_view_t name = rubraview_favorites_title(&app->favorites, i), dir = rubraview_path_dirname(app->favorites.paths[i]);
         double x = text_x;
         rubraview_pal_rect_t c1 = { x, rect.y, c_name - small, rect.height };
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), name, c1.width, small), c1, small, kind == 1 ? 0xFFB8D8FFu : ink, RUBRAVIEW_TEXT_LEFT);
@@ -12166,8 +12166,8 @@ static bool favwin_press(app_state_t *app, double x, double y) {
             break;
         }
         case RUBRAVIEW_LISTWIN_ADD: {
-            u8str_t here = current_file_path(app);
-            if (here.len == 0) { osd_say(app, TU8("open a file first")); break; }
+            proven_u8str_view_t here = current_file_path(app);
+            if (here.size == 0) { osd_say(app, TU8("open a file first")); break; }
             if (rubraview_favorites_contains(&app->favorites, here)) { osd_say(app, TU8("already a favourite")); break; }
             favorite_toggle_path(app, here);
             favwin_build(app);
@@ -12198,7 +12198,7 @@ static bool favwin_press(app_state_t *app, double x, double y) {
         }
         case RUBRAVIEW_LISTWIN_DEL: {
             if (favwin_checked(app) == 0) { osd_say(app, TU8("tick the favourites to take off first")); break; }
-            u8str_t gone[RUBRAVIEW_FAVORITES_MAX];
+            proven_u8str_view_t gone[RUBRAVIEW_FAVORITES_MAX];
             size_t n = 0;
             for (size_t i = 0; i < count; ++i) if (app->fav_checked[i]) gone[n++] = app->favorites.paths[i];
             for (size_t i = 0; i < n; ++i) favorite_toggle_path(app, gone[i]);
@@ -12208,7 +12208,7 @@ static bool favwin_press(app_state_t *app, double x, double y) {
         }
         case RUBRAVIEW_LISTWIN_ROW:
             if (index < count) {
-                u8str_t path = app_keep(app, app->favorites.paths[index]);
+                proven_u8str_view_t path = app_keep(app, app->favorites.paths[index]);
                 int kind = app->fav_kind[index];
                 if (!kind) { osd_say(app, TU8("that is no longer there")); break; }
                 lw->open = false;
@@ -12254,18 +12254,18 @@ static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
     double pad = w->label_height * 0.5;
 
     int preset = eq_preset_now(app);
-    u8str_t name = eq_preset_label(preset);
+    proven_u8str_view_t name = eq_preset_label(preset);
     char title[96];
-    int n = snprintf(title, sizeof(title), T("Equaliser   %.*s"), (int)name.len, name.ptr);
+    int n = snprintf(title, sizeof(title), T("Equaliser   %.*s"), (int)name.size, name.ptr);
     rubraview_pal_rect_t head = { w->x + pad, w->y, w->width - w->title_height - pad, w->title_height };
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ title, (size_t)n }, head, w->title_height * 0.45,
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, w->title_height * 0.45,
                                               COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_eqwin_close_rect(w);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
-    rubraview_pal_render_draw_text(app->renderer, U8("X"), close, w->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), close, w->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 
     for (int p = 0; p < RUBRAVIEW_EQWIN_PRESETS; ++p) {
         rubraview_rect_t r = rubraview_eqwin_preset_rect(w, (size_t)p);
@@ -12297,12 +12297,12 @@ static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
         char v[16];
         int m = snprintf(v, sizeof(v), "%+.1f", (double)gains[b]);
         rubraview_pal_rect_t top = { col.x, col.y, col.width, w->label_height };
-        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ v, (size_t)m }, top, w->label_height * 0.55,
+        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)v, (size_t)m }, top, w->label_height * 0.55,
                                                   COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         char f[16];
         m = freqs[b] >= 1000.0 ? snprintf(f, sizeof(f), "%gk", freqs[b] / 1000.0) : snprintf(f, sizeof(f), "%g", freqs[b]);
         rubraview_pal_rect_t bottom = { col.x, col.y + col.height - w->label_height, col.width, w->label_height };
-        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ f, (size_t)m }, bottom, w->label_height * 0.55,
+        if (m > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)f, (size_t)m }, bottom, w->label_height * 0.55,
                                                   0xC0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
     }
 }
@@ -12313,20 +12313,20 @@ static void draw_eqwin(app_state_t *app, double win_w, double win_h) {
    from Settings › General. begin sets the place's face and gives its size (a factor); end puts back the one before. */
 static int g_place = PF_NONE;
 static void place_font_apply(app_state_t *app, int which) {
-    u8str_t f = which == PF_TITLE ? rubraview_settings_get_text(&app->settings, U8("general"), U8("font_titlebar"))
-              : which == PF_MENU ? rubraview_settings_get_text(&app->settings, U8("general"), U8("font_menu"))
-              : which == PF_NAME ? rubraview_settings_get_text(&app->settings, U8("general"), U8("font_name"))
-              : which == PF_LIST ? rubraview_settings_get_text(&app->settings, U8("general"), U8("font_list"))
-              : which == PF_BUTTONS ? rubraview_settings_get_text(&app->settings, U8("general"), U8("font_buttons")) : U8("");
+    proven_u8str_view_t f = which == PF_TITLE ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_titlebar"))
+              : which == PF_MENU ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_menu"))
+              : which == PF_NAME ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_name"))
+              : which == PF_LIST ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_list"))
+              : which == PF_BUTTONS ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_buttons")) : PROVEN_LIT("");
     rubraview_font_spec_t face = rubraview_font_spec_parse(f);
     rubraview_pal_render_set_text_font(app->renderer, face.family, face.weight, face.italic);
 }
 
 static double place_size(app_state_t *app, int which) {
-    double v = which == PF_TITLE ? rubraview_settings_get(&app->settings, U8("general"), U8("size_titlebar"))
-             : which == PF_MENU ? rubraview_settings_get(&app->settings, U8("general"), U8("size_menu"))
-             : which == PF_LIST ? rubraview_settings_get(&app->settings, U8("general"), U8("size_list"))
-             : which == PF_BUTTONS ? rubraview_settings_get(&app->settings, U8("general"), U8("size_buttons")) : 100.0;
+    double v = which == PF_TITLE ? rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("size_titlebar"))
+             : which == PF_MENU ? rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("size_menu"))
+             : which == PF_LIST ? rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("size_list"))
+             : which == PF_BUTTONS ? rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("size_buttons")) : 100.0;
     if (which == PF_NAME) return name_scale(app);
     return v >= 60.0 && v <= 200.0 ? v / 100.0 : 1.0;
 }
@@ -12345,7 +12345,7 @@ static void place_font_end(app_state_t *app, int before) {
 }
 
 /* 1.25.0: words drawn bold (twice, a hair apart) for what is on, plain for what is off. */
-static void draw_text_weight(app_state_t *app, u8str_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold) {
+static void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold) {
     rubraview_pal_render_draw_text(app->renderer, text, r, size, argb, RUBRAVIEW_TEXT_CENTER);
     if (bold) rubraview_pal_render_draw_text(app->renderer, text, (rubraview_pal_rect_t){ r.x + size * 0.06, r.y, r.width, r.height },
                                              size, argb, RUBRAVIEW_TEXT_CENTER);
@@ -12392,7 +12392,7 @@ static void draw_tmenu_in(app_state_t *app) {
     rubraview_pal_rect_t f = tmenu_frame(app);
     rubraview_pal_render_fill_rect(app->renderer, f, 0xF6202020u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(app->renderer, f, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
-    bool pinned = rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5;
+    bool pinned = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5;
     for (int32_t i = 0; i < TMENU_COUNT; ++i) {
         rubraview_pal_rect_t r = tmenu_row(app, i);
         bool on = i == 0 && pinned;
@@ -12434,7 +12434,7 @@ static bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo) {
 static void draw_titlebar(app_state_t *app, double win_w) {
     if (!app->titlebar.shown) return;
     rubraview_pal_rect_t bar = { 0.0, 0.0, win_w, app->titlebar.height };
-    rubraview_pal_render_fill_rect(app->renderer, bar, rubraview_box_fade(COLOR_BAR_FILL, rubraview_settings_get(&app->settings, U8("ui"), U8("titlebar_opacity"))), 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, bar, rubraview_box_fade(COLOR_BAR_FILL, rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("titlebar_opacity"))), 0.0);
 
     int32_t page = current_page_index(app);
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -12450,12 +12450,12 @@ static void draw_titlebar(app_state_t *app, double win_w) {
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ lx, mr.y + bh * 0.5 + (double)k * bh * 0.17 - th * 0.5, lw, th }, COLOR_TEXT, th * 0.5);
     }
     /* the name: the folder in the open-file screen, else the file on screen; a press opens the open-file screen */
-    u8str_t name = app->picker_open ? (app->picker_dir.len > 0 ? app->picker_dir : U8("Rubraview"))
-                 : page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : U8("");
+    proven_u8str_view_t name = app->picker_open ? (app->picker_dir.size > 0 ? app->picker_dir : PROVEN_LIT("Rubraview"))
+                 : page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : PROVEN_LIT("");
     double tk = 1.0;
     int before_font = place_font_begin(app, PF_TITLE, &tk);   /* 1.25.0: the title bar's name in its own face and size */
     double font = bh * 0.38 * tk, name_w = 0.0;
-    if (name.len > 0 && rubraview_pal_render_measure_text(app->renderer, name, font, &name_w)) app->titlebar.name_width = name_w + 20.0 * dpi;
+    if (name.size > 0 && rubraview_pal_render_measure_text(app->renderer, name, font, &name_w)) app->titlebar.name_width = name_w + 20.0 * dpi;
     else app->titlebar.name_width = 0.0;
     rubraview_rect_t nr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_NAME, win_w);
     if (nr.width > 0.0) {
@@ -12464,7 +12464,7 @@ static void draw_titlebar(app_state_t *app, double win_w) {
             rubraview_pal_render_fill_rect(app->renderer, nb, COLOR_TILE_FILL, 3.0 * dpi);
         char fit[1024];
         /* measured to fit: whole (the estimate files_fit_text makes would cut it); cut only when the row is short */
-        u8str_t shown = nr.width + 0.5 >= name_w + 20.0 * dpi ? name : files_fit_text(fit, sizeof(fit), name, nr.width - 20.0 * dpi, font);
+        proven_u8str_view_t shown = nr.width + 0.5 >= name_w + 20.0 * dpi ? name : files_fit_text(fit, sizeof(fit), name, nr.width - 20.0 * dpi, font);
         rubraview_pal_render_draw_text(app->renderer, shown,
                                        (rubraview_pal_rect_t){ nr.x + 10.0 * dpi, nr.y, nr.width - 10.0 * dpi, nr.height }, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
@@ -12478,9 +12478,9 @@ static void draw_titlebar(app_state_t *app, double win_w) {
     };
     const char *const GLYPHS[] = { T("Set"), "P", "H", "T", "F", "_", "[]", "R", "X" };
     bool on[9] = { app->settings_open,
-                   rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5,
+                   rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
                    app->chrome_hidden,
-                   rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5,
+                   rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5,
                    rubraview_pal_window_is_fullscreen(app->window),
                    false,
                    rubraview_pal_window_is_maximized(app->window),
@@ -12508,7 +12508,7 @@ static void draw_wheel_strip(app_state_t *app) {
         double dpi = rubraview_pal_window_dpi_scale(app->window);
         rubraview_pal_rect_t strip = strip_rect(app);
         rubraview_pal_render_fill_rect(app->renderer, strip, strip_fade(rubraview_box_fade(COLOR_BAR_FILL,
-                                       rubraview_settings_get(&app->settings, U8("ui"), U8("strip_opacity"))), shown), 0.0);   /* 1.25.0 */
+                                       rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("strip_opacity"))), shown), 0.0);   /* 1.25.0 */
         double lead = rubraview_filmstrip_lead(&app->filmstrip);
         int32_t current = current_page_index(app);
         rubraview_virtual_range_t visible = rubraview_filmstrip_visible(&app->filmstrip);
@@ -12539,7 +12539,7 @@ static void draw_wheel_strip(app_state_t *app) {
                 char number[24];
                 int n = snprintf(number, sizeof(number), "%zu", index + 1);
                 rubraview_pal_render_fill_rect(app->renderer, cell, strip_fade(COLOR_TILE_FILL, shown), 3.0);
-                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = number, .len = (size_t)n }, cell,
+                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)n }, cell,
                                                           14.0 * dpi, strip_fade(COLOR_TEXT, shown), RUBRAVIEW_TEXT_CENTER);
             }
             bool here = (int32_t)index == current;
@@ -12568,7 +12568,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->menubox.headless) {
         char crumb[128];
-        u8str_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
+        proven_u8str_view_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
         /* Beside the anchor, on its row: the grid is below or above it now. */
         rubraview_rect_t anchor = rubraview_box_anchor_rect(&app->menubox, &metrics);
         rubraview_rect_t pin = rubraview_box_pin_rect(&app->menubox, &metrics);
@@ -12600,7 +12600,7 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
                                app->resume_page + 1, page_count(app));
         if (written > 0) {
             rubraview_pal_render_draw_text(app->renderer,
-                                           (u8str_t){ .ptr = line, .len = (size_t)written },
+                                           (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written },
                                            prompt, bar_h * 0.4, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
     }
@@ -12615,20 +12615,20 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
         if (page >= 0 && (size_t)page < page_count(app)) {
             /* The file's name at the left; its size, resolution and place at the right, the place last (owner, 2026-10-16). */
             const app_page_t *pg = &app->pages[page];
-            u8str_t name = app->source.pages[page].name;
+            proven_u8str_view_t name = app->source.pages[page].name;
             if (app->osd_size_page != page) {
                 /* Read once a page: from the archive's index, or the file's own entry. */
                 app->osd_size_page = page;
                 app->osd_size_bytes = 0;
-                u8str_t path = app->source.pages[page].path;
+                proven_u8str_view_t path = app->source.pages[page].path;
                 rubraview_fs_entry_t entry;
-                if (path.len == 0) app->osd_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+                if (path.size == 0) app->osd_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
                 else if (rubraview_pal_fs_stat(app->arena, path, &entry)) app->osd_size_bytes = entry.size_bytes;
             }
             bool playing = app->media && page == app->media_page;
             bool picture = pg->loaded && !playing;
             char right_buf[192];
-            u8str_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
+            proven_u8str_view_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
                                                 picture ? real_w(pg) : 0, picture ? real_h(pg) : 0,
                                                 app->osd_size_bytes, picture && pg->reduced,
                                                 playing ? app->media_position : 0.0,
@@ -12637,8 +12637,8 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
             char text_buf[256];
             int through = text_percent(app);
             if (through >= 0 && text_encoding_shown(app)) {
-                int n = snprintf(text_buf, sizeof(text_buf), T("%s, %d %% through  %.*s"), text_encoding_shown(app), through, (int)right.len, right.ptr);
-                if (n > 0 && (size_t)n < sizeof(text_buf)) right = (u8str_t){ .ptr = text_buf, .len = (size_t)n };
+                int n = snprintf(text_buf, sizeof(text_buf), T("%s, %d %% through  %.*s"), text_encoding_shown(app), through, (int)right.size, right.ptr);
+                if (n > 0 && (size_t)n < sizeof(text_buf)) right = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text_buf, .size = (size_t)n };
             }
 
             /* The alpha byte carries the fade, so the whole overlay
@@ -12652,21 +12652,21 @@ static void draw_chrome(app_state_t *app, double win_w, double win_h) {
             uint32_t ink = (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu);
 
             double right_w = 0.0;
-            if (!rubraview_pal_render_measure_text(app->renderer, right, font, &right_w)) right_w = (double)right.len * font * 0.55;
+            if (!rubraview_pal_render_measure_text(app->renderer, right, font, &right_w)) right_w = (double)right.size * font * 0.55;
             rubraview_pal_rect_t right_box = { win_w - pad - right_w - 2.0, bottom, right_w + 2.0, bar_h };
             rubraview_pal_render_draw_text(app->renderer, right, right_box, font, ink, RUBRAVIEW_TEXT_LEFT);
 
             /* The name in what is left: whole if it fits, else its start, "...", and its last ten characters. */
             double room = right_box.x - 2.0 * pad;
             char name_buf[1024];
-            u8str_t shown = name;
+            proven_u8str_view_t shown = name;
             double w = 0.0;
             if (room > 0.0 && rubraview_pal_render_measure_text(app->renderer, name, font, &w) && w > room) {
                 size_t total = rubraview_utf8_chars(name);
                 size_t lo = 0, hi = total > 13 ? total - 13 : 0;   /* head characters that fit */
                 while (lo < hi) {
                     size_t mid = (lo + hi + 1) / 2;
-                    u8str_t trial = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, mid, 10);
+                    proven_u8str_view_t trial = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, mid, 10);
                     if (rubraview_pal_render_measure_text(app->renderer, trial, font, &w) && w <= room) lo = mid;
                     else hi = mid - 1;
                 }
@@ -12697,7 +12697,7 @@ static void draw_music_backdrop(app_state_t *app, int32_t win_w, int32_t win_h) 
 /* Whether the analyser has something to draw now: a song playing on its page. */
 static bool visualizer_live(const app_state_t *app) {
     return app->media && !app->media_info.has_video && !app->media_paused &&
-           rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")) > 0.5;
+           rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer")) > 0.5;
 }
 
 /* The music page's analyser and lyrics (owner, 2026-09-30). The analyser
@@ -12710,7 +12710,7 @@ static void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double chrome = 56.0 * dpi + (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
 
-    int viz = (int)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")));
+    int viz = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer")));
     if (viz > 0) {
         double h = 64.0 * dpi, w = (double)win_w * 0.6;
         double x0 = ((double)win_w - w) * 0.5, y0 = (double)win_h - chrome - 96.0 * dpi - h;
@@ -12773,10 +12773,10 @@ static void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
             int32_t index = (now < 0 ? 0 : now) + k;
             if (now < 0 && k < 0) continue;
             if (index < 0 || (size_t)index >= lyrics->count) continue;
-            u8str_t text = lyrics->lines[index].text;
+            proven_u8str_view_t text = lyrics->lines[index].text;
             rubraview_pal_rect_t row = { band.x, top + (double)(k + 3) * row_h, band.width, row_h };
             bool current = index == now && !lyrics->untimed;
-            rubraview_pal_render_draw_text(app->renderer, text.len > 0 ? text : U8("\xE2\x99\xAA"), row,
+            rubraview_pal_render_draw_text(app->renderer, text.size > 0 ? text : PROVEN_LIT("\xE2\x99\xAA"), row,
                                            current ? size * 1.1 : size * 0.85,
                                            current ? COLOR_TEXT : 0x90F0F0F0u, RUBRAVIEW_TEXT_CENTER);
             app->lyric_row_index[k + 3] = index;
@@ -12793,17 +12793,17 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
         int32_t track = rubraview_cue_track_at(&app->music_cue, app->media_position);
         if (track >= 0) {
             const rubraview_cue_track_t *ct = &app->music_cue.tracks[track];
-            if (ct->title.len > 0) cue_tags.title = ct->title;
-            if (ct->performer.len > 0) cue_tags.artist = ct->performer;
-            else if (app->music_cue.album_performer.len > 0) cue_tags.artist = app->music_cue.album_performer;
-            if (app->music_cue.album_title.len > 0) cue_tags.album = app->music_cue.album_title;
+            if (ct->title.size > 0) cue_tags.title = ct->title;
+            if (ct->performer.size > 0) cue_tags.artist = ct->performer;
+            else if (app->music_cue.album_performer.size > 0) cue_tags.artist = app->music_cue.album_performer;
+            if (app->music_cue.album_title.size > 0) cue_tags.album = app->music_cue.album_title;
             static char number[16];
             int n = snprintf(number, sizeof(number), "%d/%zu", ct->number, app->music_cue.count);
-            if (n > 0) cue_tags.track_number = (u8str_t){ .ptr = number, .len = (size_t)n };
+            if (n > 0) cue_tags.track_number = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)n };
         }
     }
     const rubraview_tags_t *t = &cue_tags;
-    if (t->title.len == 0 && t->artist.len == 0 && t->album.len == 0 && t->codec.len == 0) return;
+    if (t->title.size == 0 && t->artist.size == 0 && t->album.size == 0 && t->codec.size == 0) return;
 
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double size = 17.0 * dpi;
@@ -12811,8 +12811,8 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     /* The block sits **above** the seek bar and the status line, not
        across them: how many lines there are is known first, and the
        whole thing is placed from the bottom up. */
-    bool has_name = t->title.len > 0 || t->artist.len > 0;
-    bool has_record = t->album.len > 0 || t->year.len > 0 || t->track_number.len > 0;
+    bool has_name = t->title.size > 0 || t->artist.size > 0;
+    bool has_record = t->album.size > 0 || t->year.size > 0 || t->track_number.size > 0;
     double height = (has_name ? size * 1.6 : 0.0) + (has_record ? size * 1.4 : 0.0) + size * 1.4;
     double chrome = 56.0 * dpi + (app->filmstrip.visible ? FILMSTRIP_THUMB : 0.0);
     double bottom = (double)win_h - chrome - height - 8.0 * dpi;
@@ -12822,16 +12822,16 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     int n = 0;
     /* The name, and who made it. */
     if (has_name) {
-        if (t->title.len > 0 && t->artist.len > 0) {
+        if (t->title.size > 0 && t->artist.size > 0) {
             n = snprintf(line, sizeof(line), "%.*s  —  %.*s",
-                         (int)t->title.len, t->title.ptr, (int)t->artist.len, t->artist.ptr);
+                         (int)t->title.size, t->title.ptr, (int)t->artist.size, t->artist.ptr);
         } else {
-            u8str_t one = t->title.len > 0 ? t->title : t->artist;
-            n = snprintf(line, sizeof(line), "%.*s", (int)one.len, one.ptr);
+            proven_u8str_view_t one = t->title.size > 0 ? t->title : t->artist;
+            n = snprintf(line, sizeof(line), "%.*s", (int)one.size, one.ptr);
         }
         if (n > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.6 };
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                            rect, size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             bottom += size * 1.6;
         }
@@ -12839,15 +12839,15 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     /* The record, its year, and the track's number on it. */
     if (has_record) {
         n = snprintf(line, sizeof(line), "%.*s%s%.*s%s%s%.*s",
-                     (int)t->album.len, t->album.ptr,
-                     t->album.len > 0 && t->year.len > 0 ? "  (" : "",
-                     (int)t->year.len, t->year.ptr,
-                     t->album.len > 0 && t->year.len > 0 ? ")" : "",
-                     t->track_number.len > 0 ? "   no. " : "",
-                     (int)t->track_number.len, t->track_number.ptr);
+                     (int)t->album.size, t->album.ptr,
+                     t->album.size > 0 && t->year.size > 0 ? "  (" : "",
+                     (int)t->year.size, t->year.ptr,
+                     t->album.size > 0 && t->year.size > 0 ? ")" : "",
+                     t->track_number.size > 0 ? "   no. " : "",
+                     (int)t->track_number.size, t->track_number.ptr);
         if (n > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                            rect, size * 0.8, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             bottom += size * 1.4;
         }
@@ -12856,7 +12856,7 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     {
         char what[160];
         int w = 0;
-        if (t->codec.len > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "%.*s", (int)t->codec.len, t->codec.ptr);
+        if (t->codec.size > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "%.*s", (int)t->codec.size, t->codec.ptr);
         if (t->bitrate_kbps > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, T("%s%u kbps"), w > 0 ? "  ·  " : "", t->bitrate_kbps);
         if (t->sample_rate > 0) {
             w += snprintf(what + w, sizeof(what) - (size_t)w, T("%s%.1f kHz"), w > 0 ? "  ·  " : "",
@@ -12869,7 +12869,7 @@ static void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
         }
         if (w > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
-            rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = what, .len = (size_t)w },
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)what, .size = (size_t)w },
                                            rect, size * 0.75, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
@@ -13043,10 +13043,10 @@ static void draw_spread(app_state_t *app, size_t spread_index, double opacity,
    page — a page inside a CBZ is not a file, so none of §3.18 applies to
    it and every action below refuses rather than doing something to the
    archive. */
-static u8str_t current_file_path(app_state_t *app) {
+static proven_u8str_view_t current_file_path(app_state_t *app) {
     int32_t page = current_page_index(app);
     if (page < 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) {
-        return (u8str_t){ .ptr = "", .len = 0 };
+        return PROVEN_LIT("");
     }
     return app->source.pages[page].path;
 }
@@ -13054,8 +13054,8 @@ static u8str_t current_file_path(app_state_t *app) {
 /* After a file leaves the sequence the viewer has to land somewhere.
    §3.18.1: the next item, or the one before when the last was removed. */
 static void reopen_after_removal(app_state_t *app, size_t removed_index) {
-    u8str_t dir = app->source_dir;
-    if (dir.len == 0) return;
+    proven_u8str_view_t dir = app->source_dir;
+    if (dir.size == 0) return;
 
     size_t target = removed_index;
     open_folder(app, dir);
@@ -13067,24 +13067,24 @@ static void reopen_after_removal(app_state_t *app, size_t removed_index) {
 
 /* D-128: the folder again, on a file by its path — a file was added beside it,
    so its place in the order (by date, say) may not be what it was. */
-static void reopen_on_path(app_state_t *app, u8str_t path, size_t fallback) {
-    u8str_t dir = app->source_dir;
-    if (dir.len == 0) return;
+static void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback) {
+    proven_u8str_view_t dir = app->source_dir;
+    if (dir.size == 0) return;
     char kept[1024];
-    if (path.len >= sizeof(kept)) { reopen_after_removal(app, fallback); return; }
-    memcpy(kept, path.ptr, path.len);                 /* the list it may point into is about to be made again */
-    u8str_t want = { .ptr = kept, .len = path.len };
+    if (path.size >= sizeof(kept)) { reopen_after_removal(app, fallback); return; }
+    memcpy(kept, path.ptr, path.size);                 /* the list it may point into is about to be made again */
+    proven_u8str_view_t want = { .ptr = (const proven_byte_t *)kept, .size = path.size };
     open_folder(app, dir);
     if (page_count(app) == 0) return;
     size_t target = fallback < page_count(app) ? fallback : page_count(app) - 1;
     for (size_t i = 0; i < page_count(app); ++i) {
-        if (rubraview_u8_eq(app->source.pages[i].path, want)) { target = i; break; }
+        if (proven_u8str_view_eq(app->source.pages[i].path, want)) { target = i; break; }
     }
     finish_open(app, target);
 }
 
-static void osd_say(app_state_t *app, u8str_t text) {
-    size_t n = text.len < sizeof(app->notice) - 1 ? text.len : sizeof(app->notice) - 1;
+static void osd_say(app_state_t *app, proven_u8str_view_t text) {
+    size_t n = text.size < sizeof(app->notice) - 1 ? text.size : sizeof(app->notice) - 1;
     memcpy(app->notice, text.ptr, n);
     app->notice[n] = '\0';
     app->notice_length = n;
@@ -13092,8 +13092,8 @@ static void osd_say(app_state_t *app, u8str_t text) {
 }
 
 static void triage_delete(app_state_t *app, bool permanent) {
-    u8str_t path = current_file_path(app);
-    if (path.len == 0) return;
+    proven_u8str_view_t path = current_file_path(app);
+    if (path.size == 0) return;
 
     int32_t page = current_page_index(app);
     if (page < 0) return;
@@ -13115,19 +13115,19 @@ static void triage_delete(app_state_t *app, bool permanent) {
 }
 
 static void triage_curate(app_state_t *app, int32_t digit) {
-    u8str_t path = current_file_path(app);
-    if (path.len == 0) return;
+    proven_u8str_view_t path = current_file_path(app);
+    if (path.size == 0) return;
 
-    u8str_t target_dir = rubraview_curation_target(&app->curation, digit);
-    if (target_dir.len == 0) return;   /* that key is not bound: do nothing */
+    proven_u8str_view_t target_dir = rubraview_curation_target(&app->curation, digit);
+    if (target_dir.size == 0) return;   /* that key is not bound: do nothing */
 
     int32_t page = current_page_index(app);
     if (page < 0) return;
 
     rubraview_pal_fs_make_dirs(target_dir);
-    u8str_t name = rubraview_path_basename(path);
-    u8str_t target = rubraview_path_join(app->arena, target_dir, name);
-    if (target.len == 0) return;
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    proven_u8str_view_t target = rubraview_path_join(app->arena, target_dir, name);
+    if (target.size == 0) return;
 
     bool moving = app->curation.mode == RUBRAVIEW_CURATION_MOVE;
     bool ok = moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target);
@@ -13164,8 +13164,8 @@ static void apply_all_begin(app_state_t *app) {
     if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
     if (app->rename_active) rename_end(app);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    u8str_t last = rubraview_settings_get_text(&app->settings, U8("edit"), U8("copy_name"));
-    rubraview_textedit_set(&app->rename_edit, last.len > 0 ? last : U8("*_edit"));
+    proven_u8str_view_t last = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"));
+    rubraview_textedit_set(&app->rename_edit, last.size > 0 ? last : PROVEN_LIT("*_edit"));
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_is_apply = true;
@@ -13178,7 +13178,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
     apply_all_job_t *job = (apply_all_job_t*)param;
     bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
     for (size_t i = 0; i < job->count && !InterlockedCompareExchange(&job->cancel, 0, 0); ++i) {
-        u8str_t path = cstr(job->paths[i]);
+        proven_u8str_view_t path = cstr(job->paths[i]);
         bool ok = false;
         int32_t w = 0, h = 0;
         if (com && rubraview_pal_image_size(path, &w, &h) && w > 0 && h > 0) {
@@ -13213,16 +13213,16 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     rubraview_export_options_t options = job->options;
                     rubraview_export_format_t f = rubraview_export_format_for_name(path);
                     options.format = f;
-                    u8str_t ext = rubraview_export_extension(f);
-                    u8str_t stem = rubraview_path_stem(rubraview_path_basename(path));
-                    u8str_t dir = rubraview_path_dirname(path);
+                    proven_u8str_view_t ext = rubraview_export_extension(f);
+                    proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(path));
+                    proven_u8str_view_t dir = rubraview_path_dirname(path);
                     char tmp[2048];
-                    int n = snprintf(tmp, sizeof(tmp), "%.*s\\%.*s.rvsaving.%.*s", (int)dir.len, dir.ptr, (int)stem.len, stem.ptr, (int)ext.len, ext.ptr);
-                    u8str_t out = { .ptr = tmp, .len = n > 0 && (size_t)n < sizeof(tmp) ? (size_t)n : 0 };
-                    ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.len > 0 && rubraview_pal_image_save(out, &px, &options);
+                    int n = snprintf(tmp, sizeof(tmp), "%.*s\\%.*s.rvsaving.%.*s", (int)dir.size, dir.ptr, (int)stem.size, stem.ptr, (int)ext.size, ext.ptr);
+                    proven_u8str_view_t out = { .ptr = (const proven_byte_t *)tmp, .size = n > 0 && (size_t)n < sizeof(tmp) ? (size_t)n : 0 };
+                    ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.size > 0 && rubraview_pal_image_save(out, &px, &options);
                     if (ok) (void)details_keep(path, out, path, f, &options);   /* 1.17.0: read from the original before it goes */
                     ok = ok && rubraview_pal_fs_recycle(path) && rubraview_pal_fs_replace(out, path);
-                    if (!ok && out.len > 0 && rubraview_pal_fs_exists(out) && rubraview_pal_fs_exists(path)) (void)rubraview_pal_fs_recycle(out);
+                    if (!ok && out.size > 0 && rubraview_pal_fs_exists(out) && rubraview_pal_fs_exists(path)) (void)rubraview_pal_fs_recycle(out);
                 } else if (ok) {
                     /* in its own format when it can be written, else PNG (RV-139: AVIF and JPEG XL when FFmpeg can) */
                     rubraview_export_options_t options = job->options;
@@ -13232,15 +13232,15 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                         (f == RUBRAVIEW_EXPORT_JXL && !(ff & RUBRAVIEW_FFMPEG_WRITES_JXL))) f = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
                     if (f == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) f = RUBRAVIEW_EXPORT_PNG;
                     options.format = f;
-                    u8str_t ext = rubraview_export_extension(f);
-                    u8str_t stem = rubraview_path_stem(rubraview_path_basename(path));
+                    proven_u8str_view_t ext = rubraview_export_extension(f);
+                    proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(path));
                     char name[1024];
-                    int n = snprintf(name, sizeof(name), "%s%.*s%s.%.*s", job->prefix, (int)stem.len, stem.ptr, job->suffix, (int)ext.len, ext.ptr);
+                    int n = snprintf(name, sizeof(name), "%s%.*s%s.%.*s", job->prefix, (int)stem.size, stem.ptr, job->suffix, (int)ext.size, ext.ptr);
                     proven_arena_t *names = &lanes[steps.cursor % 2u];
-                    u8str_t target = n > 0 && (size_t)n < sizeof(name)
-                        ? rubraview_filing_target(names, rubraview_path_dirname(path), (u8str_t){ .ptr = name, .len = (size_t)n }, filing_exists, NULL)
-                        : (u8str_t){ .ptr = "", .len = 0 };
-                    ok = target.len > 0 && rubraview_pal_image_save(target, &px, &options);
+                    proven_u8str_view_t target = n > 0 && (size_t)n < sizeof(name)
+                        ? rubraview_filing_target(names, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)n }, filing_exists, NULL)
+                        : PROVEN_LIT("");
+                    ok = target.size > 0 && rubraview_pal_image_save(target, &px, &options);
                     if (ok) (void)details_keep(path, target, target, f, &options);   /* 1.17.0 */
                 }
                 free(mem);
@@ -13259,15 +13259,15 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
 /* A copy Edit made, by its name as the copies' pattern makes them ("*_edit"):
    left out when the steps go onto the list's pictures, as copies or over the
    originals (owner, 2026-10-18), so a copy is not edited a second time. */
-static bool edit_is_copy_name(u8str_t path, u8str_t pattern) {
-    if (pattern.len == 0) pattern = U8("*_edit");
+static bool edit_is_copy_name(proven_u8str_view_t path, proven_u8str_view_t pattern) {
+    if (pattern.size == 0) pattern = PROVEN_LIT("*_edit");
     return rubraview_glob_match_list(rubraview_path_stem(rubraview_path_basename(path)), pattern);
 }
 
 static void apply_all_typed(app_state_t *app) {
-    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     char pattern[160];
-    size_t n = text.len < sizeof(pattern) - 1 ? text.len : sizeof(pattern) - 1;
+    size_t n = text.size < sizeof(pattern) - 1 ? text.size : sizeof(pattern) - 1;
     memcpy(pattern, text.ptr, n);
     pattern[n] = '\0';
     rename_end(app);
@@ -13275,19 +13275,19 @@ static void apply_all_typed(app_state_t *app) {
     bool bad = !star || strchr(star + 1, '*') || n == 1 || strpbrk(pattern, "\\/:\"<>|?");
     if (bad) { osd_say(app, TU8("the name needs one * for the picture's own name and something beside it: *_edit")); return; }
     if (app->apply_job || app->edit_steps.cursor == 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) return;
-    rubraview_settings_set_text(&app->settings, U8("edit"), U8("copy_name"), app_keep(app, cstr(pattern)));
+    rubraview_settings_set_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"), app_keep(app, cstr(pattern)));
     apply_all_job_t *job = (apply_all_job_t*)calloc(1, sizeof(*job));
     if (!job) return;
     size_t count = page_count(app);
     job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
-        u8str_t p = app->source.pages[i].path;
-        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER))) continue;   /* pictures only */
+        proven_u8str_view_t p = app->source.pages[i].path;
+        if (p.size == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER))) continue;   /* pictures only */
         if (edit_is_copy_name(p, cstr(pattern))) continue;                                                    /* not a copy made before */
-        char *copy = (char*)malloc(p.len + 1);
+        char *copy = (char*)malloc(p.size + 1);
         if (!copy) continue;
-        memcpy(copy, p.ptr, p.len);
-        copy[p.len] = '\0';
+        memcpy(copy, p.ptr, p.size);
+        copy[p.size] = '\0';
         job->paths[job->count++] = copy;
     }
     if (job->count == 0) { free(job->paths); free(job); osd_say(app, TU8("no pictures in the list")); return; }
@@ -13314,7 +13314,7 @@ static void apply_all_start(app_state_t *app, apply_all_job_t *job) {
     app->apply_said = -1;
     char said[96];
     int m = snprintf(said, sizeof(said), T("applying the edit to %zu pictures..."), job->count);
-    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+    if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
 }
 
 /* RV-137 (owner, 2026-10-18): the steps written over every picture of the
@@ -13324,13 +13324,13 @@ static void apply_all_originals(app_state_t *app) {
     if (!edit_panel_open(app)) return;
     edit_live_close(app);
     if (app->edit_steps.cursor == 0) { osd_say(app, TU8("make a change in Edit first: its steps are what is applied")); return; }
-    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len > 0) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
+    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.size > 0) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
     if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
     size_t count = page_count(app), pictures = 0;
-    u8str_t copies = rubraview_settings_get_text(&app->settings, U8("edit"), U8("copy_name"));   /* Edit's copies are not originals */
+    proven_u8str_view_t copies = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"));   /* Edit's copies are not originals */
     for (size_t i = 0; i < count; ++i) {
-        u8str_t p = app->source.pages[i].path;
-        if (p.len > 0 && rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER)) && !edit_is_copy_name(p, copies)) pictures++;
+        proven_u8str_view_t p = app->source.pages[i].path;
+        if (p.size > 0 && rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER)) && !edit_is_copy_name(p, copies)) pictures++;
     }
     if (pictures == 0) { osd_say(app, TU8("no pictures in the list")); return; }
     double now = rubraview_pal_time_now_seconds();
@@ -13338,7 +13338,7 @@ static void apply_all_originals(app_state_t *app) {
         asked_at = now;
         char said[160];
         int m = snprintf(said, sizeof(said), T("press again to write the changes over %zu originals (the old files go to the Recycle Bin)"), pictures);
-        if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+        if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
         return;
     }
     asked_at = -100.0;
@@ -13346,12 +13346,12 @@ static void apply_all_originals(app_state_t *app) {
     if (!job) return;
     job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
-        u8str_t p = app->source.pages[i].path;
-        if (p.len == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), U8(IMAGE_FILTER)) || edit_is_copy_name(p, copies)) continue;
-        char *copy = (char*)malloc(p.len + 1);
+        proven_u8str_view_t p = app->source.pages[i].path;
+        if (p.size == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER)) || edit_is_copy_name(p, copies)) continue;
+        char *copy = (char*)malloc(p.size + 1);
         if (!copy) continue;
-        memcpy(copy, p.ptr, p.len);
-        copy[p.len] = '\0';
+        memcpy(copy, p.ptr, p.size);
+        copy[p.size] = '\0';
         job->paths[job->count++] = copy;
     }
     if (job->count == 0) { free(job->paths); free(job); return; }
@@ -13370,7 +13370,7 @@ static void apply_all_poll(app_state_t *app, bool quitting) {
             app->apply_said = done + failed;
             char said[96];
             int m = snprintf(said, sizeof(said), T("applying the edit: %ld / %zu"), (long)(done + failed), job->count);
-            if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+            if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
         }
         return;
     }
@@ -13388,7 +13388,7 @@ static void apply_all_poll(app_state_t *app, bool quitting) {
                            : snprintf(said, sizeof(said), T("%ld originals written over"), (long)done))
           : failed ? snprintf(said, sizeof(said), T("%ld copies made beside the pictures; %ld could not be"), (long)done, (long)failed)
                    : snprintf(said, sizeof(said), T("%ld copies made beside the pictures"), (long)done);
-    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+    if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
     if (over && done > 0) {
         /* the pictures hold the changes now: shown again they would be made twice, and read again from their files */
         if (edit_panel_open(app)) {
@@ -13413,20 +13413,20 @@ static void apply_all_poll(app_state_t *app, bool quitting) {
    in as `name-1.ext`, `name-2.ext`, ... A page inside an archive is not a
    file, so it can be copied out (its bytes written as a file) but not
    moved. */
-static bool filing_exists(void *ctx, u8str_t path) {
+static bool filing_exists(void *ctx, proven_u8str_view_t path) {
     (void)ctx;
     return rubraview_pal_fs_exists(path);
 }
 
 static void filing_put(app_state_t *app, bool moving) {
     if (current_page_index(app) < 0) return;
-    u8str_t dir = moving ? app->curation.move_dir : app->curation.copy_dir;
+    proven_u8str_view_t dir = moving ? app->curation.move_dir : app->curation.copy_dir;
     /* None set yet: the box asks for one, as Shift+F6 / Shift+F7 do. */
-    if (dir.len == 0) { target_begin(app, moving, false); return; }
+    if (dir.size == 0) { target_begin(app, moving, false); return; }
     filing_put_to(app, dir, moving);
 }
 
-static void filing_put_to(app_state_t *app, u8str_t dir, bool moving) {
+static void filing_put_to(app_state_t *app, proven_u8str_view_t dir, bool moving) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
     bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
@@ -13434,16 +13434,16 @@ static void filing_put_to(app_state_t *app, u8str_t dir, bool moving) {
         osd_say(app, TU8("a page inside an archive can be copied (F6), not moved"));
         return;
     }
-    u8str_t path = in_archive ? (u8str_t){ .ptr = "", .len = 0 } : app->source.pages[page].path;
-    u8str_t name = rubraview_path_basename(in_archive ? app->source.pages[page].name : path);
-    if (name.len == 0) return;
+    proven_u8str_view_t path = in_archive ? PROVEN_LIT("") : app->source.pages[page].path;
+    proven_u8str_view_t name = rubraview_path_basename(in_archive ? app->source.pages[page].name : path);
+    if (name.size == 0) return;
 
     if (!rubraview_pal_fs_make_dirs(dir) && !rubraview_pal_fs_exists(dir)) {
         osd_say(app, TU8("that folder could not be made"));
         return;
     }
-    u8str_t target = rubraview_filing_target(app->arena, dir, name, filing_exists, NULL);
-    if (target.len == 0) {
+    proven_u8str_view_t target = rubraview_filing_target(app->arena, dir, name, filing_exists, NULL);
+    if (target.size == 0) {
         osd_say(app, TU8("no free name left in that folder"));
         return;
     }
@@ -13477,9 +13477,9 @@ static void filing_put_to(app_state_t *app, u8str_t dir, bool moving) {
 
     /* Say the name it has there: it is not always the name it had. */
     char said[sizeof(app->notice)];
-    u8str_t put = rubraview_path_basename(target);
-    int n = snprintf(said, sizeof(said), "%s: %.*s", moving ? T("moved") : T("copied"), (int)(put.len < 160 ? put.len : 160), put.ptr);
-    osd_say(app, (u8str_t){ .ptr = said, .len = n > 0 ? (size_t)n : 0 });
+    proven_u8str_view_t put = rubraview_path_basename(target);
+    int n = snprintf(said, sizeof(said), "%s: %.*s", moving ? T("moved") : T("copied"), (int)(put.size < 160 ? put.size : 160), put.ptr);
+    osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = n > 0 ? (size_t)n : 0 });
 
     if (moving) reopen_after_removal(app, (size_t)page);
 }
@@ -13535,7 +13535,7 @@ static void triage_undo(app_state_t *app) {
     if (undone > 1) {
         char line[96];
         int n = snprintf(line, sizeof(line), T("%zu undone"), undone);
-        osd_say(app, (u8str_t){ .ptr = line, .len = n > 0 ? (size_t)n : 0 });
+        osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 });
     } else {
         osd_say(app, TU8("undone"));
     }
@@ -13580,22 +13580,22 @@ static void rename_end(app_state_t *app) {
 static void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
     if (app->ab_edit_open) {
         if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
-            ab_edit_text_typed(app, (u8str_t){ .ptr = event->text.utf8, .len = event->text.length });
+            ab_edit_text_typed(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length });
         }
         return;
     }
     if (app->px_edit_open) {
         if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
-            px_edit_text_typed(app, (u8str_t){ .ptr = event->text.utf8, .len = event->text.length });
+            px_edit_text_typed(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length });
         }
         return;
     }
     if (!app->rename_active) return;
-    u8str_t text = { .ptr = event->text.utf8, .len = event->text.length };
+    proven_u8str_view_t text = { .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
         rename_insert(app, text);
     } else {
-        size_t n = text.len < sizeof(app->rename_composing) ? text.len : sizeof(app->rename_composing) - 1;
+        size_t n = text.size < sizeof(app->rename_composing) ? text.size : sizeof(app->rename_composing) - 1;
         memcpy(app->rename_composing, text.ptr, n);
         app->rename_composing_length = n;
     }
@@ -13606,9 +13606,9 @@ static void rename_text(app_state_t *app, const rubraview_window_event_t *event)
    on screen, all of it selected so typing replaces it. */
 static void picker_path_begin(app_state_t *app) {
     if (!app->picker_open || app->rename_active) return;
-    u8str_t here = rubraview_picker_is_places(app->picker_dir) ? U8("") : app->picker_dir;
+    proven_u8str_view_t here = rubraview_picker_is_places(app->picker_dir) ? PROVEN_LIT("") : app->picker_dir;
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, here.len < sizeof(app->rename_buffer) ? here : U8(""));
+    rubraview_textedit_set(&app->rename_edit, here.size < sizeof(app->rename_buffer) ? here : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_is_path = true;
@@ -13619,10 +13619,10 @@ static void picker_path_begin(app_state_t *app) {
 /* Enter in the path box: a folder is shown, a file is opened, and a path
    that is not there is said, with the box left open to put it right. */
 static void picker_path_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    u8str_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_edit), app->picker_dir);
-    if (path.len == 0) { rename_end(app); return; }
+    proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_edit), app->picker_dir);
+    if (path.size == 0) { rename_end(app); return; }
     rubraview_fs_entry_t found;
     if (!rubraview_pal_fs_stat(app->arena, path, &found)) {
         osd_say(app, TU8("no such folder or file"));
@@ -13654,10 +13654,10 @@ static void target_begin(app_state_t *app, bool moving, bool from_picker) {
         }
     }
     if (app->rename_active) rename_end(app);
-    u8str_t last = rubraview_settings_get_text(&app->settings, U8("curation"), U8("other_dir"));
-    if (last.len == 0) last = moving ? app->curation.move_dir : app->curation.copy_dir;
+    proven_u8str_view_t last = rubraview_settings_get_text(&app->settings, PROVEN_LIT("curation"), PROVEN_LIT("other_dir"));
+    if (last.size == 0) last = moving ? app->curation.move_dir : app->curation.copy_dir;
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, last.len < sizeof(app->rename_buffer) ? last : U8(""));
+    rubraview_textedit_set(&app->rename_edit, last.size < sizeof(app->rename_buffer) ? last : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_is_target = true;
@@ -13676,7 +13676,7 @@ static void target_browse(app_state_t *app) {
         .parent_window_handle = rubraview_pal_window_native_handle(app->window),
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (picked.accepted && picked.count > 0 && picked.paths[0].len < sizeof(app->rename_buffer)) {
+    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer)) {
         rubraview_textedit_set(&app->rename_edit, picked.paths[0]);   /* in the box, for Enter */
         app->target_offered_len = 0;
     }
@@ -13685,14 +13685,14 @@ static void target_browse(app_state_t *app) {
 /* Enter in the folder box: a folder there takes the files; one not there
    is offered, and made when Enter comes again for it. */
 static void target_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    u8str_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
-    u8str_t base = app->target_from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
-    u8str_t path = typed.len ? rubraview_picker_typed_path(app->arena, typed, base) : typed;
+    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t base = app->target_from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
+    proven_u8str_view_t path = typed.size ? rubraview_picker_typed_path(app->arena, typed, base) : typed;
     rubraview_fs_entry_t found;
-    bool exists = path.len > 0 && rubraview_pal_fs_stat(app->arena, path, &found);
-    u8str_t offered = { .ptr = app->target_offered, .len = app->target_offered_len };
+    bool exists = path.size > 0 && rubraview_pal_fs_stat(app->arena, path, &found);
+    proven_u8str_view_t offered = { .ptr = (const proven_byte_t *)app->target_offered, .size = app->target_offered_len };
     char line[1200];
     switch (rubraview_target_folder_step(path, exists, exists && found.is_directory, offered)) {
         case RUBRAVIEW_TARGET_NOTHING:
@@ -13702,12 +13702,12 @@ static void target_commit(app_state_t *app) {
             osd_say(app, TU8("that is a file, not a folder - put it right, or Esc"));
             return;
         case RUBRAVIEW_TARGET_OFFER: {
-            size_t n = path.len < sizeof(app->target_offered) ? path.len : 0;
+            size_t n = path.size < sizeof(app->target_offered) ? path.size : 0;
             memcpy(app->target_offered, path.ptr, n);
             app->target_offered_len = n;
             int w = snprintf(line, sizeof(line), T("%.*s is not there yet: Enter again makes it, Esc leaves it"),
-                             (int)path.len, path.ptr);
-            if (w > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)w < sizeof(line) ? (size_t)w : sizeof(line) - 1 });
+                             (int)path.size, path.ptr);
+            if (w > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w < sizeof(line) ? (size_t)w : sizeof(line) - 1 });
             return;
         }
         case RUBRAVIEW_TARGET_MAKE:
@@ -13720,8 +13720,8 @@ static void target_commit(app_state_t *app) {
             break;
     }
     /* Kept, to be offered first next time. */
-    u8str_t kept = app_keep(app, path);
-    rubraview_settings_set_text(&app->settings, U8("curation"), U8("other_dir"), kept);
+    proven_u8str_view_t kept = app_keep(app, path);
+    rubraview_settings_set_text(&app->settings, PROVEN_LIT("curation"), PROVEN_LIT("other_dir"), kept);
     settings_write_if_changed(app, false);
     bool moving = app->target_moving, from_picker = app->target_from_picker;
     rename_end(app);
@@ -13730,7 +13730,7 @@ static void target_commit(app_state_t *app) {
 }
 
 static void rename_begin(app_state_t *app) {
-    u8str_t path = current_file_path(app);
+    proven_u8str_view_t path = current_file_path(app);
     /* D-88: a page of an archive is renamed where it is, in its folder there. */
     bool in_archive = on_archive_page(app);
     if (in_archive) {
@@ -13739,13 +13739,13 @@ static void rename_begin(app_state_t *app) {
         if (route == RUBRAVIEW_ARCEDIT_ENCRYPTED) { osd_say(app, cstr(rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED))); return; }
         path = page_display_name(app, (size_t)current_page_index(app));
     }
-    if (path.len == 0) return;
+    if (path.size == 0) return;
 
     /* The whole name, extension and all (owner, 2026-09-23): an
        extension typed wrongly could not be corrected before, and the
        owner asked for no question when it changes. */
-    u8str_t name = rubraview_path_basename(path);
-    if (name.len >= sizeof(app->rename_buffer)) return;
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    if (name.size >= sizeof(app->rename_buffer)) return;
 
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     rubraview_textedit_set(&app->rename_edit, name);
@@ -13759,9 +13759,9 @@ static void rename_begin(app_state_t *app) {
    lists each extension the picked files have, its new one beside it; the box edits one row at a time
    (a click on a row, Tab or Enter goes to another), and Apply (Enter on the last) renames them all.
    A row left as it was leaves its files alone. */
-static bool ext_same(const char *a, u8str_t b) {
+static bool ext_same(const char *a, proven_u8str_view_t b) {
     size_t n = strlen(a);
-    if (n != b.len) return false;
+    if (n != b.size) return false;
     for (size_t i = 0; i < n; ++i) {
         char x = a[i], y = b.ptr[i];
         if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
@@ -13773,8 +13773,8 @@ static bool ext_same(const char *a, u8str_t b) {
 
 static void ext_store(app_state_t *app) {
     if (app->ext_at < 0 || app->ext_at >= app->ext_n) return;
-    u8str_t typed = rubraview_textedit_text(&app->rename_edit);
-    snprintf(app->ext_to[app->ext_at], sizeof(app->ext_to[0]), "%.*s", (int)typed.len, typed.ptr);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    snprintf(app->ext_to[app->ext_at], sizeof(app->ext_to[0]), "%.*s", (int)typed.size, typed.ptr);
 }
 
 static void ext_switch(app_state_t *app, int32_t row) {
@@ -13790,13 +13790,13 @@ static void rename_extension_begin(app_state_t *app) {
     app->ext_n = 0;
     for (size_t i = 0; i < app->picker_listing.count && app->ext_n < 16; ++i) {
         if (!app->picker_selected || !app->picker_selected[i] || app->picker_listing.entries[i].is_directory) continue;
-        u8str_t ext = rubraview_path_ext(app->picker_listing.entries[i].name);
-        if (ext.len == 0 || ext.len >= sizeof(app->ext_from[0])) continue;
+        proven_u8str_view_t ext = rubraview_path_ext(app->picker_listing.entries[i].name);
+        if (ext.size == 0 || ext.size >= sizeof(app->ext_from[0])) continue;
         bool seen = false;
         for (int32_t k = 0; k < app->ext_n && !seen; ++k) seen = ext_same(app->ext_from[k], ext);
         if (seen) continue;
-        snprintf(app->ext_from[app->ext_n], sizeof(app->ext_from[0]), "%.*s", (int)ext.len, ext.ptr);
-        snprintf(app->ext_to[app->ext_n], sizeof(app->ext_to[0]), "%.*s", (int)ext.len, ext.ptr);
+        snprintf(app->ext_from[app->ext_n], sizeof(app->ext_from[0]), "%.*s", (int)ext.size, ext.ptr);
+        snprintf(app->ext_to[app->ext_n], sizeof(app->ext_to[0]), "%.*s", (int)ext.size, ext.ptr);
         app->ext_n++;
     }
     if (app->ext_n == 0) { osd_say(app, TU8("pick some files with an extension first")); return; }
@@ -13819,17 +13819,17 @@ static void rename_extension_apply(app_state_t *app) {
         if (!app->picker_selected || !app->picker_selected[i]) continue;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
         if (entry->is_directory) continue;
-        u8str_t ext = rubraview_path_ext(entry->name);
+        proven_u8str_view_t ext = rubraview_path_ext(entry->name);
         int32_t row = -1;
-        for (int32_t k = 0; k < app->ext_n && row < 0; ++k) if (ext.len > 0 && ext_same(app->ext_from[k], ext)) row = k;
+        for (int32_t k = 0; k < app->ext_n && row < 0; ++k) if (ext.size > 0 && ext_same(app->ext_from[k], ext)) row = k;
         if (row < 0) continue;
         char want[66];
         const char *to = app->ext_to[row];
         while (*to == ' ') ++to;
         if (!*to || strcmp(to, app->ext_from[row]) == 0 || (to[0] != '.' && strcmp(to, app->ext_from[row] + 1) == 0)) continue;   /* left as it was */
         snprintf(want, sizeof(want), "%s%s", to[0] == '.' ? "" : ".", to);
-        u8str_t target = rubraview_path_with_ext(app->arena, entry->path, want);
-        if (target.len == 0 || rubraview_rename_validate(rubraview_path_basename(target)) != RUBRAVIEW_RENAME_OK ||
+        proven_u8str_view_t target = rubraview_path_with_ext(app->arena, entry->path, want);
+        if (target.size == 0 || rubraview_rename_validate(rubraview_path_basename(target)) != RUBRAVIEW_RENAME_OK ||
             rubraview_pal_fs_exists(target) || !rubraview_pal_fs_move(entry->path, target)) { failed++; continue; }
         rubraview_undo_push(&app->undo, (rubraview_file_action_t){
             .op = RUBRAVIEW_FILE_OP_RENAME, .source_path = app_keep(app, entry->path), .target_path = target, .batch = batch,
@@ -13840,13 +13840,13 @@ static void rename_extension_apply(app_state_t *app) {
     char line[128];
     int written = failed > 0 ? snprintf(line, sizeof(line), T("%zu renamed, %zu could not be"), done, failed)
                              : snprintf(line, sizeof(line), T("%zu file(s) renamed"), done);
-    if (written > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)written });
+    if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     picker_navigate(app, app->picker_dir);   /* the names on screen have changed */
 }
 
 /* Enter: the next row, and Apply on the last. */
 static void rename_extension_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
     if (app->ext_at + 1 < app->ext_n) ext_switch(app, app->ext_at + 1);
     else rename_extension_apply(app);
@@ -13860,8 +13860,8 @@ static void rename_picker_begin(app_state_t *app, size_t at) {
         osd_say(app, TU8("this list's names cannot be changed here"));
         return;
     }
-    u8str_t name = app->picker_listing.entries[at].name;
-    if (name.len == 0 || name.len >= sizeof(app->rename_buffer)) return;
+    proven_u8str_view_t name = app->picker_listing.entries[at].name;
+    if (name.size == 0 || name.size >= sizeof(app->rename_buffer)) return;
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     rubraview_textedit_set(&app->rename_edit, name);
     app->rename_active = true;
@@ -13872,18 +13872,18 @@ static void rename_picker_begin(app_state_t *app, size_t at) {
 }
 
 static void rename_picker_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     size_t at = app->rename_picker_at;
     rename_end(app);
     if (at >= app->picker_listing.count) return;
     const rubraview_fs_entry_t *entry = &app->picker_listing.entries[at];
-    u8str_t typed = rubraview_textedit_text(&app->rename_edit);
-    if (typed.len == entry->name.len && memcmp(typed.ptr, entry->name.ptr, typed.len) == 0) return;   /* nothing changed */
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    if (typed.size == entry->name.size && memcmp(typed.ptr, entry->name.ptr, typed.size) == 0) return;   /* nothing changed */
     rubraview_rename_err_t err = rubraview_rename_validate(typed);
     if (err != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(err)); return; }
-    u8str_t source = app_keep(app, entry->path);
-    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(source), typed);
-    if (target.len == 0 || rubraview_pal_fs_exists(target) || !rubraview_pal_fs_move(source, target)) {
+    proven_u8str_view_t source = app_keep(app, entry->path);
+    proven_u8str_view_t target = rubraview_path_join(app->arena, rubraview_path_dirname(source), typed);
+    if (target.size == 0 || rubraview_pal_fs_exists(target) || !rubraview_pal_fs_move(source, target)) {
         osd_say(app, TU8("could not rename that file"));
         return;
     }
@@ -13909,29 +13909,29 @@ static void rename_commit(app_state_t *app) {
     if (app->rename_is_password) { password_commit(app); return; }
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     bool in_archive = app->rename_is_archive;
     rename_end(app);
 
     if (in_archive) {
         /* D-88: the same rules for the name; the archive is written again with it. */
-        u8str_t typed = rubraview_textedit_text(&app->rename_edit);
+        proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
         rubraview_rename_err_t bad = rubraview_rename_validate(typed);
         char name[512];
         if (bad != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(bad)); return; }
-        if (!on_archive_page(app) || typed.len >= sizeof(name)) return;
-        u8str_t old = rubraview_path_basename(page_display_name(app, (size_t)current_page_index(app)));
-        if (old.len == typed.len && memcmp(old.ptr, typed.ptr, old.len) == 0) return;   /* nothing changed */
-        memcpy(name, typed.ptr, typed.len);
-        name[typed.len] = '\0';
+        if (!on_archive_page(app) || typed.size >= sizeof(name)) return;
+        proven_u8str_view_t old = rubraview_path_basename(page_display_name(app, (size_t)current_page_index(app)));
+        if (old.size == typed.size && memcmp(old.ptr, typed.ptr, old.size) == 0) return;   /* nothing changed */
+        memcpy(name, typed.ptr, typed.size);
+        name[typed.size] = '\0';
         arc_edit_on_page(app, RUBRAVIEW_ARCEDIT_RENAME, name);
         return;
     }
 
-    u8str_t path = current_file_path(app);
-    if (path.len == 0) return;
+    proven_u8str_view_t path = current_file_path(app);
+    if (path.size == 0) return;
 
-    u8str_t new_name = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t new_name = rubraview_textedit_text(&app->rename_edit);
 
     rubraview_rename_err_t err = rubraview_rename_validate(new_name);
     if (err != RUBRAVIEW_RENAME_OK) {
@@ -13939,8 +13939,8 @@ static void rename_commit(app_state_t *app) {
         return;
     }
 
-    u8str_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), new_name);
-    if (target.len == 0 || !rubraview_pal_fs_move(path, target)) {
+    proven_u8str_view_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), new_name);
+    if (target.size == 0 || !rubraview_pal_fs_move(path, target)) {
         osd_say(app, TU8("could not rename that file"));
         return;
     }
@@ -13996,17 +13996,17 @@ static void open_dropped_files(app_state_t *app, const rubraview_drop_item_t *it
    are turned in (owner, 2026-09-28). An archive keeps its natural order. */
 static rubraview_sort_mode_t folder_sort_mode(const app_state_t *app, bool *out_ascending) {
     *out_ascending = g_cli_descending >= 0 ? g_cli_descending == 0
-                   : rubraview_settings_get(&app->settings, U8("files"), U8("sort_ascending")) > 0.5;
+                   : rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("sort_ascending")) > 0.5;
     if (g_cli_sort >= 0) return (rubraview_sort_mode_t)g_cli_sort;
     return rubraview_sort_mode_for_setting(
-        (int32_t)lround(rubraview_settings_get(&app->settings, U8("files"), U8("sort_mode"))));
+        (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("sort_mode"))));
 }
 
 /* `as_given` keeps the entries in the order they come in (a list a file
    was added to the end of); `start` is the file to open on, the first
    when it is empty or not among them. */
-static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said,
-                             bool as_given, u8str_t start) {
+static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said,
+                             bool as_given, proven_u8str_view_t start) {
     if (!entries || count == 0) return;
 
     history_remember(app);
@@ -14032,19 +14032,19 @@ static void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, si
     }
     app->resume_offer = false;
     app->picker_open = false;
-    int32_t first = start.len > 0 ? rubraview_page_source_find(&app->source, start) : -1;
+    int32_t first = start.size > 0 ? rubraview_page_source_find(&app->source, start) : -1;
     finish_open(app, first > 0 ? (size_t)first : 0);
     osd_say(app, said);
 }
 
-static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, u8str_t said) {
-    open_set_ordered(app, entries, count, said, false, (u8str_t){ .ptr = "", .len = 0 });
+static void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said) {
+    open_set_ordered(app, entries, count, said, false, PROVEN_LIT(""));
 }
 
 /* ---- D-86: what Explorer's menu asks ---- */
 
 /* The files named, as one set of pages. */
-static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t count, const char *what) {
+static void open_paths_as_set(app_state_t *app, const proven_u8str_view_t *paths, size_t count, const char *what) {
     if (!subs_may_leave(app)) return;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return;
@@ -14062,7 +14062,7 @@ static void open_paths_as_set(app_state_t *app, const u8str_t *paths, size_t cou
     recent_note_shown(app);
 }
 
-static bool path_is_listed_kind(u8str_t path) {
+static bool path_is_listed_kind(proven_u8str_view_t path) {
     char kinds_buf[1024];
     if (is_station_path(path)) return true;   /* RV-157 */
     return rubraview_glob_match_list(rubraview_path_basename(path), kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER));
@@ -14076,13 +14076,13 @@ static bool path_is_listed_kind(u8str_t path) {
    file added to the list goes": end, or sorted with the rest). `show`
    turns to the first of them — what a file opened from Explorer asks —
    and without it the reader stays on the page being read. */
-static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count, bool show) {
-    bool files_open = page_count(app) > 0 && app->source.archive_path.len == 0;
+static void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool show) {
+    bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
     if (!files_open) {
         open_paths_as_set(app, paths, count, count == 1 ? T("file opened as a list") : T("files opened as a list"));
         return;
     }
-    bool at_end = lround(rubraview_settings_get(&app->settings, U8("general"), U8("added_order"))) == 0;
+    bool at_end = lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("added_order"))) == 0;
 
     size_t have = page_count(app);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, have + count, sizeof(rubraview_fs_entry_t));
@@ -14098,7 +14098,7 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
         }
     }
     size_t kept = n;
-    u8str_t first_named = { .ptr = "", .len = 0 };   /* the first of them that is, or now will be, in the list */
+    proven_u8str_view_t first_named = PROVEN_LIT("");   /* the first of them that is, or now will be, in the list */
     for (size_t i = 0; i < count; ++i) {
         rubraview_fs_entry_t entry;
         if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory) continue;
@@ -14106,12 +14106,12 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
         bool there = false;
         for (size_t k = 0; k < n && !there; ++k) {
             there = rubraview_path_same(entries[k].path, entry.path);
-            if (there && first_named.len == 0) first_named = entries[k].path;
+            if (there && first_named.size == 0) first_named = entries[k].path;
         }
         if (there) continue;
         entry.path = app_keep(app, entry.path);
         entry.name = rubraview_path_basename(entry.path);
-        if (first_named.len == 0) first_named = entry.path;
+        if (first_named.size == 0) first_named = entry.path;
         entries[n++] = entry;
         added++;
     }
@@ -14123,7 +14123,7 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
     if (show) app->added_shown_at = now;
 
     if (added == 0) {
-        int32_t page = show && first_named.len > 0 ? rubraview_page_source_find(&app->source, first_named) : -1;
+        int32_t page = show && first_named.size > 0 ? rubraview_page_source_find(&app->source, first_named) : -1;
         if (page >= 0) {
             if (page != current_page_index(app)) {
                 go_to_spread(app, spread_for_chosen_page(app, page));
@@ -14137,7 +14137,7 @@ static void list_add_paths(app_state_t *app, const u8str_t *paths, size_t count,
 
     /* The page being read, and where a film or a song on it had got to. */
     int32_t at = current_page_index(app);
-    u8str_t reading = at >= 0 && (size_t)at < have ? app->source.pages[at].path : (u8str_t){ .ptr = "", .len = 0 };
+    proven_u8str_view_t reading = at >= 0 && (size_t)at < have ? app->source.pages[at].path : PROVEN_LIT("");
     bool playing = !show && app->media != NULL && app->media_page == at;
     double position = playing ? play_position(app) : 0.0;
     bool paused = app->media_paused;
@@ -14159,10 +14159,10 @@ static void print_thumbs_load(app_state_t *app);
 static void print_thumbs_drop(app_state_t *app);
 
 /* D-87: these pictures are to be printed: how is asked first, in the panel. */
-static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(u8str_t));
+static void print_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count) {
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(res.err) || count == 0) return;
-    app->print_list = (u8str_t*)(void*)res.value.ptr;
+    app->print_list = (proven_u8str_view_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < count; ++i) app->print_list[i] = paths[i];
     app->print_list_count = count;
     if (app->panel.open) panel_close(app);
@@ -14181,10 +14181,10 @@ static void print_paths(app_state_t *app, const u8str_t *paths, size_t count) {
    settings: General > "A file given to the open window" and "The first
    file brings its folder". A book, a folder or a playlist is not a file
    of a list: it is opened in place of what was open. */
-static void explorer_open(app_state_t *app, const u8str_t *paths, size_t count) {
+static void explorer_open(app_state_t *app, const proven_u8str_view_t *paths, size_t count) {
     enum { GIVEN_ADD = 0, GIVEN_FOLDER, GIVEN_ONLY };
-    int given = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("explorer_open")));
-    bool files_open = page_count(app) > 0 && app->source.archive_path.len == 0;
+    int given = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("explorer_open")));
+    bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
     bool listed = true;
     for (size_t i = 0; i < count && listed; ++i) listed = path_is_listed_kind(paths[i]);
 
@@ -14195,18 +14195,18 @@ static void explorer_open(app_state_t *app, const u8str_t *paths, size_t count) 
     }
     if (given == GIVEN_ADD && files_open) {
         list_add_paths(app, paths, count,
-                       rubraview_settings_get(&app->settings, U8("general"), U8("added_shows")) > 0.5);
+                       rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("added_shows")) > 0.5);
         return;
     }
     if (count > 1) { open_paths_as_set(app, paths, count, T("files opened as one set")); return; }
 
     bool with_folder = given == GIVEN_FOLDER ||
-                       (given == GIVEN_ADD && rubraview_settings_get(&app->settings, U8("general"), U8("first_with_folder")) > 0.5);
+                       (given == GIVEN_ADD && rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("first_with_folder")) > 0.5);
     if (with_folder) open_path(app, paths[0]);
     else open_paths_as_set(app, paths, count, T("file opened on its own"));
 }
 
-static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, const u8str_t *paths, size_t count) {
+static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8str_view_t *paths, size_t count) {
     if (count == 0) return;
     switch (verb) {
         case RUBRAVIEW_SHELL_VERB_NONE:
@@ -14223,15 +14223,15 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             break;
         case RUBRAVIEW_SHELL_VERB_BROWSE:
             open_path(app, paths[0]);
-            if (app->source.archive_path.len > 0 && rubraview_path_same(app->source.archive_path, paths[0])) {
-                app->picker_dir = (u8str_t){ .ptr = "", .len = 0 };
+            if (app->source.archive_path.size > 0 && rubraview_path_same(app->source.archive_path, paths[0])) {
+                app->picker_dir = PROVEN_LIT("");
                 picker_open(app);
             }
             break;
         case RUBRAVIEW_SHELL_VERB_CONVERT: {
-            proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(u8str_t));
+            proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(proven_u8str_view_t));
             if (!proven_is_ok(res.err)) break;
-            app->batch_list = (u8str_t*)(void*)res.value.ptr;
+            app->batch_list = (proven_u8str_view_t*)(void*)res.value.ptr;
             for (size_t i = 0; i < count; ++i) app->batch_list[i] = paths[i];
             app->batch_list_count = count;
             if (app->panel.open) panel_close(app);
@@ -14252,15 +14252,15 @@ static void shell_requests_flush(app_state_t *app) {
     if (!c->pending) return;
     rubraview_shell_verb_t verb = c->verb;
     size_t count = 0;
-    u8str_t *paths = NULL;
-    proven_result_mem_mut_t list = rubraview_arena_alloc_array(app->arena, c->count ? c->count : 1, sizeof(u8str_t));
+    proven_u8str_view_t *paths = NULL;
+    proven_result_mem_mut_t list = rubraview_arena_alloc_array(app->arena, c->count ? c->count : 1, sizeof(proven_u8str_view_t));
     proven_result_mem_mut_t text = proven_arena_alloc(app->arena, c->text_len + 1);
     if (proven_is_ok(list.err) && proven_is_ok(text.err)) {
-        paths = (u8str_t*)(void*)list.value.ptr;
+        paths = (proven_u8str_view_t*)(void*)list.value.ptr;
         char *copy = (char*)(void*)text.value.ptr;
         memcpy(copy, c->text, c->text_len);
         for (const char *p = rubraview_shellreq_next(c, NULL); p && count < c->count; p = rubraview_shellreq_next(c, p)) {
-            paths[count++] = (u8str_t){ .ptr = copy + (p - c->text), .len = strlen(p) };
+            paths[count++] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)copy + (p - c->text), .size = strlen(p) };
         }
     }
     rubraview_shellreq_clear(c);
@@ -14268,7 +14268,7 @@ static void shell_requests_flush(app_state_t *app) {
 }
 
 /* One request into the gathering; one with another verb waiting goes first. */
-static void shell_request_take(app_state_t *app, rubraview_shell_verb_t verb, bool whole, const u8str_t *paths, size_t count) {
+static void shell_request_take(app_state_t *app, rubraview_shell_verb_t verb, bool whole, const proven_u8str_view_t *paths, size_t count) {
     double now = rubraview_pal_time_now_seconds();
     if (!rubraview_shellreq_collect(&app->shell_requests, verb, whole, paths, count, now)) {
         shell_requests_flush(app);
@@ -14286,7 +14286,7 @@ static size_t shell_requests_pump(app_state_t *app) {
         bool whole = false;
         size_t count = 0;
         if (rubraview_shellreq_unpack(blob, len, &verb, &whole, NULL, 0, &count) && count > 0) {
-            u8str_t *paths = (u8str_t*)rubraview_malloc_product(count, sizeof(u8str_t), 1);
+            proven_u8str_view_t *paths = (proven_u8str_view_t*)rubraview_malloc_product(count, sizeof(proven_u8str_view_t), 1);
             if (paths && rubraview_shellreq_unpack(blob, len, &verb, &whole, paths, count, &count)) {
                 /* A plain launch is one thing and is not waited on. */
                 shell_request_take(app, verb, whole || verb == RUBRAVIEW_SHELL_VERB_NONE, paths, count);
@@ -14311,15 +14311,15 @@ static void handle_drop(app_state_t *app, const rubraview_window_event_t *event)
     /* D-111: let go over the list window, they join the list at that row. */
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_DROP && event->drop.has_point && app->listwin.open && list_editable(app) &&
         !app->picker_open && rubraview_rect_contains(rubraview_listwin_rect(&app->listwin), event->drop.x, event->drop.y)) {
-        u8str_t paths[16];
-        for (size_t i = 0; i < count; ++i) paths[i] = (u8str_t){ .ptr = event->drop.paths[i], .len = event->drop.path_lengths[i] };
+        proven_u8str_view_t paths[16];
+        for (size_t i = 0; i < count; ++i) paths[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->drop.paths[i], .size = event->drop.path_lengths[i] };
         listwin_sync(app);
         list_insert_paths(app, paths, count, list_viewed(app) ? page_count(app) : rubraview_listwin_insert_index(&app->listwin, event->drop.y, page_count(app)));
         return;
     }
 
     for (size_t i = 0; i < count; ++i) {
-        items[i].path = (u8str_t){ .ptr = event->drop.paths[i], .len = event->drop.path_lengths[i] };
+        items[i].path = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->drop.paths[i], .size = event->drop.path_lengths[i] };
         /* A directory has no extension and does list: asking the
            filesystem is cheaper than guessing from the name. */
         rubraview_fs_listing_t probe = rubraview_pal_fs_list_dir(app->arena, items[i].path);
@@ -14408,34 +14408,34 @@ static void classify_build(app_state_t *app) {
     app->classify_panel.place_y = placed ? py : 90.0 * dpi;
     app->classify_panel.placed = true;
     const rubraview_classify_t *c = app->classify;
-    u8str_t here = current_file_path(app);
+    proven_u8str_view_t here = current_file_path(app);
     int32_t mark = c ? rubraview_classify_folder_of(c, here) : 0;
     int n;
     size_t k = 0;
     bool any = false;
     for (int32_t d = 1; d <= 9; ++d) {
-        u8str_t dir = rubraview_curation_target(&app->curation, d);
-        if (dir.len == 0) continue;
+        proven_u8str_view_t dir = rubraview_curation_target(&app->curation, d);
+        if (dir.size == 0) continue;
         any = true;
-        u8str_t name = rubraview_path_basename(dir);
+        proven_u8str_view_t name = rubraview_path_basename(dir);
         n = snprintf(words[k], sizeof(words[k]), "%s%d  %.*s  (%zu)", d == mark ? "> " : "  ", (int)d,
-                     (int)(name.len < 120 ? name.len : 120), name.ptr, c ? rubraview_classify_count(c, d) : (size_t)0);
-        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_FOLDER + d, (u8str_t){ words[k], n > 0 ? (size_t)n : 0 });
+                     (int)(name.size < 120 ? name.size : 120), name.ptr, c ? rubraview_classify_count(c, d) : (size_t)0);
+        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_FOLDER + d, (proven_u8str_view_t){ (const proven_byte_t *)words[k], n > 0 ? (size_t)n : 0 });
         ++k;
     }
     if (!any) rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_SETTINGS, TU8("No folders yet: set them in Settings > Files..."));
     rubraview_panel_add_separator(&app->classify_panel);
     if (mark) {
         n = snprintf(words[10], sizeof(words[10]), T("This one goes to %d: press to take it off"), (int)mark);
-        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_HERE, (u8str_t){ words[10], n > 0 ? (size_t)n : 0 });
+        rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_HERE, (proven_u8str_view_t){ (const proven_byte_t *)words[10], n > 0 ? (size_t)n : 0 });
     } else {
         rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_HERE, TU8("This one is not set aside (a folder or its digit)"));
     }
     size_t all = c ? rubraview_classify_count(c, 0) : 0;
     n = snprintf(words[11], sizeof(words[11]), T("Copy all set aside (%zu)"), all);
-    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_COPY, (u8str_t){ words[11], n > 0 ? (size_t)n : 0 });
+    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_COPY, (proven_u8str_view_t){ (const proven_byte_t *)words[11], n > 0 ? (size_t)n : 0 });
     n = snprintf(words[12], sizeof(words[12]), T("Move all set aside (%zu)"), all);
-    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_MOVE, (u8str_t){ words[12], n > 0 ? (size_t)n : 0 });
+    rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_MOVE, (proven_u8str_view_t){ (const proven_byte_t *)words[12], n > 0 ? (size_t)n : 0 });
     rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_CLEAR, TU8("Forget what is set aside"));
     if (any) rubraview_panel_add_button(&app->classify_panel, PANEL_CLS_SETTINGS, TU8("The folders: Settings > Files..."));
     app->classify_panel.open = true;
@@ -14455,8 +14455,8 @@ static void classify_toggle(app_state_t *app) {
 static void classify_mark(app_state_t *app, int32_t digit) {
     if (!app->classify) return;
     if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("a page inside an archive is not a file of its own: it cannot be set aside")); return; }
-    u8str_t path = current_file_path(app);
-    if (path.len == 0) return;
+    proven_u8str_view_t path = current_file_path(app);
+    if (path.size == 0) return;
     int32_t was = rubraview_classify_folder_of(app->classify, path);
     if (!rubraview_classify_set(app->classify, was ? path : app_keep(app, path), digit)) {
         osd_say(app, TU8("the list is full: copy or move what is set aside first"));
@@ -14464,8 +14464,8 @@ static void classify_mark(app_state_t *app, int32_t digit) {
     }
     char said[96];
     int n = snprintf(said, sizeof(said), T("set aside for %d (%zu in all)"), (int)digit, rubraview_classify_count(app->classify, 0));
-    osd_say(app, (u8str_t){ said, n > 0 ? (size_t)n : 0 });
-    if ((size_t)current_page_index(app) + 1 < page_count(app)) handle_action(app, U8("next_page"));
+    osd_say(app, (proven_u8str_view_t){ (const proven_byte_t *)said, n > 0 ? (size_t)n : 0 });
+    if ((size_t)current_page_index(app) + 1 < page_count(app)) handle_action(app, PROVEN_LIT("next_page"));
     classify_build(app);
 }
 
@@ -14474,14 +14474,14 @@ static void classify_run(app_state_t *app, bool moving) {
     if (!c || c->count == 0) { osd_say(app, TU8("nothing is set aside")); return; }
     size_t done = 0, failed = 0;
     for (size_t i = 0; i < c->count;) {
-        u8str_t path = c->paths[i];
-        u8str_t dir = rubraview_curation_target(&app->curation, c->folders[i]);
+        proven_u8str_view_t path = c->paths[i];
+        proven_u8str_view_t dir = rubraview_curation_target(&app->curation, c->folders[i]);
         bool ok = false;
-        if (dir.len > 0 && (rubraview_pal_fs_make_dirs(dir) || rubraview_pal_fs_exists(dir))) {
+        if (dir.size > 0 && (rubraview_pal_fs_make_dirs(dir) || rubraview_pal_fs_exists(dir))) {
             if (moving && rubraview_path_same(rubraview_path_dirname(path), dir)) ok = true;   /* already there */
             else {
-                u8str_t target = rubraview_filing_target(app->arena, dir, rubraview_path_basename(path), filing_exists, NULL);
-                ok = target.len > 0 && (moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target));
+                proven_u8str_view_t target = rubraview_filing_target(app->arena, dir, rubraview_path_basename(path), filing_exists, NULL);
+                ok = target.size > 0 && (moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target));
                 if (ok) rubraview_undo_push(&app->undo, (rubraview_file_action_t){
                     .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
                     .source_path = path, .target_path = target, .playlist_index = 0 });
@@ -14493,7 +14493,7 @@ static void classify_run(app_state_t *app, bool moving) {
     char said[160];
     int n = failed ? snprintf(said, sizeof(said), moving ? T("moved %zu; %zu could not be put there and are still set aside") : T("copied %zu; %zu could not be put there and are still set aside"), done, failed)
                    : snprintf(said, sizeof(said), moving ? T("moved %zu") : T("copied %zu"), done);
-    osd_say(app, (u8str_t){ said, n > 0 ? (size_t)n : 0 });
+    osd_say(app, (proven_u8str_view_t){ (const proven_byte_t *)said, n > 0 ? (size_t)n : 0 });
     if (moving && done > 0) {
         int32_t page = current_page_index(app);
         reopen_after_removal(app, page > 0 ? (size_t)page : 0);
@@ -14581,16 +14581,16 @@ static void edit_copy_area(app_state_t *app) {
         proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory + first + lane, .size = lane }),
     };
     rubraview_pixbuf_t full = {0};
-    u8str_t path = app->source.pages[page].path;
-    if (path.len > 0) {
+    proven_u8str_view_t path = app->source.pages[page].path;
+    if (path.size > 0) {
         full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, 0, 0);
     } else {
         rubraview_page_bytes_t bytes = { .ok = false };
         AcquireSRWLockExclusive(&app->source_lock);
         bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
         ReleaseSRWLockExclusive(&app->source_lock);
-        if (bytes.ok && bytes.data.len > 0)
-            full = rubraview_pal_image_read_pixels_within(&scratch, U8(""), (const uint8_t*)bytes.data.ptr, bytes.data.len, true, 0, 0);
+        if (bytes.ok && bytes.data.size > 0)
+            full = rubraview_pal_image_read_pixels_within(&scratch, PROVEN_LIT(""), (const uint8_t*)bytes.data.ptr, bytes.data.size, true, 0, 0);
     }
     rubraview_pixbuf_t done = full;
     for (size_t k = 0; k < steps.count && rubraview_pixbuf_is_valid(&done); ++k) {
@@ -14670,7 +14670,7 @@ static void panel_close(app_state_t *app) {
 static bool g_edit_page_two = false;
 
 /* The size Save makes, in pixels, on the button that types it (owner, 2026-10-15). */
-static u8str_t px_button_label(const app_state_t *app) {
+static proven_u8str_view_t px_button_label(const app_state_t *app) {
     static char label[64];
     const rubraview_edit_session_t *e = &app->edit;
     int32_t w = e->resize_width, h = e->resize_height;
@@ -14678,16 +14678,16 @@ static u8str_t px_button_label(const app_state_t *app) {
     /* RV-128: and what it prints at, at the DPI below */
     double dpi = e->resize_dpi > 0.0 ? e->resize_dpi : 300.0;
     int n = snprintf(label, sizeof(label), T("Size: %d x %d px (%.1f x %.1f cm)..."), (int)w, (int)h, w / dpi * 2.54, h / dpi * 2.54);
-    return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : TU8("Size in pixels...");
+    return n > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)label, .size = (size_t)n } : TU8("Size in pixels...");
 }
 
 /* The cut on the button that types it (owner, 2026-10-15). */
-static u8str_t crop_button_label(const app_state_t *app) {
+static proven_u8str_view_t crop_button_label(const app_state_t *app) {
     static char label[64];
     const rubraview_edit_session_t *e = &app->edit;
     if (!e->crop_active) return TU8("Crop: type it, or drag on the picture...");
     int n = snprintf(label, sizeof(label), T("Crop: %d, %d  %d x %d px..."), (int)e->crop.x, (int)e->crop.y, (int)e->crop.width, (int)e->crop.height);
-    return n > 0 ? (u8str_t){ .ptr = label, .len = (size_t)n } : TU8("Crop...");
+    return n > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)label, .size = (size_t)n } : TU8("Crop...");
 }
 
 /* The cut changed (a drag, Trim, the ratio): the buttons and the box say it again. */
@@ -14904,7 +14904,7 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
     return said ? buf : T("Adjust");   /* the curve alone, or nothing named */
 }
 
-static u8str_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
+static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
     char moved[80];
     const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
                      : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect)
@@ -14921,7 +14921,7 @@ static u8str_t edit_step_words(const rubraview_edit_step_t *s, size_t number, ch
     } else {
         n = snprintf(buffer, size, "%zu. %s: %s", number, what, where);
     }
-    return (u8str_t){ .ptr = buffer, .len = n > 0 ? ((size_t)n < size ? (size_t)n : size - 1) : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? ((size_t)n < size ? (size_t)n : size - 1) : 0 };
 }
 
 /* The undo list: a row for the picture as it was and one for each step; the steps in force marked. */
@@ -14938,13 +14938,13 @@ static void edit_steps_build(app_state_t *app) {
     app->steps_panel.placed = true;
     static char words[RUBRAVIEW_EDIT_MAX_STEPS + 1][96];
     int n0 = snprintf(words[0], sizeof(words[0]), "%s%s", app->edit_steps.cursor == 0 ? "> " : "  ", T("0. The picture as it was"));
-    rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST, (u8str_t){ .ptr = words[0], .len = n0 > 0 ? (size_t)n0 : 0 });
+    rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)words[0], .size = n0 > 0 ? (size_t)n0 : 0 });
     for (size_t i = 0; i < app->edit_steps.count; ++i) {
         char line[96];
-        u8str_t w = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
+        proven_u8str_view_t w = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
         int n = snprintf(words[i + 1], sizeof(words[0]), "%s%.*s", i + 1 == app->edit_steps.cursor ? "> " : i + 1 > app->edit_steps.cursor ? "- " : "  ",
-                         (int)w.len, w.ptr);
-        rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST + (int32_t)i + 1, (u8str_t){ .ptr = words[i + 1], .len = n > 0 ? (size_t)n : 0 });
+                         (int)w.size, w.ptr);
+        rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST + (int32_t)i + 1, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)words[i + 1], .size = n > 0 ? (size_t)n : 0 });
     }
     app->steps_panel.open = true;
     int32_t w = 0, h = 0;
@@ -14973,8 +14973,8 @@ static void edit_sel_build(app_state_t *app) {
     app->sel_panel.place_x = placed ? px : 12.0 * dpi;
     app->sel_panel.place_y = placed ? py : 360.0 * dpi;
     rubraview_panel_add_choice(&app->sel_panel, PANEL_SEL_SHAPE, TU8("Shape"), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? 1 : 0, 2);
-    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_X, U8("X"), on ? c->x : 0, 0.0, w > 1 ? w - 1 : 1, 1.0);
-    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_Y, U8("Y"), on ? c->y : 0, 0.0, h > 1 ? h - 1 : 1, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_X, PROVEN_LIT("X"), on ? c->x : 0, 0.0, w > 1 ? w - 1 : 1, 1.0);
+    rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_Y, PROVEN_LIT("Y"), on ? c->y : 0, 0.0, h > 1 ? h - 1 : 1, 1.0);
     rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_W, TU8("Width"), on ? c->width : w, 1.0, w > 1 ? w : 2, 1.0);
     rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_H, TU8("Height"), on ? c->height : h, 1.0, h > 1 ? h : 2, 1.0);
     rubraview_panel_add_slider(&app->sel_panel, PANEL_SEL_FEATHER, TU8("Soft edge"), app->sel_feather, 0.0, 200.0, 1.0);
@@ -15028,13 +15028,13 @@ static void edit_sel_toggle(app_state_t *app) {
     edit_sel_build(app);
 }
 
-static u8str_t edit_sel_label(const app_state_t *app) {
+static proven_u8str_view_t edit_sel_label(const app_state_t *app) {
     static char line[96];
     if (!app->edit.crop_active) return TU8("Selection: none (the whole picture)...");
     const rubraview_crop_rect_t *c = &app->edit.crop;
     int n = snprintf(line, sizeof(line), T("Selection: %s %d,%d %dx%d..."), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : T("rectangle"),
                      (int)c->x, (int)c->y, (int)c->width, (int)c->height);
-    return (u8str_t){ .ptr = line, .len = n > 0 ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 };
 }
 
 /* Edit's rows by section, in whichever order the panel wants them (RV-137). */
@@ -15065,8 +15065,8 @@ static void edit_rows_detail(app_state_t *app) {
     rubraview_panel_add_choice(&app->panel, PANEL_BLUR_KIND, TU8("Blur kind"), e->blur_box ? 1 : 0, 2);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN, TU8("Sharpen"), e->sharpen_amount, 0.0, 300.0, 0.0);
     rubraview_panel_add_choice(&app->panel, PANEL_SHARPEN_KIND, TU8("Sharpen kind"), e->sharpen_laplacian ? 1 : 0, 2);
-    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, U8("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
-    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, U8("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, PROVEN_LIT("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
+    rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, PROVEN_LIT("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
     /* Changes are on the picture at once (owner, 2026-10-18): this only ends the step, so the next change is one of its own. */
     rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
                                                                             : TU8("Done: next change a new step (Enter)"));
@@ -15093,9 +15093,9 @@ static plugin_result_t g_plugin_results[4];
 static size_t g_plugin_result_next;
 static SRWLOCK g_plugin_results_lock = SRWLOCK_INIT;
 
-static void plugins_look(u8str_t folder) {
+static void plugins_look(proven_u8str_view_t folder) {
     AcquireSRWLockExclusive(&g_plugin_lock);
-    size_t n = folder.len < sizeof(g_plugin_folder) ? folder.len : 0;
+    size_t n = folder.size < sizeof(g_plugin_folder) ? folder.size : 0;
     memcpy(g_plugin_folder, folder.ptr, n);
     g_plugin_folder[n] = '\0';
     g_plugin_count = n ? rubraview_pal_plugins_find(cstr(g_plugin_folder), g_plugins, RUBRAVIEW_PLUGIN_MAX) : 0;
@@ -15106,15 +15106,15 @@ static void plugins_look(u8str_t folder) {
 static void plugins_from_settings(app_state_t *app) {
     static int was_on = -1;
     static char was_folder[520];
-    bool on = rubraview_settings_get(&app->settings, U8("edit"), U8("plugins")) > 0.5;
-    u8str_t folder = rubraview_settings_get_text(&app->settings, U8("edit"), U8("plugin_folder"));
+    bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugins")) > 0.5;
+    proven_u8str_view_t folder = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugin_folder"));
     char chosen[520] = "";
-    if (folder.len > 0 && folder.len < sizeof(chosen)) { memcpy(chosen, folder.ptr, folder.len); chosen[folder.len] = '\0'; }
+    if (folder.size > 0 && folder.size < sizeof(chosen)) { memcpy(chosen, folder.ptr, folder.size); chosen[folder.size] = '\0'; }
     else if (on) (void)rubraview_pal_plugins_default_folder(chosen, sizeof(chosen), true);
     if (was_on == (int)on && strcmp(was_folder, chosen) == 0) return;
     was_on = on;
     snprintf(was_folder, sizeof(was_folder), "%s", chosen);
-    plugins_look(on ? cstr(chosen) : U8(""));
+    plugins_look(on ? cstr(chosen) : PROVEN_LIT(""));
     app->plugin_choice = 0;
 }
 
@@ -15247,7 +15247,7 @@ static void edit_rows_plugins(app_state_t *app) {
         int32_t id = PANEL_PLUGIN_P0 + i;
         static char labels[RUBRAVIEW_PLUGIN_PARAMS][80];   /* the rows' words live as long as the panel */
         snprintf(labels[i], sizeof(labels[i]), "  %s", q->name);
-        u8str_t name = cstr(labels[i]);
+        proven_u8str_view_t name = cstr(labels[i]);
         if (q->kind == RVF_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->plugin_values[i] > 0.5);
         else if (q->kind == RVF_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->plugin_values[i], (int32_t)q->max + 1);
         else rubraview_panel_add_slider(&app->panel, id, name, app->plugin_values[i], q->min, q->max, q->kind == RVF_INT ? 1.0 : q->step);
@@ -15500,7 +15500,7 @@ static const char *resize_preset_word(int32_t i) {
 }
 
 /* What a row's value is called: a choice's word, or a number worth reading. */
-static u8str_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size) {
+static proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size) {
     (void)app;
     const char *const CROP[] = { T("free"), "1:1", "4:3", "16:9", T("the picture's") };
     const char *const BLUR[] = { T("soft (Gaussian)"), T("flat (box)") };
@@ -15715,7 +15715,7 @@ static void panel_open_export(app_state_t *app) {
     rubraview_panel_add_choice(&app->panel, PANEL_FORMAT, TU8("Format"), (int32_t)app->export_options.format, RUBRAVIEW_EXPORT_FORMATS);
     /* Only what the format chosen has use for (owner, 2026-10-15); "as the file" is the file's own. */
     int32_t page = current_page_index(app);
-    u8str_t name = page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : U8("");
+    proven_u8str_view_t name = page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : PROVEN_LIT("");
     uint32_t rows = rubraview_export_rows_of(&app->export_options, name);   /* RV-140: the palette's rows only with one */
     if (rows & RUBRAVIEW_EXPORT_ROW_QUALITY) {
         rubraview_panel_add_slider(&app->panel, PANEL_QUALITY, TU8("Quality"),
@@ -15813,8 +15813,8 @@ static void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
     }
     if (b->dpi >= 1.0) batch_token(tk, "--dpi=%d", (int)lround(b->dpi));
     if (b->format > 0 && b->format < RUBRAVIEW_EXPORT_FORMATS) {
-        u8str_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
-        batch_token(tk, "--format=%.*s", (int)ext.len, ext.ptr);
+        proven_u8str_view_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
+        batch_token(tk, "--format=%.*s", (int)ext.size, ext.ptr);
     }
     if (b->quality >= 1.0 && fabs(b->quality - 90.0) > 0.5) batch_token(tk, "--quality=%d", (int)lround(b->quality));
     {   /* RV-140, 1.17.0: what differs from how they come, in the command line's words */
@@ -15867,17 +15867,17 @@ static void batch_defaults(struct batch_ui *b) {
 }
 
 /* The tokens (a line each) read back into the choices; false when they do not parse. */
-static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) {
+static bool batch_from_text(app_state_t *app, struct batch_ui *b, proven_u8str_view_t text) {
     const char *argv[72];
     int argc = 0;
     argv[argc++] = "rubraview";
     argv[argc++] = "--batch";
-    for (size_t i = 0; i < text.len && argc < 70;) {
+    for (size_t i = 0; i < text.size && argc < 70;) {
         size_t e = i;
-        while (e < text.len && text.ptr[e] != '\n' && text.ptr[e] != '\r') ++e;
+        while (e < text.size && text.ptr[e] != '\n' && text.ptr[e] != '\r') ++e;
         if (e > i) {
-            u8str_t line = app_keep(app, (u8str_t){ .ptr = text.ptr + i, .len = e - i });
-            argv[argc++] = line.ptr;
+            proven_u8str_view_t line = app_keep(app, (proven_u8str_view_t){ .ptr = text.ptr + i, .size = e - i });
+            argv[argc++] = (const char *)line.ptr;
         }
         i = e + 1;
     }
@@ -15915,10 +15915,10 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) 
             b->border = x->border_px;
             uint32_t rgb = x->border_px > 0 ? x->border_rgb : x->canvas_rgb;
             b->frame_colour = rgb == 0 ? 1 : rgb == 0x808080 ? 2 : 0;
-            if (x->watermark.len > 0) snprintf(b->mark, sizeof(b->mark), "%.*s", (int)x->watermark.len, x->watermark.ptr);
+            if (x->watermark.size > 0) snprintf(b->mark, sizeof(b->mark), "%.*s", (int)x->watermark.size, x->watermark.ptr);
             b->mark_corner = (int32_t)x->watermark_corner; b->mark_opacity = x->watermark_opacity;
-            if (x->text.len > 0) {
-                snprintf(b->text, sizeof(b->text), "%.*s", (int)x->text.len, x->text.ptr);
+            if (x->text.size > 0) {
+                snprintf(b->text, sizeof(b->text), "%.*s", (int)x->text.size, x->text.ptr);
                 b->text_corner = (int32_t)x->text_corner; b->text_size = x->text_size;
                 b->text_colour = x->text_rgb == 0 ? 1 : x->text_rgb == 0xFFD400 ? 2 : 0;
             }
@@ -15929,17 +15929,17 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, u8str_t text) 
     if (r.export_options.jpeg_quality > 0) b->quality = r.export_options.jpeg_quality;
     b->dpi = r.export_options.dpi;
     b->more = r.export_options;
-    if (r.job.naming_pattern.len > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.len, r.job.naming_pattern.ptr);
+    if (r.job.naming_pattern.size > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.size, r.job.naming_pattern.ptr);
     b->start = r.job.counter_start > 0 ? r.job.counter_start : 1;
-    if (r.job.replace_from.len > 0)
-        snprintf(b->replace, sizeof(b->replace), "%.*s,%.*s", (int)r.job.replace_from.len, r.job.replace_from.ptr, (int)r.job.replace_to.len, r.job.replace_to.ptr);
+    if (r.job.replace_from.size > 0)
+        snprintf(b->replace, sizeof(b->replace), "%.*s,%.*s", (int)r.job.replace_from.size, r.job.replace_from.ptr, (int)r.job.replace_to.size, r.job.replace_to.ptr);
     b->exists = r.exists; b->keep_dates = r.keep_dates; b->recursive = r.recursive; b->subfolders = r.subfolders;
-    if (r.output_dir.len > 0) snprintf(b->out, sizeof(b->out), "%.*s", (int)r.output_dir.len, r.output_dir.ptr);
+    if (r.output_dir.size > 0) snprintf(b->out, sizeof(b->out), "%.*s", (int)r.output_dir.size, r.output_dir.ptr);
     return true;
 }
 
 /* The tokens as text, a line each. */
-static u8str_t batch_text(app_state_t *app) {
+static proven_u8str_view_t batch_text(app_state_t *app) {
     batch_tokens_t tk;
     batch_tokens(&app->batch, &tk);
     char out[8192];
@@ -15949,24 +15949,24 @@ static u8str_t batch_text(app_state_t *app) {
         if (n <= 0 || (size_t)n >= sizeof(out) - at) break;
         at += (size_t)n;
     }
-    return app_keep(app, (u8str_t){ .ptr = out, .len = at });
+    return app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = at });
 }
 
-static u8str_t batch_row_label(char *buf, size_t cap, const char *what, const char *value, const char *empty) {
+static proven_u8str_view_t batch_row_label(char *buf, size_t cap, const char *what, const char *value, const char *empty) {
     int n = snprintf(buf, cap, "%s: %s...", what, value && value[0] ? value : empty);
-    return (u8str_t){ .ptr = buf, .len = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
 }
 
 static void panel_open_batch(app_state_t *app) {
     struct batch_ui *b = &app->batch;
     if (!b->loaded) {
         batch_defaults(b);
-        u8str_t last = rubraview_settings_get_text(&app->settings, U8("batch"), U8("last"));
-        if (last.len > 0) {   /* stored with \n turned to | (settings.ini is a line a key) */
+        proven_u8str_view_t last = rubraview_settings_get_text(&app->settings, PROVEN_LIT("batch"), PROVEN_LIT("last"));
+        if (last.size > 0) {   /* stored with \n turned to | (settings.ini is a line a key) */
             char text[4096];
-            size_t n = last.len < sizeof(text) ? last.len : sizeof(text);
+            size_t n = last.size < sizeof(text) ? last.size : sizeof(text);
             for (size_t i = 0; i < n; ++i) text[i] = last.ptr[i] == '|' ? '\n' : last.ptr[i];
-            if (!batch_from_text(app, b, (u8str_t){ .ptr = text, .len = n })) batch_defaults(b);
+            if (!batch_from_text(app, b, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n })) batch_defaults(b);
         }
     }
     double dpi = rubraview_pal_window_dpi_scale(app->window);
@@ -16017,10 +16017,10 @@ static void panel_open_batch(app_state_t *app) {
     rubraview_panel_add_slider(pn, PANEL_BATCH_BORDER, TU8("Border px"), b->border, 0, 500, 1);
     rubraview_panel_add_choice(pn, PANEL_BATCH_FRAME_COLOUR, TU8("  their colour"), b->frame_colour, 3);
     {
-        u8str_t mark = cstr(b->mark);
-        u8str_t base = rubraview_path_basename(mark);
+        proven_u8str_view_t mark = cstr(b->mark);
+        proven_u8str_view_t base = rubraview_path_basename(mark);
         char shown[300];
-        snprintf(shown, sizeof(shown), "%.*s", (int)(base.len < 200 ? base.len : 200), base.ptr);
+        snprintf(shown, sizeof(shown), "%.*s", (int)(base.size < 200 ? base.size : 200), base.ptr);
         rubraview_panel_add_button(pn, PANEL_BATCH_MARK, batch_row_label(labels[2], sizeof(labels[2]), T("Watermark"), shown, T("none (choose a picture)")));
     }
     if (b->mark[0]) {
@@ -16042,7 +16042,7 @@ static void panel_open_batch(app_state_t *app) {
     {   /* RV-140: the format's own choices, as Export has them */
         rubraview_export_options_t o = b->more;
         o.format = (rubraview_export_format_t)b->format;
-        export_more_rows(pn, &o, rubraview_export_rows_of(&o, U8("")));
+        export_more_rows(pn, &o, rubraview_export_rows_of(&o, PROVEN_LIT("")));
     }
     if (!b->privacy) rubraview_panel_add_choice(pn, PANEL_KEEP_DETAILS, TU8("Camera details, comments"), b->more.keep_details, 3);   /* 1.17.0 */
     rubraview_panel_add_toggle(pn, PANEL_PRIVACY, TU8("Privacy clean"), b->privacy);
@@ -16094,7 +16094,7 @@ static void batch_type_begin(app_state_t *app, int32_t id) {
 }
 
 static void batch_typed(app_state_t *app) {
-    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     int32_t id = app->batch_typing;
     char *dst = id == PANEL_BATCH_TEXT ? app->batch.text : id == PANEL_BATCH_CROP ? app->batch.crop : id == PANEL_BATCH_CANVAS ? app->batch.canvas
               : id == PANEL_BATCH_NAME ? app->batch.name : id == PANEL_BATCH_REPLACE ? app->batch.replace : app->batch.out;
@@ -16102,7 +16102,7 @@ static void batch_typed(app_state_t *app) {
                : id == PANEL_BATCH_NAME ? sizeof(app->batch.name) : id == PANEL_BATCH_REPLACE ? sizeof(app->batch.replace) : sizeof(app->batch.out);
     char was[1024];
     snprintf(was, sizeof(was), "%s", dst);
-    size_t n = text.len < cap - 1 ? text.len : cap - 1;
+    size_t n = text.size < cap - 1 ? text.size : cap - 1;
     memcpy(dst, text.ptr, n);
     dst[n] = '\0';
     if (id == PANEL_BATCH_NAME && n == 0) snprintf(dst, cap, "%s", "{name}.{ext}");
@@ -16152,20 +16152,20 @@ static void batch_try_names(app_state_t *app) {
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = 1u << 20 });
     for (size_t i = 0; i < count; ++i) {
         proven_arena_reset(&scratch);
-        u8str_t name = rubraview_path_basename(in[i].path);
-        u8str_t stem = rubraview_batch_replace_all(&scratch, rubraview_path_stem(name), r.job.replace_from, r.job.replace_to);
-        u8str_t ext = rubraview_path_ext(name);
-        if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
+        proven_u8str_view_t name = rubraview_path_basename(in[i].path);
+        proven_u8str_view_t stem = rubraview_batch_replace_all(&scratch, rubraview_path_stem(name), r.job.replace_from, r.job.replace_to);
+        proven_u8str_view_t ext = rubraview_path_ext(name);
+        if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
         if (r.export_options.format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) ext = rubraview_export_extension(r.export_options.format);
-        u8str_t out = rubraview_batch_format_name_ex(&scratch, r.job.naming_pattern, stem, ext, 0, 0, U8(""),
+        proven_u8str_view_t out = rubraview_batch_format_name_ex(&scratch, r.job.naming_pattern, stem, ext, 0, 0, PROVEN_LIT(""),
                                                      (int64_t)(r.job.counter_start > 0 ? r.job.counter_start : 1) + (int64_t)i,
                                                      rubraview_path_basename(rubraview_path_dirname(in[i].path)));
-        int n = snprintf(nc.said + *nc.at, nc.cap - *nc.at, "%s%.*s > %.*s", i ? ";  " : "", (int)(name.len < 60 ? name.len : 60), name.ptr,
-                         (int)(out.len < 60 ? out.len : 60), out.ptr);
+        int n = snprintf(nc.said + *nc.at, nc.cap - *nc.at, "%s%.*s > %.*s", i ? ";  " : "", (int)(name.size < 60 ? name.size : 60), name.ptr,
+                         (int)(out.size < 60 ? out.size : 60), out.ptr);
         if (n > 0 && (size_t)n < nc.cap - *nc.at) *nc.at += (size_t)n;
     }
     free(mem);
-    osd_say(app, (u8str_t){ .ptr = said, .len = at });
+    osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = at });
     app->notice_seconds = 8.0;
 }
 
@@ -16177,19 +16177,19 @@ static void batch_save_or_load(app_state_t *app, bool saving) {
     };
     rubraview_file_dialog_result_t picked = saving ? rubraview_pal_file_dialog_save(app->arena, &opts) : rubraview_pal_file_dialog_open(app->arena, &opts);
     if (!picked.accepted || picked.count == 0) return;
-    u8str_t path = picked.paths[0];
+    proven_u8str_view_t path = picked.paths[0];
     if (saving) {
         if (!rubraview_path_has_ext(rubraview_path_basename(path), ".rvbatch")) {
             char with[1100];
-            int n = snprintf(with, sizeof(with), "%.*s.rvbatch", (int)path.len, path.ptr);
-            if (n > 0 && (size_t)n < sizeof(with)) path = app_keep(app, (u8str_t){ .ptr = with, .len = (size_t)n });
+            int n = snprintf(with, sizeof(with), "%.*s.rvbatch", (int)path.size, path.ptr);
+            if (n > 0 && (size_t)n < sizeof(with)) path = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)with, .size = (size_t)n });
         }
         osd_say(app, rubraview_pal_fs_write_file(path, batch_text(app)) ? TU8("the choices were saved") : TU8("could not write the file"));
         return;
     }
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, path, 64u * 1024u);
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, path, 64u * 1024u);
     struct batch_ui b = app->batch;
-    if (text.len == 0 || !batch_from_text(app, &b, text)) { osd_say(app, TU8("that file holds no batch choices this version takes")); return; }
+    if (text.size == 0 || !batch_from_text(app, &b, text)) { osd_say(app, TU8("that file holds no batch choices this version takes")); return; }
     app->batch = b;
     osd_say(app, TU8("the choices were loaded"));
     panel_open_batch(app);
@@ -16199,12 +16199,12 @@ static void batch_save_or_load(app_state_t *app, bool saving) {
    are settings (`print.*`), so the next print starts from the last. */
 static rubraview_print_options_t print_options(const app_state_t *app) {
     rubraview_print_options_t o = {
-        .turn = (rubraview_print_turn_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("turn"))),
-        .size = (rubraview_print_size_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("size"))),
-        .scale_percent = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("scale"))),
-        .place = (rubraview_print_place_t)(int)lround(rubraview_settings_get(&app->settings, U8("print"), U8("place"))),
-        .margin_mm = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("margin_mm"))),
-        .per_sheet = rubraview_print_per_sheet_of((int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("per_sheet")))),
+        .turn = (rubraview_print_turn_t)(int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("turn"))),
+        .size = (rubraview_print_size_t)(int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("size"))),
+        .scale_percent = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("scale"))),
+        .place = (rubraview_print_place_t)(int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("place"))),
+        .margin_mm = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("margin_mm"))),
+        .per_sheet = rubraview_print_per_sheet_of((int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("per_sheet")))),
     };
     rubraview_print_options_clamp(&o);
     return o;
@@ -16216,13 +16216,13 @@ static rubraview_print_options_t print_options(const app_state_t *app) {
 
 static const app_state_t *g_print_app;   /* whose printers and papers the row words name */
 
-static u8str_t print_printer_name(const app_state_t *app) {
-    if (app->print_printer < 0 || (size_t)app->print_printer >= app->print_printer_count) return U8("");
+static proven_u8str_view_t print_printer_name(const app_state_t *app) {
+    if (app->print_printer < 0 || (size_t)app->print_printer >= app->print_printer_count) return PROVEN_LIT("");
     return cstr(app->print_printer_names[app->print_printer]);
 }
 
 static int32_t print_orientation(const app_state_t *app) {
-    return (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("orientation")));
+    return (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("orientation")));
 }
 
 static void print_thumbs_drop(app_state_t *app) {
@@ -16279,7 +16279,7 @@ static void print_papers_load(app_state_t *app) {
     if (app->print_printer < 0) return;
     int32_t own = 0;
     app->print_paper_count = rubraview_pal_printer_papers(print_printer_name(app), app->print_papers, 160, &own);
-    int32_t want = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("paper")));
+    int32_t want = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("paper")));
     for (size_t i = 0; i < app->print_paper_count; ++i) if (app->print_papers[i].id == want) app->print_paper = (int32_t)i;
     for (size_t i = 0; i < app->print_paper_count && app->print_paper < 0; ++i) if (app->print_papers[i].id == own) app->print_paper = (int32_t)i;
 }
@@ -16288,22 +16288,22 @@ static void print_devices_load(app_state_t *app) {
     g_print_app = app;
     rubraview_scratch_t sc;
     proven_arena_t *sa = scratch_begin(app, &sc, 1u << 20);
-    u8str_t names[32];
+    proven_u8str_view_t names[32];
     int32_t def = -1;
     size_t n = rubraview_pal_printers(sa, names, 32, &def);
     app->print_printer_count = 0;
     for (size_t i = 0; i < n; ++i) {
-        if (names[i].len >= sizeof(app->print_printer_names[0])) continue;
-        memcpy(app->print_printer_names[app->print_printer_count], names[i].ptr, names[i].len);
-        app->print_printer_names[app->print_printer_count][names[i].len] = '\0';
+        if (names[i].size >= sizeof(app->print_printer_names[0])) continue;
+        memcpy(app->print_printer_names[app->print_printer_count], names[i].ptr, names[i].size);
+        app->print_printer_names[app->print_printer_count][names[i].size] = '\0';
         if ((int32_t)i == def) def = (int32_t)app->print_printer_count;
         app->print_printer_count++;
     }
     scratch_end(app, &sc);
-    u8str_t want = rubraview_settings_get_text(&app->settings, U8("print"), U8("printer"));
+    proven_u8str_view_t want = rubraview_settings_get_text(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("printer"));
     app->print_printer = def >= 0 && (size_t)def < app->print_printer_count ? def : (app->print_printer_count > 0 ? 0 : -1);
     for (size_t i = 0; i < app->print_printer_count; ++i)
-        if (want.len > 0 && rubraview_u8_eq(want, cstr(app->print_printer_names[i]))) app->print_printer = (int32_t)i;
+        if (want.size > 0 && proven_u8str_view_eq(want, cstr(app->print_printer_names[i]))) app->print_printer = (int32_t)i;
     print_papers_load(app);
     print_sheet_load(app);
 }
@@ -16358,7 +16358,7 @@ static void draw_print_preview(app_state_t *app) {
     size_t sheets = rubraview_print_sheets(app->print_list_count, o.per_sheet);
     double mm_w = sh->paper_w * 25.4 / sh->dpi_x, mm_h = sh->paper_h * 25.4 / sh->dpi_y;
     int n = snprintf(line, sizeof(line), T("sheet %d of %zu  -  %.0f x %.0f mm"), (int)app->print_preview_sheet + 1, sheets, mm_w, mm_h);
-    if (n > 0) draw_outlined_text_aligned(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n },
+    if (n > 0) draw_outlined_text_aligned(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                           (rubraview_pal_rect_t){ pad, pad - 4.0 * dpi, right - 2.0 * pad, 28.0 * dpi }, 15.0 * dpi, 2.0, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
 }
 
@@ -16376,7 +16376,7 @@ static void panel_open_print(app_state_t *app) {
             rubraview_panel_add_choice(&app->panel, PANEL_PRINT_PAPER, TU8("Paper"), app->print_paper < 0 ? 0 : app->print_paper, (int32_t)app->print_paper_count);
         rubraview_panel_add_choice(&app->panel, PANEL_PRINT_ORIENT, TU8("The sheet"), print_orientation(app), 3);
         rubraview_panel_add_slider(&app->panel, PANEL_PRINT_COPIES, TU8("Copies"),
-                                   rubraview_settings_get(&app->settings, U8("print"), U8("copies")), 1.0, 99.0, 1.0);
+                                   rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("copies")), 1.0, 99.0, 1.0);
         rubraview_panel_add_separator(&app->panel);
     }
     rubraview_panel_add_choice(&app->panel, PANEL_PRINT_TURN, TU8("Turn"), (int32_t)o.turn, RUBRAVIEW_PRINT_TURN_COUNT);
@@ -16410,7 +16410,7 @@ static void panel_open_print(app_state_t *app) {
 static bool g_conv_is_7z;   /* D-89: which format the convert panel's method row is named for */
 
 /* What a row of the print panel shows beside its name; empty for the others. */
-static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
+static proven_u8str_view_t print_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size) {
     int n = 0;
     int32_t v = (int32_t)lround(row->value);
     switch (row->id) {
@@ -16438,7 +16438,7 @@ static u8str_t print_row_text(const rubraview_panel_row_t *row, char *buffer, si
                                                                               : (g_conv_is_7z ? T("LZMA") : T("Deflate"))); break;
         default: break;
     }
-    return (u8str_t){ .ptr = buffer, .len = n > 0 ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? (size_t)n : 0 };
 }
 
 static void print_now(app_state_t *app) {
@@ -16448,7 +16448,7 @@ static void print_now(app_state_t *app) {
     bool printed_ok = false;
     if (app->print_printer >= 0 && !app->print_with_dialog) {   /* 1.19.0: there, as chosen, no dialog */
         int32_t paper = app->print_paper >= 0 && (size_t)app->print_paper < app->print_paper_count ? app->print_papers[app->print_paper].id : 0;
-        int32_t copies = (int32_t)lround(rubraview_settings_get(&app->settings, U8("print"), U8("copies")));
+        int32_t copies = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("copies")));
         printed_ok = rubraview_pal_print_pictures_on(print_printer_name(app), paper, print_orientation(app), copies, app->print_list, count, &o, &printed);
     } else {
         printed_ok = rubraview_pal_print_pictures(rubraview_pal_window_native_handle(app->window), app->print_list, count, &o, &printed);
@@ -16464,7 +16464,7 @@ static void print_now(app_state_t *app) {
     osd_say(app, cstr(line));
 }
 
-static bool arc_temp_path(char *dst, size_t cap, const char *tag, u8str_t leaf);
+static bool arc_temp_path(char *dst, size_t cap, const char *tag, proven_u8str_view_t leaf);
 
 static void print_temp_drop(app_state_t *app) {
     if (!app->print_temp[0]) return;
@@ -16476,9 +16476,9 @@ static void print_temp_drop(app_state_t *app) {
    it is laid in the temporary folder for as long as the print takes. */
 static void print_archive_page(app_state_t *app) {
     int32_t page = current_page_index(app);
-    u8str_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
-    u8str_t stem = rubraview_path_stem(shown);
-    u8str_t ext = { .ptr = shown.ptr + stem.len, .len = shown.len - stem.len };
+    proven_u8str_view_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
+    proven_u8str_view_t stem = rubraview_path_stem(shown);
+    proven_u8str_view_t ext = { .ptr = shown.ptr + stem.size, .size = shown.size - stem.size };
     print_temp_drop(app);
     bool ok = arc_temp_path(app->print_temp, sizeof(app->print_temp), "print", ext);
     if (ok) {
@@ -16489,7 +16489,7 @@ static void print_archive_page(app_state_t *app) {
         if (mem) {
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
             rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &app->source, (size_t)page, MAX_PAGE_BYTES);
-            ok = bytes.ok && bytes.data.len > 0 && rubraview_pal_fs_write_file(cstr(app->print_temp), bytes.data);
+            ok = bytes.ok && bytes.data.size > 0 && rubraview_pal_fs_write_file(cstr(app->print_temp), bytes.data);
             free(mem);
         }
     }
@@ -16498,7 +16498,7 @@ static void print_archive_page(app_state_t *app) {
         osd_say(app, TU8("not printed: the page could not be read"));
         return;
     }
-    u8str_t path = cstr(app->print_temp);
+    proven_u8str_view_t path = cstr(app->print_temp);
     char kept[sizeof(app->print_temp)];
     memcpy(kept, app->print_temp, sizeof(kept));
     print_paths(app, &path, 1);                       /* closes a panel that is open, which drops the file's name */
@@ -16510,13 +16510,13 @@ static void print_archive_page(app_state_t *app) {
 /* D-89: how what is packed again is packed — the settings the convert
    panel shows. 0 stores; 1..9 packs. */
 static int arc_level(const app_state_t *app) {
-    if (lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_method"))) == 1) return 0;
-    int level = (int)lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_level")));
+    if (lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_method"))) == 1) return 0;
+    int level = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_level")));
     return level < 1 ? 1 : level > 9 ? 9 : level;
 }
 
 static rubraview_arcedit_target_t arc_convert_target(const app_state_t *app) {
-    return lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1
+    return lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_format"))) == 1
         ? RUBRAVIEW_ARCEDIT_7Z : RUBRAVIEW_ARCEDIT_ZIP;
 }
 
@@ -16534,7 +16534,7 @@ static void panel_open_convert(app_state_t *app) {
                                arc_convert_target(app) == RUBRAVIEW_ARCEDIT_7Z ? 1 : 0, 2);
     rubraview_panel_add_choice(&app->panel, PANEL_CONV_METHOD, TU8("Method"), arc_level(app) == 0 ? 1 : 0, 2);
     rubraview_panel_add_slider(&app->panel, PANEL_CONV_LEVEL, TU8("Level"),
-                               rubraview_settings_get(&app->settings, U8("archive"), U8("convert_level")), 1.0, 9.0, 1.0);
+                               rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_level")), 1.0, 9.0, 1.0);
     rubraview_panel_add_separator(&app->panel);
     rubraview_panel_add_button(&app->panel, PANEL_CONV_NOW, TU8("Write (Enter)"));
     app->panel.open = true;
@@ -16552,7 +16552,7 @@ static void arc_undo_drop(app_state_t *app) {
 }
 
 static bool on_archive_page(const app_state_t *app) {
-    return app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.len > 0 && !app->list_is_set &&
+    return app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->source.archive_path.size > 0 && !app->list_is_set &&
            app->source.arc != NULL && current_page_index(app) >= 0;
 }
 
@@ -16571,7 +16571,7 @@ static DWORD WINAPI arc_job_run(LPVOID param) {
     return 0;
 }
 
-static bool arc_file_exists(u8str_t path) {
+static bool arc_file_exists(proven_u8str_view_t path) {
     uint8_t mem[4096];
     proven_arena_t probe = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = sizeof(mem) });
     rubraview_fs_entry_t entry;
@@ -16594,16 +16594,16 @@ static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) 
     if (route == RUBRAVIEW_ARCEDIT_IN_PLACE) target = RUBRAVIEW_ARCEDIT_SAME;
     else if (target == RUBRAVIEW_ARCEDIT_SAME) goto fail;
 
-    u8str_t first = rubraview_page_source_first_volume(&app->source);
-    u8str_t opened = app->source.archive_path;
-    if (first.len == 0) first = opened;
+    proven_u8str_view_t first = rubraview_page_source_first_volume(&app->source);
+    proven_u8str_view_t opened = app->source.archive_path;
+    if (first.size == 0) first = opened;
     job = (arc_job_t*)calloc(1, sizeof(*job));
     if (!job) goto fail;
-    if (first.len >= sizeof(job->archive) || opened.len >= sizeof(job->opened) || first.len + 16 >= sizeof(job->out)) goto fail;
-    memcpy(job->archive, first.ptr, first.len);
-    memcpy(job->opened, opened.ptr, opened.len);
-    memcpy(job->out, first.ptr, first.len);
-    memcpy(job->out + first.len, ".rvnew", 7);
+    if (first.size >= sizeof(job->archive) || opened.size >= sizeof(job->opened) || first.size + 16 >= sizeof(job->out)) goto fail;
+    memcpy(job->archive, first.ptr, first.size);
+    memcpy(job->opened, opened.ptr, opened.size);
+    memcpy(job->out, first.ptr, first.size);
+    memcpy(job->out + first.size, ".rvnew", 7);
     memcpy(job->name, app->arc_ask_name, sizeof(job->name));
 
     /* A 7z is packed from a copy of every file laid beside it first. */
@@ -16631,9 +16631,9 @@ static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) 
     job->wake = app->window;
     /* Where the reader is afterwards: on the page itself under its new
        name, or (a page deleted) on the one that takes its number. */
-    u8str_t shown = page_display_name(app, (size_t)page);
+    proven_u8str_view_t shown = page_display_name(app, (size_t)page);
     if (op == RUBRAVIEW_ARCEDIT_REPLACE && job->name[0] == '\0') {
-        if (shown.len < sizeof(job->land)) memcpy(job->land, shown.ptr, shown.len);
+        if (shown.size < sizeof(job->land)) memcpy(job->land, shown.ptr, shown.size);
     } else if (op != RUBRAVIEW_ARCEDIT_DELETE) {
         rubraview_arcedit_sibling_name(shown, cstr(job->name), job->land, sizeof(job->land));
     }
@@ -16646,9 +16646,9 @@ static void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) 
     };
     arc_undo_drop(app);   /* one step back, and it is this edit's from here */
     /* The choice holds for this book for the session. */
-    if (job->convert && opened.len < sizeof(app->arc_choice_path)) {
-        memcpy(app->arc_choice_path, opened.ptr, opened.len);
-        app->arc_choice_path[opened.len] = '\0';
+    if (job->convert && opened.size < sizeof(app->arc_choice_path)) {
+        memcpy(app->arc_choice_path, opened.ptr, opened.size);
+        app->arc_choice_path[opened.size] = '\0';
         app->arc_choice = target;
     }
     job->thread = CreateThread(NULL, 0, arc_job_run, job, 0, NULL);
@@ -16689,7 +16689,7 @@ static void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t
     app->arc_ask_data = data;
     app->arc_ask_size = size;
     memset(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
-    if (app->source.archive_path.len < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.len);
+    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
 
     bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
                   rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
@@ -16730,7 +16730,7 @@ static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
     if (key_is(combo, "Z") || key_is(combo, "7")) {
         double v = key_is(combo, "7") ? 1.0 : 0.0;
-        rubraview_settings_set(&app->settings, U8("archive"), U8("convert_format"), v);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_format"), v);
         rubraview_panel_set_value(&app->panel, PANEL_CONV_FORMAT, v);
         return true;
     }
@@ -16738,29 +16738,29 @@ static bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
 }
 
 /* A name beside `wanted` that no file has: `book-1.cbz`, `book-2.cbz`, ... */
-static u8str_t arc_free_name(app_state_t *app, u8str_t wanted) {
+static proven_u8str_view_t arc_free_name(app_state_t *app, proven_u8str_view_t wanted) {
     if (!arc_file_exists(wanted)) return wanted;
-    u8str_t dir = rubraview_path_dirname(wanted), base = rubraview_path_basename(wanted);
-    u8str_t stem = rubraview_path_stem(base);
-    u8str_t ext = { .ptr = base.ptr + stem.len, .len = base.len - stem.len };
+    proven_u8str_view_t dir = rubraview_path_dirname(wanted), base = rubraview_path_basename(wanted);
+    proven_u8str_view_t stem = rubraview_path_stem(base);
+    proven_u8str_view_t ext = { .ptr = base.ptr + stem.size, .size = base.size - stem.size };
     for (int n = 1; n < 1000; ++n) {
         char name[1024];
-        int len = snprintf(name, sizeof(name), "%.*s-%d%.*s", (int)stem.len, stem.ptr, n, (int)ext.len, ext.ptr);
+        int len = snprintf(name, sizeof(name), "%.*s-%d%.*s", (int)stem.size, stem.ptr, n, (int)ext.size, ext.ptr);
         if (len <= 0 || (size_t)len >= sizeof(name)) break;
-        u8str_t path = rubraview_path_join(app->arena, dir, (u8str_t){ .ptr = name, .len = (size_t)len });
-        if (path.len > 0 && !arc_file_exists(path)) return path;
+        proven_u8str_view_t path = rubraview_path_join(app->arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)len });
+        if (path.size > 0 && !arc_file_exists(path)) return path;
     }
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
 /* The book again, on the page named or numbered. */
-static void arc_reopen(app_state_t *app, u8str_t path, const char *land, size_t page) {
+static void arc_reopen(app_state_t *app, proven_u8str_view_t path, const char *land, size_t page) {
     if (!open_archive(app, path)) return;
     size_t start = page < page_count(app) ? page : page_count(app) - 1;
     if (land && land[0]) {
         for (size_t i = 0; i < page_count(app); ++i) {
-            u8str_t name = page_display_name(app, i);
-            if (name.len == strlen(land) && memcmp(name.ptr, land, name.len) == 0) { start = i; break; }
+            proven_u8str_view_t name = page_display_name(app, i);
+            if (name.size == strlen(land) && memcmp(name.ptr, land, name.size) == 0) { start = i; break; }
         }
     }
     finish_open(app, start);
@@ -16770,9 +16770,9 @@ static void arc_reopen(app_state_t *app, u8str_t path, const char *land, size_t 
    The viewer lets go of the old file first — Windows replaces nothing
    that is mapped — and opens the book again afterwards. */
 static void arc_job_finish(app_state_t *app, arc_job_t *job) {
-    u8str_t out = cstr(job->out), first = cstr(job->archive);
-    u8str_t opened = app_keep(app, cstr(job->opened));
-    u8str_t final = opened;
+    proven_u8str_view_t out = cstr(job->out), first = cstr(job->archive);
+    proven_u8str_view_t opened = app_keep(app, cstr(job->opened));
+    proven_u8str_view_t final = opened;
     const char *said = NULL;
     bool done = false;
 
@@ -16784,10 +16784,10 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     if (!job->convert) {
         /* D-89: the old file steps aside as `name.rvold` so that Ctrl+Z can bring it back. */
         char backup[sizeof(app->arc_undo_backup)];
-        bool kept = first.len + 7 < sizeof(backup);
+        bool kept = first.size + 7 < sizeof(backup);
         if (kept) {
-            memcpy(backup, first.ptr, first.len);
-            memcpy(backup + first.len, ".rvold", 7);
+            memcpy(backup, first.ptr, first.size);
+            memcpy(backup + first.size, ".rvold", 7);
             kept = rubraview_pal_fs_replace(first, cstr(backup));
         }
         done = rubraview_pal_fs_replace(out, first);
@@ -16795,21 +16795,21 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
         if (done && kept) {
             memcpy(app->arc_undo_backup, backup, sizeof(backup));
             memset(app->arc_undo_path, 0, sizeof(app->arc_undo_path));
-            memcpy(app->arc_undo_path, first.ptr, first.len);
+            memcpy(app->arc_undo_path, first.ptr, first.size);
             can_undo = true;
         }
         said = done ? NULL : T("not changed: the archive could not be replaced (is it open elsewhere?)");
     } else {
         char name[1024];
-        u8str_t base = rubraview_path_basename(first);
+        proven_u8str_view_t base = rubraview_path_basename(first);
         size_t n = rubraview_arcedit_converted_name(base, job->job.target, name, sizeof(name));
-        u8str_t wanted = n > 0 ? rubraview_path_join(app->arena, rubraview_path_dirname(first), (u8str_t){ .ptr = name, .len = n })
-                               : (u8str_t){ .ptr = "", .len = 0 };
+        proven_u8str_view_t wanted = n > 0 ? rubraview_path_join(app->arena, rubraview_path_dirname(first), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = n })
+                               : PROVEN_LIT("");
         bool takes_old_name = false;
         for (size_t i = 0; i < job->job.volume_count; ++i) {
-            if (wanted.len > 0 && rubraview_path_same(wanted, cstr(job->job.volumes[i]))) takes_old_name = true;
+            if (wanted.size > 0 && rubraview_path_same(wanted, cstr(job->job.volumes[i]))) takes_old_name = true;
         }
-        if (wanted.len == 0) {
+        if (wanted.size == 0) {
             said = T("not changed: the new archive's name is too long");
         } else if (takes_old_name) {
             /* A solid 7z becoming a 7z: the old one leaves for the bin, then the new one has its name. */
@@ -16820,8 +16820,8 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
             if (binned && rubraview_pal_fs_replace(out, wanted)) { done = true; final = wanted; }
             else {
                 /* The old file would not go: the new one is kept beside it under a free name. */
-                u8str_t other = arc_free_name(app, wanted);
-                if (other.len > 0 && rubraview_pal_fs_move(out, other)) {
+                proven_u8str_view_t other = arc_free_name(app, wanted);
+                if (other.size > 0 && rubraview_pal_fs_move(out, other)) {
                     done = true;
                     final = other;
                     said = T("the old archive could not be put in the Recycle Bin: the new one is beside it");
@@ -16831,8 +16831,8 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
             }
         } else {
             /* Another name: never over a file that is already there. */
-            u8str_t target = arc_free_name(app, wanted);
-            if (target.len > 0 && rubraview_pal_fs_move(out, target)) {
+            proven_u8str_view_t target = arc_free_name(app, wanted);
+            if (target.size > 0 && rubraview_pal_fs_move(out, target)) {
                 done = true;
                 final = target;
                 for (size_t i = 0; i < job->job.volume_count; ++i) {
@@ -16846,19 +16846,19 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     if (!done) (void)rubraview_pal_fs_delete(out);
     final = app_keep(app, final);
     /* The format chosen holds for the book under its new name too. */
-    if (done && job->convert && final.len < sizeof(app->arc_choice_path)) {
-        memcpy(app->arc_choice_path, final.ptr, final.len);
-        app->arc_choice_path[final.len] = '\0';
+    if (done && job->convert && final.size < sizeof(app->arc_choice_path)) {
+        memcpy(app->arc_choice_path, final.ptr, final.size);
+        app->arc_choice_path[final.size] = '\0';
     }
 
     rubraview_arcedit_op_t op = job->job.op;
     arc_reopen(app, done ? final : opened, done ? job->land : NULL, job->page);
     if (said) { osd_say(app, cstr(said)); return; }
     char line[256];
-    u8str_t base = rubraview_path_basename(final);
+    proven_u8str_view_t base = rubraview_path_basename(final);
     const char *what = op == RUBRAVIEW_ARCEDIT_DELETE ? T("page deleted") : op == RUBRAVIEW_ARCEDIT_RENAME ? T("page renamed")
                      : op == RUBRAVIEW_ARCEDIT_REPLACE ? T("page saved over") : T("copy saved in the archive");
-    if (job->convert) snprintf(line, sizeof(line), T("%s; the book is now %.*s"), what, (int)(base.len < 160 ? base.len : 160), base.ptr);
+    if (job->convert) snprintf(line, sizeof(line), T("%s; the book is now %.*s"), what, (int)(base.size < 160 ? base.size : 160), base.ptr);
     else snprintf(line, sizeof(line), "%s%s", what, can_undo ? T("  (Ctrl+Z takes it back)") : "");
     osd_say(app, cstr(line));
 }
@@ -16868,9 +16868,9 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
 static bool arc_undo(app_state_t *app) {
     if (!app->arc_undo_backup[0] || app->arc_job) return false;
     if (!on_archive_page(app)) return false;
-    u8str_t first = rubraview_page_source_first_volume(&app->source);
-    if (!rubraview_path_same(first.len ? first : app->source.archive_path, cstr(app->arc_undo_path))) return false;
-    u8str_t opened = app_keep(app, app->source.archive_path);
+    proven_u8str_view_t first = rubraview_page_source_first_volume(&app->source);
+    if (!rubraview_path_same(first.size ? first : app->source.archive_path, cstr(app->arc_undo_path))) return false;
+    proven_u8str_view_t opened = app_keep(app, app->source.archive_path);
     size_t page = (size_t)current_page_index(app);
     history_remember(app);
     unload_all_pages(app);
@@ -16915,14 +16915,14 @@ static void arc_job_poll(app_state_t *app, bool quitting) {
 }
 
 /* A file for a moment's use in the system's temporary folder. */
-static bool arc_temp_path(char *dst, size_t cap, const char *tag, u8str_t leaf) {
+static bool arc_temp_path(char *dst, size_t cap, const char *tag, proven_u8str_view_t leaf) {
     WCHAR wide[MAX_PATH + 1];
     char dir[MAX_PATH * 3 + 1];
     DWORD n = GetTempPathW(MAX_PATH + 1, wide);
     if (n == 0 || n > MAX_PATH) return false;
     if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, dir, (int)sizeof(dir), NULL, NULL) <= 1) return false;
     int len = snprintf(dst, cap, "%srubraview-%s-%lu-%lu-%.*s", dir, tag, (unsigned long)GetCurrentProcessId(),
-                       (unsigned long)GetTickCount(), (int)leaf.len, leaf.ptr);
+                       (unsigned long)GetTickCount(), (int)leaf.size, leaf.ptr);
     return len > 0 && (size_t)len < cap;
 }
 
@@ -16930,36 +16930,36 @@ static bool arc_temp_path(char *dst, size_t cap, const char *tag, u8str_t leaf) 
    its own memory, its own WIC factory. `result` indexes save_job_poll's lines. */
 enum { SAVE_OK = 0, SAVE_UNREADABLE, SAVE_EDIT_FAILED, SAVE_UNWRITABLE, SAVE_NO_MEMORY };
 
-static u8str_t save_read_whole(u8str_t path, void **out_mem) {
+static proven_u8str_view_t save_read_whole(proven_u8str_view_t path, void **out_mem) {
     *out_mem = NULL;
     rubraview_fs_entry_t entry;
     uint8_t probe_mem[4096];
     proven_arena_t probe = proven_arena_create((proven_mem_mut_t){ .ptr = probe_mem, .size = sizeof(probe_mem) });
     if (!rubraview_pal_fs_stat(&probe, path, &entry) || entry.size_bytes == 0 || entry.size_bytes > MAX_ARCHIVE_BYTES) {
-        return (u8str_t){ .ptr = "", .len = 0 };
+        return PROVEN_LIT("");
     }
     size_t size = (size_t)entry.size_bytes + 4096;
     *out_mem = malloc(size);
-    if (!*out_mem) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!*out_mem) return PROVEN_LIT("");
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)*out_mem, .size = size });
     return rubraview_pal_fs_read_file(&arena, path, MAX_ARCHIVE_BYTES);
 }
 
-static bool details_path_taken(u8str_t path, void *ctx) { (void)ctx; return rubraview_pal_fs_exists(path); }
+static bool details_path_taken(proven_u8str_view_t path, void *ctx) { (void)ctx; return rubraview_pal_fs_exists(path); }
 
 /* 1.18.0 (owner, 2026-10-18: "그림파일 읽을 때, 옆에 동일한 이름이 있는 텍스트 파일이 있으면 읽어보고
    루브라뷰가 만든 파일이면 ... 파일 내부 정보인 것처럼"): the details a Rubraview .txt beside `picture`
    holds for it — photo.txt, photo-1.txt ... photo-20.txt, the first that names this picture. Any
    thread; `arena` keeps what is read. `out_path`, when given, is the .txt's path. */
 #define DETAILS_TXT_MAX_BYTES (1u << 20)
-static bool details_beside(proven_arena_t *arena, u8str_t picture, rubraview_details_src_t *out, u8str_t *out_path) {
+static bool details_beside(proven_arena_t *arena, proven_u8str_view_t picture, rubraview_details_src_t *out, proven_u8str_view_t *out_path) {
     *out = (rubraview_details_src_t){0};
     for (unsigned k = 0; k <= 20; ++k) {
-        u8str_t path = rubraview_details_txt_candidate(arena, picture, k);
-        if (path.len == 0) return false;
+        proven_u8str_view_t path = rubraview_details_txt_candidate(arena, picture, k);
+        if (path.size == 0) return false;
         if (!rubraview_pal_fs_exists(path)) continue;
-        u8str_t text = rubraview_pal_fs_read_file(arena, path, DETAILS_TXT_MAX_BYTES);
-        if (text.len > 0 && rubraview_details_from_txt(arena, text, picture, out)) {
+        proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, path, DETAILS_TXT_MAX_BYTES);
+        if (text.size > 0 && rubraview_details_from_txt(arena, text, picture, out)) {
             if (out_path) *out_path = path;
             return true;
         }
@@ -16974,41 +16974,41 @@ static bool details_beside(proven_arena_t *arena, u8str_t picture, rubraview_det
    (a page going into an archive). Returns DETAILS_* for the caller to say. */
 enum { DETAILS_NONE = 0, DETAILS_IN_FILE, DETAILS_TXT, DETAILS_FAILED };
 
-static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubraview_export_format_t format,
+static int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options) {
     if (!options || options->privacy_clean || options->keep_details <= RUBRAVIEW_KEEP_DETAILS_DROP) return DETAILS_NONE;
     void *src_mem = NULL, *out_mem = NULL;
-    u8str_t src = save_read_whole(source, &src_mem);
+    proven_u8str_view_t src = save_read_whole(source, &src_mem);
     int said = DETAILS_NONE;
-    if (src.len > 0) {
-        u8str_t out = save_read_whole(written, &out_mem);
+    if (src.size > 0) {
+        proven_u8str_view_t out = save_read_whole(written, &out_mem);
         /* what is read, the file made again with the blocks, the words and the .txt */
         size_t room = 0;
-        if (out.len > 0 && !PROVEN_CKD_ADD(&room, out.len, src.len) && !PROVEN_CKD_MUL(&room, room, (size_t)3) &&
+        if (out.size > 0 && !PROVEN_CKD_ADD(&room, out.size, src.size) && !PROVEN_CKD_MUL(&room, room, (size_t)3) &&
             !PROVEN_CKD_ADD(&room, room, (size_t)(8u << 20))) {
             void *work_mem = malloc(room);
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
                 rubraview_details_src_t details, beside;
-                bool own = rubraview_details_read(&work, (const uint8_t*)src.ptr, src.len, &details);
+                bool own = rubraview_details_read(&work, (const uint8_t*)src.ptr, src.size, &details);
                 /* 1.18.0: what a .txt beside the source kept for it goes on with it */
                 if (details_beside(&work, source, &beside, NULL)) { rubraview_details_merge(&work, &details, &beside); own = true; }
                 if (own) {
                     rubraview_details_put_t put = rubraview_details_put(&work, format, out, &details);
                     if (put.file.ptr != out.ptr) said = rubraview_pal_fs_write_file(written, put.file) ? DETAILS_IN_FILE : DETAILS_FAILED;
-                    if (!put.all_kept && said != DETAILS_FAILED && options->keep_details >= RUBRAVIEW_KEEP_DETAILS_OR_TXT && named.len > 0) {
+                    if (!put.all_kept && said != DETAILS_FAILED && options->keep_details >= RUBRAVIEW_KEEP_DETAILS_OR_TXT && named.size > 0) {
                         /* the one this picture has already, written again; else a free name */
                         rubraview_details_src_t had;
-                        u8str_t txt_path = { .ptr = "", .len = 0 };
+                        proven_u8str_view_t txt_path = PROVEN_LIT("");
                         if (!details_beside(&work, named, &had, &txt_path)) txt_path = rubraview_details_txt_path(&work, named, details_path_taken, NULL);
-                        u8str_t txt = rubraview_details_txt(&work, &details, rubraview_path_basename(source), rubraview_path_basename(named));
-                        if (txt_path.len > 0 && txt.len > 0) {
+                        proven_u8str_view_t txt = rubraview_details_txt(&work, &details, rubraview_path_basename(source), rubraview_path_basename(named));
+                        if (txt_path.size > 0 && txt.size > 0) {
                             /* a mark that says UTF-8, for Notepad and the like */
-                            proven_result_mem_mut_t res = proven_arena_alloc(&work, txt.len + 3);
+                            proven_result_mem_mut_t res = proven_arena_alloc(&work, txt.size + 3);
                             if (proven_is_ok(res.err)) {
                                 memcpy(res.value.ptr, "\xEF\xBB\xBF", 3);
-                                memcpy(res.value.ptr + 3, txt.ptr, txt.len);
-                                said = rubraview_pal_fs_write_file(txt_path, (u8str_t){ .ptr = (const char*)res.value.ptr, .len = txt.len + 3 })
+                                memcpy(res.value.ptr + 3, txt.ptr, txt.size);
+                                said = rubraview_pal_fs_write_file(txt_path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = txt.size + 3 })
                                            ? DETAILS_TXT : DETAILS_FAILED;
                             }
                         }
@@ -17024,33 +17024,33 @@ static int details_keep(u8str_t source, u8str_t written, u8str_t named, rubravie
 }
 
 /* The name the written file ends with: the original's, when it is written over; none for an archive's page. */
-static u8str_t save_job_named(const save_job_t *job) {
-    if (job->into_archive) return (u8str_t){ .ptr = "", .len = 0 };
+static proven_u8str_view_t save_job_named(const save_job_t *job) {
+    if (job->into_archive) return PROVEN_LIT("");
     return cstr(job->over_original ? job->source : job->out);
 }
 
 static int save_job_work(save_job_t *job) {
-    u8str_t source = { .ptr = job->source, .len = strlen(job->source) };
-    u8str_t out_path = { .ptr = job->out, .len = strlen(job->out) };
+    proven_u8str_view_t source = { .ptr = (const proven_byte_t *)job->source, .size = strlen(job->source) };
+    proven_u8str_view_t out_path = { .ptr = (const proven_byte_t *)job->out, .size = strlen(job->out) };
 
     if (job->route == RUBRAVIEW_EXPORT_STRIP_ONLY || job->route == RUBRAVIEW_EXPORT_COPY || job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS) {
         void *mem = NULL;
-        u8str_t bytes = save_read_whole(source, &mem);
+        proven_u8str_view_t bytes = save_read_whole(source, &mem);
         int result = SAVE_UNREADABLE;
-        if (bytes.len > 0 && job->route == RUBRAVIEW_EXPORT_COPY) {
+        if (bytes.size > 0 && job->route == RUBRAVIEW_EXPORT_COPY) {
             result = rubraview_pal_fs_write_file(out_path, bytes) ? SAVE_OK : SAVE_UNWRITABLE;
-        } else if (bytes.len > 0) {
+        } else if (bytes.size > 0) {
             /* the strip's output is at most the input: room for it beside */
-            size_t room = bytes.len * 2u + (1u << 20);
+            size_t room = bytes.size * 2u + (1u << 20);
             void *work_mem = malloc(room);
             result = SAVE_NO_MEMORY;
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
                 /* 1.17.0: or its scans, tables and restarts written again, its markers kept unless privacy clean */
                 rubraview_jpegtran_result_t stripped = job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS
-                    ? rubraview_jpegtran_rewrite(&work, (const uint8_t*)bytes.ptr, bytes.len, job->options.jpeg_progressive,
+                    ? rubraview_jpegtran_rewrite(&work, (const uint8_t*)bytes.ptr, bytes.size, job->options.jpeg_progressive,
                                                  job->options.jpeg_optimise, job->options.jpeg_restart_rows, !job->options.privacy_clean)
-                    : rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.len);
+                    : rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.size);
                 result = stripped.err != RUBRAVIEW_JPEGTRAN_OK ? SAVE_UNREADABLE
                        : rubraview_pal_fs_write_file(out_path, stripped.data) ? SAVE_OK : SAVE_UNWRITABLE;
                 free(work_mem);
@@ -17170,22 +17170,22 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
     if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
     if (w <= 0 || h <= 0) { osd_say(app, TU8("not saved: the page is not read yet")); return; }
 
-    u8str_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
+    proven_u8str_view_t shown = rubraview_path_basename(page_display_name(app, (size_t)page));
     rubraview_export_options_t options = app->export_options;
     if (edit_panel_open(app) && app->edit.resize_dpi > 0.0) options.dpi = app->edit.resize_dpi;   /* RV-134: the DPI chosen in Edit */
     rubraview_export_format_t source_format = rubraview_export_format_for_name(shown);
     rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
-    u8str_t stem = rubraview_path_stem(shown), ext = rubraview_export_extension(target);
-    u8str_t source_ext = { .ptr = shown.ptr + stem.len, .len = shown.len - stem.len };   /* with its dot */
+    proven_u8str_view_t stem = rubraview_path_stem(shown), ext = rubraview_export_extension(target);
+    proven_u8str_view_t source_ext = { .ptr = shown.ptr + stem.size, .size = shown.size - stem.size };   /* with its dot */
     /* Saved over in its own format the page keeps its name; in another, it takes that one's extension. */
-    u8str_t name = over ? (target == source_format ? (u8str_t){ .ptr = "", .len = 0 }
-                                                   : rubraview_batch_format_name(app->arena, U8("{name}.{ext}"), stem, ext, 0, 0, U8("")))
-                        : rubraview_batch_format_name(app->arena, U8("{name}_edit.{ext}"), stem, ext, 0, 0, U8(""));
+    proven_u8str_view_t name = over ? (target == source_format ? PROVEN_LIT("")
+                                                   : rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}.{ext}"), stem, ext, 0, 0, PROVEN_LIT("")))
+                        : rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}_edit.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
 
     save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
     if (!job) { osd_say(app, TU8("not saved: not enough memory")); return; }
-    u8str_t out_leaf = rubraview_batch_format_name(app->arena, U8("out.{ext}"), stem, ext, 0, 0, U8(""));
-    bool ok = name.len < sizeof(job->arc_name) && app->source.archive_path.len < sizeof(job->arc_path) &&
+    proven_u8str_view_t out_leaf = rubraview_batch_format_name(app->arena, PROVEN_LIT("out.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
+    bool ok = name.size < sizeof(job->arc_name) && app->source.archive_path.size < sizeof(job->arc_path) &&
               arc_temp_path(job->source, sizeof(job->source), "page", source_ext) &&
               arc_temp_path(job->out, sizeof(job->out), "edit", out_leaf);
     /* The page's bytes, read here: the archive is the main thread's to read. */
@@ -17197,7 +17197,7 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
         if (mem) {
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
             rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &app->source, (size_t)page, MAX_PAGE_BYTES);
-            ok = bytes.ok && bytes.data.len > 0 && rubraview_pal_fs_write_file(cstr(job->source), bytes.data);
+            ok = bytes.ok && bytes.data.size > 0 && rubraview_pal_fs_write_file(cstr(job->source), bytes.data);
             free(mem);
         }
     }
@@ -17206,8 +17206,8 @@ static void panel_write_archive_page(app_state_t *app, bool over) {
     job->into_archive = true;
     job->arc_op = over ? RUBRAVIEW_ARCEDIT_REPLACE : RUBRAVIEW_ARCEDIT_ADD;
     job->arc_entry = app->source.pages[page].entry_index;
-    memcpy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.len);
-    if (name.len) memcpy(job->arc_name, name.ptr, name.len);
+    memcpy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.size);
+    if (name.size) memcpy(job->arc_name, name.ptr, name.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -17234,8 +17234,8 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
     int32_t page = current_page_index(app);
     if (page < 0) return;
 
-    u8str_t source = app->source.pages[page].path;
-    if (source.len == 0) {
+    proven_u8str_view_t source = app->source.pages[page].path;
+    if (source.size == 0) {
         /* D-88: an archive page's copy goes into the archive, beside the page. */
         if (apply_edit && on_archive_page(app)) panel_write_archive_page(app, false);
         return;
@@ -17247,13 +17247,13 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
     rubraview_edit_step_t pending_now = edit_pending(app);
     bool pixels_change = apply_edit && (rubraview_edit_step_does_something(&pending_now) || app->edit_steps.cursor > 0);
 
-    u8str_t stem = rubraview_path_stem(rubraview_path_basename(source));
+    proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(source));
     rubraview_export_format_t target = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
                                          ? source_format : options.format;
-    u8str_t ext = rubraview_export_extension(target);
-    u8str_t name = rubraview_batch_format_name(app->arena, U8("{name}_edit.{ext}"), stem, ext, 0, 0, U8(""));
-    u8str_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
-    if (out_path.len == 0) return;
+    proven_u8str_view_t ext = rubraview_export_extension(target);
+    proven_u8str_view_t name = rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}_edit.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
+    proven_u8str_view_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
+    if (out_path.size == 0) return;
 
     rubraview_export_route_t route = rubraview_export_plan(&options, source_format, pixels_change);
 
@@ -17264,14 +17264,14 @@ static void panel_write_current(app_state_t *app, bool apply_edit) {
         return;
     }
     if (app->save_job) { osd_say(app, TU8("still saving the last copy")); return; }
-    if (source.len >= sizeof(app->save_job->source) || out_path.len >= sizeof(app->save_job->out)) return;
+    if (source.size >= sizeof(app->save_job->source) || out_path.size >= sizeof(app->save_job->out)) return;
 
     /* The copy is made on a thread of its own (owner, 2026-09-28): a
        large picture took the window with it for as long as it took. */
     save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
     if (!job) { osd_say(app, TU8("not saved: not enough memory")); return; }
-    memcpy(job->source, source.ptr, source.len);
-    memcpy(job->out, out_path.ptr, out_path.len);
+    memcpy(job->source, source.ptr, source.size);
+    memcpy(job->out, out_path.ptr, out_path.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -17304,21 +17304,21 @@ static void save_job_poll(app_state_t *app, bool wait) {
     if (job->into_archive) {
         /* D-88: the copy was made between two temporary files; its bytes go into the archive now. */
         void *mem = NULL;
-        u8str_t bytes = job->result == SAVE_OK ? save_read_whole(cstr(job->out), &mem) : (u8str_t){ .ptr = "", .len = 0 };
+        proven_u8str_view_t bytes = job->result == SAVE_OK ? save_read_whole(cstr(job->out), &mem) : PROVEN_LIT("");
         (void)rubraview_pal_fs_delete(cstr(job->source));
         (void)rubraview_pal_fs_delete(cstr(job->out));
         app->save_job = NULL;
         if (wait) {
             /* the reader is leaving: nothing is changed */
-        } else if (job->result != SAVE_OK || bytes.len == 0) {
+        } else if (job->result != SAVE_OK || bytes.size == 0) {
             osd_say(app, cstr(SAID[job->result != SAVE_OK ? job->result : SAVE_UNWRITABLE]));
         } else if (!on_archive_page(app) || !rubraview_path_same(cstr(job->arc_path), app->source.archive_path)) {
             osd_say(app, TU8("not saved: another book is open now"));
         } else {
-            uint8_t *data = (uint8_t*)malloc(bytes.len);
+            uint8_t *data = (uint8_t*)malloc(bytes.size);
             if (data) {
-                memcpy(data, bytes.ptr, bytes.len);
-                arc_edit_request(app, job->arc_op, job->arc_entry, job->arc_name[0] ? job->arc_name : NULL, data, bytes.len);
+                memcpy(data, bytes.ptr, bytes.size);
+                arc_edit_request(app, job->arc_op, job->arc_entry, job->arc_name[0] ? job->arc_name : NULL, data, bytes.size);
             } else {
                 osd_say(app, cstr(SAID[SAVE_NO_MEMORY]));
             }
@@ -17366,8 +17366,8 @@ static void edit_save_over(app_state_t *app) {
     double now = rubraview_pal_time_now_seconds();
     int32_t page = current_page_index(app);
     if (page < 0) return;
-    u8str_t source = app->source.pages[page].path;
-    if (source.len == 0) return;
+    proven_u8str_view_t source = app->source.pages[page].path;
+    if (source.size == 0) return;
     rubraview_edit_step_t pending = edit_pending(app);
     if (app->edit_steps.cursor == 0 && !rubraview_edit_step_does_something(&pending)) { osd_say(app, TU8("nothing to save: no step was made")); return; }
     if (now - asked_at > 4.0) {
@@ -17380,16 +17380,16 @@ static void edit_save_over(app_state_t *app) {
     rubraview_export_options_t options = app->export_options;
     options.format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
     rubraview_export_format_t source_format = rubraview_export_format_for_name(source);
-    u8str_t stem = rubraview_path_stem(rubraview_path_basename(source));
-    u8str_t ext = rubraview_export_extension(source_format);
-    u8str_t name = rubraview_batch_format_name(app->arena, U8("{name}.rvsaving.{ext}"), stem, ext, 0, 0, U8(""));
-    u8str_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
+    proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(source));
+    proven_u8str_view_t ext = rubraview_export_extension(source_format);
+    proven_u8str_view_t name = rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}.rvsaving.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
+    proven_u8str_view_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
     int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
-    if (out_path.len == 0 || w <= 0 || h <= 0) { osd_say(app, TU8("not saved: the page is not read yet")); return; }
+    if (out_path.size == 0 || w <= 0 || h <= 0) { osd_say(app, TU8("not saved: the page is not read yet")); return; }
     save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
-    if (!job || source.len >= sizeof(job->source) || out_path.len >= sizeof(job->out)) { free(job); osd_say(app, TU8("not saved: not enough memory")); return; }
-    memcpy(job->source, source.ptr, source.len);
-    memcpy(job->out, out_path.ptr, out_path.len);
+    if (!job || source.size >= sizeof(job->source) || out_path.size >= sizeof(job->out)) { free(job); osd_say(app, TU8("not saved: not enough memory")); return; }
+    memcpy(job->source, source.ptr, source.size);
+    memcpy(job->out, out_path.ptr, out_path.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -17435,9 +17435,9 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
 
     if (app->panel_is_convert) {
         switch (row->id) {
-            case PANEL_CONV_FORMAT: rubraview_settings_set(&app->settings, U8("archive"), U8("convert_format"), v); break;
-            case PANEL_CONV_METHOD: rubraview_settings_set(&app->settings, U8("archive"), U8("convert_method"), v); break;
-            case PANEL_CONV_LEVEL:  rubraview_settings_set(&app->settings, U8("archive"), U8("convert_level"), v); break;
+            case PANEL_CONV_FORMAT: rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_format"), v); break;
+            case PANEL_CONV_METHOD: rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_method"), v); break;
+            case PANEL_CONV_LEVEL:  rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_level"), v); break;
             default: break;
         }
         return;
@@ -17445,17 +17445,17 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
 
     if (app->panel_is_print) {
         switch (row->id) {
-            case PANEL_PRINT_TURN:      rubraview_settings_set(&app->settings, U8("print"), U8("turn"), v); break;
-            case PANEL_PRINT_SIZE:      rubraview_settings_set(&app->settings, U8("print"), U8("size"), v); break;
-            case PANEL_PRINT_SCALE:     rubraview_settings_set(&app->settings, U8("print"), U8("scale"), v); break;
-            case PANEL_PRINT_PLACE:     rubraview_settings_set(&app->settings, U8("print"), U8("place"), v); break;
-            case PANEL_PRINT_MARGIN:    rubraview_settings_set(&app->settings, U8("print"), U8("margin_mm"), v); break;
-            case PANEL_PRINT_PER_SHEET: rubraview_settings_set(&app->settings, U8("print"), U8("per_sheet"), v);
+            case PANEL_PRINT_TURN:      rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("turn"), v); break;
+            case PANEL_PRINT_SIZE:      rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("size"), v); break;
+            case PANEL_PRINT_SCALE:     rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("scale"), v); break;
+            case PANEL_PRINT_PLACE:     rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("place"), v); break;
+            case PANEL_PRINT_MARGIN:    rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("margin_mm"), v); break;
+            case PANEL_PRINT_PER_SHEET: rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("per_sheet"), v);
                                         app->print_preview_sheet = 0; print_thumbs_load(app); panel_open_print(app); break;
             /* 1.19.0 */
             case PANEL_PRINT_PRINTER:
                 app->print_printer = (int32_t)v;
-                rubraview_settings_set_text(&app->settings, U8("print"), U8("printer"), app_keep(app, print_printer_name(app)));
+                rubraview_settings_set_text(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("printer"), app_keep(app, print_printer_name(app)));
                 print_papers_load(app);
                 print_sheet_load(app);
                 panel_open_print(app);
@@ -17463,11 +17463,11 @@ static void panel_apply_row(app_state_t *app, int32_t index) {
             case PANEL_PRINT_PAPER:
                 app->print_paper = (int32_t)v;
                 if (app->print_paper >= 0 && (size_t)app->print_paper < app->print_paper_count)
-                    rubraview_settings_set(&app->settings, U8("print"), U8("paper"), (double)app->print_papers[app->print_paper].id);
+                    rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("paper"), (double)app->print_papers[app->print_paper].id);
                 print_sheet_load(app);
                 break;
-            case PANEL_PRINT_ORIENT: rubraview_settings_set(&app->settings, U8("print"), U8("orientation"), v); print_sheet_load(app); break;
-            case PANEL_PRINT_COPIES: rubraview_settings_set(&app->settings, U8("print"), U8("copies"), v); break;
+            case PANEL_PRINT_ORIENT: rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("orientation"), v); print_sheet_load(app); break;
+            case PANEL_PRINT_COPIES: rubraview_settings_set(&app->settings, PROVEN_LIT("print"), PROVEN_LIT("copies"), v); break;
             case PANEL_PRINT_SHEET:  app->print_preview_sheet = (int32_t)v; print_thumbs_load(app); break;
             default: break;
         }
@@ -17749,7 +17749,7 @@ static void panel_button(app_state_t *app, int32_t index) {
                                                       .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
                 rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
                 if (picked.accepted && picked.count > 0)
-                    snprintf(app->batch.mark, sizeof(app->batch.mark), "%.*s", (int)picked.paths[0].len, picked.paths[0].ptr);
+                    snprintf(app->batch.mark, sizeof(app->batch.mark), "%.*s", (int)picked.paths[0].size, picked.paths[0].ptr);
                 panel_open_batch(app);
             }
             break;
@@ -17792,7 +17792,7 @@ static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32
     const rubraview_panel_row_t *row = &panel->rows[index];
     int n = snprintf(now, sizeof(now), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, (u8str_t){ .ptr = now, .len = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_is_value = true;
@@ -17805,9 +17805,9 @@ static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32
 }
 
 static void edit_value_typed(app_state_t *app) {
-    u8str_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     char buf[48];
-    size_t n = text.len < sizeof(buf) - 1 ? text.len : sizeof(buf) - 1;
+    size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
     memcpy(buf, text.ptr, n);
     buf[n] = '\0';
     for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
@@ -17939,11 +17939,11 @@ static void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool
         rubraview_rect_t xr = rubraview_panel_close_rect(panel);
         rubraview_pal_rect_t xb = { xr.x, xr.y, xr.width, xr.height };
         if (rubraview_rect_contains(xr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, xb, COLOR_CLOSE_HOVER, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, U8("X"), xb, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), xb, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
 rows:
-    g_conv_is_7z = lround(rubraview_settings_get(&app->settings, U8("archive"), U8("convert_format"))) == 1;
+    g_conv_is_7z = lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("convert_format"))) == 1;
     for (size_t i = 0; i < panel->row_count; ++i) {
         const rubraview_panel_row_t *row = &panel->rows[i];
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
@@ -17984,7 +17984,7 @@ rows:
                 char number[24];
                 int k = snprintf(number, sizeof(number), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding * 0.5, r.height };
-                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = number, .len = (size_t)k }, at,
+                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
                                                           text_size * 0.9, 0xFFB8D0F0u, RUBRAVIEW_TEXT_RIGHT);
             } else if (!app->panel_is_print && !app->panel_is_convert &&
                 (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
@@ -18007,7 +18007,7 @@ rows:
                 char number[24];
                 int k = snprintf(number, sizeof(number), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = number, .len = (size_t)k }, at,
+                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
                                                           text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
             }
             {   /* 1.24.0: and in a box, which a press opens for typing (as its name does) */
@@ -18070,30 +18070,30 @@ static void settings_read_file(app_state_t *app) {
        2026-09-23 this asked for the plain name `settings.ini`, so both
        portable mode and §3.18.3's triage folders followed the working
        directory — which is why the number keys curated nothing. */
-    u8str_t exe = rubraview_pal_process_executable(app->arena);
-    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
-    if (beside.len == 0) beside = U8(".");
-    u8str_t portable_ini = rubraview_path_join(app->arena, beside, U8("settings.ini"));
-    app->config_mode = rubraview_config_mode_for(portable_ini.len > 0 &&
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
+    proven_u8str_view_t beside = exe.size > 0 ? rubraview_path_dirname(exe) : PROVEN_LIT(".");
+    if (beside.size == 0) beside = PROVEN_LIT(".");
+    proven_u8str_view_t portable_ini = rubraview_path_join(app->arena, beside, PROVEN_LIT("settings.ini"));
+    app->config_mode = rubraview_config_mode_for(portable_ini.size > 0 &&
                                                  rubraview_pal_fs_exists(portable_ini));
     app->config_beside = beside;
     app->packaged = rubraview_pal_process_packaged(app->package_family, sizeof(app->package_family));
     app->other_copies = rubraview_pal_shell_other_copies();
 
-    u8str_t appdata = U8(".");
+    proven_u8str_view_t appdata = PROVEN_LIT(".");
 #ifdef _WIN32
     char appdata_utf8[1024];
     DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
     if (written > 0 && written < sizeof(appdata_utf8)) {
-        appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
+        appdata = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata_utf8, .size = written };
     }
 #endif
     app->settings_path = rubraview_config_path(app->arena, app->config_mode,
-                                               beside, appdata, U8("settings.ini"));
+                                               beside, appdata, PROVEN_LIT("settings.ini"));
     app->keymap_path = rubraview_config_path(app->arena, app->config_mode,
-                                             beside, appdata, U8("keymap.ini"));
+                                             beside, appdata, PROVEN_LIT("keymap.ini"));
 
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     app->settings = rubraview_settings_load(app->arena, text);
     shell_menu_take_old(app, text);
     app->settings_saved = app->settings;
@@ -18110,11 +18110,11 @@ static void settings_read_file(app_state_t *app) {
 #define SETTINGS_LINK        0xFF5AAEFFu   /* what can be pressed: an action, a button, a path's box, underlined */
 
 /* The live values the document's `info` lines name. */
-static size_t settings_info(void *user, u8str_t source, char *buffer, size_t capacity) {
+static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
     int n = 0;
-    if (rubraview_u8_eq_lit(source, "config.path")) {
-        u8str_t shown = app->settings_path;
+    if (proven_u8str_view_eq(source, PROVEN_LIT("config.path"))) {
+        proven_u8str_view_t shown = app->settings_path;
         char real[1024];
         if (app->packaged && app->package_family[0]) {
             /* RV-113 (2): a packaged program's AppData is its package's
@@ -18123,16 +18123,16 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
             DWORD got = GetEnvironmentVariableA("LOCALAPPDATA", local, (DWORD)sizeof(local));
             if (got > 0 && got < sizeof(local)) {
                 int m = snprintf(real, sizeof(real), "%s\\Packages\\%s\\LocalCache\\Roaming\\Rubraview\\settings.ini", local, app->package_family);
-                u8str_t candidate = { .ptr = real, .len = m > 0 && (size_t)m < sizeof(real) ? (size_t)m : 0 };
-                if (candidate.len > 0 && rubraview_pal_fs_exists(candidate)) shown = candidate;
+                proven_u8str_view_t candidate = { .ptr = (const proven_byte_t *)real, .size = m > 0 && (size_t)m < sizeof(real) ? (size_t)m : 0 };
+                if (candidate.size > 0 && rubraview_pal_fs_exists(candidate)) shown = candidate;
             }
         }
-        n = snprintf(buffer, capacity, "%.*s%s", (int)shown.len, shown.ptr,
+        n = snprintf(buffer, capacity, "%.*s%s", (int)shown.size, shown.ptr,
                      app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("  (portable)") : "");
         /* The folder comes from Windows with backslashes and the file name is
            joined with '/': shown with Windows' own separator throughout. */
         for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
-    } else if (rubraview_u8_eq_lit(source, "app.others")) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.others"))) {
         /* D-154: two copies, two menus: what this machine has besides this one. */
         const rubraview_other_copies_t *o = &app->other_copies;
         n = snprintf(buffer, capacity, "%s",
@@ -18141,12 +18141,12 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
                      : o->msi && o->msi_menu && app->packaged ? T("the MSI's too, with its menu: Windows 11's menu shows twice (Remove for every user in that copy)")
                      : o->msi ? T("the one the MSI installed too")
                      : T("none"));
-    } else if (rubraview_u8_eq_lit(source, "app.kind")) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.kind"))) {
         n = snprintf(buffer, capacity, "%s",
                      app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
                      : app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("portable: the settings beside it")
                      : T("from the zip or the installer: register below"));
-    } else if (rubraview_u8_eq_lit(source, "media.ffmpeg")) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("media.ffmpeg"))) {
         int place = rubraview_pal_ffmpeg_place();
         /* RFC-0009: found where it is named, else beside the program, else where an older Import put it. */
         n = snprintf(buffer, capacity, "%s",
@@ -18159,15 +18159,15 @@ static size_t settings_info(void *user, u8str_t source, char *buffer, size_t cap
             int m = snprintf(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with %s"), encoders);
             if (m > 0) n += m;
         }
-    } else if (rubraview_u8_eq_lit(source, "gpu.adapter")) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("gpu.adapter"))) {
         n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
-    } else if (rubraview_u8_eq_lit(source, "memory.use") && app->mem) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("memory.use")) && app->mem) {
         /* RFC-0006: the program's memory by use, and the most the session ever held */
         rubraview_mem_stats_t st = rubraview_mem_stats(app->mem);
         n = snprintf(buffer, capacity, T("session %zu MB (most %zu), a track %zu MB, %zu window(s), %zu MB for the moment; %zu MB held"),
                      st.persist_used >> 20, st.persist_peak >> 20, st.media_used >> 20, st.windows_live, st.scratch_live >> 20,
                      st.total_held >> 20);
-    } else if (rubraview_u8_eq_lit(source, "cache.used")) {
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("cache.used"))) {
         size_t loaded = 0;
         uint64_t bytes = 0;
         for (size_t i = 0; i < page_count(app); ++i) {
@@ -18195,17 +18195,17 @@ static const struct { const char *table, *section, *key; } FOLDER_LISTS[FOLDER_L
     { "thumb_dirs", "thumbs", "skip_dirs" },
 };
 
-static u8str_t folder_list_text(const app_state_t *app, int32_t list) {
+static proven_u8str_view_t folder_list_text(const app_state_t *app, int32_t list) {
     return rubraview_settings_get_text(&app->settings, cstr(FOLDER_LISTS[list].section), cstr(FOLDER_LISTS[list].key));
 }
 
-static void folder_list_set(app_state_t *app, int32_t list, u8str_t text) {
+static void folder_list_set(app_state_t *app, int32_t list, proven_u8str_view_t text) {
     rubraview_settings_set_text(&app->settings, cstr(FOLDER_LISTS[list].section), cstr(FOLDER_LISTS[list].key), text);
 }
 
 /* The list a table shows, or -1. */
-static int32_t folder_list_of_table(u8str_t table) {
-    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) if (rubraview_u8_eq_lit(table, FOLDER_LISTS[l].table)) return l;
+static int32_t folder_list_of_table(proven_u8str_view_t table) {
+    for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) if (proven_u8str_view_eq(table, proven_u8str_view_from_cstr(FOLDER_LISTS[l].table))) return l;
     return -1;
 }
 
@@ -18219,20 +18219,20 @@ static void skip_dirs_table_rows(app_state_t *app) {
         rubraview_settings_view_set_named_table_rows(&app->settings_view, cstr(FOLDER_LISTS[l].table), (int32_t)folder_list_count(app, l) + 2);
     }
     /* RFC-0007: the plug-ins' heading and one row each (or one that says why there are none) */
-    rubraview_settings_view_set_named_table_rows(&app->settings_view, U8("plugins"), (int32_t)(g_plugin_count > 0 ? g_plugin_count : 1) + 1);
+    rubraview_settings_view_set_named_table_rows(&app->settings_view, PROVEN_LIT("plugins"), (int32_t)(g_plugin_count > 0 ? g_plugin_count : 1) + 1);
 }
 
 /* The eight folders of before go into the list, once, and are emptied in the file. */
 /* RV-120: a settings file from before each extension had its own menu box
    has no shell.menu_<ext>; the menu box starts as that extension's Open
    with box was, so registering again changes nothing by itself. */
-static void shell_menu_take_old(app_state_t *app, u8str_t text) {
+static void shell_menu_take_old(app_state_t *app, proven_u8str_view_t text) {
     rubraview_ini_doc_t ini = rubraview_ini_parse(app->arena, text);
     size_t count = 0;
     const rubraview_setting_def_t *schema = rubraview_settings_schema(&count);
     for (size_t i = 0; i < count; ++i) {
         const rubraview_setting_def_t *def = &schema[i];
-        if (def->pair == 0 || !rubraview_u8_eq_lit(def->section, "shell")) continue;
+        if (def->pair == 0 || !proven_u8str_view_eq(def->section, PROVEN_LIT("shell"))) continue;
         const rubraview_setting_def_t *menu = &schema[def->pair];
         if (rubraview_ini_get(&ini, menu->section, menu->key)) continue;
         rubraview_settings_set(&app->settings, menu->section, menu->key, rubraview_settings_get(&app->settings, def->section, def->key));
@@ -18244,40 +18244,40 @@ static void skip_dirs_take_old(app_state_t *app) {
                                         "skip_dir_5", "skip_dir_6", "skip_dir_7", "skip_dir_8" };
     bool moved = false;
     for (int i = 0; i < 8; ++i) {
-        u8str_t key = { .ptr = OLD[i], .len = strlen(OLD[i]) };
-        u8str_t folder = rubraview_settings_get_text(&app->settings, U8("recent"), key);
-        if (folder.len == 0) continue;
+        proven_u8str_view_t key = { .ptr = (const proven_byte_t *)OLD[i], .size = strlen(OLD[i]) };
+        proven_u8str_view_t folder = rubraview_settings_get_text(&app->settings, PROVEN_LIT("recent"), key);
+        if (folder.size == 0) continue;
         char buffer[8192];
-        u8str_t list = rubraview_folder_list_put(buffer, sizeof(buffer), rubraview_settings_get_text(&app->settings, U8("recent"), U8("skip_dirs")),
+        proven_u8str_view_t list = rubraview_folder_list_put(buffer, sizeof(buffer), rubraview_settings_get_text(&app->settings, PROVEN_LIT("recent"), PROVEN_LIT("skip_dirs")),
                                                  folder, (size_t)-1);
-        if (list.len == 0) continue;
-        rubraview_settings_set_text(&app->settings, U8("recent"), U8("skip_dirs"), app_keep(app, list));
-        rubraview_settings_set_text(&app->settings, U8("recent"), key, U8(""));
+        if (list.size == 0) continue;
+        rubraview_settings_set_text(&app->settings, PROVEN_LIT("recent"), PROVEN_LIT("skip_dirs"), app_keep(app, list));
+        rubraview_settings_set_text(&app->settings, PROVEN_LIT("recent"), key, PROVEN_LIT(""));
         moved = true;
     }
     if (moved) settings_write_if_changed(app, false);
 }
 
-static size_t settings_table_row(void *user, u8str_t source, size_t index, char *buffer, size_t capacity) {
+static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t index, char *buffer, size_t capacity) {
     app_state_t *app = (app_state_t*)user;
     int32_t folders = folder_list_of_table(source);
     if (folders >= 0) {
-        u8str_t dirs[256];
+        proven_u8str_view_t dirs[256];
         size_t n = rubraview_folder_list_split(folder_list_text(app, folders), dirs, 256);
         /* The last row is the box every folder is typed in; the one being changed says so. */
         bool typing = app->spath_active && app->spath_list_index >= 0 && app->spath_list == folders;
         bool changing = typing && (size_t)app->spath_list_index == index - 1;
         int w = index == 0 ? snprintf(buffer, capacity, T("Folder  (Enter changes it in the box below; Delete or the x at the end takes it off)"))
-              : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].len, dirs[index - 1].ptr,
+              : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].size, dirs[index - 1].ptr,
                                       changing ? T("   (being changed below)") : "")
               : index == n + 1 ? (typing ? 0
                                   : snprintf(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
               : 0;
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
-    if (rubraview_u8_eq_lit(source, "plugins")) {   /* RFC-0007: what the folder holds */
+    if (proven_u8str_view_eq(source, PROVEN_LIT("plugins"))) {   /* RFC-0007: what the folder holds */
         int w = 0;
-        bool on = rubraview_settings_get(&app->settings, U8("edit"), U8("plugins")) > 0.5;
+        bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugins")) > 0.5;
         if (index == 0) w = snprintf(buffer, capacity, "%s", T("Plug-in  (version, licence)  -  file"));
         else if (!on) w = index == 1 ? snprintf(buffer, capacity, "%s", T("plug-ins are off")) : 0;
         else if (g_plugin_count == 0) w = index == 1 ? snprintf(buffer, capacity, T("none in %s"), g_plugin_folder) : 0;
@@ -18289,7 +18289,7 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
         }
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
-    if (!rubraview_u8_eq_lit(source, "keymap")) return 0;
+    if (!proven_u8str_view_eq(source, PROVEN_LIT("keymap"))) return 0;
     if (index == 0) {
         int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", T("keys  (Enter adds a key, Delete takes the last off)"));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
@@ -18304,8 +18304,8 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
     } else {
         for (size_t c = 0; c < b->combo_count && used + 32 < sizeof(keys); ++c) {
             char one[64];
-            u8str_t text = rubraview_key_combo_format(one, sizeof(one), b->combos[c]);
-            int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.len, text.ptr);
+            proven_u8str_view_t text = rubraview_key_combo_format(one, sizeof(one), b->combos[c]);
+            int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.size, text.ptr);
             if (n > 0) used += (size_t)n;
         }
         /* §3.22.2: a key another action also claims where the two meet —
@@ -18318,7 +18318,7 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
                 for (size_t y = 0; y < o->combo_count && !clash; ++y)
                     clash = rubraview_key_combo_equal(b->combos[x], o->combos[y]);
             if (!clash) continue;
-            int n = snprintf(keys + used, sizeof(keys) - used, T("  ! also %.*s"), (int)o->action.len, o->action.ptr);
+            int n = snprintf(keys + used, sizeof(keys) - used, T("  ! also %.*s"), (int)o->action.size, o->action.ptr);
             if (n > 0) used += (size_t)n;
             break;
         }
@@ -18326,8 +18326,8 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
         if (b->combo_count == 0 && used == 0) used = (size_t)snprintf(keys, sizeof(keys), T("(no key)"));
     }
     int n = snprintf(buffer, capacity, "%-12.*s %-24.*s %.*s",
-                     b->context.len ? (int)b->context.len : 2, b->context.len ? b->context.ptr : "ui",
-                     (int)b->action.len, b->action.ptr, (int)used, keys);
+                     b->context.size ? (int)b->context.size : 2, b->context.size ? (const char *)b->context.ptr : "ui",
+                     (int)b->action.size, b->action.ptr, (int)used, keys);
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
 }
@@ -18335,11 +18335,11 @@ static size_t settings_table_row(void *user, u8str_t source, size_t index, char 
 static void settings_measure(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
     /* 1.25.0 (owner, 2026-10-20): its own face, size and line spacing (Settings › General) */
-    double size = rubraview_settings_get(&app->settings, U8("general"), U8("size_settings")) / 100.0;
-    double spacing = rubraview_settings_get(&app->settings, U8("general"), U8("settings_spacing")) / 100.0;
+    double size = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("size_settings")) / 100.0;
+    double spacing = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("settings_spacing")) / 100.0;
     if (!(size >= 0.6)) size = 1.0;
     if (!(spacing >= 1.0)) spacing = 1.0;
-    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, U8("general"), U8("font_settings")));
+    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("font_settings")));
     rubraview_pal_render_set_mono_family(app->settings_renderer, face.family);
     app->settings_font = 15.0 * dpi * size;
     if (!rubraview_pal_render_mono_cell(app->settings_renderer, app->settings_font,
@@ -18450,11 +18450,11 @@ static void settings_write_if_changed(app_state_t *app, bool say) {
     rubraview_scratch_t sc;
     proven_arena_t *sa = scratch_begin(app, &sc, 4u << 20);
     proven_arena_t *half = settings_half_next(app);
-    u8str_t existing = rubraview_pal_fs_read_file(sa, app->settings_path, 256u * 1024u);
+    proven_u8str_view_t existing = rubraview_pal_fs_read_file(sa, app->settings_path, 256u * 1024u);
     rubraview_settings_t merged = rubraview_settings_merge_changed(sa, &app->settings, &app->settings_saved, existing);
-    u8str_t text = rubraview_settings_save(half, &merged, existing);
+    proven_u8str_view_t text = rubraview_settings_save(half, &merged, existing);
     scratch_end(app, &sc);
-    bool written = text.len > 0 && rubraview_pal_fs_write_file_atomic(app->settings_path, text);
+    bool written = text.size > 0 && rubraview_pal_fs_write_file_atomic(app->settings_path, text);
     if (locked) rubraview_pal_config_unlock();
     if (written) {
         app->settings_saved = app->settings;
@@ -18479,7 +18479,7 @@ static void page_failure_notice(app_state_t *app) {
     app_page_t *page = &app->pages[index];
     if (!page->failed || page->failure_said) return;
     page->failure_said = true;
-    u8str_t name = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
+    proven_u8str_view_t name = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
     if (is_media_path(name) || is_text_path(name)) return;
     if (rubraview_path_has_ext(name, ".jxl")) {
         /* What is known of why: Windows' codec was tried first and is not
@@ -18517,15 +18517,15 @@ static void settings_share(app_state_t *app, double now) {
 static void settings_follow(app_state_t *app, int what) {
     if (what & 1) {
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
+    proven_u8str_view_t existing = rubraview_pal_fs_read_file(app->arena, app->settings_path, 256u * 1024u);
     if (locked) rubraview_pal_config_unlock();
-    if (existing.len > 0) {
+    if (existing.size > 0) {
         rubraview_settings_t loaded = rubraview_settings_load(app->arena, existing);
         rubraview_settings_t mine = rubraview_settings_merge_changed(app->arena, &app->settings, &app->settings_saved, existing);
         bool changed = rubraview_settings_differs(&mine, &app->settings);
         if (app->settings_open && changed) {
             /* Revert undoes what was done in this window, not what another viewer did. */
-            u8str_t opened = rubraview_settings_save(app->arena, &app->settings_opened, existing);
+            proven_u8str_view_t opened = rubraview_settings_save(app->arena, &app->settings_opened, existing);
             app->settings_opened = rubraview_settings_merge_changed(app->arena, &loaded, &app->settings_saved, opened);
         }
         /* The counts of changes are this viewer's own: what it redraws by. */
@@ -18555,8 +18555,8 @@ static void settings_close(app_state_t *app) {
     settings_write_if_changed(app, true);
     app->key_capture = 0;
     if (!rubraview_keymap_equal(&app->keymap, &app->keymap_saved)) {
-        u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
-        if (text.len > 0 && rubraview_pal_fs_write_file_atomic(app->keymap_path, text)) {
+        proven_u8str_view_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
+        if (text.size > 0 && rubraview_pal_fs_write_file_atomic(app->keymap_path, text)) {
             app->keymap_saved = rubraview_keymap_copy(app->arena, &app->keymap);
             rubraview_pal_instance_tell_config_changed(true);   /* D-105 */
             osd_say(app, TU8("keys saved to keymap.ini"));
@@ -18588,14 +18588,14 @@ static const char *const LANG_PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant", "fa"
 
 /* Where Import puts what cannot go beside the program (the Store's package
    and Program Files take no files): `name` in the settings folder. */
-static u8str_t imported_folder(app_state_t *app, const char *name) {
-    u8str_t dir = rubraview_path_dirname(app->settings_path);
-    return dir.len > 0 ? rubraview_path_join(app->arena, dir, cstr(name)) : U8("");
+static proven_u8str_view_t imported_folder(app_state_t *app, const char *name) {
+    proven_u8str_view_t dir = rubraview_path_dirname(app->settings_path);
+    return dir.size > 0 ? rubraview_path_join(app->arena, dir, cstr(name)) : PROVEN_LIT("");
 }
 
 static void lang_apply(app_state_t *app) {
     static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
-    int c = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("language")));
+    int c = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("language")));
     const char *want = CHOICES[c >= 0 && c < 7 ? c : 0];
     if (strcmp(want, "auto") == 0) {
         char tag[96];
@@ -18610,16 +18610,16 @@ static void lang_apply(app_state_t *app) {
     if (want) {
         char name[48];
         snprintf(name, sizeof(name), "lang/%s.txt", want);
-        u8str_t dirs[2] = { rubraview_path_dirname(app->settings_path), app->config_beside };
+        proven_u8str_view_t dirs[2] = { rubraview_path_dirname(app->settings_path), app->config_beside };
         bool loaded = false;
         for (int i = 0; i < 2 && !loaded; i++) {
-            if (dirs[i].len == 0) continue;
+            if (dirs[i].size == 0) continue;
             rubraview_scratch_t sc;   /* the pack keeps its own copy; the file read is for the moment */
             proven_arena_t *sa = scratch_begin(app, &sc, RUBRAVIEW_LANG_MAX_FILE + (64u << 10));
-            u8str_t path = rubraview_path_join(sa, dirs[i], cstr(name));
-            u8str_t text = rubraview_pal_fs_read_file(sa, path, RUBRAVIEW_LANG_MAX_FILE);
+            proven_u8str_view_t path = rubraview_path_join(sa, dirs[i], cstr(name));
+            proven_u8str_view_t text = rubraview_pal_fs_read_file(sa, path, RUBRAVIEW_LANG_MAX_FILE);
             rubraview_lang_stats_t stats;
-            if (text.len > 0) loaded = rubraview_lang_load(&g_lang, text, &stats);
+            if (text.size > 0) loaded = rubraview_lang_load(&g_lang, text, &stats);
             scratch_end(app, &sc);
         }
         if (loaded) {
@@ -18628,7 +18628,7 @@ static void lang_apply(app_state_t *app) {
         } else {
             char line[96];
             int n = snprintf(line, sizeof(line), T("no language pack lang\\%s.txt beside rubraview.exe: English it is"), want);
-            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+            if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         }
     }
     /* Everything that holds text made in the old language is made again. */
@@ -18653,13 +18653,13 @@ static void settings_apply_rest(app_state_t *app) {
 
     /* General */
     lang_apply(app);
-    app->frameless = rubraview_settings_get(st, U8("general"), U8("frameless")) > 0.5;
+    app->frameless = rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("frameless")) > 0.5;
     rubraview_pal_window_set_frameless(app->window, app->frameless);
-    app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(st, U8("general"), U8("titlebar_trigger_px"))) * dpi;   /* never less than the bar (owner, 2026-10-14) */
-    app->titlebar.hide_delay = rubraview_settings_get(st, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
+    app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("titlebar_trigger_px"))) * dpi;   /* never less than the bar (owner, 2026-10-14) */
+    app->titlebar.hide_delay = rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("titlebar_hide_ms")) / 1000.0;
 
     /* Viewer */
-    double fit = rubraview_settings_get(st, U8("viewer"), U8("fit_mode"));
+    double fit = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("fit_mode"));
     if (fit != last_fit) {
         static const rubraview_fit_mode_t FIT[] = { RUBRAVIEW_FIT_WINDOW, RUBRAVIEW_FIT_WIDTH, RUBRAVIEW_FIT_HEIGHT,
                                                     RUBRAVIEW_FIT_ACTUAL_SIZE, RUBRAVIEW_FIT_SMART, RUBRAVIEW_FIT_STRETCH };
@@ -18668,7 +18668,7 @@ static void settings_apply_rest(app_state_t *app) {
         if (!first) reset_view(app);
         last_fit = fit;
     }
-    double layout = rubraview_settings_get(st, U8("viewer"), U8("layout"));
+    double layout = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("layout"));
     if (layout != last_layout) {
         /* The one place the layout is set from: the settings window, the
            toolbox's tile, the menu and the key all write this setting, so
@@ -18687,62 +18687,62 @@ static void settings_apply_rest(app_state_t *app) {
         if (!first) reset_view(app);
         last_layout = layout;
     }
-    double collapse = rubraview_settings_get(st, U8("viewer"), U8("portrait_collapse"));
+    double collapse = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("portrait_collapse"));
     if (collapse != last_collapse) {
         app->layout_opts.portrait_collapse_ar = collapse > 0.5 ? 1.0 : 0.0;   /* 0: never collapse */
         app->needs_relayout = true;
         last_collapse = collapse;
     }
-    g_gutter = rubraview_settings_get(st, U8("viewer"), U8("gutter_px")) * dpi;
-    g_zoom_step = 1.0 + rubraview_settings_get(st, U8("viewer"), U8("zoom_step_percent")) / 100.0;
-    g_whole_zoom = rubraview_settings_get(st, U8("viewer"), U8("whole_zoom")) > 0.5;
+    g_gutter = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("gutter_px")) * dpi;
+    g_zoom_step = 1.0 + rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("zoom_step_percent")) / 100.0;
+    g_whole_zoom = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("whole_zoom")) > 0.5;
     {
         static const uint32_t BACK[] = { 0xFF101010u, 0xFF000000u, 0xFF606060u, 0xFFFFFFFFu };
-        int back = (int)lround(rubraview_settings_get(st, U8("viewer"), U8("background")));
+        int back = (int)lround(rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("background")));
         g_canvas = BACK[back >= 0 && back < 4 ? back : 0];
         static const uint32_t INK[] = { 0xFFFFFFFFu, 0xFFFFE94Du, 0xFF66E0FFu, 0xFF7CF08Au, 0xFFFF9AD0u };
-        int ink = (int)lround(rubraview_settings_get(st, U8("video"), U8("subtitle_color")));
+        int ink = (int)lround(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_color")));
         g_subtitle_argb = INK[ink >= 0 && ink < 5 ? ink : 0];
         static uint64_t last_face = 0;
-        u8str_t face = rubraview_settings_get_text(st, U8("video"), U8("subtitle_font"));
+        proven_u8str_view_t face = rubraview_settings_get_text(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_font"));
         uint64_t h = 1469598103934665603ull;
-        for (size_t i = 0; i < face.len; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
+        for (size_t i = 0; i < face.size; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
         if (h != last_face) { g_subtitle_style++; last_face = h; }
     }
     /* Before anything asks for FFmpeg, and again on a change: while it is
        not loaded, the new folder is tried at the next ask. */
     rubraview_pal_ffmpeg_set_folders(imported_folder(app, "ffmpeg"), rubraview_pal_fs_expand_env(app->arena,
-        rubraview_path_typed_folder(rubraview_settings_get_text(st, U8("video"), U8("ffmpeg_dir")))));
-    double grid = rubraview_settings_get(st, U8("viewer"), U8("pixel_grid"));
+        rubraview_path_typed_folder(rubraview_settings_get_text(st, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir")))));
+    double grid = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("pixel_grid"));
     if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
 
     /* Files */
     {
         /* RV-106: what a folder lists, changed while one is open: it is listed again, on the same file. */
         static uint64_t last_listing = 0;
-        u8str_t pattern = rubraview_settings_get_text(st, U8("files"), U8("pattern"));
+        proven_u8str_view_t pattern = rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
         uint64_t listing = 1469598103934665603ull;
-        for (size_t i = 0; i < pattern.len; ++i) listing = (listing ^ (uint8_t)pattern.ptr[i]) * 1099511628211ull;
+        for (size_t i = 0; i < pattern.size; ++i) listing = (listing ^ (uint8_t)pattern.ptr[i]) * 1099511628211ull;
         static const char *const KEYS[] = { "sort_mode", "sort_ascending", "subfolders", "show" };
         for (size_t i = 0; i < 4; ++i) {
-            listing = (listing ^ (uint64_t)lround(rubraview_settings_get(st, U8("files"), cstr(KEYS[i])) + 1.0)) * 1099511628211ull;
+            listing = (listing ^ (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("files"), cstr(KEYS[i])) + 1.0)) * 1099511628211ull;
         }
         if (listing != last_listing && !first) folder_relist(app);
         last_listing = listing;
     }
-    int cp = (int)lround(rubraview_settings_get(st, U8("files"), U8("archive_codepage")));
+    int cp = (int)lround(rubraview_settings_get(st, PROVEN_LIT("files"), PROVEN_LIT("archive_codepage")));
     app->archive_codepage = cp >= 0 && cp <= (int)RUBRAVIEW_CODEPAGE_WESTERN ? (rubraview_codepage_t)cp : RUBRAVIEW_CODEPAGE_AUTO;
 
     /* Audio */
-    rubraview_pal_audio_set_latency_ms((uint32_t)lround(rubraview_settings_get(st, U8("audio"), U8("wasapi_latency_ms"))));
+    rubraview_pal_audio_set_latency_ms((uint32_t)lround(rubraview_settings_get(st, PROVEN_LIT("audio"), PROVEN_LIT("wasapi_latency_ms"))));
 
-    picker_columns_read(rubraview_settings_get_text(st, U8("files"), U8("picker_columns")));   /* 1.25.0 */
+    picker_columns_read(rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("picker_columns")));   /* 1.25.0 */
     {   /* 1.25.0: the settings window's face, size or line spacing changed: laid out again */
         static uint64_t last_look;
-        u8str_t f = rubraview_settings_get_text(st, U8("general"), U8("font_settings"));
-        uint64_t look = (uint64_t)lround(rubraview_settings_get(st, U8("general"), U8("size_settings"))) * 1000u +
-                        (uint64_t)lround(rubraview_settings_get(st, U8("general"), U8("settings_spacing")));
-        for (size_t i = 0; i < f.len; ++i) look = (look ^ (unsigned char)f.ptr[i]) * 1099511628211ull;
+        proven_u8str_view_t f = rubraview_settings_get_text(st, PROVEN_LIT("general"), PROVEN_LIT("font_settings"));
+        uint64_t look = (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("size_settings"))) * 1000u +
+                        (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("settings_spacing")));
+        for (size_t i = 0; i < f.size; ++i) look = (look ^ (unsigned char)f.ptr[i]) * 1099511628211ull;
         if (look != last_look) {
             last_look = look;
             if (!first && app->settings_open && app->settings_window) {
@@ -18756,7 +18756,7 @@ static void settings_apply_rest(app_state_t *app) {
     }
 
     /* Text: shown at all (1.25.0) */
-    bool text_on = rubraview_settings_get(st, U8("text"), U8("viewer")) > 0.5;
+    bool text_on = rubraview_settings_get(st, PROVEN_LIT("text"), PROVEN_LIT("viewer")) > 0.5;
     if (text_on != g_text_on) {
         g_text_on = text_on;
         if (!first) settings_say(app, text_on ? T("text files are listed and shown again")
@@ -18765,29 +18765,29 @@ static void settings_apply_rest(app_state_t *app) {
 
     /* Display */
     static const double TILE[] = { 48.0, 64.0, 96.0 };
-    int tile = (int)lround(rubraview_settings_get(st, U8("display"), U8("tile_base_px")));
+    int tile = (int)lround(rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("tile_base_px")));
     g_tile_base = TILE[tile >= 0 && tile < 3 ? tile : 1];
-    double color = rubraview_settings_get(st, U8("display"), U8("color_management"));
+    double color = rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("color_management"));
     if (color != last_color) {
         rubraview_pal_image_set_color_management(color > 0.5);
         if (!first) unload_all_pages(app);   /* decoded again, with or without the profile */
         last_color = color;
     }
     static const uint32_t ACCENT[] = { 0xFFC0304Au, 0xFF3A78D8u, 0xFF2E9E6Au, 0xFFD08A1Eu, 0xFF1E9E9Eu, 0xFF8A4FD0u };
-    int accent = (int)lround(rubraview_settings_get(st, U8("display"), U8("accent")));
+    int accent = (int)lround(rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("accent")));
     g_accent = ACCENT[accent >= 0 && accent < 6 ? accent : 0];
 
     /* Cache */
-    app->cache_budget = (size_t)rubraview_settings_get(st, U8("cache"), U8("memory_cap_mb")) * 1024u * 1024u;
-    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookahead")));
-    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, U8("cache"), U8("lookbehind")));
-    double privacy = rubraview_settings_get(st, U8("cache"), U8("privacy_clean"));
+    app->cache_budget = (size_t)rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("memory_cap_mb")) * 1024u * 1024u;
+    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("lookahead")));
+    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("lookbehind")));
+    double privacy = rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("privacy_clean"));
     if (privacy != last_privacy) { app->export_options.privacy_clean = privacy > 0.5; last_privacy = privacy; }
-    double details = rubraview_settings_get(st, U8("cache"), U8("keep_details"));   /* 1.17.0 */
+    double details = rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("keep_details"));   /* 1.17.0 */
     if (details != last_details) { app->export_options.keep_details = (int32_t)lround(details); last_details = details; }
 
     /* Keys */
-    double keymap = rubraview_settings_get(st, U8("keys"), U8("use_keymap_file"));
+    double keymap = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("use_keymap_file"));
     if (keymap != last_keymap) {
         if (!first) load_keymap(app);
         last_keymap = keymap;
@@ -18798,7 +18798,7 @@ static void settings_apply_rest(app_state_t *app) {
 /* RV-136 (owner, 2026-10-18): one face for every word the program writes,
    Settings › General › UI font, on every window's renderer. */
 static void ui_font_apply_all(app_state_t *app) {
-    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, U8("general"), U8("ui_font")));
+    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font")));
     rubraview_renderer_t *all[] = { app->renderer, app->mini_renderer, app->toolbox_renderer, app->settings_renderer, app->info_renderer,
                                     app->help_renderer, app->files_renderer, app->subs_renderer, app->fontpick_renderer,
                                     app->edit_renderer };
@@ -18814,17 +18814,17 @@ static void settings_took_effect(app_state_t *app) {
         plugins_from_settings(app);
         if (app->settings_window && g_plugin_count != before) skip_dirs_table_rows(app);
     }
-    app->media_preferred = rubraview_settings_get(&app->settings, U8("video"), U8("decoder")) > 0.5
+    app->media_preferred = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("decoder")) > 0.5
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     /* Owner, 2026-09-15: always on top follows the setting, whichever way it was changed. */
     rubraview_pal_window_set_topmost(app->window,
-                                     rubraview_settings_get(&app->settings, U8("general"), U8("always_on_top")) > 0.5);
+                                     rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5);
     /* D-15: the session volume follows the setting. */
-    rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, U8("audio"), U8("volume")) / 100.0,
-                                   rubraview_settings_get(&app->settings, U8("audio"), U8("mute")) > 0.5);
+    rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")) / 100.0,
+                                   rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5);
     /* D-38: export's resizes on the graphics card, restarted only when the choice changed. */
     static int applied = -1;
-    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("display"), U8("gpu_resize")));
+    int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("display"), PROVEN_LIT("gpu_resize")));
     if (mode != applied) {
         applied = mode;
         (void)rubraview_pal_gpu_resample_start((rubraview_gpu_resize_mode_t)mode);
@@ -18836,8 +18836,8 @@ static void settings_took_effect(app_state_t *app) {
     bool ascending = true;
     int order = (int)folder_sort_mode(app, &ascending) * 2 + (ascending ? 1 : 0);
     if (sorted >= 0 && order != sorted && app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER && page_count(app) > 1) {
-        u8str_t here = current_file_path(app);
-        if (here.len > 0 && !app->media) open_path(app, here);
+        proven_u8str_view_t here = current_file_path(app);
+        if (here.size > 0 && !app->media) open_path(app, here);
     }
     sorted = order;
 
@@ -18860,15 +18860,15 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
     if (writing) {
         rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
         if (!picked.accepted || picked.count == 0) return;
-        u8str_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
-        settings_say(app, text.len > 0 && rubraview_pal_fs_write_file(picked.paths[0], text)
+        proven_u8str_view_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
+        settings_say(app, text.size > 0 && rubraview_pal_fs_write_file(picked.paths[0], text)
                               ? T("keys exported") : T("could not write that file"));
         return;
     }
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
     if (!picked.accepted || picked.count == 0) return;
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], KEYMAP_MAX_BYTES);
-    rubraview_keymap_t keymap = text.len > 0 ? rubraview_keymap_parse(app->arena, text) : (rubraview_keymap_t){0};
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], KEYMAP_MAX_BYTES);
+    rubraview_keymap_t keymap = text.size > 0 ? rubraview_keymap_parse(app->arena, text) : (rubraview_keymap_t){0};
     if (keymap.count == 0) {
         settings_say(app, T("that file holds no keys; nothing changed"));
         return;
@@ -18886,9 +18886,9 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
    another name, and only when every one is there do they take their
    names, so a copy that fails half way leaves nothing behind (RV-122).
    0 nothing copied, 1 beside, 2 the settings folder. */
-static bool import_into(app_state_t *app, u8str_t place, const u8str_t *from, const u8str_t *names, size_t count) {
-    u8str_t to[16], spare[16];
-    if (count > 16 || place.len == 0 || !rubraview_pal_fs_make_dirs(place)) return false;
+static bool import_into(app_state_t *app, proven_u8str_view_t place, const proven_u8str_view_t *from, const proven_u8str_view_t *names, size_t count) {
+    proven_u8str_view_t to[16], spare[16];
+    if (count > 16 || place.size == 0 || !rubraview_pal_fs_make_dirs(place)) return false;
     size_t done = 0;
     for (; done < count; done++) {
         to[done] = rubraview_path_join(app->arena, place, names[done]);
@@ -18904,9 +18904,9 @@ static bool import_into(app_state_t *app, u8str_t place, const u8str_t *from, co
     return whole;
 }
 
-static int import_files(app_state_t *app, const u8str_t *from, const u8str_t *names, size_t count, const char *sub,
+static int import_files(app_state_t *app, const proven_u8str_view_t *from, const proven_u8str_view_t *names, size_t count, const char *sub,
                         bool beside_in_sub) {
-    u8str_t beside = beside_in_sub ? rubraview_path_join(app->arena, app->config_beside, cstr(sub)) : app->config_beside;
+    proven_u8str_view_t beside = beside_in_sub ? rubraview_path_join(app->arena, app->config_beside, cstr(sub)) : app->config_beside;
     if (import_into(app, beside, from, names, count)) return 1;
     return import_into(app, imported_folder(app, sub), from, names, count) ? 2 : 0;
 }
@@ -18919,23 +18919,23 @@ static void lang_import(app_state_t *app) {
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
     if (!picked.accepted || picked.count == 0) return;
-    u8str_t from[16], names[16];
+    proven_u8str_view_t from[16], names[16];
     size_t count = 0;
     for (size_t i = 0; i < picked.count && count < 16; i++) {
         /* Only a pack this build can choose, under its own name (ko.txt), and one that reads. */
-        u8str_t stem = rubraview_path_stem(picked.paths[i]);
+        proven_u8str_view_t stem = rubraview_path_stem(picked.paths[i]);
         const char *code = NULL;
         for (size_t k = 0; k < 5 && !code; k++) {
             size_t at = 0, n = strlen(LANG_PACKS[k]);
-            while (at < n && at < stem.len && tolower((unsigned char)stem.ptr[at]) == tolower((unsigned char)LANG_PACKS[k][at])) at++;
-            if (at == n && stem.len == n) code = LANG_PACKS[k];
+            while (at < n && at < stem.size && tolower((unsigned char)stem.ptr[at]) == tolower((unsigned char)LANG_PACKS[k][at])) at++;
+            if (at == n && stem.size == n) code = LANG_PACKS[k];
         }
         rubraview_scratch_t sc;   /* read only to see that it is a pack */
         proven_arena_t *sa = scratch_begin(app, &sc, RUBRAVIEW_LANG_MAX_FILE + (64u << 10));
-        u8str_t text = code ? rubraview_pal_fs_read_file(sa, picked.paths[i], RUBRAVIEW_LANG_MAX_FILE) : U8("");
+        proven_u8str_view_t text = code ? rubraview_pal_fs_read_file(sa, picked.paths[i], RUBRAVIEW_LANG_MAX_FILE) : PROVEN_LIT("");
         rubraview_lang_t probe = {0};
         rubraview_lang_stats_t stats;
-        bool reads = text.len > 0 && rubraview_lang_load(&probe, text, &stats);
+        bool reads = text.size > 0 && rubraview_lang_load(&probe, text, &stats);
         rubraview_lang_free(&probe);
         scratch_end(app, &sc);
         if (!reads) continue;
@@ -18952,9 +18952,9 @@ static void lang_import(app_state_t *app) {
     /* The settings folder's lang\ is read first (lang_apply): an older pack
        of the same name there would hide the one put beside the program. */
     if (where == 1) {
-        u8str_t own = imported_folder(app, "lang");
-        u8str_t beside = rubraview_path_join(app->arena, app->config_beside, U8("lang"));
-        for (size_t i = 0; own.len > 0 && !rubraview_u8_eq(own, beside) && i < count; i++) {
+        proven_u8str_view_t own = imported_folder(app, "lang");
+        proven_u8str_view_t beside = rubraview_path_join(app->arena, app->config_beside, PROVEN_LIT("lang"));
+        for (size_t i = 0; own.size > 0 && !proven_u8str_view_eq(own, beside) && i < count; i++) {
             if (rubraview_pal_fs_exists(rubraview_path_join(app->arena, own, names[i]))) (void)import_into(app, own, &from[i], &names[i], 1);
         }
     }
@@ -18977,42 +18977,42 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
     const rubraview_settings_t *st = &app->settings;
     /* RV-120: each extension's two boxes, Open with and the right-click menu. */
     const struct { const char *ext; bool types, menu; } CHOICES[] = {
-        { "jpg",  rubraview_settings_get(st, U8("shell"), U8("ext_jpg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_jpg")) > 0.5 },
-        { "jpeg", rubraview_settings_get(st, U8("shell"), U8("ext_jpeg")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_jpeg")) > 0.5 },
-        { "png",  rubraview_settings_get(st, U8("shell"), U8("ext_png")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_png")) > 0.5 },
-        { "apng", rubraview_settings_get(st, U8("shell"), U8("ext_apng")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_apng")) > 0.5 },
-        { "gif",  rubraview_settings_get(st, U8("shell"), U8("ext_gif")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_gif")) > 0.5 },
-        { "bmp",  rubraview_settings_get(st, U8("shell"), U8("ext_bmp")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_bmp")) > 0.5 },
-        { "tif",  rubraview_settings_get(st, U8("shell"), U8("ext_tif")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_tif")) > 0.5 },
-        { "tiff", rubraview_settings_get(st, U8("shell"), U8("ext_tiff")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_tiff")) > 0.5 },
-        { "webp", rubraview_settings_get(st, U8("shell"), U8("ext_webp")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_webp")) > 0.5 },
-        { "avif", rubraview_settings_get(st, U8("shell"), U8("ext_avif")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_avif")) > 0.5 },
-        { "jxl",  rubraview_settings_get(st, U8("shell"), U8("ext_jxl")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_jxl")) > 0.5 },
-        { "ico",  rubraview_settings_get(st, U8("shell"), U8("ext_ico")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_ico")) > 0.5 },
-        { "cbz",  rubraview_settings_get(st, U8("shell"), U8("ext_cbz")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cbz")) > 0.5 },
-        { "cb7",  rubraview_settings_get(st, U8("shell"), U8("ext_cb7")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cb7")) > 0.5 },
-        { "cbr",  rubraview_settings_get(st, U8("shell"), U8("ext_cbr")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_cbr")) > 0.5 },
-        { "mp4",  rubraview_settings_get(st, U8("shell"), U8("ext_mp4")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mp4")) > 0.5 },
-        { "mkv",  rubraview_settings_get(st, U8("shell"), U8("ext_mkv")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mkv")) > 0.5 },
-        { "webm", rubraview_settings_get(st, U8("shell"), U8("ext_webm")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_webm")) > 0.5 },
-        { "avi",  rubraview_settings_get(st, U8("shell"), U8("ext_avi")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_avi")) > 0.5 },
-        { "mov",  rubraview_settings_get(st, U8("shell"), U8("ext_mov")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mov")) > 0.5 },
-        { "mp3",  rubraview_settings_get(st, U8("shell"), U8("ext_mp3")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_mp3")) > 0.5 },
-        { "flac", rubraview_settings_get(st, U8("shell"), U8("ext_flac")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_flac")) > 0.5 },
-        { "wav",  rubraview_settings_get(st, U8("shell"), U8("ext_wav")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_wav")) > 0.5 },
-        { "ogg",  rubraview_settings_get(st, U8("shell"), U8("ext_ogg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_ogg")) > 0.5 },
-        { "opus", rubraview_settings_get(st, U8("shell"), U8("ext_opus")) > 0.5, rubraview_settings_get(st, U8("shell"), U8("menu_opus")) > 0.5 },
-        { "m4a",  rubraview_settings_get(st, U8("shell"), U8("ext_m4a")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_m4a")) > 0.5 },
+        { "jpg",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_jpg")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_jpg")) > 0.5 },
+        { "jpeg", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_jpeg")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_jpeg")) > 0.5 },
+        { "png",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_png")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_png")) > 0.5 },
+        { "apng", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_apng")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_apng")) > 0.5 },
+        { "gif",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_gif")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_gif")) > 0.5 },
+        { "bmp",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_bmp")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_bmp")) > 0.5 },
+        { "tif",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_tif")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_tif")) > 0.5 },
+        { "tiff", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_tiff")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_tiff")) > 0.5 },
+        { "webp", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_webp")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_webp")) > 0.5 },
+        { "avif", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_avif")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_avif")) > 0.5 },
+        { "jxl",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_jxl")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_jxl")) > 0.5 },
+        { "ico",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_ico")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_ico")) > 0.5 },
+        { "cbz",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_cbz")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_cbz")) > 0.5 },
+        { "cb7",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_cb7")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_cb7")) > 0.5 },
+        { "cbr",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_cbr")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_cbr")) > 0.5 },
+        { "mp4",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mp4")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mp4")) > 0.5 },
+        { "mkv",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mkv")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mkv")) > 0.5 },
+        { "webm", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_webm")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_webm")) > 0.5 },
+        { "avi",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_avi")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_avi")) > 0.5 },
+        { "mov",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mov")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mov")) > 0.5 },
+        { "mp3",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mp3")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mp3")) > 0.5 },
+        { "flac", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_flac")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_flac")) > 0.5 },
+        { "wav",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_wav")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_wav")) > 0.5 },
+        { "ogg",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_ogg")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_ogg")) > 0.5 },
+        { "opus", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_opus")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_opus")) > 0.5 },
+        { "m4a",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_m4a")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_m4a")) > 0.5 },
         /* RV-123: text files */
-        { "txt",  rubraview_settings_get(st, U8("shell"), U8("ext_txt")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_txt")) > 0.5 },
-        { "log",  rubraview_settings_get(st, U8("shell"), U8("ext_log")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_log")) > 0.5 },
-        { "nfo",  rubraview_settings_get(st, U8("shell"), U8("ext_nfo")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_nfo")) > 0.5 },
-        { "md",   rubraview_settings_get(st, U8("shell"), U8("ext_md")) > 0.5,   rubraview_settings_get(st, U8("shell"), U8("menu_md")) > 0.5 },
-        { "zip",  rubraview_settings_get(st, U8("shell"), U8("ext_zip")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_zip")) > 0.5 },
-        { "7z",   rubraview_settings_get(st, U8("shell"), U8("ext_7z")) > 0.5,   rubraview_settings_get(st, U8("shell"), U8("menu_7z")) > 0.5 },
-        { "rar",  rubraview_settings_get(st, U8("shell"), U8("ext_rar")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_rar")) > 0.5 },
-        { "alz",  rubraview_settings_get(st, U8("shell"), U8("ext_alz")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_alz")) > 0.5 },
-        { "egg",  rubraview_settings_get(st, U8("shell"), U8("ext_egg")) > 0.5,  rubraview_settings_get(st, U8("shell"), U8("menu_egg")) > 0.5 },
+        { "txt",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_txt")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_txt")) > 0.5 },
+        { "log",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_log")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_log")) > 0.5 },
+        { "nfo",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_nfo")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_nfo")) > 0.5 },
+        { "md",   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_md")) > 0.5,   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_md")) > 0.5 },
+        { "zip",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_zip")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_zip")) > 0.5 },
+        { "7z",   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_7z")) > 0.5,   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_7z")) > 0.5 },
+        { "rar",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_rar")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_rar")) > 0.5 },
+        { "alz",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_alz")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_alz")) > 0.5 },
+        { "egg",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_egg")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_egg")) > 0.5 },
     };
     size_t pos = 0;
     out[0] = '\0';
@@ -19036,7 +19036,7 @@ typedef enum { SHELL_PART_LEAVE = 0, SHELL_PART_APPLY, SHELL_PART_REMOVE } shell
    extensions of `selection` (`;` between) and ours is taken off every
    other extension; a part removed loses everything of ours; a part left
    is not touched. */
-static int shell_apply(proven_arena_t *arena, u8str_t selection, u8str_t menu_selection, shell_part_t types, shell_part_t menu,
+static int shell_apply(proven_arena_t *arena, proven_u8str_view_t selection, proven_u8str_view_t menu_selection, shell_part_t types, shell_part_t menu,
                        bool all_users) {
     bool ok = true;
     int code = SHELL_DONE;
@@ -19044,12 +19044,12 @@ static int shell_apply(proven_arena_t *arena, u8str_t selection, u8str_t menu_se
         /* Ours is taken off everything first, so an extension switched
            off since the last time loses it. */
         if (!rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users)) ok = false;
-        u8str_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT)
-                                                 : (u8str_t){ .ptr = "", .len = 0 };
-        if (list.len > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
+        proven_u8str_view_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT)
+                                                 : PROVEN_LIT("");
+        if (list.size > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
     }
     if (menu == SHELL_PART_APPLY) {
-        switch (rubraview_pal_shell_menu_register(menu_selection.len > 0 ? menu_selection : selection, all_users)) {
+        switch (rubraview_pal_shell_menu_register(menu_selection.size > 0 ? menu_selection : selection, all_users)) {
             case RUBRAVIEW_SHELL_MENU_FAILED: ok = false; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_NO_PARTS: code = SHELL_DONE_NO_PARTS; break;
             case RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED: code = SHELL_DONE_REFUSED; break;
@@ -19082,7 +19082,7 @@ static void shell_wipe_action(app_state_t *app) {
     int mine = shell_wipe(false);
     int code = SHELL_FAILED;
     static const char ARGS[] = "--wipe-shell --all-users";
-    bool asked = rubraview_pal_shell_run_elevated((u8str_t){ .ptr = ARGS, .len = sizeof(ARGS) - 1 }, &code);
+    bool asked = rubraview_pal_shell_run_elevated((proven_u8str_view_t){ .ptr = (const proven_byte_t *)ARGS, .size = sizeof(ARGS) - 1 }, &code);
     if (mine < 0) settings_say(app, T("could not remove this user's entries"));
     else if (!asked) settings_say(app, T("removed for this user; every user's entries need the administrator's permission, which was not given"));
     else if (code != SHELL_DONE) settings_say(app, T("removed for this user; could not remove every user's entries"));
@@ -19091,11 +19091,11 @@ static void shell_wipe_action(app_state_t *app) {
 
 /* Settings › Explorer: the extensions switched on, for this user or —
    through this program run again as an administrator — for every user. */
-static void shell_types_action(app_state_t *app, u8str_t name) {
-    bool adding = rubraview_u8_eq_lit(name, "shell.register") || rubraview_u8_eq_lit(name, "shell.register_all");
-    bool all = rubraview_u8_eq_lit(name, "shell.register_all") || rubraview_u8_eq_lit(name, "shell.unregister_all");
-    bool types = rubraview_settings_get(&app->settings, U8("shell"), U8("open_with")) > 0.5;
-    bool menu = rubraview_settings_get(&app->settings, U8("shell"), U8("menu")) > 0.5;
+static void shell_types_action(app_state_t *app, proven_u8str_view_t name) {
+    bool adding = proven_u8str_view_eq(name, PROVEN_LIT("shell.register")) || proven_u8str_view_eq(name, PROVEN_LIT("shell.register_all"));
+    bool all = proven_u8str_view_eq(name, PROVEN_LIT("shell.register_all")) || proven_u8str_view_eq(name, PROVEN_LIT("shell.unregister_all"));
+    bool types = rubraview_settings_get(&app->settings, PROVEN_LIT("shell"), PROVEN_LIT("open_with")) > 0.5;
+    bool menu = rubraview_settings_get(&app->settings, PROVEN_LIT("shell"), PROVEN_LIT("menu")) > 0.5;
 
     char words[256], menu_words[256];
     size_t words_len = shell_chosen_words(app, false, words, sizeof(words));
@@ -19108,8 +19108,8 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
     int code = SHELL_FAILED;
     if (!all) {
         /* The page's two switches: what is off is taken back. */
-        code = adding ? shell_apply(app->arena, rubraview_shell_selection_parse(app->arena, (u8str_t){ .ptr = words, .len = words_len }),
-                                    rubraview_shell_selection_parse(app->arena, (u8str_t){ .ptr = menu_words, .len = menu_len }),
+        code = adding ? shell_apply(app->arena, rubraview_shell_selection_parse(app->arena, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)words, .size = words_len }),
+                                    rubraview_shell_selection_parse(app->arena, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)menu_words, .size = menu_len }),
                                     types ? SHELL_PART_APPLY : SHELL_PART_REMOVE, menu ? SHELL_PART_APPLY : SHELL_PART_REMOVE, false)
                       : shell_remove(false);
     } else {
@@ -19119,7 +19119,7 @@ static void shell_types_action(app_state_t *app, u8str_t name) {
                                   types ? "" : " --remove-types", menu ? "" : " --remove-menu")
                        : snprintf(args, sizeof(args), "--unregister-shell --all-users");
         if (n <= 0 || (size_t)n >= sizeof(args) ||
-            !rubraview_pal_shell_run_elevated((u8str_t){ .ptr = args, .len = (size_t)n }, &code)) {
+            !rubraview_pal_shell_run_elevated((proven_u8str_view_t){ .ptr = (const proven_byte_t *)args, .size = (size_t)n }, &code)) {
             settings_say(app, T("not done: the administrator's permission was not given"));
             return;
         }
@@ -19225,7 +19225,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 if (event == RUBRAVIEW_SEVENT_TABLE_CLEAR) {
                     if ((size_t)row > n) break;
                     char buffer[8192];
-                    u8str_t list = rubraview_folder_list_remove(buffer, sizeof(buffer), folder_list_text(app, folders), (size_t)row - 1);
+                    proven_u8str_view_t list = rubraview_folder_list_remove(buffer, sizeof(buffer), folder_list_text(app, folders), (size_t)row - 1);
                     folder_list_set(app, folders, app_keep(app, list));
                     skip_dirs_table_rows(app);
                     settings_took_effect(app);
@@ -19236,9 +19236,9 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     if (def) settings_path_begin(app, def);
                     app->spath_list = folders;
                     app->spath_list_index = row - 1;   /* the folder in place, or past the end: a new one */
-                    u8str_t dirs[256];
+                    proven_u8str_view_t dirs[256];
                     size_t have = rubraview_folder_list_split(folder_list_text(app, folders), dirs, 256);
-                    rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : U8(""));
+                    rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : PROVEN_LIT(""));
                     rubraview_textedit_select_all(&app->spath_edit);
                     /* Typed in the box that is always there, the list's last row, never over another row. */
                     rubraview_settings_view_focus_table_row(&app->settings_view, cstr(FOLDER_LISTS[folders].table), (int32_t)n + 1);
@@ -19252,15 +19252,15 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             if (event == RUBRAVIEW_SEVENT_TABLE_EDIT) {
                 app->key_capture = row;
                 snprintf(text, sizeof(text), T("press the key to add to %.*s (Esc: leave it as it is)"),
-                         (int)b->action.len, b->action.ptr);
+                         (int)b->action.size, b->action.ptr);
             } else if (b->combo_count == 0) {
-                snprintf(text, sizeof(text), T("%.*s has no key to take off"), (int)b->action.len, b->action.ptr);
+                snprintf(text, sizeof(text), T("%.*s has no key to take off"), (int)b->action.size, b->action.ptr);
             } else {
                 char one[64];
-                u8str_t last = rubraview_key_combo_format(one, sizeof(one), b->combos[b->combo_count - 1]);
+                proven_u8str_view_t last = rubraview_key_combo_format(one, sizeof(one), b->combos[b->combo_count - 1]);
                 rubraview_keymap_unbind_last(&app->keymap, (size_t)row - 1);
                 snprintf(text, sizeof(text), T("took %.*s off %.*s (Revert puts it back)"),
-                         (int)last.len, last.ptr, (int)b->action.len, b->action.ptr);
+                         (int)last.size, last.ptr, (int)b->action.size, b->action.ptr);
             }
             settings_say(app, text);
             break;
@@ -19271,14 +19271,14 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             if (!node || node->kind != RUBRAVIEW_NODE_SETTING) break;
             const rubraview_setting_def_t *def = &app->settings_view.doc->defs[node->setting];
             if (event == RUBRAVIEW_SEVENT_CLEAR_TEXT) {
-                rubraview_settings_set_text(&app->settings, def->section, def->key, U8(""));
+                rubraview_settings_set_text(&app->settings, def->section, def->key, PROVEN_LIT(""));
                 settings_say(app, "cleared");
                 break;
             }
             /* RV-136 (owner, 2026-10-18): a font is chosen in the program's own picker. */
-            if ((rubraview_u8_eq_lit(def->section, "video") && rubraview_u8_eq_lit(def->key, "subtitle_font")) ||
-                (rubraview_u8_eq_lit(def->section, "text") && rubraview_u8_eq_lit(def->key, "font")) ||
-                (rubraview_u8_eq_lit(def->section, "general") && rubraview_u8_eq_lit(def->key, "ui_font"))) {
+            if ((proven_u8str_view_eq(def->section, PROVEN_LIT("video")) && proven_u8str_view_eq(def->key, PROVEN_LIT("subtitle_font"))) ||
+                (proven_u8str_view_eq(def->section, PROVEN_LIT("text")) && proven_u8str_view_eq(def->key, PROVEN_LIT("font"))) ||
+                (proven_u8str_view_eq(def->section, PROVEN_LIT("general")) && proven_u8str_view_eq(def->key, PROVEN_LIT("ui_font")))) {
                 fontpick_show(app, def->section, def->key);
                 break;
             }
@@ -19288,28 +19288,28 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_ACTION: {
             const rubraview_settings_node_t *node = rubraview_settings_view_focused_node(&app->settings_view);
             if (!node) break;
-            if (app->packaged && (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
-                                  rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all") ||
-                                  rubraview_u8_eq_lit(node->name, "shell.wipe"))) {
+            if (app->packaged && (proven_u8str_view_eq(node->name, PROVEN_LIT("shell.register")) || proven_u8str_view_eq(node->name, PROVEN_LIT("shell.unregister")) ||
+                                  proven_u8str_view_eq(node->name, PROVEN_LIT("shell.register_all")) || proven_u8str_view_eq(node->name, PROVEN_LIT("shell.unregister_all")) ||
+                                  proven_u8str_view_eq(node->name, PROVEN_LIT("shell.wipe")))) {
                 /* RV-113 (2): what a packaged program registers goes to the
                    package's own registry, which Explorer does not read; the
                    package's manifest gave Windows its file types already. */
                 settings_say(app, T("the Store's copy: Windows has its file types from the package; choose Rubraview in Default apps"));
-            } else if (rubraview_u8_eq_lit(node->name, "shell.register") || rubraview_u8_eq_lit(node->name, "shell.unregister") ||
-                rubraview_u8_eq_lit(node->name, "shell.register_all") || rubraview_u8_eq_lit(node->name, "shell.unregister_all")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("shell.register")) || proven_u8str_view_eq(node->name, PROVEN_LIT("shell.unregister")) ||
+                proven_u8str_view_eq(node->name, PROVEN_LIT("shell.register_all")) || proven_u8str_view_eq(node->name, PROVEN_LIT("shell.unregister_all"))) {
                 shell_types_action(app, node->name);
-            } else if (rubraview_u8_eq_lit(node->name, "shell.wipe")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("shell.wipe"))) {
                 shell_wipe_action(app);
-            } else if (rubraview_u8_eq_lit(node->name, "shell.defaults")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("shell.defaults"))) {
                 rubraview_pal_shell_open_default_apps();
-            } else if (rubraview_u8_eq_lit(node->name, "ffmpeg.download")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("ffmpeg.download"))) {
                 /* The owner (2026-10-17): where to get FFmpeg, one press away. */
                 settings_say(app, rubraview_pal_shell_open_web("https://github.com/BtbN/FFmpeg-Builds/releases")
                                       ? T("the FFmpeg download page is opening in the browser")
                                       : T("the browser could not be started"));
-            } else if (rubraview_u8_eq_lit(node->name, "app.restart")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.restart"))) {
                 restart_now(app);
-            } else if (rubraview_u8_eq_lit(node->name, "cache.clear_thumbs")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.clear_thumbs"))) {
                 /* RV-107: the picker's pictures are kept in memory only; they are made again as tiles come into view. */
                 picker_thumbs_free(app);
                 app->picker_generation++;
@@ -19320,18 +19320,18 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     app->picker_thumb_count = app->picker_thumbs ? app->picker_listing.count : 0;
                 }
                 settings_say(app, T("the picker's thumbnails were let go"));
-            } else if (rubraview_u8_eq_lit(node->name, "cache.reset_history")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.reset_history"))) {
                 /* Every place read to, here and in the file. Another viewer that is open still has its own. */
                 app->history = (rubraview_history_t){0};
                 app->resume_offer = false;
                 bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-                bool written = app->history_path.len > 0 &&
+                bool written = app->history_path.size > 0 &&
                                rubraview_pal_fs_write_file_atomic(app->history_path, rubraview_history_serialize(app->arena, &app->history));
                 if (locked) rubraview_pal_config_unlock();
                 settings_say(app, written ? T("every reading place is forgotten") : T("forgotten here; the history file could not be written"));
-            } else if (rubraview_u8_eq_lit(node->name, "keys.export") || rubraview_u8_eq_lit(node->name, "keys.import")) {
-                keys_export_or_import(app, rubraview_u8_eq_lit(node->name, "keys.export"));
-            } else if (rubraview_u8_eq_lit(node->name, "lang.import")) {
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.export")) || proven_u8str_view_eq(node->name, PROVEN_LIT("keys.import"))) {
+                keys_export_or_import(app, proven_u8str_view_eq(node->name, PROVEN_LIT("keys.export")));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("lang.import"))) {
                 lang_import(app);
             }
             break;
@@ -19366,31 +19366,31 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
     size_t index = (size_t)app->key_capture - 1;
     app->key_capture = 0;
     if (index >= app->keymap.count) return;
-    if (combo.modifiers == 0 && rubraview_u8_eq_lit(combo.key_name, "Escape")) {
+    if (combo.modifiers == 0 && proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Escape"))) {
         settings_say(app, T("no key added"));
         return;
     }
     char one[64], text[200];
-    u8str_t name = rubraview_key_combo_format(one, sizeof(one), combo);
+    proven_u8str_view_t name = rubraview_key_combo_format(one, sizeof(one), combo);
     const rubraview_key_binding_t *holder = NULL;
     rubraview_bind_result_t result = rubraview_keymap_bind(app->arena, &app->keymap, index, combo, &holder);
     const rubraview_key_binding_t *b = &app->keymap.bindings[index];
     switch (result) {
         case RUBRAVIEW_BIND_ADDED:
-            snprintf(text, sizeof(text), T("%.*s added to %.*s"), (int)name.len, name.ptr, (int)b->action.len, b->action.ptr);
+            snprintf(text, sizeof(text), T("%.*s added to %.*s"), (int)name.size, name.ptr, (int)b->action.size, b->action.ptr);
             break;
         case RUBRAVIEW_BIND_ALREADY:
-            snprintf(text, sizeof(text), T("%.*s already has %.*s"), (int)b->action.len, b->action.ptr, (int)name.len, name.ptr);
+            snprintf(text, sizeof(text), T("%.*s already has %.*s"), (int)b->action.size, b->action.ptr, (int)name.size, name.ptr);
             break;
         case RUBRAVIEW_BIND_TAKEN:
-            snprintf(text, sizeof(text), T("not changed: %.*s is %.*s's key%s%.*s%s"), (int)name.len, name.ptr,
-                     (int)holder->action.len, holder->action.ptr,
-                     holder->context.len ? " (" : "", (int)holder->context.len, holder->context.ptr,
-                     holder->context.len ? ")" : "");
+            snprintf(text, sizeof(text), T("not changed: %.*s is %.*s's key%s%.*s%s"), (int)name.size, name.ptr,
+                     (int)holder->action.size, holder->action.ptr,
+                     holder->context.size ? " (" : "", (int)holder->context.size, holder->context.ptr,
+                     holder->context.size ? ")" : "");
             break;
         case RUBRAVIEW_BIND_FAILED:
         default:
-            snprintf(text, sizeof(text), T("could not add %.*s"), (int)name.len, name.ptr);
+            snprintf(text, sizeof(text), T("could not add %.*s"), (int)name.size, name.ptr);
             break;
     }
     settings_say(app, text);
@@ -19403,8 +19403,8 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
 
 static void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
-    u8str_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
-    rubraview_textedit_set(&app->spath_edit, now.len < sizeof(app->spath_buffer) ? now : U8(""));
+    proven_u8str_view_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
+    rubraview_textedit_set(&app->spath_edit, now.size < sizeof(app->spath_buffer) ? now : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->spath_edit);
     app->spath_section = def->section;
     app->spath_key = def->key;
@@ -19423,7 +19423,7 @@ static void settings_number_begin(app_state_t *app) {
     double v = rubraview_settings_get(&app->settings, def->section, def->key);
     int n = def->type == RUBRAVIEW_SETTING_FLOAT ? snprintf(now, sizeof(now), "%.2f", v) : snprintf(now, sizeof(now), "%.0f", v);
     app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
-    rubraview_textedit_set(&app->spath_edit, (u8str_t){ .ptr = now, .len = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_set(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->spath_edit);
     app->spath_section = def->section;
     app->spath_key = def->key;
@@ -19448,10 +19448,10 @@ static void settings_path_end(app_state_t *app) {
 }
 
 static void settings_path_commit(app_state_t *app) {
-    u8str_t text = rubraview_textedit_text(&app->spath_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_edit);
     if (app->spath_number) {   /* 1.24.0 */
         char buf[48];
-        size_t n = text.len < sizeof(buf) - 1 ? text.len : sizeof(buf) - 1;
+        size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
         memcpy(buf, text.ptr, n);
         buf[n] = '\0';
         for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
@@ -19464,26 +19464,26 @@ static void settings_path_commit(app_state_t *app) {
         return;
     }
     /* Explorer's "Copy as path" puts quotes round it; spaces at the ends are no part of a folder. */
-    while (text.len > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.len--; }
-    while (text.len > 0 && (text.ptr[text.len - 1] == ' ' || text.ptr[text.len - 1] == '"')) text.len--;
+    while (text.size > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.size--; }
+    while (text.size > 0 && (text.ptr[text.size - 1] == ' ' || text.ptr[text.size - 1] == '"')) text.size--;
     /* RV-106: "Only names like" is typed like a folder and is not one. */
-    bool is_folder = !rubraview_u8_eq_lit(app->spath_section, "text") &&   /* 1.25.0: an editor, colours */
-                     !(rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern")) &&
-                     (!rubraview_u8_eq_lit(app->spath_section, "video") ||   /* RV-107: a font's name, a language */
-                      rubraview_u8_eq_lit(app->spath_key, "ffmpeg_dir"));
+    bool is_folder = !proven_u8str_view_eq(app->spath_section, PROVEN_LIT("text")) &&   /* 1.25.0: an editor, colours */
+                     !(proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) &&
+                     (!proven_u8str_view_eq(app->spath_section, PROVEN_LIT("video")) ||   /* RV-107: a font's name, a language */
+                      proven_u8str_view_eq(app->spath_key, PROVEN_LIT("ffmpeg_dir")));
     if (app->spath_list_index >= 0) {
         /* A folder of the list kept out of Recent: put in its place, or added; empty takes it off. */
         rubraview_fs_entry_t is;
-        if (text.len > 0 && (!rubraview_pal_fs_stat(app->arena, text, &is) || !is.is_directory)) {
+        if (text.size > 0 && (!rubraview_pal_fs_stat(app->arena, text, &is) || !is.is_directory)) {
             settings_say(app, T("no such folder - put it right, or Esc"));
             return;
         }
         int32_t folders = app->spath_list;
-        u8str_t now = folder_list_text(app, folders);
+        proven_u8str_view_t now = folder_list_text(app, folders);
         char buffer[8192];
-        u8str_t list = text.len == 0 ? rubraview_folder_list_remove(buffer, sizeof(buffer), now, (size_t)app->spath_list_index)
+        proven_u8str_view_t list = text.size == 0 ? rubraview_folder_list_remove(buffer, sizeof(buffer), now, (size_t)app->spath_list_index)
                                      : rubraview_folder_list_put(buffer, sizeof(buffer), now, text, (size_t)app->spath_list_index);
-        if (text.len > 0 && list.len == 0) { settings_say(app, T("the list is full")); return; }
+        if (text.size > 0 && list.size == 0) { settings_say(app, T("the list is full")); return; }
         folder_list_set(app, folders, app_keep(app, list));
         app->spath_list_index = -1;
         settings_path_end(app);
@@ -19491,13 +19491,13 @@ static void settings_path_commit(app_state_t *app) {
         rubraview_settings_view_focus_table_row(&app->settings_view, cstr(FOLDER_LISTS[folders].table),
                                                 (int32_t)folder_list_count(app, folders) + 1);   /* the box, for the next one */
         settings_took_effect(app);
-        settings_say(app, text.len == 0 ? T("folder taken off")
+        settings_say(app, text.size == 0 ? T("folder taken off")
                           : folders == FOLDER_LIST_THUMBS ? T("no thumbnails for this folder, and all under it")
                           : T("folder kept out of Recent, and all under it"));
         return;
     }
-    if (text.len == 0) {
-        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, U8(""));
+    if (text.size == 0) {
+        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, PROVEN_LIT(""));
         settings_path_end(app);
         settings_took_effect(app);
         settings_say(app, is_folder ? T("folder cleared") : "cleared");
@@ -19508,7 +19508,7 @@ static void settings_path_commit(app_state_t *app) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
         settings_path_end(app);
         settings_took_effect(app);
-        settings_say(app, rubraview_u8_eq_lit(app->spath_section, "files")
+        settings_say(app, proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files"))
                               ? "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*"
                               : T("kept (Delete clears it)"));
         return;
@@ -19533,7 +19533,7 @@ static void settings_path_browse(app_state_t *app) {
         .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (picked.accepted && picked.count > 0 && picked.paths[0].len < sizeof(app->spath_buffer)) {
+    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->spath_buffer)) {
         rubraview_textedit_set(&app->spath_edit, picked.paths[0]);   /* in the box, for Enter to keep */
     }
 }
@@ -19543,7 +19543,7 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->spath_active) return false;
     bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
     if (key_is(combo, "Enter")) {
-        textbox_insert(&app->spath_edit, (u8str_t){ .ptr = app->spath_composing, .len = app->spath_composing_length });
+        textbox_insert(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length });
         app->spath_composing_length = 0;
         settings_path_commit(app);
     } else if (key_is(combo, "Escape")) {
@@ -19616,7 +19616,7 @@ static void skip_dirs_draw_x(app_state_t *app) {
         rubraview_pal_rect_t cell = { cw * skip_dirs_x_col(app), ch * row, cw * 3, ch };
         bool over = mr == row && mc >= skip_dirs_x_col(app) && mc < skip_dirs_x_col(app) + 3;
         rubraview_pal_render_fill_rect(r, cell, over ? COLOR_CLOSE_HOVER : SETTINGS_PANE, 2.0);
-        rubraview_pal_render_draw_text(r, U8("X"), cell, app->settings_font, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(r, PROVEN_LIT("X"), cell, app->settings_font, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
 
@@ -19638,10 +19638,10 @@ static void settings_path_draw(app_state_t *app) {
     rubraview_pal_rect_t box = { cw * col0, y - pad, cw * cols, ch + 2.0 * pad };
     rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 3.0);
     rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 3.0);
-    u8str_t text = rubraview_textedit_text(&app->spath_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_edit);
     size_t caret_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
     rubraview_textedit_selection_range(&app->spath_edit, &a, &b);
-    for (size_t i = 0; i < text.len; ++i) {
+    for (size_t i = 0; i < text.size; ++i) {
         if (((unsigned char)text.ptr[i] & 0xC0) == 0x80) continue;
         if (i < app->spath_edit.caret) caret_chars++;
         if (i < a) sel_a++;
@@ -19649,25 +19649,25 @@ static void settings_path_draw(app_state_t *app) {
     }
     size_t first = settings_path_first(app, cols);
     size_t skip = 0, seen = 0;
-    while (skip < text.len && seen < first) {
+    while (skip < text.size && seen < first) {
         skip++;
-        while (skip < text.len && ((unsigned char)text.ptr[skip] & 0xC0) == 0x80) skip++;
+        while (skip < text.size && ((unsigned char)text.ptr[skip] & 0xC0) == 0x80) skip++;
         seen++;
     }
     if (sel_b > sel_a) {
         double sx = sel_a > first ? (double)(sel_a - first) : 0.0, ex = (double)(sel_b - first);
         if (ex > sx) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x + cw * sx, y, cw * (ex - sx), ch }, 0x704A90D9u, 0.0);
     }
-    rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = text.ptr + skip, .len = text.len - skip }, box.x, y, fs, SETTINGS_TEXT);
+    rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = text.ptr + skip, .size = text.size - skip }, box.x, y, fs, SETTINGS_TEXT);
     double cx = box.x + cw * (double)(caret_chars - first);
     if (app->spath_composing_length > 0) {
-        rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = app->spath_composing, .len = app->spath_composing_length },
+        rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length },
                                             cx, y, fs, 0xFFFFD27Fu);
     }
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
     /* 1.24.0: its buttons on the row under it — OK, Cancel, and Browse... for a folder */
     const char *words[3] = { T("OK"), T("Cancel"), T("Browse...") };
-    int32_t n = app->spath_number || (rubraview_u8_eq_lit(app->spath_section, "files") && rubraview_u8_eq_lit(app->spath_key, "pattern")) ? 2 : 3;
+    int32_t n = app->spath_number || (proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) ? 2 : 3;
     double bx = box.x, by = box.y + box.height + pad, bh = ch + 2.0 * pad;
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x, box.y + box.height, box.width, bh + 2.0 * pad }, SETTINGS_BACKGROUND, 0.0);   /* the rows under it covered */
     app->spath_btn_n = n;
@@ -19750,7 +19750,7 @@ static size_t settings_pump(app_state_t *app) {
                 if (app->spath_active) {   /* 1.24.0: the box's own buttons */
                     int32_t hit = -1;
                     for (int32_t i = 0; i < app->spath_btn_n; ++i) if (pal_rect_has(app->spath_btn[i], event.mouse.x, event.mouse.y)) hit = i;
-                    if (hit == 0) { textbox_insert(&app->spath_edit, (u8str_t){ .ptr = app->spath_composing, .len = app->spath_composing_length });
+                    if (hit == 0) { textbox_insert(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length });
                                     app->spath_composing_length = 0; settings_path_commit(app); app->settings_dirty = true; break; }
                     if (hit == 1) { settings_path_end(app); app->settings_dirty = true; break; }
                     if (hit == 2) { settings_path_browse(app); app->settings_dirty = true; break; }
@@ -19834,7 +19834,7 @@ static size_t settings_pump(app_state_t *app) {
                         for (size_t i = 0; i < view->line_count; ++i) {
                             if (view->lines[i].kind != RUBRAVIEW_LINE_SETTING || rubraview_settings_view_screen_row(view, i) != rr) continue;
                             const rubraview_settings_node_t *node = &view->doc->nodes[view->lines[i].node];
-                            if (view->doc->defs[node->setting].help.len > 0) help = node->setting;
+                            if (view->doc->defs[node->setting].help.size > 0) help = node->setting;
                             break;
                         }
                     }
@@ -19880,12 +19880,12 @@ static size_t settings_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
             case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
                 if (app->spath_active) {
-                    u8str_t typed = { .ptr = event.text.utf8, .len = event.text.length };
+                    proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length };
                     if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
                         textbox_insert(&app->spath_edit, typed);
                         app->spath_composing_length = 0;
                     } else {
-                        size_t n = typed.len < sizeof(app->spath_composing) ? typed.len : sizeof(app->spath_composing) - 1;
+                        size_t n = typed.size < sizeof(app->spath_composing) ? typed.size : sizeof(app->spath_composing) - 1;
                         memcpy(app->spath_composing, typed.ptr, n);
                         app->spath_composing_length = n;
                     }
@@ -19934,20 +19934,20 @@ static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo) {
     char text[16384];
     size_t n = 0;
     if (app->settings_sel.active) {
-        u8str_t rows[96];
+        proven_u8str_view_t rows[96];
         int32_t count = (int32_t)(sizeof(rows) / sizeof(rows[0]));
-        for (int32_t i = 0; i < count; ++i) rows[i] = (u8str_t){ .ptr = app->settings_grid_text[i], .len = app->settings_grid_len[i] };
+        for (int32_t i = 0; i < count; ++i) rows[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->settings_grid_text[i], .size = app->settings_grid_len[i] };
         n = rubraview_grid_selection_copy(&app->settings_sel, rows, count, text, sizeof(text));
     } else if (v->focus_line >= 0) {
         int32_t row = rubraview_settings_view_screen_row(v, (size_t)v->focus_line);
         if (v->lines[v->focus_line].kind == RUBRAVIEW_LINE_TABLE) row += v->focus_row;
         if (row >= 0 && row < 96) {   /* already a window row, the title's two included */
-            u8str_t line = { .ptr = app->settings_grid_text[row], .len = app->settings_grid_len[row] };
+            proven_u8str_view_t line = { .ptr = (const proven_byte_t *)app->settings_grid_text[row], .size = app->settings_grid_len[row] };
             rubraview_grid_selection_t whole = { true, 0, 0, 0, INT32_MAX / 2 };
             n = rubraview_grid_selection_copy(&whole, &line, 1, text, sizeof(text));
         }
     }
-    const char *said = n > 0 && rubraview_pal_clipboard_set_text(app->settings_window, (u8str_t){ .ptr = text, .len = n })
+    const char *said = n > 0 && rubraview_pal_clipboard_set_text(app->settings_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n })
                            ? T("copied") : T("nothing to copy");
     settings_say(app, said);
     return true;
@@ -19955,14 +19955,14 @@ static bool settings_copy_key(app_state_t *app, rubraview_key_combo_t combo) {
 
 /* A `preview subtitle` line: the sample drawn the way the video will
    draw it, at the size and outline on the page right now. */
-static void settings_preview(app_state_t *app, u8str_t name, rubraview_pal_rect_t rect) {
+static void settings_preview(app_state_t *app, proven_u8str_view_t name, rubraview_pal_rect_t rect) {
     rubraview_renderer_t *r = app->settings_renderer;
     rubraview_pal_render_fill_rect(r, rect, 0xFF303A44u, 0.0);
-    if (!rubraview_u8_eq_lit(name, "subtitle")) return;
+    if (!proven_u8str_view_eq(name, PROVEN_LIT("subtitle"))) return;
     double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
-    double size = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_size")) * dpi;
-    double off = rubraview_settings_get(&app->settings, U8("video"), U8("subtitle_outline")) * dpi;
-    u8str_t sample = TU8("Subtitle sample  \xEC\x9E\x90\xEB\xA7\x89 \xEB\xAF\xB8\xEB\xA6\xAC\xEB\xB3\xB4\xEA\xB8\xB0");
+    double size = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_size")) * dpi;
+    double off = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("subtitle_outline")) * dpi;
+    proven_u8str_view_t sample = TU8("Subtitle sample  \xEC\x9E\x90\xEB\xA7\x89 \xEB\xAF\xB8\xEB\xA6\xAC\xEB\xB3\xB4\xEA\xB8\xB0");
     /* A size too tall for the block is drawn as tall as the block
        allows — the video's own subtitle shows the real size. */
     if (size > rect.height * 0.6) size = rect.height * 0.6;
@@ -19972,12 +19972,12 @@ static void settings_preview(app_state_t *app, u8str_t name, rubraview_pal_rect_
 /* Text on the settings grid, each narrow run and each wide character at
    its own cell, so Hangul in a folder name does not pull the rest of the
    line off its columns. */
-static void settings_text(app_state_t *app, u8str_t text, double x, double y, uint32_t color) {
+static void settings_text(app_state_t *app, proven_u8str_view_t text, double x, double y, uint32_t color) {
     rubraview_cell_run_t runs[256];
     size_t n = rubraview_cell_runs(text, runs, sizeof(runs) / sizeof(runs[0]));
     for (size_t i = 0; i < n; ++i) {
-        u8str_t piece = { .ptr = text.ptr + runs[i].offset, .len = runs[i].length };
-        if (piece.len == 1 && piece.ptr[0] == ' ') continue;
+        proven_u8str_view_t piece = { .ptr = text.ptr + runs[i].offset, .size = runs[i].length };
+        if (piece.size == 1 && piece.ptr[0] == ' ') continue;
         rubraview_pal_render_draw_text_mono(app->settings_renderer, piece, x + app->settings_cell_w * runs[i].col,
                                             y, app->settings_font, color);
     }
@@ -19986,13 +19986,13 @@ static void settings_text(app_state_t *app, u8str_t text, double x, double y, ui
 /* The owner (2026-10-17): "설정에서 누를 수 있는 기능은 파란색 글씨와 밑줄로". The part
    of `text` from its first `open` to its last `close` ("< Register >", "[ Close ]",
    a path's "[C:\\...]") in link blue, its words underlined; the rest in `base`. */
-static void settings_text_link(app_state_t *app, u8str_t text, double x, double y, uint32_t base, char open, char close) {
-    size_t a = 0, b = text.len;
-    while (a < text.len && text.ptr[a] != open) ++a;
+static void settings_text_link(app_state_t *app, proven_u8str_view_t text, double x, double y, uint32_t base, char open, char close) {
+    size_t a = 0, b = text.size;
+    while (a < text.size && text.ptr[a] != open) ++a;
     if (close == 0) {   /* from `open` to the text's end: a box and its word ("[x] on") */
         while (b > a && text.ptr[b - 1] == ' ') --b;
         if (a >= b) { settings_text(app, text, x, y, base); return; }
-        u8str_t before = { text.ptr, a }, link = { text.ptr + a, b - a };
+        proven_u8str_view_t before = { text.ptr, a }, link = { text.ptr + a, b - a };
         double lx = x + app->settings_cell_w * (double)rubraview_text_columns(before);
         settings_text(app, before, x, y, base);
         settings_text(app, link, lx, y, SETTINGS_LINK);
@@ -20002,20 +20002,20 @@ static void settings_text_link(app_state_t *app, u8str_t text, double x, double 
         return;
     }
     while (b > a && text.ptr[b - 1] != close) --b;
-    if (a >= text.len || b <= a + 1) { settings_text(app, text, x, y, base); return; }
-    u8str_t before = { text.ptr, a }, link = { text.ptr + a, b - a }, after = { text.ptr + b, text.len - b };
+    if (a >= text.size || b <= a + 1) { settings_text(app, text, x, y, base); return; }
+    proven_u8str_view_t before = { text.ptr, a }, link = { text.ptr + a, b - a }, after = { text.ptr + b, text.size - b };
     double cw = app->settings_cell_w, ch = app->settings_cell_h;
     double lx = x + cw * (double)rubraview_text_columns(before);
     settings_text(app, before, x, y, base);
     settings_text(app, link, lx, y, SETTINGS_LINK);
     settings_text(app, after, lx + cw * (double)rubraview_text_columns(link), y, base);
     /* under the words, not the brackets or the spaces inside them */
-    size_t i = 1, j = link.len - 1;
+    size_t i = 1, j = link.size - 1;
     while (i < j && link.ptr[i] == ' ') ++i;
     while (j > i && link.ptr[j - 1] == ' ') --j;
     if (j <= i) return;
-    double ux = lx + cw * (double)rubraview_text_columns((u8str_t){ link.ptr, i });
-    double uw = cw * (double)rubraview_text_columns((u8str_t){ link.ptr + i, j - i });
+    double ux = lx + cw * (double)rubraview_text_columns((proven_u8str_view_t){ link.ptr, i });
+    double uw = cw * (double)rubraview_text_columns((proven_u8str_view_t){ link.ptr + i, j - i });
     double line = ch > 16.0 ? ch / 16.0 : 1.0;
     rubraview_pal_render_fill_rect(app->settings_renderer, (rubraview_pal_rect_t){ ux, y + ch - line * 1.5, uw, line }, SETTINGS_LINK, 0.0);
 }
@@ -20048,7 +20048,7 @@ static const char *track_kind_name(rubraview_track_kind_t kind) {
     return kind == RUBRAVIEW_TRACK_VIDEO ? T("Video") : kind == RUBRAVIEW_TRACK_AUDIO ? T("Sound") : T("Subtitle");
 }
 
-static void info_folder_summary(app_state_t *app, u8str_t dir);
+static void info_folder_summary(app_state_t *app, proven_u8str_view_t dir);
 static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info_t *info);
 
 /* What there is to say about the page on screen, gathered into rows. */
@@ -20056,7 +20056,7 @@ static void info_add_details(proven_arena_t *a, rubraview_info_t *info, const ru
     for (size_t i = 0; details && i < details->count; ++i) {
         const rubraview_detail_t *line = &details->lines[i];
         if (line->heading) rubraview_info_heading(a, info, line->label);
-        else rubraview_info_add(a, info, line->label, (u8str_t){ line->value, strlen(line->value) });
+        else rubraview_info_add(a, info, line->label, (proven_u8str_view_t){ (const proven_byte_t *)line->value, strlen(line->value) });
     }
 }
 
@@ -20078,7 +20078,7 @@ static void info_gather(app_state_t *app) {
     } else {
         const rubraview_page_ref_t *ref = &app->source.pages[index];
         bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
-        u8str_t path = ref->path;
+        proven_u8str_view_t path = ref->path;
 
         /* The file */
         rubraview_info_heading(a, &info, in_archive ? T("Page") : T("File"));
@@ -20089,15 +20089,15 @@ static void info_gather(app_state_t *app) {
         rubraview_fs_entry_t entry;
         if (!in_archive && rubraview_pal_fs_stat(a, path, &entry)) {
             file_bytes = entry.size_bytes;
-            rubraview_info_add(a, &info, T("Size"), (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), entry.size_bytes) });
+            rubraview_info_add(a, &info, T("Size"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), entry.size_bytes) });
             info_local_time(b, sizeof(b), entry.mtime);
-            rubraview_info_add(a, &info, T("Modified"), (u8str_t){ b, strlen(b) });
+            rubraview_info_add(a, &info, T("Modified"), (proven_u8str_view_t){ (const proven_byte_t *)b, strlen(b) });
             info_local_time(b, sizeof(b), entry.ctime);
-            rubraview_info_add(a, &info, T("Created"), (u8str_t){ b, strlen(b) });
+            rubraview_info_add(a, &info, T("Created"), (proven_u8str_view_t){ (const proven_byte_t *)b, strlen(b) });
         }
         if (in_archive) {
             file_bytes = rubraview_page_source_entry_size(&app->source, (size_t)index);
-            rubraview_info_add(a, &info, T("Size"), (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), file_bytes) });
+            rubraview_info_add(a, &info, T("Size"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), file_bytes) });
             const fulta_arc_entry_t *en = rubraview_page_source_entry(&app->source, (size_t)index);
             if (en) {
                 /* The method as the archive names it (FultaArc's word for it); a
@@ -20124,19 +20124,19 @@ static void info_gather(app_state_t *app) {
                 archive_bytes = set_bytes;   /* a set: the volumes read so far */
             }
             if (rubraview_page_source_is_encrypted(&app->source)) rubraview_info_add(a, &info, T("Encrypted"), TU8("yes"));
-            rubraview_info_add(a, &info, T("Size"), (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
+            rubraview_info_add(a, &info, T("Size"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
             rubraview_info_addf(a, &info, T("Pages"), "%zu", page_count(app));
             /* the book's own summary: its folders and what it holds unpacked */
             uint64_t unpacked = 0;
             size_t folders = 0;
-            u8str_t last = { .ptr = "", .len = 0 };
+            proven_u8str_view_t last = PROVEN_LIT("");
             for (size_t p = 0; p < page_count(app); ++p) {
                 unpacked += rubraview_page_source_entry_size(&app->source, p);
-                u8str_t dir = rubraview_path_dirname(app->source.pages[p].name);
-                if (dir.len > 0 && !(dir.len == last.len && memcmp(dir.ptr, last.ptr, dir.len) == 0)) { folders++; last = dir; }
+                proven_u8str_view_t dir = rubraview_path_dirname(app->source.pages[p].name);
+                if (dir.size > 0 && !(dir.size == last.size && memcmp(dir.ptr, last.ptr, dir.size) == 0)) { folders++; last = dir; }
             }
             if (folders) rubraview_info_addf(a, &info, T("Folders inside"), "%zu", folders);
-            rubraview_info_add(a, &info, T("Pages unpacked"), (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), unpacked) });
+            rubraview_info_add(a, &info, T("Pages unpacked"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), unpacked) });
         }
 
         bool film = app->media && app->media_page == index;
@@ -20144,12 +20144,12 @@ static void info_gather(app_state_t *app) {
             /* A film or a song */
             const rubraview_media_info_t *m = &app->media_info;
             rubraview_info_heading(a, &info, m->has_video ? T("Film") : T("Sound"));
-            rubraview_info_add(a, &info, T("Length"), (u8str_t){ b, rubraview_info_duration(b, sizeof(b), m->duration_seconds) });
+            rubraview_info_add(a, &info, T("Length"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_duration(b, sizeof(b), m->duration_seconds) });
             if (m->has_video) {
                 char code[32];
                 rubraview_info_fourcc(code, sizeof(code), m->video_fourcc);
                 rubraview_info_addf(a, &info, T("Picture"), T("%d x %d, %.3g frames a second"), m->width, m->height, m->frame_rate);
-                rubraview_info_add(a, &info, T("Picture codec"), (u8str_t){ code, strlen(code) });
+                rubraview_info_add(a, &info, T("Picture codec"), (proven_u8str_view_t){ (const proven_byte_t *)code, strlen(code) });
                 rubraview_info_add(a, &info, T("Decoded"), m->hardware_decode ? TU8("on the graphics card") : TU8("in software"));
             }
             if (m->has_audio && m->audio_sample_rate) {
@@ -20166,7 +20166,7 @@ static void info_gather(app_state_t *app) {
             uint32_t kbps = m->bitrate_kbps;
             if (!kbps && file_bytes && m->duration_seconds > 0.0) kbps = (uint32_t)((double)file_bytes * 8.0 / m->duration_seconds / 1000.0);
             if (kbps) rubraview_info_addf(a, &info, T("Bitrate"), "%u kbit/s%s", (unsigned)kbps, m->bitrate_kbps ? "" : T(" (size over length)"));
-            rubraview_info_add(a, &info, T("Opened by"), m->backend == RUBRAVIEW_BACKEND_FFMPEG ? U8("FFmpeg") : U8("Media Foundation"));
+            rubraview_info_add(a, &info, T("Opened by"), m->backend == RUBRAVIEW_BACKEND_FFMPEG ? PROVEN_LIT("FFmpeg") : PROVEN_LIT("Media Foundation"));
             if (m->has_video) {
                 /* 1.25.1 (owner, 2026-10-20: "어떤 백엔드나 다이렉트x 같은거 어떻게 하여 화면에 출력해 주는지도 자세한 정보"):
                    the way a picture goes from the file to the screen */
@@ -20198,7 +20198,7 @@ static void info_gather(app_state_t *app) {
                                         rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
                     if (rf.decode_device) rubraview_info_addf(a, &info, T("Card's decoders"), T("%u kinds (Direct3D 11 video)"), (unsigned)rf.decoder_profiles);
                 }
-                int gm = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hardware_decode")));
+                int gm = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode")));
                 const char *mode = gm <= 0 ? TC("choice", "off") : gm == 1 ? TC("choice", "on") : TC("choice", "always");
                 rubraview_info_addf(a, &info, T("GPU decoding"), "%s%s%s", mode,
                                     m->path_why_software[0] ? " - " : "", m->path_why_software[0] ? rubraview_tr(m->path_why_software) : "");
@@ -20216,7 +20216,7 @@ static void info_gather(app_state_t *app) {
                         rubraview_info_addf(a, &info, T("HDR"), T("%s, not tone mapped - %s"), kind,
                                             m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map"));
                     if (m->hdr_tone_mapped && !m->hdr_output) {   /* RV-153: why not as HDR */
-                        int ho = (int)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+                        int ho = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
                         const char *why = ho <= 0 ? T("HDR output is off (Settings > Video)")
                                         : app->hdr_output_refused && app->hdr_output_why ? rubraview_tr(app->hdr_output_why)
                                         : !app->media_hdr_screen.hdr ? T("this screen is not in HDR (Windows' display settings)")
@@ -20237,11 +20237,11 @@ static void info_gather(app_state_t *app) {
                     const rubraview_track_t *tr = &app->tracks.tracks[t];
                     char label[24];
                     snprintf(label, sizeof(label), "%s %zu", track_kind_name(tr->kind), t + 1);
-                    int n = snprintf(b, sizeof(b), "%.*s", (int)tr->codec.len, tr->codec.ptr);
+                    int n = snprintf(b, sizeof(b), "%.*s", (int)tr->codec.size, tr->codec.ptr);
                     if (tr->channels > 0 && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, T(", %d ch"), tr->channels);
-                    if (tr->language.len && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", %.*s", (int)tr->language.len, tr->language.ptr);
-                    if (tr->title.len && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", \"%.*s\"", (int)tr->title.len, tr->title.ptr);
-                    if (n > 0) rubraview_info_add(a, &info, label, (u8str_t){ b, (size_t)n < sizeof(b) ? (size_t)n : sizeof(b) - 1 });
+                    if (tr->language.size && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", %.*s", (int)tr->language.size, tr->language.ptr);
+                    if (tr->title.size && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", \"%.*s\"", (int)tr->title.size, tr->title.ptr);
+                    if (n > 0) rubraview_info_add(a, &info, label, (proven_u8str_view_t){ (const proven_byte_t *)b, (size_t)n < sizeof(b) ? (size_t)n : sizeof(b) - 1 });
                 }
             }
             if (app->music_tags_read) {
@@ -20255,7 +20255,7 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_add(a, &info, T("Genre"), g->genre);
                 rubraview_info_add(a, &info, T("Codec"), g->codec);
                 if (g->bits_per_sample) rubraview_info_addf(a, &info, T("Bits"), "%u", (unsigned)g->bits_per_sample);
-                if (g->art_size) rubraview_info_add(a, &info, T("Cover"), (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), g->art_size) });
+                if (g->art_size) rubraview_info_add(a, &info, T("Cover"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), g->art_size) });
             }
         } else if (!is_media_path(path) && !is_text_path(path)) {
             /* A picture: what it is, then what its EXIF says. */
@@ -20267,10 +20267,10 @@ static void info_gather(app_state_t *app) {
                 if (rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX) { bytes = map.data; size = (size_t)map.size; }
             } else if (page_read_cost(app, (size_t)index) <= PAGE_JOB_MIN_COST) {
                 rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, (size_t)index, &mem);
-                if (pb.ok) { bytes = (const uint8_t*)pb.data.ptr; size = pb.data.len; }
+                if (pb.ok) { bytes = (const uint8_t*)pb.data.ptr; size = pb.data.size; }
             }
             rubraview_image_desc_t d;
-            bool described = bytes && rubraview_pal_image_describe(in_archive ? U8("") : path, bytes, size, &d);
+            bool described = bytes && rubraview_pal_image_describe(in_archive ? PROVEN_LIT("") : path, bytes, size, &d);
             if (!described && !in_archive) described = rubraview_pal_image_describe(path, NULL, 0, &d);
             /* The file's own account of how it was made (read below too, for the ratio). */
             static rubraview_details_t details;
@@ -20284,15 +20284,15 @@ static void info_gather(app_state_t *app) {
             bool carried = described && strcmp(d.format, "TIFF") == 0 && own[0] && strcmp(own, "TIFF") != 0;
             rubraview_info_heading(a, &info, T("Picture"));
             if (described) {
-                rubraview_info_add(a, &info, T("Format"), carried ? cstr(own) : (u8str_t){ d.format, strlen(d.format) });
+                rubraview_info_add(a, &info, T("Format"), carried ? cstr(own) : (proven_u8str_view_t){ (const proven_byte_t *)d.format, strlen(d.format) });
                 rubraview_info_addf(a, &info, T("Pixels"), T("%d x %d (%.1f megapixels)"), d.width, d.height,
                                     (double)d.width * (double)d.height / 1e6);
-                rubraview_info_add(a, &info, T("Aspect ratio"), (u8str_t){ b, rubraview_info_aspect(b, sizeof(b), d.width, d.height) });
-                if (!carried) rubraview_info_add(a, &info, T("Pixel format"), (u8str_t){ d.pixels, strlen(d.pixels) });
+                rubraview_info_add(a, &info, T("Aspect ratio"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_aspect(b, sizeof(b), d.width, d.height) });
+                if (!carried) rubraview_info_add(a, &info, T("Pixel format"), (proven_u8str_view_t){ (const proven_byte_t *)d.pixels, strlen(d.pixels) });
                 if (d.dpi_x > 0.0) {
                     rubraview_info_addf(a, &info, T("Resolution"), T("%.0f x %.0f dpi"), d.dpi_x, d.dpi_y);
                     rubraview_info_add(a, &info, T("Print size"),
-                                       (u8str_t){ b, rubraview_info_print_size(b, sizeof(b), d.width, d.height, d.dpi_x, d.dpi_y) });
+                                       (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_print_size(b, sizeof(b), d.width, d.height, d.dpi_x, d.dpi_y) });
                 }
                 if (d.frames > 1) rubraview_info_addf(a, &info, T("Frames"), "%u", (unsigned)d.frames);
                 rubraview_info_add(a, &info, T("Colour profile"), d.color_profile ? TU8("embedded") : TU8("none"));
@@ -20305,7 +20305,7 @@ static void info_gather(app_state_t *app) {
             }
             if (page->loaded && page->width > 0 && page->height > 0) {
                 rubraview_info_add(a, &info, T("In memory"),
-                                   (u8str_t){ b, rubraview_info_bytes(b, sizeof(b), (uint64_t)page->width * (uint64_t)page->height * 4u) });
+                                   (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), (uint64_t)page->width * (uint64_t)page->height * 4u) });
             }
             /* RV-130: read once more, timed, and its colours counted: a
                picture up to 24 megapixels, so turning pages with the window
@@ -20317,7 +20317,7 @@ static void info_gather(app_state_t *app) {
                 if (work) {
                     proven_arena_t wa = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work, .size = need });
                     double t0 = rubraview_pal_time_now_seconds();
-                    rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&wa, in_archive ? U8("") : path, bytes, size, false);
+                    rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&wa, in_archive ? PROVEN_LIT("") : path, bytes, size, false);
                     double ms = (rubraview_pal_time_now_seconds() - t0) * 1000.0;
                     if (px.pixels) {
                         rubraview_info_addf(a, &info, T("Decoded in"), T("%.0f ms"), ms);
@@ -20348,18 +20348,18 @@ static void info_gather(app_state_t *app) {
             }
             /* 1.18.0: what Rubraview kept beside it, shown as the file's own */
             rubraview_details_src_t beside;
-            u8str_t beside_path = { .ptr = "", .len = 0 };
+            proven_u8str_view_t beside_path = PROVEN_LIT("");
             if (!in_archive && details_beside(a, path, &beside, &beside_path)) {
-                u8str_t beside_name = rubraview_path_basename(beside_path);
+                proven_u8str_view_t beside_name = rubraview_path_basename(beside_path);
                 char title[400];
-                snprintf(title, sizeof(title), T("Kept beside it in %.*s"), (int)(beside_name.len < 300 ? beside_name.len : 300), beside_name.ptr);
+                snprintf(title, sizeof(title), T("Kept beside it in %.*s"), (int)(beside_name.size < 300 ? beside_name.size : 300), beside_name.ptr);
                 rubraview_info_heading(a, &info, title);
                 for (size_t i = 0; i < beside.info.count; ++i) {
                     const rubraview_info_line_t *l = &beside.info.lines[i];
-                    if (l->heading) rubraview_info_heading(a, &info, l->label.ptr);
-                    else rubraview_info_add(a, &info, l->label.ptr, l->value);
+                    if (l->heading) rubraview_info_heading(a, &info, (const char *)l->label.ptr);
+                    else rubraview_info_add(a, &info, (const char *)l->label.ptr, l->value);
                 }
-                if (beside.xmp.len > 0) rubraview_info_addf(a, &info, T("XMP"), T("%zu bytes"), beside.xmp.len);
+                if (beside.xmp.size > 0) rubraview_info_addf(a, &info, T("XMP"), T("%zu bytes"), beside.xmp.size);
             }
             free(mem);
             rubraview_pal_fs_unmap(&map);
@@ -20368,16 +20368,16 @@ static void info_gather(app_state_t *app) {
 
     /* What the folder holds (the book's folder when a book is open). */
     if (index >= 0 && (size_t)index < page_count(app)) {
-        u8str_t dir = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER ? rubraview_path_dirname(app->source.archive_path)
+        proven_u8str_view_t dir = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER ? rubraview_path_dirname(app->source.archive_path)
                                                                      : rubraview_path_dirname(app->source.pages[index].path);
         info_folder_summary(app, dir);
         info_add_summary(app, a, &info);
     }
 
-    proven_result_mem_mut_t rr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(u8str_t));
+    proven_result_mem_mut_t rr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(proven_u8str_view_t));
     proven_result_mem_mut_t hr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(bool));
     if (!proven_is_ok(rr.err) || !proven_is_ok(hr.err)) { app->info_count = 0; return; }
-    app->info_rows = (u8str_t*)(void*)rr.value.ptr;
+    app->info_rows = (proven_u8str_view_t*)(void*)rr.value.ptr;
     app->info_heading = (bool*)(void*)hr.value.ptr;
     app->info_count = rubraview_info_rows(a, &info, INFO_LABEL_COLS, app->info_rows, INFO_MAX_ROWS);
     for (size_t i = 0, r = 0; i < info.count && r < app->info_count; ++i, ++r) app->info_heading[r] = info.lines[i].heading;
@@ -20390,9 +20390,9 @@ static void info_gather(app_state_t *app) {
    thousand files is a big listing. */
 enum { INFO_PICTURES, INFO_FILMS, INFO_SONGS, INFO_ARCHIVES, INFO_FOLDERS, INFO_OTHER, INFO_ALL };
 
-static void info_folder_summary(app_state_t *app, u8str_t dir) {
-    if (dir.len == 0 || dir.len >= sizeof(app->info_folder)) return;
-    if (strlen(app->info_folder) == dir.len && memcmp(app->info_folder, dir.ptr, dir.len) == 0) return;   /* the same one */
+static void info_folder_summary(app_state_t *app, proven_u8str_view_t dir) {
+    if (dir.size == 0 || dir.size >= sizeof(app->info_folder)) return;
+    if (strlen(app->info_folder) == dir.size && memcmp(app->info_folder, dir.ptr, dir.size) == 0) return;   /* the same one */
     memset(app->info_counts, 0, sizeof(app->info_counts));
     memset(app->info_bytes, 0, sizeof(app->info_bytes));
     size_t budget = 64u * 1024u * 1024u;
@@ -20403,9 +20403,9 @@ static void info_folder_summary(app_state_t *app, u8str_t dir) {
     for (size_t i = 0; i < listing.count; ++i) {
         const rubraview_fs_entry_t *e = &listing.entries[i];
         int kind = e->is_directory ? INFO_FOLDERS
-                 : rubraview_glob_match_list(e->name, U8(IMAGE_FILTER)) ? INFO_PICTURES
-                 : rubraview_glob_match_list(e->name, U8(ARCHIVE_FILTER)) ? INFO_ARCHIVES
-                 : rubraview_glob_match_list(e->name, U8(MEDIA_FILTER))
+                 : rubraview_glob_match_list(e->name, PROVEN_LIT(IMAGE_FILTER)) ? INFO_PICTURES
+                 : rubraview_glob_match_list(e->name, PROVEN_LIT(ARCHIVE_FILTER)) ? INFO_ARCHIVES
+                 : rubraview_glob_match_list(e->name, PROVEN_LIT(MEDIA_FILTER))
                      ? (rubraview_tags_is_music_name(e->name) ? INFO_SONGS : INFO_FILMS)
                  : INFO_OTHER;
         app->info_counts[kind]++;
@@ -20416,8 +20416,8 @@ static void info_folder_summary(app_state_t *app, u8str_t dir) {
         }
     }
     free(mem);
-    memcpy(app->info_folder, dir.ptr, dir.len);
-    app->info_folder[dir.len] = '\0';
+    memcpy(app->info_folder, dir.ptr, dir.size);
+    app->info_folder[dir.size] = '\0';
 }
 
 static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info_t *info) {
@@ -20508,12 +20508,12 @@ static void info_scroll_by(app_state_t *app, int32_t lines) {
 #define INFO_DIM        0xFF8A9099u
 
 /* Text on the grid, each narrow run and each wide character at its own cell. */
-static void info_text(app_state_t *app, u8str_t text, double x, double y, uint32_t color) {
+static void info_text(app_state_t *app, proven_u8str_view_t text, double x, double y, uint32_t color) {
     rubraview_cell_run_t runs[256];
     size_t n = rubraview_cell_runs(text, runs, sizeof(runs) / sizeof(runs[0]));
     for (size_t i = 0; i < n; ++i) {
-        u8str_t piece = { .ptr = text.ptr + runs[i].offset, .len = runs[i].length };
-        if (piece.len == 1 && piece.ptr[0] == ' ') continue;
+        proven_u8str_view_t piece = { .ptr = text.ptr + runs[i].offset, .size = runs[i].length };
+        if (piece.size == 1 && piece.ptr[0] == ' ') continue;
         rubraview_pal_render_draw_text_mono(app->info_renderer, piece, x + app->info_cell_w * runs[i].col,
                                             y, app->info_font, color);
     }
@@ -20547,7 +20547,7 @@ static void draw_info_window(app_state_t *app) {
     char foot[160];
     int n = snprintf(foot, sizeof(foot), T(" %s%sdrag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc"),
                      app->info_message, app->info_message[0] ? "   |   " : "");
-    if (n > 0) rubraview_pal_render_draw_text_mono(r, (u8str_t){ foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
+    if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
                                                    0.0, (double)h - ch * 1.2, app->info_font, INFO_DIM);
     if (!rubraview_pal_render_end(r)) app->info_dirty = true;
 }
@@ -20559,7 +20559,7 @@ static void info_copy(app_state_t *app) {
     rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->info_count, INT32_MAX / 2 };
     const rubraview_grid_selection_t *sel = app->info_sel.active ? &app->info_sel : &all;
     size_t n = rubraview_grid_selection_copy(sel, app->info_rows, (int32_t)app->info_count, text, 65536);
-    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->info_window, (u8str_t){ .ptr = text, .len = n });
+    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->info_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
     snprintf(app->info_message, sizeof(app->info_message), "%s", ok ? (app->info_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy"));
     free(text);
     app->info_dirty = true;
@@ -20667,13 +20667,13 @@ static void help_rebuild(app_state_t *app) {
     }
     for (size_t i = 0; i < notice_count && app->help_count < room; ++i) {
         app->help_lines[app->help_count++] = (rubraview_help_line_t){
-            .kind = RUBRAVIEW_HELP_NOTE, .text = (u8str_t){ .ptr = notices[i], .len = strlen(notices[i]) } };
+            .kind = RUBRAVIEW_HELP_NOTE, .text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)notices[i], .size = strlen(notices[i]) } };
     }
     /* The second column starts after the longest key list there is, so a
        binding with three keys does not run into what it does. */
     size_t widest = 0;
     for (size_t i = 0; i < app->help_count; ++i) {
-        if (app->help_lines[i].keys.len > widest) widest = app->help_lines[i].keys.len;
+        if (app->help_lines[i].keys.size > widest) widest = app->help_lines[i].keys.size;
     }
     app->help_key_cols = (int32_t)widest + 4;
     if (app->help_key_cols < 20) app->help_key_cols = 20;
@@ -20685,15 +20685,15 @@ static void help_rebuild(app_state_t *app) {
         char *row = app->help_row_text[i];
         int n = 0;
         if (l->kind == RUBRAVIEW_HELP_ENTRY) {
-            int pad = app->help_key_cols - 2 - (int)l->keys.len;
-            n = snprintf(row, 256, "  %.*s%*s%.*s", (int)l->keys.len, l->keys.ptr, pad > 1 ? pad : 1, "",
-                         (int)l->text.len, l->text.ptr);
+            int pad = app->help_key_cols - 2 - (int)l->keys.size;
+            n = snprintf(row, 256, "  %.*s%*s%.*s", (int)l->keys.size, l->keys.ptr, pad > 1 ? pad : 1, "",
+                         (int)l->text.size, l->text.ptr);
         } else if (l->kind != RUBRAVIEW_HELP_BLANK) {
-            n = snprintf(row, 256, "  %.*s", (int)l->text.len, l->text.ptr);
+            n = snprintf(row, 256, "  %.*s", (int)l->text.size, l->text.ptr);
         }
         if (n < 0) n = 0;
         if (n > 255) n = 255;
-        app->help_rows[i] = (u8str_t){ .ptr = row, .len = (size_t)n };
+        app->help_rows[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)row, .size = (size_t)n };
     }
     app->help_sel.active = false;
     app->help_dirty = true;
@@ -20780,11 +20780,11 @@ static void draw_help_window(app_state_t *app) {
     {
         char top[160];
         int n = snprintf(top, sizeof(top), T("Rubraview %s, released %s"), RUBRAVIEW_VERSION_STRING, RUBRAVIEW_RELEASE_DATE);
-        if (n > 0) rubraview_pal_render_draw_text_mono(r, (u8str_t){ top, (size_t)n }, keys_col, 0.0, fs, HELP_HEADING);
-        u8str_t url = U8(RUBRAVIEW_PROJECT_URL);
+        if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)top, (size_t)n }, keys_col, 0.0, fs, HELP_HEADING);
+        proven_u8str_view_t url = PROVEN_LIT(RUBRAVIEW_PROJECT_URL);
         rubraview_pal_render_draw_text_mono(r, url, keys_col, ch, fs, HELP_LINK);
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ keys_col, ch * 2.0 - (ch > 16.0 ? ch / 16.0 : 1.0) * 1.5,
-                                                                  cw * (double)url.len, ch > 16.0 ? ch / 16.0 : 1.0 }, HELP_LINK, 0.0);
+                                                                  cw * (double)url.size, ch > 16.0 ? ch / 16.0 : 1.0 }, HELP_LINK, 0.0);
     }
     for (int32_t row = 0; row < rows; ++row) {
         size_t index = (size_t)(app->help_scroll + row);
@@ -20824,7 +20824,7 @@ static void draw_help_window(app_state_t *app) {
     if (written > 0) {
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
                                        0xFF1E1E1Eu, 0.0);
-        rubraview_pal_render_draw_text_mono(r, (u8str_t){ .ptr = foot, .len = (size_t)written },
+        rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)foot, .size = (size_t)written },
                                             0.0, (double)h - ch, fs, HELP_HEADING);
     }
     rubraview_pal_render_end(r);
@@ -20901,7 +20901,7 @@ static size_t help_pump(app_state_t *app) {
                     rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->help_count, INT32_MAX / 2 };
                     size_t n = rubraview_grid_selection_copy(app->help_sel.active ? &app->help_sel : &all,
                                                              app->help_rows, (int32_t)app->help_count, text, 131072);
-                    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->help_window, (u8str_t){ .ptr = text, .len = n });
+                    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->help_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
                     snprintf(app->help_message, sizeof(app->help_message), "%s",
                              ok ? (app->help_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy"));
                     free(text);
@@ -20938,7 +20938,7 @@ static void mini_toggle_play(app_state_t *app) {
                                   pausing ? RUBRAVIEW_BGM_READER_PAUSED : RUBRAVIEW_BGM_READER_RESUMED,
                                   bgm_pause_for_sound(app));
     } else if (app->media && !app->media_info.has_video) {
-        handle_action(app, U8("media_play_pause"));
+        handle_action(app, PROVEN_LIT("media_play_pause"));
     }
     app->mini_dirty = true;
 }
@@ -20949,7 +20949,7 @@ static int32_t mini_neighbour_page(const app_state_t *app, bool forward) {
     if (from < 0) return -1;
     int32_t step = forward ? 1 : -1;
     for (int32_t i = from + step; i >= 0 && (size_t)i < page_count(app); i += step) {
-        u8str_t path = app->source.pages[i].path;
+        proven_u8str_view_t path = app->source.pages[i].path;
         if (is_media_path(path) && rubraview_tags_is_music_name(rubraview_path_basename(path))) return i;
     }
     return -1;
@@ -20966,7 +20966,7 @@ static void mini_go_to(app_state_t *app, int32_t index) {
         app->mini_dirty = true;
         return;
     }
-    u8str_t path = app->source.pages[index].path;
+    proven_u8str_view_t path = app->source.pages[index].path;
     rubraview_media_backend_t order[2];
     size_t count = rubraview_media_backend_order(app->media_preferred,
                                                  rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
@@ -20985,10 +20985,10 @@ static void mini_go_to(app_state_t *app, int32_t index) {
         if (app->mem) rubraview_region_reset(&app->mem->bgm);   /* RFC-0006: the track before's words given back */
         {
             proven_arena_t *ba = app->mem && rubraview_region_ensure(&app->mem->bgm, MUSIC_MAX_HEAD_BYTES + (2u << 20)) ? &app->mem->bgm.arena : app->arena;
-            u8str_t head = rubraview_pal_fs_read_file(ba, path, MUSIC_MAX_HEAD_BYTES);
-            if (head.len > 0) {
+            proven_u8str_view_t head = rubraview_pal_fs_read_file(ba, path, MUSIC_MAX_HEAD_BYTES);
+            if (head.size > 0) {
                 app->bgm_tags = rubraview_tags_read(ba, (rubraview_tags_source_t){
-                    .head = (const uint8_t*)head.ptr, .head_size = head.len, .file_size = head.len });
+                    .head = (const uint8_t*)head.ptr, .head_size = head.size, .file_size = head.size });
             }
         }
         rubraview_pal_media_set_paused(app->bgm_media, was_paused);
@@ -21073,8 +21073,8 @@ static void draw_mini_window(app_state_t *app) {
     double left = cover.x + cover.width + 6.0 * dpi;
     double text_w = (double)w - left - 6.0 * dpi - 3.0 * 28.0 * dpi;
     if (text_w < 40.0 * dpi) text_w = 40.0 * dpi;
-    u8str_t title = tags->title;
-    if (title.len == 0) {
+    proven_u8str_view_t title = tags->title;
+    if (title.size == 0) {
         int32_t page = mini_page(app);
         if (page >= 0 && (size_t)page < page_count(app)) {
             title = rubraview_path_basename(app->source.pages[page].path);
@@ -21082,7 +21082,7 @@ static void draw_mini_window(app_state_t *app) {
     }
     rubraview_pal_rect_t line1 = { left, 6.0 * dpi, text_w, 18.0 * dpi };
     rubraview_pal_render_draw_text(r, title, line1, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-    if (tags->artist.len > 0) {
+    if (tags->artist.size > 0) {
         rubraview_pal_rect_t line2 = { left, 25.0 * dpi, text_w, 16.0 * dpi };
         rubraview_pal_render_draw_text(r, tags->artist, line2, 11.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
@@ -21108,7 +21108,7 @@ static void draw_mini_window(app_state_t *app) {
         rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, 2.0);
     }
     char clock[64];
-    u8str_t at = rubraview_format_timecode(clock, sizeof(clock), mini_position(app), false);
+    proven_u8str_view_t at = rubraview_format_timecode(clock, sizeof(clock), mini_position(app), false);
     rubraview_pal_rect_t time_rect = { strip.x + strip.width + 4.0 * dpi, h - 20.0 * dpi,
                                        (double)w - (strip.x + strip.width) - 8.0 * dpi, 16.0 * dpi };
     rubraview_pal_render_draw_text(r, at, time_rect, 11.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
@@ -21303,7 +21303,7 @@ static void files_preview_step(app_state_t *app, double now) {
     if (bytes.ok) {
         loaded = bytes.from_disk
             ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[page].path, true)
-            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, (const uint8_t*)bytes.data.ptr, bytes.data.len, true);
+            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, (const uint8_t*)bytes.data.ptr, bytes.data.size, true);
     }
     free(mem);
     if (!loaded.ok || !loaded.texture) { app->files_preview_state = FILES_PREVIEW_FAILED; return; }
@@ -21323,18 +21323,18 @@ static int files_size_text(char *buf, size_t cap, uint64_t bytes) {
 
 /* As much of `text` as about fits `width` at `size`, cut at a whole
    character with "..." (there is no clipping to lean on). */
-static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width, double size) {
+static proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size) {
     size_t room = size > 0.0 ? (size_t)(width / (size * 0.56)) : 0;
     size_t chars = 0, at = 0;
-    while (at < text.len) {
+    while (at < text.size) {
         size_t next = at + 1;
-        while (next < text.len && ((unsigned char)text.ptr[next] & 0xC0) == 0x80) next++;
+        while (next < text.size && ((unsigned char)text.ptr[next] & 0xC0) == 0x80) next++;
         /* a CJK character is about twice a Latin one wide */
         chars += (unsigned char)text.ptr[at] >= 0xE0 ? 2 : 1;
         if (chars > room) break;
         at = next;
     }
-    if (at >= text.len) return text;
+    if (at >= text.size) return text;
     while (at > 0 && chars + 3 > room) {         /* make room for the dots */
         size_t prev = at - 1;
         while (prev > 0 && ((unsigned char)text.ptr[prev] & 0xC0) == 0x80) prev--;
@@ -21344,7 +21344,7 @@ static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width,
     if (at + 4 > cap) at = cap > 4 ? cap - 4 : 0;
     memcpy(buf, text.ptr, at);
     memcpy(buf + at, "...", 3);
-    return (u8str_t){ .ptr = buf, .len = at + 3 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = at + 3 };
 }
 
 /* ---- RV-136: the font picker (owner, 2026-10-18) ----
@@ -21359,11 +21359,11 @@ static u8str_t files_fit_text(char *buf, size_t cap, u8str_t text, double width,
 #define FONTPICK_BACKGROUND 0xFF181818u
 #define FONTPICK_NEW_FACES  6     /* rows drawn in their own face a frame */
 
-static u8str_t fontpick_sample(void) {
+static proven_u8str_view_t fontpick_sample(void) {
     static char buf[96];
     /* "Abc" in a pack is that language's own short word (한글, かな漢字, ...). */
     int n = snprintf(buf, sizeof(buf), "Iil1 aoO0 %s", T("Abc"));
-    return (u8str_t){ .ptr = buf, .len = n > 0 ? (size_t)n : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
 }
 
 static double fontpick_dpi(const app_state_t *app) { return rubraview_pal_window_dpi_scale(app->fontpick_window); }
@@ -21379,9 +21379,9 @@ static size_t fontpick_rows(const app_state_t *app) {
 }
 
 /* Does `name` hold the words typed, letters of any case alike? */
-static bool fontpick_finds(u8str_t name, const char *find, size_t len) {
+static bool fontpick_finds(proven_u8str_view_t name, const char *find, size_t len) {
     if (len == 0) return true;
-    for (size_t i = 0; i + len <= name.len; ++i) {
+    for (size_t i = 0; i + len <= name.size; ++i) {
         size_t k = 0;
         for (; k < len; ++k) {
             int a = (unsigned char)name.ptr[i + k], b = (unsigned char)find[k];
@@ -21408,10 +21408,10 @@ static void fontpick_filter(app_state_t *app) {
         app->fontpick_sel = app->fontpick_list_count ? 0 : -1;
         for (size_t i = 0; i < app->fontpick_list_count; ++i) {
             const rubraview_font_family_t *f = &app->fontpick_all[app->fontpick_list[i]];
-            u8str_t a = { f->shown.ptr, f->shown.len < app->fontpick_find_len ? f->shown.len : app->fontpick_find_len };
-            u8str_t b = { f->name.ptr, f->name.len < app->fontpick_find_len ? f->name.len : app->fontpick_find_len };
-            if ((a.len == app->fontpick_find_len && fontpick_finds(a, app->fontpick_find, app->fontpick_find_len)) ||
-                (b.len == app->fontpick_find_len && fontpick_finds(b, app->fontpick_find, app->fontpick_find_len))) {
+            proven_u8str_view_t a = { f->shown.ptr, f->shown.size < app->fontpick_find_len ? f->shown.size : app->fontpick_find_len };
+            proven_u8str_view_t b = { f->name.ptr, f->name.size < app->fontpick_find_len ? f->name.size : app->fontpick_find_len };
+            if ((a.size == app->fontpick_find_len && fontpick_finds(a, app->fontpick_find, app->fontpick_find_len)) ||
+                (b.size == app->fontpick_find_len && fontpick_finds(b, app->fontpick_find, app->fontpick_find_len))) {
                 app->fontpick_sel = (int32_t)i;
                 break;
             }
@@ -21445,7 +21445,7 @@ static void fontpick_close(app_state_t *app) {
     app->settings_dirty = true;
 }
 
-static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key) {
+static void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_view_t key) {
     if (app->fontpick_open) fontpick_close(app);
     size_t cap = 4u << 20;
     app->fontpick_mem = malloc(cap);
@@ -21492,7 +21492,7 @@ static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key) {
     fontpick_filter(app);
     for (size_t i = 0; i < app->fontpick_list_count; ++i) {   /* the font in use, chosen and in sight */
         const rubraview_font_family_t *f = &app->fontpick_all[app->fontpick_list[i]];
-        if (now.family.len > 0 && (rubraview_u8_eq(f->name, now.family) || rubraview_u8_eq(f->shown, now.family))) {
+        if (now.family.size > 0 && (proven_u8str_view_eq(f->name, now.family) || proven_u8str_view_eq(f->shown, now.family))) {
             app->fontpick_sel = (int32_t)i;
             break;
         }
@@ -21506,7 +21506,7 @@ static void fontpick_show(app_state_t *app, u8str_t section, u8str_t key) {
 /* What the picker keeps: the family chosen with its weight and italic; empty for the program's face. */
 static void fontpick_keep(app_state_t *app, bool program_face) {
     char buf[200];
-    u8str_t value = U8("");
+    proven_u8str_view_t value = PROVEN_LIT("");
     if (!program_face && app->fontpick_sel >= 0 && (size_t)app->fontpick_sel < app->fontpick_list_count) {
         const rubraview_font_family_t *f = &app->fontpick_all[app->fontpick_list[app->fontpick_sel]];
         value = rubraview_font_spec_format(buf, sizeof(buf), f->name, app->fontpick_weight, app->fontpick_italic);
@@ -21514,7 +21514,7 @@ static void fontpick_keep(app_state_t *app, bool program_face) {
     rubraview_settings_set_text(&app->settings, app->fontpick_section, app->fontpick_key, app_keep(app, value));
     fontpick_close(app);
     settings_took_effect(app);
-    settings_say(app, value.len ? T("font chosen") : T("the program's own font"));
+    settings_say(app, value.size ? T("font chosen") : T("the program's own font"));
 }
 
 /* The bottom's places: the weight (its left half lighter, right half heavier), italic, Default, OK, Cancel. */
@@ -21528,7 +21528,7 @@ static rubraview_pal_rect_t fontpick_place(const app_state_t *app, int which) {
     return (rubraview_pal_rect_t){ X[which] * d, y, W[which] * d, bh };
 }
 
-static void fontpick_link(rubraview_renderer_t *r, rubraview_pal_rect_t box, u8str_t text, double size, bool lit) {
+static void fontpick_link(rubraview_renderer_t *r, rubraview_pal_rect_t box, proven_u8str_view_t text, double size, bool lit) {
     if (lit) rubraview_pal_render_fill_rect(r, box, 0xFF2A2F38u, 3.0);
     rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0, 3.0);
     rubraview_pal_render_draw_text(r, text, box, size, SETTINGS_LINK, RUBRAVIEW_TEXT_CENTER);
@@ -21556,13 +21556,13 @@ static void draw_fontpick_window(app_state_t *app) {
     int n = app->fontpick_find_len
         ? snprintf(line, sizeof(line), "%.*s|   %zu / %zu", (int)app->fontpick_find_len, app->fontpick_find, app->fontpick_list_count, app->fontpick_all_count)
         : snprintf(line, sizeof(line), T("type to find a font   %zu"), app->fontpick_all_count);
-    if (n > 0) rubraview_pal_render_draw_text(r, (u8str_t){ line, (size_t)n }, (rubraview_pal_rect_t){ find.x + 8.0 * d, find.y, find.width - 16.0 * d, find.height },
+    if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)n }, (rubraview_pal_rect_t){ find.x + 8.0 * d, find.y, find.width - 16.0 * d, find.height },
                                               font, app->fontpick_find_len ? COLOR_TEXT : 0xFF909090u, RUBRAVIEW_TEXT_LEFT);
 
     /* The families: the name, then the sample — in its own face once drawn so. */
     size_t rows = fontpick_rows(app), fresh = 0;
     bool waiting = false;
-    u8str_t sample = fontpick_sample();
+    proven_u8str_view_t sample = fontpick_sample();
     double name_w = (double)w * 0.46;
     for (size_t k = 0; k < rows && app->fontpick_first + k < app->fontpick_list_count; ++k) {
         size_t at = app->fontpick_first + k;
@@ -21579,7 +21579,7 @@ static void draw_fontpick_window(app_state_t *app) {
         if (app->fontpick_drawn[fi]) {
             rubraview_pal_render_set_text_font(r, f->name, app->fontpick_weight, app->fontpick_italic);
             rubraview_pal_render_draw_text(r, sample, right, font * 1.25, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-            rubraview_pal_render_set_text_family(r, U8(""));
+            rubraview_pal_render_set_text_family(r, PROVEN_LIT(""));
         } else {
             rubraview_pal_render_draw_text(r, sample, right, font * 1.25, 0xFF606060u, RUBRAVIEW_TEXT_LEFT);
             waiting = true;
@@ -21605,7 +21605,7 @@ static void draw_fontpick_window(app_state_t *app) {
         rubraview_pal_render_set_text_font(r, f->name, app->fontpick_weight, app->fontpick_italic);
         rubraview_pal_render_draw_text(r, sample, (rubraview_pal_rect_t){ 14.0 * d, by + 6.0 * d, (double)w - 28.0 * d, 70.0 * d },
                                        30.0 * d, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        rubraview_pal_render_set_text_family(r, U8(""));
+        rubraview_pal_render_set_text_family(r, PROVEN_LIT(""));
     }
     char weight[64];
     snprintf(weight, sizeof(weight), "<  %s  >", rubraview_font_weight_name(app->fontpick_weight));
@@ -21780,17 +21780,17 @@ static void draw_files_window(app_state_t *app) {
     rubraview_pal_render_begin(r, FILES_BACKGROUND);
 
     /* The header: what the list is, and where the file on screen is in it. */
-    bool in_archive = app->source.archive_path.len > 0 && !app->list_is_set;
+    bool in_archive = app->source.archive_path.size > 0 && !app->list_is_set;
     char head[640], cut[640];
-    u8str_t what = app->list_is_set ? TU8("Playlist")
+    proven_u8str_view_t what = app->list_is_set ? TU8("Playlist")
                  : in_archive ? rubraview_path_basename(app->source.archive_path)
                  : rubraview_path_basename(app->source_dir);
-    int hn = current >= 0 ? snprintf(head, sizeof(head), "%d / %zu   %.*s", current + 1, count, (int)(what.len < 560 ? what.len : 560), what.ptr)
-                          : snprintf(head, sizeof(head), "%zu   %.*s", count, (int)(what.len < 560 ? what.len : 560), what.ptr);
+    int hn = current >= 0 ? snprintf(head, sizeof(head), "%d / %zu   %.*s", current + 1, count, (int)(what.size < 560 ? what.size : 560), what.ptr)
+                          : snprintf(head, sizeof(head), "%zu   %.*s", count, (int)(what.size < 560 ? what.size : 560), what.ptr);
     rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, lw->title_height };
     rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
     rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, lw->title_height };
-    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)hn }, head_text.width, font),
+    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)hn }, head_text.width, font),
                                                head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     if (lw->editable) {
         draw_list_bar(app, r, lw, app->files_px, app->files_py);
@@ -21822,13 +21822,13 @@ static void draw_files_window(app_state_t *app) {
             int sn = files_size_text(size_text, sizeof(size_text), bytes);
             size_w = font * 0.56 * 9.0;
             rubraview_pal_rect_t size_box = { row.x + row.width - size_w - lw->row_height * 0.3, row.y, size_w, row.height };
-            if (sn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ size_text, (size_t)sn }, size_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
+            if (sn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)size_text, (size_t)sn }, size_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
         }
         char line[640];
-        u8str_t name = page_display_name(app, i);
-        int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.len < 600 ? name.len : 600), name.ptr);
+        proven_u8str_view_t name = page_display_name(app, i);
+        int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.size < 600 ? name.size : 600), name.ptr);
         rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, row.x + row.width - text_left - lw->row_height * 0.9 - size_w, row.height };
-        if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
+        if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
                                                   text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     draw_list_drop_line(app, r, lw, true);
@@ -21870,12 +21870,12 @@ static void draw_files_window(app_state_t *app) {
         }
         if (say) {
             rubraview_pal_rect_t mid = { room.x + 8.0 * dpi, room.y, room.width - 16.0 * dpi, room.height };
-            rubraview_pal_render_draw_text(r, (u8str_t){ say, strlen(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)say, strlen(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
         if (page >= 0 && (size_t)page < count) {
             rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, caption_h * 0.5 };
             rubraview_pal_rect_t line2 = { line1.x, line1.y + caption_h * 0.5 - 2.0, line1.width, caption_h * 0.5 };
-            u8str_t name = page_display_name(app, (size_t)page);
+            proven_u8str_view_t name = page_display_name(app, (size_t)page);
             rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), name, line1.width, font), line1, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             char facts[160], size_text[32];
             int fn = 0;
@@ -21887,7 +21887,7 @@ static void draw_files_window(app_state_t *app) {
             } else if (bytes > 0) {
                 fn = snprintf(facts, sizeof(facts), "%s", size_text);
             }
-            if (fn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            if (fn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
     if (app->ctx_in_files) draw_ctxmenu_on(app, r, app->files_px, app->files_py);   /* RV-117: a file's own list */
@@ -21910,8 +21910,8 @@ static size_t files_pump(app_state_t *app) {
                     char next[sizeof(app->list_filter)];
                     size_t n = strlen(app->list_filter);
                     memcpy(next, app->list_filter, n);
-                    (void)rubraview_rename_append(next, sizeof(next), &n, (u8str_t){ .ptr = event.text.utf8, .len = event.text.length });
-                    list_filter_set(app, (u8str_t){ .ptr = next, .len = n });
+                    (void)rubraview_rename_append(next, sizeof(next), &n, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length });
+                    list_filter_set(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)next, .size = n });
                     app->files_dirty = true;
                 }
                 break;
@@ -21941,9 +21941,9 @@ static size_t files_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_DROP:
                 /* RV-117: files from Explorer join the list at the row they are let go over */
                 if (event.drop.count > 0 && list_editable(app)) {
-                    u8str_t paths[16];
+                    proven_u8str_view_t paths[16];
                     size_t n = event.drop.count < 16 ? event.drop.count : 16;
-                    for (size_t i = 0; i < n; ++i) paths[i] = (u8str_t){ .ptr = event.drop.paths[i], .len = event.drop.path_lengths[i] };
+                    for (size_t i = 0; i < n; ++i) paths[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.drop.paths[i], .size = event.drop.path_lengths[i] };
                     listwin_sync(app);
                     size_t at = event.drop.has_point && !list_viewed(app) ? rubraview_listwin_insert_index(&app->files_list, event.drop.y, page_count(app))
                                                                           : page_count(app);
@@ -21984,13 +21984,13 @@ static size_t files_pump(app_state_t *app) {
                 if (app->ctx_open && app->ctx_in_files && popups_key(app, combo)) { app->files_dirty = true; break; }
                 if (chooser_key(app, CHOOSE_IN_FILES, combo)) break;   /* 1.25.0 */
                 if (app->list_filter_in_files) {   /* 1.25.0: the filter's keys */
-                    if (key_is(combo, "Escape")) { list_filter_set(app, U8("")); list_filter_files_end(app); break; }
+                    if (key_is(combo, "Escape")) { list_filter_set(app, PROVEN_LIT("")); list_filter_files_end(app); break; }
                     if (key_is(combo, "Enter")) { list_filter_files_end(app); break; }
                     if (key_is(combo, "Backspace")) {
                         size_t n = strlen(app->list_filter);
                         while (n > 0 && ((unsigned char)app->list_filter[n - 1] & 0xC0u) == 0x80u) --n;
                         if (n > 0) --n;
-                        list_filter_set(app, (u8str_t){ .ptr = app->list_filter, .len = n });
+                        list_filter_set(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->list_filter, .size = n });
                         app->files_dirty = true;
                         break;
                     }
@@ -22079,13 +22079,13 @@ static bool takeout_wanted(const rubraview_mkv_track_t *track) {
    have (its tracks are described in `takeout.mkv`'s place for that). */
 static void takeout_write(app_state_t *app);
 
-static void takeout_mp4(app_state_t *app, u8str_t film) {
+static void takeout_mp4(app_state_t *app, proven_u8str_view_t film) {
     const char *why = NULL;
     if (!rubraview_mp4_open(&app->takeout.mp4, app->takeout.map.data, app->takeout.map.size, &why)) {
         takeout_end(app);
         char line[200];
         int n = snprintf(line, sizeof(line), T("subtitles are taken out of Matroska and MP4 films only (%s)"), why ? why : T("not one of them"));
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         return;
     }
     app->takeout.mkv = (rubraview_mkv_t){0};
@@ -22094,7 +22094,7 @@ static void takeout_mp4(app_state_t *app, u8str_t film) {
         const rubraview_mp4_track_t *t = &app->takeout.mp4.tracks[i];
         rubraview_mkv_track_t *as = &app->takeout.mkv.tracks[app->takeout.mkv.track_count++];
         *as = (rubraview_mkv_track_t){ .number = t->id, .type = t->subtitle ? 0x11 : 0,
-                                       .language = { .ptr = t->language, .len = strlen(t->language) },
+                                       .language = { .ptr = (const proven_byte_t *)t->language, .size = strlen(t->language) },
                                        .subtitle = t->subtitle == RUBRAVIEW_MP4_SUB_TX3G ? RUBRAVIEW_MKV_SUB_SRT
                                                  : t->subtitle == RUBRAVIEW_MP4_SUB_OTHER ? RUBRAVIEW_MKV_SUB_OTHER : RUBRAVIEW_MKV_SUB_NONE };
         if (t->subtitle == RUBRAVIEW_MP4_SUB_OTHER) other++;
@@ -22118,8 +22118,8 @@ static void takeout_mp4(app_state_t *app, u8str_t film) {
                                : TU8("the film holds no subtitles"));
         return;
     }
-    memcpy(app->takeout.film, film.ptr, film.len);
-    app->takeout.film[film.len] = '\0';
+    memcpy(app->takeout.film, film.ptr, film.size);
+    app->takeout.film[film.size] = '\0';
     takeout_write(app);
 }
 
@@ -22129,12 +22129,12 @@ static void takeout_begin(app_state_t *app) {
         osd_say(app, TU8("taking the subtitles out was stopped; nothing was written"));
         return;
     }
-    if (!app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app) || app->source.archive_path.len > 0) {
+    if (!app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app) || app->source.archive_path.size > 0) {
         osd_say(app, TU8("no film file is open to take subtitles out of"));
         return;
     }
-    u8str_t film = app->source.pages[app->media_page].path;
-    if (film.len == 0 || film.len >= sizeof(app->takeout.film)) return;
+    proven_u8str_view_t film = app->source.pages[app->media_page].path;
+    if (film.size == 0 || film.size >= sizeof(app->takeout.film)) return;
     if (!rubraview_pal_fs_map(film, &app->takeout.map)) {
         osd_say(app, TU8("the film could not be read"));
         return;
@@ -22165,8 +22165,8 @@ static void takeout_begin(app_state_t *app) {
                    : TU8("the film holds no subtitles"));
         return;
     }
-    memcpy(app->takeout.film, film.ptr, film.len);
-    app->takeout.film[film.len] = '\0';
+    memcpy(app->takeout.film, film.ptr, film.size);
+    app->takeout.film[film.size] = '\0';
     rubraview_mkv_walk_begin(&app->takeout.mkv, &app->takeout.walk);
     app->takeout.running = true;
     app->takeout.said_at = 0.0;
@@ -22177,10 +22177,10 @@ static void takeout_begin(app_state_t *app) {
 /* The walk is over: each track's text goes to its file. One already there
    with the same bytes is left; another is kept under a numbered name (D-126). */
 static void takeout_write(app_state_t *app) {
-    u8str_t film = { .ptr = app->takeout.film, .len = strlen(app->takeout.film) };
+    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->takeout.film, .size = strlen(app->takeout.film) };
     char said[400];
     size_t said_len = 0, written = 0, same = 0, failed = 0, empty = 0;
-    u8str_t first = { .ptr = "", .len = 0 };
+    proven_u8str_view_t first = PROVEN_LIT("");
     for (size_t i = 0; i < app->takeout.mkv.track_count; ++i) {
         const rubraview_mkv_track_t *t = &app->takeout.mkv.tracks[i];
         if (!takeout_wanted(t)) continue;
@@ -22188,34 +22188,34 @@ static void takeout_write(app_state_t *app) {
         unsigned ordinal = 0;                         /* earlier tracks of the same language */
         for (size_t k = 0; k < i; ++k) {
             const rubraview_mkv_track_t *o = &app->takeout.mkv.tracks[k];
-            if (takeout_wanted(o) && app->takeout.out[k].cues > 0 && rubraview_u8_eq(o->language, t->language) &&
+            if (takeout_wanted(o) && app->takeout.out[k].cues > 0 && proven_u8str_view_eq(o->language, t->language) &&
                 strcmp(rubraview_mkv_subtitle_ext(o), rubraview_mkv_subtitle_ext(t)) == 0) ordinal++;
         }
         char name[1100];
         size_t name_len = rubraview_mkv_subtitle_name(t, film, ordinal, name, sizeof(name));
         if (name_len == 0) { failed++; continue; }
-        u8str_t path = { .ptr = name, .len = name_len };
-        u8str_t text = { .ptr = app->takeout.out[i].data, .len = app->takeout.out[i].len };
+        proven_u8str_view_t path = { .ptr = (const proven_byte_t *)name, .size = name_len };
+        proven_u8str_view_t text = { .ptr = (const proven_byte_t *)app->takeout.out[i].data, .size = app->takeout.out[i].len };
         bool ok = true;
         if (rubraview_pal_fs_exists(path)) {
-            u8str_t there = rubraview_pal_fs_read_file(app->arena, path, SUBTITLE_MAX_BYTES);
-            if (rubraview_u8_eq(there, text)) { same++; ok = false; }
+            proven_u8str_view_t there = rubraview_pal_fs_read_file(app->arena, path, SUBTITLE_MAX_BYTES);
+            if (proven_u8str_view_eq(there, text)) { same++; ok = false; }
             else {
-                u8str_t kept = { .ptr = "", .len = 0 };
-                for (unsigned number = 1; number < 10000 && kept.len == 0; ++number) {
-                    u8str_t candidate = rubraview_subtitle_backup_path(app->arena, path, number);
-                    if (candidate.len == 0) break;
+                proven_u8str_view_t kept = PROVEN_LIT("");
+                for (unsigned number = 1; number < 10000 && kept.size == 0; ++number) {
+                    proven_u8str_view_t candidate = rubraview_subtitle_backup_path(app->arena, path, number);
+                    if (candidate.size == 0) break;
                     if (!rubraview_pal_fs_exists(candidate)) kept = candidate;
                 }
-                if (kept.len == 0 || !rubraview_pal_fs_move(path, kept)) { failed++; ok = false; }
+                if (kept.size == 0 || !rubraview_pal_fs_move(path, kept)) { failed++; ok = false; }
             }
         }
         if (ok && !rubraview_pal_fs_write_file(path, text)) { failed++; ok = false; }
         if (!ok) continue;
         written++;
-        u8str_t base = rubraview_path_basename(path);
-        if (first.len == 0) first = app_keep(app, path);
-        int n = snprintf(said + said_len, sizeof(said) - said_len, "%s%.*s", said_len ? ", " : "", (int)(base.len < 120 ? base.len : 120), base.ptr);
+        proven_u8str_view_t base = rubraview_path_basename(path);
+        if (first.size == 0) first = app_keep(app, path);
+        int n = snprintf(said + said_len, sizeof(said) - said_len, "%s%.*s", said_len ? ", " : "", (int)(base.size < 120 ? base.size : 120), base.ptr);
         if (n > 0 && (size_t)n < sizeof(said) - said_len) said_len += (size_t)n;
     }
     char line[520];
@@ -22226,22 +22226,22 @@ static void takeout_write(app_state_t *app) {
     else n = snprintf(line, sizeof(line), "%s", empty ? T("the film's subtitle tracks are empty") : T("nothing was taken out"));
     app->takeout.mp4 = (rubraview_mp4_t){0};
     takeout_end(app);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 
     /* The film on screen is still that film: its list of subtitles is made
        again, and with none on (or none changed) the first new one is shown. */
     if (written == 0 || !app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app)) return;
-    if (!rubraview_u8_eq(app->source.pages[app->media_page].path, film) || rubraview_subtitle_changed(&app->subtitle)) return;
+    if (!proven_u8str_view_eq(app->source.pages[app->media_page].path, film) || rubraview_subtitle_changed(&app->subtitle)) return;
     int32_t shown = app->tracks.current_subtitle;
-    u8str_t shown_path = app->subtitle.source_path;
+    proven_u8str_view_t shown_path = app->subtitle.source_path;
     tracks_prepare(app, film);
     int32_t pick = -1;
     for (size_t i = 0; i < app->tracks.count; ++i) {
         const rubraview_track_t *tr = &app->tracks.tracks[i];
         if (tr->kind != RUBRAVIEW_TRACK_SUBTITLE || !tr->is_external || tr->stream_index < 0 ||
             (size_t)tr->stream_index >= app->subtitle_count) continue;
-        u8str_t p = app->subtitle_files[tr->stream_index].path;
-        if (shown >= 0 && shown_path.len > 0 ? rubraview_u8_eq(p, shown_path) : rubraview_u8_eq(p, first)) { pick = (int32_t)i; break; }
+        proven_u8str_view_t p = app->subtitle_files[tr->stream_index].path;
+        if (shown >= 0 && shown_path.size > 0 ? proven_u8str_view_eq(p, shown_path) : proven_u8str_view_eq(p, first)) { pick = (int32_t)i; break; }
     }
     if (pick >= 0) subtitle_select(app, pick);
 }
@@ -22283,7 +22283,7 @@ static void takeout_step(app_state_t *app) {
         app->takeout.said_at = began;
         char line[64];
         int n = snprintf(line, sizeof(line), T("taking the subtitles out... %d %%"), percent);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         app->subs_dirty = true;
     }
 }
@@ -22318,13 +22318,13 @@ static bool subs_may_leave(app_state_t *app) {
     double now = rubraview_pal_time_now_seconds();
     if (now < app->subs_leave_through) return true;   /* one going passes through here more than once */
     if (app->subs_leave_unasked) {                     /* nobody pressed, so there is no second press to wait for */
-        osd_say(app, app->subtitle.source_path.len ? TU8("subtitle changes not saved: stopped here; Save keeps them")
+        osd_say(app, app->subtitle.source_path.size ? TU8("subtitle changes not saved: stopped here; Save keeps them")
                                                    : TU8("subtitle changes not saved: stopped here"));
         return false;
     }
     if (rubraview_confirm_press(&app->subs_leave, 1, now)) { app->subs_leave_through = now + 1.0; return true; }
     /* a subtitle inside the film cannot be saved (yet): only the way on is said */
-    osd_say(app, app->subtitle.source_path.len ? TU8("subtitle changes not saved: Save keeps them, again leaves them")
+    osd_say(app, app->subtitle.source_path.size ? TU8("subtitle changes not saved: Save keeps them, again leaves them")
                                                : TU8("subtitle changes not saved: again leaves them"));
     app->notice_seconds = RUBRAVIEW_CONFIRM_SECONDS;   /* said for as long as the second try counts */
     return false;
@@ -22359,7 +22359,7 @@ static void subs_sync(app_state_t *app) {
                    : kind == SUBS_PGS ? (const void*)app->pgs.entries : NULL;
     size_t of_count = kind == SUBS_TEXT ? app->subtitle.count : kind == SUBS_VOBSUB ? app->vobsub.count
                     : kind == SUBS_PGS ? app->pgs.count : 0;
-    const char *language = kind == SUBS_TEXT ? app->subtitle.shown_language.ptr : NULL;
+    const char *language = kind == SUBS_TEXT ? (const char *)app->subtitle.shown_language.ptr : NULL;
     if (of == app->subs_for && of_count == app->subs_for_count && language == app->subs_for_language &&
         app->subs_for_generation == g_subs_generation) return;
     app->subs_for_generation = g_subs_generation;
@@ -22417,7 +22417,7 @@ static void subs_focus_amount(app_state_t *app, bool on) {
 
 /* ---- A subtitle put into a Matroska film (RV-115 stage 4, D-128) ---- */
 
-static u8str_t putin_temp(const app_state_t *app) { return (u8str_t){ .ptr = app->putin.temp, .len = strlen(app->putin.temp) }; }
+static proven_u8str_view_t putin_temp(const app_state_t *app) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->putin.temp, .size = strlen(app->putin.temp) }; }
 
 /* Done, stopped or failed: everything let go; unless the swap happened, the temporary file goes. */
 static void putin_end(app_state_t *app, bool swapped) {
@@ -22437,19 +22437,19 @@ static void putin_fail(app_state_t *app, const char *why) {
     putin_end(app, false);
     char line[300];
     int n = snprintf(line, sizeof(line), T("the subtitle was not put in: %s; the film is as it was"), why ? why : T("it could not be done"));
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 }
 
 /* Why the subtitle on screen cannot go into the film, or NULL when it can be tried. */
 static const char *putin_refusal(app_state_t *app) {
     if (!app->media || !app->media_info.has_video || app->media_page < 0 || (size_t)app->media_page >= page_count(app) ||
-        app->source.archive_path.len > 0) return T("no film file is open");
+        app->source.archive_path.size > 0) return T("no film file is open");
     if (subs_kind(app) != SUBS_TEXT) return T("no text subtitle is on");
-    if (app->subtitle.source_path.len == 0) return T("the subtitle on is already inside the film");
+    if (app->subtitle.source_path.size == 0) return T("the subtitle on is already inside the film");
     if (rubraview_subtitle_changed(&app->subtitle)) return T("save the subtitle's changes first");
     if (app->takeout.running) return T("subtitles are being taken out");
     /* said before the first press arms it; the film's own bytes decide again in `putin_begin` */
-    u8str_t film = rubraview_path_basename(app->source.pages[app->media_page].path);
+    proven_u8str_view_t film = rubraview_path_basename(app->source.pages[app->media_page].path);
     if (rubraview_path_has_ext(film, ".webm")) return T("a WebM film holds no SubRip");
     if ((rubraview_path_has_ext(film, ".mkv") || rubraview_path_has_ext(film, ".mk3d")) &&
 app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAVIEW_SUBTITLE_ASS)
@@ -22464,15 +22464,15 @@ static bool putin_emit(void *ctx, const void *bytes, size_t size) {
 static void putin_begin(app_state_t *app) {
     const char *why = putin_refusal(app);
     if (why) { putin_fail(app, why); return; }
-    u8str_t film = app->source.pages[app->media_page].path;
-    if (film.len == 0 || film.len >= sizeof(app->putin.film)) { putin_fail(app, T("the film's name is too long")); return; }
-    memcpy(app->putin.film, film.ptr, film.len);
-    app->putin.film[film.len] = '\0';
+    proven_u8str_view_t film = app->source.pages[app->media_page].path;
+    if (film.size == 0 || film.size >= sizeof(app->putin.film)) { putin_fail(app, T("the film's name is too long")); return; }
+    memcpy(app->putin.film, film.ptr, film.size);
+    app->putin.film[film.size] = '\0';
     int tn = snprintf(app->putin.temp, sizeof(app->putin.temp), "%s.rubraview-part", app->putin.film);
     if (tn <= 0 || (size_t)tn >= sizeof(app->putin.temp)) { putin_fail(app, T("the film's name is too long")); return; }
     if (!rubraview_pal_fs_map(film, &app->putin.map)) { putin_fail(app, T("the film could not be read")); return; }
-    u8str_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
-    u8str_t name = rubraview_path_basename(app->subtitle.source_path);
+    proven_u8str_view_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
+    proven_u8str_view_t name = rubraview_path_basename(app->subtitle.source_path);
     uint64_t total = 0;
     app->putin.is_mp4 = false;
     if (!rubraview_mkv_open(&app->putin.mkv, app->putin.map.data, app->putin.map.size, &why)) {
@@ -22481,7 +22481,7 @@ static void putin_begin(app_state_t *app) {
             putin_fail(app, T("subtitles are put into Matroska and MP4 films only"));
             return;
         }
-        if (!rubraview_mp4_put_plan(&app->putin.mp4_put, &app->putin.mp4, &app->subtitle, tag.len == 3 ? tag : (u8str_t){ .ptr = "", .len = 0 },
+        if (!rubraview_mp4_put_plan(&app->putin.mp4_put, &app->putin.mp4, &app->subtitle, tag.size == 3 ? tag : PROVEN_LIT(""),
                                     name, &why)) {
             putin_fail(app, why);
             return;
@@ -22495,7 +22495,7 @@ static void putin_begin(app_state_t *app) {
     if (!app->putin.is_mp4) {
     rubraview_mkv_put_track_t track;
     if (!rubraview_mkv_put_track_from_subtitle(app->arena, &app->subtitle, &track, &why)) { putin_fail(app, why); return; }
-    if (tag.len == 3) track.language = tag;                   /* `film.kor.srt`: a three-letter code is Matroska's own */
+    if (tag.size == 3) track.language = tag;                   /* `film.kor.srt`: a three-letter code is Matroska's own */
     track.name = name;
     uint64_t uid = (uint64_t)(rubraview_pal_time_now_seconds() * 1000003.0) ^ 0x5DEECE66Du;
     if (!rubraview_mkv_put_plan(&app->putin.put, &app->putin.mkv, &track, uid, &why)) { putin_fail(app, why); return; }
@@ -22519,16 +22519,16 @@ static void putin_swap(app_state_t *app) {
     if (app->putin.made_map.os) rubraview_pal_fs_unmap(&app->putin.made_map);
     if (app->putin.map.os) rubraview_pal_fs_unmap(&app->putin.map);
     app->putin.made_map = app->putin.map = (rubraview_fs_mapping_t){0};
-    u8str_t film = { .ptr = app->putin.film, .len = strlen(app->putin.film) };
-    u8str_t kept = { .ptr = "", .len = 0 };
-    for (unsigned number = 1; number < 10000 && kept.len == 0; ++number) {
-        u8str_t name = rubraview_subtitle_backup_path(app->arena, film, number);
-        if (name.len == 0) break;
+    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->putin.film, .size = strlen(app->putin.film) };
+    proven_u8str_view_t kept = PROVEN_LIT("");
+    for (unsigned number = 1; number < 10000 && kept.size == 0; ++number) {
+        proven_u8str_view_t name = rubraview_subtitle_backup_path(app->arena, film, number);
+        if (name.size == 0) break;
         if (!rubraview_pal_fs_exists(name)) kept = name;
     }
-    if (kept.len == 0) { putin_fail(app, T("no free name to keep the film under")); return; }
+    if (kept.size == 0) { putin_fail(app, T("no free name to keep the film under")); return; }
     bool on_screen = app->media && app->media_page >= 0 && (size_t)app->media_page < page_count(app) &&
-                     rubraview_u8_eq(app->source.pages[app->media_page].path, film);
+                     proven_u8str_view_eq(app->source.pages[app->media_page].path, film);
     int32_t page = current_page_index(app);
     if (!rubraview_pal_fs_move(film, kept)) {
         if (on_screen) media_close(app);                         /* the player may hold it: let go and try again */
@@ -22542,9 +22542,9 @@ static void putin_swap(app_state_t *app) {
     }
     putin_end(app, true);
     char line[400];
-    u8str_t kept_name = rubraview_path_basename(kept);
-    int n = snprintf(line, sizeof(line), T("the subtitle is in the film now; the film as it was is %.*s"), (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+    proven_u8str_view_t kept_name = rubraview_path_basename(kept);
+    int n = snprintf(line, sizeof(line), T("the subtitle is in the film now; the film as it was is %.*s"), (int)(kept_name.size < 300 ? kept_name.size : 300), kept_name.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
     if (on_screen) reopen_on_path(app, film, page >= 0 ? (size_t)page : 0);
 }
 
@@ -22591,7 +22591,7 @@ static void putin_step(app_state_t *app) {
         app->putin.said_at = began;
         char line[80];
         int n = snprintf(line, sizeof(line), "%s... %d %%", app->putin.phase == 1 ? T("writing the film with the subtitle in it") : T("checking the new film against the old"), percent);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         app->subs_dirty = true;
     }
 }
@@ -22608,7 +22608,7 @@ static void putin_press(app_state_t *app) {
     if (why) {
         char line[200];
         int n = snprintf(line, sizeof(line), T("cannot put the subtitle in: %s"), why);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         return;
     }
     if (app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0) {
@@ -22617,13 +22617,13 @@ static void putin_press(app_state_t *app) {
         return;
     }
     app->putin.armed_at = now;
-    u8str_t film = app->source.pages[app->media_page].path;
-    u8str_t kept = rubraview_path_basename(rubraview_subtitle_backup_path(app->arena, film, 1));
-    u8str_t sub = rubraview_path_basename(app->subtitle.source_path);
+    proven_u8str_view_t film = app->source.pages[app->media_page].path;
+    proven_u8str_view_t kept = rubraview_path_basename(rubraview_subtitle_backup_path(app->arena, film, 1));
+    proven_u8str_view_t sub = rubraview_path_basename(app->subtitle.source_path);
     char line[600];
     int n = snprintf(line, sizeof(line), T("put %.*s into the film? It is written again and checked; the film as it is stays as %.*s. Press again to go on"),
-                     (int)(sub.len < 200 ? sub.len : 200), sub.ptr, (int)(kept.len < 200 ? kept.len : 200), kept.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
+                     (int)(sub.size < 200 ? sub.size : 200), sub.ptr, (int)(kept.size < 200 ? kept.size : 200), kept.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
     app->subs_dirty = true;
 }
 
@@ -22736,7 +22736,7 @@ static void subs_move(app_state_t *app, int sign) {
         osd_say(app, TU8("only text subtitles can be moved"));
         return;
     }
-    if (!rubraview_subwin_amount((u8str_t){ app->subs_amount, app->subs_amount_len }, &amount)) {
+    if (!rubraview_subwin_amount((proven_u8str_view_t){ (const proven_byte_t *)app->subs_amount, app->subs_amount_len }, &amount)) {
         osd_say(app, TU8("the seconds to move by are not a number above 0"));
         return;
     }
@@ -22751,7 +22751,7 @@ static void subs_move(app_state_t *app, int sign) {
     char line[96];
     int n = snprintf(line, sizeof(line), T("%zu subtitle%s %.*s s %s"), moved, moved == 1 ? "" : TC("plural", "s"),
                      (int)app->subs_amount_len, app->subs_amount, sign < 0 ? "earlier" : "later");
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     app->subs_dirty = true;
 }
 
@@ -22782,17 +22782,17 @@ static void subs_edit_end(app_state_t *app, bool keep) {
     app->subs_dirty = true;
     if (!keep || subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
     size_t cue = app->subs_rows[row];
-    u8str_t typed = rubraview_textedit_text(&app->subs_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->subs_edit);
     if (times) {
         /* RV-115: `0:01:02.50 --> 0:01:04.00`, as the row showed them */
         size_t arrow = SIZE_MAX;
-        for (size_t i = 0; i + 2 < typed.len && arrow == SIZE_MAX; ++i) {
+        for (size_t i = 0; i + 2 < typed.size && arrow == SIZE_MAX; ++i) {
             if (typed.ptr[i] == '-' && typed.ptr[i + 1] == '-' && typed.ptr[i + 2] == '>') arrow = i;
         }
         double start = 0.0, end = 0.0;
         if (arrow == SIZE_MAX ||
-            !rubraview_subtitle_parse_time((u8str_t){ .ptr = typed.ptr, .len = arrow }, &start) ||
-            !rubraview_subtitle_parse_time((u8str_t){ .ptr = typed.ptr + arrow + 3, .len = typed.len - arrow - 3 }, &end)) {
+            !rubraview_subtitle_parse_time((proven_u8str_view_t){ .ptr = typed.ptr, .size = arrow }, &start) ||
+            !rubraview_subtitle_parse_time((proven_u8str_view_t){ .ptr = typed.ptr + arrow + 3, .size = typed.size - arrow - 3 }, &end)) {
             osd_say(app, TU8("type the times as 0:01:02.50 --> 0:01:04.00"));
             return;
         }
@@ -22801,8 +22801,8 @@ static void subs_edit_end(app_state_t *app, bool keep) {
         subs_rows_again(app, at);
         return;
     }
-    u8str_t was = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, cue);
-    if (typed.len == was.len && memcmp(typed.ptr, was.ptr, typed.len) == 0) return;
+    proven_u8str_view_t was = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, cue);
+    if (typed.size == was.size && memcmp(typed.ptr, was.ptr, typed.size) == 0) return;
     if (!rubraview_subtitle_cue_retype(subs_arena(app, 256u << 10), &app->subtitle, cue, typed)) {
         osd_say(app, TU8("a subtitle cannot be left with nothing to show"));
     }
@@ -22811,20 +22811,20 @@ static void subs_edit_end(app_state_t *app, bool keep) {
 static void subs_edit_begin_as(app_state_t *app, size_t row, bool times) {
     if (subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
     subs_edit_end(app, true);
-    u8str_t typed = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, app->subs_rows[row]);
+    proven_u8str_view_t typed = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, app->subs_rows[row]);
     char clock[96];
     if (times) {   /* RV-115: the two times, to type over */
         const rubraview_subtitle_cue_t *c = &app->subtitle.cues[app->subs_rows[row]];
         char a[32], b[32];
-        u8str_t ta = rubraview_subwin_time(a, sizeof(a), c->start_seconds), tb = rubraview_subwin_time(b, sizeof(b), c->end_seconds);
-        int n = snprintf(clock, sizeof(clock), "%.*s --> %.*s", (int)ta.len, ta.ptr, (int)tb.len, tb.ptr);
-        typed = (u8str_t){ .ptr = clock, .len = n > 0 ? (size_t)n : 0 };
+        proven_u8str_view_t ta = rubraview_subwin_time(a, sizeof(a), c->start_seconds), tb = rubraview_subwin_time(b, sizeof(b), c->end_seconds);
+        int n = snprintf(clock, sizeof(clock), "%.*s --> %.*s", (int)ta.size, ta.ptr, (int)tb.size, tb.ptr);
+        typed = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clock, .size = n > 0 ? (size_t)n : 0 };
     }
-    if (typed.len == 0) {
+    if (typed.size == 0) {
         osd_say(app, TU8("this subtitle's text has no place in a file to edit"));
         return;
     }
-    if (typed.len + 1 >= sizeof(app->subs_edit_buffer)) {
+    if (typed.size + 1 >= sizeof(app->subs_edit_buffer)) {
         osd_say(app, TU8("this subtitle is too long to edit here"));
         return;
     }
@@ -22849,7 +22849,7 @@ static void subs_add(app_state_t *app) {
     subs_edit_end(app, true);
     double at = app->media_position - app->subtitle.offset_seconds;
     if (!(at >= 0.0)) at = 0.0;
-    int32_t cue = rubraview_subtitle_cue_add(subs_arena(app, subs_edit_room(app)), &app->subtitle, at, at + 2.0, U8("..."));
+    int32_t cue = rubraview_subtitle_cue_add(subs_arena(app, subs_edit_room(app)), &app->subtitle, at, at + 2.0, PROVEN_LIT("..."));
     if (cue < 0) { osd_say(app, TU8("a new subtitle is written like one already in the file, and there is none")); return; }
     subs_rows_again(app, cue);
     if (app->subs_anchor < app->subs_count) subs_edit_begin(app, app->subs_anchor);
@@ -22870,7 +22870,7 @@ static void subs_remove(app_state_t *app) {
     subs_rows_again(app, -1);
     char line[96];
     int n = snprintf(line, sizeof(line), T("%zu taken out; Save writes it, and the file keeps them until then"), gone);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 /* Save: the file written again in its own format with only the changed
@@ -22880,7 +22880,7 @@ static void subs_save(app_state_t *app) {
     subs_edit_end(app, true);
     if (subs_kind(app) != SUBS_TEXT) { osd_say(app, TU8("only text subtitles can be saved")); return; }
     if (!rubraview_subtitle_changed(&app->subtitle) && app->subtitle.offset_seconds == 0.0) { osd_say(app, TU8("nothing was changed")); return; }
-    if (app->subtitle.source_path.len == 0) {
+    if (app->subtitle.source_path.size == 0) {
         osd_say(app, TU8("this subtitle is inside the film: it cannot be saved yet"));
         return;
     }
@@ -22892,31 +22892,31 @@ static void subs_save(app_state_t *app) {
        then becomes the one in use; the half before (the track as it was, its edits) is
        emptied at the next save. */
     /* the file made, read back and re-encoded, and its cues parsed twice (as saved, and with a mark) */
-    size_t save_room = track->source.len * 8u + 2u * subs_edit_room(app);
+    size_t save_room = track->source.size * 8u + 2u * subs_edit_room(app);
     proven_arena_t *to = app->mem ? rubraview_halves_next(&app->mem->subs, save_room) : NULL;
     if (!to) to = app->arena;
     const char *why = NULL;
-    u8str_t next = rubraview_subtitle_patched(to, track, &why);
-    if (next.len == 0) {
+    proven_u8str_view_t next = rubraview_subtitle_patched(to, track, &why);
+    if (next.size == 0) {
         char line[160];
         int n = snprintf(line, sizeof(line), T("not saved: %s"), why ? why : T("the file could not be written again"));
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return;
     }
     /* The file must still be what was read, and read back the same in its own encoding. */
-    u8str_t disk = rubraview_pal_fs_read_file(to, track->source_path, SUBTITLE_MAX_BYTES);
-    u8str_t was = track->source_transcoded ? rubraview_pal_encode_codepage(to, track->source, 0) : track->source;
-    if (disk.len == 0 || was.len != disk.len || memcmp(was.ptr, disk.ptr, disk.len) != 0) {
-        osd_say(app, track->source_transcoded && was.len == 0
+    proven_u8str_view_t disk = rubraview_pal_fs_read_file(to, track->source_path, SUBTITLE_MAX_BYTES);
+    proven_u8str_view_t was = track->source_transcoded ? rubraview_pal_encode_codepage(to, track->source, 0) : track->source;
+    if (disk.size == 0 || was.size != disk.size || memcmp(was.ptr, disk.ptr, disk.size) != 0) {
+        osd_say(app, track->source_transcoded && was.size == 0
                          ? TU8("not saved: the file does not read back the same in its encoding")
                          : TU8("not saved: the file was changed on disk since it was read"));
         return;
     }
-    u8str_t bytes = next;
+    proven_u8str_view_t bytes = next;
     bool now_utf8 = false;
     if (track->source_transcoded) {
         bytes = rubraview_pal_encode_codepage(to, next, 0);
-        if (bytes.len == 0) {
+        if (bytes.size == 0) {
             /* RV-115: the file's code page has no such character — UTF-8 is offered, and a second Save takes it */
             double now = rubraview_pal_time_now_seconds();
             if (!(app->subs_utf8_armed > 0.0 && now - app->subs_utf8_armed < 6.0)) {
@@ -22925,22 +22925,22 @@ static void subs_save(app_state_t *app) {
                 return;
             }
             app->subs_utf8_armed = 0.0;
-            proven_result_mem_mut_t res = proven_arena_alloc(to, next.len + 4);
+            proven_result_mem_mut_t res = proven_arena_alloc(to, next.size + 4);
             if (!proven_is_ok(res.err)) { osd_say(app, TU8("not saved: no memory")); return; }
             char *with_bom = (char*)(void*)res.value.ptr;
             memcpy(with_bom, "\xEF\xBB\xBF", 3);   /* a mark players read as UTF-8 */
-            memcpy(with_bom + 3, next.ptr, next.len);
-            bytes = (u8str_t){ .ptr = with_bom, .len = next.len + 3 };
+            memcpy(with_bom + 3, next.ptr, next.size);
+            bytes = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)with_bom, .size = next.size + 3 };
             now_utf8 = true;
         }
     }
-    u8str_t kept = { .ptr = "", .len = 0 };
+    proven_u8str_view_t kept = PROVEN_LIT("");
     for (unsigned number = 1; number < 10000; ++number) {
-        u8str_t name = rubraview_subtitle_backup_path(to, track->source_path, number);
-        if (name.len == 0) break;
+        proven_u8str_view_t name = rubraview_subtitle_backup_path(to, track->source_path, number);
+        if (name.size == 0) break;
         if (!rubraview_pal_fs_exists(name)) { kept = name; break; }
     }
-    if (kept.len == 0 || !rubraview_pal_fs_move(track->source_path, kept)) {
+    if (kept.size == 0 || !rubraview_pal_fs_move(track->source_path, kept)) {
         osd_say(app, TU8("not saved: the file before could not be renamed"));
         return;
     }
@@ -22952,13 +22952,13 @@ static void subs_save(app_state_t *app) {
     /* Read as saved: the places are the new file's, and nothing is changed. */
     rubraview_subtitle_track_t fresh = rubraview_subtitle_parse(to, next, track->format);
     /* the language shown is a name in the track before: kept with the new one */
-    u8str_t shown = { .ptr = "", .len = 0 };
-    if (track->shown_language.len > 0) {
-        proven_result_mem_mut_t res = proven_arena_alloc(to, track->shown_language.len + 1);
+    proven_u8str_view_t shown = PROVEN_LIT("");
+    if (track->shown_language.size > 0) {
+        proven_result_mem_mut_t res = proven_arena_alloc(to, track->shown_language.size + 1);
         if (proven_is_ok(res.err)) {
-            memcpy(res.value.ptr, track->shown_language.ptr, track->shown_language.len);
-            ((char*)(void*)res.value.ptr)[track->shown_language.len] = '\0';
-            shown = (u8str_t){ .ptr = (const char*)(void*)res.value.ptr, .len = track->shown_language.len };
+            memcpy(res.value.ptr, track->shown_language.ptr, track->shown_language.size);
+            ((char*)(void*)res.value.ptr)[track->shown_language.size] = '\0';
+            shown = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)(void*)res.value.ptr, .size = track->shown_language.size };
         } else {
             fresh.count = 0;   /* not read back whole: kept as it was (below) */
         }
@@ -22984,9 +22984,9 @@ static void subs_save(app_state_t *app) {
     }
     app->subtitle_offset_seconds = 0.0;   /* written in: this film's remembered offset is spent */
     char line[400];
-    u8str_t kept_name = rubraview_path_basename(kept);
-    int n = snprintf(line, sizeof(line), T("saved; the file before is %.*s"), (int)(kept_name.len < 300 ? kept_name.len : 300), kept_name.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    proven_u8str_view_t kept_name = rubraview_path_basename(kept);
+    int n = snprintf(line, sizeof(line), T("saved; the file before is %.*s"), (int)(kept_name.size < 300 ? kept_name.size : 300), kept_name.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     app->subs_dirty = true;
 }
 
@@ -23029,9 +23029,9 @@ static void draw_subs_window(app_state_t *app) {
     if (kind == SUBS_NONE) {
         hn = snprintf(head, sizeof(head), "%s", app->media ? T("no subtitle is on") : T("no film is open"));
     } else {
-        u8str_t name = app->subtitle_name;
+        proven_u8str_view_t name = app->subtitle_name;
         hn = snprintf(head, sizeof(head), T("%zu subtitle%s   %zu ticked   %.*s%s"), count, count == 1 ? "" : TC("plural", "s"), picked,
-                      (int)(name.len < 200 ? name.len : 200), name.ptr, kind == SUBS_TEXT && rubraview_subtitle_changed(&app->subtitle) ? T("   (changed, not saved)") : "");
+                      (int)(name.size < 200 ? name.size : 200), name.ptr, kind == SUBS_TEXT && rubraview_subtitle_changed(&app->subtitle) ? T("   (changed, not saved)") : "");
     }
     rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
     double head_x = pad;
@@ -23048,7 +23048,7 @@ static void draw_subs_window(app_state_t *app) {
                                       : snprintf(label, sizeof(label), T("Take out"));
         rubraview_pal_render_fill_rect(r, takeout, app->takeout.running ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, takeout, COLOR_BOX_BORDER, 1.0, 3.0);
-        if (ln > 0) rubraview_pal_render_draw_text(r, (u8str_t){ label, (size_t)ln }, takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     rubraview_pal_rect_t putin = subs_part_rect(app, SUBS_PART_PUTIN);
     bool putin_shown = takeout_shown && kind == SUBS_TEXT && putin.x > head_x + lw->row_height * 4.0;
@@ -23060,11 +23060,11 @@ static void draw_subs_window(app_state_t *app) {
                                   : snprintf(label, sizeof(label), "%s", armed ? T("Sure? Put in") : T("Put in film"));
         rubraview_pal_render_fill_rect(r, putin, app->putin.phase || armed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, putin, COLOR_BOX_BORDER, 1.0, 3.0);
-        if (ln > 0) rubraview_pal_render_draw_text(r, (u8str_t){ label, (size_t)ln }, putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         if (armed) app->subs_dirty = true;            /* the question goes away by itself */
     }
     rubraview_pal_rect_t head_text = { head_x, 0.0, (putin_shown ? putin.x : takeout_shown ? takeout.x : lw->width) - head_x - pad, band };
-    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
+    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
                                                                  head_text.width, font), head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 
     /* The bar: Earlier, the seconds, Later. */
@@ -23081,9 +23081,9 @@ static void draw_subs_window(app_state_t *app) {
         rubraview_pal_render_stroke_rect(r, amount, app->subs_amount_focus ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0, 2.0);
         char typed[24];
         int tn = snprintf(typed, sizeof(typed), "%.*s%s", (int)app->subs_amount_len, app->subs_amount, app->subs_amount_focus ? "|" : "");
-        if (tn > 0) rubraview_pal_render_draw_text(r, (u8str_t){ typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (tn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t unit = { amount.x + amount.width + pad * 0.5, amount.y, lw->row_height * 0.8, amount.height };
-        rubraview_pal_render_draw_text(r, U8("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(r, PROVEN_LIT("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         rubraview_pal_rect_t save = subs_part_rect(app, SUBS_PART_SAVE);
         if (save.x > later.x + later.width + pad) {          /* room for it beside Later */
             bool changed = rubraview_subtitle_changed(&app->subtitle) || app->subtitle.offset_seconds != 0.0;   /* Z / X is saved too */
@@ -23121,7 +23121,7 @@ static void draw_subs_window(app_state_t *app) {
             rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         }
         x += time_w;
-        u8str_t said = kind == SUBS_TEXT ? rubraview_subwin_line(line, sizeof(line), app->subtitle.cues[app->subs_rows[i]].text)
+        proven_u8str_view_t said = kind == SUBS_TEXT ? rubraview_subwin_line(line, sizeof(line), app->subtitle.cues[app->subs_rows[i]].text)
                                          : TU8("(picture)");
         rubraview_pal_rect_t text = { x, row.y, row.x + row.width - x - pad, row.height };
         if (kind == SUBS_TEXT && (app->subtitle.cues[app->subs_rows[i]].time_changed || app->subtitle.cues[app->subs_rows[i]].text_changed ||
@@ -23151,7 +23151,7 @@ static void draw_subs_window(app_state_t *app) {
             memcpy(line + n, app->subs_edit_composing, comp); n += comp;
             line[n++] = '|';
             memcpy(line + n, te->buf + caret, te->len - caret); n += te->len - caret;
-            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (u8str_t){ line, n }, text.width, font), text, font,
+            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, n }, text.width, font), text, font,
                                            COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         } else
         if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
@@ -23273,7 +23273,7 @@ static size_t subs_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
                 if (app->subs_edit_row >= 0) {
                     app->subs_edit_composing_len = 0;
-                    (void)rubraview_textedit_insert(&app->subs_edit, (u8str_t){ .ptr = event.text.utf8, .len = event.text.length });
+                    (void)rubraview_textedit_insert(&app->subs_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length });
                     app->subs_dirty = true;
                     break;
                 }
@@ -23355,18 +23355,18 @@ static size_t subs_pump(app_state_t *app) {
     return handled;
 }
 
-static void settings_grid_keep(app_state_t *app, int32_t row, u8str_t text) {
+static void settings_grid_keep(app_state_t *app, int32_t row, proven_u8str_view_t text) {
     if (row < 0 || row >= (int32_t)(sizeof(app->settings_grid_len) / sizeof(app->settings_grid_len[0]))) return;
-    size_t n = text.len < sizeof(app->settings_grid_text[0]) ? text.len : sizeof(app->settings_grid_text[0]) - 1;
+    size_t n = text.size < sizeof(app->settings_grid_text[0]) ? text.size : sizeof(app->settings_grid_text[0]) - 1;
     /* Cut on a character, never inside one. */
-    while (n > 0 && n < text.len && ((unsigned char)text.ptr[n] & 0xC0u) == 0x80u) --n;
+    while (n > 0 && n < text.size && ((unsigned char)text.ptr[n] & 0xC0u) == 0x80u) --n;
     memcpy(app->settings_grid_text[row], text.ptr, n);
     app->settings_grid_len[row] = (uint16_t)n;
 }
 
 /* A table row with a box to tick in it (an extension's): "[x]" or "[ ]". */
-static bool settings_row_has_box(u8str_t text) {
-    for (size_t i = 0; i + 2 < text.len; ++i)
+static bool settings_row_has_box(proven_u8str_view_t text) {
+    for (size_t i = 0; i + 2 < text.size; ++i)
         if (text.ptr[i] == '[' && (text.ptr[i + 1] == 'x' || text.ptr[i + 1] == ' ') && text.ptr[i + 2] == ']') return true;
     return false;
 }
@@ -23438,18 +23438,18 @@ static int32_t chooser_nearest(const chooser_t *c, double value) {
 }
 
 /* A tile that chooses one of several: its list instead of the next one. False for any other tile. */
-static bool chooser_open_tile(app_state_t *app, u8str_t action, double x, double y, double above_y) {
+static bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_TILE, .current = -1 };
-    if (action.len >= sizeof(c->action)) return false;
-    memcpy(c->action, action.ptr, action.len);
+    if (action.size >= sizeof(c->action)) return false;
+    memcpy(c->action, action.ptr, action.size);
     const char *title = NULL;
-    if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_cycle"))) {
         title = T("Zoom");
         chooser_word(c, 0.0, "%s", T("Real size"));
         for (int p = 20; p <= 200; p += 20) chooser_word(c, (double)p, "%d%%", p);
         c->current = at_real_size(app) ? 0 : chooser_nearest(c, app->zoom * 100.0);
-    } else if (rubraview_u8_eq_lit(action, "fit_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_cycle"))) {
         title = T("Fit");
         chooser_word(c, RUBRAVIEW_FIT_WINDOW, "%s", T("fit: the window"));
         chooser_word(c, RUBRAVIEW_FIT_WIDTH, "%s", T("fit: the width"));
@@ -23458,62 +23458,62 @@ static bool chooser_open_tile(app_state_t *app, u8str_t action, double x, double
         chooser_word(c, RUBRAVIEW_FIT_STRETCH, "%s", T("fit: stretched to fill"));
         c->current = chooser_nearest(c, (double)app->fit_mode);
         if (fabs(c->values[c->current] - (double)app->fit_mode) > 0.5) c->current = -1;
-    } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
         title = T("Layout");
         for (int i = 0; i < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT; ++i) chooser_word(c, i, "%s", layout_said((rubraview_layout_choice_t)i));
         c->current = (int32_t)rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction);
-    } else if (rubraview_u8_eq_lit(action, "media_speed_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle"))) {
         title = T("Speed");
         static const double SPEEDS[] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
         for (size_t i = 0; i < 6; ++i) chooser_word(c, SPEEDS[i], "%gx", SPEEDS[i]);
         c->current = chooser_nearest(c, app->media_speed > 0.0 ? app->media_speed : 1.0);
-    } else if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_cycle"))) {
         title = T("Delay");
         static const double DELAYS[] = { 1.0, 2.0, 3.0, 5.0, 10.0 };
         for (size_t i = 0; i < 5; ++i) chooser_word(c, DELAYS[i], T("%g s"), DELAYS[i]);
         c->current = chooser_nearest(c, app->slideshow.interval_seconds);
-    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle") && anim_plays(app)) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle")) && anim_plays(app)) {
         title = T("At the end");
         chooser_word(c, 0, "%s", T("an animation goes round and round"));
         chooser_word(c, 1, "%s", T("an animation plays once and stops"));
         chooser_word(c, 2, "%s", T("after an animation, the next file"));
         c->current = anim_end_mode(app);
-    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle"))) {
         title = T("At the end");
         for (int i = 0; i < (int)RUBRAVIEW_REPEAT_MODE_COUNT; ++i) chooser_word(c, i, "%s", rubraview_repeat_sentence((rubraview_repeat_mode_t)i));
         c->current = (int32_t)repeat_mode(app);
-    } else if (rubraview_u8_eq_lit(action, "media_eq_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_cycle"))) {
         title = T("Equaliser");
-        for (int i = 0; i < RUBRAVIEW_EQWIN_PRESETS; ++i) { u8str_t n = eq_preset_label(i); chooser_word(c, i, "%.*s", (int)n.len, n.ptr); }
+        for (int i = 0; i < RUBRAVIEW_EQWIN_PRESETS; ++i) { proven_u8str_view_t n = eq_preset_label(i); chooser_word(c, i, "%.*s", (int)n.size, n.ptr); }
         c->current = eq_preset_now(app);
-    } else if (rubraview_u8_eq_lit(action, "media_visualizer_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_visualizer_cycle"))) {
         title = T("Analyser");
         chooser_word(c, 0, "%s", T("analyser off"));
         chooser_word(c, 1, "%s", T("analyser: spectrum"));
         chooser_word(c, 2, "%s", T("analyser: oscilloscope"));
-        c->current = (int32_t)lround(rubraview_settings_get(&app->settings, U8("audio"), U8("visualizer")));
-    } else if (rubraview_u8_eq_lit(action, "text_breaks") && app->text) {
+        c->current = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer")));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_breaks")) && app->text) {
         title = T("Line breaks");
         chooser_word(c, 0, "%s", T("line breaks as they are"));
         chooser_word(c, 1, "%s", T("all in one run, no line breaks"));
         chooser_word(c, 2, "%s", T("blank lines dropped"));
         chooser_word(c, 3, "%s", T("paragraphs found (a sentence's end and more line breaks)"));
-        c->current = (int32_t)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks")));
-    } else if (rubraview_u8_eq_lit(action, "text_encoding") && app->text) {
+        c->current = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks")));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_encoding")) && app->text) {
         title = T("Encoding");
         for (int i = 0; i < (int)RUBRAVIEW_TEXTENC_COUNT; ++i) {
             if (i == (int)RUBRAVIEW_TEXTENC_AUTO) continue;
             chooser_word(c, i, "%s", rubraview_textenc_name((rubraview_textenc_t)i));
         }
         c->current = chooser_nearest(c, (double)text_enc_now(app));
-    } else if (rubraview_u8_eq_lit(action, "next_audio_track") && app->media) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) && app->media) {
         title = T("Sound track");
         for (size_t i = 0; i < app->tracks.count; ++i) {
             if (app->tracks.tracks[i].kind != RUBRAVIEW_TRACK_AUDIO) continue;
             char label[160];
-            u8str_t text = rubraview_track_label(label, sizeof(label), &app->tracks, (int32_t)i);
+            proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &app->tracks, (int32_t)i);
             if ((int32_t)i == app->tracks.current_audio) c->current = (int32_t)c->count;
-            chooser_word(c, (double)i, "%.*s", (int)text.len, text.ptr);
+            chooser_word(c, (double)i, "%.*s", (int)text.size, text.ptr);
         }
         if (c->count < 2) { osd_say(app, TU8("this file has only one sound track")); c->count = 0; return true; }
     } else {
@@ -23526,9 +23526,9 @@ static bool chooser_open_tile(app_state_t *app, u8str_t action, double x, double
 
 static void chooser_pick_tile(app_state_t *app, size_t i) {
     chooser_t *c = &app->chooser;
-    u8str_t action = cstr(c->action);
+    proven_u8str_view_t action = cstr(c->action);
     double v = c->values[i];
-    if (rubraview_u8_eq_lit(action, "zoom_cycle")) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_cycle"))) {
         if (v == 0.0) {
             if (app->fit_mode != RUBRAVIEW_FIT_ACTUAL_SIZE) app->fit_beside_real = app->fit_mode;
             app->fit_mode = RUBRAVIEW_FIT_ACTUAL_SIZE;
@@ -23538,46 +23538,46 @@ static void chooser_pick_tile(app_state_t *app, size_t i) {
             app->zoom = v / 100.0;
         }
         zoom_say(app);
-    } else if (rubraview_u8_eq_lit(action, "fit_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_cycle"))) {
         app->fit_mode = (rubraview_fit_mode_t)(int)v;
         reset_view(app);
         osd_say(app, cstr(c->words[i]));
-    } else if (rubraview_u8_eq_lit(action, "toggle_layout")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
         layout_set(app, (rubraview_layout_choice_t)(int)v, true);
-    } else if (rubraview_u8_eq_lit(action, "media_speed_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle"))) {
         speed_set(app, v);
-    } else if (rubraview_u8_eq_lit(action, "interval_cycle")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_cycle"))) {
         interval_set(app, v);
-    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle") && anim_plays(app)) {
-        rubraview_settings_set(&app->settings, U8("viewer"), U8("animation_end"), v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle")) && anim_plays(app)) {
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("animation_end"), v);
         osd_say(app, cstr(c->words[i]));
-    } else if (rubraview_u8_eq_lit(action, "media_repeat_cycle")) {
-        rubraview_settings_set(&app->settings, U8("audio"), U8("at_end"), v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle"))) {
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end"), v);
         app->follow_for = -1;   /* decided again, in the new mode */
         osd_say(app, cstr(c->words[i]));
-    } else if (rubraview_u8_eq_lit(action, "media_eq_cycle")) {
-        rubraview_settings_set(&app->settings, U8("audio"), U8("eq_preset"), v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_cycle"))) {
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset"), v);
         audio_chain_update(app);
         char line[96];
         int n = snprintf(line, sizeof(line), T("equaliser: %s"), c->words[i]);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
-    } else if (rubraview_u8_eq_lit(action, "media_visualizer_cycle")) {
-        rubraview_settings_set(&app->settings, U8("audio"), U8("visualizer"), v);
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_visualizer_cycle"))) {
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer"), v);
         osd_say(app, cstr(c->words[i]));
-    } else if (rubraview_u8_eq_lit(action, "text_breaks") && app->text) {
-        rubraview_settings_set(&app->settings, U8("text"), U8("breaks"), v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_breaks")) && app->text) {
+        rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"), v);
         if (!text_rebuild(app)) { osd_say(app, TU8("out of memory")); return; }
         osd_say(app, cstr(c->words[i]));
-    } else if (rubraview_u8_eq_lit(action, "text_encoding") && app->text) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_encoding")) && app->text) {
         text_encoding_set(app, (rubraview_textenc_t)(int)v);
-    } else if (rubraview_u8_eq_lit(action, "next_audio_track")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track"))) {
         audio_track_set(app, (int32_t)v);
     }
 }
 
 /* 1.25.0: the wheel over a one-of-many tile: the choice before or after the one in force, round. */
-static bool chooser_wheel_tile(app_state_t *app, u8str_t action, double notches) {
-    if (rubraview_u8_eq_lit(action, "next_audio_track") || notches == 0.0) return false;   /* tracks: the list */
+static bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) || notches == 0.0) return false;   /* tracks: the list */
     bool was_open = app->chooser.open;
     chooser_t keep = app->chooser;
     if (!chooser_open_tile(app, action, 0.0, 0.0, 0.0)) { app->chooser = keep; return false; }
@@ -23597,15 +23597,15 @@ static void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, dou
     if (row < 0 || (size_t)row >= panel->row_count || panel->rows[row].kind != RUBRAVIEW_ROW_CHOICE) return;
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_PANEL, .panel = which, .row = row, .current = (int32_t)lround(panel->rows[row].value) };
-    snprintf(c->title, sizeof(c->title), "%.*s", (int)panel->rows[row].label.len, panel->rows[row].label.ptr);
+    snprintf(c->title, sizeof(c->title), "%.*s", (int)panel->rows[row].label.size, panel->rows[row].label.ptr);
     int32_t n = panel->rows[row].choice_count > 0 ? panel->rows[row].choice_count : (int32_t)panel->rows[row].max_value + 1;
     for (int32_t i = 0; i < n && i < CHOOSE_MAX; ++i) {
         rubraview_panel_row_t probe = panel->rows[row];
         probe.value = (double)i;
         char words[96];
-        u8str_t text = which == 1 && (app->panel_is_print || app->panel_is_convert) ? print_row_text(&probe, words, sizeof(words))
+        proven_u8str_view_t text = which == 1 && (app->panel_is_print || app->panel_is_convert) ? print_row_text(&probe, words, sizeof(words))
                                                                                      : adjust_row_text(app, &probe, words, sizeof(words));
-        chooser_word(c, (double)i, "%.*s", (int)text.len, text.ptr);
+        chooser_word(c, (double)i, "%.*s", (int)text.size, text.ptr);
     }
     chooser_show(app, app->edit_window && edit_panel_open(app) ? CHOOSE_IN_EDIT : CHOOSE_IN_MAIN, x, y, above_y);
 }
@@ -23618,11 +23618,11 @@ static void chooser_open_setting(app_state_t *app) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_SETTING, .def = def,
                       .current = (int32_t)lround(rubraview_settings_get(&app->settings, def->section, def->key)) };
-    u8str_t label = rubraview_tr_u8(def->label);
-    snprintf(c->title, sizeof(c->title), "%.*s", (int)label.len, label.ptr);
+    proven_u8str_view_t label = rubraview_tr_u8(def->label);
+    snprintf(c->title, sizeof(c->title), "%.*s", (int)label.size, label.ptr);
     for (int32_t i = 0; i < def->choice_count && i < CHOOSE_MAX; ++i) {
-        u8str_t w = rubraview_settings_choice_word(def, i);
-        chooser_word(c, (double)i, "%.*s", (int)w.len, w.ptr);
+        proven_u8str_view_t w = rubraview_settings_choice_word(def, i);
+        chooser_word(c, (double)i, "%.*s", (int)w.size, w.ptr);
     }
     int32_t row = rubraview_settings_view_screen_row(v, (size_t)v->focus_line);
     double x = app->settings_cell_w * (double)(v->content_col + v->label_cols);
@@ -23633,8 +23633,8 @@ static void chooser_open_setting(app_state_t *app) {
 static void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = order ? CHOOSE_ORDER : CHOOSE_SORT };
-    int key = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
-    bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+    int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     if (order) {
         snprintf(c->title, sizeof(c->title), "%s", T("Order"));
         chooser_word(c, 0, "%s \xE2\x96\xB2", T("Rising"));
@@ -23659,19 +23659,19 @@ static void chooser_open_listext(app_state_t *app, int where, double x, double y
     char seen[CHOOSE_MAX][16];
     size_t counts[CHOOSE_MAX] = {0}, kinds = 0, count = page_count(app);
     for (size_t i = 0; i < count; ++i) {
-        u8str_t e = rubraview_path_ext(app->source.pages[i].path);
-        if (e.len == 0 || e.len >= sizeof(seen[0])) e = U8(".");
+        proven_u8str_view_t e = rubraview_path_ext(app->source.pages[i].path);
+        if (e.size == 0 || e.size >= sizeof(seen[0])) e = PROVEN_LIT(".");
         size_t k = 0;
         for (; k < kinds; ++k) {
-            u8str_t have = cstr(seen[k]);
-            bool same = have.len == e.len;
-            for (size_t j = 0; j < e.len && same; ++j) same = rubraview_ascii_lower(have.ptr[j]) == rubraview_ascii_lower(e.ptr[j]);
+            proven_u8str_view_t have = cstr(seen[k]);
+            bool same = have.size == e.size;
+            for (size_t j = 0; j < e.size && same; ++j) same = rubraview_ascii_lower(have.ptr[j]) == rubraview_ascii_lower(e.ptr[j]);
             if (same) break;
         }
         if (k == kinds) {
             if (kinds + 1 >= CHOOSE_MAX) continue;
-            for (size_t j = 0; j < e.len; ++j) seen[kinds][j] = rubraview_ascii_lower(e.ptr[j]);
-            seen[kinds][e.len] = '\0';
+            for (size_t j = 0; j < e.size; ++j) seen[kinds][j] = rubraview_ascii_lower(e.ptr[j]);
+            seen[kinds][e.size] = '\0';
             kinds++;
         }
         counts[k]++;
@@ -23686,17 +23686,17 @@ static void chooser_open_listext(app_state_t *app, int where, double x, double y
 
 static void list_ext_toggle(app_state_t *app, int32_t k) {
     if (k < 0) { app->list_ext_off_n = 0; list_view_changed(app); return; }
-    u8str_t e = cstr(app->list_ext_seen[k]);
+    proven_u8str_view_t e = cstr(app->list_ext_seen[k]);
     for (size_t i = 0; i < app->list_ext_off_n; ++i) {
-        if (!rubraview_u8_eq(cstr(app->list_ext_off[i]), e)) continue;
+        if (!proven_u8str_view_eq(cstr(app->list_ext_off[i]), e)) continue;
         memmove(app->list_ext_off[i], app->list_ext_off[i + 1], (app->list_ext_off_n - i - 1) * sizeof(app->list_ext_off[0]));
         app->list_ext_off_n--;
         list_view_changed(app);
         return;
     }
-    if (app->list_ext_off_n >= sizeof(app->list_ext_off) / sizeof(app->list_ext_off[0]) || e.len >= sizeof(app->list_ext_off[0])) return;
-    memcpy(app->list_ext_off[app->list_ext_off_n], e.ptr, e.len);
-    app->list_ext_off[app->list_ext_off_n][e.len] = '\0';
+    if (app->list_ext_off_n >= sizeof(app->list_ext_off) / sizeof(app->list_ext_off[0]) || e.size >= sizeof(app->list_ext_off[0])) return;
+    memcpy(app->list_ext_off[app->list_ext_off_n], e.ptr, e.size);
+    app->list_ext_off[app->list_ext_off_n][e.size] = '\0';
     app->list_ext_off_n++;
     list_view_changed(app);
 }
@@ -23721,7 +23721,7 @@ static void chooser_open_listsort(app_state_t *app, int where, double x, double 
 }
 
 /* The list put in order by `key`, rising or falling; the file on screen stays. */
-static struct list_sort_key { u8str_t name, ext; uint64_t size; int64_t mtime, ctime; } *g_list_keys;
+static struct list_sort_key { proven_u8str_view_t name, ext; uint64_t size; int64_t mtime, ctime; } *g_list_keys;
 static int g_list_key, g_list_desc;
 static int list_sort_cmp(const void *pa, const void *pb) {
     size_t a = *(const size_t*)pa, b = *(const size_t*)pb;
@@ -23750,7 +23750,7 @@ static void list_sort(app_state_t *app, int key, bool desc) {
     rubraview_scratch_t sc;
     proven_arena_t *pa = scratch_begin(app, &sc, 4096u + count * 64u);
     for (size_t i = 0; i < count; ++i) {
-        u8str_t path = app->source.pages[i].path;
+        proven_u8str_view_t path = app->source.pages[i].path;
         keys[i] = (struct list_sort_key){ .name = rubraview_path_basename(path), .ext = rubraview_path_ext(path) };
         rubraview_fs_entry_t st;
         if (key >= 3 && rubraview_pal_fs_stat(pa, path, &st)) { keys[i].size = st.size_bytes; keys[i].mtime = st.mtime; keys[i].ctime = st.ctime; }
@@ -23789,12 +23789,12 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             app->settings_dirty = true;
             break;
         case CHOOSE_SORT: {
-            bool desc = rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort_desc")) > 0.5;
+            bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
             picker_sort_set(app, (int)c->values[index], desc);
             break;
         }
         case CHOOSE_ORDER: {
-            int key = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("picker_sort"))) - 1;
+            int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
             picker_sort_set(app, key < 0 ? 0 : key, c->values[index] > 0.5);
             break;
         }
@@ -23922,12 +23922,12 @@ static void draw_settings_window(app_state_t *app) {
         if (p == v->page) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, y, cw * v->list_cols, ch }, SETTINGS_FOCUS, 0.0);
         }
-        u8str_t page = rubraview_settings_page_text(v, p, line, sizeof(line));
+        proven_u8str_view_t page = rubraview_settings_page_text(v, p, line, sizeof(line));
         if (p == v->page) settings_text(app, page, 0.0, y, SETTINGS_TEXT);
         else {   /* another page, a click away: a link (owner, 2026-10-18) */
             size_t a = 0;
-            while (a < page.len && page.ptr[a] == ' ') ++a;
-            settings_text_link(app, (u8str_t){ page.ptr + a, page.len - a }, app->settings_cell_w * (double)a, y, SETTINGS_TEXT, page.ptr[a], 0);
+            while (a < page.size && page.ptr[a] == ' ') ++a;
+            settings_text_link(app, (proven_u8str_view_t){ page.ptr + a, page.size - a }, app->settings_cell_w * (double)a, y, SETTINGS_TEXT, page.ptr[a], 0);
         }
     }
 
@@ -23954,7 +23954,7 @@ static void draw_settings_window(app_state_t *app) {
                 rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 - cw * 0.5, y, cw * (v->cols - v->content_col), ch },
                                                SETTINGS_FOCUS, 0.0);
             }
-            u8str_t text = rubraview_settings_line_text(v, &app->settings, &sources, i, k, line, sizeof(line));
+            proven_u8str_view_t text = rubraview_settings_line_text(v, &app->settings, &sources, i, k, line, sizeof(line));
             uint32_t color = SETTINGS_TEXT;
             if (ln->kind == RUBRAVIEW_LINE_SECTION) color = SETTINGS_ACCENT;
             /* Not read by the viewer yet: dimmed, except under the focus bar, where dim text is unreadable. */
@@ -23965,18 +23965,18 @@ static void draw_settings_window(app_state_t *app) {
             /* The owner (2026-10-18): whatever a click changes looks like a link — a switch, a choice,
                a slider, an extension's boxes — as the actions and the paths do. */
             const rubraview_setting_def_t *def = ln->kind == RUBRAVIEW_LINE_SETTING ? &v->doc->defs[node->setting] : NULL;
-            u8str_t value = { text.ptr, 0 };
+            proven_u8str_view_t value = { text.ptr, 0 };
             if (def) {   /* what follows the label */
                 size_t at = 0;
-                for (int32_t c = 0; at < text.len && c < v->label_cols;) {
+                for (int32_t c = 0; at < text.size && c < v->label_cols;) {
                     uint32_t cp = (unsigned char)text.ptr[at];
                     size_t n = cp < 0x80 ? 1 : cp < 0xE0 ? 2 : cp < 0xF0 ? 3 : 4;
-                    c += (int32_t)rubraview_text_columns((u8str_t){ text.ptr + at, n });
+                    c += (int32_t)rubraview_text_columns((proven_u8str_view_t){ text.ptr + at, n });
                     at += n;
                 }
-                value = (u8str_t){ text.ptr + at, text.len - at };
+                value = (proven_u8str_view_t){ text.ptr + at, text.size - at };
             }
-            u8str_t label = { text.ptr, (size_t)(value.ptr - text.ptr) };
+            proven_u8str_view_t label = { text.ptr, (size_t)(value.ptr - text.ptr) };
             double vx = x0 + cw * (double)rubraview_text_columns(label);
             if (ln->kind == RUBRAVIEW_LINE_ACTION) settings_text_link(app, text, x0, y, color, '<', '>');
             else if (def && def->pair != 0) { settings_text(app, label, x0, y, color); settings_text_link(app, value, vx, y, color, '[', 0); }
@@ -24023,7 +24023,7 @@ static void draw_settings_window(app_state_t *app) {
         const char *words = rubraview_action_words(b->action);
         if (words) words = rubraview_tr(words);
         char tip[400];
-        int n = snprintf(tip, sizeof(tip), "%.*s: %s", (int)b->action.len, b->action.ptr, words ? words : T("(no words for it)"));
+        int n = snprintf(tip, sizeof(tip), "%.*s: %s", (int)b->action.size, b->action.ptr, words ? words : T("(no words for it)"));
         if (n > 0) {
             int32_t ww = 0, wh = 0;
             rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
@@ -24036,14 +24036,14 @@ static void draw_settings_window(app_state_t *app) {
             rubraview_pal_rect_t box = { x, y, tw, th };
             rubraview_pal_render_fill_rect(r, box, 0xF0303030u, 3.0);
             rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0, 3.0);
-            rubraview_pal_render_draw_text(r, (u8str_t){ .ptr = tip, .len = (size_t)n < sizeof(tip) ? (size_t)n : sizeof(tip) - 1 },
+            rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)tip, .size = (size_t)n < sizeof(tip) ? (size_t)n : sizeof(tip) - 1 },
                                            box, fs, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
     }
     if (app->settings_tip_shown && app->settings_tip_row <= 0 && app->settings_tip_help >= 0 &&
         (size_t)app->settings_tip_help < rubraview_settings_document()->def_count) {
         /* A setting's fuller explanation, wrapped, under the pointer. */
-        u8str_t help = rubraview_tr_u8(rubraview_settings_document()->defs[app->settings_tip_help].help);
+        proven_u8str_view_t help = rubraview_tr_u8(rubraview_settings_document()->defs[app->settings_tip_help].help);
         int32_t ww = 0, wh = 0;
         rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
         double tw = cw * 56.0;
@@ -24237,9 +24237,9 @@ static void edit_preview_open(app_state_t *app) {
     }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_mem, .size = big });
     rubraview_pixbuf_t full = {0};
-    u8str_t path = app->source.pages[page].path;
+    proven_u8str_view_t path = app->source.pages[page].path;
     int32_t max_w = within ? pw : 0, max_h = within ? ph : 0;
-    if (path.len > 0) {
+    if (path.size > 0) {
         full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, max_w, max_h);
     } else {
         rubraview_page_bytes_t bytes = { .ok = false };
@@ -24248,9 +24248,9 @@ static void edit_preview_open(app_state_t *app) {
             bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)page, MAX_PAGE_BYTES);
             ReleaseSRWLockExclusive(&app->source_lock);
         }
-        if (bytes.ok && bytes.data.len > 0) {
-            full = rubraview_pal_image_read_pixels_within(&scratch, (u8str_t){ .ptr = "", .len = 0 },
-                                                          (const uint8_t*)bytes.data.ptr, bytes.data.len, true,
+        if (bytes.ok && bytes.data.size > 0) {
+            full = rubraview_pal_image_read_pixels_within(&scratch, PROVEN_LIT(""),
+                                                          (const uint8_t*)bytes.data.ptr, bytes.data.size, true,
                                                           max_w, max_h);
         }
     }
@@ -24450,7 +24450,7 @@ static void draw_crop_overlay(app_state_t *app) {
     rubraview_pal_rect_t label = { x, y - 22.0 * dpi, 200.0 * dpi, 20.0 * dpi };
     if (label.y < rect.y) label.y = y + 2.0 * dpi;
     rubraview_pal_render_fill_rect(app->renderer, label, 0xC0000000u, 0.0);
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n }, label, 13.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n }, label, 13.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_LEFT);
 }
 
 /* What a press on the selection takes: a handle (3..10), the inside to move it (2), or nothing (0). */
@@ -24652,13 +24652,13 @@ static void curve_widget_drag(app_state_t *app, double px, double py) {
 static void boxes_apply_size(app_state_t *app) {
     if (!app->menubox.grip_active) {
         rubraview_box_set_size(&app->menubox,
-                               (int32_t)lround(rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_columns"))),
-                               rubraview_settings_get(&app->settings, U8("ui"), U8("menubox_size")) / 100.0);
+                               (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("menubox_columns"))),
+                               rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("menubox_size")) / 100.0);
     }
     if (!app->toolbox.grip_active) {
         rubraview_box_set_size(&app->toolbox,
-                               (int32_t)lround(rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_columns"))),
-                               rubraview_settings_get(&app->settings, U8("ui"), U8("toolbox_size")) / 100.0);
+                               (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_columns"))),
+                               rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_size")) / 100.0);
     }
 }
 
@@ -24669,7 +24669,7 @@ static void boxes_apply_size(app_state_t *app) {
 
 typedef struct text_page {
     int32_t page;                      /* the page it is */
-    u8str_t key;                       /* its path, for the place kept (malloc'd) */
+    proven_u8str_view_t key;                       /* its path, for the place kept (malloc'd) */
     char *source;                      /* the file's text, cleaned (§2.3) */
     size_t source_len;
     rubraview_textenc_t enc;
@@ -24714,8 +24714,8 @@ typedef struct text_page {
     double col_x, col_w, top_pad;
 } text_page_t;
 
-static bool is_text_path(u8str_t path) {
-    return g_text_on && path.len > 0 && rubraview_glob_match_list(rubraview_path_basename(path), U8(TEXT_FILTER));
+static bool is_text_path(proven_u8str_view_t path) {
+    return g_text_on && path.size > 0 && rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT(TEXT_FILTER));
 }
 
 /* A page that is neither a picture nor played: the text ones. */
@@ -24727,25 +24727,25 @@ static double text_dpi(app_state_t *app) { return rubraview_pal_window_dpi_scale
 
 /* The size in pixels, the line's height, from Settings › Text. */
 static double text_px(app_state_t *app) {
-    double pt = rubraview_settings_get(&app->settings, U8("text"), U8("size"));
+    double pt = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("size"));
     return (pt > 1.0 ? pt : 18.0) * 96.0 / 72.0 * text_dpi(app);
 }
 
 static double text_spacing(app_state_t *app) {
-    double pct = rubraview_settings_get(&app->settings, U8("text"), U8("line_spacing"));
+    double pct = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("line_spacing"));
     return (pct >= 80.0 ? pct : 160.0) / 100.0;
 }
 
 static double text_line_h(app_state_t *app) { return text_px(app) * text_spacing(app); }
 
-static bool text_wraps(app_state_t *app) { return rubraview_settings_get(&app->settings, U8("text"), U8("wrap")) > 0.5; }
+static bool text_wraps(app_state_t *app) { return rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("wrap")) > 0.5; }
 
 /* 1.25.0: "#RRGGBB" (or "RRGGBB") as an opaque colour; false for anything else. */
-static bool hex_colour(u8str_t text, uint32_t *out) {
-    while (text.len > 0 && text.ptr[0] == ' ') { text.ptr++; text.len--; }
-    while (text.len > 0 && text.ptr[text.len - 1] == ' ') text.len--;
-    if (text.len > 0 && text.ptr[0] == '#') { text.ptr++; text.len--; }
-    if (text.len != 6) return false;
+static bool hex_colour(proven_u8str_view_t text, uint32_t *out) {
+    while (text.size > 0 && text.ptr[0] == ' ') { text.ptr++; text.size--; }
+    while (text.size > 0 && text.ptr[text.size - 1] == ' ') text.size--;
+    if (text.size > 0 && text.ptr[0] == '#') { text.ptr++; text.size--; }
+    if (text.size != 6) return false;
     uint32_t v = 0;
     for (size_t i = 0; i < 6; ++i) {
         char c = text.ptr[i];
@@ -24762,17 +24762,17 @@ static bool hex_colour(u8str_t text, uint32_t *out) {
 static uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback) {
     uint32_t c = 0;
     /* spelled out: check-settings.py finds reads by their literal keys */
-    u8str_t v = strcmp(key, "color_text") == 0 ? rubraview_settings_get_text(&app->settings, U8("text"), U8("color_text"))
-              : strcmp(key, "color_back") == 0 ? rubraview_settings_get_text(&app->settings, U8("text"), U8("color_back"))
-              : strcmp(key, "color_link") == 0 ? rubraview_settings_get_text(&app->settings, U8("text"), U8("color_link"))
-                                               : rubraview_settings_get_text(&app->settings, U8("text"), U8("color_mark"));
+    proven_u8str_view_t v = strcmp(key, "color_text") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_text"))
+              : strcmp(key, "color_back") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_back"))
+              : strcmp(key, "color_link") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_link"))
+                                               : rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_mark"));
     return hex_colour(v, &c) ? c : fallback;
 }
 
 static uint32_t text_ink(app_state_t *app, uint32_t *paper) {
     static const uint32_t PAPER[] = { 0xFF1B1B1Bu, 0xFFF4ECD8u, 0xFFFFFFFFu, 0xFF000000u };
     static const uint32_t INK[]   = { 0xFFDADADAu, 0xFF433422u, 0xFF202020u, 0xFFC8C8C8u };
-    int k = (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("paper")));
+    int k = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("paper")));
     if (k < 0 || k > 3) k = 0;
     if (paper) *paper = text_colour(app, "color_back", PAPER[k]);   /* 1.25.0 (owner, 2026-10-20) */
     return text_colour(app, "color_text", INK[k]);
@@ -24866,17 +24866,17 @@ static void text_scroll_by(app_state_t *app, double dy) {
 /* The place kept for this file (§6): where the paragraph at the top began in the file. */
 static void text_remember(app_state_t *app) {
     text_page_t *t = app->text;
-    if (!t || t->key.len == 0 || t->view.count == 0) return;
-    if (rubraview_settings_get(&app->settings, U8("files"), U8("reading_history")) < 0.5) return;
+    if (!t || t->key.size == 0 || t->view.count == 0) return;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("reading_history")) < 0.5) return;
     if (recent_kept_out(app, t->key)) return;
     size_t source = t->view.paras[t->anchor].source;
     /* The history keeps the path it is given: a copy that outlives the page. */
     rubraview_history_record(app->arena, &app->history, app_keep(app, t->key), (int32_t)source, (int32_t)t->source_len, (int64_t)time(NULL));
     if (t->enc_by_hand) {
         char key[1100];
-        int n = snprintf(key, sizeof(key), "%.*s|encoding", (int)t->key.len, t->key.ptr);
+        int n = snprintf(key, sizeof(key), "%.*s|encoding", (int)t->key.size, t->key.ptr);
         if (n > 0 && (size_t)n < sizeof(key)) {
-            rubraview_history_record(app->arena, &app->history, app_keep(app, (u8str_t){ .ptr = key, .len = (size_t)n }),
+            rubraview_history_record(app->arena, &app->history, app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)key, .size = (size_t)n }),
                                      (int32_t)t->enc, 0, (int64_t)time(NULL));
         }
     }
@@ -24907,10 +24907,10 @@ static bool text_rebuild(app_state_t *app) {
     free(t->blocks); free(t->heights); free(t->tops); free(t->carry);
     t->blocks = NULL; t->heights = NULL; t->tops = NULL; t->carry = NULL;
     rubraview_text_view_free(&t->view);
-    int breaks = (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks")));
-    bool trim = rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) > 0.5;
+    int breaks = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks")));
+    bool trim = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("trim_lead")) > 0.5;
     if (breaks < 0 || breaks >= RUBRAVIEW_TEXT_BREAKS_COUNT) breaks = 0;
-    bool headings = rubraview_settings_get(&app->settings, U8("text"), U8("headings")) > 0.5;
+    bool headings = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("headings")) > 0.5;
     if (!rubraview_text_view_build_ex(&t->view, t->source, t->source_len, (rubraview_text_breaks_t)breaks, trim, headings)) return false;
     t->built_breaks = breaks;
     t->built_trim = trim;
@@ -24957,12 +24957,12 @@ static bool text_decode(text_page_t *t, const uint8_t *bytes, size_t size, rubra
 /* The bytes of page `index`: mapped from the folder, or read out of the archive. */
 static bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, bool by_hand) {
     text_page_t *t = app->text;
-    u8str_t path = app->source.pages[index].path;
+    proven_u8str_view_t path = app->source.pages[index].path;
     rubraview_fs_mapping_t map = {0};
     void *mem = NULL;
     const uint8_t *bytes = NULL;
     size_t size = 0;
-    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER && path.len > 0) {
+    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER && path.size > 0) {
         if (!rubraview_pal_fs_map(path, &map)) return false;
         if (map.size > TEXT_MAX_BYTES) { rubraview_pal_fs_unmap(&map); osd_say(app, TU8("this text file is over 64 MB: not shown")); return false; }
         bytes = (const uint8_t *)map.data;
@@ -24971,7 +24971,7 @@ static bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t
         rubraview_page_bytes_t b = page_read_owned(&app->source, &app->source_lock, (size_t)index, &mem);
         if (!b.ok) { free(mem); return false; }
         bytes = (const uint8_t *)b.data.ptr;
-        size = b.data.len;
+        size = b.data.size;
     }
     size_t bom = 0;
     char tag[96];
@@ -24980,7 +24980,7 @@ static bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t
     rubraview_textenc_t enc = want != RUBRAVIEW_TEXTENC_AUTO ? want : guessed;
     if (want != RUBRAVIEW_TEXTENC_AUTO && enc != guessed) bom = 0;
     /* A .nfo's art is drawn in DOS's box characters. */
-    if (want == RUBRAVIEW_TEXTENC_AUTO && enc == RUBRAVIEW_TEXTENC_CP1252 && rubraview_path_has_ext(path.len ? path : app->source.pages[index].name, ".nfo")) {
+    if (want == RUBRAVIEW_TEXTENC_AUTO && enc == RUBRAVIEW_TEXTENC_CP1252 && rubraview_path_has_ext(path.size ? path : app->source.pages[index].name, ".nfo")) {
         enc = RUBRAVIEW_TEXTENC_CP437;
     }
     bool ok = text_decode(t, bytes, size, enc, bom);
@@ -24995,22 +24995,22 @@ static void text_open(app_state_t *app, int32_t index) {
     if (!t) return;
     app->text = t;
     t->page = index;
-    u8str_t path = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
-    u8str_t key = app->source.archive_path.len > 0 && app->source.pages[index].path.len == 0
+    proven_u8str_view_t path = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
+    proven_u8str_view_t key = app->source.archive_path.size > 0 && app->source.pages[index].path.size == 0
         ? rubraview_path_join(app->arena, app->source.archive_path, app->source.pages[index].name) : path;
-    char *k = (char *)malloc(key.len + 1);
-    if (k) { memcpy(k, key.ptr, key.len); k[key.len] = '\0'; t->key = (u8str_t){ .ptr = k, .len = key.len }; }
+    char *k = (char *)malloc(key.size + 1);
+    if (k) { memcpy(k, key.ptr, key.size); k[key.size] = '\0'; t->key = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)k, .size = key.size }; }
 
     /* An encoding chosen by hand for this file, else the setting's, else the guess. */
     rubraview_textenc_t want = RUBRAVIEW_TEXTENC_AUTO;
     bool by_hand = false;
     char hk[1100];
-    int hn = snprintf(hk, sizeof(hk), "%.*s|encoding", (int)key.len, key.ptr);
+    int hn = snprintf(hk, sizeof(hk), "%.*s|encoding", (int)key.size, key.ptr);
     const rubraview_history_entry_t *chosen = hn > 0 && (size_t)hn < sizeof(hk)
-        ? rubraview_history_find(&app->history, (u8str_t){ .ptr = hk, .len = (size_t)hn }) : NULL;
+        ? rubraview_history_find(&app->history, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)hk, .size = (size_t)hn }) : NULL;
     if (chosen && chosen->page > 0 && chosen->page < RUBRAVIEW_TEXTENC_COUNT) { want = (rubraview_textenc_t)chosen->page; by_hand = true; }
     else {
-        int s = (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("encoding")));
+        int s = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("encoding")));
         if (s > 0 && s < RUBRAVIEW_TEXTENC_COUNT) want = (rubraview_textenc_t)s;
     }
     if (!text_with_bytes(app, index, want, by_hand) || !text_rebuild(app)) {
@@ -25033,13 +25033,13 @@ static void text_prepare(app_state_t *app) {
     int32_t index = current_page_index(app);
     if (app->text && app->text->page == index && index >= 0 && (size_t)index < page_count(app)) {
         /* The same page of the same set: a new set may have a text page at the same place. */
-        u8str_t path = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
-        size_t n = path.len;
-        if (app->text->key.len >= n && memcmp(app->text->key.ptr + app->text->key.len - n, path.ptr, n) == 0) return;
+        proven_u8str_view_t path = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
+        size_t n = path.size;
+        if (app->text->key.size >= n && memcmp(app->text->key.ptr + app->text->key.size - n, path.ptr, n) == 0) return;
     }
     text_close(app);
     if (index >= 0 && (size_t)index < page_count(app)) {
-        u8str_t path = app->source.pages[index].path.len > 0 ? app->source.pages[index].path : app->source.pages[index].name;
+        proven_u8str_view_t path = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
         if (is_text_path(path)) text_open(app, index);
     }
     toolbox_refresh(app);
@@ -25047,9 +25047,9 @@ static void text_prepare(app_state_t *app) {
 
 /* ---- laying out and drawing ---- */
 
-static uint64_t text_family_hash(u8str_t s) {
+static uint64_t text_family_hash(proven_u8str_view_t s) {
     uint64_t h = 1469598103934665603ull;
-    for (size_t i = 0; i < s.len; ++i) h = (h ^ (uint8_t)s.ptr[i]) * 1099511628211ull;
+    for (size_t i = 0; i < s.size; ++i) h = (h ^ (uint8_t)s.ptr[i]) * 1099511628211ull;
     return h;
 }
 
@@ -25078,13 +25078,13 @@ static rubraview_text_block_t *text_block_made(app_state_t *app, text_page_t *t,
     if (t->blocks[i]) return t->blocks[i];
     if (t->carry && t->view.paras[i].joined && t->carry[i] == TEXT_CARRY_UNKNOWN) t->carry[i] = 0;   /* reached out of order */
     const rubraview_text_para_t *p = &t->view.paras[i];
-    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, U8("text"), U8("font")));
+    rubraview_font_spec_t face = rubraview_font_spec_parse(rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("font")));
     rubraview_text_style_t style = {
         .family = face.family, .weight = face.weight, .italic = face.italic,   /* RV-136 */
         .size = t->lay_size, .line_spacing = t->lay_spacing, .width = t->lay_width, .wrap = t->lay_wrap,
     };
     size_t from = text_block_start(t, i);
-    rubraview_text_block_t *b = rubraview_pal_text_block_make(app->renderer, (u8str_t){ .ptr = t->view.text + from, .len = p->start + p->len - from }, &style);
+    rubraview_text_block_t *b = rubraview_pal_text_block_make(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->view.text + from, .size = p->start + p->len - from }, &style);
     if (!b) return NULL;
     t->blocks[i] = b;
     t->laid_out++;
@@ -25105,9 +25105,9 @@ static rubraview_text_block_t *text_block_made(app_state_t *app, text_page_t *t,
 /* The column: its left edge and width, and the space above the first line. */
 static void text_column(app_state_t *app, double win_w, double *x, double *w) {
     double dpi = text_dpi(app);
-    double margin = rubraview_settings_get(&app->settings, U8("text"), U8("margin")) * dpi;
+    double margin = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("margin")) * dpi;
     double width = win_w - 2.0 * margin;
-    double chars = rubraview_settings_get(&app->settings, U8("text"), U8("width"));
+    double chars = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("width"));
     if (chars >= 10.0 && chars * text_px(app) * 0.55 < width) width = chars * text_px(app) * 0.55;
     if (width < 80.0 * dpi) width = win_w - 16.0 * dpi;
     *x = (win_w - width) * 0.5;
@@ -25229,7 +25229,7 @@ static void changes_remove_checked(app_state_t *app) {
     changes_changed(app);
     char said[96];
     int m = snprintf(said, sizeof(said), T("%zu edits removed"), n);
-    if (m > 0) osd_say(app, (u8str_t){ .ptr = said, .len = (size_t)m });
+    if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
 }
 
 static bool changes_press(app_state_t *app, double x, double y) {
@@ -25314,7 +25314,7 @@ static void draw_changes(app_state_t *app) {
         list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_DOWN), "\xE2\x96\xBC", small * 0.8, false,
                     i + 1 < app->edit_steps.cursor ? COLOR_TEXT : COLOR_BOX_BORDER);
         char line[96], fit[200];
-        u8str_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
+        proven_u8str_view_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
         rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - text_x - 4.0, r0.height };
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
                                        in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
@@ -25337,7 +25337,7 @@ static void edit_heading(app_state_t *app, int32_t id, const char *words, size_t
     if (r.width <= 0.0) return;
     char text[96];
     int n = number ? snprintf(text, sizeof(text), "%s   %zu", words, number) : snprintf(text, sizeof(text), "%s", words);
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ text, (size_t)n }, (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)text, (size_t)n }, (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
                                               app->panel.row_height * 0.5, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
 }
 
@@ -25493,13 +25493,13 @@ static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
     t->col_w = col_w;
 
     /* Built again when Settings › Text changed its breaks or its indents. */
-    if (t->built_breaks != (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks"))) ||
-        t->built_trim != (rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) > 0.5) ||
-        t->built_headings != (rubraview_settings_get(&app->settings, U8("text"), U8("headings")) > 0.5)) {
+    if (t->built_breaks != (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"))) ||
+        t->built_trim != (rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("trim_lead")) > 0.5) ||
+        t->built_headings != (rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("headings")) > 0.5)) {
         if (!text_rebuild(app) || t->view.count == 0) return;
     }
     /* Laid out again when what they were laid out for has changed. */
-    u8str_t family = rubraview_settings_get_text(&app->settings, U8("text"), U8("font"));
+    proven_u8str_view_t family = rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("font"));
     double size = text_px(app), spacing = text_spacing(app);
     bool wrap = text_wraps(app);
     if (fabs(t->lay_width - col_w) > 0.5 || fabs(t->lay_size - size) > 0.01 || fabs(t->lay_spacing - spacing) > 0.001 ||
@@ -25576,10 +25576,10 @@ static void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (t->autoscroll) {
         char line[64];
         int n = text_pages_mode(app)
-            ? snprintf(line, sizeof(line), T("auto: a screen every %d s"), (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"))))
-            : snprintf(line, sizeof(line), T("auto %d lines/min"), (int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"))));
+            ? snprintf(line, sizeof(line), T("auto: a screen every %d s"), (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"))))
+            : snprintf(line, sizeof(line), T("auto %d lines/min"), (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"))));
         rubraview_pal_rect_t r = { (double)win_w - 220.0 * dpi, (double)win_h - 30.0 * dpi, 200.0 * dpi, 22.0 * dpi };
-        if (n > 0) rubraview_pal_render_draw_text(app->renderer, (u8str_t){ .ptr = line, .len = (size_t)n }, r, 13.0 * dpi,
+        if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n }, r, 13.0 * dpi,
                                                   (ink & 0x00FFFFFFu) | 0x90000000u, RUBRAVIEW_TEXT_RIGHT);
     }
 }
@@ -25597,7 +25597,7 @@ static int text_percent(const app_state_t *app) {
 }
 
 static bool text_pages_mode(const app_state_t *app) {
-    return lround(rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_mode"))) == 1;
+    return lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_mode"))) == 1;
 }
 
 /* Auto-scroll (§5, the owner's first wish): each pass moves the text by
@@ -25611,7 +25611,7 @@ static void text_tick(app_state_t *app, double now) {
     if (dt <= 0.0 || dt > 0.25) return;
     if (text_pages_mode(app)) {   /* RV-123 (RFC-0005 §5): a screen at a time, every N seconds */
         t->autoscroll_carry += dt;
-        double every = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"));
+        double every = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"));
         if (t->autoscroll_carry < (every >= 1.0 ? every : 10.0)) return;
         t->autoscroll_carry = 0.0;
         double step = t->view_h - text_line_h(app);   /* one line kept on screen, to read on from */
@@ -25619,7 +25619,7 @@ static void text_tick(app_state_t *app, double now) {
         if (text_at_end(t)) { t->autoscroll = false; osd_say(app, TU8("auto-scroll: the end")); }
         return;
     }
-    double lpm = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"));
+    double lpm = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"));
     double px = (lpm > 0.0 ? lpm : 30.0) / 60.0 * text_line_h(app) * dt + t->autoscroll_carry;
     double whole = floor(px * 4.0) / 4.0;   /* quarter pixels: smooth, and no drift */
     t->autoscroll_carry = px - whole;
@@ -25638,43 +25638,43 @@ static const char *text_encoding_shown(const app_state_t *app) {
 
 static void text_speed(app_state_t *app, double factor) {
     if (text_pages_mode(app)) {   /* faster is fewer seconds a screen */
-        double s = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_page_seconds"));
+        double s = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"));
         double next = round((s >= 1.0 ? s : 10.0) / factor);
         if (next == s) next = s + (factor > 1.0 ? -1.0 : 1.0);
         if (next < 2.0) next = 2.0;
         if (next > 120.0) next = 120.0;
-        rubraview_settings_set(&app->settings, U8("text"), U8("autoscroll_page_seconds"), next);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"), next);
         char line[80];
         int n = snprintf(line, sizeof(line), T("auto-scroll: a screen every %d s"), (int)next);
-        if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return;
     }
-    double lpm = rubraview_settings_get(&app->settings, U8("text"), U8("autoscroll_speed"));
+    double lpm = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"));
     double next = round((lpm > 0.0 ? lpm : 30.0) * factor);
     if (next == lpm) next = lpm + (factor > 1.0 ? 1.0 : -1.0);
     if (next < 2.0) next = 2.0;
     if (next > 600.0) next = 600.0;
-    rubraview_settings_set(&app->settings, U8("text"), U8("autoscroll_speed"), next);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"), next);
     char line[80];
     int n = snprintf(line, sizeof(line), T("auto-scroll: %d lines a minute"), (int)next);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static void text_set(app_state_t *app, const char *key, double value, const char *format_text) {
-    rubraview_settings_set(&app->settings, U8("text"), cstr(key), value);
-    double now = rubraview_settings_get(&app->settings, U8("text"), cstr(key));
+    rubraview_settings_set(&app->settings, PROVEN_LIT("text"), cstr(key), value);
+    double now = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), cstr(key));
     char line[80];
     int n = snprintf(line, sizeof(line), format_text, (int)lround(now));
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static void text_find_step(app_state_t *app, bool forward) {
     text_page_t *t = app->text;
     if (!t) return;
-    u8str_t needle = app->rename_active && app->rename_is_find ? rubraview_textedit_text(&app->rename_edit)
-                                                                : (u8str_t){ .ptr = t->find, .len = t->find_len };
-    if (needle.len == 0) { osd_say(app, TU8("type what to find (Ctrl+F)")); return; }
-    if (needle.ptr != t->find && needle.len < sizeof(t->find)) { memcpy(t->find, needle.ptr, needle.len); t->find_len = needle.len; }
+    proven_u8str_view_t needle = app->rename_active && app->rename_is_find ? rubraview_textedit_text(&app->rename_edit)
+                                                                : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len };
+    if (needle.size == 0) { osd_say(app, TU8("type what to find (Ctrl+F)")); return; }
+    if ((const char *)needle.ptr != t->find && needle.size < sizeof(t->find)) { memcpy(t->find, needle.ptr, needle.size); t->find_len = needle.size; }
     size_t from = t->match ? (forward ? t->match_at + 1 : t->match_at)
                            : t->view.paras[t->anchor].start;
     size_t at = 0, len = 0;
@@ -25696,14 +25696,14 @@ static void text_find_step(app_state_t *app, bool forward) {
     size_t which = 0, count = rubraview_text_count(&t->view, needle, at, &which);
     char line[64];
     int n = snprintf(line, sizeof(line), T("found %zu of %zu"), which, count);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
 static void text_copy(app_state_t *app) {
     text_page_t *t = app->text;
     size_t lo = t->sel_a < t->sel_b ? t->sel_a : t->sel_b, hi = t->sel_a < t->sel_b ? t->sel_b : t->sel_a;
     if (hi <= lo) { osd_say(app, TU8("nothing is selected: drag over the text, or Ctrl+A")); return; }
-    osd_say(app, rubraview_pal_clipboard_set_text(app->window, (u8str_t){ .ptr = t->view.text + lo, .len = hi - lo })
+    osd_say(app, rubraview_pal_clipboard_set_text(app->window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->view.text + lo, .size = hi - lo })
                      ? TU8("copied") : TU8("could not copy"));
 }
 
@@ -25718,7 +25718,7 @@ static void text_encoding_set(app_state_t *app, rubraview_textenc_t next) {
     t->anchor = rubraview_text_view_para_of_source(&t->view, source < t->source_len ? source : 0);
     char line[96];
     int n = snprintf(line, sizeof(line), T("read as %s (E: the next)"), rubraview_textenc_name(t->enc));
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     update_window_title(app);
 }
 
@@ -25733,90 +25733,90 @@ static void text_encoding_next(app_state_t *app) {
 }
 
 /* The text page's own actions; false for one that is not its. */
-static bool text_action(app_state_t *app, u8str_t action) {
-    if (action.len < 5 || memcmp(action.ptr, "text_", 5) != 0) return false;
+static bool text_action(app_state_t *app, proven_u8str_view_t action) {
+    if (action.size < 5 || memcmp(action.ptr, "text_", 5) != 0) return false;
     text_page_t *t = app->text;
     if (!t || !text_active(app)) { osd_say(app, TU8("for a text file")); return true; }
     double line = text_line_h(app);
     double screen = t->view_h > line * 2.0 ? t->view_h - line * 1.5 : line;
-    if (rubraview_u8_eq_lit(action, "text_autoscroll")) {
+    if (proven_u8str_view_eq(action, PROVEN_LIT("text_autoscroll"))) {
         t->autoscroll = !t->autoscroll;
         t->autoscroll_last = rubraview_pal_time_now_seconds();
         t->autoscroll_carry = 0.0;
         if (t->autoscroll) text_speed(app, 1.0); else osd_say(app, TU8("auto-scroll stopped"));
-    } else if (rubraview_u8_eq_lit(action, "text_faster")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_faster"))) {
         text_speed(app, 1.1);
-    } else if (rubraview_u8_eq_lit(action, "text_slower")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_slower"))) {
         text_speed(app, 1.0 / 1.1);
-    } else if (rubraview_u8_eq_lit(action, "text_line_down") || rubraview_u8_eq_lit(action, "text_line_up")) {
-        bool down = rubraview_u8_eq_lit(action, "text_line_down");
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_line_down")) || proven_u8str_view_eq(action, PROVEN_LIT("text_line_up"))) {
+        bool down = proven_u8str_view_eq(action, PROVEN_LIT("text_line_down"));
         if (t->autoscroll) text_speed(app, down ? 1.1 : 1.0 / 1.1);   /* while it runs, the arrows are its speed */
         else text_scroll_by(app, down ? line : -line);
-    } else if (rubraview_u8_eq_lit(action, "text_screen_down")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_screen_down"))) {
         if (text_at_end(t)) { apply_intent(app, RUBRAVIEW_INTENT_NEXT_PAGE); return true; }   /* as a book's last page */
         text_scroll_by(app, screen);
-    } else if (rubraview_u8_eq_lit(action, "text_screen_up")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_screen_up"))) {
         if (text_scroll_y(t) <= 0.5) { apply_intent(app, RUBRAVIEW_INTENT_PREV_PAGE); return true; }
         text_scroll_by(app, -screen);
-    } else if (rubraview_u8_eq_lit(action, "text_top")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_top"))) {
         text_scroll_to(t, 0.0);
-    } else if (rubraview_u8_eq_lit(action, "text_bottom")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_bottom"))) {
         text_scroll_to(t, 1e18);
-    } else if (rubraview_u8_eq_lit(action, "text_bigger") || rubraview_u8_eq_lit(action, "text_smaller")) {
-        double pt = rubraview_settings_get(&app->settings, U8("text"), U8("size"));
-        text_set(app, "size", pt + (rubraview_u8_eq_lit(action, "text_bigger") ? 1.0 : -1.0), T("text size %d pt"));
-    } else if (rubraview_u8_eq_lit(action, "text_spacing_more") || rubraview_u8_eq_lit(action, "text_spacing_less")) {
-        double pct = rubraview_settings_get(&app->settings, U8("text"), U8("line_spacing"));
-        text_set(app, "line_spacing", pct + (rubraview_u8_eq_lit(action, "text_spacing_more") ? 10.0 : -10.0), T("line spacing %d %%"));
-    } else if (rubraview_u8_eq_lit(action, "text_breaks")) {
-        int b = ((int)lround(rubraview_settings_get(&app->settings, U8("text"), U8("breaks"))) + 1) % RUBRAVIEW_TEXT_BREAKS_COUNT;
-        rubraview_settings_set(&app->settings, U8("text"), U8("breaks"), (double)b);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_bigger")) || proven_u8str_view_eq(action, PROVEN_LIT("text_smaller"))) {
+        double pt = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("size"));
+        text_set(app, "size", pt + (proven_u8str_view_eq(action, PROVEN_LIT("text_bigger")) ? 1.0 : -1.0), T("text size %d pt"));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_more")) || proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_less"))) {
+        double pct = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("line_spacing"));
+        text_set(app, "line_spacing", pct + (proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_more")) ? 10.0 : -10.0), T("line spacing %d %%"));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_breaks"))) {
+        int b = ((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"))) + 1) % RUBRAVIEW_TEXT_BREAKS_COUNT;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"), (double)b);
         if (!text_rebuild(app)) { osd_say(app, TU8("out of memory")); return true; }
         osd_say(app, b == 0 ? TU8("line breaks as they are") : b == 1 ? TU8("all in one run, no line breaks")
                      : b == 2 ? TU8("blank lines dropped") : TU8("paragraphs found (a sentence's end and more line breaks)"));
-    } else if (rubraview_u8_eq_lit(action, "text_indent")) {
-        bool trim = rubraview_settings_get(&app->settings, U8("text"), U8("trim_lead")) < 0.5;
-        rubraview_settings_set(&app->settings, U8("text"), U8("trim_lead"), trim ? 1.0 : 0.0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_indent"))) {
+        bool trim = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("trim_lead")) < 0.5;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("trim_lead"), trim ? 1.0 : 0.0);
         if (!text_rebuild(app)) { osd_say(app, TU8("out of memory")); return true; }
         osd_say(app, trim ? TU8("indents removed") : TU8("indents kept"));
-    } else if (rubraview_u8_eq_lit(action, "text_wrap")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_wrap"))) {
         bool wrap = !text_wraps(app);
-        rubraview_settings_set(&app->settings, U8("text"), U8("wrap"), wrap ? 1.0 : 0.0);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("wrap"), wrap ? 1.0 : 0.0);
         osd_say(app, wrap ? TU8("word wrap: to the window") : TU8("word wrap off: long lines run on (Shift+wheel)"));
-    } else if (rubraview_u8_eq_lit(action, "text_find")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_find"))) {
         if (app->rename_active) rename_end(app);
         app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-        rubraview_textedit_set(&app->rename_edit, (u8str_t){ .ptr = t->find, .len = t->find_len });
+        rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len });
         rubraview_textedit_select_all(&app->rename_edit);
         app->rename_active = true;
         app->rename_is_find = true;
         app->rename_composing_length = 0;
         rubraview_pal_window_text_input(app->window, true);
-    } else if (rubraview_u8_eq_lit(action, "text_find_next") || rubraview_u8_eq_lit(action, "text_find_prev")) {
-        text_find_step(app, rubraview_u8_eq_lit(action, "text_find_next"));
-    } else if (rubraview_u8_eq_lit(action, "text_encoding")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_find_next")) || proven_u8str_view_eq(action, PROVEN_LIT("text_find_prev"))) {
+        text_find_step(app, proven_u8str_view_eq(action, PROVEN_LIT("text_find_next")));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_encoding"))) {
         text_encoding_next(app);
-    } else if (rubraview_u8_eq_lit(action, "text_edit_external")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_edit_external"))) {
         /* 1.25.0 (owner, 2026-10-20): the file in the editor Settings › Text names, Notepad without one */
-        u8str_t path = current_file_path(app);
-        if (path.len == 0) { osd_say(app, TU8("a page inside an archive has no file of its own to edit")); return true; }
-        u8str_t editor = rubraview_settings_get_text(&app->settings, U8("text"), U8("editor"));
+        proven_u8str_view_t path = current_file_path(app);
+        if (path.size == 0) { osd_say(app, TU8("a page inside an archive has no file of its own to edit")); return true; }
+        proven_u8str_view_t editor = rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("editor"));
         char line[4096];
         size_t pos = 0;
         line[0] = '\0';
-        append_arg(line, sizeof(line), &pos, editor.len > 0 ? editor : U8("notepad.exe"));
+        append_arg(line, sizeof(line), &pos, editor.size > 0 ? editor : PROVEN_LIT("notepad.exe"));
         append_arg(line, sizeof(line), &pos, path);
-        if (!rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) osd_say(app, TU8("the editor could not be started"));
+        if (!rubraview_pal_process_start((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) osd_say(app, TU8("the editor could not be started"));
         else osd_say(app, TU8("opened in the editor: Reload reads it again"));
-    } else if (rubraview_u8_eq_lit(action, "text_reload")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_reload"))) {
         /* the file read again, in the encoding it is read in, at the same place */
         size_t source = t->view.count ? t->view.paras[t->anchor].source : 0;
         if (!text_with_bytes(app, t->page, t->enc, false) || !text_rebuild(app)) { osd_say(app, TU8("could not read it again")); return true; }
         t->anchor = rubraview_text_view_para_of_source(&t->view, source);
         osd_say(app, TU8("read again"));
-    } else if (rubraview_u8_eq_lit(action, "text_copy")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_copy"))) {
         text_copy(app);
-    } else if (rubraview_u8_eq_lit(action, "text_select_all")) {
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_select_all"))) {
         t->sel_a = 0;
         t->sel_b = t->view.len;
         osd_say(app, TU8("all selected: Ctrl+C copies"));
@@ -25831,8 +25831,8 @@ static bool text_action(app_state_t *app, u8str_t action) {
 static bool text_wheel(app_state_t *app, double notches, uint32_t mods) {
     if (!text_active(app)) return false;
     text_page_t *t = app->text;
-    if (mods & RUBRAVIEW_MOD_CTRL) { text_action(app, notches > 0 ? U8("text_bigger") : U8("text_smaller")); return true; }
-    if (mods & RUBRAVIEW_MOD_ALT) { text_action(app, notches > 0 ? U8("text_spacing_more") : U8("text_spacing_less")); return true; }
+    if (mods & RUBRAVIEW_MOD_CTRL) { text_action(app, notches > 0 ? PROVEN_LIT("text_bigger") : PROVEN_LIT("text_smaller")); return true; }
+    if (mods & RUBRAVIEW_MOD_ALT) { text_action(app, notches > 0 ? PROVEN_LIT("text_spacing_more") : PROVEN_LIT("text_spacing_less")); return true; }
     if (mods & RUBRAVIEW_MOD_SHIFT) {
         if (!text_wraps(app)) { t->x_scroll -= notches * text_px(app) * 4.0; if (t->x_scroll < 0.0) t->x_scroll = 0.0; }
         return true;
@@ -25891,7 +25891,7 @@ static bool text_release(app_state_t *app, double x, double y) {
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     bool click = t->sel_a == t->sel_b && fabs(x - t->press_x) < 6.0 && fabs(y - t->press_y) < 6.0;
     bool middle = t->press_x > win_w / 3.0 && t->press_x < win_w * 2.0 / 3.0 && t->press_y > win_h / 3.0 && t->press_y < win_h * 2.0 / 3.0;
-    if (click && middle) handle_action(app, U8("text_autoscroll"));
+    if (click && middle) handle_action(app, PROVEN_LIT("text_autoscroll"));
     else if (!click && t->autoscroll) { t->autoscroll = false; osd_say(app, TU8("auto-scroll stopped")); }   /* a selection */
     return true;
 }
@@ -25981,7 +25981,7 @@ static void render_frame(app_state_t *app) {
             char line[96];
             int n = snprintf(line, sizeof(line), T("reading page %zu... %d %%"), app->page_job->index + 1,
                              total > 0 ? (int)(done * 100u / total) : 0);
-            if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)n });
+            if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         } else if (fading) {
             rubraview_transition_pose_t leaving, arriving;
             rubraview_transition_poses(app->transition.kind, progress, (double)win_w,
@@ -26086,7 +26086,7 @@ static void hdr_screen_tick(app_state_t *app, double dt) {
     app->hdr_screen_check += dt;
     if (app->hdr_screen_check < 1.0) return;
     app->hdr_screen_check = 0.0;
-    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, U8("video"), U8("hdr_output")));
+    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
     if (hdr_out != 1) return;
     rubraview_hdr_display_t now;
     rubraview_pal_render_hdr_display(app->renderer, &now);
@@ -26134,13 +26134,13 @@ static void tick_timers(app_state_t *app, double dt) {
         app->titlebar.idle_seconds = 0.0;
     }
     if (app->frameless && !app->chrome_hidden &&
-        (app->picker_open || app->tmenu_open || rubraview_settings_get(&app->settings, U8("general"), U8("titlebar_pinned")) > 0.5)) {
+        (app->picker_open || app->tmenu_open || rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5)) {
         app->titlebar.shown = true;   /* 1.20.0: pinned; 1.24.0: and always over the open-file screen */
         app->titlebar.idle_seconds = 0.0;
     }
     {   /* 1.24.0: the window's title follows the open-file screen's folder, and goes back when it closes */
         uint64_t key = app->picker_open ? 1469598103934665603ull : 0;
-        for (size_t i = 0; app->picker_open && i < app->picker_dir.len; ++i) key = (key ^ (unsigned char)app->picker_dir.ptr[i]) * 1099511628211ull;
+        for (size_t i = 0; app->picker_open && i < app->picker_dir.size; ++i) key = (key ^ (unsigned char)app->picker_dir.ptr[i]) * 1099511628211ull;
         if (key != app->title_key) { app->title_key = key; update_window_title(app); }
     }
     rubraview_titlebar_tick(&app->titlebar, dt);
@@ -26168,14 +26168,14 @@ static void tick_timers(app_state_t *app, double dt) {
         /* RV-116: resting on a box's anchor, pin, grip or seek bar says what they do */
         rubraview_tile_metrics_t base = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
         bool free_pointer = app->pointer_inside && !app->box_drag && !app->box_sizing && !app->ctx_open && !app->slidepop_open;
-        u8str_t hint = free_pointer ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : U8("");
+        proven_u8str_view_t hint = free_pointer ? rubraview_box_hint(&app->menubox, &base, app->pointer_x, app->pointer_y) : PROVEN_LIT("");
         const char *keys_of = NULL;   /* the owner (2026-10-18): every tooltip with its keys; the menu box is gone (1.21.0) */
-        if (hint.len == 0 && free_pointer) {
+        if (hint.size == 0 && free_pointer) {
             hint = rubraview_box_hint(&app->toolbox, &base, app->pointer_x, app->pointer_y);
             keys_of = rubraview_rect_contains(rubraview_box_pin_rect(&app->toolbox, &base), app->pointer_x, app->pointer_y) ? "toggle_toolbox_pin" : "toggle_toolbox";
         }
-        if (hint.len > 0 && keys_of) hint = hint_with_keys(app, cstr(keys_of), hint.ptr, hint_scratch, sizeof(hint_scratch));
-        if (hint.len == 0 && free_pointer && app->titlebar.shown) {   /* 1.25.0: every title bar button says what it does */
+        if (hint.size > 0 && keys_of) hint = hint_with_keys(app, cstr(keys_of), (const char *)hint.ptr, hint_scratch, sizeof(hint_scratch));
+        if (hint.size == 0 && free_pointer && app->titlebar.shown) {   /* 1.25.0: every title bar button says what it does */
             int32_t bw = 0, bh = 0;
             rubraview_pal_window_get_size(app->window, &bw, &bh);
             static const struct { rubraview_titlebar_button_t b; const char *action, *words; } TIPS[] = {
@@ -26192,30 +26192,30 @@ static void tick_timers(app_state_t *app, double dt) {
                 { RUBRAVIEW_TITLEBAR_CLOSE, "quit", N_("Close Rubraview") },
             };
             rubraview_titlebar_button_t over = rubraview_titlebar_hit(&app->titlebar, app->pointer_x, app->pointer_y, (double)bw);
-            for (size_t k = 0; k < sizeof(TIPS) / sizeof(TIPS[0]) && hint.len == 0; ++k) {
+            for (size_t k = 0; k < sizeof(TIPS) / sizeof(TIPS[0]) && hint.size == 0; ++k) {
                 if (TIPS[k].b != over) continue;
                 hint = TIPS[k].action[0] ? hint_with_keys(app, cstr(TIPS[k].action), rubraview_tr(TIPS[k].words), hint_scratch, sizeof(hint_scratch))
                                          : cstr(rubraview_tr(TIPS[k].words));
             }
         }
-        if (hint.len == 0 && app->pointer_inside && app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED &&
+        if (hint.size == 0 && app->pointer_inside && app->toolbox.state != RUBRAVIEW_BOX_COLLAPSED &&
             app->toolbox.state != RUBRAVIEW_BOX_DETACHED && !app->ctx_open && !app->slidepop_open) {
             /* the layout's icon says which it is, as words, when the pointer rests on it (owner, 2026-10-14) */
             int32_t tile = rubraview_box_tile_at(&app->toolbox, &base, app->pointer_x, app->pointer_y);
-            if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "toggle_layout")) {
-                hint = hint_with_keys(app, U8("toggle_layout"), layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)),
+            if (tile >= 0 && tile < app->toolbox_tile_count && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("toggle_layout"))) {
+                hint = hint_with_keys(app, PROVEN_LIT("toggle_layout"), layout_said(rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction)),
                                       hint_scratch, sizeof(hint_scratch));
             }
-            if (tile >= 0 && tile < app->toolbox_tile_count && rubraview_u8_eq_lit(app->toolbox_tiles[tile].action, "fit_cycle")) {
+            if (tile >= 0 && tile < app->toolbox_tile_count && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("fit_cycle"))) {
                 /* the fit it is in, in words (owner, 2026-10-15), and its keys */
                 hint = hint_with_keys(app, cstr(fit_action_of(app->fit_mode)), rubraview_fit_tile_hint(app->fit_mode), hint_scratch, sizeof(hint_scratch));
             }
-            if (hint.len == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
+            if (hint.size == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
                 const char *said = rubraview_action_hint(app->toolbox_tiles[tile].action);
                 hint = hint_with_keys(app, app->toolbox_tiles[tile].action, said, hint_scratch, sizeof(hint_scratch));
             }
         }
-        if (hint.len == 0 && app->pointer_inside && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->ctx_open) {
+        if (hint.size == 0 && app->pointer_inside && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->ctx_open) {
             /* A menu item whose name does not explain itself says what it does (owner, 2026-10-15: Crisp, Grid). */
             int32_t tile = rubraview_box_tile_at(&app->menubox, &base, app->pointer_x, app->pointer_y);
             const rubraview_menu_item_t *item = tile >= 0 ? rubraview_menu_item_at(&app->menu, tile) : NULL;
@@ -26223,11 +26223,11 @@ static void tick_timers(app_state_t *app, double dt) {
             if (item) hint = hint_with_keys(app, item->action, said, hint_scratch, sizeof(hint_scratch));
         }
         /* Kept in the app's own buffer, so it is the same text however it was made. */
-        if (hint.len >= sizeof(app->hint_text)) hint.len = sizeof(app->hint_text) - 1;
-        if (hint.len != app->hint.len || memcmp(hint.ptr, app->hint_text, hint.len) != 0) {
-            memmove(app->hint_text, hint.ptr, hint.len);
-            app->hint_text[hint.len] = '\0';
-            app->hint = (u8str_t){ .ptr = app->hint_text, .len = hint.len };
+        if (hint.size >= sizeof(app->hint_text)) hint.size = sizeof(app->hint_text) - 1;
+        if (hint.size != app->hint.size || memcmp(hint.ptr, app->hint_text, hint.size) != 0) {
+            memmove(app->hint_text, hint.ptr, hint.size);
+            app->hint_text[hint.size] = '\0';
+            app->hint = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->hint_text, .size = hint.size };
             app->hint_since = rubraview_pal_time_now_seconds();
         }
     }
@@ -26323,7 +26323,7 @@ static uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
         SIG(&h, app->slidepop_len); SIG(&h, (int64_t)lround(app->slideshow.interval_seconds * 10.0));
         SIG(&h, app->slideshow.paused); SIG(&h, (int)app->slideshow.loop);
-        SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, U8("viewer"), U8("transition"))));
+        SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("transition"))));
         SIG(&h, app->ctx_confirm.until);
     }
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
@@ -26344,7 +26344,7 @@ static uint64_t scene_signature(const app_state_t *app) {
    or the picker in the folder it was in. */
 static void startup_without_file(app_state_t *app, bool no_file) {
     if (!no_file || app->history.count == 0) return;
-    int mode = (int)lround(rubraview_settings_get(&app->settings, U8("general"), U8("startup")));
+    int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("startup")));
     if (mode == 0) return;
     const rubraview_history_entry_t *last = &app->history.entries[0];
     for (size_t i = 1; i < app->history.count; ++i) {
@@ -26355,7 +26355,7 @@ static void startup_without_file(app_state_t *app, bool no_file) {
     if (mode == 1) {
         open_path(app, last->path);
     } else {
-        u8str_t folder = entry.is_directory ? last->path : rubraview_path_dirname(last->path);
+        proven_u8str_view_t folder = entry.is_directory ? last->path : rubraview_path_dirname(last->path);
         picker_open(app);
         picker_navigate(app, folder);
         app->picker.focus = 0;
@@ -26369,12 +26369,12 @@ static void load_keymap(app_state_t *app) {
        one it was read only from the working folder, so a file left there
        still counts when AppData has none. */
     /* Settings › Keys › Use keymap.ini: off, the built-in keys, whatever the file says. */
-    bool use_file = rubraview_settings_get(&app->settings, U8("keys"), U8("use_keymap_file")) > 0.5;
-    u8str_t text = use_file ? rubraview_pal_fs_read_file(app->arena, app->keymap_path, KEYMAP_MAX_BYTES) : U8("");
-    if (use_file && text.len == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
-        text = rubraview_pal_fs_read_file(app->arena, U8("keymap.ini"), KEYMAP_MAX_BYTES);
+    bool use_file = rubraview_settings_get(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("use_keymap_file")) > 0.5;
+    proven_u8str_view_t text = use_file ? rubraview_pal_fs_read_file(app->arena, app->keymap_path, KEYMAP_MAX_BYTES) : PROVEN_LIT("");
+    if (use_file && text.size == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
+        text = rubraview_pal_fs_read_file(app->arena, PROVEN_LIT("keymap.ini"), KEYMAP_MAX_BYTES);
     }
-    if (text.len == 0) text = cstr(rubraview_default_keymap());
+    if (text.size == 0) text = cstr(rubraview_default_keymap());
     app->keymap = rubraview_keymap_parse(app->arena, text);
 }
 
@@ -26494,27 +26494,27 @@ static void history_load(app_state_t *app) {
        first time the settings window is opened. */
     settings_read_file(app);
 
-    u8str_t appdata = U8(".");
+    proven_u8str_view_t appdata = PROVEN_LIT(".");
 #ifdef _WIN32
     char appdata_utf8[1024];
     DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
     if (written > 0 && written < sizeof(appdata_utf8)) {
-        appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
+        appdata = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata_utf8, .size = written };
     }
 #endif
     app->history_path = rubraview_config_path(app->arena, app->config_mode,
-                                              app->config_beside, appdata, U8("history.ini"));
+                                              app->config_beside, appdata, PROVEN_LIT("history.ini"));
     app->layout_path = rubraview_config_path(app->arena, app->config_mode,
-                                             app->config_beside, appdata, U8("layout.ini"));
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
+                                             app->config_beside, appdata, PROVEN_LIT("layout.ini"));
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, app->history_path, 1024u * 1024u);
     app->history = rubraview_history_parse(app->arena, text);
     app->recent_path = rubraview_config_path(app->arena, app->config_mode,
-                                             app->config_beside, appdata, U8("recent.ini"));
+                                             app->config_beside, appdata, PROVEN_LIT("recent.ini"));
     app->recent = rubraview_recent_parse(app->arena, rubraview_pal_fs_read_file(app->arena, app->recent_path, 256u * 1024u));
 
     /* D-43: the picker's favourites, beside the history. */
     app->favorites_path = rubraview_config_path(app->arena, app->config_mode,
-                                                app->config_beside, appdata, U8("favorites.ini"));
+                                                app->config_beside, appdata, PROVEN_LIT("favorites.ini"));
     app->favorites = rubraview_favorites_parse(app->arena,
                                                rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u));
 }
@@ -26523,8 +26523,8 @@ static void history_load(app_state_t *app) {
    are not settings the reader edits in a dialog — they are where the
    hands left them — so they live in their own small file beside the
    reading history, under the same portable-or-AppData rule. */
-static double ini_number(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double fallback) {
-    const u8str_t *text = rubraview_ini_get(doc, section, key);
+static double ini_number(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, double fallback) {
+    const proven_u8str_view_t *text = rubraview_ini_get(doc, section, key);
     double value = 0.0;
     return (text && rubraview_parse_double_prefix(*text, &value, NULL)) ? value : fallback;
 }
@@ -26579,9 +26579,9 @@ static void boxes_place(app_state_t *app) {
 }
 
 static void layout_load(app_state_t *app) {
-    if (app->layout_path.len == 0) return;
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, app->layout_path, 8u * 1024u);
-    if (text.len == 0) return;
+    if (app->layout_path.size == 0) return;
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, app->layout_path, 8u * 1024u);
+    if (text.size == 0) return;
     rubraview_ini_doc_t doc = rubraview_ini_parse(app->arena, text);
 
     struct { rubraview_box_t *box; const char *x_key, *y_key; } BOXES[] = {
@@ -26589,32 +26589,32 @@ static void layout_load(app_state_t *app) {
         { &app->menubox, "menubox_x", "menubox_y" },
     };
     for (size_t i = 0; i < sizeof(BOXES) / sizeof(BOXES[0]); ++i) {
-        BOXES[i].box->anchor_x = ini_number(&doc, U8("boxes"), cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
-        BOXES[i].box->anchor_y = ini_number(&doc, U8("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
+        BOXES[i].box->anchor_x = ini_number(&doc, PROVEN_LIT("boxes"), cstr(BOXES[i].x_key), BOXES[i].box->anchor_x);
+        BOXES[i].box->anchor_y = ini_number(&doc, PROVEN_LIT("boxes"), cstr(BOXES[i].y_key), BOXES[i].box->anchor_y);
     }
     boxes_keep_in_reach(app);
     /* Since 0.0.48 the places are shares of the window; a file from before has pixels, which are taken once. */
     static const char *const SHARE_KEYS[2][2] = { { "toolbox_share_x", "toolbox_share_y" }, { "menubox_share_x", "menubox_share_y" } };
     for (int i = 0; i < 2; ++i) {
-        double sx = ini_number(&doc, U8("boxes"), cstr(SHARE_KEYS[i][0]), -1.0), sy = ini_number(&doc, U8("boxes"), cstr(SHARE_KEYS[i][1]), -1.0);
+        double sx = ini_number(&doc, PROVEN_LIT("boxes"), cstr(SHARE_KEYS[i][0]), -1.0), sy = ini_number(&doc, PROVEN_LIT("boxes"), cstr(SHARE_KEYS[i][1]), -1.0);
         if (sx >= 0.0 && sx <= 1.0 && sy >= 0.0 && sy <= 1.0) {
             app->box_share[i][0] = sx;
             app->box_share[i][1] = sy;
             app->box_share_known[i] = true;
             app->box_put[i][0] = BOXES[i].box->anchor_x;   /* not "moved by hand": the share stands */
             app->box_put[i][1] = BOXES[i].box->anchor_y;
-        } else if (rubraview_ini_get(&doc, U8("boxes"), cstr(BOXES[i].x_key))) {
+        } else if (rubraview_ini_get(&doc, PROVEN_LIT("boxes"), cstr(BOXES[i].x_key))) {
             app->box_share_known[i] = false;
         }
     }
     /* Where the boxes were left, not a setting: layout.ini, read like the positions. */
-    if (ini_number(&doc, U8("boxes"), U8("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
+    if (ini_number(&doc, PROVEN_LIT("boxes"), PROVEN_LIT("toolbox_pinned"), 0.0) > 0.5) rubraview_box_set_pinned(&app->toolbox, true);
 
     /* D-33: the subtitle box, as fractions of the window. */
-    if (ini_number(&doc, U8("subtitle_box"), U8("placed"), 0.0) > 0.5) {
-        double left = ini_number(&doc, U8("subtitle_box"), U8("left"), -1.0);
-        double bottom = ini_number(&doc, U8("subtitle_box"), U8("bottom"), -1.0);
-        double width = ini_number(&doc, U8("subtitle_box"), U8("width"), -1.0);
+    if (ini_number(&doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("placed"), 0.0) > 0.5) {
+        double left = ini_number(&doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("left"), -1.0);
+        double bottom = ini_number(&doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("bottom"), -1.0);
+        double width = ini_number(&doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("width"), -1.0);
         if (left >= 0.0 && left < 1.0 && bottom > 0.0 && bottom <= 1.0 && width > 0.0 && width <= 1.0) {
             app->subbox.placed = true;
             app->subbox.left = left;
@@ -26627,57 +26627,57 @@ static void layout_load(app_state_t *app) {
     static const char *const FRAME_KEYS[4] = { "x", "y", "width", "height" };
     int32_t frame[4];
     for (size_t i = 0; i < 4; ++i) {
-        double v = ini_number(&doc, U8("settings_window"), cstr(FRAME_KEYS[i]), 0.0);
+        double v = ini_number(&doc, PROVEN_LIT("settings_window"), cstr(FRAME_KEYS[i]), 0.0);
         frame[i] = (v > -100000.0 && v < 100000.0) ? (int32_t)v : 0;
     }
     if (frame[2] >= 200 && frame[3] >= 150) memcpy(app->settings_frame, frame, sizeof(frame));
 }
 
 static void layout_save(app_state_t *app) {
-    if (app->layout_path.len == 0) return;
+    if (app->layout_path.size == 0) return;
     /* Through the configuration writer, so the file is in the INI and
        TOML subset (D-13). */
     rubraview_ini_doc_t doc = {0};
     boxes_place(app);   /* a box let go a moment ago has its share taken */
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_share_x"), app->box_share[0][0]);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("toolbox_share_y"), app->box_share[0][1]);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_share_x"), app->box_share[1][0]);
-    rubraview_ini_set_float(app->arena, &doc, U8("boxes"), U8("menubox_share_y"), app->box_share[1][1]);
-    rubraview_ini_set_int(app->arena, &doc, U8("boxes"), U8("toolbox_pinned"), app->toolbox.pinned ? 1 : 0);
+    rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("boxes"), PROVEN_LIT("toolbox_share_x"), app->box_share[0][0]);
+    rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("boxes"), PROVEN_LIT("toolbox_share_y"), app->box_share[0][1]);
+    rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("boxes"), PROVEN_LIT("menubox_share_x"), app->box_share[1][0]);
+    rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("boxes"), PROVEN_LIT("menubox_share_y"), app->box_share[1][1]);
+    rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("boxes"), PROVEN_LIT("toolbox_pinned"), app->toolbox.pinned ? 1 : 0);
     if (app->subbox.placed) {
-        rubraview_ini_set_int(app->arena, &doc, U8("subtitle_box"), U8("placed"), 1);
-        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("left"), app->subbox.left);
-        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("bottom"), app->subbox.bottom);
-        rubraview_ini_set_float(app->arena, &doc, U8("subtitle_box"), U8("width"), app->subbox.width);
+        rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("placed"), 1);
+        rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("left"), app->subbox.left);
+        rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("bottom"), app->subbox.bottom);
+        rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("subtitle_box"), PROVEN_LIT("width"), app->subbox.width);
     }
     if (app->settings_frame[2] > 0 && app->settings_frame[3] > 0) {
-        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("x"), app->settings_frame[0]);
-        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("y"), app->settings_frame[1]);
-        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("width"), app->settings_frame[2]);
-        rubraview_ini_set_int(app->arena, &doc, U8("settings_window"), U8("height"), app->settings_frame[3]);
+        rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("x"), app->settings_frame[0]);
+        rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("y"), app->settings_frame[1]);
+        rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("width"), app->settings_frame[2]);
+        rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("height"), app->settings_frame[3]);
     }
-    u8str_t text = rubraview_ini_serialize(app->arena, &doc);
-    if (text.len > 0) rubraview_pal_fs_write_file_atomic(app->layout_path, text);   /* D-99: the last viewer closed leaves its places */
+    proven_u8str_view_t text = rubraview_ini_serialize(app->arena, &doc);
+    if (text.size > 0) rubraview_pal_fs_write_file_atomic(app->layout_path, text);   /* D-99: the last viewer closed leaves its places */
 }
 
 /* D-104: Settings > Files > "Folders that are not written down". */
-static size_t recent_skip_dirs(const app_state_t *app, u8str_t *out) {
+static size_t recent_skip_dirs(const app_state_t *app, proven_u8str_view_t *out) {
     /* Each by its own name, so the settings check sees every row is read. */
     const rubraview_settings_t *st = &app->settings;
-    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(st, U8("recent"), U8("skip_dirs")), out + 8, RECENT_SKIP_DIRS - 8);
-    out[0] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_1"));
-    out[1] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_2"));
-    out[2] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_3"));
-    out[3] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_4"));
-    out[4] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_5"));
-    out[5] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_6"));
-    out[6] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_7"));
-    out[7] = rubraview_settings_get_text(st, U8("recent"), U8("skip_dir_8"));
+    size_t n = rubraview_folder_list_split(rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dirs")), out + 8, RECENT_SKIP_DIRS - 8);
+    out[0] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_1"));
+    out[1] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_2"));
+    out[2] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_3"));
+    out[3] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_4"));
+    out[4] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_5"));
+    out[5] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_6"));
+    out[6] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_7"));
+    out[7] = rubraview_settings_get_text(st, PROVEN_LIT("recent"), PROVEN_LIT("skip_dir_8"));
     return 8 + n;
 }
 
-static bool recent_kept_out(const app_state_t *app, u8str_t path) {
-    u8str_t dirs[RECENT_SKIP_DIRS];
+static bool recent_kept_out(const app_state_t *app, proven_u8str_view_t path) {
+    proven_u8str_view_t dirs[RECENT_SKIP_DIRS];
     return rubraview_recent_is_kept_out(path, dirs, recent_skip_dirs(app, dirs));
 }
 
@@ -26701,21 +26701,21 @@ static void recent_settle(app_state_t *app, proven_arena_t *built, rubraview_rec
     if (!rubraview_recent_rehome(app->arena, all)) app->mem->full = true;   /* no room there: kept with the session's */
 }
 
-static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
-    if (app->recent_path.len == 0) return;
+static void recent_sync(app_state_t *app, proven_u8str_view_t opened, bool clear) {
+    if (app->recent_path.size == 0) return;
     proven_arena_t *ra = recent_arena(app);
-    u8str_t dirs[RECENT_SKIP_DIRS];
+    proven_u8str_view_t dirs[RECENT_SKIP_DIRS];
     size_t dir_count = recent_skip_dirs(app, dirs);
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
+    proven_u8str_view_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
     rubraview_recent_t all = rubraview_recent_parse(ra, before);
     rubraview_recent_merge(ra, &all, &app->recent, RECENT_KEPT);
     if (clear) rubraview_recent_clear(&all, (int64_t)time(NULL));
-    if (opened.len > 0) rubraview_recent_add(ra, &all, opened, (int64_t)time(NULL), RECENT_KEPT);   /* copied into its home below */
+    if (opened.size > 0) rubraview_recent_add(ra, &all, opened, (int64_t)time(NULL), RECENT_KEPT);   /* copied into its home below */
     (void)rubraview_history_drop_within(&all.list, dirs, dir_count);
-    u8str_t after = rubraview_recent_serialize(ra, &all);
-    bool same = after.len == before.len && (after.len == 0 || memcmp(after.ptr, before.ptr, after.len) == 0);
-    if (!same && (before.len > 0 || all.list.count > 0 || all.cleared > 0)) {
+    proven_u8str_view_t after = rubraview_recent_serialize(ra, &all);
+    bool same = after.size == before.size && (after.size == 0 || memcmp(after.ptr, before.ptr, after.size) == 0);
+    if (!same && (before.size > 0 || all.list.count > 0 || all.cleared > 0)) {
         (void)rubraview_pal_fs_write_file_atomic(app->recent_path, after);
     }
     if (locked) rubraview_pal_config_unlock();
@@ -26725,11 +26725,11 @@ static void recent_sync(app_state_t *app, u8str_t opened, bool clear) {
 
 /* The owner (2026-10-17): files taken off the recent list (not off the disk),
    under the same lock, so the other viewers do not bring them back. */
-static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count) {
-    if (app->recent_path.len == 0 || count == 0) return;
+static void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t count) {
+    if (app->recent_path.size == 0 || count == 0) return;
     proven_arena_t *ra = recent_arena(app);
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    u8str_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
+    proven_u8str_view_t before = rubraview_pal_fs_read_file(ra, app->recent_path, 256u * 1024u);
     rubraview_recent_t all = rubraview_recent_parse(ra, before);
     rubraview_recent_merge(ra, &all, &app->recent, RECENT_KEPT);
     int64_t now = (int64_t)time(NULL);
@@ -26741,9 +26741,9 @@ static void recent_forget(app_state_t *app, const u8str_t *paths, size_t count) 
 }
 
 /* The reader opened `path` by name: a file, a book, a folder, a playlist. */
-static void recent_note(app_state_t *app, u8str_t path) {
-    if (path.len == 0) return;
-    if (rubraview_settings_get(&app->settings, U8("recent"), U8("keep")) < 0.5) return;
+static void recent_note(app_state_t *app, proven_u8str_view_t path) {
+    if (path.size == 0) return;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("recent"), PROVEN_LIT("keep")) < 0.5) return;
     if (recent_kept_out(app, path)) return;
     recent_sync(app, path, false);
 }
@@ -26751,19 +26751,19 @@ static void recent_note(app_state_t *app, u8str_t path) {
 /* Of a set of files the reader named, the one it opened on is the one opened. */
 static void recent_note_shown(app_state_t *app) {
     int32_t at = current_page_index(app);
-    if (at >= 0 && (size_t)at < page_count(app) && app->source.archive_path.len == 0) recent_note(app, app->source.pages[at].path);
+    if (at >= 0 && (size_t)at < page_count(app) && app->source.archive_path.size == 0) recent_note(app, app->source.pages[at].path);
 }
 
 static void history_remember(app_state_t *app) {
-    if (app->source_dir.len == 0 || page_count(app) == 0) return;
+    if (app->source_dir.size == 0 || page_count(app) == 0) return;
     /* Settings › Files › Remember the page: off, nothing is written down. */
-    if (rubraview_settings_get(&app->settings, U8("files"), U8("reading_history")) < 0.5) return;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("reading_history")) < 0.5) return;
 
     int32_t current = current_page_index(app);
     if (current < 0) return;
 
     /* An archive is remembered by its own path; a folder by the folder. */
-    u8str_t key = app->source.archive_path.len > 0 ? app->source.archive_path : app->source_dir;
+    proven_u8str_view_t key = app->source.archive_path.size > 0 ? app->source.archive_path : app->source_dir;
     if (recent_kept_out(app, key)) return;   /* D-104: nothing of such a folder is written down */
     rubraview_history_record(app->arena, &app->history, key, current, (int32_t)page_count(app),
                              (int64_t)time(NULL));   /* a date: pal_time is a monotonic clock, which restarts with the machine */
@@ -26778,7 +26778,7 @@ static void source_close(app_state_t *app) {
     page_job_stop(app);   /* the thread reads this source */
     rubraview_page_source_close(&app->source);
     rubraview_pal_fs_unmap(&app->archive_map);
-    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    app->archive_bytes = PROVEN_LIT("");
 }
 
 /* ---- the open archive's names, read again (owner, 2026-10-01) ---- */
@@ -26790,11 +26790,11 @@ static void source_close(app_state_t *app) {
    stores without saying they are UTF-8 change (ZIP without the flag, RAR 4
    without Unicode); 7z's are always Unicode. */
 static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage) {
-    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.len == 0) {
+    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.size == 0) {
         osd_say(app, TU8("names: only an archive's can be read again"));
         return;
     }
-    u8str_t path = app_keep(app, app->source.archive_path);
+    proven_u8str_view_t path = app_keep(app, app->source.archive_path);
     int32_t current = current_page_index(app);
     size_t entry = current >= 0 && (size_t)current < page_count(app) ? app->source.pages[current].entry_index : SIZE_MAX;
     app->names_codepage = (int32_t)codepage;
@@ -26806,11 +26806,11 @@ static void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage
     app->resume_offer = false;
     finish_open(app, start);
     char line[512];
-    u8str_t label = rubraview_codepage_label(codepage);
-    u8str_t name = page_count(app) > 0 ? app->source.pages[start].name : U8("");
-    int n = snprintf(line, sizeof(line), T("names read as %.*s:  %.*s"), (int)label.len, label.ptr,
-                     (int)(name.len < 300 ? name.len : 300), name.ptr);
-    if (n > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
+    proven_u8str_view_t label = rubraview_codepage_label(codepage);
+    proven_u8str_view_t name = page_count(app) > 0 ? app->source.pages[start].name : PROVEN_LIT("");
+    int n = snprintf(line, sizeof(line), T("names read as %.*s:  %.*s"), (int)label.size, label.ptr,
+                     (int)(name.size < 300 ? name.size : 300), name.ptr);
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
 }
 
 /* ---- a RAR's password (owner, 2026-10-01) ---- */
@@ -26820,22 +26820,22 @@ static void secure_wipe(void *p, size_t n) {
     while (n--) *v++ = 0;
 }
 
-static void password_remember(app_state_t *app, u8str_t password) {
-    if (password.len == 0 || password.len >= sizeof(app->passwords[0])) return;
+static void password_remember(app_state_t *app, proven_u8str_view_t password) {
+    if (password.size == 0 || password.size >= sizeof(app->passwords[0])) return;
     for (size_t i = 0; i < app->password_count; ++i) {
-        if (app->password_lens[i] == password.len && memcmp(app->passwords[i], password.ptr, password.len) == 0) return;
+        if (app->password_lens[i] == password.size && memcmp(app->passwords[i], password.ptr, password.size) == 0) return;
     }
     size_t slot = app->password_count < 8 ? app->password_count++ : 7;   /* full: the newest takes the last place */
     secure_wipe(app->passwords[slot], sizeof(app->passwords[slot]));
-    memcpy(app->passwords[slot], password.ptr, password.len);
-    app->password_lens[slot] = password.len;
+    memcpy(app->passwords[slot], password.ptr, password.size);
+    app->password_lens[slot] = password.size;
 }
 
 /* The box, empty, over a locked archive; `wrong` when the last one typed was not it. */
-static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong) {
-    if (archive_path.len >= sizeof(app->password_for)) return;
-    memcpy(app->password_for, archive_path.ptr, archive_path.len);
-    app->password_for_len = archive_path.len;
+static void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong) {
+    if (archive_path.size >= sizeof(app->password_for)) return;
+    memcpy(app->password_for, archive_path.ptr, archive_path.size);
+    app->password_for_len = archive_path.size;
     if (app->rename_active) rename_end(app);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     app->rename_active = true;
@@ -26847,11 +26847,11 @@ static void password_ask(app_state_t *app, u8str_t archive_path, bool wrong) {
 
 /* Enter in the password box: the archive is opened again with it. */
 static void password_commit(app_state_t *app) {
-    rename_insert(app, (u8str_t){ .ptr = app->rename_composing, .len = app->rename_composing_length });
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
     char typed[sizeof(app->rename_buffer)];
-    u8str_t text = rubraview_textedit_text(&app->rename_edit);
-    size_t n = text.len < sizeof(typed) ? text.len : sizeof(typed) - 1;
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    size_t n = text.size < sizeof(typed) ? text.size : sizeof(typed) - 1;
     memcpy(typed, text.ptr, n);
     char path[sizeof(app->password_for)];
     memcpy(path, app->password_for, app->password_for_len);
@@ -26860,13 +26860,13 @@ static void password_commit(app_state_t *app) {
     if (n == 0) { secure_wipe(typed, sizeof(typed)); return; }
     app->open_password = typed;
     app->open_password_len = n;
-    open_path(app, (u8str_t){ .ptr = path, .len = path_len });
+    open_path(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = path_len });
     app->open_password = NULL;
     app->open_password_len = 0;
     secure_wipe(typed, sizeof(typed));
 }
 
-static bool open_archive(app_state_t *app, u8str_t archive_path) {
+static bool open_archive(app_state_t *app, proven_u8str_view_t archive_path) {
     if (app->arc_job) return false;   /* D-88: the archive on screen is being written again */
     /* Leaving one archive for another gives back what the old one held;
        a CB7's decoded solid block is heap memory, not arena memory. */
@@ -26878,34 +26878,34 @@ static bool open_archive(app_state_t *app, u8str_t archive_path) {
        2026-09-28: comics of several GB). */
     if (!rubraview_pal_fs_map(archive_path, &app->archive_map)) return false;
     if (app->archive_map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&app->archive_map); return false; }
-    u8str_t bytes = { .ptr = (const char*)app->archive_map.data, .len = (size_t)app->archive_map.size };
+    proven_u8str_view_t bytes = { .ptr = (const proven_byte_t *)(const char*)app->archive_map.data, .size = (size_t)app->archive_map.size };
 
     app->archive_bytes = bytes;
     app->list_is_set = false;
     static char kinds_buf[512];   /* lasting: the source may keep the kinds it was opened with */
-    u8str_t given = { .ptr = app->open_password ? app->open_password : "", .len = app->open_password ? app->open_password_len : 0 };
+    proven_u8str_view_t given = rubraview_u8(app->open_password ? app->open_password : "", app->open_password ? app->open_password_len : 0);
     rubraview_codepage_t names = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
     app->source = rubraview_page_source_from_archive_password(app->arena,
-                                                              (const uint8_t*)bytes.ptr, bytes.len,
+                                                              (const uint8_t*)bytes.ptr, bytes.size,
                                                               archive_path, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER),
                                                               names, MAX_PAGE_BYTES,
                                                               PAGE_CACHE_BUDGET, given);
     /* Locked (owner, 2026-10-01): the passwords that worked this session
        first, then the reader is asked. */
-    for (size_t i = 0; app->source.needs_password && given.len == 0 && i < app->password_count; ++i) {
+    for (size_t i = 0; app->source.needs_password && given.size == 0 && i < app->password_count; ++i) {
         rubraview_page_source_close(&app->source);
         app->source = rubraview_page_source_from_archive_password(app->arena,
-                                                                  (const uint8_t*)bytes.ptr, bytes.len,
+                                                                  (const uint8_t*)bytes.ptr, bytes.size,
                                                                   archive_path, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER),
                                                                   names, MAX_PAGE_BYTES, PAGE_CACHE_BUDGET,
-                                                                  (u8str_t){ .ptr = app->passwords[i], .len = app->password_lens[i] });
+                                                                  (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->passwords[i], .size = app->password_lens[i] });
     }
     app->source_dir = rubraview_path_dirname(archive_path);
     if (app->source.needs_password) {
-        password_ask(app, archive_path, given.len > 0);
+        password_ask(app, archive_path, given.size > 0);
         return false;
     }
-    if (given.len > 0) password_remember(app, given);
+    if (given.size > 0) password_remember(app, given);
     return app->source.page_count > 0;
 }
 
@@ -26920,20 +26920,20 @@ typedef struct folder_files {
 } folder_files_t;
 
 /* Settings > Files > Show and Only names like: the kinds listed, and the names among them. */
-static bool folder_lists(const app_state_t *app, u8str_t name, bool filtered) {
+static bool folder_lists(const app_state_t *app, proven_u8str_view_t name, bool filtered) {
     char kinds_buf[1024];
-    const char *const KINDS[] = { kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER };
+    const char *const KINDS[] = { (const char *)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER };
     name = rubraview_path_basename(name);
     if (!filtered) return rubraview_glob_match_list(name, cstr(KINDS[0]));
-    int show = (int)lround(rubraview_settings_get(&app->settings, U8("files"), U8("show")));
+    int show = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("show")));
     if (!rubraview_glob_match_list(name, cstr(KINDS[show >= 0 && show < 4 ? show : 0]))) return false;
-    u8str_t pattern = rubraview_settings_get_text(&app->settings, U8("files"), U8("pattern"));
-    return pattern.len == 0 || rubraview_glob_match_list(name, pattern);
+    proven_u8str_view_t pattern = rubraview_settings_get_text(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
+    return pattern.size == 0 || rubraview_glob_match_list(name, pattern);
 }
 
 /* The files of `dir` (and, with subfolders, of the folders under it), each
    named by its path from `root` so that a sort by name goes folder by folder. */
-static void folder_gather(app_state_t *app, u8str_t root, u8str_t dir, int depth, bool deep, folder_files_t *out) {
+static void folder_gather(app_state_t *app, proven_u8str_view_t root, proven_u8str_view_t dir, int depth, bool deep, folder_files_t *out) {
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
     for (size_t i = 0; i < listing.count && out->count < SUBFOLDER_FILES; ++i) {
         rubraview_fs_entry_t e = listing.entries[i];
@@ -26948,10 +26948,10 @@ static void folder_gather(app_state_t *app, u8str_t root, u8str_t dir, int depth
             out->entries = grown;
             out->cap = cap;
         }
-        if (depth > 0 && e.path.len > root.len + 1) {
-            size_t skip = root.len;
+        if (depth > 0 && e.path.size > root.size + 1) {
+            size_t skip = root.size;
             if (e.path.ptr[skip] == '/' || e.path.ptr[skip] == '\\') skip++;
-            e.name = (u8str_t){ .ptr = e.path.ptr + skip, .len = e.path.len - skip };
+            e.name = (proven_u8str_view_t){ .ptr = e.path.ptr + skip, .size = e.path.size - skip };
         }
         out->entries[out->count++] = e;
     }
@@ -26970,11 +26970,11 @@ static void source_shuffle(app_state_t *app) {
 }
 
 /* `keep` is a file listed whatever the filters say: the one that was opened by name. */
-static bool open_folder_keeping(app_state_t *app, u8str_t dir, u8str_t keep) {
+static bool open_folder_keeping(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t keep) {
     if (app->arc_job) return false;   /* D-88 */
     source_close(app);
 
-    bool deep = g_cli_subfolders || rubraview_settings_get(&app->settings, U8("files"), U8("subfolders")) > 0.5;
+    bool deep = g_cli_subfolders || rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("subfolders")) > 0.5;
     folder_files_t all = {0};
     folder_gather(app, dir, dir, 0, deep, &all);
     if (all.count == 0) { free(all.entries); return false; }
@@ -26985,7 +26985,7 @@ static bool open_folder_keeping(app_state_t *app, u8str_t dir, u8str_t keep) {
         for (size_t i = 0; i < all.count; ++i) {
             const rubraview_fs_entry_t *e = &all.entries[i];
             if (folder_lists(app, e->name, pass == 0) ||
-                (keep.len > 0 && rubraview_path_same(e->path, keep) && folder_lists(app, e->name, false))) {
+                (keep.size > 0 && rubraview_path_same(e->path, keep) && folder_lists(app, e->name, false))) {
                 all.entries[kept++] = *e;
             }
         }
@@ -26997,84 +26997,84 @@ static bool open_folder_keeping(app_state_t *app, u8str_t dir, u8str_t keep) {
     memcpy(entries, all.entries, kept * sizeof(*entries));
     free(all.entries);
 
-    app->archive_bytes = (u8str_t){ .ptr = "", .len = 0 };
+    app->archive_bytes = PROVEN_LIT("");
     bool ascending = true;
     rubraview_sort_mode_t mode = folder_sort_mode(app, &ascending);
     /* By name through folders: folder by folder, each in its own order. */
     if (deep && (mode == RUBRAVIEW_SORT_NAME_NATURAL || mode == RUBRAVIEW_SORT_NAME_LEXICAL)) mode = RUBRAVIEW_SORT_PATH_NATURAL;
     app->list_is_set = false;
     rubraview_fs_listing_t listing = { .entries = entries, .count = kept };
-    app->source = rubraview_page_source_from_listing(app->arena, &listing, U8("*"), mode, ascending);
+    app->source = rubraview_page_source_from_listing(app->arena, &listing, PROVEN_LIT("*"), mode, ascending);
     if (mode == RUBRAVIEW_SORT_RANDOM) source_shuffle(app);
     app->source_dir = dir;
     return app->source.page_count > 0;
 }
 
-static bool open_folder(app_state_t *app, u8str_t dir) {
-    return open_folder_keeping(app, dir, (u8str_t){ .ptr = "", .len = 0 });
+static bool open_folder(app_state_t *app, proven_u8str_view_t dir) {
+    return open_folder_keeping(app, dir, PROVEN_LIT(""));
 }
 
 /* The folder being read, listed again — its order or its filters changed —
    and back on the file it was on. A set of files and a book are left alone. */
 static void folder_relist(app_state_t *app) {
-    if (page_count(app) == 0 || app->list_is_set || app->source.archive_path.len > 0 ||
-        app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source_dir.len == 0 || app->arc_job) return;
+    if (page_count(app) == 0 || app->list_is_set || app->source.archive_path.size > 0 ||
+        app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source_dir.size == 0 || app->arc_job) return;
     int32_t at = current_page_index(app);
-    u8str_t reading = at >= 0 ? app_keep(app, app->source.pages[at].path) : (u8str_t){ .ptr = "", .len = 0 };
-    u8str_t dir = app_keep(app, app->source_dir);
+    proven_u8str_view_t reading = at >= 0 ? app_keep(app, app->source.pages[at].path) : PROVEN_LIT("");
+    proven_u8str_view_t dir = app_keep(app, app->source_dir);
     if (!open_folder_keeping(app, dir, reading)) return;
-    int32_t page = reading.len > 0 ? rubraview_page_source_find(&app->source, reading) : -1;
+    int32_t page = reading.size > 0 ? rubraview_page_source_find(&app->source, reading) : -1;
     finish_open(app, page > 0 ? (size_t)page : 0);
 }
 
 /* A playlist file (`.m3u8`, `.m3u`, `.rvlist`): its files, in its order.
    A path that is not whole is from the playlist's own folder. */
-static bool path_is_playlist(u8str_t path) {
-    return rubraview_glob_match_list(rubraview_path_basename(path), U8(LIST_FILTER));
+static bool path_is_playlist(proven_u8str_view_t path) {
+    return rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT(LIST_FILTER));
 }
 
 /* RV-157: a list's text as UTF-8 — a .pls or .m3u from a station's site is often in its country's code page,
    or UTF-16. Into the arena; empty when it cannot be read. */
-static u8str_t playlist_text_utf8(app_state_t *app, u8str_t raw) {
+static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_view_t raw) {
     size_t bom = 0;
     char tag[96];
     const char *lang = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
-    rubraview_textenc_t enc = rubraview_textenc_guess((const uint8_t*)raw.ptr, raw.len, lang, &bom);
+    rubraview_textenc_t enc = rubraview_textenc_guess((const uint8_t*)raw.ptr, raw.size, lang, &bom);
     if (enc == RUBRAVIEW_TEXTENC_UTF8) return raw;   /* a BOM is the parser's to pass over */
     char *text = NULL;
     size_t len = 0;
     if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
-        text = rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.len - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, &len);
+        text = rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.size - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, &len);
     } else {
-        text = rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.len - bom, rubraview_textenc_codepage(enc), &len);
+        text = rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.size - bom, rubraview_textenc_codepage(enc), &len);
     }
     if (!text) return raw;
-    u8str_t kept = app_keep(app, (u8str_t){ .ptr = text, .len = len });
+    proven_u8str_view_t kept = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = len });
     free(text);
     return kept;
 }
 
-static void open_playlist(app_state_t *app, u8str_t path) {
-    u8str_t text = rubraview_pal_fs_read_file(app->arena, path, 8u * 1024u * 1024u);
-    if (text.len == 0) { osd_say(app, TU8("the playlist is empty or could not be read")); return; }
+static void open_playlist(app_state_t *app, proven_u8str_view_t path) {
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, path, 8u * 1024u * 1024u);
+    if (text.size == 0) { osd_say(app, TU8("the playlist is empty or could not be read")); return; }
     rubraview_playlist_t list = rubraview_playlist_parse_named(app->arena, rubraview_path_basename(path), playlist_text_utf8(app, text));
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, list.count ? list.count : 1, sizeof(rubraview_fs_entry_t));
     if (list.count == 0 || !proven_is_ok(res.err)) { osd_say(app, TU8("the playlist names no file")); return; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
-    u8str_t dir = rubraview_path_dirname(path);
+    proven_u8str_view_t dir = rubraview_path_dirname(path);
     size_t n = 0, missing = 0, stations = 0;
     for (size_t i = 0; i < list.count; ++i) {
-        u8str_t item = list.entries[i].path;
-        if (item.len == 0) continue;
+        proven_u8str_view_t item = list.entries[i].path;
+        if (item.size == 0) continue;
         /* RV-157: an internet radio station, by the title the list gives it */
         if (is_station_path(item)) {
-            u8str_t title = list.entries[i].title;
-            entries[n++] = (rubraview_fs_entry_t){ .name = title.len > 0 ? title : rubraview_stream_display_name(item), .path = item };
+            proven_u8str_view_t title = list.entries[i].title;
+            entries[n++] = (rubraview_fs_entry_t){ .name = title.size > 0 ? title : rubraview_stream_display_name(item), .path = item };
             stations++;
             continue;
         }
-        if (rubraview_glob_match(item, U8("*://*"))) { missing++; continue; }   /* another kind of address: not ours to open */
-        bool whole = item.ptr[0] == '/' || item.ptr[0] == '\\' || (item.len > 2 && item.ptr[1] == ':');
+        if (rubraview_glob_match(item, PROVEN_LIT("*://*"))) { missing++; continue; }   /* another kind of address: not ours to open */
+        bool whole = item.ptr[0] == '/' || item.ptr[0] == '\\' || (item.size > 2 && item.ptr[1] == ':');
         if (!whole) item = rubraview_path_join(app->arena, dir, item);
         rubraview_fs_entry_t entry;
         if (!rubraview_pal_fs_stat(app->arena, item, &entry) || entry.is_directory || !path_is_listed_kind(entry.path)) {
@@ -27090,7 +27090,7 @@ static void open_playlist(app_state_t *app, u8str_t path) {
     else if (stations > 0) snprintf(line, sizeof(line), T("playlist: %zu files and stations (%zu stations)"), n, stations);
     else if (missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files, %zu not found"), n, missing);
     else snprintf(line, sizeof(line), T("playlist: %zu files"), n);
-    open_set_ordered(app, entries, n, cstr(line), true, (u8str_t){ .ptr = "", .len = 0 });
+    open_set_ordered(app, entries, n, cstr(line), true, PROVEN_LIT(""));
     if (page_count(app) > 0) {
         if (stations > 0) app->source_dir = dir;   /* a station has no folder: the list's own is where Rename and the rest look */
         recent_note(app, path);
@@ -27116,8 +27116,8 @@ static void finish_open(app_state_t *app, size_t start_page) {
     app->precache = rubraview_precache_create(app->jobs, &app->page_cache,
                                               page_count(app), ESTIMATED_PAGE_BYTES);
     /* Settings › Cache: how many pages are read ahead and kept behind. */
-    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookahead")));
-    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(&app->settings, U8("cache"), U8("lookbehind")));
+    app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("lookahead")));
+    app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("lookbehind")));
 
     if (start_page >= page_count(app)) start_page = 0;
     ensure_page_loaded(app, (int32_t)start_page);
@@ -27125,7 +27125,7 @@ static void finish_open(app_state_t *app, size_t start_page) {
 
     /* §3.8.5: let the archive's own manifest set the reading direction
        and mark its covers before the first spread is chosen. */
-    if (app->source.has_comicinfo && rubraview_settings_get(&app->settings, U8("files"), U8("comicinfo")) > 0.5) {
+    if (app->source.has_comicinfo && rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("comicinfo")) > 0.5) {
         rubraview_comicinfo_t info = rubraview_comicinfo_parse(app->arena, app->source.comicinfo_xml);
         proven_result_mem_mut_t infos_res =
             rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
@@ -27160,16 +27160,16 @@ static void finish_open(app_state_t *app, size_t start_page) {
     update_window_title(app);
 }
 
-static void open_path(app_state_t *app, u8str_t path) {
+static void open_path(app_state_t *app, proven_u8str_view_t path) {
     if (app->arc_job) { osd_say(app, TU8("the archive is being written (Esc stops it)")); return; }
     if (!subs_may_leave(app)) return;
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
     app->names_codepage = -1;   /* a code page chosen for one archive's names stays with it */
-    if (rubraview_glob_match_list(rubraview_path_basename(path), U8("*.cue"))) {
-        u8str_t audio = cue_audio_path(app, path);
-        if (audio.len == 0) { osd_say(app, TU8("the cue sheet's audio file is not beside it")); return; }
+    if (rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT("*.cue"))) {
+        proven_u8str_view_t audio = cue_audio_path(app, path);
+        if (audio.size == 0) { osd_say(app, TU8("the cue sheet's audio file is not beside it")); return; }
         path = app_keep(app, audio);
     }
     if (is_station_path(path)) {   /* RV-157: an address given on its own (the command line): a list of one station */
@@ -27177,7 +27177,7 @@ static void open_path(app_state_t *app, u8str_t path) {
         if (!proven_is_ok(res.err)) return;
         rubraview_fs_entry_t *one = (rubraview_fs_entry_t*)(void*)res.value.ptr;
         *one = (rubraview_fs_entry_t){ .name = rubraview_stream_display_name(path), .path = path };
-        open_set_ordered(app, one, 1, TU8("live: an internet radio station"), true, (u8str_t){ .ptr = "", .len = 0 });
+        open_set_ordered(app, one, 1, TU8("live: an internet radio station"), true, PROVEN_LIT(""));
         return;
     }
     rubraview_fs_entry_t entry;
@@ -27191,19 +27191,19 @@ static void open_path(app_state_t *app, u8str_t path) {
     /* The path is spelt as the caller gave it — backslashes from the
        shell, '/' from a folder listing — so every lookup by it compares
        with rubraview_path_same, never byte for byte. */
-    u8str_t key = entry.path;
+    proven_u8str_view_t key = entry.path;
 
     if (entry.is_directory) {
         opened = open_folder(app, entry.path);
         key = entry.path;
-    } else if (rubraview_glob_match_list(rubraview_path_basename(entry.path), U8(ARCHIVE_FILTER))) {
+    } else if (rubraview_glob_match_list(rubraview_path_basename(entry.path), PROVEN_LIT(ARCHIVE_FILTER))) {
         opened = open_archive(app, entry.path);
     } else {
         /* `rubraview.exe test.jpg` has no directory part at all, and
            listing "" lists nothing. The folder it means is the one the
            command was run in. */
-        u8str_t folder = rubraview_path_dirname(entry.path);
-        if (folder.len == 0) folder = U8(".");
+        proven_u8str_view_t folder = rubraview_path_dirname(entry.path);
+        if (folder.size == 0) folder = PROVEN_LIT(".");
         opened = open_folder_keeping(app, folder, entry.path);
         key = folder;
     }
@@ -27214,11 +27214,11 @@ static void open_path(app_state_t *app, u8str_t path) {
        rather than dropping the reader back on page one. */
     size_t start_page = 0;
     const rubraview_history_entry_t *seen =
-        rubraview_settings_get(&app->settings, U8("files"), U8("reading_history")) > 0.5
+        rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("reading_history")) > 0.5
             ? rubraview_history_find(&app->history, key) : NULL;
     if (seen && rubraview_history_should_offer_resume(seen)) {
         /* Settings › Files › Offer to resume: off, it simply opens there. */
-        app->resume_offer = rubraview_settings_get(&app->settings, U8("files"), U8("resume_prompt")) > 0.5;
+        app->resume_offer = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("resume_prompt")) > 0.5;
         app->resume_page = seen->page;
         if ((size_t)seen->page < app->source.page_count) start_page = (size_t)seen->page;
     } else {
@@ -27248,12 +27248,12 @@ static void open_path(app_state_t *app, u8str_t path) {
 /* §3.8.1 point 4: reaching the end of a volume continues into the next
    archive in the same directory. */
 static bool open_sibling_archive(app_state_t *app, bool forward) {
-    if (app->source.archive_path.len == 0 || app->source_dir.len == 0) return false;
+    if (app->source.archive_path.size == 0 || app->source_dir.size == 0) return false;
 
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, app->source_dir);
-    u8str_t next = rubraview_page_source_sibling_archive(app->arena, &listing,
+    proven_u8str_view_t next = rubraview_page_source_sibling_archive(app->arena, &listing,
                                                           app->source.archive_path, forward);
-    if (next.len == 0) return false;
+    if (next.size == 0) return false;
     if (!subs_may_leave(app)) return true;   /* held: it said why */
     open_path(app, next);
     if (!forward && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);   /* going back: its last page */
@@ -27262,12 +27262,12 @@ static bool open_sibling_archive(app_state_t *app, bool forward) {
 
 /* The folder beside this one, after or before it, that has something to show (owner, 2026-10-14). */
 static bool open_sibling_folder(app_state_t *app, bool forward) {
-    u8str_t dir = app->source_dir;
-    if (dir.len == 0) return false;
-    u8str_t parent = rubraview_path_dirname(dir);
-    if (parent.len == 0 || rubraview_path_same(parent, dir)) return false;
+    proven_u8str_view_t dir = app->source_dir;
+    if (dir.size == 0) return false;
+    proven_u8str_view_t parent = rubraview_path_dirname(dir);
+    if (parent.size == 0 || rubraview_path_same(parent, dir)) return false;
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, parent);
-    u8str_t beside[64];
+    proven_u8str_view_t beside[64];
     size_t n = rubraview_page_source_sibling_folders(app->arena, &listing, dir, forward, beside, 64);
     for (size_t i = 0; i < n; ++i) {
         rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(app->arena, beside[i]);
@@ -27280,9 +27280,9 @@ static bool open_sibling_folder(app_state_t *app, bool forward) {
         open_path(app, beside[i]);
         if (!forward && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);
         char line[400];
-        u8str_t name = rubraview_path_basename(beside[i]);
-        int m = snprintf(line, sizeof(line), forward ? T("next folder: %.*s") : T("previous folder: %.*s"), (int)(name.len < 300 ? name.len : 300), name.ptr);
-        if (m > 0) osd_say(app, (u8str_t){ .ptr = line, .len = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
+        proven_u8str_view_t name = rubraview_path_basename(beside[i]);
+        int m = snprintf(line, sizeof(line), forward ? T("next folder: %.*s") : T("previous folder: %.*s"), (int)(name.size < 300 ? name.size : 300), name.ptr);
+        if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
         return true;
     }
     return false;
@@ -27350,12 +27350,12 @@ static void console_line(const char *text) {
 }
 
 /* Defined with run_batch below (D-86); --subfolders reads them. */
-static const u8str_t *g_launch_paths;
+static const proven_u8str_view_t *g_launch_paths;
 static size_t         g_launch_count;
 
 typedef struct batch_ctx {
     const rubraview_cli_result_t *cli;
-    u8str_t output_dir;
+    proven_u8str_view_t output_dir;
     size_t written;
     proven_job_sys_t *jobs;   /* RV-067's pool for resizes on the CPU; NULL on one core */
     size_t workers;
@@ -27398,14 +27398,14 @@ static int32_t resize_target(const rubraview_batch_resize_params_t *r,
 
 /* One line on the run's console naming the file and what went wrong: a
    count of failures says nothing about which or why. */
-static void batch_say(u8str_t path, const char *why) {
+static void batch_say(proven_u8str_view_t path, const char *why) {
     char line[600];
-    int n = snprintf(line, sizeof(line), "rubraview: %.*s: %s", (int)(path.len < 500 ? path.len : 500), path.ptr, why);
+    int n = snprintf(line, sizeof(line), "rubraview: %.*s: %s", (int)(path.size < 500 ? path.size : 500), path.ptr, why);
     if (n > 0) console_line(line);
 }
 
 /* RV-129: --keep-dates: the file written takes its source's modified time. */
-static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, u8str_t source, u8str_t written) {
+static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, proven_u8str_view_t source, proven_u8str_view_t written) {
     if (!bc->cli->keep_dates) return;
     rubraview_fs_entry_t e;
     if (!rubraview_pal_fs_stat(arena, source, &e) || !rubraview_pal_fs_set_mtime(written, e.mtime)) batch_say(written, "its date could not be set");
@@ -27414,7 +27414,7 @@ static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, u8str_
 /* Decode, turn, resize, adjust, save. A step that cannot be done fails the
    file: writing it without the step would say it was done. */
 static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview_batch_input_t *input,
-                         u8str_t out_path, const rubraview_batch_orient_params_t *orient,
+                         proven_u8str_view_t out_path, const rubraview_batch_orient_params_t *orient,
                          const rubraview_batch_resize_params_t *resize, const rubraview_batch_color_params_t *color,
                          const rubraview_batch_extra_params_t *extra,
                          rubraview_export_options_t options, rubraview_export_format_t source_format) {
@@ -27520,7 +27520,7 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
             if (!rubraview_pixbuf_is_valid(&framed)) { batch_say(input->path, "the border could not be made"); return false; }
             pixels = framed;
         }
-        if (extra->watermark.len > 0) {
+        if (extra->watermark.size > 0) {
             if (!bc->mark_tried) {   /* read once, into memory of its own that outlives every file's */
                 bc->mark_tried = true;
                 size_t room = 64u << 20;
@@ -27546,14 +27546,14 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
                 batch_say(input->path, "the watermark could not be laid on"); return false;
             }
         }
-        if (extra->text.len > 0) {   /* RV-134: words on it, last of all */
-            u8str_t name = rubraview_path_basename(input->path);
-            u8str_t ext = rubraview_path_ext(name);
-            if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
+        if (extra->text.size > 0) {   /* RV-134: words on it, last of all */
+            proven_u8str_view_t name = rubraview_path_basename(input->path);
+            proven_u8str_view_t ext = rubraview_path_ext(name);
+            if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
             char date[40] = "";
             rubraview_fs_entry_t e;
             if (rubraview_pal_fs_stat(arena, input->path, &e)) { info_local_time(date, sizeof(date), e.mtime); date[10] = '\0'; }
-            u8str_t words = rubraview_batch_format_name_ex(arena, extra->text, rubraview_path_stem(name), ext, pixels.width, pixels.height,
+            proven_u8str_view_t words = rubraview_batch_format_name_ex(arena, extra->text, rubraview_path_stem(name), ext, pixels.width, pixels.height,
                                                            cstr(date), bc->counter, rubraview_path_basename(rubraview_path_dirname(input->path)));
             int32_t shorter = pixels.width < pixels.height ? pixels.width : pixels.height;
             int32_t px = shorter * extra->text_size / 100;
@@ -27582,37 +27582,37 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
 }
 
 static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *job,
-                          const rubraview_batch_input_t *input, u8str_t output_name, void *ctx) {
+                          const rubraview_batch_input_t *input, proven_u8str_view_t output_name, void *ctx) {
     batch_ctx_t *bc = (batch_ctx_t*)ctx;
     bc->counter = (int64_t)(job->counter_start > 0 ? job->counter_start : 1) + (int64_t)bc->seen++;   /* as the core counts for the name */
-    u8str_t out_dir = bc->output_dir.len > 0 ? bc->output_dir : rubraview_path_dirname(input->path);
+    proven_u8str_view_t out_dir = bc->output_dir.size > 0 ? bc->output_dir : rubraview_path_dirname(input->path);
     /* The name carries the source's extension. When the job converts, the
        file must be named after what is actually written, or a PNG lands
        in a .jpg and nothing can open it. */
     if (bc->cli->export_options.format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
-        u8str_t want = rubraview_export_extension(bc->cli->export_options.format);
-        u8str_t stem = rubraview_path_stem(output_name);
-        if (want.len > 0 && stem.len > 0) {
-            size_t n = stem.len + 1 + want.len;
+        proven_u8str_view_t want = rubraview_export_extension(bc->cli->export_options.format);
+        proven_u8str_view_t stem = rubraview_path_stem(output_name);
+        if (want.size > 0 && stem.size > 0) {
+            size_t n = stem.size + 1 + want.size;
             proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
             if (proven_is_ok(res.err)) {
                 char *p = (char*)res.value.ptr;
-                memcpy(p, stem.ptr, stem.len);
-                p[stem.len] = '.';
-                memcpy(p + stem.len + 1, want.ptr, want.len);
+                memcpy(p, stem.ptr, stem.size);
+                p[stem.size] = '.';
+                memcpy(p + stem.size + 1, want.ptr, want.size);
                 p[n] = '\0';
-                output_name = (u8str_t){ .ptr = p, .len = n };
+                output_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)p, .size = n };
             }
         }
     }
     /* RV-129: --subfolders keeps where under the input the file was */
-    if (bc->cli->subfolders && bc->output_dir.len > 0) {
-        u8str_t here = rubraview_path_dirname(input->path);
+    if (bc->cli->subfolders && bc->output_dir.size > 0) {
+        proven_u8str_view_t here = rubraview_path_dirname(input->path);
         for (size_t r = 0; r < g_launch_count; ++r) {
-            u8str_t root = g_launch_paths[r];
-            if (here.len > root.len + 1 && memcmp(here.ptr, root.ptr, root.len) == 0 && (here.ptr[root.len] == '\\' || here.ptr[root.len] == '/')) {
-                out_dir = rubraview_path_join(arena, out_dir, (u8str_t){ .ptr = here.ptr + root.len + 1, .len = here.len - root.len - 1 });
-                if (out_dir.len == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
+            proven_u8str_view_t root = g_launch_paths[r];
+            if (here.size > root.size + 1 && memcmp(here.ptr, root.ptr, root.size) == 0 && (here.ptr[root.size] == '\\' || here.ptr[root.size] == '/')) {
+                out_dir = rubraview_path_join(arena, out_dir, (proven_u8str_view_t){ .ptr = here.ptr + root.size + 1, .size = here.size - root.size - 1 });
+                if (out_dir.size == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
                     batch_say(input->path, "its folder under the output could not be made");
                     return false;
                 }
@@ -27620,13 +27620,13 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             }
         }
     }
-    u8str_t out_path = rubraview_path_join(arena, out_dir, output_name);
-    if (out_path.len == 0) return false;
+    proven_u8str_view_t out_path = rubraview_path_join(arena, out_dir, output_name);
+    if (out_path.size == 0) return false;
     /* RV-129: --exists: replace it (as before), leave it, or take the next free name */
     if (bc->cli->exists != 0 && rubraview_pal_fs_exists(out_path)) {
         if (bc->cli->exists == 1) { batch_say(out_path, "is there already: left as it is"); return true; }
         out_path = rubraview_filing_target(arena, out_dir, output_name, filing_exists, NULL);
-        if (out_path.len == 0) { batch_say(input->path, "no free name left beside it"); return false; }
+        if (out_path.size == 0) { batch_say(input->path, "no free name left beside it"); return false; }
     }
 
     const rubraview_batch_orient_params_t *orient = NULL;
@@ -27656,14 +27656,14 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         bool lossless_possible = !orient || !orient->use_exif_auto_orient;
 
         if (lossless_possible && (op != RUBRAVIEW_JPEGTRAN_NONE || options.privacy_clean)) {
-            u8str_t bytes = rubraview_pal_fs_read_file(arena, input->path, MAX_ARCHIVE_BYTES);
-            if (bytes.len > 0) {
+            proven_u8str_view_t bytes = rubraview_pal_fs_read_file(arena, input->path, MAX_ARCHIVE_BYTES);
+            if (bytes.size > 0) {
                 rubraview_jpegtran_result_t turned = rubraview_jpegtran_apply(
-                    arena, (const uint8_t*)bytes.ptr, bytes.len, op,
+                    arena, (const uint8_t*)bytes.ptr, bytes.size, op,
                     RUBRAVIEW_JPEGTRAN_KEEP_EDGE, options.privacy_clean);
                 /* RV-134: a DPI asked for goes into the JFIF block; a file without one is written the other way */
                 bool dpi_ok = options.dpi <= 0.0 || (turned.err == RUBRAVIEW_JPEGTRAN_OK &&
-                              rubraview_jpeg_set_dpi((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.len, options.dpi));
+                              rubraview_jpeg_set_dpi((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.size, options.dpi));
                 if (turned.err == RUBRAVIEW_JPEGTRAN_OK && dpi_ok) {
                     if (rubraview_pal_fs_write_file(out_path, turned.data)) {
                         bc->written++;
@@ -27725,7 +27725,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
 
 /* Collects the files a run will work on: one file, or a directory, or a
    directory tree when --recursive was given. */
-static size_t collect_inputs(proven_arena_t *arena, u8str_t root, bool recursive,
+static size_t collect_inputs(proven_arena_t *arena, proven_u8str_view_t root, bool recursive,
                              rubraview_batch_input_t *out, size_t capacity, size_t count) {
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(arena, root);
     if (listing.count == 0) {
@@ -27782,15 +27782,15 @@ static void append_text(char *buf, size_t cap, size_t *pos, const char *text) {
    refused while a name already there would be replaced. */
 /* Appends `text`, in quotes when it holds a space, so a folder with one
    in its name survives the command line. */
-static void append_arg(char *buf, size_t cap, size_t *pos, u8str_t text) {
+static void append_arg(char *buf, size_t cap, size_t *pos, proven_u8str_view_t text) {
     bool quote = false;
-    for (size_t i = 0; i < text.len; ++i) if (text.ptr[i] == ' ') { quote = true; break; }
+    for (size_t i = 0; i < text.size; ++i) if (text.ptr[i] == ' ') { quote = true; break; }
     /* No separator before the first token: a command line that starts
        with a space has no program name in it, and CreateProcess refuses
        it — which is exactly how this was found. */
     if (*pos > 0 && *pos + 1 < cap) buf[(*pos)++] = ' ';
     if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
-    for (size_t i = 0; i < text.len && *pos + 1 < cap; ++i) buf[(*pos)++] = text.ptr[i];
+    for (size_t i = 0; i < text.size && *pos + 1 < cap; ++i) buf[(*pos)++] = text.ptr[i];
     if (quote && *pos + 1 < cap) buf[(*pos)++] = '"';
     buf[*pos] = '\0';
 }
@@ -27802,15 +27802,15 @@ static void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text
 /* File › New window (owner, 2026-10-16): this program once more, with
    nothing open, a window of its own whatever "Reuse the open window" says. */
 static void new_window(app_state_t *app) {
-    u8str_t exe = rubraview_pal_process_executable(app->arena);
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
     char line[4096];
     size_t pos = 0;
     line[0] = '\0';
-    if (exe.len > 0) {
+    if (exe.size > 0) {
         append_arg(line, sizeof(line), &pos, exe);
         append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
     }
-    if (exe.len == 0 || !rubraview_pal_process_start((u8str_t){ .ptr = line, .len = pos })) {
+    if (exe.size == 0 || !rubraview_pal_process_start((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) {
         osd_say(app, TU8("a new window could not be started"));
     }
 }
@@ -27818,8 +27818,8 @@ static void new_window(app_state_t *app) {
 /* The chosen files as a list file in the user's temporary folder, which
    the batch run reads and removes (--paths-temp). Empty when it could not
    be written. */
-static u8str_t batch_list_file(app_state_t *app) {
-    u8str_t none = { .ptr = "", .len = 0 };
+static proven_u8str_view_t batch_list_file(app_state_t *app) {
+    proven_u8str_view_t none = PROVEN_LIT("");
     WCHAR wide[MAX_PATH + 1];
     char dir[MAX_PATH * 3 + 1];
     DWORD n = GetTempPathW(MAX_PATH + 1, wide);
@@ -27828,33 +27828,33 @@ static u8str_t batch_list_file(app_state_t *app) {
     if (written <= 1) return none;
 
     size_t total = 0;
-    for (size_t i = 0; i < app->batch_list_count; ++i) total += app->batch_list[i].len + 1;
+    for (size_t i = 0; i < app->batch_list_count; ++i) total += app->batch_list[i].size + 1;
     proven_result_mem_mut_t res = proven_arena_alloc(app->arena, total + (size_t)written + 64);
     if (!proven_is_ok(res.err)) return none;
     char *text = (char*)(void*)res.value.ptr;
     size_t at = 0;
     for (size_t i = 0; i < app->batch_list_count; ++i) {
-        memcpy(text + at, app->batch_list[i].ptr, app->batch_list[i].len);
-        at += app->batch_list[i].len;
+        memcpy(text + at, app->batch_list[i].ptr, app->batch_list[i].size);
+        at += app->batch_list[i].size;
         text[at++] = '\n';
     }
     char *name = text + total;
     int name_len = snprintf(name, (size_t)written + 64, "%srubraview-batch-%lu-%lu.txt", dir,
                             (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
     if (name_len <= 0) return none;
-    u8str_t path = { .ptr = name, .len = (size_t)name_len };
-    return rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = text, .len = total }) ? path : none;
+    proven_u8str_view_t path = { .ptr = (const proven_byte_t *)name, .size = (size_t)name_len };
+    return rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = total }) ? path : none;
 }
 
 static void panel_run_batch(app_state_t *app) {
     bool on_list = app->batch_list_count > 0;
-    if (!on_list && (app->source_dir.len == 0 || app->archive_bytes.len > 0)) {
+    if (!on_list && (app->source_dir.size == 0 || app->archive_bytes.size > 0)) {
         osd_say(app, TU8("batch runs on a folder of pictures, not on an archive"));
         return;
     }
 
-    u8str_t exe = rubraview_pal_process_executable(app->arena);
-    if (exe.len == 0) {
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
+    if (exe.size == 0) {
         osd_say(app, TU8("could not find this program to start a batch run"));
         return;
     }
@@ -27875,18 +27875,18 @@ static void panel_run_batch(app_state_t *app) {
     }
     /* Remembered for the next time (settings.ini holds a key a line: | between them) */
     {
-        u8str_t text = batch_text(app);
+        proven_u8str_view_t text = batch_text(app);
         char kept[4096];
-        size_t n = text.len < sizeof(kept) ? text.len : sizeof(kept);
+        size_t n = text.size < sizeof(kept) ? text.size : sizeof(kept);
         for (size_t i = 0; i < n; ++i) kept[i] = text.ptr[i] == '\n' ? '|' : text.ptr[i];
         while (n > 0 && kept[n - 1] == '|') --n;
-        rubraview_settings_set_text(&app->settings, U8("batch"), U8("last"), app_keep(app, (u8str_t){ .ptr = kept, .len = n }));
+        rubraview_settings_set_text(&app->settings, PROVEN_LIT("batch"), PROVEN_LIT("last"), app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)kept, .size = n }));
     }
 
     /* Chosen files: beside the first of them; a folder of its own when one was typed. */
-    u8str_t beside = on_list ? rubraview_path_dirname(app->batch_list[0]) : app->source_dir;
-    u8str_t out_dir = app->batch.out[0] ? cstr(app->batch.out) : rubraview_path_join(app->arena, beside, U8("rubraview-out"));
-    if (out_dir.len == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
+    proven_u8str_view_t beside = on_list ? rubraview_path_dirname(app->batch_list[0]) : app->source_dir;
+    proven_u8str_view_t out_dir = app->batch.out[0] ? cstr(app->batch.out) : rubraview_path_join(app->arena, beside, PROVEN_LIT("rubraview-out"));
+    if (out_dir.size == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
         osd_say(app, TU8("could not make the output folder"));
         return;
     }
@@ -27904,24 +27904,24 @@ static void panel_run_batch(app_state_t *app) {
     for (size_t i = 0; i < tk.n; ++i) if (strncmp(tk.v[i], "--out=", 6) != 0) append_arg_cstr(line, sizeof(line), &pos, tk.v[i]);
     {
         char out_arg[1100];
-        int n = snprintf(out_arg, sizeof(out_arg), "--out=%.*s", (int)out_dir.len, out_dir.ptr);
+        int n = snprintf(out_arg, sizeof(out_arg), "--out=%.*s", (int)out_dir.size, out_dir.ptr);
         if (n > 0 && (size_t)n < sizeof(out_arg)) append_arg_cstr(line, sizeof(line), &pos, out_arg);
     }
     if (on_list) {
-        u8str_t list = batch_list_file(app);
-        if (list.len == 0) {
+        proven_u8str_view_t list = batch_list_file(app);
+        if (list.size == 0) {
             osd_say(app, TU8("could not write the list of files for the batch run"));
             return;
         }
         char list_arg[1100];
-        int n = snprintf(list_arg, sizeof(list_arg), "--paths-from=%.*s", (int)list.len, list.ptr);
+        int n = snprintf(list_arg, sizeof(list_arg), "--paths-from=%.*s", (int)list.size, list.ptr);
         append_arg_cstr(line, sizeof(line), &pos, "--paths-temp");
-        if (n > 0) append_arg(line, sizeof(line), &pos, (u8str_t){ .ptr = list_arg, .len = (size_t)n });
+        if (n > 0) append_arg(line, sizeof(line), &pos, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)list_arg, .size = (size_t)n });
     } else {
         append_arg(line, sizeof(line), &pos, app->source_dir);
     }
 
-    if (rubraview_pal_process_start_console((u8str_t){ .ptr = line, .len = pos })) {
+    if (rubraview_pal_process_start_console((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) {
         osd_say(app, TU8("batch started in a window of its own"));
     } else {
         osd_say(app, TU8("could not start the batch run"));
@@ -27931,32 +27931,32 @@ static void panel_run_batch(app_state_t *app) {
 /* D-38 in a batch run, which starts before the viewer reads its settings:
    settings.ini found by the same rule (beside the program, else AppData). */
 static rubraview_gpu_resize_mode_t batch_gpu_resize_mode(proven_arena_t *arena) {
-    u8str_t exe = rubraview_pal_process_executable(arena);
-    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
-    u8str_t portable_ini = rubraview_path_join(arena, beside, U8("settings.ini"));
-    rubraview_config_mode_t mode = rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini));
+    proven_u8str_view_t exe = rubraview_pal_process_executable(arena);
+    proven_u8str_view_t beside = exe.size > 0 ? rubraview_path_dirname(exe) : PROVEN_LIT(".");
+    proven_u8str_view_t portable_ini = rubraview_path_join(arena, beside, PROVEN_LIT("settings.ini"));
+    rubraview_config_mode_t mode = rubraview_config_mode_for(portable_ini.size > 0 && rubraview_pal_fs_exists(portable_ini));
     char appdata_utf8[1024];
-    u8str_t appdata = U8(".");
+    proven_u8str_view_t appdata = PROVEN_LIT(".");
     DWORD written = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
-    if (written > 0 && written < sizeof(appdata_utf8)) appdata = (u8str_t){ .ptr = appdata_utf8, .len = written };
-    u8str_t path = rubraview_config_path(arena, mode, beside, appdata, U8("settings.ini"));
+    if (written > 0 && written < sizeof(appdata_utf8)) appdata = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata_utf8, .size = written };
+    proven_u8str_view_t path = rubraview_config_path(arena, mode, beside, appdata, PROVEN_LIT("settings.ini"));
     rubraview_settings_t settings = rubraview_settings_load(arena, rubraview_pal_fs_read_file(arena, path, 256u * 1024u));
-    return (rubraview_gpu_resize_mode_t)lround(rubraview_settings_get(&settings, U8("display"), U8("gpu_resize")));
+    return (rubraview_gpu_resize_mode_t)lround(rubraview_settings_get(&settings, PROVEN_LIT("display"), PROVEN_LIT("gpu_resize")));
 }
 
 /* D-86: the paths this launch was given — those on the command line, then
    the lines of --paths-from — for a batch run, a hand-over, or the first
    thing the window does. */
-static const u8str_t *g_launch_paths;
+static const proven_u8str_view_t *g_launch_paths;
 static size_t         g_launch_count;
 static rubraview_shell_verb_t g_launch_verb;
 static bool           g_launch_whole;
 static int32_t        g_launch_page;   /* --page=N, for the first thing opened */
 
 static void launch_paths_gather(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
-    u8str_t text = { .ptr = "", .len = 0 };
+    proven_u8str_view_t text = PROVEN_LIT("");
     size_t listed = 0;
-    if (cli->paths_from.len > 0) {
+    if (cli->paths_from.size > 0) {
         text = rubraview_pal_fs_read_file(arena, cli->paths_from, 16u * 1024u * 1024u);
         listed = rubraview_shellreq_split_lines(text, NULL, 0);
         /* A list written for this launch alone is not left behind. */
@@ -27964,9 +27964,9 @@ static void launch_paths_gather(proven_arena_t *arena, const rubraview_cli_resul
     }
     size_t total = cli->input_count + listed;
     if (total == 0) return;
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, total, sizeof(u8str_t));
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, total, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(res.err)) return;
-    u8str_t *paths = (u8str_t*)(void*)res.value.ptr;
+    proven_u8str_view_t *paths = (proven_u8str_view_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < cli->input_count; ++i) paths[i] = cli->inputs[i];
     if (listed > 0) (void)rubraview_shellreq_split_lines(text, paths + cli->input_count, listed);
     g_launch_paths = paths;
@@ -27995,8 +27995,8 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         const rubraview_batch_action_t *a = &cli->job.actions[i];
         if (a->kind != RUBRAVIEW_BATCH_EXTRA || !a->params.extra.plugin[0]) continue;
         char folder[520] = "";
-        if (a->params.extra.plugin_folder.len > 0 && a->params.extra.plugin_folder.len < sizeof(folder))
-            memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.len);
+        if (a->params.extra.plugin_folder.size > 0 && a->params.extra.plugin_folder.size < sizeof(folder))
+            memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
         else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
         plugins_look(cstr(folder));
         break;
@@ -28004,7 +28004,7 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
 
     /* --out= names a folder that may not be there yet: made first, or every file would fail
        to be written (the window made its rubraview-out itself; the command line did not). */
-    if (cli->output_dir.len > 0 && !rubraview_pal_fs_make_dirs(cli->output_dir) && !rubraview_pal_fs_exists(cli->output_dir)) {
+    if (cli->output_dir.size > 0 && !rubraview_pal_fs_make_dirs(cli->output_dir) && !rubraview_pal_fs_exists(cli->output_dir)) {
         console_line("rubraview: the --out folder could not be made");
         return 1;
     }
@@ -28030,7 +28030,7 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         ctx.jobs = NULL;
     }
     rubraview_batch_report_t report = rubraview_batch_run(&work, &cli->job, inputs, count,
-                                                          U8(""), batch_process, &ctx, NULL, 0);
+                                                          PROVEN_LIT(""), batch_process, &ctx, NULL, 0);
     rubraview_pal_gpu_resample_stop();
     if (ctx.jobs) { proven_job_system_close(ctx.jobs); proven_job_system_destroy(ctx.jobs); }
     free(ctx.mark_memory);
@@ -28079,7 +28079,7 @@ static int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
  * own error code, which is the part that identifies the cause.
  */
 static void report_startup_failure(void) {
-    u8str_t where = rubraview_pal_render_last_error();
+    proven_u8str_view_t where = rubraview_pal_render_last_error();
     uint32_t hr = rubraview_pal_render_last_hresult();
 
     char message[512];
@@ -28088,7 +28088,7 @@ static void report_startup_failure(void) {
         "It failed while %.*s.\r\n"
         "Windows reported error 0x%08lX.\r\n\r\n"
         "This has been written to rubraview-diag.txt next to the program.",
-        (int)where.len, where.len > 0 ? where.ptr : "starting up",
+        (int)where.size, where.size > 0 ? (const char *)where.ptr : "starting up",
         (unsigned long)hr);
     if (n <= 0) return;
 
@@ -28111,11 +28111,11 @@ static void report_startup_failure(void) {
 /* §3.22 [video] decoder (D-9): the backend a file is offered to first.
    The other one still gets its turn when this one cannot open it. */
 static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
-    u8str_t text = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
-    if (text.len == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, PROVEN_LIT("settings.ini"), 256u * 1024u);
+    if (text.size == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
-    const u8str_t *decoder = rubraview_ini_get(&doc, U8("video"), U8("decoder"));
-    return (decoder && rubraview_u8_eq_lit(*decoder, "ffmpeg"))
+    const proven_u8str_view_t *decoder = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("decoder"));
+    return (decoder && proven_u8str_view_eq(*decoder, PROVEN_LIT("ffmpeg")))
         ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
 }
 
@@ -28125,25 +28125,25 @@ static rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
    remote shell: the media PAL hands over CPU pixels and needs no
    renderer. mfprobe asks Windows what it *could* decode; this asks
    rubraview what it actually does with one file. */
-static int probe_media_file(proven_arena_t *arena, u8str_t path) {
+static int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
     char line[512];
     /* Where the viewer itself would look (RV-122): the imported copy in the
        settings folder, and the folder settings.ini names. */
-    u8str_t chosen = U8(""), exe = rubraview_pal_process_executable(arena);
-    u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
+    proven_u8str_view_t chosen = PROVEN_LIT(""), exe = rubraview_pal_process_executable(arena);
+    proven_u8str_view_t beside = exe.size > 0 ? rubraview_path_dirname(exe) : PROVEN_LIT(".");
     char appdata[1024];
     DWORD got = GetEnvironmentVariableA("APPDATA", appdata, (DWORD)sizeof(appdata));
-    rubraview_config_mode_t mode = rubraview_config_mode_for(rubraview_pal_fs_exists(rubraview_path_join(arena, beside, U8("settings.ini"))));
-    u8str_t settings = rubraview_config_path(arena, mode, beside,
-                                             got > 0 && got < sizeof(appdata) ? (u8str_t){ .ptr = appdata, .len = got } : U8("."),
-                                             U8("settings.ini"));
-    u8str_t ini = rubraview_pal_fs_read_file(arena, U8("settings.ini"), 256u * 1024u);
-    if (ini.len > 0) {
+    rubraview_config_mode_t mode = rubraview_config_mode_for(rubraview_pal_fs_exists(rubraview_path_join(arena, beside, PROVEN_LIT("settings.ini"))));
+    proven_u8str_view_t settings = rubraview_config_path(arena, mode, beside,
+                                             got > 0 && got < sizeof(appdata) ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata, .size = got } : PROVEN_LIT("."),
+                                             PROVEN_LIT("settings.ini"));
+    proven_u8str_view_t ini = rubraview_pal_fs_read_file(arena, PROVEN_LIT("settings.ini"), 256u * 1024u);
+    if (ini.size > 0) {
         rubraview_ini_doc_t doc = rubraview_ini_parse(arena, ini);
-        const u8str_t *dir = rubraview_ini_get(&doc, U8("video"), U8("ffmpeg_dir"));
+        const proven_u8str_view_t *dir = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir"));
         if (dir) chosen = rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir));
     }
-    rubraview_pal_ffmpeg_set_folders(rubraview_path_join(arena, rubraview_path_dirname(settings), U8("ffmpeg")), chosen);
+    rubraview_pal_ffmpeg_set_folders(rubraview_path_join(arena, rubraview_path_dirname(settings), PROVEN_LIT("ffmpeg")), chosen);
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
     console_line(ffmpeg_here
         ? "FFmpeg: its DLLs are here, at a version these headers know"
@@ -28169,8 +28169,8 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
         const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) {
-            u8str_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
-            snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.len, why.ptr);
+            proven_u8str_view_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
+            snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.size, why.ptr);
             console_line(line);
             continue;
         }
@@ -28188,13 +28188,13 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
         if (rubraview_pal_media_tracks(opened.media, &set) && set.count > 0) {
             for (size_t t = 0; t < set.count; ++t) {
                 char label[160];
-                u8str_t text = rubraview_track_label(label, sizeof(label), &set, (int32_t)t);
+                proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &set, (int32_t)t);
                 bool current = (int32_t)t == set.current_video || (int32_t)t == set.current_audio;
                 const char *kind = set.tracks[t].kind == RUBRAVIEW_TRACK_AUDIO ? "sound"
                                  : set.tracks[t].kind == RUBRAVIEW_TRACK_SUBTITLE ? "subtitle"
                                  : "picture";
                 snprintf(line, sizeof(line), "%s: %-8s %s %.*s", name, kind,
-                         current ? "*" : " ", (int)text.len, text.ptr);
+                         current ? "*" : " ", (int)text.size, text.ptr);
                 console_line(line);
             }
         } else {
@@ -28228,14 +28228,14 @@ static int probe_media_file(proven_arena_t *arena, u8str_t path) {
 
     /* §3.16.1: the same search the viewer does, said out loud — which
        of discovery, reading and parsing worked, and what came out. */
-    u8str_t sub_name = { .ptr = "", .len = 0 };
+    proven_u8str_view_t sub_name = PROVEN_LIT("");
     const char *why = NULL;
     rubraview_subtitle_track_t track = subtitle_find(arena, path, &sub_name, &why);
     if (track.count == 0) {
         snprintf(line, sizeof(line), "Subtitles: none — %s", why ? why : "not looked for");
     } else {
         snprintf(line, sizeof(line), "Subtitles: %.*s — %zu line(s), the first %.3f s to %.3f s",
-                 (int)sub_name.len, sub_name.ptr, track.count,
+                 (int)sub_name.size, sub_name.ptr, track.count,
                  track.cues[0].start_seconds, track.cues[0].end_seconds);
     }
     console_line(line);
@@ -28307,7 +28307,7 @@ static void probe_gpu_resize(void) {
     rubraview_pal_gpu_resample_stop();
 }
 
-static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
+static int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
     (void)arena;
     char line[512];
 
@@ -28408,12 +28408,12 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
         code = 2;
     } else {
         WCHAR wide[MAX_PATH * 2];
-        if (MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, wide,
+        if (MultiByteToWideChar(CP_UTF8, 0, (const char *)path.ptr, (int)path.size, wide,
                                 (int)(sizeof(wide) / sizeof(wide[0])) - 1) <= 0) {
             console_line("that path cannot be read");
             code = 2;
         } else {
-            wide[MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, NULL, 0)] = L'\0';
+            wide[MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, NULL, 0)] = L'\0';
             IMFAttributes *attrs = NULL;
             IMFSourceReader *reader = NULL;
             if (SUCCEEDED(mf_create_attributes(&attrs, 3)) && attrs) {
@@ -28484,9 +28484,9 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, &gpu);
         if (!opened.media) {
             /* Why, so "cannot open" and "the card broke it" read differently. */
-            u8str_t why = rubraview_media_failure_text(opened.failure);
+            proven_u8str_view_t why = rubraview_media_failure_text(opened.failure);
             snprintf(line, sizeof(line), "hardware_decode = %s: the film did not open - %.*s",
-                     MODE_NAMES[mode], (int)why.len, why.ptr);
+                     MODE_NAMES[mode], (int)why.size, why.ptr);
             console_line(line);
             code = 2;
             continue;
@@ -28560,8 +28560,8 @@ static int probe_gpu_file(proven_arena_t *arena, u8str_t path) {
     rubraview_media_open_result_t vopen = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_MEDIA_FOUNDATION, &vgpu);
     opened_in = rubraview_pal_time_now_seconds() - opened_in;
     if (!vopen.media) {
-        u8str_t why = rubraview_media_failure_text(vopen.failure);
-        snprintf(line, sizeof(line), "viewer path (%s): the film did not open (%.1f s) - %.*s", MODE_NAMES[vmode], opened_in, (int)why.len, why.ptr);
+        proven_u8str_view_t why = rubraview_media_failure_text(vopen.failure);
+        snprintf(line, sizeof(line), "viewer path (%s): the film did not open (%.1f s) - %.*s", MODE_NAMES[vmode], opened_in, (int)why.size, why.ptr);
         console_line(line);
         code = 2;
     } else {
@@ -28634,7 +28634,7 @@ static void wait_pumping(int milliseconds) {
     }
 }
 
-static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
+static int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
     console_line("rubraview " RUBRAVIEW_VERSION_STRING " - diagnostics");
     console_line("rubraview: step 1 - starting COM's imaging factory (WIC)");
     /* Before any window exists, so a hang here cannot be blamed on one. */
@@ -28649,11 +28649,11 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
     }
     console_line("rubraview: step 1 ok");
 
-    if (image_path.len > 0) {
+    if (image_path.size > 0) {
         console_line("rubraview: step 2 - opening the file with WIC (no window, no GPU)");
 
         char narrow[1024];
-        size_t n = image_path.len < sizeof(narrow) - 1 ? image_path.len : sizeof(narrow) - 1;
+        size_t n = image_path.size < sizeof(narrow) - 1 ? image_path.size : sizeof(narrow) - 1;
         memcpy(narrow, image_path.ptr, n);
         narrow[n] = '\0';
 
@@ -28705,18 +28705,18 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
 
     if (!renderer) {
         char line[512];
-        u8str_t where = rubraview_pal_render_last_error();
+        proven_u8str_view_t where = rubraview_pal_render_last_error();
         snprintf(line, sizeof(line), "rubraview: step 4 FAILED while %.*s (0x%08lX)",
-                 (int)where.len, where.ptr, (unsigned long)rubraview_pal_render_last_hresult());
+                 (int)where.size, where.ptr, (unsigned long)rubraview_pal_render_last_hresult());
         console_line(line);
         rubraview_pal_window_destroy(window);
         return 1;
     }
 
     char described[256];
-    u8str_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
+    proven_u8str_view_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
     char line[320];
-    snprintf(line, sizeof(line), "rubraview: step 4 ok - %.*s", (int)info.len, info.ptr);
+    snprintf(line, sizeof(line), "rubraview: step 4 ok - %.*s", (int)info.size, info.ptr);
     console_line(line);
 
     console_line("rubraview: step 5 - drawing a plain rectangle");
@@ -28728,15 +28728,15 @@ static int run_diagnostics(proven_arena_t *arena, u8str_t image_path) {
                            : "rubraview: step 5 FAILED - the device was lost");
     wait_pumping(800);
 
-    if (image_path.len > 0) {
+    if (image_path.size > 0) {
         console_line("rubraview: step 6 - the viewer's own decode path, stage by stage");
 
         char report[2048];
-        u8str_t text = rubraview_pal_image_diagnose(renderer, image_path, report, sizeof(report));
+        proven_u8str_view_t text = rubraview_pal_image_diagnose(renderer, image_path, report, sizeof(report));
 
         size_t start = 0;
-        for (size_t i = 0; i <= text.len; ++i) {
-            bool at_end = i == text.len;
+        for (size_t i = 0; i <= text.size; ++i) {
+            bool at_end = i == text.size;
             if (!at_end && text.ptr[i] != '\n') continue;
             size_t stop = i;
             while (stop > start && (text.ptr[stop - 1] == '\r' || text.ptr[stop - 1] == '\n')) stop--;
@@ -28825,14 +28825,14 @@ static void box_drag_motion(app_state_t *app, double x, double y) {
             bool forward = sx > app->nav_done_x;
             app->nav_done_x += forward ? 1 : -1;
             app->nav_done_y = sy;      /* what the hand did up or down while going sideways is not a file step */
-            bool opened = app->source.archive_path.len > 0 ? open_sibling_archive(app, forward) : open_sibling_folder(app, forward);
+            bool opened = app->source.archive_path.size > 0 ? open_sibling_archive(app, forward) : open_sibling_folder(app, forward);
             if (!opened) osd_say(app, forward ? TU8("nothing after this one") : TU8("nothing before this one"));
             return;
         }
         while (sy != app->nav_done_y) {
             bool forward = sy > app->nav_done_y;
             app->nav_done_y += forward ? 1 : -1;
-            handle_action(app, forward ? U8("next_page") : U8("prev_page"));
+            handle_action(app, forward ? PROVEN_LIT("next_page") : PROVEN_LIT("prev_page"));
         }
         return;
     }
@@ -28873,8 +28873,8 @@ static void box_release(app_state_t *app, double x, double y) {
         app->box_sizing = NULL;
         rubraview_box_grip_end(box);
         bool menu = box == &app->menubox;
-        rubraview_settings_set(&app->settings, U8("ui"), menu ? U8("menubox_columns") : U8("toolbox_columns"), (double)box->columns);
-        rubraview_settings_set(&app->settings, U8("ui"), menu ? U8("menubox_size") : U8("toolbox_size"), box->scale * 100.0);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), menu ? PROVEN_LIT("menubox_columns") : PROVEN_LIT("toolbox_columns"), (double)box->columns);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), menu ? PROVEN_LIT("menubox_size") : PROVEN_LIT("toolbox_size"), box->scale * 100.0);
         return;
     }
     if (!app->box_drag) return;
@@ -28966,14 +28966,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 size_t pos = 0;
                 message[0] = '\0';
                 append_text(message, sizeof(message), &pos, "rubraview: ");
-                u8str_t reason = rubraview_cli_error_text(cli.err);
-                for (size_t i = 0; i < reason.len && pos + 1 < sizeof(message); ++i) {
+                proven_u8str_view_t reason = rubraview_cli_error_text(cli.err);
+                for (size_t i = 0; i < reason.size && pos + 1 < sizeof(message); ++i) {
                     message[pos++] = reason.ptr[i];
                 }
                 message[pos] = '\0';
-                if (cli.offending.len > 0) {
+                if (cli.offending.size > 0) {
                     append_text(message, sizeof(message), &pos, ": ");
-                    for (size_t i = 0; i < cli.offending.len && pos + 1 < sizeof(message); ++i) {
+                    for (size_t i = 0; i < cli.offending.size && pos + 1 < sizeof(message); ++i) {
                         message[pos++] = cli.offending.ptr[i];
                     }
                     message[pos] = '\0';
@@ -29043,7 +29043,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             if (cli.register_shell || cli.unregister_shell) {
                 int code = SHELL_FAILED;
                 if (cli.register_shell) {
-                    u8str_t selection = cli.shell_types.len > 0 ? cli.shell_types : rubraview_shell_extensions_all();
+                    proven_u8str_view_t selection = cli.shell_types.size > 0 ? cli.shell_types : rubraview_shell_extensions_all();
                     shell_part_t types = cli.shell_no_types ? SHELL_PART_LEAVE : cli.shell_remove_types ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
                     shell_part_t menu = cli.shell_no_menu ? SHELL_PART_LEAVE : cli.shell_remove_menu ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
                     code = shell_apply(arena, selection, cli.shell_menu_types, types, menu, cli.shell_all_users);
@@ -29067,23 +29067,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                 /* The file the viewer itself reads (settings_read_file): beside the
                    executable in portable mode, under AppData otherwise. It was looked
                    for in the working folder, so an installed viewer never saw it. */
-                u8str_t exe = rubraview_pal_process_executable(arena);
-                u8str_t beside = exe.len > 0 ? rubraview_path_dirname(exe) : U8(".");
-                if (beside.len == 0) beside = U8(".");
-                u8str_t portable_ini = rubraview_path_join(arena, beside, U8("settings.ini"));
-                u8str_t appdata = U8(".");
+                proven_u8str_view_t exe = rubraview_pal_process_executable(arena);
+                proven_u8str_view_t beside = exe.size > 0 ? rubraview_path_dirname(exe) : PROVEN_LIT(".");
+                if (beside.size == 0) beside = PROVEN_LIT(".");
+                proven_u8str_view_t portable_ini = rubraview_path_join(arena, beside, PROVEN_LIT("settings.ini"));
+                proven_u8str_view_t appdata = PROVEN_LIT(".");
                 char appdata_utf8[1024];
                 DWORD appdata_len = GetEnvironmentVariableA("APPDATA", appdata_utf8, (DWORD)sizeof(appdata_utf8));
-                if (appdata_len > 0 && appdata_len < sizeof(appdata_utf8)) appdata = (u8str_t){ .ptr = appdata_utf8, .len = appdata_len };
-                u8str_t settings_file = rubraview_config_path(
-                    arena, rubraview_config_mode_for(portable_ini.len > 0 && rubraview_pal_fs_exists(portable_ini)),
-                    beside, appdata, U8("settings.ini"));
-                u8str_t settings = rubraview_pal_fs_read_file(arena, settings_file, 256u * 1024u);
+                if (appdata_len > 0 && appdata_len < sizeof(appdata_utf8)) appdata = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata_utf8, .size = appdata_len };
+                proven_u8str_view_t settings_file = rubraview_config_path(
+                    arena, rubraview_config_mode_for(portable_ini.size > 0 && rubraview_pal_fs_exists(portable_ini)),
+                    beside, appdata, PROVEN_LIT("settings.ini"));
+                proven_u8str_view_t settings = rubraview_pal_fs_read_file(arena, settings_file, 256u * 1024u);
                 /* Through the settings loader, which knows where the key
                    lives now ([general]) and where older files put it — and
                    what it is when no file says (D-99: a window each). */
                 rubraview_settings_t loaded = rubraview_settings_load(arena, settings);
-                bool single_instance = rubraview_settings_get(&loaded, U8("general"), U8("single_instance")) > 0.5;
+                bool single_instance = rubraview_settings_get(&loaded, PROVEN_LIT("general"), PROVEN_LIT("single_instance")) > 0.5;
                 /* What the menu asks is for the window that is open (the
                    classic menu starts this once a selected file). */
                 if (cli.shell_verb != RUBRAVIEW_SHELL_VERB_NONE) single_instance = true;
@@ -29174,8 +29174,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     app.osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app.osd_size_page = -1;
     app.titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
-    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px"))) * dpi;
-    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
+    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_trigger_px"))) * dpi;
+    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_hide_ms")) / 1000.0;
     app.listwin = rubraview_listwin_create(dpi);
     app.list_tip_page = -1;
     app.listwin_shown_page = -1;
@@ -29206,7 +29206,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
        numbers only curated when the viewer happened to be started in a
        folder holding one, which is to say almost never. */
     {
-        u8str_t settings = rubraview_pal_fs_read_file(arena, app.settings_path, 256u * 1024u);
+        proven_u8str_view_t settings = rubraview_pal_fs_read_file(arena, app.settings_path, 256u * 1024u);
         app.curation = rubraview_curation_parse(arena, settings);
     }
     rubraview_pal_window_accept_drops(app.window, true);
@@ -29276,8 +29276,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
                 case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
                     app.titlebar = rubraview_titlebar_create(event.dpi.scale);
-                    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_trigger_px"))) * event.dpi.scale;
-                    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, U8("general"), U8("titlebar_hide_ms")) / 1000.0;
+                    app.titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app.settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_trigger_px"))) * event.dpi.scale;
+                    app.titlebar.hide_delay = rubraview_settings_get(&app.settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_hide_ms")) / 1000.0;
                     app.needs_relayout = true;
                     break;
 
@@ -29456,10 +29456,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             int32_t fw = 0, fh = 0;
                             rubraview_pal_window_get_size(app.window, &fw, &fh);
                             char fbuf[200];
-                            u8str_t flabel;
+                            proven_u8str_view_t flabel;
                             rubraview_pal_rect_t chip = picker_filter_chip(&app, (double)fw, dpi, &flabel, fbuf, sizeof(fbuf));
                             if (pal_rect_has(chip, event.mouse.x, event.mouse.y)) {
-                                if (app.picker_filter[0] && event.mouse.x >= chip.x + chip.width - 28.0 * dpi) picker_filter_set(&app, U8(""));
+                                if (app.picker_filter[0] && event.mouse.x >= chip.x + chip.width - 28.0 * dpi) picker_filter_set(&app, PROVEN_LIT(""));
                                 else picker_filter_begin(&app);
                                 break;
                             }
@@ -29490,12 +29490,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                                 }
                                 x += w + 4.0 * dpi;
                             }
-                            u8str_t star = on_chip ? U8("") : picker_star_label(&app);
-                            if (star.len > 0 && event.mouse.x >= x && event.mouse.x < x + picker_chip_width(star, dpi)) {
+                            proven_u8str_view_t star = on_chip ? PROVEN_LIT("") : picker_star_label(&app);
+                            if (star.size > 0 && event.mouse.x >= x && event.mouse.x < x + picker_chip_width(star, dpi)) {
                                 picker_toggle_favorite(&app);
                                 break;
                             }
-                            if (star.len > 0) x += picker_chip_width(star, dpi) + 4.0 * dpi;
+                            if (star.size > 0) x += picker_chip_width(star, dpi) + 4.0 * dpi;
                             if (!on_chip && event.mouse.x >= x && !app.rename_active) picker_path_begin(&app);
                             break;
                         }
@@ -29776,7 +29776,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                            picture it is what it was (a page turned at the sides, the boxes
                            shown), and nothing on one larger than the window. */
                         if (app.media) {
-                            handle_action(&app, U8("media_play_pause"));
+                            handle_action(&app, PROVEN_LIT("media_play_pause"));
                         } else {
                             rubraview_pointer_context_t ctx = pointer_context(&app);
                             rubraview_pointer_intent_t intent = rubraview_pointer_click(&ctx, app.view_press_x, false);
@@ -29810,7 +29810,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                             }
                         } else if (from < app.favorites.count) {
                             rubraview_fs_entry_t st;   /* 1.24.0: a file among them opens in the viewer */
-                            u8str_t path = app_keep(&app, app.favorites.paths[from]);
+                            proven_u8str_view_t path = app_keep(&app, app.favorites.paths[from]);
                             if (rubraview_pal_fs_stat(app.arena, path, &st) && !st.is_directory) { app.picker_open = false; open_path(&app, path); }
                             else { picker_navigate(&app, path); app.picker.focus = 0; }
                         }
@@ -29882,11 +29882,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                         }
                         if (app.toolbox.state != RUBRAVIEW_BOX_DETACHED &&
                             (rubraview_rect_contains(band, event.mouse.x, event.mouse.y) || rubraview_rect_contains(title, event.mouse.x, event.mouse.y))) {
-                            double pct = rubraview_settings_get(&app.settings, U8("display"), U8("name_scale")) + (event.mouse.wheel_delta > 0 ? 10.0 : -10.0);
-                            rubraview_settings_set(&app.settings, U8("display"), U8("name_scale"), pct);
+                            double pct = rubraview_settings_get(&app.settings, PROVEN_LIT("display"), PROVEN_LIT("name_scale")) + (event.mouse.wheel_delta > 0 ? 10.0 : -10.0);
+                            rubraview_settings_set(&app.settings, PROVEN_LIT("display"), PROVEN_LIT("name_scale"), pct);
                             char line[48];
                             int n = snprintf(line, sizeof(line), T("names and messages %d%%"), (int)lround(name_scale(&app) * 100.0));
-                            if (n > 0) osd_say(&app, (u8str_t){ .ptr = line, .len = (size_t)n });
+                            if (n > 0) osd_say(&app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
                             break;
                         }
                     }
@@ -29937,8 +29937,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                        (Settings › Video › Wheel is the volume while playing); with that
                        off it zooms a film, as Ctrl + wheel does, as it did before. */
                     if (app.media && wheel_mods == 0) {
-                        if (rubraview_settings_get(&app.settings, U8("video"), U8("wheel_volume")) > 0.5) {
-                            handle_action(&app, event.mouse.wheel_delta > 0.0 ? U8("media_volume_up") : U8("media_volume_down"));
+                        if (rubraview_settings_get(&app.settings, PROVEN_LIT("video"), PROVEN_LIT("wheel_volume")) > 0.5) {
+                            handle_action(&app, event.mouse.wheel_delta > 0.0 ? PROVEN_LIT("media_volume_up") : PROVEN_LIT("media_volume_down"));
                             note_activity(&app);
                             break;
                         }
@@ -30001,7 +30001,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
                     if (intent != RUBRAVIEW_INTENT_NEXT_PAGE && intent != RUBRAVIEW_INTENT_PREV_PAGE) break;
                     app.pan_x = app.swipe_pan_x;
                     app.pan_y = app.swipe_pan_y;
-                    handle_action(&app, intent == RUBRAVIEW_INTENT_NEXT_PAGE ? U8("next_page") : U8("prev_page"));
+                    handle_action(&app, intent == RUBRAVIEW_INTENT_NEXT_PAGE ? PROVEN_LIT("next_page") : PROVEN_LIT("prev_page"));
                     break;
                 }
 
@@ -30091,8 +30091,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         /* D-154: two copies with two Windows 11 menus, said once (ever). */
         if (!app.copies_told && (app.packaged || app.other_copies.store) && app.other_copies.msi_menu) {
             app.copies_told = true;
-            if (rubraview_settings_get(&app.settings, U8("shell"), U8("told_twice")) < 0.5) {
-                rubraview_settings_set(&app.settings, U8("shell"), U8("told_twice"), 1.0);
+            if (rubraview_settings_get(&app.settings, PROVEN_LIT("shell"), PROVEN_LIT("told_twice")) < 0.5) {
+                rubraview_settings_set(&app.settings, PROVEN_LIT("shell"), PROVEN_LIT("told_twice"), 1.0);
                 osd_say(&app, TU8("Rubraview is installed twice (MSI and Store): Windows 11's menu shows two; Settings › Explorer says what to do"));
             }
         }
@@ -30197,13 +30197,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     layout_save(&app);
     text_close(&app);   /* RFC-0005: its place is kept */
     history_remember(&app);
-    if (app.history_path.len > 0 && app.history.count > 0) {
+    if (app.history_path.size > 0 && app.history.count > 0) {
         /* D-99: other viewers wrote their places since this one read the file:
            theirs and this one's are put together, each book at its newer place. */
         bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
         rubraview_history_t all = rubraview_history_parse(arena, rubraview_pal_fs_read_file(arena, app.history_path, 1024u * 1024u));
         rubraview_history_merge(arena, &all, &app.history);
-        u8str_t skip_dirs[RECENT_SKIP_DIRS];
+        proven_u8str_view_t skip_dirs[RECENT_SKIP_DIRS];
         (void)rubraview_history_drop_within(&all, skip_dirs, recent_skip_dirs(&app, skip_dirs));   /* D-104 */
         rubraview_history_prune(&all, HISTORY_MAX_ENTRIES);
         rubraview_pal_fs_write_file_atomic(app.history_path, rubraview_history_serialize(arena, &all));

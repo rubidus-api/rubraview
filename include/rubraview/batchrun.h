@@ -42,7 +42,7 @@ typedef enum rubraview_cli_err {
 
 typedef struct rubraview_cli_result {
     rubraview_cli_err_t err;
-    u8str_t             offending;  /* the argument that failed, for the message */
+    proven_u8str_view_t             offending;  /* the argument that failed, for the message */
 
     bool                batch_mode; /* --batch was given */
     bool                register_shell;    /* §3.19.3 --register-shell */
@@ -50,17 +50,17 @@ typedef struct rubraview_cli_result {
     bool                wipe_shell;        /* D-110 --wipe-shell: every Rubraview entry of Explorer's menu, an older version's too */
     bool                shell_all_users;   /* --all-users: under HKLM, for every user (needs an administrator) */
     bool                shell_setup;       /* --setup: run by the installer (D-90): see rubraview_shell_setup_exit */
-    u8str_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */
-    u8str_t             shell_menu_types;  /* --menu-types=...: the menu's own, when it differs (RV-120); empty: as --types */
+    proven_u8str_view_t             shell_types;       /* --types=jpg,comics,...: the extensions chosen, `;` between; empty when not given */
+    proven_u8str_view_t             shell_menu_types;  /* --menu-types=...: the menu's own, when it differs (RV-120); empty: as --types */
     bool                shell_no_types;    /* --no-types: leave the file types (double click) alone */
     bool                shell_no_menu;     /* --no-menu: leave the right-click menu alone */
     bool                shell_remove_types; /* --remove-types: take the file types back while registering the rest */
     bool                shell_remove_menu;  /* --remove-menu: take the menu back while registering the rest */
     rubraview_shell_verb_t shell_verb;     /* D-86: --open, --open-only, --add, --browse, --convert, --print, --new-window */
     bool                shell_whole;       /* --whole: every selected file is on this command line */
-    u8str_t             paths_from;        /* --paths-from=FILE: more inputs, one a line */
+    proven_u8str_view_t             paths_from;        /* --paths-from=FILE: more inputs, one a line */
     bool                paths_temp;        /* --paths-temp: that file was written for this launch; remove it once read */
-    const u8str_t      *inputs;            /* every input path, in order (`input` is the last) */
+    const proven_u8str_view_t      *inputs;            /* every input path, in order (`input` is the last) */
     size_t              input_count;
     bool                new_instance;      /* --new-instance: ignore §3.19.1 for this launch */
     int32_t             start_page;        /* --page=N: the viewer opens a book on its page N (1 the first); 0 when not given */
@@ -74,8 +74,8 @@ typedef struct rubraview_cli_result {
     bool                descending_given; /* --descending / --ascending */
     bool                descending;
     bool                pause_at_end; /* --pause: wait for a key before the window closes */
-    u8str_t             input;      /* the file or directory to work on */
-    u8str_t             output_dir; /* --out=..., empty for "beside the source" */
+    proven_u8str_view_t             input;      /* the file or directory to work on */
+    proven_u8str_view_t             output_dir; /* --out=..., empty for "beside the source" */
     /* RV-129 (owner, 2026-10-17) */
     int32_t             exists;       /* --exists=replace (0, as before) | skip (1) | number (2): name-1.ext */
     bool                keep_dates;   /* --keep-dates: each file written takes its source's modified time */
@@ -135,12 +135,12 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
                          int argc, const char *const *argv);
 
 /** A one-line explanation of a parse failure, for the console. */
-u8str_t rubraview_cli_error_text(rubraview_cli_err_t err);
+proven_u8str_view_t rubraview_cli_error_text(rubraview_cli_err_t err);
 
 /* ---- the execution engine ---- */
 
 typedef struct rubraview_batch_input {
-    u8str_t  path;
+    proven_u8str_view_t  path;
     uint64_t size_bytes;
 } rubraview_batch_input_t;
 
@@ -152,8 +152,8 @@ typedef enum rubraview_batch_status {
 
 typedef struct rubraview_batch_item_result {
     rubraview_batch_status_t status;
-    u8str_t                  input_path;
-    u8str_t                  output_name;  /* the name the pattern produced */
+    proven_u8str_view_t                  input_path;
+    proven_u8str_view_t                  output_name;  /* the name the pattern produced */
 } rubraview_batch_item_result_t;
 
 /**
@@ -164,7 +164,7 @@ typedef struct rubraview_batch_item_result {
 typedef bool (*rubraview_batch_process_fn)(proven_arena_t *arena,
                                            const rubraview_batch_job_t *job,
                                            const rubraview_batch_input_t *input,
-                                           u8str_t output_name,
+                                           proven_u8str_view_t output_name,
                                            void *ctx);
 
 typedef struct rubraview_batch_report {
@@ -183,7 +183,7 @@ typedef struct rubraview_batch_report {
 rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
                                              const rubraview_batch_job_t *job,
                                              const rubraview_batch_input_t *inputs, size_t input_count,
-                                             u8str_t date_str,
+                                             proven_u8str_view_t date_str,
                                              rubraview_batch_process_fn process, void *ctx,
                                              rubraview_batch_item_result_t *out_results,
                                              size_t results_capacity);

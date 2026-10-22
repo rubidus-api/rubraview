@@ -26,14 +26,14 @@ typedef struct rubraview_file_dialog_opts {
 } rubraview_file_dialog_opts_t;
 
 typedef struct rubraview_file_dialog_result {
-    u8str_t *paths;          /* Array of selected UTF-8 file paths allocated in arena */
+    proven_u8str_view_t *paths;          /* Array of selected UTF-8 file paths allocated in arena */
     size_t   count;          /* Number of paths selected */
     bool     accepted;       /* True if user confirmed selection, false if cancelled */
 } rubraview_file_dialog_result_t;
 
 /**
  * Open file selection dialog.
- * Allocates returned u8str_t array in the provided memory arena.
+ * Allocates returned proven_u8str_view_t array in the provided memory arena.
  */
 rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *arena, const rubraview_file_dialog_opts_t *opts);
 
@@ -52,7 +52,7 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_aren
  * The face name picked is written to `out` (UTF-8, NUL-terminated); false
  * when the dialog was cancelled or there is none on this platform.
  */
-bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char *out, size_t cap);
+bool rubraview_pal_choose_font(void *parent_window_handle, proven_u8str_view_t current, char *out, size_t cap);
 
 #ifdef __cplusplus
 }

@@ -306,8 +306,8 @@ static void wbox(wbuf_t *out, const char *type, const wbuf_t *content) {
 static const uint32_t IDENTITY[9] = { 0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000 };
 
 /* The new track, as FFmpeg writes a 3GPP text one. */
-static void write_trak(wbuf_t *out, const rubraview_mp4_put_t *put, uint32_t movie_scale, uint64_t duration_ms, u8str_t language,
-                       u8str_t name, uint64_t chunk_at) {
+static void write_trak(wbuf_t *out, const rubraview_mp4_put_t *put, uint32_t movie_scale, uint64_t duration_ms, proven_u8str_view_t language,
+                       proven_u8str_view_t name, uint64_t chunk_at) {
     wbuf_t trak = {0}, b = {0}, mdia = {0}, minf = {0}, stbl = {0}, x = {0}, edts = {0};
     uint64_t movie_duration = 0;
     if (PROVEN_CKD_MUL(&movie_duration, duration_ms, (uint64_t)movie_scale)) movie_duration = 0;
@@ -329,7 +329,7 @@ static void write_trak(wbuf_t *out, const rubraview_mp4_put_t *put, uint32_t mov
     wbox(&trak, "edts", &edts); wbuf_free(&edts);
 
     uint16_t code = 0x55C4;                             /* "und" */
-    if (language.len == 3) {
+    if (language.size == 3) {
         bool letters = true;
         for (int i = 0; i < 3; ++i) letters = letters && language.ptr[i] >= 'a' && language.ptr[i] <= 'z';
         if (letters) code = (uint16_t)(((language.ptr[0] - 0x60) << 10) | ((language.ptr[1] - 0x60) << 5) | (language.ptr[2] - 0x60));
@@ -340,7 +340,7 @@ static void write_trak(wbuf_t *out, const rubraview_mp4_put_t *put, uint32_t mov
     w16(&b, code); w16(&b, 0);
     wbox(&mdia, "mdhd", &b); wbuf_free(&b);
     wfull(&b, 0, 0); w32(&b, 0); wtype(&b, "sbtl"); w32(&b, 0); w32(&b, 0); w32(&b, 0);
-    wput(&b, name.len ? name.ptr : "SubtitleHandler", name.len ? (name.len > 200 ? 200 : name.len) : 15); w8(&b, 0);
+    wput(&b, name.size ? (const char *)name.ptr : "SubtitleHandler", name.size ? (name.size > 200 ? 200 : name.size) : 15); w8(&b, 0);
     wbox(&mdia, "hdlr", &b); wbuf_free(&b);
 
     wfull(&b, 0, 0); wbox(&minf, "nmhd", &b); wbuf_free(&b);
@@ -387,15 +387,15 @@ void rubraview_mp4_put_free(rubraview_mp4_put_t *put) {
 }
 
 static bool shown(const rubraview_subtitle_track_t *t, const rubraview_subtitle_cue_t *cue) {
-    if (cue->text.len == 0) return false;
-    if (t->shown_language.len == 0) return true;
-    return cue->language.len == t->shown_language.len && memcmp(cue->language.ptr, t->shown_language.ptr, cue->language.len) == 0;
+    if (cue->text.size == 0) return false;
+    if (t->shown_language.size == 0) return true;
+    return cue->language.size == t->shown_language.size && memcmp(cue->language.ptr, t->shown_language.ptr, cue->language.size) == 0;
 }
 
 static uint64_t to_ms(double seconds) { return seconds > 0.0 ? (uint64_t)(seconds * 1000.0 + 0.5) : 0; }
 
 bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4, const rubraview_subtitle_track_t *subtitle,
-                            u8str_t language, u8str_t name, const char **out_why) {
+                            proven_u8str_view_t language, proven_u8str_view_t name, const char **out_why) {
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
@@ -437,8 +437,8 @@ bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4
             put->samples[put->sample_count++] = (rubraview_mp4_put_sample_t){ .at = (uint32_t)data.len, .size = 2, .start = now, .duration = start - now };
             w16(&data, 0);
         }
-        size_t len = cue->text.len > 65535 ? 65535 : cue->text.len;
-        while (len > 0 && len < cue->text.len && ((unsigned char)cue->text.ptr[len] & 0xC0) == 0x80) len--;   /* whole characters */
+        size_t len = cue->text.size > 65535 ? 65535 : cue->text.size;
+        while (len > 0 && len < cue->text.size && ((unsigned char)cue->text.ptr[len] & 0xC0) == 0x80) len--;   /* whole characters */
         put->samples[put->sample_count++] = (rubraview_mp4_put_sample_t){ .at = (uint32_t)data.len, .size = (uint32_t)(len + 2),
                                                                           .start = start, .duration = end - start };
         w16(&data, (uint16_t)len);

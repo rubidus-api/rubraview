@@ -42,7 +42,7 @@ typedef struct rubraview_image_load_result {
  * rotated result.
  */
 rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_renderer_t *renderer,
-                                                               u8str_t path,
+                                                               proven_u8str_view_t path,
                                                                bool apply_exif_orientation);
 
 /**
@@ -65,7 +65,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
  * frames are described; the return value is the true count, which may be
  * larger. Returns 1 for an ordinary image and 0 if it cannot be read.
  */
-size_t rubraview_pal_image_frame_info(u8str_t path,
+size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
                                       const uint8_t *data, size_t size,
                                       rubraview_frame_t *out_frames, size_t cap);
 
@@ -76,7 +76,7 @@ size_t rubraview_pal_image_frame_info(u8str_t path,
  * that do not animate).
  */
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
-                                                             u8str_t path,
+                                                             proven_u8str_view_t path,
                                                              const uint8_t *data, size_t size,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
@@ -98,7 +98,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
  */
 typedef struct rubraview_anim_reader rubraview_anim_reader_t;
 
-rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *data, size_t size,
+rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const uint8_t *data, size_t size,
                                                  const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height);
 
@@ -140,7 +140,7 @@ void rubraview_pal_image_thread_end(void);
  * tell which. This runs the real path — the same calls the viewer makes
  * — and says where it stopped and what the operating system said.
  */
-u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t path,
+proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, proven_u8str_view_t path,
                                      char *buffer, size_t buffer_size);
 
 /**
@@ -165,17 +165,17 @@ typedef struct rubraview_image_desc {
     bool     color_profile;
 } rubraview_image_desc_t;
 
-bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out);
+bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out);
 
 /**
  * A picture's size as stored, without decoding its pixels — enough for a
  * batch run to give a large picture room of its own first. False when it
  * cannot be read.
  */
-bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_height);
+bool rubraview_pal_image_size(proven_u8str_view_t path, int32_t *out_width, int32_t *out_height);
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
-                                                   u8str_t path,
+                                                   proven_u8str_view_t path,
                                                    const uint8_t *data, size_t size,
                                                    bool apply_exif_orientation);
 
@@ -186,7 +186,7 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
  * large page — never is.
  */
 rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
-                                                          u8str_t path,
+                                                          proven_u8str_view_t path,
                                                           const uint8_t *data, size_t size,
                                                           bool apply_exif_orientation,
                                                           int32_t max_width, int32_t max_height);
@@ -196,10 +196,10 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
  * `font` (empty: Segoe UI), its letters `px` pixels high, as a GRAY8 mask
  * of how much of each pixel the letters cover. Empty when it cannot.
  */
-rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px);
+rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px);
 
 /** RV-135: the same, the lines wrapped at `width` pixels and cut at `height` (a page's first lines). */
-rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px,
+rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px,
                                                int32_t width, int32_t height);
 
 /**
@@ -212,7 +212,7 @@ rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, u8str_t te
  * the encoder is given pixels and no metadata, so there is none to
  * carry over.
  */
-bool rubraview_pal_image_save(u8str_t path,
+bool rubraview_pal_image_save(proven_u8str_view_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options);
 
@@ -232,10 +232,10 @@ const char *rubraview_pal_image_save_why(void);
  * its FFmpeg cannot write a moving JPEG XL (the first picture is then written as a still one). Why it failed:
  * rubraview_pal_image_save_why().
  */
-int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_path, const uint8_t *data, size_t size,
+int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, const uint8_t *data, size_t size,
                                               const rubraview_export_options_t *options, bool avif);
 
-int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
+int rubraview_pal_image_save_animation_webp(proven_u8str_view_t out_path, proven_u8str_view_t source_path,
                                             const uint8_t *data, size_t size,
                                             const rubraview_export_options_t *options);
 
@@ -243,7 +243,7 @@ int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_pat
  * §3.10's multi-size ICO. The same image is written at each of the sizes
  * `rubraview_export_ico_sizes` names, into one file.
  */
-bool rubraview_pal_image_save_ico(u8str_t path,
+bool rubraview_pal_image_save_ico(proven_u8str_view_t path,
                                   const rubraview_pixbuf_t *pixels,
                                   const int32_t *sizes, size_t size_count);
 

@@ -81,11 +81,11 @@ static uint64_t read_uint(const rubraview_mkv_t *mkv, const elem_t *e) {
 }
 
 /* A string element: as long as it says, less the zeros it may be padded with. */
-static u8str_t read_text(const rubraview_mkv_t *mkv, const elem_t *e) {
+static proven_u8str_view_t read_text(const rubraview_mkv_t *mkv, const elem_t *e) {
     size_t len = e->size > 4096 ? 4096 : (size_t)e->size;
     const char *ptr = (const char*)mkv->data + e->body;
     while (len > 0 && ptr[len - 1] == '\0') len--;
-    return (u8str_t){ .ptr = ptr, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)ptr, .size = len };
 }
 
 static bool is_top_level(uint32_t id) {
@@ -93,8 +93,8 @@ static bool is_top_level(uint32_t id) {
            id == ID_ATTACHMENTS || id == ID_CHAPTERS || id == ID_TAGS || id == ID_SEGMENT || id == ID_EBML;
 }
 
-static bool text_is(u8str_t s, const char *lit) {
-    return rubraview_u8_eq(s, (u8str_t){ .ptr = lit, .len = strlen(lit) });
+static bool text_is(proven_u8str_view_t s, const char *lit) {
+    return proven_u8str_view_eq(s, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)lit, .size = strlen(lit) });
 }
 
 static rubraview_mkv_sub_t classify(const rubraview_mkv_track_t *t) {
@@ -109,8 +109,8 @@ static rubraview_mkv_sub_t classify(const rubraview_mkv_track_t *t) {
 
 static void read_track(rubraview_mkv_t *mkv, const elem_t *entry) {
     if (mkv->track_count >= RUBRAVIEW_MKV_MAX_TRACKS) return;
-    rubraview_mkv_track_t t = { .language = { .ptr = "", .len = 0 }, .name = { .ptr = "", .len = 0 },
-                                .codec = { .ptr = "", .len = 0 } };
+    rubraview_mkv_track_t t = { .language = PROVEN_LIT(""), .name = PROVEN_LIT(""),
+                                .codec = PROVEN_LIT("") };
     bool bcp47 = false;
     uint64_t at = entry->body;
     elem_t e;
@@ -133,7 +133,7 @@ static void read_track(rubraview_mkv_t *mkv, const elem_t *entry) {
         at = e.next;
     }
     if (t.number == 0) return;                       /* a track no block can name */
-    if (t.language.len == 0) t.language = (u8str_t){ .ptr = "eng", .len = 3 };   /* the format's own default */
+    if (t.language.size == 0) t.language = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"eng", .size = 3 };   /* the format's own default */
     t.subtitle = classify(&t);
     mkv->tracks[mkv->track_count++] = t;
 }
@@ -417,13 +417,13 @@ const char *rubraview_mkv_subtitle_ext(const rubraview_mkv_track_t *track) {
     return "";
 }
 
-size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, u8str_t film_path, unsigned ordinal, char *out, size_t cap) {
+size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, proven_u8str_view_t film_path, unsigned ordinal, char *out, size_t cap) {
     const char *ext = rubraview_mkv_subtitle_ext(track);
-    if (!ext[0] || !out || cap == 0 || film_path.len == 0) return 0;
-    size_t stem = film_path.len - rubraview_path_ext(film_path).len;
+    if (!ext[0] || !out || cap == 0 || film_path.size == 0) return 0;
+    size_t stem = film_path.size - rubraview_path_ext(film_path).size;
     char language[20];
     size_t n = 0;
-    for (size_t i = 0; i < track->language.len && n + 1 < sizeof(language); ++i) {
+    for (size_t i = 0; i < track->language.size && n + 1 < sizeof(language); ++i) {
         char c = track->language.ptr[i];
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') language[n++] = c;
     }
@@ -524,20 +524,15 @@ static int64_t to_ticks(const rubraview_mkv_t *mkv, int64_t ns) {
 
 /* ---- the subtitle to put in ---- */
 
-static u8str_t trim_text(u8str_t s) {
-    while (s.len > 0 && (s.ptr[0] == ' ' || s.ptr[0] == '\t')) { s.ptr++; s.len--; }
-    while (s.len > 0 && (s.ptr[s.len - 1] == ' ' || s.ptr[s.len - 1] == '\t' || s.ptr[s.len - 1] == '\r')) s.len--;
-    return s;
-}
 
 /* SubStation's `H:MM:SS.cc`. */
-static bool ass_clock(u8str_t s, int64_t *out_ns) {
-    s = trim_text(s);
+static bool ass_clock(proven_u8str_view_t s, int64_t *out_ns) {
+    s = proven_u8str_view_trim(s);
     int64_t parts[3] = { 0, 0, 0 };
     uint64_t frac = 0, frac_digits = 0;
     size_t part = 0;
     bool in_frac = false, digit = false;
-    for (size_t i = 0; i < s.len; ++i) {
+    for (size_t i = 0; i < s.size; ++i) {
         char c = s.ptr[i];
         if (c >= '0' && c <= '9') {
             digit = true;
@@ -564,10 +559,10 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
-    if (!arena || !subtitle || !out || subtitle->source.len == 0) { *out_why = N_("the subtitle's file was not kept"); return false; }
-    *out = (rubraview_mkv_put_track_t){ .language = { .ptr = "", .len = 0 }, .name = { .ptr = "", .len = 0 },
-                                        .private_data = { .ptr = "", .len = 0 } };
-    u8str_t src = subtitle->source;
+    if (!arena || !subtitle || !out || subtitle->source.size == 0) { *out_why = N_("the subtitle's file was not kept"); return false; }
+    *out = (rubraview_mkv_put_track_t){ .language = PROVEN_LIT(""), .name = PROVEN_LIT(""),
+                                        .private_data = PROVEN_LIT("") };
+    proven_u8str_view_t src = subtitle->source;
     size_t room = 0;
 
     if (subtitle->format == RUBRAVIEW_SUBTITLE_SRT) {
@@ -579,7 +574,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         size_t n = 0;
         for (size_t i = 0; i < subtitle->count; ++i) {
             const rubraview_subtitle_cue_t *cue = &subtitle->cues[i];
-            if (cue->place.text_len == 0 || cue->place.text_at > src.len || cue->place.text_len > src.len - cue->place.text_at) continue;
+            if (cue->place.text_len == 0 || cue->place.text_at > src.size || cue->place.text_len > src.size - cue->place.text_at) continue;
             /* As written, the file's line ends made '\n'. */
             proven_result_mem_mut_t t = proven_arena_alloc(arena, cue->place.text_len + 1);
             if (!proven_is_ok(t.err)) { *out_why = N_("no memory"); return false; }
@@ -600,56 +595,56 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         out->codec = "S_TEXT/ASS";
         /* The header: everything through the `Format:` line of `[Events]`. */
         size_t events = SIZE_MAX;
-        for (size_t i = 0; i + 8 <= src.len; ++i) {
+        for (size_t i = 0; i + 8 <= src.size; ++i) {
             if (memcmp(src.ptr + i, "[Events]", 8) == 0) { events = i; break; }
         }
         if (events == SIZE_MAX) { *out_why = "the SubStation file has no [Events]"; return false; }
         size_t head_end = SIZE_MAX, at = events;
-        while (at < src.len) {
+        while (at < src.size) {
             size_t line_end = at;
-            while (line_end < src.len && src.ptr[line_end] != '\n') line_end++;
-            u8str_t line = trim_text((u8str_t){ .ptr = src.ptr + at, .len = line_end - at });
-            if (rubraview_u8_starts_with_ci(line, "format:")) { head_end = line_end < src.len ? line_end + 1 : line_end; break; }
+            while (line_end < src.size && src.ptr[line_end] != '\n') line_end++;
+            proven_u8str_view_t line = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + at, .size = line_end - at });
+            if (rubraview_u8_starts_with_ci(line, "format:")) { head_end = line_end < src.size ? line_end + 1 : line_end; break; }
             at = line_end + 1;
         }
         if (head_end == SIZE_MAX) { *out_why = N_("the SubStation file's events have no Format line"); return false; }
-        out->private_data = (u8str_t){ .ptr = src.ptr, .len = head_end };
+        out->private_data = (proven_u8str_view_t){ .ptr = src.ptr, .size = head_end };
         /* Count the Dialogue lines, then make each a block: ReadOrder,Layer,the rest after the times. */
-        for (size_t i = head_end; i < src.len; ) {
+        for (size_t i = head_end; i < src.size; ) {
             size_t e = i;
-            while (e < src.len && src.ptr[e] != '\n') e++;
-            if (rubraview_u8_starts_with_ci(trim_text((u8str_t){ .ptr = src.ptr + i, .len = e - i }), "dialogue:")) room++;
+            while (e < src.size && src.ptr[e] != '\n') e++;
+            if (rubraview_u8_starts_with_ci(proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + i, .size = e - i }), "dialogue:")) room++;
             i = e + 1;
         }
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, room ? room : 1, sizeof(rubraview_mkv_put_cue_t));
         if (!proven_is_ok(res.err)) { *out_why = N_("no memory"); return false; }
         rubraview_mkv_put_cue_t *cues = (rubraview_mkv_put_cue_t*)(void*)res.value.ptr;
         size_t n = 0, order = 0;
-        for (size_t i = head_end; i < src.len && n < room; ) {
+        for (size_t i = head_end; i < src.size && n < room; ) {
             size_t e = i;
-            while (e < src.len && src.ptr[e] != '\n') e++;
-            u8str_t line = trim_text((u8str_t){ .ptr = src.ptr + i, .len = e - i });
+            while (e < src.size && src.ptr[e] != '\n') e++;
+            proven_u8str_view_t line = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = src.ptr + i, .size = e - i });
             i = e + 1;
             if (!rubraview_u8_starts_with_ci(line, "dialogue:")) continue;
-            u8str_t rest = { .ptr = line.ptr + 9, .len = line.len - 9 };
+            proven_u8str_view_t rest = { .ptr = line.ptr + 9, .size = line.size - 9 };
             size_t commas[3], found = 0;
-            for (size_t k = 0; k < rest.len && found < 3; ++k) if (rest.ptr[k] == ',') commas[found++] = k;
+            for (size_t k = 0; k < rest.size && found < 3; ++k) if (rest.ptr[k] == ',') commas[found++] = k;
             if (found < 3) continue;
             int64_t start = 0, end = 0;
-            if (!ass_clock((u8str_t){ rest.ptr + commas[0] + 1, commas[1] - commas[0] - 1 }, &start) ||
-                !ass_clock((u8str_t){ rest.ptr + commas[1] + 1, commas[2] - commas[1] - 1 }, &end)) continue;
-            u8str_t layer = trim_text((u8str_t){ rest.ptr, commas[0] });
-            u8str_t tail = { rest.ptr + commas[2], rest.len - commas[2] };   /* ",Style,...,Text" */
+            if (!ass_clock((proven_u8str_view_t){ rest.ptr + commas[0] + 1, commas[1] - commas[0] - 1 }, &start) ||
+                !ass_clock((proven_u8str_view_t){ rest.ptr + commas[1] + 1, commas[2] - commas[1] - 1 }, &end)) continue;
+            proven_u8str_view_t layer = proven_u8str_view_trim((proven_u8str_view_t){ rest.ptr, commas[0] });
+            proven_u8str_view_t tail = { rest.ptr + commas[2], rest.size - commas[2] };   /* ",Style,...,Text" */
             char number[24];
             int nn = snprintf(number, sizeof(number), "%zu,", order++);
             if (nn <= 0) continue;
-            size_t size = (size_t)nn + layer.len + tail.len;
+            size_t size = (size_t)nn + layer.size + tail.size;
             proven_result_mem_mut_t t = proven_arena_alloc(arena, size + 1);
             if (!proven_is_ok(t.err)) { *out_why = N_("no memory"); return false; }
             uint8_t *text = t.value.ptr;
             memcpy(text, number, (size_t)nn);
-            memcpy(text + nn, layer.ptr, layer.len);
-            memcpy(text + nn + layer.len, tail.ptr, tail.len);
+            memcpy(text + nn, layer.ptr, layer.size);
+            memcpy(text + nn + layer.size, tail.ptr, tail.size);
             cues[n++] = (rubraview_mkv_put_cue_t){ .start_ns = start, .duration_ns = end > start ? end - start : 0,
                                                    .payload = text, .size = size };
         }
@@ -751,10 +746,10 @@ static void write_tracks(wbuf_t *out, const rubraview_mkv_t *mkv, const elem_t *
     welem_uint(&entry, ID_FLAG_LACING, 0, 1);
     welem_uint(&entry, ID_FLAG_DEFAULT, 0, 1);
     welem(&entry, ID_CODEC_ID, put->track.codec, strlen(put->track.codec));
-    u8str_t language = put->track.language.len > 0 ? put->track.language : (u8str_t){ .ptr = "und", .len = 3 };
-    welem(&entry, ID_LANGUAGE, language.ptr, language.len);
-    if (put->track.name.len > 0) welem(&entry, ID_NAME, put->track.name.ptr, put->track.name.len);
-    if (put->track.private_data.len > 0) welem(&entry, ID_CODEC_PRIVATE, put->track.private_data.ptr, put->track.private_data.len);
+    proven_u8str_view_t language = put->track.language.size > 0 ? put->track.language : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"und", .size = 3 };
+    welem(&entry, ID_LANGUAGE, language.ptr, language.size);
+    if (put->track.name.size > 0) welem(&entry, ID_NAME, put->track.name.ptr, put->track.name.size);
+    if (put->track.private_data.size > 0) welem(&entry, ID_CODEC_PRIVATE, put->track.private_data.ptr, put->track.private_data.size);
     if (!entry.failed) welem(&body, ID_TRACK_ENTRY, entry.data, entry.len);
     if (entry.failed || body.failed) out->failed = true;
     else welem(out, ID_TRACKS, body.data, body.len);
@@ -1153,7 +1148,7 @@ bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv
     if (check->made.track_count != old->track_count + 1) { check->why = N_("the new film's tracks are not the old ones and one more"); return false; }
     for (size_t i = 0; i < old->track_count; ++i) {
         const rubraview_mkv_track_t *a = &old->tracks[i], *b = &check->made.tracks[i];
-        if (a->number != b->number || a->type != b->type || !rubraview_u8_eq(a->codec, b->codec) ||
+        if (a->number != b->number || a->type != b->type || !proven_u8str_view_eq(a->codec, b->codec) ||
             a->private_size != b->private_size || (a->private_size && memcmp(a->private_data, b->private_data, a->private_size) != 0)) {
             check->why = N_("a track of the new film is not as it was");
             return false;

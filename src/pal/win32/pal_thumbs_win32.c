@@ -32,7 +32,7 @@
 
 #define TEXT_TILE_W 192   /* RV-135: a text file's tile, a page */
 #define TEXT_TILE_H 256
-static uint8_t *text_page_small(proven_arena_t *scratch, u8str_t path, double aspect, int32_t *out_w, int32_t *out_h);
+static uint8_t *text_page_small(proven_arena_t *scratch, proven_u8str_view_t path, double aspect, int32_t *out_w, int32_t *out_h);
 
 /* Defined here so the link does not depend on which MinGW carries it. */
 static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
@@ -80,17 +80,17 @@ struct rubraview_thumbs {
 
 /* ---- the shell's picture ---- */
 
-uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t *out_w, int32_t *out_h) {
+uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t side, int32_t *out_w, int32_t *out_h) {
     uint8_t *result = NULL;
     char narrow[MAX_PATH * 4];
     WCHAR wide[MAX_PATH * 2];
-    if (path.len == 0 || path.len >= sizeof(narrow)) return NULL;
+    if (path.size == 0 || path.size >= sizeof(narrow)) return NULL;
     if (rubraview_stream_is_address(path)) return NULL;   /* RV-157: a station is not the shell's to look at */
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
     /* The shell's parser, unlike CreateFile, does not take '/' for a
        separator — and a listing joins the folder and the name with '/'. */
-    for (size_t i = 0; i < path.len; ++i) {
+    for (size_t i = 0; i < path.size; ++i) {
         if (narrow[i] == '/') narrow[i] = '\\';
     }
     IShellItemImageFactory *factory = NULL;
@@ -134,13 +134,13 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t 
 /* ---- what the file is: its size in pixels, its length (owner, 2026-10-16) ----
    From the shell's property store, which reads them from the file's header
    for every type it has a handler for; 0 for what it does not know. */
-static void shell_meta(u8str_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
+static void shell_meta(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
     char narrow[MAX_PATH * 4];
     WCHAR wide[MAX_PATH * 2];
-    if (path.len == 0 || path.len >= sizeof(narrow)) return;
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
-    for (size_t i = 0; i < path.len; ++i) if (narrow[i] == '/') narrow[i] = '\\';
+    if (path.size == 0 || path.size >= sizeof(narrow)) return;
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
+    for (size_t i = 0; i < path.size; ++i) if (narrow[i] == '/') narrow[i] = '\\';
     IShellItem2 *item = NULL;
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0 ||
         FAILED(SHCreateItemFromParsingName(wide, NULL, &RV_IID_IShellItem2_T, (void**)&item)) || !item) return;
@@ -213,7 +213,7 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
 /* RV-110: a file the shell has no picture for, when it is one the
    viewer reads without Windows' codec (the shell needs it; an AVIF, a
    JPEG XL) or by rewriting it first (a BigTIFF). */
-static uint8_t *own_file_small(IWICImagingFactory *factory, u8str_t path, int32_t *out_w, int32_t *out_h) {
+static uint8_t *own_file_small(IWICImagingFactory *factory, proven_u8str_view_t path, int32_t *out_w, int32_t *out_h) {
     uint8_t *result = NULL;
     rubraview_fs_mapping_t map = {0};
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
@@ -234,8 +234,8 @@ static uint8_t *own_file_small(IWICImagingFactory *factory, u8str_t path, int32_
    not finish within 1.5 s — or could not even commit. A first page that
    needs more than ARCHIVE_MAX_COST decoded before it (deep in a solid 7z
    block) is let go, so one book cannot hold the queue up. */
-static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *factory, u8str_t path,
-                                   u8str_t picture_filter, int32_t *out_w, int32_t *out_h) {
+static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *factory, proven_u8str_view_t path,
+                                   proven_u8str_view_t picture_filter, int32_t *out_w, int32_t *out_h) {
     uint8_t *result = NULL;
     rubraview_fs_mapping_t map = {0};
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
@@ -245,8 +245,8 @@ static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *
             ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
         if (source.page_count > 0 && rubraview_page_source_read_cost(&source, 0) <= ARCHIVE_MAX_COST) {
             rubraview_page_bytes_t page = rubraview_page_source_read(scratch, &source, 0, ARCHIVE_MAX_ENTRY);
-            if (page.ok && page.data.len > 0) {
-                result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.len,
+            if (page.ok && page.data.size > 0) {
+                result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.size,
                                            THUMB_DECODE_SIDE, out_w, out_h);
             }
         }
@@ -260,10 +260,10 @@ static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *
 
 static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICImagingFactory *factory,
                          const rubraview_thumb_job_t *job, int32_t *out_w, int32_t *out_h, rubraview_thumb_result_t *meta) {
-    u8str_t path = { .ptr = job->path, .len = job->path_len };
-    u8str_t pictures = { .ptr = t->pictures, .len = t->pictures_len };
-    u8str_t films = { .ptr = t->films, .len = t->films_len };
-    u8str_t archives = { .ptr = t->archives, .len = t->archives_len };
+    proven_u8str_view_t path = { .ptr = (const proven_byte_t *)job->path, .size = job->path_len };
+    proven_u8str_view_t pictures = { .ptr = (const proven_byte_t *)t->pictures, .size = t->pictures_len };
+    proven_u8str_view_t films = { .ptr = (const proven_byte_t *)t->films, .size = t->films_len };
+    proven_u8str_view_t archives = { .ptr = (const proven_byte_t *)t->archives, .size = t->archives_len };
     int32_t w = 0, h = 0;
     uint8_t *raw = NULL;
     bool is_text = false;
@@ -278,8 +278,8 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
            when the shell has nothing for one, the next — three at most, so
            a folder of odd files does not hold the queue up. */
         rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(scratch, path);
-        u8str_t none = { .ptr = "", .len = 0 };
-        u8str_t kinds[2] = { pictures, films };
+        proven_u8str_view_t none = PROVEN_LIT("");
+        proven_u8str_view_t kinds[2] = { pictures, films };
         int tries = 0;
         for (int k = 0; k < 2 && !raw && tries < FOLDER_TRIES; ++k) {
             rubraview_sibling_index_t found = rubraview_fs_index_siblings(scratch, &inside, none, kinds[k],
@@ -291,7 +291,7 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         }
     } else if (rubraview_glob_match_list(rubraview_path_basename(path), archives)) {
         raw = archive_first_page(scratch, factory, path, pictures, &w, &h);
-    } else if (rubraview_glob_match_list(rubraview_path_basename(path), (u8str_t){ .ptr = "*.txt;*.log;*.nfo;*.md", .len = 22 })) {
+    } else if (rubraview_glob_match_list(rubraview_path_basename(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"*.txt;*.log;*.nfo;*.md", .size = 22 })) {
         raw = text_page_small(scratch, path, job->aspect, &w, &h);   /* RV-135 */
         is_text = raw != NULL;
     } else {
@@ -330,7 +330,7 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
 /* RV-135 (2026-10-18): a text file's tile is a page of its first lines, dark on
    light paper, so text files are told apart at a glance. The first 4 KB are read,
    the encoding guessed as the viewer guesses it. */
-static uint8_t *text_page_small(proven_arena_t *scratch, u8str_t path, double aspect, int32_t *out_w, int32_t *out_h) {
+static uint8_t *text_page_small(proven_arena_t *scratch, proven_u8str_view_t path, double aspect, int32_t *out_w, int32_t *out_h) {
     rubraview_fs_mapping_t map;
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     size_t n = map.size < 4096u ? (size_t)map.size : 4096u;
@@ -362,7 +362,7 @@ static uint8_t *text_page_small(proven_arena_t *scratch, u8str_t path, double as
     if (th > TEXT_TILE_H * 2) { th = TEXT_TILE_H * 2; tw = (int32_t)((double)th * aspect + 0.5); }
     if (th < 48) th = 48;
     const int32_t pad = 10;
-    rubraview_pixbuf_t mask = rubraview_pal_text_mask_box(scratch, (u8str_t){ .ptr = clean, .len = clean_len }, (u8str_t){ .ptr = "", .len = 0 },
+    rubraview_pixbuf_t mask = rubraview_pal_text_mask_box(scratch, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = clean_len }, PROVEN_LIT(""),
                                                           14, tw - 2 * pad, th - 2 * pad);
     free(clean);
     uint8_t *out = (uint8_t *)malloc((size_t)tw * (size_t)th * 4u);
@@ -434,13 +434,13 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
 
 /* ---- the main thread's side ---- */
 
-static size_t copy_filter(char *to, size_t cap, u8str_t from) {
-    size_t n = from.len < cap ? from.len : cap;
+static size_t copy_filter(char *to, size_t cap, proven_u8str_view_t from) {
+    size_t n = from.size < cap ? from.size : cap;
     if (n) memcpy(to, from.ptr, n);
     return n;
 }
 
-rubraview_thumbs_t *rubraview_pal_thumbs_start(u8str_t picture_filter, u8str_t film_filter, u8str_t archive_filter,
+rubraview_thumbs_t *rubraview_pal_thumbs_start(proven_u8str_view_t picture_filter, proven_u8str_view_t film_filter, proven_u8str_view_t archive_filter,
                                                rubraview_thumbs_wake_fn wake, void *context) {
     rubraview_thumbs_t *t = (rubraview_thumbs_t*)calloc(1, sizeof(*t));
     if (!t) return NULL;
@@ -485,7 +485,7 @@ void rubraview_pal_thumbs_generation(rubraview_thumbs_t *t, uint32_t generation)
 }
 
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *t, uint32_t generation, size_t index,
-                                  bool folder, double aspect, u8str_t path) {
+                                  bool folder, double aspect, proven_u8str_view_t path) {
     if (!t || rubraview_stream_is_address(path)) return false;   /* RV-157: no picture made of a station */
     AcquireSRWLockExclusive(&t->lock);
     bool ok = rubraview_thumbq_push(&t->queue, generation, index, folder, aspect, path);

@@ -22,8 +22,8 @@ extern "C" {
  */
 
 typedef struct rubraview_fs_entry {
-    u8str_t  name;         /* basename, e.g. "page_042.webp" */
-    u8str_t  path;         /* full path, e.g. "D:/Manga/Ch01/page_042.webp" */
+    proven_u8str_view_t  name;         /* basename, e.g. "page_042.webp" */
+    proven_u8str_view_t  path;         /* full path, e.g. "D:/Manga/Ch01/page_042.webp" */
     uint64_t size_bytes;
     int64_t  mtime;        /* modification time, seconds since the Unix epoch */
     int64_t  ctime;        /* creation time on Windows; status-change time on POSIX (the closest available) */
@@ -41,7 +41,7 @@ typedef struct rubraview_fs_listing {
  * (rubraview_fs_index_siblings, or rubraview_sort_items directly).
  * Returns an empty listing if the directory cannot be opened.
  */
-rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t dir_path);
+rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u8str_view_t dir_path);
 
 /**
  * The PC page's entries (owner, 2026-09-28): the usual folders (home,
@@ -57,14 +57,14 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
  * the viewer runs in), so the picker can climb above it. What cannot be
  * resolved is given back as it was. NUL-terminated, in `arena`.
  */
-u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path);
+proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8str_view_t path);
 
 /**
  * `path` with Windows' %VARIABLES% put in (%LOCALAPPDATA%\ffmpeg), for a
  * folder typed into the settings. What cannot be expanded is given back as
  * it was. NUL-terminated, in `arena`.
  */
-u8str_t rubraview_pal_fs_expand_env(proven_arena_t *arena, u8str_t path);
+proven_u8str_view_t rubraview_pal_fs_expand_env(proven_arena_t *arena, proven_u8str_view_t path);
 
 /**
  * A file mapped read-only (owner, 2026-09-28: comics of several GB). The
@@ -79,7 +79,7 @@ typedef struct rubraview_fs_mapping {
     void          *os;     /* the platform's handle, NULL when unmapped */
 } rubraview_fs_mapping_t;
 
-bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out);
+bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out);
 void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping);
 
 /*
@@ -90,12 +90,12 @@ void rubraview_pal_fs_unmap(rubraview_fs_mapping_t *mapping);
 bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping);
 
 /** Metadata for a single path. Returns false if it does not exist or cannot be read. */
-bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry);
+bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubraview_fs_entry_t *out_entry);
 
 /** RV-129: give a file the modified time `mtime` (seconds since the Unix epoch); false when it cannot. */
-bool rubraview_pal_fs_set_mtime(u8str_t path, int64_t mtime);
+bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime);
 
-bool rubraview_pal_fs_exists(u8str_t path);
+bool rubraview_pal_fs_exists(proven_u8str_view_t path);
 
 /**
  * Read an entire file into the arena, NUL-terminated per §7.2.3 so the
@@ -103,7 +103,7 @@ bool rubraview_pal_fs_exists(u8str_t path);
  * if the file cannot be read or exceeds `max_bytes` (a bound, since this
  * reads caller-supplied paths such as keymap.ini and settings.ini).
  */
-u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t max_bytes);
+proven_u8str_view_t rubraview_pal_fs_read_file(proven_arena_t *arena, proven_u8str_view_t path, size_t max_bytes);
 
 /**
  * §3.8.3 step 3: transcode bytes from a legacy code page into UTF-8.
@@ -113,7 +113,7 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
  * code-page tables), so the caller keeps the raw bytes rather than
  * showing nothing.
  */
-u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id);
+proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, proven_u8str_view_t bytes, uint32_t codepage_id);
 
 /**
  * RFC-0005 §2: a text file's bytes in a Windows code page, as UTF-8,
@@ -129,7 +129,7 @@ char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t code
  * password box gives UTF-8. Empty when the platform cannot transcode, or a
  * character has no exact place in that code page (no best-fit guesses).
  */
-u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint32_t codepage_id);
+proven_u8str_view_t rubraview_pal_encode_codepage(proven_arena_t *arena, proven_u8str_view_t utf8, uint32_t codepage_id);
 
 /**
  * Write a whole file, replacing it. Used for the small state files
@@ -137,7 +137,7 @@ u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint3
  * cannot be written, which in portable mode on read-only media is a
  * normal outcome rather than an error worth interrupting the reader.
  */
-bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents);
+bool rubraview_pal_fs_write_file(proven_u8str_view_t path, proven_u8str_view_t contents);
 
 /**
  * D-99: the same, for a file several viewers may read and write at once.
@@ -146,7 +146,7 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents);
  * one, never half of one. Falls back to writing in place where the
  * exchange is refused.
  */
-bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents);
+bool rubraview_pal_fs_write_file_atomic(proven_u8str_view_t path, proven_u8str_view_t contents);
 
 /**
  * A file written a piece at a time (RV-115: a film of several gigabytes
@@ -155,10 +155,10 @@ bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents);
  * whether every piece was written; `abort` closes and removes the file.
  */
 typedef struct rubraview_fs_writer { void *os; bool failed; uint64_t written; } rubraview_fs_writer_t;
-bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, u8str_t path);
+bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_view_t path);
 bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size);
 bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer);
-void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path);
+void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, proven_u8str_view_t path);
 
 /**
  * D-99: one viewer at a time reads a state file, puts its changes in and
@@ -181,7 +181,7 @@ void rubraview_pal_config_unlock(void);
  * both the host and the Windows build.
  */
 typedef struct rubraview_sibling_index {
-    u8str_t *paths;  /* full paths, filtered and ordered */
+    proven_u8str_view_t *paths;  /* full paths, filtered and ordered */
     size_t   count;
     size_t   current; /* index of current_file_path within `paths`; 0 when not found */
     bool     found;   /* whether current_file_path was present after filtering */
@@ -189,8 +189,8 @@ typedef struct rubraview_sibling_index {
 
 rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
                                                       const rubraview_fs_listing_t *listing,
-                                                      u8str_t current_file_path,
-                                                      u8str_t extension_filter,
+                                                      proven_u8str_view_t current_file_path,
+                                                      proven_u8str_view_t extension_filter,
                                                       rubraview_sort_mode_t mode,
                                                       bool ascending);
 
@@ -200,40 +200,40 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
  * Send a file to the recycle bin (§3.18.1). Undoable by the OS, which is
  * the whole reason to prefer it to a delete.
  */
-bool rubraview_pal_fs_recycle(u8str_t path);
+bool rubraview_pal_fs_recycle(proven_u8str_view_t path);
 
 /** Delete a file outright (§3.18.1's Shift+Delete). Not undoable. */
-bool rubraview_pal_fs_delete(u8str_t path);
+bool rubraview_pal_fs_delete(proven_u8str_view_t path);
 
 /**
  * Restore the most recently recycled file. Returns false when the
  * platform cannot do it — the caller must then say so rather than
  * reporting a success it did not have.
  */
-bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path);
+bool rubraview_pal_fs_restore_last_recycled(proven_u8str_view_t original_path);
 
 /** Move or rename a file. Used by both §3.18.2 and §3.18.3. */
-bool rubraview_pal_fs_move(u8str_t from, u8str_t to);
+bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to);
 
 /**
  * D-88: `from` takes `to`'s name, in one step, whether or not `to`
  * exists — how an archive written again takes the old one's place.
  */
-bool rubraview_pal_fs_replace(u8str_t from, u8str_t to);
+bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to);
 
 /** The bytes free for this user on the volume holding `dir`. */
-bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes);
+bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes);
 
 /** Copy a file (§3.18.3's copy mode). Fails rather than overwriting. */
-bool rubraview_pal_fs_copy(u8str_t from, u8str_t to);
+bool rubraview_pal_fs_copy(proven_u8str_view_t from, proven_u8str_view_t to);
 /** 1.22.0: a folder and all in it copied to `to` (made); false when any of it could not be. */
-bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to);
+bool rubraview_pal_fs_copy_tree(proven_u8str_view_t from, proven_u8str_view_t to);
 
 /** 1.23.0: a folder and all in it gone for good (an undone folder copy); false when any of it stays. */
-bool rubraview_pal_fs_delete_tree(u8str_t path);
+bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path);
 
 /** Create a directory, and any missing parent of it. */
-bool rubraview_pal_fs_make_dirs(u8str_t path);
+bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path);
 
 #ifdef __cplusplus
 }

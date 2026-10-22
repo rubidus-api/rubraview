@@ -13,9 +13,9 @@ static void remove_at(rubraview_thumbq_t *q, size_t i) {
 }
 
 bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t index, bool folder,
-                           double aspect, u8str_t path) {
+                           double aspect, proven_u8str_view_t path) {
     if (!q || !q->jobs || q->capacity == 0 || generation != q->generation) return false;
-    if (path.len == 0 || path.len > RUBRAVIEW_THUMBQ_PATH) return false;
+    if (path.size == 0 || path.size > RUBRAVIEW_THUMBQ_PATH) return false;
     for (size_t i = 0; i < q->count; ++i) {
         if (q->jobs[i].index == index) { remove_at(q, i); break; }   /* asked again: to the front */
     }
@@ -25,8 +25,8 @@ bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t in
     job->index = index;
     job->folder = folder;
     job->aspect = aspect;
-    job->path_len = path.len;
-    memcpy(job->path, path.ptr, path.len);
+    job->path_len = path.size;
+    memcpy(job->path, path.ptr, path.size);
     job->bytes = NULL;
     job->bytes_len = 0;
     return true;

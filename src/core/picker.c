@@ -8,25 +8,25 @@
 #include <string.h>
 #include <stdlib.h>
 
-bool rubraview_picker_is_places(u8str_t dir) {
-    return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_PLACES);
+bool rubraview_picker_is_places(proven_u8str_view_t dir) {
+    return proven_u8str_view_eq(dir, proven_u8str_view_from_cstr(RUBRAVIEW_PICKER_PLACES));
 }
 
-bool rubraview_picker_is_recent(u8str_t dir) {
-    return rubraview_u8_eq_lit(dir, RUBRAVIEW_PICKER_RECENT);
+bool rubraview_picker_is_recent(proven_u8str_view_t dir) {
+    return proven_u8str_view_eq(dir, proven_u8str_view_from_cstr(RUBRAVIEW_PICKER_RECENT));
 }
 
-u8str_t rubraview_picker_parent(u8str_t dir) {
-    const u8str_t none = { .ptr = "", .len = 0 };
-    const u8str_t places = { .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
-    if (!dir.ptr || dir.len == 0 || rubraview_picker_is_places(dir)) return none;
+proven_u8str_view_t rubraview_picker_parent(proven_u8str_view_t dir) {
+    const proven_u8str_view_t none = PROVEN_LIT("");
+    const proven_u8str_view_t places = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
+    if (!dir.ptr || dir.size == 0 || rubraview_picker_is_places(dir)) return none;
     if (rubraview_picker_is_recent(dir)) return places;
 
-    size_t len = dir.len;
+    size_t len = dir.size;
     while (len > 0 && rubraview_path_is_sep(dir.ptr[len - 1])) --len;
     if (len == 0) return places;                                   /* "/" */
     if (len == 2 && dir.ptr[1] == ':') return places;              /* "C:", "C:/" */
-    if (dir.len >= 2 && rubraview_path_is_sep(dir.ptr[0]) && rubraview_path_is_sep(dir.ptr[1])) {
+    if (dir.size >= 2 && rubraview_path_is_sep(dir.ptr[0]) && rubraview_path_is_sep(dir.ptr[1])) {
         /* "//server/share" is a root too: count the names after the "//". */
         size_t names = 0;
         bool in_name = false;
@@ -37,8 +37,8 @@ u8str_t rubraview_picker_parent(u8str_t dir) {
         }
         if (names <= 2) return places;
     }
-    u8str_t parent = rubraview_path_dirname((u8str_t){ .ptr = dir.ptr, .len = len });
-    return parent.len > 0 ? parent : places;
+    proven_u8str_view_t parent = rubraview_path_dirname((proven_u8str_view_t){ .ptr = dir.ptr, .size = len });
+    return parent.size > 0 ? parent : places;
 }
 
 static char fold(char c) {
@@ -46,65 +46,65 @@ static char fold(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
 }
 
-bool rubraview_picker_inside_archive(u8str_t dir, u8str_t archive_path, u8str_t *out_inner) {
-    size_t n = archive_path.len;
+bool rubraview_picker_inside_archive(proven_u8str_view_t dir, proven_u8str_view_t archive_path, proven_u8str_view_t *out_inner) {
+    size_t n = archive_path.size;
     while (n > 0 && rubraview_path_is_sep(archive_path.ptr[n - 1])) --n;
-    if (n == 0 || !dir.ptr || dir.len < n) return false;
+    if (n == 0 || !dir.ptr || dir.size < n) return false;
     for (size_t i = 0; i < n; ++i) {
         if (fold(dir.ptr[i]) != fold(archive_path.ptr[i])) return false;
     }
-    if (dir.len > n && !rubraview_path_is_sep(dir.ptr[n])) return false;   /* "Big.cbz2" is another file */
-    size_t start = n, end = dir.len;
+    if (dir.size > n && !rubraview_path_is_sep(dir.ptr[n])) return false;   /* "Big.cbz2" is another file */
+    size_t start = n, end = dir.size;
     while (start < end && rubraview_path_is_sep(dir.ptr[start])) ++start;
     while (end > start && rubraview_path_is_sep(dir.ptr[end - 1])) --end;
-    if (out_inner) *out_inner = (u8str_t){ .ptr = dir.ptr + start, .len = end - start };
+    if (out_inner) *out_inner = (proven_u8str_view_t){ .ptr = dir.ptr + start, .size = end - start };
     return true;
 }
 
 /* The part of `name` after the folder `inner`, when the page is inside it.
    Separators alike; the book's own names are compared as they are. */
-static bool after_folder(u8str_t name, u8str_t inner, u8str_t *rest) {
-    if (inner.len == 0) { *rest = name; return true; }
-    if (name.len <= inner.len + 1) return false;
-    for (size_t i = 0; i < inner.len; ++i) {
+static bool after_folder(proven_u8str_view_t name, proven_u8str_view_t inner, proven_u8str_view_t *rest) {
+    if (inner.size == 0) { *rest = name; return true; }
+    if (name.size <= inner.size + 1) return false;
+    for (size_t i = 0; i < inner.size; ++i) {
         char a = name.ptr[i], b = inner.ptr[i];
         if (a == b || (rubraview_path_is_sep(a) && rubraview_path_is_sep(b))) continue;
         return false;
     }
-    if (!rubraview_path_is_sep(name.ptr[inner.len])) return false;
-    *rest = (u8str_t){ .ptr = name.ptr + inner.len + 1, .len = name.len - inner.len - 1 };
+    if (!rubraview_path_is_sep(name.ptr[inner.size])) return false;
+    *rest = (proven_u8str_view_t){ .ptr = name.ptr + inner.size + 1, .size = name.size - inner.size - 1 };
     return true;
 }
 
-static u8str_t join3(proven_arena_t *arena, u8str_t a, u8str_t b, u8str_t c) {
-    u8str_t ab = b.len > 0 ? rubraview_path_join(arena, a, b) : a;
+static proven_u8str_view_t join3(proven_arena_t *arena, proven_u8str_view_t a, proven_u8str_view_t b, proven_u8str_view_t c) {
+    proven_u8str_view_t ab = b.size > 0 ? rubraview_path_join(arena, a, b) : a;
     return rubraview_path_join(arena, ab, c);
 }
 
-rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, u8str_t archive_path,
+rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, proven_u8str_view_t archive_path,
                                                          const rubraview_page_ref_t *pages, size_t page_count,
-                                                         u8str_t inner) {
+                                                         proven_u8str_view_t inner) {
     rubraview_archive_level_t level = {0};
     if (!arena || !pages || page_count == 0) return level;
     proven_result_mem_mut_t er = rubraview_arena_alloc_array(arena, page_count, sizeof(rubraview_fs_entry_t));
     proven_result_mem_mut_t pr = rubraview_arena_alloc_array(arena, page_count, sizeof(size_t));
-    proven_result_mem_mut_t fr = rubraview_arena_alloc_array(arena, page_count, sizeof(u8str_t));
+    proven_result_mem_mut_t fr = rubraview_arena_alloc_array(arena, page_count, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(er.err) || !proven_is_ok(pr.err) || !proven_is_ok(fr.err)) return level;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)er.value.ptr;
     size_t *page_of = (size_t*)(void*)pr.value.ptr;
-    u8str_t *folders = (u8str_t*)(void*)fr.value.ptr;
+    proven_u8str_view_t *folders = (proven_u8str_view_t*)(void*)fr.value.ptr;
 
     /* Folders first, in the order the book reaches them; a folder's pages
        are together, so only the last one found needs comparing. */
     size_t folder_count = 0;
     for (size_t i = 0; i < page_count; ++i) {
-        u8str_t rest;
+        proven_u8str_view_t rest;
         if (!after_folder(pages[i].name, inner, &rest)) continue;
         size_t cut = 0;
-        while (cut < rest.len && !rubraview_path_is_sep(rest.ptr[cut])) ++cut;
-        if (cut == rest.len || cut == 0) continue;   /* a page here, or an empty part */
-        u8str_t folder = { .ptr = rest.ptr, .len = cut };
-        if (folder_count > 0 && folders[folder_count - 1].len == cut &&
+        while (cut < rest.size && !rubraview_path_is_sep(rest.ptr[cut])) ++cut;
+        if (cut == rest.size || cut == 0) continue;   /* a page here, or an empty part */
+        proven_u8str_view_t folder = { .ptr = rest.ptr, .size = cut };
+        if (folder_count > 0 && folders[folder_count - 1].size == cut &&
             memcmp(folders[folder_count - 1].ptr, folder.ptr, cut) == 0) continue;
         folders[folder_count++] = folder;
     }
@@ -116,10 +116,10 @@ rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, 
         page_of[count++] = RUBRAVIEW_PICKER_NOT_A_PAGE;
     }
     for (size_t i = 0; i < page_count; ++i) {
-        u8str_t rest;
-        if (!after_folder(pages[i].name, inner, &rest) || rest.len == 0) continue;
+        proven_u8str_view_t rest;
+        if (!after_folder(pages[i].name, inner, &rest) || rest.size == 0) continue;
         bool nested = false;
-        for (size_t k = 0; k < rest.len && !nested; ++k) nested = rubraview_path_is_sep(rest.ptr[k]);
+        for (size_t k = 0; k < rest.size && !nested; ++k) nested = rubraview_path_is_sep(rest.ptr[k]);
         if (nested) continue;
         entries[count] = (rubraview_fs_entry_t){ .name = rest, .path = join3(arena, archive_path, inner, rest) };
         page_of[count++] = i;
@@ -131,11 +131,11 @@ rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, 
 
 static bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 
-u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_t current) {
-    const u8str_t none = { .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8str_view_t typed, proven_u8str_view_t current) {
+    const proven_u8str_view_t none = PROVEN_LIT("");
     if (!arena || !typed.ptr) return none;
-    const char *p = typed.ptr;
-    size_t n = typed.len;
+    const char *p = (const char *)typed.ptr;
+    size_t n = typed.size;
     while (n > 0 && is_space(p[0])) { ++p; --n; }
     while (n > 0 && is_space(p[n - 1])) --n;
     if (n >= 2 && p[0] == '"' && p[n - 1] == '"') { ++p; n -= 2; }
@@ -148,48 +148,48 @@ u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_
     size_t keep = drive ? 3 : 1;
     while (n > keep && rubraview_path_is_sep(p[n - 1])) --n;
 
-    u8str_t cleaned = { .ptr = p, .len = n };
-    if (drive && n == 2) cleaned = rubraview_path_join(arena, cleaned, (u8str_t){ .ptr = "/", .len = 1 });
-    else if (!drive && !rubraview_path_is_sep(p[0]) && current.len > 0 && !rubraview_picker_is_places(current)) {
+    proven_u8str_view_t cleaned = { .ptr = (const proven_byte_t *)p, .size = n };
+    if (drive && n == 2) cleaned = rubraview_path_join(arena, cleaned, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"/", .size = 1 });
+    else if (!drive && !rubraview_path_is_sep(p[0]) && current.size > 0 && !rubraview_picker_is_places(current)) {
         cleaned = rubraview_path_join(arena, current, cleaned);
     }
-    if (cleaned.ptr == p) {
+    if ((const char *)cleaned.ptr == p) {
         /* A slice of what was typed: copied, so the OS gets its NUL. */
         proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
         if (!proven_is_ok(res.err)) return none;
         memcpy(res.value.ptr, p, n);
         res.value.ptr[n] = '\0';
-        cleaned = (u8str_t){ .ptr = (const char*)res.value.ptr, .len = n };
+        cleaned = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = n };
     }
     return cleaned;
 }
 
-rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path) {
+rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
-    if (!path.ptr || path.len == 0) return crumbs;
+    if (!path.ptr || path.size == 0) return crumbs;
 
-    crumbs.items[0].label = (u8str_t){ .ptr = T("PC"), .len = 2 };
-    crumbs.items[0].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_PLACES, .len = sizeof(RUBRAVIEW_PICKER_PLACES) - 1 };
+    crumbs.items[0].label = rubraview_u8(T("PC"), strlen(T("PC")));
+    crumbs.items[0].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
     crumbs.count = 1;
     if (rubraview_picker_is_places(path)) return crumbs;
     if (rubraview_picker_is_recent(path)) {
-        crumbs.items[1].label = (u8str_t){ .ptr = T("Recent"), .len = 6 };
-        crumbs.items[1].prefix = (u8str_t){ .ptr = RUBRAVIEW_PICKER_RECENT, .len = sizeof(RUBRAVIEW_PICKER_RECENT) - 1 };
+        crumbs.items[1].label = rubraview_u8(T("Recent"), strlen(T("Recent")));
+        crumbs.items[1].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_RECENT);
         crumbs.count = 2;
         return crumbs;
     }
 
     size_t start = 0;
-    for (size_t i = 0; i <= path.len; ++i) {
-        bool at_end = (i == path.len);
+    for (size_t i = 0; i <= path.size; ++i) {
+        bool at_end = (i == path.size);
         if (!at_end && !rubraview_path_is_sep(path.ptr[i])) continue;
 
         if (i > start) {
             if (crumbs.count >= RUBRAVIEW_PICKER_MAX_CRUMBS) break;
-            crumbs.items[crumbs.count].label = (u8str_t){ .ptr = path.ptr + start, .len = i - start };
+            crumbs.items[crumbs.count].label = (proven_u8str_view_t){ .ptr = path.ptr + start, .size = i - start };
             /* The prefix runs from the start of the path through this
                segment, so tapping a crumb navigates straight there. */
-            crumbs.items[crumbs.count].prefix = (u8str_t){ .ptr = path.ptr, .len = i };
+            crumbs.items[crumbs.count].prefix = (proven_u8str_view_t){ .ptr = path.ptr, .size = i };
             crumbs.count++;
         }
         start = i + 1;
@@ -267,8 +267,8 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
        steps to the next match rather than sticking on the first. */
     for (size_t step = 1; step <= count; ++step) {
         size_t index = (picker->focus + step) % count;
-        u8str_t name = picker->listing->entries[index].name;
-        if (name.len == 0) continue;
+        proven_u8str_view_t name = picker->listing->entries[index].name;
+        if (name.size == 0) continue;
 
         if (tolower((unsigned char)name.ptr[0]) == wanted) {
             picker->focus = index;
@@ -283,8 +283,8 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
    like a file in those modes; only `..` is still the way up. */
 static bool pickable(const rubraview_picker_t *picker, size_t index) {
     if (!picker || !picker->listing || !picker->selected || index >= picker->listing->count) return false;
-    u8str_t name = picker->listing->entries[index].name;
-    return !(picker->listing->entries[index].is_directory && name.len == 2 && name.ptr[0] == '.' && name.ptr[1] == '.');
+    proven_u8str_view_t name = picker->listing->entries[index].name;
+    return !(picker->listing->entries[index].is_directory && name.size == 2 && name.ptr[0] == '.' && name.ptr[1] == '.');
 }
 
 void rubraview_picker_set_mode(rubraview_picker_t *picker, rubraview_picker_mode_t mode) {
@@ -322,16 +322,16 @@ bool rubraview_picker_tap(rubraview_picker_t *picker, size_t index) {
     return true;
 }
 
-size_t rubraview_picker_select_extension(rubraview_picker_t *picker, u8str_t ext, bool on) {
-    if (!picker || !picker->listing || !picker->selected || ext.len == 0) return 0;
+size_t rubraview_picker_select_extension(rubraview_picker_t *picker, proven_u8str_view_t ext, bool on) {
+    if (!picker || !picker->listing || !picker->selected || ext.size == 0) return 0;
     size_t changed = 0;
     for (size_t i = 0; i < picker->listing->count; ++i) {
         if (!pickable(picker, i)) continue;
-        u8str_t name = picker->listing->entries[i].name;
-        if (name.len < ext.len) continue;
-        const char *tail = name.ptr + (name.len - ext.len);
+        proven_u8str_view_t name = picker->listing->entries[i].name;
+        if (name.size < ext.size) continue;
+        const char *tail = (const char *)name.ptr + (name.size - ext.size);
         bool same = true;
-        for (size_t k = 0; k < ext.len && same; ++k) {
+        for (size_t k = 0; k < ext.size && same; ++k) {
             char a = tail[k], b = ext.ptr[k];
             if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
             if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
@@ -373,7 +373,7 @@ void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
     if (out_total_bytes) *out_total_bytes = bytes;
 }
 
-size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, u8str_t patterns) {
+size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, proven_u8str_view_t patterns) {
     if (!listing || !listing->entries) return 0;
     size_t kept = 0;
     for (size_t i = 0; i < listing->count; ++i) {
@@ -398,16 +398,16 @@ size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
     return (size_t)n;
 }
 
-size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_directory) {
+size_t rubraview_picker_type_text(char *buf, size_t cap, proven_u8str_view_t name, bool is_directory) {
     if (!buf || cap == 0) return 0;
     buf[0] = '\0';
     const char *word = is_directory ? T("Folder") : T("File");
-    size_t dot = name.len;
-    for (size_t i = name.len; !is_directory && i-- > 1;) {
+    size_t dot = name.size;
+    for (size_t i = name.size; !is_directory && i-- > 1;) {
         if (name.ptr[i] == '.') { dot = i; break; }
         if (name.ptr[i] == '/' || name.ptr[i] == '\\') break;
     }
-    size_t ext = dot < name.len ? name.len - dot - 1 : 0;
+    size_t ext = dot < name.size ? name.size - dot - 1 : 0;
     if (ext > 0 && ext <= 8 && ext < cap) {
         for (size_t i = 0; i < ext; ++i) {
             char c = name.ptr[dot + 1 + i];
@@ -457,12 +457,12 @@ const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key) {
 }
 
 /* The extension, without its dot; empty for a folder or a name without one. */
-static u8str_t sort_ext(const rubraview_fs_entry_t *e) {
-    if (e->is_directory) return (u8str_t){ .ptr = "", .len = 0 };
-    for (size_t k = e->name.len; k > 0; --k) {
-        if (e->name.ptr[k - 1] == '.') return (u8str_t){ .ptr = e->name.ptr + k, .len = e->name.len - k };
+static proven_u8str_view_t sort_ext(const rubraview_fs_entry_t *e) {
+    if (e->is_directory) return PROVEN_LIT("");
+    for (size_t k = e->name.size; k > 0; --k) {
+        if (e->name.ptr[k - 1] == '.') return (proven_u8str_view_t){ .ptr = e->name.ptr + k, .size = e->name.size - k };
     }
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
 typedef struct sort_ctx {
@@ -473,7 +473,7 @@ typedef struct sort_ctx {
 } sort_ctx_t;
 
 static bool is_dotdot(const rubraview_fs_entry_t *e) {
-    return e->is_directory && e->name.len == 2 && e->name.ptr[0] == '.' && e->name.ptr[1] == '.';
+    return e->is_directory && e->name.size == 2 && e->name.ptr[0] == '.' && e->name.ptr[1] == '.';
 }
 
 /* <0 when entry a goes before entry b. */

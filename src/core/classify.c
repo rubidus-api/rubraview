@@ -1,19 +1,19 @@
 #include "rubraview/classify.h"
 #include <string.h>
 
-static size_t find(const rubraview_classify_t *c, u8str_t path) {
-    for (size_t i = 0; i < c->count; ++i) if (rubraview_u8_eq(c->paths[i], path)) return i;
+static size_t find(const rubraview_classify_t *c, proven_u8str_view_t path) {
+    for (size_t i = 0; i < c->count; ++i) if (proven_u8str_view_eq(c->paths[i], path)) return i;
     return SIZE_MAX;
 }
 
-int32_t rubraview_classify_folder_of(const rubraview_classify_t *c, u8str_t path) {
-    if (!c || path.len == 0) return 0;
+int32_t rubraview_classify_folder_of(const rubraview_classify_t *c, proven_u8str_view_t path) {
+    if (!c || path.size == 0) return 0;
     size_t i = find(c, path);
     return i == SIZE_MAX ? 0 : c->folders[i];
 }
 
-bool rubraview_classify_set(rubraview_classify_t *c, u8str_t path, int32_t folder) {
-    if (!c || path.len == 0 || folder < 0 || folder > 9) return false;
+bool rubraview_classify_set(rubraview_classify_t *c, proven_u8str_view_t path, int32_t folder) {
+    if (!c || path.size == 0 || folder < 0 || folder > 9) return false;
     size_t i = find(c, path);
     if (folder == 0) {
         if (i != SIZE_MAX) rubraview_classify_remove_at(c, i);

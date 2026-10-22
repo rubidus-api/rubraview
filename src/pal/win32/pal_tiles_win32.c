@@ -288,11 +288,11 @@ void rubraview_pal_tiles_stop(rubraview_tiles_t *t) {
     /* Otherwise the thread still holds `t`; it is left, not freed under it. */
 }
 
-static void set_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path, uint8_t *bytes, size_t size,
+static void set_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_view_t path, uint8_t *bytes, size_t size,
                        bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
     AcquireSRWLockExclusive(&t->lock);
     t->generation = generation;
-    t->path_len = path.len < sizeof(t->path) ? path.len : 0;
+    t->path_len = path.size < sizeof(t->path) ? path.size : 0;
     if (t->path_len) memcpy(t->path, path.ptr, t->path_len);
     free(t->given);   /* a page never taken: the thread was still on another */
     t->given = bytes;
@@ -308,7 +308,7 @@ static void set_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path, 
     ReleaseSRWLockExclusive(&t->lock);
 }
 
-void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, u8str_t path,
+void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_view_t path,
                                 bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
     if (!t) return;
     set_source(t, generation, path, NULL, 0, apply_exif_orientation, picture_w, picture_h);
@@ -317,7 +317,7 @@ void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, u8str
 void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *t, uint32_t generation, uint8_t *bytes, size_t size,
                                       bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
     if (!t) { free(bytes); return; }
-    set_source(t, generation, (u8str_t){ .ptr = "", .len = 0 }, bytes, size,
+    set_source(t, generation, PROVEN_LIT(""), bytes, size,
                apply_exif_orientation, picture_w, picture_h);
 }
 

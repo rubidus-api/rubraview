@@ -29,8 +29,8 @@ typedef enum rubraview_help_line_kind {
 
 typedef struct rubraview_help_line {
     rubraview_help_line_kind_t kind;
-    u8str_t keys;   /* "Ctrl+O", or "Right, Space" when several are bound */
-    u8str_t text;   /* what it does, or the heading */
+    proven_u8str_view_t keys;   /* "Ctrl+O", or "Right, Space" when several are bound */
+    proven_u8str_view_t text;   /* what it does, or the heading */
 } rubraview_help_line_t;
 
 /**
@@ -46,7 +46,7 @@ size_t rubraview_help_build(proven_arena_t *arena,
                             rubraview_help_line_t *out, size_t max);
 
 /** What an action is called in the menu or the toolbox, or an empty slice. */
-u8str_t rubraview_help_action_label(const rubraview_boxes_doc_t *boxes, u8str_t action);
+proven_u8str_view_t rubraview_help_action_label(const rubraview_boxes_doc_t *boxes, proven_u8str_view_t action);
 
 #ifdef __cplusplus
 }

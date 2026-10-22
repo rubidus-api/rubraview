@@ -139,7 +139,7 @@ rubraview_export_options_t rubraview_export_defaults(void);
 void rubraview_export_clamp(rubraview_export_options_t *options);
 
 /** The file extension a format writes, without the dot ("jpg", "png", ...). */
-u8str_t rubraview_export_extension(rubraview_export_format_t format);
+proven_u8str_view_t rubraview_export_extension(rubraview_export_format_t format);
 
 /**
  * RV-134: a JPEG's JFIF block (APP0 right after SOI) set to `dpi` dots an
@@ -149,7 +149,7 @@ u8str_t rubraview_export_extension(rubraview_export_format_t format);
 bool rubraview_jpeg_set_dpi(uint8_t *jpeg, size_t len, double dpi);
 
 /** The format a filename implies, or SAME_AS_SOURCE when it names none. */
-rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename);
+rubraview_export_format_t rubraview_export_format_for_name(proven_u8str_view_t filename);
 
 /* The export panel's rows a format has use for (owner, 2026-10-15: only those shown). */
 enum {
@@ -175,10 +175,10 @@ enum {
  * Which rows the export panel shows for `format`; "as the file" stands
  * for the format `source_name`'s extension names (none known: no rows).
  */
-uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_name, bool webp_lossless);
+uint32_t rubraview_export_rows(rubraview_export_format_t format, proven_u8str_view_t source_name, bool webp_lossless);
 
 /** RV-140: the rows for these options, the palette's only when one is written. */
-uint32_t rubraview_export_rows_of(const rubraview_export_options_t *options, u8str_t source_name);
+uint32_t rubraview_export_rows_of(const rubraview_export_options_t *options, proven_u8str_view_t source_name);
 
 /** RV-140: the palette's size these options ask for, 2..256. */
 int32_t rubraview_export_palette_size(const rubraview_export_options_t *options);

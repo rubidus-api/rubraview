@@ -70,13 +70,13 @@ size_t rubraview_subwin_shift(rubraview_subtitle_track_t *track, uint32_t *rows,
  * `2`, a comma for the point as well. False when it is not a number, not
  * above nothing, or more than an hour.
  */
-bool rubraview_subwin_amount(u8str_t text, double *out_seconds);
+bool rubraview_subwin_amount(proven_u8str_view_t text, double *out_seconds);
 
 /** A time as the list writes it: `1:02:03.45`, hours always, hundredths. */
-u8str_t rubraview_subwin_time(char *buffer, size_t size, double seconds);
+proven_u8str_view_t rubraview_subwin_time(char *buffer, size_t size, double seconds);
 
 /** A subtitle on one row: its line breaks written as " / ". Cut at `size`, on a character. */
-u8str_t rubraview_subwin_line(char *buffer, size_t size, u8str_t text);
+proven_u8str_view_t rubraview_subwin_line(char *buffer, size_t size, proven_u8str_view_t text);
 
 #ifdef __cplusplus
 }

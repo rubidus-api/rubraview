@@ -137,7 +137,7 @@ void rubraview_eq_preset_gains(rubraview_eq_preset_t preset, float *out_gains_db
     memcpy(out_gains_db, EQ_PRESETS[preset], sizeof(EQ_PRESETS[0]));
 }
 
-u8str_t rubraview_eq_preset_name(rubraview_eq_preset_t preset) {
+proven_u8str_view_t rubraview_eq_preset_name(rubraview_eq_preset_t preset) {
     switch (preset) {
         case RUBRAVIEW_EQ_FLAT: return TU8("Flat");
         case RUBRAVIEW_EQ_ROCK: return TU8("Rock");
@@ -147,7 +147,7 @@ u8str_t rubraview_eq_preset_name(rubraview_eq_preset_t preset) {
         case RUBRAVIEW_EQ_BASS_BOOST: return TU8("Bass boost");
         case RUBRAVIEW_EQ_VOCAL_BOOST: return TU8("Vocal boost");
         case RUBRAVIEW_EQ_ACOUSTIC: return TU8("Acoustic");
-        default: return U8("");
+        default: return PROVEN_LIT("");
     }
 }
 
@@ -294,8 +294,8 @@ double rubraview_replaygain_factor(const rubraview_replaygain_t *tags,
     return factor;
 }
 
-bool rubraview_replaygain_parse_db(u8str_t text, double *out_db) {
-    if (!out_db || text.len == 0) return false;
+bool rubraview_replaygain_parse_db(proven_u8str_view_t text, double *out_db) {
+    if (!out_db || text.size == 0) return false;
 
     double value = 0.0;
     size_t used = 0;
@@ -303,9 +303,9 @@ bool rubraview_replaygain_parse_db(u8str_t text, double *out_db) {
 
     /* The tag is conventionally "-7.230000 dB"; anything after the
        number that is not a unit means it is not a gain. */
-    while (used < text.len && (text.ptr[used] == ' ' || text.ptr[used] == '\t')) used++;
-    u8str_t unit = { .ptr = text.ptr + used, .len = text.len - used };
-    if (unit.len > 0 && !rubraview_u8_starts_with_ci(unit, "db")) return false;
+    while (used < text.size && (text.ptr[used] == ' ' || text.ptr[used] == '\t')) used++;
+    proven_u8str_view_t unit = { .ptr = text.ptr + used, .size = text.size - used };
+    if (unit.size > 0 && !rubraview_u8_starts_with_ci(unit, "db")) return false;
 
     *out_db = value;
     return true;

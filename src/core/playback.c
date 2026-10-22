@@ -116,8 +116,8 @@ double rubraview_seekbar_fraction(double position_seconds, double duration_secon
     return clampd(position_seconds / duration_seconds, 0.0, 1.0);
 }
 
-u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds) {
-    u8str_t empty = { .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 16) return empty;
 
     if (seconds < 0.0) seconds = 0.0;
@@ -143,11 +143,11 @@ u8str_t rubraview_format_timecode(char *buffer, size_t buffer_size, double secon
     }
 
     if (written <= 0) return empty;
-    return (u8str_t){ .ptr = buffer, .len = (size_t)written };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written };
 }
 
-bool rubraview_parse_timecode(u8str_t text, double *out_seconds) {
-    if (!out_seconds || text.len == 0) return false;
+bool rubraview_parse_timecode(proven_u8str_view_t text, double *out_seconds) {
+    if (!out_seconds || text.size == 0) return false;
 
     /* Up to three parts divided by colons — seconds, or minutes and
        seconds, or hours, minutes and seconds — and the last of them may
@@ -155,22 +155,22 @@ bool rubraview_parse_timecode(u8str_t text, double *out_seconds) {
     double part[3] = { 0.0, 0.0, 0.0 };
     size_t count = 0;
     size_t i = 0;
-    while (i < text.len && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
+    while (i < text.size && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
 
     bool any_digit = false;
-    while (i <= text.len) {
+    while (i <= text.size) {
         double whole = 0.0;
         bool digits = false;
-        while (i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
+        while (i < text.size && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
             whole = whole * 10.0 + (double)(text.ptr[i] - '0');
             digits = true;
             any_digit = true;
             i++;
         }
-        if (i < text.len && (text.ptr[i] == '.' || text.ptr[i] == ',')) {
+        if (i < text.size && (text.ptr[i] == '.' || text.ptr[i] == ',')) {
             i++;
             double scale = 0.1;
-            while (i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
+            while (i < text.size && text.ptr[i] >= '0' && text.ptr[i] <= '9') {
                 whole += (double)(text.ptr[i] - '0') * scale;
                 scale *= 0.1;
                 digits = true;
@@ -181,11 +181,11 @@ bool rubraview_parse_timecode(u8str_t text, double *out_seconds) {
         if (!digits) return false;
         if (count >= 3) return false;
         part[count++] = whole;
-        if (i < text.len && text.ptr[i] == ':') { i++; continue; }
+        if (i < text.size && text.ptr[i] == ':') { i++; continue; }
         break;
     }
-    while (i < text.len && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
-    if (i != text.len || !any_digit) return false;   /* something else is in there */
+    while (i < text.size && (text.ptr[i] == ' ' || text.ptr[i] == '\t')) i++;
+    if (i != text.size || !any_digit) return false;   /* something else is in there */
 
     double seconds = 0.0;
     for (size_t k = 0; k < count; ++k) {
@@ -212,12 +212,12 @@ bool rubraview_tracks_add(rubraview_track_set_t *set, rubraview_track_t track) {
     return true;
 }
 
-static bool language_matches(u8str_t a, u8str_t b) {
-    if (a.len == 0 || b.len == 0) return false;
+static bool language_matches(proven_u8str_view_t a, proven_u8str_view_t b) {
+    if (a.size == 0 || b.size == 0) return false;
 
     /* Containers write "kor", "ko", "kor-KR" for the same thing, so the
        shorter tag is compared as a prefix of the longer. */
-    size_t n = a.len < b.len ? a.len : b.len;
+    size_t n = a.size < b.size ? a.size : b.size;
     for (size_t i = 0; i < n; ++i) {
         char x = a.ptr[i], y = b.ptr[i];
         if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
@@ -228,7 +228,7 @@ static bool language_matches(u8str_t a, u8str_t b) {
 }
 
 int32_t rubraview_tracks_choose(const rubraview_track_set_t *set, rubraview_track_kind_t kind,
-                                u8str_t preferred_language) {
+                                proven_u8str_view_t preferred_language) {
     if (!set) return -1;
 
     int32_t by_language = -1, by_default = -1, first = -1;
@@ -288,14 +288,14 @@ int32_t rubraview_tracks_next(const rubraview_track_set_t *set, rubraview_track_
     return current;
 }
 
-u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
+proven_u8str_view_t rubraview_track_label(char *buffer, size_t buffer_size,
                               const rubraview_track_set_t *set, int32_t index) {
-    u8str_t empty = { .ptr = "", .len = 0 };
+    proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 8) return empty;
 
     if (!set || index < 0 || (size_t)index >= set->count) {
         int written = snprintf(buffer, buffer_size, T("Off"));
-        return written > 0 ? (u8str_t){ .ptr = buffer, .len = (size_t)written } : empty;
+        return written > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written } : empty;
     }
 
     const rubraview_track_t *track = &set->tracks[index];
@@ -309,12 +309,12 @@ u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
     }
 
     char language[32];
-    size_t n = track->language.len < sizeof(language) - 1 ? track->language.len : sizeof(language) - 1;
+    size_t n = track->language.size < sizeof(language) - 1 ? track->language.size : sizeof(language) - 1;
     if (n > 0) memcpy(language, track->language.ptr, n);
     language[n] = '\0';
 
     char codec[32];
-    size_t c = track->codec.len < sizeof(codec) - 1 ? track->codec.len : sizeof(codec) - 1;
+    size_t c = track->codec.size < sizeof(codec) - 1 ? track->codec.size : sizeof(codec) - 1;
     if (c > 0) memcpy(codec, track->codec.ptr, c);
     codec[c] = '\0';
 
@@ -331,7 +331,7 @@ u8str_t rubraview_track_label(char *buffer, size_t buffer_size,
 
     if (written <= 0) return empty;
     if ((size_t)written >= buffer_size) written = (int)buffer_size - 1;
-    return (u8str_t){ .ptr = buffer, .len = (size_t)written };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written };
 }
 
 double rubraview_pagebar_fraction(size_t index, size_t count) {
@@ -348,12 +348,12 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
     return page < count ? page : count - 1;
 }
 
-u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+proven_u8str_view_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
                                int volume, bool muted, double speed, double ab_a, double ab_b) {
-    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!buffer || buffer_size == 0) return PROVEN_LIT("");
     char at[32], total[32], sp[16] = "";
-    u8str_t a = rubraview_format_timecode(at, sizeof(at), position, false);
-    u8str_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
+    proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), position, false);
+    proven_u8str_view_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
     if (speed > 0.0 && fabs(speed - 1.0) > 1e-6) {
         int n = snprintf(sp, sizeof(sp), "%.2f", speed);
         while (n > 0 && sp[n - 1] == '0') sp[--n] = '\0';
@@ -362,12 +362,12 @@ u8str_t rubraview_media_status(char *buffer, size_t buffer_size, double position
     char vol[24];
     if (muted) snprintf(vol, sizeof(vol), "muted");
     else snprintf(vol, sizeof(vol), "vol %d%%", volume);
-    int n = snprintf(buffer, buffer_size, "%.*s / %.*s   %s%s%s%s%s", (int)a.len, a.ptr, (int)t.len, t.ptr, vol,
+    int n = snprintf(buffer, buffer_size, "%.*s / %.*s   %s%s%s%s%s", (int)a.size, a.ptr, (int)t.size, t.ptr, vol,
                      sp[0] ? "   " : "", sp, sp[0] ? "x" : "",
                      ab_a >= 0.0 ? (ab_b > ab_a ? "   A-B" : "   A-") : "");
-    if (n < 0) { buffer[0] = '\0'; return (u8str_t){ .ptr = buffer, .len = 0 }; }
+    if (n < 0) { buffer[0] = '\0'; return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 }; }
     size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
-    return (u8str_t){ .ptr = buffer, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
 }
 
 void rubraview_timecode_split(double seconds, int32_t *out_hours, int32_t *out_minutes, double *out_seconds) {
@@ -379,9 +379,9 @@ void rubraview_timecode_split(double seconds, int32_t *out_hours, int32_t *out_m
 }
 
 /* One field: digits, and for the seconds one point (or comma) and up to three decimals. */
-static bool timecode_field(u8str_t text, bool fraction, double *out) {
+static bool timecode_field(proven_u8str_view_t text, bool fraction, double *out) {
     double value = 0.0, scale = 0.0;
-    for (size_t i = 0; i < text.len; ++i) {
+    for (size_t i = 0; i < text.size; ++i) {
         char c = text.ptr[i];
         if (c >= '0' && c <= '9') {
             if (scale > 0.0) {
@@ -401,9 +401,9 @@ static bool timecode_field(u8str_t text, bool fraction, double *out) {
     return true;
 }
 
-bool rubraview_timecode_join(u8str_t hours, u8str_t minutes, u8str_t seconds, double *out) {
+bool rubraview_timecode_join(proven_u8str_view_t hours, proven_u8str_view_t minutes, proven_u8str_view_t seconds, double *out) {
     if (!out) return false;
-    if (hours.len == 0 && minutes.len == 0 && seconds.len == 0) { *out = -1.0; return true; }
+    if (hours.size == 0 && minutes.size == 0 && seconds.size == 0) { *out = -1.0; return true; }
     double h = 0.0, m = 0.0, s = 0.0;
     if (!timecode_field(hours, false, &h) || !timecode_field(minutes, false, &m) || !timecode_field(seconds, true, &s)) return false;
     *out = h * 3600.0 + m * 60.0 + s;

@@ -38,9 +38,9 @@ typedef enum rubraview_mkv_sub {
 typedef struct rubraview_mkv_track {
     uint64_t            number;        /* as blocks name it */
     uint8_t             type;          /* 1 video, 2 sound, 0x11 subtitles */
-    u8str_t             codec;         /* CodecID, in the file */
-    u8str_t             language;      /* BCP 47 when given, else the three letters; "eng" when neither (the format's default) */
-    u8str_t             name;
+    proven_u8str_view_t             codec;         /* CodecID, in the file */
+    proven_u8str_view_t             language;      /* BCP 47 when given, else the three letters; "eng" when neither (the format's default) */
+    proven_u8str_view_t             name;
     const uint8_t      *private_data;  /* CodecPrivate, in the file */
     size_t              private_size;
     bool                encoded;       /* compressed or encrypted (ContentEncodings): its blocks are not text as they stand */
@@ -124,7 +124,7 @@ size_t rubraview_mkv_subtitle_cue(const rubraview_mkv_track_t *track, unsigned c
  * Only letters, digits and '-' of the language are used. Returns the
  * length written (with a terminator), 0 when it does not fit.
  */
-size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, u8str_t film_path, unsigned ordinal, char *out, size_t cap);
+size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, proven_u8str_view_t film_path, unsigned ordinal, char *out, size_t cap);
 
 /** ".srt" or ".ass" for a track that can be taken out; "" otherwise. */
 const char *rubraview_mkv_subtitle_ext(const rubraview_mkv_track_t *track);
@@ -154,9 +154,9 @@ typedef struct rubraview_mkv_put_track {
     const rubraview_mkv_put_cue_t *cues;
     size_t                         count;
     const char                    *codec;          /* "S_TEXT/UTF8" or "S_TEXT/ASS" */
-    u8str_t                        language;       /* three letters; empty is "und" */
-    u8str_t                        name;
-    u8str_t                        private_data;   /* SubStation's header, through its `Format:` line */
+    proven_u8str_view_t                        language;       /* three letters; empty is "und" */
+    proven_u8str_view_t                        name;
+    proven_u8str_view_t                        private_data;   /* SubStation's header, through its `Format:` line */
 } rubraview_mkv_put_track_t;
 
 /**

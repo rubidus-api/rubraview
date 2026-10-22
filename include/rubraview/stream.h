@@ -22,15 +22,15 @@ extern "C" {
 
 /** An address of a station: `http`, `https`, `mms`, `mmsh` or `mmst`, `://`, a host, no control characters,
     shorter than RUBRAVIEW_STREAM_URL_MAX. Upper or lower case scheme. */
-bool rubraview_stream_is_address(u8str_t text);
+bool rubraview_stream_is_address(proven_u8str_view_t text);
 
 /** What FFmpeg is asked to open, in order, NUL-terminated: `mms://` as `mmsh://` (MMS over HTTP) and then
     `mmst://` (over TCP); any other address as it is, once. 0 when `address` is not one. */
-size_t rubraview_stream_ffmpeg_urls(u8str_t address, char out[2][RUBRAVIEW_STREAM_URL_MAX]);
+size_t rubraview_stream_ffmpeg_urls(proven_u8str_view_t address, char out[2][RUBRAVIEW_STREAM_URL_MAX]);
 
 /** The name shown for an address with no title: host and path, the scheme, a user name and password, the
     query and a trailing `/` left out. A view into `address`. */
-u8str_t rubraview_stream_display_name(u8str_t address);
+proven_u8str_view_t rubraview_stream_display_name(proven_u8str_view_t address);
 
 #ifdef __cplusplus
 }

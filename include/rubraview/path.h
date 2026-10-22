@@ -22,13 +22,13 @@ static inline bool rubraview_path_is_sep(char c) {
  * E.g. "D:/Photos/vacation/img.jpg" -> "D:/Photos/vacation"
  * E.g. "img.jpg" -> "" (empty slice)
  */
-u8str_t rubraview_path_dirname(u8str_t path);
+proven_u8str_view_t rubraview_path_dirname(proven_u8str_view_t path);
 
 /**
  * Extract filename portion of path with extension (Zero-copy slice).
  * E.g. "D:/Photos/vacation/img.jpg" -> "img.jpg"
  */
-u8str_t rubraview_path_basename(u8str_t path);
+proven_u8str_view_t rubraview_path_basename(proven_u8str_view_t path);
 
 /**
  * Extract file extension including leading dot in lowercase comparison (Zero-copy slice).
@@ -36,19 +36,19 @@ u8str_t rubraview_path_basename(u8str_t path);
  * E.g. "archive.tar.gz" -> ".gz"
  * E.g. "README" -> "" (empty slice)
  */
-u8str_t rubraview_path_ext(u8str_t path);
+proven_u8str_view_t rubraview_path_ext(proven_u8str_view_t path);
 
 /**
  * Extract filename stem without extension (Zero-copy slice).
  * E.g. "D:/Photos/vacation/img.jpg" -> "img"
  */
-u8str_t rubraview_path_stem(u8str_t path);
+proven_u8str_view_t rubraview_path_stem(proven_u8str_view_t path);
 
 /**
  * Case-insensitive file extension match.
  * E.g. rubraview_path_has_ext(path, ".jpg") returns true for "test.JPG" or "test.jpg".
  */
-bool rubraview_path_has_ext(u8str_t path, const char *ext);
+bool rubraview_path_has_ext(proven_u8str_view_t path, const char *ext);
 
 /**
  * Whether two paths name the same file the way Windows decides it:
@@ -57,7 +57,7 @@ bool rubraview_path_has_ext(u8str_t path, const char *ext);
  * "Vol 02.cbz" with '/', and both are the same volume. Nothing is
  * resolved on disk: "a/../b" and "b" still differ.
  */
-bool rubraview_path_same(u8str_t a, u8str_t b);
+bool rubraview_path_same(proven_u8str_view_t a, proven_u8str_view_t b);
 
 /**
  * A file name another program handed over (a browser's dragged picture, a
@@ -69,14 +69,14 @@ bool rubraview_path_same(u8str_t a, u8str_t b);
  * UTF-8 boundary, keeping its extension when it can. An empty result is
  * "dropped". Written into `buf`, NUL-terminated; the returned view is it.
  */
-u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name);
+proven_u8str_view_t rubraview_path_safe_name(char *buf, size_t cap, proven_u8str_view_t name);
 
 /**
  * Join directory and filename into an arena-allocated path.
  * Strictly guarantees the null-terminated allocation invariant:
  * (allocated size = len + 1, and ptr[len] == '\0').
  */
-u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename);
+proven_u8str_view_t rubraview_path_join(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename);
 
 /**
  * The file beside this one with another extension, as a whole path:
@@ -92,16 +92,16 @@ u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename
  * On another drive or share there is no way from one to the other, and
  * `path` comes back as it is. NUL-terminated, in `arena`.
  */
-u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t path);
+proven_u8str_view_t rubraview_path_relative(proven_arena_t *arena, proven_u8str_view_t base, proven_u8str_view_t path);
 
-u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext);
+proven_u8str_view_t rubraview_path_with_ext(proven_arena_t *arena, proven_u8str_view_t path, const char *new_ext);
 
 /**
  * A folder as typed or pasted into the settings: spaces and quotes taken
  * off both ends, and the separators at its end ("C:\\x\\" is "C:\\x"; a
  * drive's root "C:\\" stays). A view into `typed`, not NUL-terminated.
  */
-u8str_t rubraview_path_typed_folder(u8str_t typed);
+proven_u8str_view_t rubraview_path_typed_folder(proven_u8str_view_t typed);
 
 /*
  * D-120: `name` is what a viewer writes a state file through before it
@@ -109,7 +109,7 @@ u8str_t rubraview_path_typed_folder(u8str_t typed);
  * the process's number, so a file left by a viewer that died can be told
  * from one being written now. Names, not paths; no case folding.
  */
-bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid);
+bool rubraview_path_state_temp(proven_u8str_view_t name, proven_u8str_view_t base, uint32_t *out_pid);
 
 #ifdef __cplusplus
 }

@@ -67,7 +67,7 @@ def check_menu(code, source):
 def main():
     code = (ROOT / "src" / "core" / "filemanage.c").read_text(encoding="utf-8")
     body = code[code.index("rubraview_shell_extensions(void)"):]
-    viewer = set(re.search(r'U8\("([^"]*)"\)', body).group(1).split(";"))
+    viewer = set(re.search(r'PROVEN_LIT\("([^"]*)"\)', body).group(1).split(";"))
     source = (ROOT / "resources" / "distribution" / "rubraview-store.toml").read_text(encoding="utf-8")
     store = re.findall(r'^extension = "\.([^"]+)"$', source, re.M)
     problems = []

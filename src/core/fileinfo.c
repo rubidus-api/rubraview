@@ -5,12 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 
-static u8str_t keep(proven_arena_t *arena, const char *text, size_t n) {
+static proven_u8str_view_t keep(proven_arena_t *arena, const char *text, size_t n) {
     proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     if (n) memcpy(res.value.ptr, text, n);
     res.value.ptr[n] = '\0';
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = n };
 }
 
 static void push(proven_arena_t *arena, rubraview_info_t *info, rubraview_info_line_t line) {
@@ -31,10 +31,10 @@ void rubraview_info_heading(proven_arena_t *arena, rubraview_info_t *info, const
     push(arena, info, (rubraview_info_line_t){ .heading = true, .label = keep(arena, title, strlen(title)) });
 }
 
-void rubraview_info_add(proven_arena_t *arena, rubraview_info_t *info, const char *label, u8str_t value) {
-    if (value.len == 0) return;
+void rubraview_info_add(proven_arena_t *arena, rubraview_info_t *info, const char *label, proven_u8str_view_t value) {
+    if (value.size == 0) return;
     push(arena, info, (rubraview_info_line_t){ .label = keep(arena, label, strlen(label)),
-                                               .value = keep(arena, value.ptr, value.len) });
+                                               .value = keep(arena, (const char *)value.ptr, value.size) });
 }
 
 void rubraview_info_addf(proven_arena_t *arena, rubraview_info_t *info, const char *label, const char *format, ...) {
@@ -45,7 +45,7 @@ void rubraview_info_addf(proven_arena_t *arena, rubraview_info_t *info, const ch
     va_end(ap);
     if (n <= 0) return;
     size_t len = (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1;
-    rubraview_info_add(arena, info, label, (u8str_t){ .ptr = buf, .len = len });
+    rubraview_info_add(arena, info, label, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = len });
 }
 
 static size_t done(char *buf, size_t cap, int n) {
@@ -146,7 +146,7 @@ static const char *orientation_words(int32_t o) {
     }
 }
 
-static u8str_t lit(const char *s) { return (u8str_t){ .ptr = s, .len = strlen(s) }; }
+static proven_u8str_view_t lit(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = strlen(s) }; }
 
 /* The EXIF enumerations in words; NULL for "not given" and for values the
    standard does not name. */
@@ -209,7 +209,7 @@ void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, cons
     else rubraview_info_add(arena, info, T("Taken"), lit(x->date_taken));
     if (strcmp(x->date_digitized, x->date_taken) != 0) rubraview_info_add(arena, info, T("Digitized"), lit(x->date_digitized));
     rubraview_info_add(arena, info, T("Changed"), lit(x->date_modified));
-    if (x->has_exposure) rubraview_info_add(arena, info, T("Exposure"), (u8str_t){ b, rubraview_info_exposure(b, sizeof(b), x->exposure_num, x->exposure_den) });
+    if (x->has_exposure) rubraview_info_add(arena, info, T("Exposure"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_exposure(b, sizeof(b), x->exposure_num, x->exposure_den) });
     if (x->has_fnumber) rubraview_info_addf(arena, info, T("Aperture"), "f/%.1f", x->fnumber);
     if (x->iso) rubraview_info_addf(arena, info, T("ISO"), "%u", (unsigned)x->iso);
     if (x->has_focal) {
@@ -217,7 +217,7 @@ void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, cons
         else rubraview_info_addf(arena, info, T("Focal length"), T("%.0f mm"), x->focal_mm);
     }
     if (x->has_bias) rubraview_info_addf(arena, info, T("Exposure bias"), T("%+.2f EV"), x->exposure_bias);
-    if (x->has_flash) rubraview_info_add(arena, info, T("Flash"), (u8str_t){ b, flash_words(b, sizeof(b), x->flash) });
+    if (x->has_flash) rubraview_info_add(arena, info, T("Flash"), (proven_u8str_view_t){ (const proven_byte_t *)b, flash_words(b, sizeof(b), x->flash) });
     if (x->has_max_aperture) rubraview_info_addf(arena, info, T("Widest aperture"), "f/%.1f", x->max_aperture);
     if (x->has_lens_spec) {
         double *s = (double*)x->lens_spec;
@@ -260,7 +260,7 @@ void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, cons
         else rubraview_info_addf(arena, info, T("Resolution (EXIF)"), "%.0f x %.0f %s", x->x_resolution, yr, unit);
     }
     if (x->pixel_x && x->pixel_y) rubraview_info_addf(arena, info, T("Pixels (EXIF)"), "%u x %u", (unsigned)x->pixel_x, (unsigned)x->pixel_y);
-    if (x->has_gps) rubraview_info_add(arena, info, T("Location"), (u8str_t){ b, rubraview_info_gps(b, sizeof(b), x->latitude, x->longitude) });
+    if (x->has_gps) rubraview_info_add(arena, info, T("Location"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_gps(b, sizeof(b), x->latitude, x->longitude) });
     /* The same place in decimal degrees, which a map's search box takes as typed. */
     if (x->has_gps) rubraview_info_addf(arena, info, T("Coordinates"), "%.6f, %.6f", x->latitude, x->longitude);
     if (x->has_altitude) rubraview_info_addf(arena, info, T("Altitude"), "%.0f m", x->altitude_m);
@@ -307,7 +307,7 @@ void rubraview_info_add_iptc(proven_arena_t *arena, rubraview_info_t *info, cons
         int k = snprintf(b + n, sizeof(b) - n, n ? " (%s)" : "%s", x->country_code);
         if (k > 0) n += (size_t)k;
     }
-    if (n) rubraview_info_add(arena, info, T("Place"), (u8str_t){ b, n < sizeof(b) ? n : sizeof(b) - 1 });
+    if (n) rubraview_info_add(arena, info, T("Place"), (proven_u8str_view_t){ (const proven_byte_t *)b, n < sizeof(b) ? n : sizeof(b) - 1 });
     rubraview_info_add(arena, info, T("Job"), lit(x->job_id));
     rubraview_info_add(arena, info, T("Instructions"), lit(x->instructions));
 }
@@ -365,7 +365,7 @@ uint32_t rubraview_info_unique_colours(proven_arena_t *arena, const rubraview_pi
 }
 
 size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, int32_t label_cols,
-                           u8str_t *rows, size_t capacity) {
+                           proven_u8str_view_t *rows, size_t capacity) {
     if (!arena || !info || !rows) return 0;
     size_t n = 0;
     for (size_t i = 0; i < info->count && n < capacity; ++i) {
@@ -375,16 +375,16 @@ size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, 
            Korean label's characters are three bytes and two columns each. */
         size_t cols = rubraview_text_columns(l->label);
         size_t pad = label_cols > (int32_t)cols ? (size_t)label_cols - cols : 1;
-        size_t len = 2 + l->label.len + pad + l->value.len;
+        size_t len = 2 + l->label.size + pad + l->value.size;
         proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
         if (!proven_is_ok(res.err)) break;
         char *p = (char*)res.value.ptr;
         memcpy(p, "  ", 2);
-        memcpy(p + 2, l->label.ptr, l->label.len);
-        memset(p + 2 + l->label.len, ' ', pad);
-        memcpy(p + 2 + l->label.len + pad, l->value.ptr, l->value.len);
+        memcpy(p + 2, l->label.ptr, l->label.size);
+        memset(p + 2 + l->label.size, ' ', pad);
+        memcpy(p + 2 + l->label.size + pad, l->value.ptr, l->value.size);
         p[len] = '\0';
-        rows[n++] = (u8str_t){ .ptr = p, .len = len };
+        rows[n++] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)p, .size = len };
     }
     return n;
 }

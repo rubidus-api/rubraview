@@ -38,70 +38,70 @@ double rubraview_osd_opacity(const rubraview_osd_t *osd) {
     return 1.0 - (into_fade / osd->fade_seconds);
 }
 
-u8str_t rubraview_osd_format(char *buffer, size_t buffer_size,
-                             u8str_t file_name, int32_t width, int32_t height,
+proven_u8str_view_t rubraview_osd_format(char *buffer, size_t buffer_size,
+                             proven_u8str_view_t file_name, int32_t width, int32_t height,
                              double zoom_percent, size_t index, size_t total) {
-    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!buffer || buffer_size == 0) return PROVEN_LIT("");
 
     /* file_name is a slice and need not be NUL-terminated, so its length
        is passed explicitly via the precision specifier. */
     /* No name and no count: the toolbox's line says those (owner,
        2026-09-29), and the status line keeps what only it says. */
     int written;
-    if (file_name.len == 0 && total == 0) {
+    if (file_name.size == 0 && total == 0) {
         written = snprintf(buffer, buffer_size, "%d x %d  |  %.0f%%", width, height, zoom_percent);
     } else {
         written = snprintf(buffer, buffer_size, "%.*s  |  %d x %d  |  %.0f%%  |  %zu / %zu",
-                           (int)file_name.len, file_name.ptr ? file_name.ptr : "",
+                           (int)file_name.size, file_name.ptr ? (const char *)file_name.ptr : "",
                            width, height, zoom_percent,
                            total > 0 ? index + 1 : 0, total);
     }
     if (written < 0) {
         buffer[0] = '\0';
-        return (u8str_t){ .ptr = buffer, .len = 0 };
+        return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 };
     }
 
     size_t len = (size_t)written;
     if (len >= buffer_size) len = buffer_size - 1; /* snprintf truncated */
-    return (u8str_t){ .ptr = buffer, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
 }
 
-size_t rubraview_utf8_chars(u8str_t text) {
+size_t rubraview_utf8_chars(proven_u8str_view_t text) {
     size_t n = 0;
-    for (size_t i = 0; i < text.len; ++i) if (((uint8_t)text.ptr[i] & 0xC0) != 0x80) n++;
+    for (size_t i = 0; i < text.size; ++i) if (((uint8_t)text.ptr[i] & 0xC0) != 0x80) n++;
     return n;
 }
 
 /* The byte offset of code point `chars` in `text` (its length when past the end). */
-static size_t utf8_offset(u8str_t text, size_t chars) {
+static size_t utf8_offset(proven_u8str_view_t text, size_t chars) {
     size_t n = 0;
-    for (size_t i = 0; i < text.len; ++i) {
+    for (size_t i = 0; i < text.size; ++i) {
         if (((uint8_t)text.ptr[i] & 0xC0) != 0x80) {
             if (n == chars) return i;
             n++;
         }
     }
-    return text.len;
+    return text.size;
 }
 
-u8str_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, u8str_t text, size_t head_chars, size_t tail_chars) {
+proven_u8str_view_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, proven_u8str_view_t text, size_t head_chars, size_t tail_chars) {
     size_t total = rubraview_utf8_chars(text);
     if (total <= head_chars + tail_chars + 3 || !buffer) return text;
     size_t head = utf8_offset(text, head_chars);
     size_t tail = utf8_offset(text, total - tail_chars);
-    size_t need = head + 3 + (text.len - tail);
+    size_t need = head + 3 + (text.size - tail);
     if (need + 1 > buffer_size) return text;
     memcpy(buffer, text.ptr, head);
     memcpy(buffer + head, "...", 3);
-    memcpy(buffer + head + 3, text.ptr + tail, text.len - tail);
+    memcpy(buffer + head + 3, text.ptr + tail, text.size - tail);
     buffer[need] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = need };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = need };
 }
 
-u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
+proven_u8str_view_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
                             int32_t width, int32_t height, uint64_t bytes, bool reduced,
                             double position, double duration) {
-    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!buffer || buffer_size == 0) return PROVEN_LIT("");
     size_t at = 0;
     #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
                               if (w_ > 0) { at += (size_t)w_; } \
@@ -117,15 +117,15 @@ u8str_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size
     }
     if (duration > 0.0) {
         char where[32], length[32];   /* to the second (owner, 2026-10-16) */
-        u8str_t a = rubraview_format_timecode(where, sizeof(where), position > duration ? duration : position, false);
-        u8str_t l = rubraview_format_timecode(length, sizeof(length), duration, false);
-        OSD_PUT("%.*s / %.*s  |  ", (int)a.len, a.ptr, (int)l.len, l.ptr);
+        proven_u8str_view_t a = rubraview_format_timecode(where, sizeof(where), position > duration ? duration : position, false);
+        proven_u8str_view_t l = rubraview_format_timecode(length, sizeof(length), duration, false);
+        OSD_PUT("%.*s / %.*s  |  ", (int)a.size, a.ptr, (int)l.size, l.ptr);
     }
     if (width > 0 && height > 0) OSD_PUT("%d x %d  |  ", (int)width, (int)height);
     OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);   /* the place, at the very right */
     #undef OSD_PUT
     buffer[at] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = at };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = at };
 }
 
 /* ---- Hover titlebar ---- */

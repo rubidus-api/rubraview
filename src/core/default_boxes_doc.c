@@ -418,7 +418,7 @@ static const char *const PARTS[] = {
 static char g_document[32768];
 static size_t g_document_len;
 
-u8str_t rubraview_default_boxes_document(void) {
+proven_u8str_view_t rubraview_default_boxes_document(void) {
     if (g_document_len == 0) {
         for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); ++i) {
             size_t n = strlen(PARTS[i]);
@@ -428,5 +428,5 @@ u8str_t rubraview_default_boxes_document(void) {
         }
         g_document[g_document_len] = '\0';
     }
-    return (u8str_t){ .ptr = g_document, .len = g_document_len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)g_document, .size = g_document_len };
 }

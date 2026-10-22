@@ -14,17 +14,17 @@ bool rubraview_pal_process_packaged(char *family, size_t cap) {
     return false;
 }
 
-u8str_t rubraview_pal_process_executable(proven_arena_t *arena) {
+proven_u8str_view_t rubraview_pal_process_executable(proven_arena_t *arena) {
     (void)arena;
-    return (u8str_t){0};
+    return (proven_u8str_view_t){0};
 }
 
-bool rubraview_pal_process_start_console(u8str_t command_line) {
+bool rubraview_pal_process_start_console(proven_u8str_view_t command_line) {
     (void)command_line;
     return false;
 }
 
-bool rubraview_pal_process_start(u8str_t command_line) {
+bool rubraview_pal_process_start(proven_u8str_view_t command_line) {
     (void)command_line;
     return false;
 }

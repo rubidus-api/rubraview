@@ -14,13 +14,13 @@ extern "C" {
  * '*' matches any run of characters (including none); '?' matches exactly
  * one character.
  */
-bool rubraview_glob_match(u8str_t name, u8str_t pattern);
+bool rubraview_glob_match(proven_u8str_view_t name, proven_u8str_view_t pattern);
 
 /**
  * Match against a ';'-separated list of patterns (e.g. "*.jpg;*.png").
  * An empty list matches everything (no filter configured).
  */
-bool rubraview_glob_match_list(u8str_t name, u8str_t pattern_list);
+bool rubraview_glob_match_list(proven_u8str_view_t name, proven_u8str_view_t pattern_list);
 
 #ifdef __cplusplus
 }

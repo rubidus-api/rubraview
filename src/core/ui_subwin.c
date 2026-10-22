@@ -5,10 +5,10 @@
 #include <string.h>
 
 static bool cue_listed(const rubraview_subtitle_track_t *track, const rubraview_subtitle_cue_t *cue) {
-    if (cue->text.len == 0 || cue->removed) return false;   /* RV-115: a removed cue waits, unseen, for the save */
-    if (track->shown_language.len == 0) return true;
-    return cue->language.len == track->shown_language.len &&
-           memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.len) == 0;
+    if (cue->text.size == 0 || cue->removed) return false;   /* RV-115: a removed cue waits, unseen, for the save */
+    if (track->shown_language.size == 0) return true;
+    return cue->language.size == track->shown_language.size &&
+           memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.size) == 0;
 }
 
 size_t rubraview_subwin_rows(const rubraview_subtitle_track_t *track, uint32_t *rows, size_t max) {
@@ -88,22 +88,22 @@ size_t rubraview_subwin_shift(rubraview_subtitle_track_t *track, uint32_t *rows,
     return moved;
 }
 
-bool rubraview_subwin_amount(u8str_t text, double *out_seconds) {
+bool rubraview_subwin_amount(proven_u8str_view_t text, double *out_seconds) {
     double whole = 0.0, part = 0.0, scale = 1.0;
     size_t digits = 0, i = 0;
-    while (i < text.len && text.ptr[i] == ' ') i++;
-    for (; i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9'; ++i, ++digits) {
+    while (i < text.size && text.ptr[i] == ' ') i++;
+    for (; i < text.size && text.ptr[i] >= '0' && text.ptr[i] <= '9'; ++i, ++digits) {
         whole = whole * 10.0 + (double)(text.ptr[i] - '0');
         if (whole > 3600.0) return false;
     }
-    if (i < text.len && (text.ptr[i] == '.' || text.ptr[i] == ',')) {
+    if (i < text.size && (text.ptr[i] == '.' || text.ptr[i] == ',')) {
         ++i;
-        for (; i < text.len && text.ptr[i] >= '0' && text.ptr[i] <= '9'; ++i, ++digits) {
+        for (; i < text.size && text.ptr[i] >= '0' && text.ptr[i] <= '9'; ++i, ++digits) {
             if (scale < 1e6) { scale *= 10.0; part += (double)(text.ptr[i] - '0') / scale; }
         }
     }
-    while (i < text.len && text.ptr[i] == ' ') i++;
-    if (i != text.len || digits == 0) return false;
+    while (i < text.size && text.ptr[i] == ' ') i++;
+    if (i != text.size || digits == 0) return false;
     double seconds = whole + part;
     if (!(seconds > 0.0) || seconds > 3600.0) return false;
     if (out_seconds) *out_seconds = seconds;
@@ -122,8 +122,8 @@ size_t rubraview_subwin_chosen_count(const bool *chosen, size_t count) {
     return n;
 }
 
-u8str_t rubraview_subwin_time(char *buffer, size_t size, double seconds) {
-    u8str_t none = { .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_subwin_time(char *buffer, size_t size, double seconds) {
+    proven_u8str_view_t none = PROVEN_LIT("");
     if (!buffer || size == 0) return none;
     if (!(seconds > 0.0)) seconds = 0.0;
     if (seconds > 359999.0) seconds = 359999.0;       /* 99:59:59 */
@@ -131,17 +131,17 @@ u8str_t rubraview_subwin_time(char *buffer, size_t size, double seconds) {
     long long whole = hundredths / 100;
     int n = snprintf(buffer, size, "%lld:%02lld:%02lld.%02lld", whole / 3600, whole / 60 % 60, whole % 60, hundredths % 100);
     if (n <= 0) return none;
-    return (u8str_t){ .ptr = buffer, .len = (size_t)n < size ? (size_t)n : size - 1 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)n < size ? (size_t)n : size - 1 };
 }
 
-u8str_t rubraview_subwin_line(char *buffer, size_t size, u8str_t text) {
+proven_u8str_view_t rubraview_subwin_line(char *buffer, size_t size, proven_u8str_view_t text) {
     size_t n = 0;
-    if (!buffer || size == 0) return (u8str_t){ .ptr = "", .len = 0 };
-    for (size_t i = 0; i < text.len; ++i) {
+    if (!buffer || size == 0) return PROVEN_LIT("");
+    for (size_t i = 0; i < text.size; ++i) {
         unsigned char c = (unsigned char)text.ptr[i];
         if (c == '\r') continue;
         if (c == '\n') {
-            if (i + 1 >= text.len) break;             /* a break at the end says nothing */
+            if (i + 1 >= text.size) break;             /* a break at the end says nothing */
             if (n + 3 > size) break;
             memcpy(buffer + n, " / ", 3);
             n += 3;
@@ -149,10 +149,10 @@ u8str_t rubraview_subwin_line(char *buffer, size_t size, u8str_t text) {
         }
         /* a whole character or none */
         size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-        if (i + len > text.len || n + len > size) break;
+        if (i + len > text.size || n + len > size) break;
         memcpy(buffer + n, text.ptr + i, len);
         n += len;
         i += len - 1;
     }
-    return (u8str_t){ .ptr = buffer, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n };
 }

@@ -393,7 +393,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (name) {
                 rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_KEY_DOWN };
                 e.key.combo.modifiers = current_modifiers();
-                e.key.combo.key_name = (u8str_t){ .ptr = name, .len = strlen(name) };
+                e.key.combo.key_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = strlen(name) };
                 queue_push(w, e);
             }
             if (msg == WM_SYSKEYDOWN) break; /* let Alt+F4 and friends reach DefWindowProc */
@@ -954,9 +954,9 @@ static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rub
                 char raw[MAX_PATH * 4], safe[240];
                 int len = WideCharToMultiByte(CP_UTF8, 0, fd->cFileName, -1, raw, (int)sizeof(raw), NULL, NULL);
                 if (len <= 1) continue;
-                u8str_t name = rubraview_path_safe_name(safe, sizeof(safe), (u8str_t){ .ptr = raw, .len = (size_t)(len - 1) });
+                proven_u8str_view_t name = rubraview_path_safe_name(safe, sizeof(safe), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)raw, .size = (size_t)(len - 1) });
                 WCHAR wide_name[MAX_PATH], path[MAX_PATH * 2];
-                if (MultiByteToWideChar(CP_UTF8, 0, name.ptr, -1, wide_name, MAX_PATH) <= 0) continue;
+                if (MultiByteToWideChar(CP_UTF8, 0, (const char *)name.ptr, -1, wide_name, MAX_PATH) <= 0) continue;
                 int m = _snwprintf(path, MAX_PATH * 2, L"%ls\\%ls", folder, wide_name);
                 if (m <= 0 || m >= MAX_PATH * 2) continue;
                 if (drop_write_contents(data, (LONG)i, path)) drop_event_add_wide(w, event, path);
@@ -1103,15 +1103,15 @@ bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t
     return ok;
 }
 
-bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, u8str_t text) {
-    if (text.len == 0 || text.len > 65536) return false;
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, NULL, 0);
+bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, proven_u8str_view_t text) {
+    if (text.size == 0 || text.size > 65536) return false;
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size, NULL, 0);
     if (wide_len <= 0) return false;
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, ((size_t)wide_len + 1) * sizeof(WCHAR));
     if (!memory) return false;
     WCHAR *wide = (WCHAR*)GlobalLock(memory);
     if (!wide) { GlobalFree(memory); return false; }
-    MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, wide_len);
+    MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size, wide, wide_len);
     wide[wide_len] = L'\0';
     GlobalUnlock(memory);
     if (!OpenClipboard(window ? window->hwnd : NULL)) { GlobalFree(memory); return false; }
@@ -1342,7 +1342,7 @@ bool rubraview_pal_instance_claim(void) {
     return GetLastError() != ERROR_ALREADY_EXISTS;
 }
 
-bool rubraview_pal_instance_hand_over(u8str_t path) {
+bool rubraview_pal_instance_hand_over(proven_u8str_view_t path) {
     HWND target = FindWindowW(RUBRAVIEW_WINDOW_CLASS, NULL);
     if (!target) return false;
 
@@ -1350,10 +1350,10 @@ bool rubraview_pal_instance_hand_over(u8str_t path) {
     SetForegroundWindow(target);
 
     /* An empty path is a legitimate hand-over: "come to the front". */
-    if (path.len == 0) return true;
+    if (path.size == 0) return true;
 
     char buffer[1024];
-    size_t length = path.len < sizeof(buffer) - 1 ? path.len : sizeof(buffer) - 1;
+    size_t length = path.size < sizeof(buffer) - 1 ? path.size : sizeof(buffer) - 1;
     memcpy(buffer, path.ptr, length);
     buffer[length] = '\0';
 
@@ -1483,12 +1483,12 @@ static bool write_key(HKEY root, const WCHAR *subkey, const WCHAR *value_name, c
 /* Splits the caller's ';'-separated list, calling `each` per extension.
    Both register and unregister walk it the same way, which is what keeps
    them from disagreeing about what was written. */
-static bool for_each_extension(u8str_t list, bool (*each)(const WCHAR *ext, const WCHAR *progid)) {
+static bool for_each_extension(proven_u8str_view_t list, bool (*each)(const WCHAR *ext, const WCHAR *progid)) {
     bool all_ok = true;
     size_t start = 0;
 
-    for (size_t i = 0; i <= list.len; ++i) {
-        if (i != list.len && list.ptr[i] != ';') continue;
+    for (size_t i = 0; i <= list.size; ++i) {
+        if (i != list.size && list.ptr[i] != ';') continue;
         size_t length = i - start;
         if (length == 0 || length > 16) { start = i + 1; continue; }
 
@@ -1657,7 +1657,7 @@ static bool shell_can_write_machine(void) {
     return true;
 }
 
-bool rubraview_pal_shell_register_for(u8str_t extensions_semicolon_list, bool all_users) {
+bool rubraview_pal_shell_register_for(proven_u8str_view_t extensions_semicolon_list, bool all_users) {
     if (all_users && !shell_can_write_machine()) return false;
     g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, register_one);
@@ -1668,7 +1668,7 @@ bool rubraview_pal_shell_register_for(u8str_t extensions_semicolon_list, bool al
     return ok;
 }
 
-bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool all_users) {
+bool rubraview_pal_shell_unregister_for(proven_u8str_view_t extensions_semicolon_list, bool all_users) {
     if (all_users && !shell_can_write_machine()) return false;
     g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, unregister_one);
@@ -1677,19 +1677,19 @@ bool rubraview_pal_shell_unregister_for(u8str_t extensions_semicolon_list, bool 
     return ok;
 }
 
-bool rubraview_pal_shell_register(u8str_t extensions_semicolon_list) {
+bool rubraview_pal_shell_register(proven_u8str_view_t extensions_semicolon_list) {
     return rubraview_pal_shell_register_for(extensions_semicolon_list, false);
 }
 
-bool rubraview_pal_shell_unregister(u8str_t extensions_semicolon_list) {
+bool rubraview_pal_shell_unregister(proven_u8str_view_t extensions_semicolon_list) {
     return rubraview_pal_shell_unregister_for(extensions_semicolon_list, false);
 }
 
-bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
+bool rubraview_pal_shell_run_elevated(proven_u8str_view_t arguments, int *out_exit_code) {
     WCHAR exe[MAX_PATH * 2];
     if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
     WCHAR args[1024];
-    int n = MultiByteToWideChar(CP_UTF8, 0, arguments.ptr, (int)arguments.len, args, 1023);
+    int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)arguments.ptr, (int)arguments.size, args, 1023);
     if (n <= 0) return false;
     args[n] = 0;
     SHELLEXECUTEINFOW info = { .cbSize = sizeof(info) };
@@ -1708,11 +1708,11 @@ bool rubraview_pal_shell_run_elevated(u8str_t arguments, int *out_exit_code) {
     return true;
 }
 
-bool rubraview_pal_shell_reveal(u8str_t path) {
+bool rubraview_pal_shell_reveal(proven_u8str_view_t path) {
     WCHAR wide[MAX_PATH * 2];
-    if (path.len == 0 || path.len > INT_MAX) return false;
+    if (path.size == 0 || path.size > INT_MAX) return false;
     if (rubraview_stream_is_address(path)) return false;   /* RV-157: a station has no folder */
-    int n = MultiByteToWideChar(CP_UTF8, 0, path.ptr, (int)path.len, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
+    int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
     if (n <= 0) return false;
     wide[n] = L'\0';
     /* The shell names a file with backslashes only. */

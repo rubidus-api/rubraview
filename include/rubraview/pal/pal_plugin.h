@@ -14,7 +14,7 @@ bool rubraview_pal_plugins_default_folder(char *out, size_t capacity, bool make)
 
 /** The folder's `*.rvf.dll`, each looked at (64-bit, its hash) and asked what it is; those refused are
     listed too, with why. Returns how many. A plug-in whose file has not changed is not asked again. */
-size_t rubraview_pal_plugins_find(u8str_t folder, rubraview_plugin_t *out, size_t capacity);
+size_t rubraview_pal_plugins_find(proven_u8str_view_t folder, rubraview_plugin_t *out, size_t capacity);
 
 /** One run over BGRA rows (`width` * 4 apart) into `out` (the same size). `tick` is called about every 50 ms
     with the progress; true from it cancels. False and `*why` when the plug-in failed, crashed, was cancelled

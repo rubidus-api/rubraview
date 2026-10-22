@@ -3,37 +3,37 @@
 #include <string.h>
 #include <ctype.h>
 
-u8str_t rubraview_path_dirname(u8str_t path) {
-    if (path.ptr == NULL || path.len == 0) {
-        return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_path_dirname(proven_u8str_view_t path) {
+    if (path.ptr == NULL || path.size == 0) {
+        return PROVEN_LIT("");
     }
 
     /* Scan backwards for last separator */
-    for (proven_size_t i = path.len; i > 0; --i) {
+    for (proven_size_t i = path.size; i > 0; --i) {
         proven_size_t idx = i - 1;
         if (rubraview_path_is_sep(path.ptr[idx])) {
             /* If separator is at root (e.g. "/foo" -> "/"), preserve root */
             if (idx == 0) {
-                return (u8str_t){ .ptr = path.ptr, .len = 1 };
+                return (proven_u8str_view_t){ .ptr = path.ptr, .size = 1 };
             }
-            return (u8str_t){ .ptr = path.ptr, .len = idx };
+            return (proven_u8str_view_t){ .ptr = path.ptr, .size = idx };
         }
     }
 
-    return (u8str_t){ .ptr = path.ptr, .len = 0 };
+    return (proven_u8str_view_t){ .ptr = path.ptr, .size = 0 };
 }
 
-u8str_t rubraview_path_basename(u8str_t path) {
-    if (path.ptr == NULL || path.len == 0) {
-        return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_path_basename(proven_u8str_view_t path) {
+    if (path.ptr == NULL || path.size == 0) {
+        return PROVEN_LIT("");
     }
 
-    for (proven_size_t i = path.len; i > 0; --i) {
+    for (proven_size_t i = path.size; i > 0; --i) {
         proven_size_t idx = i - 1;
         if (rubraview_path_is_sep(path.ptr[idx])) {
-            return (u8str_t){
+            return (proven_u8str_view_t){
                 .ptr = path.ptr + idx + 1,
-                .len = path.len - idx - 1
+                .size = path.size - idx - 1
             };
         }
     }
@@ -41,47 +41,47 @@ u8str_t rubraview_path_basename(u8str_t path) {
     return path;
 }
 
-u8str_t rubraview_path_ext(u8str_t path) {
-    u8str_t base = rubraview_path_basename(path);
-    if (base.len == 0) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_path_ext(proven_u8str_view_t path) {
+    proven_u8str_view_t base = rubraview_path_basename(path);
+    if (base.size == 0) return PROVEN_LIT("");
 
-    for (proven_size_t i = base.len; i > 0; --i) {
+    for (proven_size_t i = base.size; i > 0; --i) {
         proven_size_t idx = i - 1;
         if (base.ptr[idx] == '.') {
             /* Do not treat leading dot in hidden file (e.g. ".gitignore") as extension */
             if (idx == 0) {
-                return (u8str_t){ .ptr = "", .len = 0 };
+                return PROVEN_LIT("");
             }
-            return (u8str_t){
+            return (proven_u8str_view_t){
                 .ptr = base.ptr + idx,
-                .len = base.len - idx
+                .size = base.size - idx
             };
         }
     }
 
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
-u8str_t rubraview_path_stem(u8str_t path) {
-    u8str_t base = rubraview_path_basename(path);
-    u8str_t ext = rubraview_path_ext(path);
-    if (ext.len > 0) {
-        return (u8str_t){
+proven_u8str_view_t rubraview_path_stem(proven_u8str_view_t path) {
+    proven_u8str_view_t base = rubraview_path_basename(path);
+    proven_u8str_view_t ext = rubraview_path_ext(path);
+    if (ext.size > 0) {
+        return (proven_u8str_view_t){
             .ptr = base.ptr,
-            .len = base.len - ext.len
+            .size = base.size - ext.size
         };
     }
     return base;
 }
 
-bool rubraview_path_has_ext(u8str_t path, const char *ext) {
+bool rubraview_path_has_ext(proven_u8str_view_t path, const char *ext) {
     if (!ext) return false;
-    u8str_t pe = rubraview_path_ext(path);
-    if (pe.len == 0) return false;
+    proven_u8str_view_t pe = rubraview_path_ext(path);
+    if (pe.size == 0) return false;
 
     /* If query ext starts with '.', match directly; if not, skip leading '.' of pe */
-    const char *p_comp = pe.ptr;
-    proven_size_t p_len = pe.len;
+    const char *p_comp = (const char *)pe.ptr;
+    proven_size_t p_len = pe.size;
     if (ext[0] != '.' && p_comp[0] == '.') {
         p_comp++;
         p_len--;
@@ -98,12 +98,12 @@ bool rubraview_path_has_ext(u8str_t path, const char *ext) {
     return true;
 }
 
-u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char *new_ext) {
-    u8str_t empty = { .ptr = "", .len = 0 };
-    if (!arena || path.len == 0 || !new_ext) return empty;
+proven_u8str_view_t rubraview_path_with_ext(proven_arena_t *arena, proven_u8str_view_t path, const char *new_ext) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
+    if (!arena || path.size == 0 || !new_ext) return empty;
 
-    u8str_t ext = rubraview_path_ext(path);
-    proven_size_t keep = path.len - ext.len;          /* the path without its extension */
+    proven_u8str_view_t ext = rubraview_path_ext(path);
+    proven_size_t keep = path.size - ext.size;          /* the path without its extension */
     proven_size_t add = (proven_size_t)strlen(new_ext);
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, keep + add + 1);
@@ -112,42 +112,42 @@ u8str_t rubraview_path_with_ext(proven_arena_t *arena, u8str_t path, const char 
     memcpy(dst, path.ptr, keep);
     memcpy(dst + keep, new_ext, add);
     dst[keep + add] = '\0';
-    return (u8str_t){ .ptr = dst, .len = keep + add };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dst, .size = keep + add };
 }
 
-u8str_t rubraview_path_join(proven_arena_t *arena, u8str_t dir, u8str_t filename) {
-    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
-    if (dir.len == 0) return filename;
-    if (filename.len == 0) return dir;
+proven_u8str_view_t rubraview_path_join(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename) {
+    if (!arena) return PROVEN_LIT("");
+    if (dir.size == 0) return filename;
+    if (filename.size == 0) return dir;
 
-    bool needs_sep = !rubraview_path_is_sep(dir.ptr[dir.len - 1]) && !rubraview_path_is_sep(filename.ptr[0]);
-    proven_size_t total_len = dir.len + (needs_sep ? 1 : 0) + filename.len;
+    bool needs_sep = !rubraview_path_is_sep(dir.ptr[dir.size - 1]) && !rubraview_path_is_sep(filename.ptr[0]);
+    proven_size_t total_len = dir.size + (needs_sep ? 1 : 0) + filename.size;
 
     /* Allocate total_len + 1 to enforce the null-terminated allocation invariant */
     proven_result_mem_mut_t res = proven_arena_alloc(arena, total_len + 1);
     if (!proven_is_ok(res.err)) {
-        return (u8str_t){ .ptr = "", .len = 0 };
+        return PROVEN_LIT("");
     }
 
     char *dst = (char*)res.value.ptr;
-    memcpy(dst, dir.ptr, dir.len);
-    proven_size_t offset = dir.len;
+    memcpy(dst, dir.ptr, dir.size);
+    proven_size_t offset = dir.size;
     if (needs_sep) {
         dst[offset++] = '/';
     }
-    memcpy(dst + offset, filename.ptr, filename.len);
-    offset += filename.len;
+    memcpy(dst + offset, filename.ptr, filename.size);
+    offset += filename.size;
     dst[offset] = '\0'; /* Guaranteed null terminator */
 
-    return (u8str_t){
-        .ptr = dst,
-        .len = total_len
+    return (proven_u8str_view_t){
+        .ptr = (const proven_byte_t *)dst,
+        .size = total_len
     };
 }
 
-bool rubraview_path_same(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    for (proven_size_t i = 0; i < a.len; ++i) {
+bool rubraview_path_same(proven_u8str_view_t a, proven_u8str_view_t b) {
+    if (a.size != b.size) return false;
+    for (proven_size_t i = 0; i < a.size; ++i) {
         char x = a.ptr[i], y = b.ptr[i];
         if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
         if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
@@ -178,15 +178,15 @@ static bool reserved_device_name(const char *name, size_t len) {
     return false;
 }
 
-u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name) {
-    u8str_t none = { .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_path_safe_name(char *buf, size_t cap, proven_u8str_view_t name) {
+    proven_u8str_view_t none = PROVEN_LIT("");
     if (!buf || cap < 16) return none;
-    u8str_t base = rubraview_path_basename(name);
+    proven_u8str_view_t base = rubraview_path_basename(name);
 
     /* Characters Windows refuses, and control bytes. */
     char clean[512];
     size_t n = 0;
-    for (size_t i = 0; i < base.len && n < sizeof(clean); ++i) {
+    for (size_t i = 0; i < base.size && n < sizeof(clean); ++i) {
         unsigned char c = (unsigned char)base.ptr[i];
         bool bad = c < 32 || c == 127 || c == '<' || c == '>' || c == ':' || c == '"' ||
                    c == '/' || c == '\\' || c == '|' || c == '?' || c == '*';
@@ -225,36 +225,36 @@ u8str_t rubraview_path_safe_name(char *buf, size_t cap, u8str_t name) {
         }
     }
     buf[at] = '\0';
-    return (u8str_t){ .ptr = buf, .len = at };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = at };
 }
 
 /* The next component of `p` from `*at`: false at the end. */
-static bool path_part(u8str_t p, proven_size_t *at, u8str_t *out) {
-    while (*at < p.len && rubraview_path_is_sep(p.ptr[*at])) (*at)++;
-    if (*at >= p.len) return false;
+static bool path_part(proven_u8str_view_t p, proven_size_t *at, proven_u8str_view_t *out) {
+    while (*at < p.size && rubraview_path_is_sep(p.ptr[*at])) (*at)++;
+    if (*at >= p.size) return false;
     proven_size_t start = *at;
-    while (*at < p.len && !rubraview_path_is_sep(p.ptr[*at])) (*at)++;
-    *out = (u8str_t){ .ptr = p.ptr + start, .len = *at - start };
+    while (*at < p.size && !rubraview_path_is_sep(p.ptr[*at])) (*at)++;
+    *out = (proven_u8str_view_t){ .ptr = p.ptr + start, .size = *at - start };
     return true;
 }
 
 /* How a whole path begins: 2 "//server", 1 "/", 0 a drive or a bare name. */
-static int path_lead(u8str_t p) {
-    if (p.len >= 2 && rubraview_path_is_sep(p.ptr[0]) && rubraview_path_is_sep(p.ptr[1])) return 2;
-    return p.len >= 1 && rubraview_path_is_sep(p.ptr[0]) ? 1 : 0;
+static int path_lead(proven_u8str_view_t p) {
+    if (p.size >= 2 && rubraview_path_is_sep(p.ptr[0]) && rubraview_path_is_sep(p.ptr[1])) return 2;
+    return p.size >= 1 && rubraview_path_is_sep(p.ptr[0]) ? 1 : 0;
 }
 
 #define RELATIVE_PARTS 64
 
-u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t path) {
-    if (!arena || base.len == 0 || path.len == 0) return path;
-    u8str_t bs[RELATIVE_PARTS], ps[RELATIVE_PARTS];
+proven_u8str_view_t rubraview_path_relative(proven_arena_t *arena, proven_u8str_view_t base, proven_u8str_view_t path) {
+    if (!arena || base.size == 0 || path.size == 0) return path;
+    proven_u8str_view_t bs[RELATIVE_PARTS], ps[RELATIVE_PARTS];
     proven_size_t bn = 0, pn = 0, at = 0;
     while (bn < RELATIVE_PARTS && path_part(base, &at, &bs[bn])) bn++;
-    if (at < base.len && bn == RELATIVE_PARTS) return path;
+    if (at < base.size && bn == RELATIVE_PARTS) return path;
     at = 0;
     while (pn < RELATIVE_PARTS && path_part(path, &at, &ps[pn])) pn++;
-    if ((at < path.len && pn == RELATIVE_PARTS) || pn == 0) return path;
+    if ((at < path.size && pn == RELATIVE_PARTS) || pn == 0) return path;
 
     /* A drive or a share's server and name come first, and must be the same thing. */
     int lead = path_lead(path);
@@ -267,26 +267,26 @@ u8str_t rubraview_path_relative(proven_arena_t *arena, u8str_t base, u8str_t pat
     proven_size_t common = fixed;
     while (common < bn && common + 1 < pn && rubraview_path_same(bs[common], ps[common])) common++;
     proven_size_t ups = bn - common, len = ups * 3;
-    for (proven_size_t i = common; i < pn; ++i) len += ps[i].len + 1;
+    for (proven_size_t i = common; i < pn; ++i) len += ps[i].size + 1;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return path;
     char *dst = (char*)res.value.ptr;
     proven_size_t n = 0;
     for (proven_size_t i = 0; i < ups; ++i) { dst[n++] = '.'; dst[n++] = '.'; dst[n++] = '/'; }
     for (proven_size_t i = common; i < pn; ++i) {
-        memcpy(dst + n, ps[i].ptr, ps[i].len);
-        n += ps[i].len;
+        memcpy(dst + n, ps[i].ptr, ps[i].size);
+        n += ps[i].size;
         if (i + 1 < pn) dst[n++] = '/';
     }
     dst[n] = '\0';
-    return (u8str_t){ .ptr = dst, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dst, .size = n };
 }
 
-bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid) {
-    if (!name.ptr || !base.ptr || base.len == 0 || name.len < base.len + 8) return false;
-    if (memcmp(name.ptr, base.ptr, base.len) != 0 || name.ptr[base.len] != '.') return false;
-    if (memcmp(name.ptr + name.len - 4, ".tmp", 4) != 0) return false;
-    size_t at = base.len + 1, end = name.len - 4;
+bool rubraview_path_state_temp(proven_u8str_view_t name, proven_u8str_view_t base, uint32_t *out_pid) {
+    if (!name.ptr || !base.ptr || base.size == 0 || name.size < base.size + 8) return false;
+    if (memcmp(name.ptr, base.ptr, base.size) != 0 || name.ptr[base.size] != '.') return false;
+    if (memcmp(name.ptr + name.size - 4, ".tmp", 4) != 0) return false;
+    size_t at = base.size + 1, end = name.size - 4;
     int64_t pid = 0;
     size_t digits = 0;
     for (; at < end && name.ptr[at] >= '0' && name.ptr[at] <= '9'; ++at, ++digits) {
@@ -301,11 +301,11 @@ bool rubraview_path_state_temp(u8str_t name, u8str_t base, uint32_t *out_pid) {
     return true;
 }
 
-u8str_t rubraview_path_typed_folder(u8str_t typed) {
-    const char *p = typed.ptr;
-    size_t n = p ? typed.len : 0;
+proven_u8str_view_t rubraview_path_typed_folder(proven_u8str_view_t typed) {
+    const char *p = (const char *)typed.ptr;
+    size_t n = p ? typed.size : 0;
     while (n > 0 && (p[0] == ' ' || p[0] == '"' || p[0] == '\t')) { p++; n--; }
     while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '"' || p[n - 1] == '\t')) n--;
     while (n > 1 && rubraview_path_is_sep(p[n - 1]) && !(n == 3 && p[1] == ':')) n--;
-    return (u8str_t){ .ptr = n ? p : "", .len = n };
+    return rubraview_u8(n ? p : "", n);
 }

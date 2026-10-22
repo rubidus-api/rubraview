@@ -24,7 +24,7 @@ bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend) {
     return api && api->available && api->available();
 }
 
-rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend,
+rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path, rubraview_media_backend_t backend,
                                                        const rubraview_media_gpu_t *gpu) {
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     const rubraview_media_backend_api_t *api = backend_api(backend);
@@ -111,9 +111,9 @@ bool rubraview_pal_media_select_audio_track(rubraview_media_t *media, int32_t st
     return media->api->select_audio_track(media->impl, stream_index);
 }
 
-u8str_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
+proven_u8str_view_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
                                                  int32_t stream_index) {
-    u8str_t empty = { .ptr = "", .len = 0 };
+    proven_u8str_view_t empty = PROVEN_LIT("");
     if (!media || !arena || !media->api->read_subtitle_stream) return empty;
     return media->api->read_subtitle_stream(media->impl, arena, stream_index);
 }

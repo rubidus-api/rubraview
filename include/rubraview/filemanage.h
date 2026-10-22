@@ -39,20 +39,20 @@ typedef enum rubraview_rename_err {
  * `NUL.jpg` cannot exist, and the rename would fail after the old name
  * had already gone.
  */
-rubraview_rename_err_t rubraview_rename_validate(u8str_t filename);
+rubraview_rename_err_t rubraview_rename_validate(proven_u8str_view_t filename);
 
 /** A short explanation, for the rename box. */
-u8str_t rubraview_rename_error_text(rubraview_rename_err_t err);
+proven_u8str_view_t rubraview_rename_error_text(rubraview_rename_err_t err);
 
 /**
  * §3.18.2: the rename box opens with the stem selected and the extension
  * left alone, so typing immediately replaces the title without losing
  * the format. Returns the stem's length in bytes.
  */
-size_t rubraview_rename_stem_length(u8str_t filename);
+size_t rubraview_rename_stem_length(proven_u8str_view_t filename);
 
 /** Join a new stem to the old extension. */
-u8str_t rubraview_rename_compose(proven_arena_t *arena, u8str_t old_filename, u8str_t new_stem);
+proven_u8str_view_t rubraview_rename_compose(proven_arena_t *arena, proven_u8str_view_t old_filename, proven_u8str_view_t new_stem);
 
 /**
  * The rename box's text: typed or composed text appended to `buffer`
@@ -61,7 +61,7 @@ u8str_t rubraview_rename_compose(proven_arena_t *arena, u8str_t old_filename, u8
  * out rather than cut — and control characters are skipped. Returns the
  * bytes added. The buffer stays NUL-terminated.
  */
-size_t rubraview_rename_append(char *buffer, size_t capacity, size_t *length, u8str_t text);
+size_t rubraview_rename_append(char *buffer, size_t capacity, size_t *length, proven_u8str_view_t text);
 
 /** Backspace: one whole UTF-8 character off the end (a Hangul syllable is three bytes). */
 void rubraview_rename_backspace(char *buffer, size_t *length);
@@ -78,8 +78,8 @@ typedef enum rubraview_file_op {
 
 typedef struct rubraview_file_action {
     rubraview_file_op_t op;
-    u8str_t source_path;      /* where it was */
-    u8str_t target_path;      /* where it went; empty for a recycle or a purge */
+    proven_u8str_view_t source_path;      /* where it was */
+    proven_u8str_view_t target_path;      /* where it went; empty for a recycle or a purge */
     size_t  playlist_index;   /* where it sat in the sequence, so undo can put it back there */
     uint32_t batch;           /* 1.23.0: not 0 for the files of one move, copy or bin of many; one undo takes them all */
 } rubraview_file_action_t;
@@ -128,23 +128,23 @@ typedef enum rubraview_curation_mode {
 } rubraview_curation_mode_t;
 
 typedef struct rubraview_curation {
-    u8str_t dirs[9];                  /* dir_1 .. dir_9; an empty slot is unbound */
+    proven_u8str_view_t dirs[9];                  /* dir_1 .. dir_9; an empty slot is unbound */
     rubraview_curation_mode_t mode;
     /* Owner, 2026-10-08: the file on screen copied to one folder, or moved
        to one, each its own key (`copy_to_folder`, `move_to_folder`).
        Empty: not set. */
-    u8str_t copy_dir;
-    u8str_t move_dir;
+    proven_u8str_view_t copy_dir;
+    proven_u8str_view_t move_dir;
 } rubraview_curation_t;
 
 /** Read the `[curation]` section of settings.ini (§3.18.3). */
-rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, u8str_t settings_ini);
+rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, proven_u8str_view_t settings_ini);
 
 /**
  * The folder a number key means, or an empty slice when that key is not
  * bound. `digit` is 1 to 9.
  */
-u8str_t rubraview_curation_target(const rubraview_curation_t *curation, int32_t digit);
+proven_u8str_view_t rubraview_curation_target(const rubraview_curation_t *curation, int32_t digit);
 
 /**
  * What the viewer should do after a curation action: a move takes the
@@ -162,8 +162,8 @@ bool rubraview_curation_advances(const rubraview_curation_t *curation);
  * path. Empty when no free name was found in 9999 tries or the arena is
  * full.
  */
-typedef bool (*rubraview_path_exists_fn)(void *ctx, u8str_t path);
-u8str_t rubraview_filing_target(proven_arena_t *arena, u8str_t dir, u8str_t filename,
+typedef bool (*rubraview_path_exists_fn)(void *ctx, proven_u8str_view_t path);
+proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
                                 rubraview_path_exists_fn exists, void *ctx);
 
 /**
@@ -181,10 +181,10 @@ typedef enum rubraview_target_step {
     RUBRAVIEW_TARGET_NOT_FOLDER,    /* a file has that name */
 } rubraview_target_step_t;
 
-rubraview_target_step_t rubraview_target_folder_step(u8str_t path, bool exists, bool is_directory, u8str_t offered);
+rubraview_target_step_t rubraview_target_folder_step(proven_u8str_view_t path, bool exists, bool is_directory, proven_u8str_view_t offered);
 
 /** The typed text without the spaces and quotes round it (Explorer's "Copy as path"). */
-u8str_t rubraview_target_folder_trim(u8str_t typed);
+proven_u8str_view_t rubraview_target_folder_trim(proven_u8str_view_t typed);
 
 /* ---- §3.19.2 drops ---- */
 
@@ -196,7 +196,7 @@ typedef enum rubraview_drop_kind {
 } rubraview_drop_kind_t;
 
 typedef struct rubraview_drop_item {
-    u8str_t path;
+    proven_u8str_view_t path;
     bool    is_directory;
 } rubraview_drop_item_t;
 
@@ -230,10 +230,10 @@ rubraview_instance_action_t rubraview_instance_decide(bool single_instance_enabl
  * once here so registering and unregistering cannot disagree about the
  * name — which is how leftover registry entries happen.
  */
-u8str_t rubraview_shell_progid(proven_arena_t *arena, u8str_t extension);
+proven_u8str_view_t rubraview_shell_progid(proven_arena_t *arena, proven_u8str_view_t extension);
 
 /** The extensions §3.19.3 offers to associate, as a `;`-separated list. */
-u8str_t rubraview_shell_extensions(void);
+proven_u8str_view_t rubraview_shell_extensions(void);
 
 /* The same list by kind, so a reader can give Rubraview the comics and
    leave the pictures with another program (owner, 2026-10-09). */
@@ -249,16 +249,16 @@ u8str_t rubraview_shell_extensions(void);
 #define RUBRAVIEW_SHELL_TEXT     32u
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
-u8str_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);
+proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);
 
 /** "pictures,comics,video,music" (any of them, any order) as a mask; 0 when a word is not one of them. */
-uint32_t rubraview_shell_groups_parse(u8str_t words);
+uint32_t rubraview_shell_groups_parse(proven_u8str_view_t words);
 
 /** Every extension the right-click menu knows: the file types and the archives. */
-u8str_t rubraview_shell_extensions_all(void);
+proven_u8str_view_t rubraview_shell_extensions_all(void);
 
 /** The kind an extension belongs to ("jpg" or ".jpg"), 0 for one that is not ours. */
-uint32_t rubraview_shell_kind_of(u8str_t extension);
+uint32_t rubraview_shell_kind_of(proven_u8str_view_t extension);
 
 /**
  * D-86: a choice of extensions, written as words with commas between — an
@@ -266,10 +266,10 @@ uint32_t rubraview_shell_kind_of(u8str_t extension);
  * "archives") or "all" — as the `;`-separated list of the extensions it
  * names, in the order of the kinds. Empty when a word is none of these.
  */
-u8str_t rubraview_shell_selection_parse(proven_arena_t *arena, u8str_t words);
+proven_u8str_view_t rubraview_shell_selection_parse(proven_arena_t *arena, proven_u8str_view_t words);
 
 /** Those of a `;`-separated list whose kind is in `kinds`. */
-u8str_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, u8str_t selection, uint32_t kinds);
+proven_u8str_view_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, proven_u8str_view_t selection, uint32_t kinds);
 
 #ifdef __cplusplus
 }

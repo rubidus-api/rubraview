@@ -34,7 +34,7 @@ typedef enum rubraview_shell_verb {
 const char *rubraview_shell_verb_flag(rubraview_shell_verb_t verb);
 
 /** The verb a command-line argument names, NONE when it names none. */
-rubraview_shell_verb_t rubraview_shell_verb_for_flag(u8str_t arg);
+rubraview_shell_verb_t rubraview_shell_verb_for_flag(proven_u8str_view_t arg);
 
 /* ---- the menu's items ---- */
 
@@ -56,7 +56,7 @@ const rubraview_shell_menu_item_t *rubraview_shell_menu_items(size_t *out_count)
  * each path with a NUL after it. Returns how many bytes that takes;
  * written only when `cap` holds them.
  */
-size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const u8str_t *paths, size_t count,
+size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const proven_u8str_view_t *paths, size_t count,
                                char *dst, size_t cap);
 
 /**
@@ -64,14 +64,14 @@ size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const u8
  * not a request; paths past `cap` are counted out, not stored.
  */
 bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_verb_t *out_verb, bool *out_whole,
-                               u8str_t *paths, size_t cap, size_t *out_count);
+                               proven_u8str_view_t *paths, size_t cap, size_t *out_count);
 
 /**
  * A file of paths, one a line (UTF-8, with or without a byte-order mark,
  * either line ending). The paths point into `text`. Returns how many
  * there are; stored up to `cap`.
  */
-size_t rubraview_shellreq_split_lines(u8str_t text, u8str_t *paths, size_t cap);
+size_t rubraview_shellreq_split_lines(proven_u8str_view_t text, proven_u8str_view_t *paths, size_t cap);
 
 /* ---- gathering one selection ---- */
 
@@ -94,7 +94,7 @@ typedef struct rubraview_shellreq_collector {
  * to be taken first — or when there is no memory.
  */
 bool rubraview_shellreq_collect(rubraview_shellreq_collector_t *c, rubraview_shell_verb_t verb, bool whole,
-                                const u8str_t *paths, size_t count, double now);
+                                const proven_u8str_view_t *paths, size_t count, double now);
 
 /** True when what was gathered is to be acted on. */
 bool rubraview_shellreq_ready(const rubraview_shellreq_collector_t *c, double now);
@@ -239,7 +239,7 @@ bool rubraview_print_preview_region(const rubraview_print_placement_t *placement
  * either case. A command that only passes a rubraview folder or file to
  * another program is not ours.
  */
-bool rubraview_shell_entry_is_ours(u8str_t key_name, u8str_t command);
+bool rubraview_shell_entry_is_ours(proven_u8str_view_t key_name, proven_u8str_view_t command);
 
 #ifdef __cplusplus
 }

@@ -141,7 +141,7 @@ int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size) {
 
 rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena, const uint8_t *jpeg, size_t size) {
     rubraview_jpeg_strip_result_t result = {0};
-    result.data = (u8str_t){ .ptr = "", .len = 0 };
+    result.data = PROVEN_LIT("");
 
     if (!arena || !jpeg || size < 2 || jpeg[0] != 0xFF || jpeg[1] != JPEG_MARKER_SOI) {
         return result;
@@ -192,7 +192,7 @@ rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena
     proven_result_mem_mut_t shrunk = proven_arena_realloc_aligned(arena, out, size, out_pos, PROVEN_DEFAULT_ALIGNMENT);
     uint8_t *final_ptr = proven_is_ok(shrunk.err) ? shrunk.value.ptr : out;
 
-    result.data = (u8str_t){ .ptr = (const char*)final_ptr, .len = out_pos };
+    result.data = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)final_ptr, .size = out_pos };
     return result;
 }
 
@@ -305,7 +305,7 @@ static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
     size_t pos = 0;
     if (cap == 0) return;
     while (n > 0 && s[n - 1] == 0) --n;
-    bool utf8 = rubraview_utf8_validate((u8str_t){ (const char*)s, n });
+    bool utf8 = rubraview_utf8_validate((proven_u8str_view_t){ (const proven_byte_t *)(const char*)s, n });
     for (size_t i = 0; i < n;) {
         uint32_t cp;
         size_t used = 1;

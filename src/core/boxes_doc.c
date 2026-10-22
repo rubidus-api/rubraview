@@ -25,9 +25,9 @@ static bool box_fail(box_parser_t *p, const char *message) {
     return false;
 }
 
-static bool action_name_ok(u8str_t w) {
-    if (w.len == 0) return false;
-    for (size_t i = 0; i < w.len; ++i) {
+static bool action_name_ok(proven_u8str_view_t w) {
+    if (w.size == 0) return false;
+    for (size_t i = 0; i < w.size; ++i) {
         char c = w.ptr[i];
         if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
     }
@@ -35,25 +35,25 @@ static bool action_name_ok(u8str_t w) {
 }
 
 /* The next word or "quoted text" from *rest; false at the end of the line. */
-static bool next_token(box_parser_t *p, u8str_t *rest, u8str_t *out, bool *quoted) {
+static bool next_token(box_parser_t *p, proven_u8str_view_t *rest, proven_u8str_view_t *out, bool *quoted) {
     size_t i = 0;
-    while (i < rest->len && (rest->ptr[i] == ' ' || rest->ptr[i] == '\t' || rest->ptr[i] == '\r')) ++i;
-    if (i >= rest->len || rest->ptr[i] == '#') { *rest = (u8str_t){ .ptr = rest->ptr + rest->len, .len = 0 }; return false; }
+    while (i < rest->size && (rest->ptr[i] == ' ' || rest->ptr[i] == '\t' || rest->ptr[i] == '\r')) ++i;
+    if (i >= rest->size || rest->ptr[i] == '#') { *rest = (proven_u8str_view_t){ .ptr = rest->ptr + rest->size, .size = 0 }; return false; }
     size_t start = i;
     if (rest->ptr[i] == '"') {
         start = ++i;
-        while (i < rest->len && rest->ptr[i] != '"') ++i;
-        if (i >= rest->len) { box_fail(p, "a quoted text is not closed"); return false; }
-        *out = (u8str_t){ .ptr = rest->ptr + start, .len = i - start };
+        while (i < rest->size && rest->ptr[i] != '"') ++i;
+        if (i >= rest->size) { box_fail(p, "a quoted text is not closed"); return false; }
+        *out = (proven_u8str_view_t){ .ptr = rest->ptr + start, .size = i - start };
         *quoted = true;
         ++i;
     } else {
-        while (i < rest->len && rest->ptr[i] != ' ' && rest->ptr[i] != '\t' && rest->ptr[i] != '\r' &&
+        while (i < rest->size && rest->ptr[i] != ' ' && rest->ptr[i] != '\t' && rest->ptr[i] != '\r' &&
                rest->ptr[i] != '"' && rest->ptr[i] != '#') ++i;
-        *out = (u8str_t){ .ptr = rest->ptr + start, .len = i - start };
+        *out = (proven_u8str_view_t){ .ptr = rest->ptr + start, .size = i - start };
         *quoted = false;
     }
-    *rest = (u8str_t){ .ptr = rest->ptr + i, .len = rest->len - i };
+    *rest = (proven_u8str_view_t){ .ptr = rest->ptr + i, .size = rest->size - i };
     return true;
 }
 
@@ -65,8 +65,8 @@ static bool add_box_node(box_parser_t *p, rubraview_box_node_t node) {
     return true;
 }
 
-static bool parse_line(box_parser_t *p, u8str_t line) {
-    u8str_t rest = line, word = {0}, second = {0}, third = {0};
+static bool parse_line(box_parser_t *p, proven_u8str_view_t line) {
+    proven_u8str_view_t rest = line, word = {0}, second = {0}, third = {0};
     bool q1 = false, q2 = false, q3 = false;
     if (!next_token(p, &rest, &word, &q1)) return p->doc->error == NULL;
     if (q1) return box_fail(p, "a line starts with a keyword, not with quoted text");
@@ -74,11 +74,11 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
     if (p->context >= 0) {
         /* RV-116: inside `context`: items, groups and its `end` only */
         rubraview_toolbox_profile_t *list = &p->doc->contexts[p->context];
-        if (rubraview_u8_eq_lit(word, "end")) {
+        if (proven_u8str_view_eq(word, PROVEN_LIT("end"))) {
             p->context = -1;
-        } else if (rubraview_u8_eq_lit(word, "group")) {
+        } else if (proven_u8str_view_eq(word, PROVEN_LIT("group"))) {
             if (list->tile_count > 0 && p->doc->context_items[p->doc->context_item_count - 1].group == p->group) p->group++;
-        } else if (rubraview_u8_eq_lit(word, "item")) {
+        } else if (proven_u8str_view_eq(word, PROVEN_LIT("item"))) {
             if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`item` needs an action id");
             if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`item` needs a \"label\"");
             if (list->tile_count >= RUBRAVIEW_CONTEXT_MAX_ITEMS) return box_fail(p, "too many items in one right-click list");
@@ -89,12 +89,12 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
             return box_fail(p, "inside `context` only `item`, `group` and `end`");
         }
         if (p->doc->error) return false;
-        u8str_t extra = {0};
+        proven_u8str_view_t extra = {0};
         bool qe = false;
         if (next_token(p, &rest, &extra, &qe)) return box_fail(p, "more on the line than the keyword takes");
         return p->doc->error == NULL;
     }
-    if (rubraview_u8_eq_lit(word, "context")) {
+    if (proven_u8str_view_eq(word, PROVEN_LIT("context"))) {
         if (p->open_menu >= 0) return box_fail(p, "a `context` inside a menu — close the menu with `end` first");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`context` needs a profile name");
         if (p->doc->context_count >= RUBRAVIEW_BOXES_MAX_PROFILES) return box_fail(p, "too many right-click lists");
@@ -106,17 +106,17 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         p->doc->contexts[p->doc->context_count++] = (rubraview_toolbox_profile_t){
             .name = second, .first_tile = (int32_t)p->doc->context_item_count, .tile_count = 0,
         };
-        u8str_t extra = {0};
+        proven_u8str_view_t extra = {0};
         bool qe = false;
         if (next_token(p, &rest, &extra, &qe)) return box_fail(p, "more on the line than the keyword takes");
         return p->doc->error == NULL;
     }
-    if (rubraview_u8_eq_lit(word, "toolbox")) {
+    if (proven_u8str_view_eq(word, PROVEN_LIT("toolbox"))) {
         if (p->open_menu >= 0) return box_fail(p, "a toolbox inside a menu — close the menu with `end` first");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`toolbox` needs a profile name");
         if (p->doc->profile_count >= RUBRAVIEW_BOXES_MAX_PROFILES) return box_fail(p, "too many toolbox profiles");
         for (size_t i = 0; i < p->doc->profile_count; ++i) {
-            if (p->doc->profiles[i].name.len == second.len && memcmp(p->doc->profiles[i].name.ptr, second.ptr, second.len) == 0) {
+            if (p->doc->profiles[i].name.size == second.size && memcmp(p->doc->profiles[i].name.ptr, second.ptr, second.size) == 0) {
                 return box_fail(p, "this toolbox profile is already defined");
             }
         }
@@ -127,14 +127,14 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         };
         return true;
     }
-    if (rubraview_u8_eq_lit(word, "group")) {
+    if (proven_u8str_view_eq(word, PROVEN_LIT("group"))) {
         if (p->profile < 0) return box_fail(p, "a `group` before any `toolbox`");
         /* A group with no tile yet is not counted: two `group` lines are one. */
         const rubraview_toolbox_profile_t *profile = &p->doc->profiles[p->profile];
         if (profile->tile_count > 0 && p->doc->tiles[p->doc->tile_count - 1].group == p->group) p->group++;
         return true;
     }
-    if (rubraview_u8_eq_lit(word, "tile")) {
+    if (proven_u8str_view_eq(word, PROVEN_LIT("tile"))) {
         if (p->profile < 0) return box_fail(p, "a `tile` before any `toolbox`");
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`tile` needs an action id");
         if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`tile` needs a \"caption\"");
@@ -143,53 +143,53 @@ static bool parse_line(box_parser_t *p, u8str_t line) {
         if (p->doc->tile_count >= RUBRAVIEW_BOXES_MAX_TILES) return box_fail(p, "too many tiles");
         p->doc->tiles[p->doc->tile_count++] = (rubraview_box_tile_t){ .action = second, .caption = third, .group = p->group };
         profile->tile_count++;
-    } else if (rubraview_u8_eq_lit(word, "menu")) {
+    } else if (proven_u8str_view_eq(word, PROVEN_LIT("menu"))) {
         p->profile = -1;
         if (!next_token(p, &rest, &second, &q2) || !q2) return box_fail(p, "`menu` needs a \"label\"");
         rubraview_box_node_t node = { .kind = RUBRAVIEW_BOX_NODE_MENU, .label = second };
         if (next_token(p, &rest, &third, &q3)) {
-            u8str_t condition = {0};
+            proven_u8str_view_t condition = {0};
             bool qc = false;
-            if (q3 || !rubraview_u8_eq_lit(third, "when") || !next_token(p, &rest, &condition, &qc) || qc) {
+            if (q3 || !proven_u8str_view_eq(third, PROVEN_LIT("when")) || !next_token(p, &rest, &condition, &qc) || qc) {
                 return box_fail(p, "after a menu's label only `when <condition>` may follow");
             }
-            if (rubraview_u8_eq_lit(condition, "media")) node.when = RUBRAVIEW_BOXES_WHEN_MEDIA;
-            else if (rubraview_u8_eq_lit(condition, "plays")) node.when = RUBRAVIEW_BOXES_WHEN_PLAYS;
+            if (proven_u8str_view_eq(condition, PROVEN_LIT("media"))) node.when = RUBRAVIEW_BOXES_WHEN_MEDIA;
+            else if (proven_u8str_view_eq(condition, PROVEN_LIT("plays"))) node.when = RUBRAVIEW_BOXES_WHEN_PLAYS;
             else return box_fail(p, "the conditions are `when media` and `when plays`");
         }
         if (p->doc->error) return false;
         if (!add_box_node(p, node)) return false;
         p->open_menu = (int32_t)p->doc->node_count - 1;
         return true;
-    } else if (rubraview_u8_eq_lit(word, "item")) {
+    } else if (proven_u8str_view_eq(word, PROVEN_LIT("item"))) {
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`item` needs an action id");
         if (!next_token(p, &rest, &third, &q3) || !q3) return box_fail(p, "`item` needs a \"label\"");
         if (!add_box_node(p, (rubraview_box_node_t){ .kind = RUBRAVIEW_BOX_NODE_ITEM, .label = third, .action = second })) return false;
-    } else if (rubraview_u8_eq_lit(word, "recent")) {
+    } else if (proven_u8str_view_eq(word, PROVEN_LIT("recent"))) {
         if (p->open_menu < 0) return box_fail(p, "`recent` outside any `menu`");
         if (!add_box_node(p, (rubraview_box_node_t){ .kind = RUBRAVIEW_BOX_NODE_RECENT })) return false;
-    } else if (rubraview_u8_eq_lit(word, "end")) {
+    } else if (proven_u8str_view_eq(word, PROVEN_LIT("end"))) {
         if (p->open_menu < 0) return box_fail(p, "an `end` with no open `menu`");
         p->open_menu = p->doc->nodes[p->open_menu].parent;
     } else {
         return box_fail(p, "unknown keyword (toolbox, tile, context, menu, item, recent, end)");
     }
     if (p->doc->error) return false;
-    u8str_t extra = {0};
+    proven_u8str_view_t extra = {0};
     bool qe = false;
     if (next_token(p, &rest, &extra, &qe)) return box_fail(p, "more on the line than the keyword takes");
     return p->doc->error == NULL;
 }
 
-bool rubraview_boxes_doc_parse(u8str_t text, rubraview_boxes_doc_t *out) {
+bool rubraview_boxes_doc_parse(proven_u8str_view_t text, rubraview_boxes_doc_t *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
     box_parser_t p = { .doc = out, .line = 0, .profile = -1, .open_menu = -1, .context = -1 };
     size_t start = 0;
-    for (size_t i = 0; i <= text.len; ++i) {
-        if (i < text.len && text.ptr[i] != '\n') continue;
+    for (size_t i = 0; i <= text.size; ++i) {
+        if (i < text.size && text.ptr[i] != '\n') continue;
         p.line++;
-        if (!parse_line(&p, (u8str_t){ .ptr = text.ptr + start, .len = i - start })) return false;
+        if (!parse_line(&p, (proven_u8str_view_t){ .ptr = text.ptr + start, .size = i - start })) return false;
         start = i + 1;
     }
     if (p.open_menu >= 0) {
@@ -214,20 +214,20 @@ const rubraview_boxes_doc_t *rubraview_boxes_document(void) {
     return &g_boxes;
 }
 
-const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes_doc_t *doc, u8str_t name) {
+const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes_doc_t *doc, proven_u8str_view_t name) {
     if (!doc) return NULL;
     for (size_t i = 0; i < doc->profile_count; ++i) {
-        if (doc->profiles[i].name.len == name.len && memcmp(doc->profiles[i].name.ptr, name.ptr, name.len) == 0) {
+        if (doc->profiles[i].name.size == name.size && memcmp(doc->profiles[i].name.ptr, name.ptr, name.size) == 0) {
             return &doc->profiles[i];
         }
     }
     return NULL;
 }
 
-const rubraview_toolbox_profile_t *rubraview_boxes_context(const rubraview_boxes_doc_t *doc, u8str_t name) {
+const rubraview_toolbox_profile_t *rubraview_boxes_context(const rubraview_boxes_doc_t *doc, proven_u8str_view_t name) {
     if (!doc) return NULL;
     for (size_t i = 0; i < doc->context_count; ++i) {
-        if (doc->contexts[i].name.len == name.len && memcmp(doc->contexts[i].name.ptr, name.ptr, name.len) == 0) {
+        if (doc->contexts[i].name.size == name.size && memcmp(doc->contexts[i].name.ptr, name.ptr, name.size) == 0) {
             return &doc->contexts[i];
         }
     }
@@ -294,7 +294,7 @@ rubraview_menu_tree_t rubraview_boxes_menu(proven_arena_t *arena, const rubravie
             item.action = recent[s.recent].action;
         } else {
             item.label = rubraview_tr_ctx_u8("menu", node->label);   /* RV-114: built again when the language changes */
-            item.action = node->kind == RUBRAVIEW_BOX_NODE_ITEM ? node->action : (u8str_t){ .ptr = "", .len = 0 };
+            item.action = node->kind == RUBRAVIEW_BOX_NODE_ITEM ? node->action : PROVEN_LIT("");
             if (node->kind == RUBRAVIEW_BOX_NODE_MENU) {
                 size_t k = children_of(doc, s.node, when, recent_count, kids, capacity);
                 if ((int32_t)k > max_children) k = (size_t)max_children;

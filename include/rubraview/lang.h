@@ -61,7 +61,7 @@ typedef struct rubraview_lang_stats {
 /** Reads a pack. False when the text is over RUBRAVIEW_LANG_MAX_FILE or
     memory runs out; a pack with no usable entry still loads (and is empty).
     `stats` may be NULL. */
-bool rubraview_lang_load(rubraview_lang_t *lang, u8str_t text, rubraview_lang_stats_t *stats);
+bool rubraview_lang_load(rubraview_lang_t *lang, proven_u8str_view_t text, rubraview_lang_stats_t *stats);
 void rubraview_lang_free(rubraview_lang_t *lang);
 
 /** The pack's text for `english` in `context` ("" or NULL for none), or NULL. */
@@ -70,7 +70,7 @@ const rubraview_lang_entry_t *rubraview_lang_find(const rubraview_lang_t *lang, 
 
 /** Whether `translation` has the same printf conversions as `english`, in
     the same order (%% is not one). */
-bool rubraview_lang_same_conversions(u8str_t english, u8str_t translation);
+bool rubraview_lang_same_conversions(proven_u8str_view_t english, proven_u8str_view_t translation);
 
 /* ---- the pack in use, for the whole program ---- */
 
@@ -89,12 +89,12 @@ const rubraview_lang_t *rubraview_lang_current(void);
 #endif
 const char *rubraview_tr(const char *english) RUBRAVIEW_FORMAT_ARG(1);
 const char *rubraview_tr_ctx(const char *context, const char *english) RUBRAVIEW_FORMAT_ARG(2);
-u8str_t rubraview_tr_u8(u8str_t english);
-u8str_t rubraview_tr_ctx_u8(const char *context, u8str_t english);
+proven_u8str_view_t rubraview_tr_u8(proven_u8str_view_t english);
+proven_u8str_view_t rubraview_tr_ctx_u8(const char *context, proven_u8str_view_t english);
 
 /** Marks a literal for check-lang.py and looks it up. */
 #define T(lit) rubraview_tr("" lit)
-#define TU8(lit) rubraview_tr_u8(U8(lit))
+#define TU8(lit) rubraview_tr_u8(PROVEN_LIT(lit))
 #define TC(ctx, lit) rubraview_tr_ctx(ctx, "" lit)
 /** Marks a literal for check-lang.py without looking it up (it is looked
     up later, where it is shown). */
@@ -102,9 +102,9 @@ u8str_t rubraview_tr_ctx_u8(const char *context, u8str_t english);
 
 /** Display columns of UTF-8 text on a character grid: East Asian Wide and
     Fullwidth characters take two, combining marks none, others one. */
-size_t rubraview_text_columns(u8str_t text);
+size_t rubraview_text_columns(proven_u8str_view_t text);
 /** Bytes of `text` that fit in `columns`, never splitting a character. */
-size_t rubraview_text_fit(u8str_t text, size_t columns);
+size_t rubraview_text_fit(proven_u8str_view_t text, size_t columns);
 /** Whether a code point takes two columns. */
 bool rubraview_codepoint_is_wide(uint32_t cp);
 

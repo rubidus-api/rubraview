@@ -6,7 +6,7 @@ static double clampd(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-rubraview_panel_t rubraview_panel_create(u8str_t title, double dpi_scale) {
+rubraview_panel_t rubraview_panel_create(proven_u8str_view_t title, double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
     rubraview_panel_t panel = {0};
     panel.title = title;
@@ -27,7 +27,7 @@ static rubraview_panel_row_t *push_row(rubraview_panel_t *panel) {
     return row;
 }
 
-bool rubraview_panel_add_slider(rubraview_panel_t *panel, int32_t id, u8str_t label,
+bool rubraview_panel_add_slider(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label,
                                 double value, double min_value, double max_value, double step) {
     rubraview_panel_row_t *row = push_row(panel);
     if (!row) return false;
@@ -42,7 +42,7 @@ bool rubraview_panel_add_slider(rubraview_panel_t *panel, int32_t id, u8str_t la
     return true;
 }
 
-bool rubraview_panel_add_toggle(rubraview_panel_t *panel, int32_t id, u8str_t label, bool on) {
+bool rubraview_panel_add_toggle(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label, bool on) {
     rubraview_panel_row_t *row = push_row(panel);
     if (!row) return false;
     row->kind = RUBRAVIEW_ROW_TOGGLE;
@@ -54,7 +54,7 @@ bool rubraview_panel_add_toggle(rubraview_panel_t *panel, int32_t id, u8str_t la
     return true;
 }
 
-bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, u8str_t label,
+bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label,
                                 int32_t index, int32_t choice_count) {
     rubraview_panel_row_t *row = push_row(panel);
     if (!row) return false;
@@ -70,7 +70,7 @@ bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, u8str_t la
     return true;
 }
 
-bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, u8str_t label) {
+bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label) {
     rubraview_panel_row_t *row = push_row(panel);
     if (!row) return false;
     row->kind = RUBRAVIEW_ROW_BUTTON;

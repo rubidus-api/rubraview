@@ -34,7 +34,7 @@ def identity():
 def extensions():
     text = (ROOT / "src" / "core" / "filemanage.c").read_text(encoding="utf-8")
     body = text[text.index("rubraview_shell_extensions_all(void)"):]
-    return re.search(r'U8\("([^"]*)"\)', body).group(1).split(";")
+    return re.search(r'PROVEN_LIT\("([^"]*)"\)', body).group(1).split(";")
 
 
 def publisher_id(publisher):

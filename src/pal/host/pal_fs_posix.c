@@ -15,12 +15,12 @@
 
 /* Copies `n` bytes into the arena as len + 1 with a trailing NUL, per the
    null-terminated allocation invariant (§7.2.3). */
-static u8str_t arena_dup(proven_arena_t *arena, const char *src, size_t n) {
+static proven_u8str_view_t arena_dup(proven_arena_t *arena, const char *src, size_t n) {
     proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     if (n > 0) memcpy(res.value.ptr, src, n);
     res.value.ptr[n] = '\0';
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = n };
 }
 
 typedef struct entry_buf {
@@ -49,15 +49,15 @@ static void fill_from_stat(rubraview_fs_entry_t *entry, const struct stat *st) {
     entry->is_directory = S_ISDIR(st->st_mode);
 }
 
-rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t dir_path) {
+rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u8str_view_t dir_path) {
     rubraview_fs_listing_t listing = {0};
-    if (!arena || dir_path.len == 0 || !dir_path.ptr) return listing;
+    if (!arena || dir_path.size == 0 || !dir_path.ptr) return listing;
 
     /* dir_path may be a slice; make a NUL-terminated copy for opendir. */
-    u8str_t dir_z = arena_dup(arena, dir_path.ptr, dir_path.len);
-    if (dir_z.len == 0) return listing;
+    proven_u8str_view_t dir_z = arena_dup(arena, (const char *)dir_path.ptr, dir_path.size);
+    if (dir_z.size == 0) return listing;
 
-    DIR *dir = opendir(dir_z.ptr);
+    DIR *dir = opendir((const char *)dir_z.ptr);
     if (!dir) return listing;
 
     entry_buf_t buf = {0};
@@ -71,7 +71,7 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t 
         entry.path = rubraview_path_join(arena, dir_z, entry.name);
 
         struct stat st;
-        if (entry.path.len > 0 && stat(entry.path.ptr, &st) == 0) {
+        if (entry.path.size > 0 && stat((const char * restrict)entry.path.ptr, &st) == 0) {
             fill_from_stat(&entry, &st);
         }
 
@@ -84,9 +84,9 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, u8str_t 
     return listing;
 }
 
-static void push_place(proven_arena_t *arena, entry_buf_t *buf, const char *name, u8str_t path) {
+static void push_place(proven_arena_t *arena, entry_buf_t *buf, const char *name, proven_u8str_view_t path) {
     struct stat st;
-    if (path.len == 0 || stat(path.ptr, &st) != 0 || !S_ISDIR(st.st_mode)) return;
+    if (path.size == 0 || stat((const char * restrict)path.ptr, &st) != 0 || !S_ISDIR(st.st_mode)) return;
     rubraview_fs_entry_t entry = {0};
     entry.name = arena_dup(arena, name, strlen(name));
     entry.path = path;
@@ -101,11 +101,11 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     entry_buf_t buf = {0};
     const char *home = getenv("HOME");
     if (home && home[0]) {
-        u8str_t home_path = arena_dup(arena, home, strlen(home));
+        proven_u8str_view_t home_path = arena_dup(arena, home, strlen(home));
         push_place(arena, &buf, "Home", home_path);
         static const char *const FOLDERS[] = { "Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music" };
         for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
-            u8str_t name = { .ptr = FOLDERS[i], .len = strlen(FOLDERS[i]) };
+            proven_u8str_view_t name = { .ptr = (const proven_byte_t *)FOLDERS[i], .size = strlen(FOLDERS[i]) };
             push_place(arena, &buf, FOLDERS[i], rubraview_path_join(arena, home_path, name));
         }
     }
@@ -117,31 +117,31 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
 }
 
 /* The host has no %VARIABLES% to put in. */
-u8str_t rubraview_pal_fs_expand_env(proven_arena_t *arena, u8str_t path) {
-    if (!arena || path.len == 0) return path;
-    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
-    return path_z.len > 0 ? path_z : path;
+proven_u8str_view_t rubraview_pal_fs_expand_env(proven_arena_t *arena, proven_u8str_view_t path) {
+    if (!arena || path.size == 0) return path;
+    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    return path_z.size > 0 ? path_z : path;
 }
 
-u8str_t rubraview_pal_fs_absolute(proven_arena_t *arena, u8str_t path) {
-    if (!arena || path.len == 0) return path;
-    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
-    if (path_z.len == 0) return path;
-    char *full = realpath(path_z.ptr, NULL);
+proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8str_view_t path) {
+    if (!arena || path.size == 0) return path;
+    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    if (path_z.size == 0) return path;
+    char *full = realpath((const char * restrict)path_z.ptr, NULL);
     if (!full) return path_z;
-    u8str_t out = arena_dup(arena, full, strlen(full));
+    proven_u8str_view_t out = arena_dup(arena, full, strlen(full));
     free(full);
-    return out.len > 0 ? out : path_z;
+    return out.size > 0 ? out : path_z;
 }
 
-bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_entry_t *out_entry) {
-    if (!arena || !out_entry || path.len == 0) return false;
+bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubraview_fs_entry_t *out_entry) {
+    if (!arena || !out_entry || path.size == 0) return false;
 
-    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
-    if (path_z.len == 0) return false;
+    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    if (path_z.size == 0) return false;
 
     struct stat st;
-    if (stat(path_z.ptr, &st) != 0) return false;
+    if (stat((const char * restrict)path_z.ptr, &st) != 0) return false;
 
     *out_entry = (rubraview_fs_entry_t){0};
     out_entry->path = path_z;
@@ -150,44 +150,44 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, u8str_t path, rubraview_fs_ent
     return true;
 }
 
-u8str_t rubraview_pal_transcode_codepage(proven_arena_t *arena, u8str_t bytes, uint32_t codepage_id) {
+proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, proven_u8str_view_t bytes, uint32_t codepage_id) {
     (void)arena; (void)bytes; (void)codepage_id;
     /* The host build carries no legacy code-page tables — that is a
        Windows facility (§3.8.3 step 3) and the reason this call sits
        behind the PAL. Returning empty tells the caller to keep the raw
        bytes rather than display a wrong transliteration. */
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
-u8str_t rubraview_pal_encode_codepage(proven_arena_t *arena, u8str_t utf8, uint32_t codepage_id) {
+proven_u8str_view_t rubraview_pal_encode_codepage(proven_arena_t *arena, proven_u8str_view_t utf8, uint32_t codepage_id) {
     (void)arena; (void)utf8; (void)codepage_id;
     /* No code-page tables here either: the caller keeps the UTF-8 bytes. */
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
-bool rubraview_pal_fs_exists(u8str_t path) {
-    if (path.len == 0 || !path.ptr) return false;
+bool rubraview_pal_fs_exists(proven_u8str_view_t path) {
+    if (path.size == 0 || !path.ptr) return false;
 
     /* The caller's slice need not be NUL-terminated (it may point into a
        larger buffer), so copy into a bounded stack buffer rather than
        reading past path.len. */
     char buf[4096];
-    if (path.len >= sizeof(buf)) return false;
-    memcpy(buf, path.ptr, path.len);
-    buf[path.len] = '\0';
+    if (path.size >= sizeof(buf)) return false;
+    memcpy(buf, path.ptr, path.size);
+    buf[path.size] = '\0';
 
     struct stat st;
     return stat(buf, &st) == 0;
 }
 
-u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t max_bytes) {
-    u8str_t empty = { .ptr = "", .len = 0 };
-    if (!arena || path.len == 0 || !path.ptr) return empty;
+proven_u8str_view_t rubraview_pal_fs_read_file(proven_arena_t *arena, proven_u8str_view_t path, size_t max_bytes) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
+    if (!arena || path.size == 0 || !path.ptr) return empty;
 
-    u8str_t path_z = arena_dup(arena, path.ptr, path.len);
-    if (path_z.len == 0) return empty;
+    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    if (path_z.size == 0) return empty;
 
-    FILE *file = fopen(path_z.ptr, "rb");
+    FILE *file = fopen((const char * restrict)path_z.ptr, "rb");
     if (!file) return empty;
 
     if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return empty; }
@@ -202,16 +202,16 @@ u8str_t rubraview_pal_fs_read_file(proven_arena_t *arena, u8str_t path, size_t m
     fclose(file);
 
     res.value.ptr[read] = '\0';
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = read };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = read };
 }
 
-bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, u8str_t path) {
+bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_view_t path) {
     if (!writer) return false;
     *writer = (rubraview_fs_writer_t){0};
-    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+    if (path.size == 0 || !path.ptr || path.size >= 4096) return false;
     char path_z[4096];
-    memcpy(path_z, path.ptr, path.len);
-    path_z[path.len] = '\0';
+    memcpy(path_z, path.ptr, path.size);
+    path_z[path.size] = '\0';
     FILE *file = fopen(path_z, "wbx");              /* "x": never over a file that is there */
     if (!file) return false;
     writer->os = file;
@@ -233,7 +233,7 @@ bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer) {
     return ok;
 }
 
-void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path) {
+void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, proven_u8str_view_t path) {
     if (writer && writer->os) {
         fclose((FILE*)writer->os);
         writer->os = NULL;
@@ -241,17 +241,17 @@ void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, u8str_t path) 
     (void)rubraview_pal_fs_delete(path);
 }
 
-bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
-    if (path.len == 0 || !path.ptr || path.len >= 4096) return false;
+bool rubraview_pal_fs_write_file(proven_u8str_view_t path, proven_u8str_view_t contents) {
+    if (path.size == 0 || !path.ptr || path.size >= 4096) return false;
 
     char path_z[4096];
-    memcpy(path_z, path.ptr, path.len);
-    path_z[path.len] = '\0';
+    memcpy(path_z, path.ptr, path.size);
+    path_z[path.size] = '\0';
 
     /* The folder the file goes in is made first: on a first run the
        settings folder does not exist yet (0.0.6: "could not write
        settings.ini" on every change). */
-    for (size_t i = 1; i < path.len; ++i) {
+    for (size_t i = 1; i < path.size; ++i) {
         if (path_z[i] != '/') continue;
         path_z[i] = '\0';
         mkdir(path_z, 0777);   /* an existing level is fine; a real failure shows at fopen */
@@ -261,20 +261,20 @@ bool rubraview_pal_fs_write_file(u8str_t path, u8str_t contents) {
     FILE *file = fopen(path_z, "wb");
     if (!file) return false;
 
-    size_t written = contents.len > 0 ? fwrite(contents.ptr, 1, contents.len, file) : 0;
-    bool ok = (written == contents.len);
+    size_t written = contents.size > 0 ? fwrite(contents.ptr, 1, contents.size, file) : 0;
+    bool ok = (written == contents.size);
     if (fclose(file) != 0) ok = false;
     return ok;
 }
 
-bool rubraview_pal_fs_write_file_atomic(u8str_t path, u8str_t contents) {
-    if (path.len == 0 || !path.ptr || path.len >= 4000) return false;
+bool rubraview_pal_fs_write_file_atomic(proven_u8str_view_t path, proven_u8str_view_t contents) {
+    if (path.size == 0 || !path.ptr || path.size >= 4000) return false;
     char temp[4096], final[4096];
-    memcpy(final, path.ptr, path.len);
-    final[path.len] = '\0';
+    memcpy(final, path.ptr, path.size);
+    final[path.size] = '\0';
     int n = snprintf(temp, sizeof(temp), "%s.%ld.tmp", final, (long)getpid());
     if (n <= 0 || (size_t)n >= sizeof(temp)) return false;
-    if (rubraview_pal_fs_write_file((u8str_t){ .ptr = temp, .len = (size_t)n }, contents) && rename(temp, final) == 0) return true;
+    if (rubraview_pal_fs_write_file((proven_u8str_view_t){ .ptr = (const proven_byte_t *)temp, .size = (size_t)n }, contents) && rename(temp, final) == 0) return true;
     remove(temp);
     return rubraview_pal_fs_write_file(path, contents);
 }
@@ -294,24 +294,24 @@ void rubraview_pal_config_unlock(void) {}
  * for. The Windows backend is the one that acts.
  */
 
-bool rubraview_pal_fs_recycle(u8str_t path) { (void)path; return false; }
-bool rubraview_pal_fs_delete(u8str_t path) { (void)path; return false; }
-bool rubraview_pal_fs_restore_last_recycled(u8str_t original_path) { (void)original_path; return false; }
-bool rubraview_pal_fs_move(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
-bool rubraview_pal_fs_copy(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
-bool rubraview_pal_fs_copy_tree(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
-bool rubraview_pal_fs_delete_tree(u8str_t path) { (void)path; return false; }
-bool rubraview_pal_fs_replace(u8str_t from, u8str_t to) { (void)from; (void)to; return false; }
-bool rubraview_pal_fs_free_bytes(u8str_t dir, uint64_t *out_bytes) { (void)dir; (void)out_bytes; return false; }
-bool rubraview_pal_fs_make_dirs(u8str_t path) { (void)path; return false; }
+bool rubraview_pal_fs_recycle(proven_u8str_view_t path) { (void)path; return false; }
+bool rubraview_pal_fs_delete(proven_u8str_view_t path) { (void)path; return false; }
+bool rubraview_pal_fs_restore_last_recycled(proven_u8str_view_t original_path) { (void)original_path; return false; }
+bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_copy(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_copy_tree(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) { (void)path; return false; }
+bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes) { (void)dir; (void)out_bytes; return false; }
+bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path) { (void)path; return false; }
 
-bool rubraview_pal_fs_map(u8str_t path, rubraview_fs_mapping_t *out) {
+bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out) {
     if (!out) return false;
     *out = (rubraview_fs_mapping_t){0};
     char z[4096];
-    if (path.len == 0 || path.len >= sizeof(z)) return false;
-    memcpy(z, path.ptr, path.len);
-    z[path.len] = '\0';
+    if (path.size == 0 || path.size >= sizeof(z)) return false;
+    memcpy(z, path.ptr, path.size);
+    z[path.size] = '\0';
     int fd = open(z, O_RDONLY);
     if (fd < 0) return false;
     struct stat st;
@@ -349,11 +349,11 @@ char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t code
     return out;
 }
 
-bool rubraview_pal_fs_set_mtime(u8str_t path, int64_t mtime) {
+bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     char z[4096];
-    if (path.len == 0 || path.len >= sizeof(z)) return false;
-    memcpy(z, path.ptr, path.len);
-    z[path.len] = '\0';
+    if (path.size == 0 || path.size >= sizeof(z)) return false;
+    memcpy(z, path.ptr, path.size);
+    z[path.size] = '\0';
     struct timespec times[2] = { { .tv_nsec = UTIME_OMIT }, { .tv_sec = (time_t)mtime, .tv_nsec = 0 } };
     return utimensat(AT_FDCWD, z, times, 0) == 0;
 }

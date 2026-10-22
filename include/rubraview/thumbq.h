@@ -41,7 +41,7 @@ typedef struct rubraview_thumbq {
 
 /* False when refused: another generation, a path too long, or no storage. */
 bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t index, bool folder,
-                           double aspect, u8str_t path);
+                           double aspect, proven_u8str_view_t path);
 
 /* A picture given as bytes (a page inside a book, which has no file).
    The queue owns `bytes` from here: it frees them if it refuses the

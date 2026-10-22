@@ -19,14 +19,14 @@ extern "C" {
  */
 
 /* The whole view is one number. */
-[[nodiscard]] bool rubraview_parse_double(u8str_t text, double *out);
+[[nodiscard]] bool rubraview_parse_double(proven_u8str_view_t text, double *out);
 
 /* A number at the start of the view, with whatever follows left alone
    ("-7.23 dB", "500 ms"). `consumed` counts leading spaces too; it may be NULL. */
-[[nodiscard]] bool rubraview_parse_double_prefix(u8str_t text, double *out, size_t *consumed);
+[[nodiscard]] bool rubraview_parse_double_prefix(proven_u8str_view_t text, double *out, size_t *consumed);
 
 /* The whole view is one decimal integer that fits in int64_t. */
-[[nodiscard]] bool rubraview_parse_i64(u8str_t text, int64_t *out);
+[[nodiscard]] bool rubraview_parse_i64(proven_u8str_view_t text, int64_t *out);
 
 /*
  * One more decimal digit onto a number being read by hand (a time stamp's

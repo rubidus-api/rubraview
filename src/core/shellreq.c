@@ -12,9 +12,9 @@ const char *rubraview_shell_verb_flag(rubraview_shell_verb_t verb) {
     return verb > RUBRAVIEW_SHELL_VERB_NONE && verb < RUBRAVIEW_SHELL_VERB_COUNT ? VERB_FLAGS[verb] : "";
 }
 
-rubraview_shell_verb_t rubraview_shell_verb_for_flag(u8str_t arg) {
+rubraview_shell_verb_t rubraview_shell_verb_for_flag(proven_u8str_view_t arg) {
     for (int verb = RUBRAVIEW_SHELL_VERB_OPEN; verb < RUBRAVIEW_SHELL_VERB_COUNT; ++verb) {
-        if (rubraview_u8_eq_lit(arg, VERB_FLAGS[verb])) return (rubraview_shell_verb_t)verb;
+        if (proven_u8str_view_eq(arg, proven_u8str_view_from_cstr(VERB_FLAGS[verb]))) return (rubraview_shell_verb_t)verb;
     }
     return RUBRAVIEW_SHELL_VERB_NONE;
 }
@@ -48,24 +48,24 @@ const rubraview_shell_menu_item_t *rubraview_shell_menu_items(size_t *out_count)
 
 /* ---- a request, packed ---- */
 
-size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const u8str_t *paths, size_t count,
+size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const proven_u8str_view_t *paths, size_t count,
                                char *dst, size_t cap) {
     size_t need = 2;
-    for (size_t i = 0; i < count; ++i) need += paths[i].len + 1;
+    for (size_t i = 0; i < count; ++i) need += paths[i].size + 1;
     if (!dst || cap < need) return need;
     dst[0] = (char)('A' + (int)verb);
     dst[1] = whole ? '1' : '0';
     size_t at = 2;
     for (size_t i = 0; i < count; ++i) {
-        if (paths[i].len) memcpy(dst + at, paths[i].ptr, paths[i].len);
-        at += paths[i].len;
+        if (paths[i].size) memcpy(dst + at, paths[i].ptr, paths[i].size);
+        at += paths[i].size;
         dst[at++] = '\0';
     }
     return need;
 }
 
 bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_verb_t *out_verb, bool *out_whole,
-                               u8str_t *paths, size_t cap, size_t *out_count) {
+                               proven_u8str_view_t *paths, size_t cap, size_t *out_count) {
     if (out_count) *out_count = 0;
     if (!blob || len < 2) return false;
     int verb = blob[0] - 'A';
@@ -78,7 +78,7 @@ bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_ver
     for (size_t at = 2; at < len;) {
         size_t n = strlen(blob + at);
         if (n > 0) {
-            if (paths && count < cap) paths[count] = (u8str_t){ .ptr = blob + at, .len = n };
+            if (paths && count < cap) paths[count] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)blob + at, .size = n };
             count++;
         }
         at += n + 1;
@@ -89,17 +89,17 @@ bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_ver
     return true;
 }
 
-size_t rubraview_shellreq_split_lines(u8str_t text, u8str_t *paths, size_t cap) {
+size_t rubraview_shellreq_split_lines(proven_u8str_view_t text, proven_u8str_view_t *paths, size_t cap) {
     size_t at = 0, count = 0;
-    if (text.len >= 3 && (unsigned char)text.ptr[0] == 0xEF && (unsigned char)text.ptr[1] == 0xBB &&
+    if (text.size >= 3 && (unsigned char)text.ptr[0] == 0xEF && (unsigned char)text.ptr[1] == 0xBB &&
         (unsigned char)text.ptr[2] == 0xBF) {
         at = 3;
     }
-    while (at < text.len) {
+    while (at < text.size) {
         size_t end = at;
-        while (end < text.len && text.ptr[end] != '\n' && text.ptr[end] != '\r') end++;
+        while (end < text.size && text.ptr[end] != '\n' && text.ptr[end] != '\r') end++;
         if (end > at) {
-            if (paths && count < cap) paths[count] = (u8str_t){ .ptr = text.ptr + at, .len = end - at };
+            if (paths && count < cap) paths[count] = (proven_u8str_view_t){ .ptr = text.ptr + at, .size = end - at };
             count++;
         }
         at = end + 1;
@@ -110,12 +110,12 @@ size_t rubraview_shellreq_split_lines(u8str_t text, u8str_t *paths, size_t cap) 
 /* ---- gathering ---- */
 
 bool rubraview_shellreq_collect(rubraview_shellreq_collector_t *c, rubraview_shell_verb_t verb, bool whole,
-                                const u8str_t *paths, size_t count, double now) {
+                                const proven_u8str_view_t *paths, size_t count, double now) {
     if (!c) return false;
     if (c->pending && c->verb != verb) return false;
 
     size_t need = c->pending ? c->text_len : 0;
-    for (size_t i = 0; i < count; ++i) need += paths[i].len + 1;
+    for (size_t i = 0; i < count; ++i) need += paths[i].size + 1;
     if (need > c->text_cap) {
         size_t grown = c->text_cap ? c->text_cap : 1024;
         while (grown < need) grown *= 2;
@@ -130,9 +130,9 @@ bool rubraview_shellreq_collect(rubraview_shellreq_collector_t *c, rubraview_she
         c->whole = false;
     }
     for (size_t i = 0; i < count; ++i) {
-        if (paths[i].len == 0) continue;
-        memcpy(c->text + c->text_len, paths[i].ptr, paths[i].len);
-        c->text_len += paths[i].len;
+        if (paths[i].size == 0) continue;
+        memcpy(c->text + c->text_len, paths[i].ptr, paths[i].size);
+        c->text_len += paths[i].size;
         c->text[c->text_len++] = '\0';
         c->count++;
     }
@@ -458,26 +458,26 @@ bool rubraview_print_preview_region(const rubraview_print_placement_t *pl, int32
 
 static char entry_lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
-static bool entry_starts(u8str_t text, size_t at, const char *word) {
+static bool entry_starts(proven_u8str_view_t text, size_t at, const char *word) {
     for (size_t i = 0; word[i]; ++i) {
-        if (at + i >= text.len || entry_lower(text.ptr[at + i]) != word[i]) return false;
+        if (at + i >= text.size || entry_lower(text.ptr[at + i]) != word[i]) return false;
     }
     return true;
 }
 
-bool rubraview_shell_entry_is_ours(u8str_t key_name, u8str_t command) {
+bool rubraview_shell_entry_is_ours(proven_u8str_view_t key_name, proven_u8str_view_t command) {
     if (entry_starts(key_name, 0, "rubraview")) return true;
     /* The program: up to the closing quote, or to ".exe" when it has none. */
     size_t start = 0, end = 0;
-    while (start < command.len && command.ptr[start] == ' ') start++;
-    if (start < command.len && command.ptr[start] == '"') {
+    while (start < command.size && command.ptr[start] == ' ') start++;
+    if (start < command.size && command.ptr[start] == '"') {
         start++;
         end = start;
-        while (end < command.len && command.ptr[end] != '"') end++;
+        while (end < command.size && command.ptr[end] != '"') end++;
     } else {
         end = start;
-        while (end < command.len && !entry_starts(command, end, ".exe")) end++;
-        if (end < command.len) end += 4;
+        while (end < command.size && !entry_starts(command, end, ".exe")) end++;
+        if (end < command.size) end += 4;
     }
     /* Its file name, after the last separator. */
     size_t name = start;

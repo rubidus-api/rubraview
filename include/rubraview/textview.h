@@ -73,10 +73,10 @@ bool rubraview_text_ends_sentence(const char *line, size_t len);
  * it), letters' case and full-width forms ignored. Wraps round once.
  * The match's place and length in bytes of the view's text.
  */
-bool rubraview_text_find(const rubraview_text_view_t *view, u8str_t needle, size_t from, bool backward,
+bool rubraview_text_find(const rubraview_text_view_t *view, proven_u8str_view_t needle, size_t from, bool backward,
                          size_t *at, size_t *len);
 /** How many times `needle` is in the view, and which of them begins at `at` (1-based; 0 none). */
-size_t rubraview_text_count(const rubraview_text_view_t *view, u8str_t needle, size_t at, size_t *which);
+size_t rubraview_text_count(const rubraview_text_view_t *view, proven_u8str_view_t needle, size_t at, size_t *which);
 
 /** One code point at `*i` of `s`, `*i` moved past it; U+FFFD for a bad byte. */
 uint32_t rubraview_text_next_cp(const char *s, size_t len, size_t *i);

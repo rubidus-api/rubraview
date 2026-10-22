@@ -35,7 +35,7 @@ void rubraview_pal_tiles_stop(rubraview_tiles_t *tiles);
 
 /* A new page (a file on disk) under a new generation: what was wanted and
    what is unread go. The picture size is the upright one the page has. */
-void rubraview_pal_tiles_source(rubraview_tiles_t *tiles, uint32_t generation, u8str_t path,
+void rubraview_pal_tiles_source(rubraview_tiles_t *tiles, uint32_t generation, proven_u8str_view_t path,
                                 bool apply_exif_orientation, int32_t picture_w, int32_t picture_h);
 /* The same for a page with no file of its own — an archive page (RV-085).
    `bytes` is a malloc'd copy of the page the thread takes over and frees;

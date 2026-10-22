@@ -61,37 +61,37 @@ typedef struct rubraview_subtitle_place {
 typedef struct rubraview_subtitle_cue {
     double  start_seconds;
     double  end_seconds;
-    u8str_t text;        /* markup removed; a line break is '\n' */
-    u8str_t language;    /* SAMI carries one per class; empty otherwise */
+    proven_u8str_view_t text;        /* markup removed; a line break is '\n' */
+    proven_u8str_view_t language;    /* SAMI carries one per class; empty otherwise */
     rubraview_subtitle_place_t place;
     bool    time_changed;   /* moved since it was read */
     bool    removed;        /* RV-115: taken out; kept, unseen, for the save to take out its block */
     bool    added;          /* RV-115: new; the save writes it in, made from a neighbour's block */
     bool    text_changed;   /* edited: `written` is what goes into the file */
-    u8str_t written;
+    proven_u8str_view_t written;
 } rubraview_subtitle_cue_t;
 
 typedef struct rubraview_subtitle_track {
     rubraview_subtitle_format_t format;
     rubraview_subtitle_cue_t   *cues;    /* sorted by start time */
     size_t                      count;
-    u8str_t                     language;
+    proven_u8str_view_t                     language;
     /* One SAMI file often holds several languages, one class each
        (owner, 2026-09-23). When this is set, only the cues of that
        language are shown; empty means every cue, as before. */
-    u8str_t                     shown_language;
+    proven_u8str_view_t                     shown_language;
     double                      offset_seconds;  /* §3.16.1's Z/X adjustment */
     /* RV-115: the text the cues' places point into, kept for saving; the
        file it came from (empty for a subtitle held in a film) and whether
        it was not UTF-8 and was read in the machine's code page — both set
        by whoever read the file. */
-    u8str_t                     source;
-    u8str_t                     source_path;
+    proven_u8str_view_t                     source;
+    proven_u8str_view_t                     source_path;
     bool                        source_transcoded;
 } rubraview_subtitle_track_t;
 
 /** Guess the format from the filename, before reading anything. */
-rubraview_subtitle_format_t rubraview_subtitle_format_for_name(u8str_t filename);
+rubraview_subtitle_format_t rubraview_subtitle_format_for_name(proven_u8str_view_t filename);
 
 /**
  * Parse a subtitle file. The format is taken from `format`, or worked
@@ -102,7 +102,7 @@ rubraview_subtitle_format_t rubraview_subtitle_format_for_name(u8str_t filename)
  * timestamp in a thousand-line subtitle should cost that line, not the
  * whole track.
  */
-rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str_t text,
+rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, proven_u8str_view_t text,
                                                     rubraview_subtitle_format_t format);
 
 /**
@@ -111,7 +111,7 @@ rubraview_subtitle_track_t rubraview_subtitle_parse(proven_arena_t *arena, u8str
  * SubStation writes one, `\N`; SAMI's own line ends are spaces (they mean
  * nothing there; `<br>` breaks a line). Empty when the cue has no place.
  */
-u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subtitle_track_t *track, size_t index);
+proven_u8str_view_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subtitle_track_t *track, size_t index);
 
 /**
  * Put an edited line in a cue's place: the cue shows it at once (markup
@@ -119,7 +119,7 @@ u8str_t rubraview_subtitle_cue_typed(proven_arena_t *arena, const rubraview_subt
  * line break in every format. False when the cue has no place, or nothing
  * would be left to show.
  */
-bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, u8str_t typed);
+bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_track_t *track, size_t index, proven_u8str_view_t typed);
 
 /**
  * The track with its Z / X offset written into its times, for a save
@@ -130,7 +130,7 @@ bool rubraview_subtitle_cue_retype(proven_arena_t *arena, rubraview_subtitle_tra
 rubraview_subtitle_track_t rubraview_subtitle_offset_folded(proven_arena_t *arena, const rubraview_subtitle_track_t *track);
 
 /** A time as typed: `1:02:03.45`, `02:03,5`, `63.5` (seconds). */
-bool rubraview_subtitle_parse_time(u8str_t text, double *out_seconds);
+bool rubraview_subtitle_parse_time(proven_u8str_view_t text, double *out_seconds);
 
 /**
  * RV-115: a cue's times typed. `end` after `start`, neither below 0. The
@@ -150,7 +150,7 @@ bool rubraview_subtitle_cue_remove(rubraview_subtitle_track_t *track, size_t ind
  * it or before the first. Its index, or -1: no cue in the file to make it
  * from, nothing to show, or no room.
  */
-int32_t rubraview_subtitle_cue_add(proven_arena_t *arena, rubraview_subtitle_track_t *track, double start, double end, u8str_t typed);
+int32_t rubraview_subtitle_cue_add(proven_arena_t *arena, rubraview_subtitle_track_t *track, double start, double end, proven_u8str_view_t typed);
 
 /** Has any cue been moved or edited since the track was read? */
 bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track);
@@ -163,14 +163,14 @@ bool rubraview_subtitle_changed(const rubraview_subtitle_track_t *track);
  * nothing changed it is the source itself. Empty, and `out_why` says
  * why, when it cannot be done.
  */
-u8str_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const char **out_why);
+proven_u8str_view_t rubraview_subtitle_patched(proven_arena_t *arena, const rubraview_subtitle_track_t *track, const char **out_why);
 
 /**
  * The name the file before is kept under when a subtitle is saved:
  * `film.smi` with 2 is `film.old2.smi`. The caller takes the first
  * number whose name is free.
  */
-u8str_t rubraview_subtitle_backup_path(proven_arena_t *arena, u8str_t path, unsigned number);
+proven_u8str_view_t rubraview_subtitle_backup_path(proven_arena_t *arena, proven_u8str_view_t path, unsigned number);
 
 /**
  * The cue to show at a given moment, or NULL. The track's own offset is
@@ -185,7 +185,7 @@ const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_t
  * (SAMI's classes; one entry, empty, for a file that names none).
  * Returns how many were written to `out`.
  */
-size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, u8str_t *out, size_t max);
+size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, proven_u8str_view_t *out, size_t max);
 
 /** §3.16.1: Z and X move the whole track in half-second steps. */
 void rubraview_subtitle_nudge(rubraview_subtitle_track_t *track, bool later);
@@ -204,14 +204,14 @@ void rubraview_subtitle_sync_reset(rubraview_subtitle_track_t *track);
  * What the playback line says of the sync: "sub +0.6 s" (a minus when
  * earlier), empty when it is 0. Written into `buffer`.
  */
-u8str_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds);
+proven_u8str_view_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds);
 
 /**
  * §3.16.1: the subtitle files that go with a video, found by sharing its
  * base name. Returns how many were written to `out`.
  */
 typedef struct rubraview_subtitle_candidate {
-    u8str_t path;
+    proven_u8str_view_t path;
     rubraview_subtitle_format_t format;
 } rubraview_subtitle_candidate_t;
 
@@ -220,10 +220,10 @@ typedef struct rubraview_subtitle_candidate {
  * `film.mkv` is "kor", `film.srt` claims nothing. §3.16.2's track list
  * shows it, so a reader with two files can tell them apart.
  */
-u8str_t rubraview_subtitle_language_tag(u8str_t video_path, u8str_t subtitle_path);
+proven_u8str_view_t rubraview_subtitle_language_tag(proven_u8str_view_t video_path, proven_u8str_view_t subtitle_path);
 
-size_t rubraview_subtitle_discover(u8str_t video_path,
-                                   const u8str_t *sibling_paths, size_t sibling_count,
+size_t rubraview_subtitle_discover(proven_u8str_view_t video_path,
+                                   const proven_u8str_view_t *sibling_paths, size_t sibling_count,
                                    rubraview_subtitle_candidate_t *out, size_t capacity);
 
 #ifdef __cplusplus

@@ -4,12 +4,12 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-int rubraview_str_lexcmp(u8str_t a, u8str_t b) {
+int rubraview_str_lexcmp(proven_u8str_view_t a, proven_u8str_view_t b) {
     if (!a.ptr && !b.ptr) return 0;
     if (!a.ptr) return -1;
     if (!b.ptr) return 1;
 
-    size_t min_len = a.len < b.len ? a.len : b.len;
+    size_t min_len = a.size < b.size ? a.size : b.size;
     int tie_breaker = 0;
 
     for (size_t i = 0; i < min_len; ++i) {
@@ -26,13 +26,13 @@ int rubraview_str_lexcmp(u8str_t a, u8str_t b) {
         }
     }
 
-    if (a.len != b.len) {
-        return a.len < b.len ? -1 : 1;
+    if (a.size != b.size) {
+        return a.size < b.size ? -1 : 1;
     }
     return tie_breaker;
 }
 
-int rubraview_str_natcmp(u8str_t a, u8str_t b) {
+int rubraview_str_natcmp(proven_u8str_view_t a, proven_u8str_view_t b) {
     if (!a.ptr && !b.ptr) return 0;
     if (!a.ptr) return -1;
     if (!b.ptr) return 1;
@@ -40,7 +40,7 @@ int rubraview_str_natcmp(u8str_t a, u8str_t b) {
     size_t ia = 0, ib = 0;
     int tie_breaker = 0;
 
-    while (ia < a.len && ib < b.len) {
+    while (ia < a.size && ib < b.size) {
         char ca = a.ptr[ia];
         char cb = b.ptr[ib];
         bool da = (ca >= '0' && ca <= '9');
@@ -50,16 +50,16 @@ int rubraview_str_natcmp(u8str_t a, u8str_t b) {
             // Contiguous digit block encountered
             // 1. Skip and count leading zeros
             size_t za = 0, zb = 0;
-            while (ia < a.len && a.ptr[ia] == '0') { za++; ia++; }
-            while (ib < b.len && b.ptr[ib] == '0') { zb++; ib++; }
+            while (ia < a.size && a.ptr[ia] == '0') { za++; ia++; }
+            while (ib < b.size && b.ptr[ib] == '0') { zb++; ib++; }
 
             // 2. Measure length of significant digits
             size_t start_a = ia;
-            while (ia < a.len && a.ptr[ia] >= '0' && a.ptr[ia] <= '9') ia++;
+            while (ia < a.size && a.ptr[ia] >= '0' && a.ptr[ia] <= '9') ia++;
             size_t sig_a = ia - start_a;
 
             size_t start_b = ib;
-            while (ib < b.len && b.ptr[ib] >= '0' && b.ptr[ib] <= '9') ib++;
+            while (ib < b.size && b.ptr[ib] >= '0' && b.ptr[ib] <= '9') ib++;
             size_t sig_b = ib - start_b;
 
             // 3. Number with more significant digits is numerically greater
@@ -96,12 +96,12 @@ int rubraview_str_natcmp(u8str_t a, u8str_t b) {
         }
     }
 
-    if (ia < a.len) return 1;
-    if (ib < b.len) return -1;
+    if (ia < a.size) return 1;
+    if (ib < b.size) return -1;
     return tie_breaker;
 }
 
-static int compare_paths(u8str_t a, u8str_t b, rubraview_sort_mode_t mode, bool ascending) {
+static int compare_paths(proven_u8str_view_t a, proven_u8str_view_t b, rubraview_sort_mode_t mode, bool ascending) {
     int cmp = 0;
     switch (mode) {
         case RUBRAVIEW_SORT_NAME_LEXICAL:
@@ -115,10 +115,10 @@ static int compare_paths(u8str_t a, u8str_t b, rubraview_sort_mode_t mode, bool 
     return ascending ? cmp : -cmp;
 }
 
-static void quicksort_paths(u8str_t *paths, int low, int high, rubraview_sort_mode_t mode, bool ascending) {
+static void quicksort_paths(proven_u8str_view_t *paths, int low, int high, rubraview_sort_mode_t mode, bool ascending) {
     if (low >= high) return;
 
-    u8str_t pivot = paths[(low + high) / 2];
+    proven_u8str_view_t pivot = paths[(low + high) / 2];
     int i = low;
     int j = high;
 
@@ -127,7 +127,7 @@ static void quicksort_paths(u8str_t *paths, int low, int high, rubraview_sort_mo
         while (compare_paths(paths[j], pivot, mode, ascending) > 0) j--;
 
         if (i <= j) {
-            u8str_t tmp = paths[i];
+            proven_u8str_view_t tmp = paths[i];
             paths[i] = paths[j];
             paths[j] = tmp;
             i++;
@@ -139,14 +139,14 @@ static void quicksort_paths(u8str_t *paths, int low, int high, rubraview_sort_mo
     if (i < high) quicksort_paths(paths, i, high, mode, ascending);
 }
 
-void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mode, bool ascending) {
+void rubraview_sort_paths(proven_u8str_view_t *paths, size_t count, rubraview_sort_mode_t mode, bool ascending) {
     if (!paths || count <= 1 || mode == RUBRAVIEW_SORT_AS_GIVEN) return;
 
     if (mode == RUBRAVIEW_SORT_RANDOM) {
         // Fisher-Yates shuffle
         for (size_t i = count - 1; i > 0; --i) {
             size_t j = (size_t)(rand() % (int)(i + 1));
-            u8str_t tmp = paths[i];
+            proven_u8str_view_t tmp = paths[i];
             paths[i] = paths[j];
             paths[j] = tmp;
         }
@@ -160,16 +160,16 @@ void rubraview_sort_paths(u8str_t *paths, size_t count, rubraview_sort_mode_t mo
 
 static bool is_path_sep(char c) { return c == '/' || c == '\\'; }
 
-int rubraview_path_natcmp(u8str_t a, u8str_t b) {
+int rubraview_path_natcmp(proven_u8str_view_t a, proven_u8str_view_t b) {
     size_t ia = 0, ib = 0;
     for (;;) {
         size_t ea = ia, eb = ib;
-        while (ea < a.len && !is_path_sep(a.ptr[ea])) ea++;
-        while (eb < b.len && !is_path_sep(b.ptr[eb])) eb++;
-        bool a_file = ea >= a.len, b_file = eb >= b.len;   /* the last part is the page itself */
+        while (ea < a.size && !is_path_sep(a.ptr[ea])) ea++;
+        while (eb < b.size && !is_path_sep(b.ptr[eb])) eb++;
+        bool a_file = ea >= a.size, b_file = eb >= b.size;   /* the last part is the page itself */
         if (a_file != b_file) return a_file ? -1 : 1;      /* a level's pages before its folders */
-        int cmp = rubraview_str_natcmp((u8str_t){ .ptr = a.ptr + ia, .len = ea - ia },
-                                       (u8str_t){ .ptr = b.ptr + ib, .len = eb - ib });
+        int cmp = rubraview_str_natcmp((proven_u8str_view_t){ .ptr = a.ptr + ia, .size = ea - ia },
+                                       (proven_u8str_view_t){ .ptr = b.ptr + ib, .size = eb - ib });
         if (cmp != 0 || a_file) return cmp;
         ia = ea + 1;
         ib = eb + 1;

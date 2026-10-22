@@ -63,8 +63,8 @@ typedef struct rubraview_settings_node {
     rubraview_settings_node_kind_t kind;
     int32_t  page;      /* which page it is on (the page node's own index for PAGE) */
     uint32_t line;      /* where in the document, for messages */
-    u8str_t  text;      /* PAGE and SECTION: the title; INFO and ACTION: the label */
-    u8str_t  name;      /* PAGE: its id; INFO and TABLE: the source; PREVIEW: the sample; ACTION: what it does */
+    proven_u8str_view_t  text;      /* PAGE and SECTION: the title; INFO and ACTION: the label */
+    proven_u8str_view_t  name;      /* PAGE: its id; INFO and TABLE: the source; PREVIEW: the sample; ACTION: what it does */
     int32_t  setting;   /* SETTING: the index into `defs` */
     int32_t  rows;      /* PREVIEW: how many rows tall */
 } rubraview_settings_node_t;
@@ -88,10 +88,10 @@ typedef struct rubraview_settings_doc {
  * which must outlive the result. The first mistake stops the parse and is
  * reported with its line; nothing is guessed.
  */
-rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, u8str_t text);
+rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, proven_u8str_view_t text);
 
 /** The document compiled into the viewer. */
-u8str_t rubraview_default_settings_document(void);
+proven_u8str_view_t rubraview_default_settings_document(void);
 
 /**
  * The built-in document, parsed once on first use and kept for the life
@@ -101,7 +101,7 @@ u8str_t rubraview_default_settings_document(void);
 const rubraview_settings_doc_t *rubraview_settings_document(void);
 
 /** A page's title, or an empty string. */
-u8str_t rubraview_settings_page_title(size_t page);
+proven_u8str_view_t rubraview_settings_page_title(size_t page);
 
 #ifdef __cplusplus
 }

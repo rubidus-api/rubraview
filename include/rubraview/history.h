@@ -28,7 +28,7 @@ extern "C" {
  */
 
 typedef struct rubraview_history_entry {
-    u8str_t path;      /* the archive or folder this position belongs to */
+    proven_u8str_view_t path;      /* the archive or folder this position belongs to */
     int32_t page;      /* zero-based page index */
     int32_t total;     /* pages in that archive when it was recorded */
     int64_t timestamp; /* Unix seconds, for pruning the oldest entries */
@@ -41,10 +41,10 @@ typedef struct rubraview_history {
 } rubraview_history_t;
 
 /** Parse `history.ini`. An unparseable line is skipped, not fatal. */
-rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text);
+rubraview_history_t rubraview_history_parse(proven_arena_t *arena, proven_u8str_view_t text);
 
 /** The recorded position for a path, or NULL if it has not been read before. */
-const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_t *history, u8str_t path);
+const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_t *history, proven_u8str_view_t path);
 
 /**
  * Record where the reader stopped. An existing entry for the same path
@@ -52,7 +52,7 @@ const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_
  * volume is reopened.
  */
 void rubraview_history_record(proven_arena_t *arena, rubraview_history_t *history,
-                              u8str_t path, int32_t page, int32_t total, int64_t timestamp);
+                              proven_u8str_view_t path, int32_t page, int32_t total, int64_t timestamp);
 
 /**
  * Drop the oldest entries until at most `max_entries` remain, so a
@@ -68,7 +68,7 @@ void rubraview_history_merge(proven_arena_t *arena, rubraview_history_t *into, c
 
 
 /** Serialize back to `history.ini` text, newest entry last. */
-u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history);
+proven_u8str_view_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history);
 
 /**
  * §3.17.1: whether reopening this path should offer to resume. A
@@ -99,7 +99,7 @@ typedef struct rubraview_recent {
     rubraview_history_t removed;
 } rubraview_recent_t;
 
-rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text);
+rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, proven_u8str_view_t text);
 
 /**
  * RFC-0006: the list moved whole into `arena` — its entries and every path —
@@ -107,14 +107,14 @@ rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text);
  * False, with the list as it was, when the arena cannot hold it.
  */
 bool rubraview_recent_rehome(proven_arena_t *arena, rubraview_recent_t *recent);
-u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent);
+proven_u8str_view_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent);
 
 /** `path` was opened at `timestamp`: it becomes the newest; at most `max_entries` are kept. */
-void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
+void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, proven_u8str_view_t path,
                           int64_t timestamp, size_t max_entries);
 
 /** Take `path` off the list at `timestamp` (the file itself is not touched). */
-void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path, int64_t timestamp);
+void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, proven_u8str_view_t path, int64_t timestamp);
 
 /** Empty the list, at `timestamp`. */
 void rubraview_recent_clear(rubraview_recent_t *recent, int64_t timestamp);
@@ -134,10 +134,10 @@ size_t rubraview_recent_newest(const rubraview_recent_t *recent, size_t *out_ind
  * as `rubraview_path_same` compares. "C:/a" does not hold "C:/ab/x.jpg".
  * An empty folder holds nothing.
  */
-bool rubraview_path_is_within(u8str_t path, u8str_t folder);
+bool rubraview_path_is_within(proven_u8str_view_t path, proven_u8str_view_t folder);
 
 /** Whether `path` lies in any of `folders` (empty ones are skipped). */
-bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count);
+bool rubraview_recent_is_kept_out(proven_u8str_view_t path, const proven_u8str_view_t *folders, size_t count);
 
 /**
  * 1.20.0 (owner, 2026-10-18: "그 폴더와 그 폴더의 하위 폴더 썸네일만 안 보이게"): is a tile's
@@ -145,7 +145,7 @@ bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t c
  * a folder inside one — as it is seen from the folder above it. The files in them, and an
  * archive, show theirs.
  */
-bool rubraview_thumb_folder_kept_out(u8str_t path, bool is_directory, const u8str_t *folders, size_t count);
+bool rubraview_thumb_folder_kept_out(proven_u8str_view_t path, bool is_directory, const proven_u8str_view_t *folders, size_t count);
 
 /*
  * The folders kept out of Recent, as many as wanted (owner, 2026-10-16):
@@ -153,20 +153,20 @@ bool rubraview_thumb_folder_kept_out(u8str_t path, bool is_directory, const u8st
  */
 
 /** The folders in `joined`, in order, empty pieces skipped; returns how many (at most `capacity`). */
-size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity);
+size_t rubraview_folder_list_split(proven_u8str_view_t joined, proven_u8str_view_t *out, size_t capacity);
 
 /**
  * `joined` with `folder` added at the end, or put in place of the one at
  * `replace` (0-based; past the end adds). A folder already there is not
  * added twice. Written into `buffer`; the result is empty when it does not fit.
  */
-u8str_t rubraview_folder_list_put(char *buffer, size_t capacity, u8str_t joined, u8str_t folder, size_t replace);
+proven_u8str_view_t rubraview_folder_list_put(char *buffer, size_t capacity, proven_u8str_view_t joined, proven_u8str_view_t folder, size_t replace);
 
 /** `joined` without the folder at `index` (0-based), written into `buffer`. */
-u8str_t rubraview_folder_list_remove(char *buffer, size_t capacity, u8str_t joined, size_t index);
+proven_u8str_view_t rubraview_folder_list_remove(char *buffer, size_t capacity, proven_u8str_view_t joined, size_t index);
 
 /** D-104: the entries lying in any of `folders` are taken out. Returns how many went. */
-size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count);
+size_t rubraview_history_drop_within(rubraview_history_t *history, const proven_u8str_view_t *folders, size_t count);
 
 /* ---- §3.17.2 configuration hierarchy ---- */
 
@@ -188,11 +188,11 @@ rubraview_config_mode_t rubraview_config_mode_for(bool portable_probe_exists);
  * the executable's own directory in portable mode, or
  * `<appdata>/rubraview/` otherwise.
  */
-u8str_t rubraview_config_path(proven_arena_t *arena,
+proven_u8str_view_t rubraview_config_path(proven_arena_t *arena,
                               rubraview_config_mode_t mode,
-                              u8str_t executable_dir,
-                              u8str_t appdata_dir,
-                              u8str_t file_name);
+                              proven_u8str_view_t executable_dir,
+                              proven_u8str_view_t appdata_dir,
+                              proven_u8str_view_t file_name);
 
 #ifdef __cplusplus
 }

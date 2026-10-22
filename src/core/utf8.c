@@ -1,67 +1,28 @@
 #include "rubraview/utf8.h"
+#include "proven/utf.h"
 
+/* RV-159: proven's decoder, the one in the program; an invalid byte still moves the caller on by one. */
 uint32_t rubraview_utf8_decode(const uint8_t *s, size_t len, size_t *out_len) {
     if (out_len) *out_len = 1;
     if (!s || len == 0) return RUBRAVIEW_UTF8_INVALID;
-
-    uint8_t b0 = s[0];
-
-    if (b0 < 0x80) {
-        return b0;
-    }
-
-    if (b0 < 0xC2 || b0 > 0xF4) {
-        /* Continuation byte, overlong two-byte lead (0xC0/0xC1), or byte > 0xF4 */
-        return RUBRAVIEW_UTF8_INVALID;
-    }
-
-    size_t need;
-    uint32_t cp;
-    uint8_t lo1 = 0x80, hi1 = 0xBF; /* valid range for the second byte, tightened below */
-
-    if (b0 < 0xE0) {
-        need = 1;
-        cp = (uint32_t)(b0 & 0x1Fu);
-    } else if (b0 < 0xF0) {
-        need = 2;
-        cp = (uint32_t)(b0 & 0x0Fu);
-        if (b0 == 0xE0) lo1 = 0xA0;      /* reject overlong 3-byte */
-        else if (b0 == 0xED) hi1 = 0x9F; /* reject encoded surrogate halves */
-    } else {
-        need = 3;
-        cp = (uint32_t)(b0 & 0x07u);
-        if (b0 == 0xF0) lo1 = 0x90;      /* reject overlong 4-byte */
-        else if (b0 == 0xF4) hi1 = 0x8F; /* reject codepoints beyond U+10FFFF */
-    }
-
-    if (len < need + 1) return RUBRAVIEW_UTF8_INVALID;
-
-    for (size_t i = 0; i < need; ++i) {
-        uint8_t b = s[1 + i];
-        uint8_t lo = (i == 0) ? lo1 : 0x80;
-        uint8_t hi = (i == 0) ? hi1 : 0xBF;
-        if (b < lo || b > hi) return RUBRAVIEW_UTF8_INVALID;
-        cp = (cp << 6) | (uint32_t)(b & 0x3Fu);
-    }
-
-    if (out_len) *out_len = need + 1;
-    return cp;
+    proven_utf8_char_t c = proven_utf8_decode_next(rubraview_u8(s, len), 0);
+    if (c.err != PROVEN_OK) return RUBRAVIEW_UTF8_INVALID;
+    if (out_len) *out_len = c.len;
+    return c.cp;
 }
 
-bool rubraview_utf8_validate(u8str_t bytes) {
-    if (bytes.len == 0) return true;
+bool rubraview_utf8_validate(proven_u8str_view_t bytes) {
+    if (bytes.size == 0) return true;
     if (!bytes.ptr) return false;
-
-    size_t i = 0;
-    while (i < bytes.len) {
-        size_t consumed = 1;
-        uint32_t cp = rubraview_utf8_decode((const uint8_t*)bytes.ptr + i, bytes.len - i, &consumed);
-        if (cp == RUBRAVIEW_UTF8_INVALID) return false;
-        i += consumed;
+    for (proven_size_t pos = 0; pos < bytes.size;) {
+        proven_utf8_char_t c = proven_utf8_decode_next(bytes, pos);
+        if (c.err != PROVEN_OK) return false;
+        pos += c.len;
     }
     return true;
 }
 
+/* Not in proven yet (asked of proven_c_lib, 2026-10-22): one character written. */
 size_t rubraview_utf8_encode(uint32_t codepoint, uint8_t *dst, size_t dst_cap, size_t *inout_pos) {
     if (!dst || !inout_pos) return 0;
     if (codepoint > 0x10FFFFu) return 0;

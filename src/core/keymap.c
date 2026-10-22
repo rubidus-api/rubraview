@@ -4,25 +4,19 @@
 #include <string.h>
 #include <ctype.h>
 
-static u8str_t trim(const char *ptr, size_t len) {
-    size_t start = 0, end = len;
-    while (start < end && (ptr[start] == ' ' || ptr[start] == '\t')) start++;
-    while (end > start && (ptr[end - 1] == ' ' || ptr[end - 1] == '\t')) end--;
-    return (u8str_t){ .ptr = ptr + start, .len = end - start };
-}
 
-static rubraview_key_combo_t parse_combo(u8str_t token) {
+static rubraview_key_combo_t parse_combo(proven_u8str_view_t token) {
     rubraview_key_combo_t combo = { .modifiers = 0, .key_name = token };
 
     while (true) {
         size_t plus = (size_t)-1;
-        for (size_t i = 0; i < combo.key_name.len; ++i) {
+        for (size_t i = 0; i < combo.key_name.size; ++i) {
             if (combo.key_name.ptr[i] == '+') { plus = i; break; }
         }
         if (plus == (size_t)-1) break;
 
-        u8str_t word = { .ptr = combo.key_name.ptr, .len = plus };
-        u8str_t rest = { .ptr = combo.key_name.ptr + plus + 1, .len = combo.key_name.len - plus - 1 };
+        proven_u8str_view_t word = { .ptr = combo.key_name.ptr, .size = plus };
+        proven_u8str_view_t rest = { .ptr = combo.key_name.ptr + plus + 1, .size = combo.key_name.size - plus - 1 };
 
         uint32_t mod = 0;
         if (rubraview_u8_eq_lit_ci(word, "shift")) mod = RUBRAVIEW_MOD_SHIFT;
@@ -57,13 +51,13 @@ static bool combo_buf_push(proven_arena_t *arena, combo_buf_t *b, rubraview_key_
     return true;
 }
 
-static void parse_combo_list(proven_arena_t *arena, u8str_t value, rubraview_key_binding_t *binding) {
+static void parse_combo_list(proven_arena_t *arena, proven_u8str_view_t value, rubraview_key_binding_t *binding) {
     combo_buf_t buf = {0};
     size_t start = 0;
-    for (size_t i = 0; i <= value.len; ++i) {
-        if (i == value.len || value.ptr[i] == ',') {
-            u8str_t token = trim(value.ptr + start, i - start);
-            if (token.len > 0) {
+    for (size_t i = 0; i <= value.size; ++i) {
+        if (i == value.size || value.ptr[i] == ',') {
+            proven_u8str_view_t token = proven_u8str_view_trim(rubraview_u8((const char *)value.ptr + start, i - start));
+            if (token.size > 0) {
                 combo_buf_push(arena, &buf, parse_combo(token));
             }
             start = i + 1;
@@ -93,7 +87,7 @@ static bool binding_buf_push(proven_arena_t *arena, binding_buf_t *b, rubraview_
     return true;
 }
 
-rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_text) {
+rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, proven_u8str_view_t ini_text) {
     rubraview_keymap_t keymap = {0};
     if (!arena) return keymap;
 
@@ -104,10 +98,10 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
         /* D-13: `[ui]` is the context everything falls back to. Before it
            had a name those bindings sat above the first section, and an
            older keymap.ini that still does that reads the same way. */
-        u8str_t context = doc.entries[i].section;
-        if (rubraview_u8_eq_lit(context, "ui")) context = (u8str_t){ .ptr = "", .len = 0 };
+        proven_u8str_view_t context = doc.entries[i].section;
+        if (proven_u8str_view_eq(context, PROVEN_LIT("ui"))) context = PROVEN_LIT("");
         /* D-16: [animation] became [media]; a keymap.ini saved before still loads. */
-        if (rubraview_u8_eq_lit(context, "animation")) context = (u8str_t){ .ptr = "media", .len = 5 };
+        if (proven_u8str_view_eq(context, PROVEN_LIT("animation"))) context = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"media", .size = 5 };
         rubraview_key_binding_t binding = {
             .context = context,
             .action = doc.entries[i].key,
@@ -125,40 +119,40 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, u8str_t ini_tex
 
 static bool combo_matches(rubraview_key_combo_t a, rubraview_key_combo_t b) {
     if (a.modifiers != b.modifiers) return false;
-    if (a.key_name.len != b.key_name.len) return false;
-    for (size_t i = 0; i < a.key_name.len; ++i) {
+    if (a.key_name.size != b.key_name.size) return false;
+    for (size_t i = 0; i < a.key_name.size; ++i) {
         if (tolower((unsigned char)a.key_name.ptr[i]) != tolower((unsigned char)b.key_name.ptr[i])) return false;
     }
     return true;
 }
 
-static u8str_t find_action_in_context(const rubraview_keymap_t *keymap, u8str_t context, rubraview_key_combo_t combo) {
+static proven_u8str_view_t find_action_in_context(const rubraview_keymap_t *keymap, proven_u8str_view_t context, rubraview_key_combo_t combo) {
     for (size_t i = 0; i < keymap->count; ++i) {
         const rubraview_key_binding_t *b = &keymap->bindings[i];
-        if (!rubraview_u8_eq(b->context, context)) continue;
+        if (!proven_u8str_view_eq(b->context, context)) continue;
         for (size_t c = 0; c < b->combo_count; ++c) {
             if (combo_matches(b->combos[c], combo)) return b->action;
         }
     }
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
-u8str_t rubraview_keymap_find_action(const rubraview_keymap_t *keymap, u8str_t context, rubraview_key_combo_t combo) {
-    if (!keymap || !keymap->bindings) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_keymap_find_action(const rubraview_keymap_t *keymap, proven_u8str_view_t context, rubraview_key_combo_t combo) {
+    if (!keymap || !keymap->bindings) return PROVEN_LIT("");
 
-    u8str_t found = find_action_in_context(keymap, context, combo);
-    if (found.len > 0) return found;
+    proven_u8str_view_t found = find_action_in_context(keymap, context, combo);
+    if (found.size > 0) return found;
 
-    if (context.len > 0) {
-        return find_action_in_context(keymap, (u8str_t){ .ptr = "", .len = 0 }, combo);
+    if (context.size > 0) {
+        return find_action_in_context(keymap, PROVEN_LIT(""), combo);
     }
     return found;
 }
 
-const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_keymap_t *keymap, u8str_t context, u8str_t action) {
+const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_keymap_t *keymap, proven_u8str_view_t context, proven_u8str_view_t action) {
     if (!keymap || !keymap->bindings) return NULL;
     for (size_t i = 0; i < keymap->count; ++i) {
-        if (rubraview_u8_eq(keymap->bindings[i].context, context) && rubraview_u8_eq(keymap->bindings[i].action, action)) {
+        if (proven_u8str_view_eq(keymap->bindings[i].context, context) && proven_u8str_view_eq(keymap->bindings[i].action, action)) {
             return &keymap->bindings[i];
         }
     }
@@ -167,29 +161,29 @@ const rubraview_key_binding_t *rubraview_keymap_find_binding(const rubraview_key
 
 /* ---- §3.22.2 tab 8: changing bindings in place (D-14) ---- */
 
-u8str_t rubraview_key_combo_format(char *buffer, size_t capacity, rubraview_key_combo_t combo) {
-    if (!buffer || capacity == 0) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_key_combo_format(char *buffer, size_t capacity, rubraview_key_combo_t combo) {
+    if (!buffer || capacity == 0) return PROVEN_LIT("");
     int n = snprintf(buffer, capacity, "%s%s%s%.*s",
                      (combo.modifiers & RUBRAVIEW_MOD_CTRL) ? "Ctrl+" : "",
                      (combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? "Shift+" : "",
                      (combo.modifiers & RUBRAVIEW_MOD_ALT) ? "Alt+" : "",
-                     (int)combo.key_name.len, combo.key_name.ptr);
-    if (n <= 0) { buffer[0] = '\0'; return (u8str_t){ .ptr = buffer, .len = 0 }; }
-    return (u8str_t){ .ptr = buffer, .len = (size_t)n < capacity ? (size_t)n : capacity - 1 };
+                     (int)combo.key_name.size, combo.key_name.ptr);
+    if (n <= 0) { buffer[0] = '\0'; return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 }; }
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)n < capacity ? (size_t)n : capacity - 1 };
 }
 
 bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b) {
     return combo_matches(a, b);
 }
 
-static bool in_base_layer(u8str_t context) {
-    return context.len == 0 ||
-           (rubraview_u8_eq_lit(context, "navigation")) ||
-           (rubraview_u8_eq_lit(context, "view"));
+static bool in_base_layer(proven_u8str_view_t context) {
+    return context.size == 0 ||
+           (proven_u8str_view_eq(context, PROVEN_LIT("navigation"))) ||
+           (proven_u8str_view_eq(context, PROVEN_LIT("view")));
 }
 
-bool rubraview_keymap_contexts_meet(u8str_t a, u8str_t b) {
-    if (rubraview_u8_eq(a, b)) return true;
+bool rubraview_keymap_contexts_meet(proven_u8str_view_t a, proven_u8str_view_t b) {
+    if (proven_u8str_view_eq(a, b)) return true;
     return in_base_layer(a) && in_base_layer(b);
 }
 
@@ -219,7 +213,7 @@ bool rubraview_keymap_equal(const rubraview_keymap_t *a, const rubraview_keymap_
     if (!a || !b || a->count != b->count) return false;
     for (size_t i = 0; i < a->count; ++i) {
         const rubraview_key_binding_t *x = &a->bindings[i], *y = &b->bindings[i];
-        if (!rubraview_u8_eq(x->context, y->context) || !rubraview_u8_eq(x->action, y->action) ||
+        if (!proven_u8str_view_eq(x->context, y->context) || !proven_u8str_view_eq(x->action, y->action) ||
             x->combo_count != y->combo_count) return false;
         for (size_t c = 0; c < x->combo_count; ++c) {
             if (!combo_matches(x->combos[c], y->combos[c])) return false;
@@ -232,7 +226,7 @@ rubraview_bind_result_t rubraview_keymap_bind(proven_arena_t *arena, rubraview_k
                                               rubraview_key_combo_t combo,
                                               const rubraview_key_binding_t **out_holder) {
     if (out_holder) *out_holder = NULL;
-    if (!arena || !keymap || index >= keymap->count || combo.key_name.len == 0) return RUBRAVIEW_BIND_FAILED;
+    if (!arena || !keymap || index >= keymap->count || combo.key_name.size == 0) return RUBRAVIEW_BIND_FAILED;
     rubraview_key_binding_t *target = &keymap->bindings[index];
     for (size_t c = 0; c < target->combo_count; ++c) {
         if (combo_matches(target->combos[c], combo)) return RUBRAVIEW_BIND_ALREADY;
@@ -252,13 +246,13 @@ rubraview_bind_result_t rubraview_keymap_bind(proven_arena_t *arena, rubraview_k
     rubraview_key_combo_t *combos = (rubraview_key_combo_t*)(void*)res.value.ptr;
     if (target->combo_count > 0) memcpy(combos, target->combos, target->combo_count * sizeof(rubraview_key_combo_t));
     /* The event's key name points at a PAL literal; keep a copy of our own. */
-    proven_result_mem_mut_t name = proven_arena_alloc(arena, combo.key_name.len + 1);
+    proven_result_mem_mut_t name = proven_arena_alloc(arena, combo.key_name.size + 1);
     if (!proven_is_ok(name.err)) return RUBRAVIEW_BIND_FAILED;
-    memcpy(name.value.ptr, combo.key_name.ptr, combo.key_name.len);
-    name.value.ptr[combo.key_name.len] = '\0';
+    memcpy(name.value.ptr, combo.key_name.ptr, combo.key_name.size);
+    name.value.ptr[combo.key_name.size] = '\0';
     combos[target->combo_count] = (rubraview_key_combo_t){
         .modifiers = combo.modifiers,
-        .key_name = { .ptr = (const char*)name.value.ptr, .len = combo.key_name.len },
+        .key_name = { .ptr = (const proven_byte_t *)(const char*)name.value.ptr, .size = combo.key_name.size },
     };
     target->combos = combos;
     target->combo_count++;
@@ -271,8 +265,8 @@ bool rubraview_keymap_unbind_last(rubraview_keymap_t *keymap, size_t index) {
     return true;
 }
 
-u8str_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap) {
-    if (!arena || !keymap) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap) {
+    if (!arena || !keymap) return PROVEN_LIT("");
     rubraview_ini_doc_t doc = {0};
     for (size_t i = 0; i < keymap->count; ++i) {
         const rubraview_key_binding_t *b = &keymap->bindings[i];
@@ -280,16 +274,16 @@ u8str_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap
         size_t used = 0;
         for (size_t c = 0; c < b->combo_count && used < sizeof(list); ++c) {
             if (c > 0 && used + 2 < sizeof(list)) { memcpy(list + used, ", ", 2); used += 2; }
-            u8str_t one = rubraview_key_combo_format(list + used, sizeof(list) - used, b->combos[c]);
-            used += one.len;
+            proven_u8str_view_t one = rubraview_key_combo_format(list + used, sizeof(list) - used, b->combos[c]);
+            used += one.size;
         }
         proven_result_mem_mut_t res = proven_arena_alloc(arena, used + 1);
-        if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+        if (!proven_is_ok(res.err)) return PROVEN_LIT("");
         memcpy(res.value.ptr, list, used);
         res.value.ptr[used] = '\0';
-        u8str_t section = b->context.len == 0 ? (u8str_t){ .ptr = "ui", .len = 2 } : b->context;
+        proven_u8str_view_t section = b->context.size == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"ui", .size = 2 } : b->context;
         rubraview_ini_set_string(arena, &doc, section, b->action,
-                                 (u8str_t){ .ptr = (const char*)res.value.ptr, .len = used });
+                                 (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = used });
     }
     return rubraview_ini_serialize(arena, &doc);
 }

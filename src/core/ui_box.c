@@ -744,10 +744,10 @@ static bool hint_in(rubraview_rect_t r, double x, double y) {
     return r.width > 0.0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
 }
 
-u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
+proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metrics_t *m, double px, double py) {
     static const char *const NONE = "";
     const char *text = NONE;
-    if (!box || !m || box->state == RUBRAVIEW_BOX_DETACHED) return (u8str_t){ .ptr = NONE, .len = 0 };
+    if (!box || !m || box->state == RUBRAVIEW_BOX_DETACHED) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)NONE, .size = 0 };
     bool menu = box->kind == RUBRAVIEW_BOX_MENU;
     /* the anchor's words, folded or open: the open grid sits beside the anchor, not over it
        (owner, 2026-10-15: both halves say what they do) */
@@ -769,5 +769,5 @@ u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metr
     }
     size_t n = 0;
     while (text[n]) n++;
-    return (u8str_t){ .ptr = text, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n };
 }

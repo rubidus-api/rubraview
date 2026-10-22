@@ -79,9 +79,9 @@ static bool fail_step(const char *what, HRESULT hr) {
     return false;
 }
 
-u8str_t rubraview_pal_render_last_error(void) {
-    if (!g_last_error) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = g_last_error, .len = strlen(g_last_error) };
+proven_u8str_view_t rubraview_pal_render_last_error(void) {
+    if (!g_last_error) return PROVEN_LIT("");
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)g_last_error, .size = strlen(g_last_error) };
 }
 
 uint32_t rubraview_pal_render_last_hresult(void) {
@@ -366,8 +366,8 @@ static bool create_device(struct rubraview_renderer *r) {
  * exposes the effect interfaces in C, this is where the graph would go.
  */
 
-u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size) {
-    if (!buffer || buffer_size < 32) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size < 32) return PROVEN_LIT("");
 
     int written = snprintf(buffer, buffer_size,
         "driver: %s   feature level: 0x%04X   size: %dx%d   swap chain: %s   text: %s",
@@ -378,8 +378,8 @@ u8str_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buff
         (renderer && renderer->swap_chain) ? "yes" : "no",
         (renderer && renderer->dwrite) ? "DirectWrite" : "unavailable");
 
-    if (written <= 0) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = buffer, .len = (size_t)written };
+    if (written <= 0) return PROVEN_LIT("");
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written };
 }
 
 rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *native_window_handle, int32_t width, int32_t height) {
@@ -854,32 +854,32 @@ static DWRITE_FONT_WEIGHT weight_of(int32_t weight) {
     return weight >= 100 && weight <= 950 ? (DWRITE_FONT_WEIGHT)weight : DWRITE_FONT_WEIGHT_NORMAL;
 }
 
-static void wide_family(WCHAR out[64], u8str_t family) {
+static void wide_family(WCHAR out[64], proven_u8str_view_t family) {
     out[0] = 0;
-    if (family.len == 0 || family.len > 120) return;
-    int n = MultiByteToWideChar(CP_UTF8, 0, family.ptr, (int)family.len, out, 63);
+    if (family.size == 0 || family.size > 120) return;
+    int n = MultiByteToWideChar(CP_UTF8, 0, (const char *)family.ptr, (int)family.size, out, 63);
     out[n > 0 && n < 64 ? n : 0] = 0;
 }
 
-void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic) {
+void rubraview_pal_render_set_text_font(rubraview_renderer_t *renderer, proven_u8str_view_t family, int32_t weight, bool italic) {
     if (!renderer) return;
     wide_family(renderer->text_family, family);
     renderer->text_weight = weight_of(weight);
     renderer->text_style = italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
 }
 
-void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, u8str_t family) {
+void rubraview_pal_render_set_text_family(rubraview_renderer_t *renderer, proven_u8str_view_t family) {
     rubraview_pal_render_set_text_font(renderer, family, 0, false);
 }
 
-void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, u8str_t family, int32_t weight, bool italic) {
+void rubraview_pal_render_set_ui_font(rubraview_renderer_t *renderer, proven_u8str_view_t family, int32_t weight, bool italic) {
     if (!renderer) return;
     wide_family(renderer->ui_family, family);
     renderer->ui_weight = weight_of(weight);
     renderer->ui_style = italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
 }
 
-void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, u8str_t family) {
+void rubraview_pal_render_set_mono_family(rubraview_renderer_t *renderer, proven_u8str_view_t family) {
     if (renderer) wide_family(renderer->mono_family, family);
 }
 
@@ -900,32 +900,32 @@ static DWRITE_FONT_STYLE face_style(const rubraview_renderer_t *r) {
 
 static int family_name_compare(const void *a, const void *b) {
     const rubraview_font_family_t *x = (const rubraview_font_family_t*)a, *y = (const rubraview_font_family_t*)b;
-    size_t n = x->shown.len < y->shown.len ? x->shown.len : y->shown.len;
+    size_t n = x->shown.size < y->shown.size ? x->shown.size : y->shown.size;
     for (size_t i = 0; i < n; ++i) {
         int cx = (unsigned char)x->shown.ptr[i], cy = (unsigned char)y->shown.ptr[i];
         if (cx >= 'A' && cx <= 'Z') cx += 32;
         if (cy >= 'A' && cy <= 'Z') cy += 32;
         if (cx != cy) return cx - cy;
     }
-    return x->shown.len < y->shown.len ? -1 : x->shown.len > y->shown.len ? 1 : 0;
+    return x->shown.size < y->shown.size ? -1 : x->shown.size > y->shown.size ? 1 : 0;
 }
 
 /* A localized name as UTF-8 in `arena`: the locale's, else English, else the first. */
-static u8str_t family_name(proven_arena_t *arena, IDWriteLocalizedStrings *names, const WCHAR *locale) {
+static proven_u8str_view_t family_name(proven_arena_t *arena, IDWriteLocalizedStrings *names, const WCHAR *locale) {
     UINT32 index = 0, len = 0;
     BOOL exists = FALSE;
     if (locale && (FAILED(IDWriteLocalizedStrings_FindLocaleName(names, locale, &index, &exists)) || !exists)) index = UINT32_MAX;
     if (index == UINT32_MAX && (FAILED(IDWriteLocalizedStrings_FindLocaleName(names, L"en-us", &index, &exists)) || !exists)) index = 0;
     WCHAR wide[128];
     if (FAILED(IDWriteLocalizedStrings_GetStringLength(names, index, &len)) || len == 0 || len >= 128 ||
-        FAILED(IDWriteLocalizedStrings_GetString(names, index, wide, 128))) return (u8str_t){ .ptr = "", .len = 0 };
+        FAILED(IDWriteLocalizedStrings_GetString(names, index, wide, 128))) return PROVEN_LIT("");
     char utf8[400];
     int n = WideCharToMultiByte(CP_UTF8, 0, wide, (int)len, utf8, (int)sizeof(utf8), NULL, NULL);
-    if (n <= 0) return (u8str_t){ .ptr = "", .len = 0 };
+    if (n <= 0) return PROVEN_LIT("");
     proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)n);
-    if (!proven_is_ok(m.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(m.err)) return PROVEN_LIT("");
     memcpy(m.value.ptr, utf8, (size_t)n);
-    return (u8str_t){ .ptr = (const char*)m.value.ptr, .len = (size_t)n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)m.value.ptr, .size = (size_t)n };
 }
 
 size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_t **out) {
@@ -946,9 +946,9 @@ size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_
                 IDWriteLocalizedStrings *names = NULL;
                 if (FAILED(IDWriteFontCollection_GetFontFamily(fonts, i, &family)) || !family) continue;
                 if (SUCCEEDED(IDWriteFontFamily_GetFamilyNames(family, &names)) && names) {
-                    u8str_t name = family_name(arena, names, NULL);
-                    u8str_t shown = has_locale ? family_name(arena, names, locale) : name;
-                    if (name.len > 0 && name.ptr[0] != '@') list[count++] = (rubraview_font_family_t){ .shown = shown.len ? shown : name, .name = name };
+                    proven_u8str_view_t name = family_name(arena, names, NULL);
+                    proven_u8str_view_t shown = has_locale ? family_name(arena, names, locale) : name;
+                    if (name.size > 0 && name.ptr[0] != '@') list[count++] = (rubraview_font_family_t){ .shown = shown.size ? shown : name, .name = name };
                     IDWriteLocalizedStrings_Release(names);
                 }
                 IDWriteFontFamily_Release(family);
@@ -963,18 +963,18 @@ size_t rubraview_pal_font_families(proven_arena_t *arena, rubraview_font_family_
 }
 
 bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
-                                    u8str_t text,
+                                    proven_u8str_view_t text,
                                     rubraview_pal_rect_t rect,
                                     double font_size,
                                     uint32_t argb,
                                     rubraview_text_align_t align) {
     if (!renderer || !renderer->target || !renderer->dwrite) return false;
-    if (text.len == 0 || text.len > 4096) return false;
+    if (text.size == 0 || text.size > 4096) return false;
     if (font_size <= 0.0) font_size = 14.0;
 
     /* UTF-8 to UTF-16 at the API boundary only (§7.2.3). */
     WCHAR wide[4096];
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len,
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size,
                                        wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
 
@@ -1011,15 +1011,15 @@ bool rubraview_pal_render_draw_text(rubraview_renderer_t *renderer,
     return true;
 }
 
-bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, double font_size,
                                        double *out_width) {
     if (!renderer || !renderer->dwrite || !out_width) return false;
     *out_width = 0.0;
-    if (text.len == 0) return true;
-    if (text.len > 4096) return false;
+    if (text.size == 0) return true;
+    if (text.size > 4096) return false;
     if (font_size <= 0.0) font_size = 14.0;
     WCHAR wide[4096];
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, (int)(sizeof(wide) / sizeof(wide[0])));
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size, wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
     IDWriteTextFormat *format = NULL;
     if (FAILED(IDWriteFactory_CreateTextFormat(renderer->dwrite, face_family(renderer), NULL, face_weight(renderer),
@@ -1041,16 +1041,16 @@ bool rubraview_pal_render_measure_text(rubraview_renderer_t *renderer, u8str_t t
     return ok;
 }
 
-bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, u8str_t text, double font_size,
+bool rubraview_pal_render_measure_text_wrapped(rubraview_renderer_t *renderer, proven_u8str_view_t text, double font_size,
                                                double wrap_width, double *out_width, double *out_height) {
     if (!renderer || !renderer->dwrite || !out_width || !out_height) return false;
     *out_width = *out_height = 0.0;
-    if (text.len == 0) return true;
-    if (text.len > 4096) return false;
+    if (text.size == 0) return true;
+    if (text.size > 4096) return false;
     if (font_size <= 0.0) font_size = 14.0;
     if (wrap_width < 1.0) wrap_width = 1.0;
     WCHAR wide[4096];
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wide, (int)(sizeof(wide) / sizeof(wide[0])));
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size, wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
     /* The same face and wrapping draw_text draws with. */
     IDWriteTextFormat *format = NULL;
@@ -1094,21 +1094,21 @@ static UINT32 block_u16(const rubraview_text_block_t *b, size_t u8) {
     return lo;
 }
 
-rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, u8str_t text,
+rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, proven_u8str_view_t text,
                                                       const rubraview_text_style_t *style) {
-    if (!renderer || !renderer->dwrite || !style || text.len > 0x7FFFFFF0u) return NULL;
+    if (!renderer || !renderer->dwrite || !style || text.size > 0x7FFFFFF0u) return NULL;
     rubraview_text_block_t *b = (rubraview_text_block_t *)calloc(1, sizeof(*b));
     if (!b) return NULL;
-    WCHAR *wide = (WCHAR *)malloc((text.len + 1) * sizeof(WCHAR));
-    b->u8_of = (uint32_t *)malloc((text.len + 2) * sizeof(uint32_t));
+    WCHAR *wide = (WCHAR *)malloc((text.size + 1) * sizeof(WCHAR));
+    b->u8_of = (uint32_t *)malloc((text.size + 2) * sizeof(uint32_t));
     if (!wide || !b->u8_of) { free(wide); free(b->u8_of); free(b); return NULL; }
     /* UTF-8 to UTF-16 by hand, keeping where each unit came from. */
     const uint8_t *s = (const uint8_t *)text.ptr;
     UINT32 w = 0;
-    for (size_t i = 0; i < text.len;) {
+    for (size_t i = 0; i < text.size;) {
         uint8_t c = s[i];
         int n = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
-        if (i + (size_t)n > text.len) n = 1;
+        if (i + (size_t)n > text.size) n = 1;
         uint32_t cp = n == 1 ? c : c & (n == 2 ? 0x1F : n == 3 ? 0x0F : 0x07);
         for (int k = 1; k < n; ++k) cp = (cp << 6) | (s[i + (size_t)k] & 0x3F);
         if (cp >= 0x10000) {
@@ -1120,12 +1120,12 @@ rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *rend
         }
         i += (size_t)n;
     }
-    b->u8_of[w] = (uint32_t)text.len;
+    b->u8_of[w] = (uint32_t)text.size;
     b->wide_len = w;
-    b->utf8_len = text.len;
+    b->utf8_len = text.size;
 
     WCHAR family[64];
-    int fn = style->family.len > 0 ? MultiByteToWideChar(CP_UTF8, 0, style->family.ptr, (int)style->family.len, family, 63) : 0;
+    int fn = style->family.size > 0 ? MultiByteToWideChar(CP_UTF8, 0, (LPCCH)style->family.ptr, (int)style->family.size, family, 63) : 0;
     family[fn > 0 ? fn : 0] = 0;
     double size = style->size > 1.0 ? style->size : 16.0;
     IDWriteTextFormat *format = NULL;
@@ -1308,13 +1308,13 @@ bool rubraview_pal_render_mono_cell(rubraview_renderer_t *renderer, double font_
     return ok;
 }
 
-bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, u8str_t text,
+bool rubraview_pal_render_draw_text_mono(rubraview_renderer_t *renderer, proven_u8str_view_t text,
                                          double x, double y, double font_size, uint32_t argb) {
     if (!renderer || !renderer->target || !renderer->dwrite) return false;
-    if (text.len == 0 || text.len > 4096 || font_size <= 0.0) return false;
+    if (text.size == 0 || text.size > 4096 || font_size <= 0.0) return false;
 
     WCHAR wide[4096];
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len,
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)text.ptr, (int)text.size,
                                        wide, (int)(sizeof(wide) / sizeof(wide[0])));
     if (wide_len <= 0) return false;
 

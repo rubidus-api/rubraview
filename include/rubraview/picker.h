@@ -27,8 +27,8 @@ extern "C" {
  * "Comics" in "C:/Comics/Berserk" opens "C:/Comics".
  */
 typedef struct rubraview_breadcrumb {
-    u8str_t label;  /* the segment itself, e.g. "Comics" */
-    u8str_t prefix; /* the path up to and including it */
+    proven_u8str_view_t label;  /* the segment itself, e.g. "Comics" */
+    proven_u8str_view_t prefix; /* the path up to and including it */
 } rubraview_breadcrumb_t;
 
 typedef struct rubraview_breadcrumbs {
@@ -44,7 +44,7 @@ typedef struct rubraview_breadcrumbs {
  */
 #define RUBRAVIEW_PICKER_PLACES "::pc"
 
-bool rubraview_picker_is_places(u8str_t dir);
+bool rubraview_picker_is_places(proven_u8str_view_t dir);
 
 /**
  * The recent files as a place of their own (owner, 2026-10-16): the same
@@ -53,14 +53,14 @@ bool rubraview_picker_is_places(u8str_t dir);
  */
 #define RUBRAVIEW_PICKER_RECENT "::recent"
 
-bool rubraview_picker_is_recent(u8str_t dir);
+bool rubraview_picker_is_recent(proven_u8str_view_t dir);
 
 /**
  * The folder `..` opens: the parent, or the PC page from a root ("C:",
  * "C:/", "/", "//server/share") or a bare relative name. Empty for the
  * PC page itself and for an empty path.
  */
-u8str_t rubraview_picker_parent(u8str_t dir);
+proven_u8str_view_t rubraview_picker_parent(proven_u8str_view_t dir);
 
 /**
  * Inside the archive being read (owner, 2026-09-28: moving around a comic
@@ -70,7 +70,7 @@ u8str_t rubraview_picker_parent(u8str_t dir);
  * the archive, without separators at its ends. Either separator, and
  * letters in either case, as Windows compares paths.
  */
-bool rubraview_picker_inside_archive(u8str_t dir, u8str_t archive_path, u8str_t *out_inner);
+bool rubraview_picker_inside_archive(proven_u8str_view_t dir, proven_u8str_view_t archive_path, proven_u8str_view_t *out_inner);
 
 #define RUBRAVIEW_PICKER_NOT_A_PAGE ((size_t)-1)
 
@@ -85,9 +85,9 @@ typedef struct rubraview_archive_level {
  * folder's pages together). Paths are the archive's path joined with the
  * inside, NUL-terminated in `arena`.
  */
-rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, u8str_t archive_path,
+rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, proven_u8str_view_t archive_path,
                                                          const rubraview_page_ref_t *pages, size_t page_count,
-                                                         u8str_t inner);
+                                                         proven_u8str_view_t inner);
 
 /**
  * A path typed into the picker's path box (owner, 2026-09-28), cleaned:
@@ -96,13 +96,13 @@ rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, 
  * "C:/", and a relative name is joined to `current` unless that is the
  * PC page. Empty when nothing is left. NUL-terminated, in `arena`.
  */
-u8str_t rubraview_picker_typed_path(proven_arena_t *arena, u8str_t typed, u8str_t current);
+proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8str_view_t typed, proven_u8str_view_t current);
 
 /**
  * Split a path into tappable segments, after a first "PC" chip that
  * opens the PC page. Slices point into `path`.
  */
-rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(u8str_t path);
+rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path);
 
 /*
  * How a tap picks (owner, 2026-09-23: "쉬프트나 컨트롤 입력 없이"). A mode
@@ -168,7 +168,7 @@ bool rubraview_picker_tap(rubraview_picker_t *picker, size_t index);
  * Every file whose name ends in `ext` (".jpg", case does not matter) is
  * turned on, or off. Returns how many changed.
  */
-size_t rubraview_picker_select_extension(rubraview_picker_t *picker, u8str_t ext, bool on);
+size_t rubraview_picker_select_extension(rubraview_picker_t *picker, proven_u8str_view_t ext, bool on);
 
 /** Nothing selected, and no range half-marked. */
 void rubraview_picker_clear_selection(rubraview_picker_t *picker);
@@ -222,7 +222,7 @@ void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const ru
  * list, "*.jpg;*.png"), in their order, and return how many files were
  * dropped (owner, 2026-09-21: the picker shows only what can be opened).
  */
-size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, u8str_t patterns);
+size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, proven_u8str_view_t patterns);
 
 /** §3.15.2: the bottom bar's "N files (M bytes)" metrics. */
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
@@ -235,7 +235,7 @@ void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
  * length written, NUL-terminated, 0 when `cap` is too small.
  */
 size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes);
-size_t rubraview_picker_type_text(char *buf, size_t cap, u8str_t name, bool is_directory);
+size_t rubraview_picker_type_text(char *buf, size_t cap, proven_u8str_view_t name, bool is_directory);
 
 #ifdef __cplusplus
 }

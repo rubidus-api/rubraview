@@ -4,26 +4,26 @@
 
 /* ---- the index file ---- */
 
-static bool line_starts(u8str_t line, const char *word, u8str_t *rest) {
+static bool line_starts(proven_u8str_view_t line, const char *word, proven_u8str_view_t *rest) {
     size_t n = strlen(word);
-    if (line.len < n) return false;
+    if (line.size < n) return false;
     for (size_t i = 0; i < n; ++i) {
         char a = line.ptr[i], b = word[i];
         if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
         if (a != b) return false;
     }
-    *rest = (u8str_t){ .ptr = line.ptr + n, .len = line.len - n };
-    while (rest->len > 0 && (rest->ptr[0] == ' ' || rest->ptr[0] == '\t')) { rest->ptr++; rest->len--; }
+    *rest = (proven_u8str_view_t){ .ptr = line.ptr + n, .size = line.size - n };
+    while (rest->size > 0 && (rest->ptr[0] == ' ' || rest->ptr[0] == '\t')) { rest->ptr++; rest->size--; }
     return true;
 }
 
-static u8str_t next_line(u8str_t *text) {
+static proven_u8str_view_t next_line(proven_u8str_view_t *text) {
     size_t i = 0;
-    while (i < text->len && text->ptr[i] != '\n') i++;
-    u8str_t line = { .ptr = text->ptr, .len = i };
-    if (line.len > 0 && line.ptr[line.len - 1] == '\r') line.len--;
-    text->ptr += i < text->len ? i + 1 : i;
-    text->len -= i < text->len ? i + 1 : i;
+    while (i < text->size && text->ptr[i] != '\n') i++;
+    proven_u8str_view_t line = { .ptr = text->ptr, .size = i };
+    if (line.size > 0 && line.ptr[line.size - 1] == '\r') line.size--;
+    text->ptr += i < text->size ? i + 1 : i;
+    text->size -= i < text->size ? i + 1 : i;
     return line;
 }
 
@@ -36,24 +36,24 @@ static int hex_digit(char c) {
 
 /* `00:01:02:500` — hours, minutes, seconds, milliseconds. A leading `-`
    turns up in `delay:`, which winds every later timestamp back. */
-static bool parse_stamp(u8str_t text, double *out_seconds) {
+static bool parse_stamp(proven_u8str_view_t text, double *out_seconds) {
     double sign = 1.0;
     size_t i = 0;
-    while (i < text.len && (text.ptr[i] == ' ' || text.ptr[i] == '+')) i++;
-    if (i < text.len && text.ptr[i] == '-') { sign = -1.0; i++; }
+    while (i < text.size && (text.ptr[i] == ' ' || text.ptr[i] == '+')) i++;
+    if (i < text.size && text.ptr[i] == '-') { sign = -1.0; i++; }
     int part[4] = { 0, 0, 0, 0 };
     int found = 0;
     int value = 0;
     bool digits = false;
-    for (; i <= text.len && found < 4; ++i) {
-        char c = i < text.len ? text.ptr[i] : ':';
+    for (; i <= text.size && found < 4; ++i) {
+        char c = i < text.size ? text.ptr[i] : ':';
         if (c >= '0' && c <= '9') { value = rubraview_digit_append_i32(value, c); digits = true; continue; }
         if (c == ':' || c == '.' || c == ',') {
             if (!digits) return false;
             part[found++] = value;
             value = 0;
             digits = false;
-            if (i == text.len) break;
+            if (i == text.size) break;
             continue;
         }
         break;
@@ -67,33 +67,33 @@ static bool parse_stamp(u8str_t text, double *out_seconds) {
 }
 
 /* `palette: 000000, 1a1a1a, ...` — sixteen colours, RGB hex. */
-static void parse_palette(u8str_t rest, uint32_t *palette) {
+static void parse_palette(proven_u8str_view_t rest, uint32_t *palette) {
     size_t entry = 0;
     size_t i = 0;
-    while (i < rest.len && entry < 16) {
-        while (i < rest.len && (rest.ptr[i] == ' ' || rest.ptr[i] == ',' || rest.ptr[i] == '\t')) i++;
+    while (i < rest.size && entry < 16) {
+        while (i < rest.size && (rest.ptr[i] == ' ' || rest.ptr[i] == ',' || rest.ptr[i] == '\t')) i++;
         uint32_t value = 0;
         int digits = 0;
-        while (i < rest.len && hex_digit(rest.ptr[i]) >= 0 && digits < 6) {
+        while (i < rest.size && hex_digit(rest.ptr[i]) >= 0 && digits < 6) {
             value = (value << 4) | (uint32_t)hex_digit(rest.ptr[i]);
             digits++;
             i++;
         }
         if (digits == 0) break;
         palette[entry++] = 0xFF000000u | value;
-        while (i < rest.len && rest.ptr[i] != ',') i++;
+        while (i < rest.size && rest.ptr[i] != ',') i++;
     }
 }
 
-size_t rubraview_vobsub_languages(u8str_t idx_text, u8str_t *out, size_t max) {
+size_t rubraview_vobsub_languages(proven_u8str_view_t idx_text, proven_u8str_view_t *out, size_t max) {
     size_t count = 0;
-    u8str_t text = idx_text;
-    while (text.len > 0 && count < max) {
-        u8str_t line = next_line(&text), rest;
+    proven_u8str_view_t text = idx_text;
+    while (text.size > 0 && count < max) {
+        proven_u8str_view_t line = next_line(&text), rest;
         if (!line_starts(line, "id:", &rest)) continue;
         size_t n = 0;
-        while (n < rest.len && rest.ptr[n] != ',' && rest.ptr[n] != ' ') n++;
-        out[count++] = (u8str_t){ .ptr = rest.ptr, .len = n };
+        while (n < rest.size && rest.ptr[n] != ',' && rest.ptr[n] != ' ') n++;
+        out[count++] = (proven_u8str_view_t){ .ptr = rest.ptr, .size = n };
     }
     return count;
 }
@@ -271,7 +271,7 @@ static bool read_controls(const uint8_t *spu, size_t size, size_t control,
 
 /* The index: the palette, the frame size and, for the chosen language,
    when each subtitle starts and where its picture is. */
-rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t idx_text, size_t stream) {
+rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, proven_u8str_view_t idx_text, size_t stream) {
     rubraview_vobsub_track_t track = {0};
     if (!arena) return track;
     track.frame_width = 720;
@@ -281,9 +281,9 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
     /* Two passes: the first counts this language's lines so the entries
        are allocated once. */
     size_t wanted = 0, block = (size_t)-1;
-    u8str_t text = idx_text, rest;
-    while (text.len > 0) {
-        u8str_t line = next_line(&text);
+    proven_u8str_view_t text = idx_text, rest;
+    while (text.size > 0) {
+        proven_u8str_view_t line = next_line(&text);
         if (line_starts(line, "id:", &rest)) {
             block = block == (size_t)-1 ? 0 : block + 1;
             track.stream_count++;
@@ -301,14 +301,14 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
     double delay = 0.0;
     block = (size_t)-1;
     text = idx_text;
-    while (text.len > 0 && count < wanted) {
-        u8str_t line = next_line(&text);
+    while (text.size > 0 && count < wanted) {
+        proven_u8str_view_t line = next_line(&text);
         if (line_starts(line, "size:", &rest)) {
             int32_t w = 0, h = 0;
             size_t i = 0;
-            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') w = rubraview_digit_append_i32(w, rest.ptr[i++]);
-            while (i < rest.len && (rest.ptr[i] == 'x' || rest.ptr[i] == 'X' || rest.ptr[i] == ' ')) i++;
-            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') h = rubraview_digit_append_i32(h, rest.ptr[i++]);
+            while (i < rest.size && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') w = rubraview_digit_append_i32(w, rest.ptr[i++]);
+            while (i < rest.size && (rest.ptr[i] == 'x' || rest.ptr[i] == 'X' || rest.ptr[i] == ' ')) i++;
+            while (i < rest.size && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') h = rubraview_digit_append_i32(h, rest.ptr[i++]);
             if (w > 0 && h > 0) { track.frame_width = w; track.frame_height = h; }
             continue;
         }
@@ -322,8 +322,8 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
             block = block == (size_t)-1 ? 0 : block + 1;
             if (block == stream) {
                 size_t n = 0;
-                while (n < rest.len && rest.ptr[n] != ',' && rest.ptr[n] != ' ') n++;
-                track.language = (u8str_t){ .ptr = rest.ptr, .len = n };
+                while (n < rest.size && rest.ptr[n] != ',' && rest.ptr[n] != ' ') n++;
+                track.language = (proven_u8str_view_t){ .ptr = rest.ptr, .size = n };
             }
             continue;
         }
@@ -331,11 +331,11 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t i
 
         double stamp = 0.0;
         if (!parse_stamp(rest, &stamp)) continue;
-        u8str_t after = rest, pos;
-        while (after.len > 0 && !line_starts(after, "filepos:", &pos)) { after.ptr++; after.len--; }
-        if (after.len == 0) continue;
+        proven_u8str_view_t after = rest, pos;
+        while (after.size > 0 && !line_starts(after, "filepos:", &pos)) { after.ptr++; after.size--; }
+        if (after.size == 0) continue;
         size_t filepos = 0, i = 0;
-        while (i < pos.len && hex_digit(pos.ptr[i]) >= 0) filepos = (filepos << 4) | (size_t)hex_digit(pos.ptr[i++]);
+        while (i < pos.size && hex_digit(pos.ptr[i]) >= 0) filepos = (filepos << 4) | (size_t)hex_digit(pos.ptr[i++]);
         entries[count++] = (rubraview_vobsub_entry_t){ .start_seconds = stamp + delay, .filepos = filepos };
     }
 

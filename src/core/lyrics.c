@@ -8,7 +8,7 @@ typedef struct line_reader {
     size_t len, pos;
 } line_reader_t;
 
-static u8str_t read_line(line_reader_t *r) {
+static proven_u8str_view_t read_line(line_reader_t *r) {
     size_t start = r->pos;
     while (r->pos < r->len && r->ptr[r->pos] != '\n') r->pos++;
 
@@ -16,14 +16,9 @@ static u8str_t read_line(line_reader_t *r) {
     if (end > start && r->ptr[end - 1] == '\r') end--;
     if (r->pos < r->len) r->pos++;
 
-    return (u8str_t){ .ptr = r->ptr + start, .len = end - start };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)r->ptr + start, .size = end - start };
 }
 
-static u8str_t trim(u8str_t s) {
-    while (s.len > 0 && (s.ptr[0] == ' ' || s.ptr[0] == '\t')) { s.ptr++; s.len--; }
-    while (s.len > 0 && (s.ptr[s.len - 1] == ' ' || s.ptr[s.len - 1] == '\t')) s.len--;
-    return s;
-}
 
 /* ---- .lrc ---- */
 
@@ -48,34 +43,34 @@ static bool lyric_push(proven_arena_t *arena, lyric_buf_t *b, rubraview_lyric_li
 
 /* `[mm:ss.xx]` — and the fraction may be two digits (hundredths) or
    three (milliseconds), which different tools write differently. */
-static bool parse_lrc_stamp(u8str_t s, double *out) {
+static bool parse_lrc_stamp(proven_u8str_view_t s, double *out) {
     int64_t minutes = 0, seconds = 0;
     double fraction = 0.0;
     size_t i = 0;
 
-    while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
+    while (i < s.size && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
         minutes = rubraview_digit_append(minutes, s.ptr[i++]);
     }
-    if (i == 0 || i >= s.len || s.ptr[i] != ':') return false;
+    if (i == 0 || i >= s.size || s.ptr[i] != ':') return false;
     i++;
 
     size_t seconds_start = i;
-    while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
+    while (i < s.size && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
         seconds = rubraview_digit_append(seconds, s.ptr[i++]);
     }
     if (i == seconds_start) return false;
 
-    if (i < s.len && (s.ptr[i] == '.' || s.ptr[i] == ':')) {
+    if (i < s.size && (s.ptr[i] == '.' || s.ptr[i] == ':')) {
         i++;
         double scale = 1.0;
         double value = 0.0;
-        while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
+        while (i < s.size && s.ptr[i] >= '0' && s.ptr[i] <= '9') {
             value = value * 10.0 + (s.ptr[i++] - '0');
             scale *= 10.0;
         }
         if (scale > 1.0) fraction = value / scale;
     }
-    if (i != s.len) return false;
+    if (i != s.size) return false;
 
     *out = (double)minutes * 60.0 + (double)seconds + fraction;
     return true;
@@ -93,16 +88,16 @@ static void sort_lyrics(rubraview_lyric_line_t *lines, size_t count) {
     }
 }
 
-rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
+rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, proven_u8str_view_t text) {
     rubraview_lyrics_t lyrics = {0};
-    if (!arena || text.len == 0) return lyrics;
+    if (!arena || text.size == 0) return lyrics;
 
-    line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
+    line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
     lyric_buf_t lines = {0};
 
     while (r.pos < r.len) {
-        u8str_t line = trim(read_line(&r));
-        if (line.len == 0) continue;
+        proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
+        if (line.size == 0) continue;
 
         /* A line may carry several timestamps: a chorus is written once
            and pointed at from each place it occurs. */
@@ -110,12 +105,12 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
         size_t stamp_count = 0;
         size_t i = 0;
 
-        while (i < line.len && line.ptr[i] == '[' && stamp_count < 16) {
+        while (i < line.size && line.ptr[i] == '[' && stamp_count < 16) {
             size_t close = i + 1;
-            while (close < line.len && line.ptr[close] != ']') close++;
-            if (close >= line.len) break;
+            while (close < line.size && line.ptr[close] != ']') close++;
+            if (close >= line.size) break;
 
-            u8str_t inside = { .ptr = line.ptr + i + 1, .len = close - i - 1 };
+            proven_u8str_view_t inside = { .ptr = line.ptr + i + 1, .size = close - i - 1 };
             double when = 0.0;
 
             if (parse_lrc_stamp(inside, &when)) {
@@ -123,16 +118,16 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
             } else {
                 /* Not a time: one of the metadata tags. */
                 if (rubraview_u8_starts_with_ci(inside, "ti:")) {
-                    lyrics.title = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
+                    lyrics.title = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
                 } else if (rubraview_u8_starts_with_ci(inside, "ar:")) {
-                    lyrics.artist = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
+                    lyrics.artist = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
                 } else if (rubraview_u8_starts_with_ci(inside, "al:")) {
-                    lyrics.album = trim((u8str_t){ .ptr = inside.ptr + 3, .len = inside.len - 3 });
+                    lyrics.album = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = inside.ptr + 3, .size = inside.size - 3 });
                 } else if (rubraview_u8_starts_with_ci(inside, "offset:")) {
                     /* The tag is in milliseconds, and positive means
                        the words come *earlier*. */
                     double ms = 0.0;
-                    u8str_t value = { .ptr = inside.ptr + 7, .len = inside.len - 7 };
+                    proven_u8str_view_t value = { .ptr = inside.ptr + 7, .size = inside.size - 7 };
                     if (rubraview_parse_double_prefix(value, &ms, NULL)) lyrics.offset_seconds = -ms / 1000.0;
                 }
             }
@@ -141,7 +136,7 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
 
         if (stamp_count == 0) continue;
 
-        u8str_t body = trim((u8str_t){ .ptr = line.ptr + i, .len = line.len - i });
+        proven_u8str_view_t body = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + i, .size = line.size - i });
         for (size_t k = 0; k < stamp_count; ++k) {
             lyric_push(arena, &lines, (rubraview_lyric_line_t){
                 .time_seconds = stamps[k], .text = body });
@@ -154,15 +149,15 @@ rubraview_lyrics_t rubraview_lyrics_parse(proven_arena_t *arena, u8str_t text) {
     return lyrics;
 }
 
-rubraview_lyrics_t rubraview_lyrics_from_text(proven_arena_t *arena, u8str_t text) {
+rubraview_lyrics_t rubraview_lyrics_from_text(proven_arena_t *arena, proven_u8str_view_t text) {
     rubraview_lyrics_t lyrics = rubraview_lyrics_parse(arena, text);
     if (lyrics.count > 0 || !arena) return lyrics;
     lyrics = (rubraview_lyrics_t){ .untimed = true };
-    line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
+    line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
     lyric_buf_t lines = {0};
     while (r.pos < r.len) {
-        u8str_t line = trim(read_line(&r));
-        if (line.len == 0) continue;
+        proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
+        if (line.size == 0) continue;
         if (!lyric_push(arena, &lines, (rubraview_lyric_line_t){ .time_seconds = -1.0, .text = line })) break;
     }
     lyrics.lines = lines.data;
@@ -212,12 +207,12 @@ double rubraview_lyrics_time_of(const rubraview_lyrics_t *lyrics, int32_t index)
 /* ---- .cue ---- */
 
 /* A quoted field, or the rest of the line when it is not quoted. */
-static u8str_t quoted_or_rest(u8str_t s) {
-    s = trim(s);
-    if (s.len >= 2 && s.ptr[0] == '"') {
+static proven_u8str_view_t quoted_or_rest(proven_u8str_view_t s) {
+    s = proven_u8str_view_trim(s);
+    if (s.size >= 2 && s.ptr[0] == '"') {
         size_t close = 1;
-        while (close < s.len && s.ptr[close] != '"') close++;
-        return (u8str_t){ .ptr = s.ptr + 1, .len = close - 1 };
+        while (close < s.size && s.ptr[close] != '"') close++;
+        return (proven_u8str_view_t){ .ptr = s.ptr + 1, .size = close - 1 };
     }
     return s;
 }
@@ -228,15 +223,15 @@ static u8str_t quoted_or_rest(u8str_t s) {
  * is the obvious thing to do and what most naive parsers do — puts every
  * track boundary in the wrong place.
  */
-static bool parse_cue_time(u8str_t s, double *out) {
-    s = trim(s);
+static bool parse_cue_time(proven_u8str_view_t s, double *out) {
+    s = proven_u8str_view_trim(s);
     int64_t parts[3] = {0, 0, 0};
     size_t part = 0;
     int64_t value = 0;
     bool any = false;
 
-    for (size_t i = 0; i <= s.len; ++i) {
-        char c = i < s.len ? s.ptr[i] : ':';
+    for (size_t i = 0; i <= s.size; ++i) {
+        char c = i < s.size ? s.ptr[i] : ':';
         if (c >= '0' && c <= '9') { value = rubraview_digit_append(value, c); any = true; continue; }
         if (c != ':') return false;
         if (!any || part >= 3) return false;
@@ -250,17 +245,17 @@ static bool parse_cue_time(u8str_t s, double *out) {
     return true;
 }
 
-rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, double total_seconds) {
+rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_view_t text, double total_seconds) {
     rubraview_cue_sheet_t sheet = {0};
-    if (!arena || text.len == 0) return sheet;
+    if (!arena || text.size == 0) return sheet;
 
     /* Two passes: count the tracks, then fill them. A cue sheet is small
        and this avoids a growing buffer for no benefit. */
     size_t track_count = 0;
     {
-        line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
+        line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
         while (r.pos < r.len) {
-            u8str_t line = trim(read_line(&r));
+            proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
             if (rubraview_u8_starts_with_ci(line, "track ")) track_count++;
         }
     }
@@ -271,22 +266,22 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
     rubraview_cue_track_t *tracks = (rubraview_cue_track_t*)(void*)res.value.ptr;
     memset(tracks, 0, track_count * sizeof(*tracks));
 
-    line_reader_t r = { .ptr = text.ptr, .len = text.len, .pos = 0 };
+    line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
     size_t current = 0;
     bool in_track = false;
 
     while (r.pos < r.len) {
-        u8str_t line = trim(read_line(&r));
-        if (line.len == 0) continue;
+        proven_u8str_view_t line = proven_u8str_view_trim(read_line(&r));
+        if (line.size == 0) continue;
 
         if (rubraview_u8_starts_with_ci(line, "file ")) {
-            u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 5, .len = line.len - 5 });
+            proven_u8str_view_t rest = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + 5, .size = line.size - 5 });
             sheet.audio_file = quoted_or_rest(rest);
             /* Unquoted, the file's type (WAVE, MP3, ...) follows the name. */
-            if (rest.len > 0 && rest.ptr[0] != '"') {
-                size_t cut = sheet.audio_file.len;
+            if (rest.size > 0 && rest.ptr[0] != '"') {
+                size_t cut = sheet.audio_file.size;
                 while (cut > 0 && sheet.audio_file.ptr[cut - 1] != ' ') cut--;
-                if (cut > 1) sheet.audio_file.len = cut - 1;
+                if (cut > 1) sheet.audio_file.size = cut - 1;
             }
             continue;
         }
@@ -295,9 +290,9 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
             in_track = true;
             if (current >= track_count) break;
 
-            u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
+            proven_u8str_view_t rest = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + 6, .size = line.size - 6 });
             int32_t number = 0;
-            for (size_t i = 0; i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9'; ++i) {
+            for (size_t i = 0; i < rest.size && rest.ptr[i] >= '0' && rest.ptr[i] <= '9'; ++i) {
                 number = rubraview_digit_append_i32(number, rest.ptr[i]);
             }
             tracks[current].number = number;
@@ -307,7 +302,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         }
 
         if (rubraview_u8_starts_with_ci(line, "title ")) {
-            u8str_t value = quoted_or_rest((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
+            proven_u8str_view_t value = quoted_or_rest((proven_u8str_view_t){ .ptr = line.ptr + 6, .size = line.size - 6 });
             /* Before the first TRACK, TITLE names the album. */
             if (in_track && current > 0) tracks[current - 1].title = value;
             else sheet.album_title = value;
@@ -315,18 +310,18 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
         }
 
         if (rubraview_u8_starts_with_ci(line, "performer ")) {
-            u8str_t value = quoted_or_rest((u8str_t){ .ptr = line.ptr + 10, .len = line.len - 10 });
+            proven_u8str_view_t value = quoted_or_rest((proven_u8str_view_t){ .ptr = line.ptr + 10, .size = line.size - 10 });
             if (in_track && current > 0) tracks[current - 1].performer = value;
             else sheet.album_performer = value;
             continue;
         }
 
         if (rubraview_u8_starts_with_ci(line, "index ") && in_track && current > 0) {
-            u8str_t rest = trim((u8str_t){ .ptr = line.ptr + 6, .len = line.len - 6 });
+            proven_u8str_view_t rest = proven_u8str_view_trim((proven_u8str_view_t){ .ptr = line.ptr + 6, .size = line.size - 6 });
 
             int64_t index_number = 0;
             size_t i = 0;
-            while (i < rest.len && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') {
+            while (i < rest.size && rest.ptr[i] >= '0' && rest.ptr[i] <= '9') {
                 index_number = rubraview_digit_append(index_number, rest.ptr[i++]);
             }
 
@@ -336,7 +331,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
             if (index_number != 1) continue;
 
             double when = 0.0;
-            if (parse_cue_time((u8str_t){ .ptr = rest.ptr + i, .len = rest.len - i }, &when)) {
+            if (parse_cue_time((proven_u8str_view_t){ .ptr = rest.ptr + i, .size = rest.size - i }, &when)) {
                 tracks[current - 1].start_seconds = when;
             }
             continue;
@@ -358,16 +353,16 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, u8str_t text, d
 }
 
 /* The name after the last folder separator, either kind. */
-static u8str_t cue_basename(u8str_t s) {
-    for (size_t i = s.len; i > 0; --i) {
-        if (s.ptr[i - 1] == '/' || s.ptr[i - 1] == '\\') return (u8str_t){ .ptr = s.ptr + i, .len = s.len - i };
+static proven_u8str_view_t cue_basename(proven_u8str_view_t s) {
+    for (size_t i = s.size; i > 0; --i) {
+        if (s.ptr[i - 1] == '/' || s.ptr[i - 1] == '\\') return (proven_u8str_view_t){ .ptr = s.ptr + i, .size = s.size - i };
     }
     return s;
 }
 
-static size_t cue_stem_len(u8str_t s) {
-    for (size_t i = s.len; i > 0; --i) if (s.ptr[i - 1] == '.') return i - 1;
-    return s.len;
+static size_t cue_stem_len(proven_u8str_view_t s) {
+    for (size_t i = s.size; i > 0; --i) if (s.ptr[i - 1] == '.') return i - 1;
+    return s.size;
 }
 
 static bool cue_same_ci(const char *a, const char *b, size_t n) {
@@ -380,12 +375,12 @@ static bool cue_same_ci(const char *a, const char *b, size_t n) {
     return true;
 }
 
-bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, u8str_t audio_name) {
-    if (!sheet || sheet->audio_file.len == 0 || audio_name.len == 0) return false;
-    u8str_t named = cue_basename(sheet->audio_file), have = cue_basename(audio_name);
-    if (named.len == have.len && cue_same_ci(named.ptr, have.ptr, have.len)) return true;
+bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, proven_u8str_view_t audio_name) {
+    if (!sheet || sheet->audio_file.size == 0 || audio_name.size == 0) return false;
+    proven_u8str_view_t named = cue_basename(sheet->audio_file), have = cue_basename(audio_name);
+    if (named.size == have.size && cue_same_ci((const char *)named.ptr, (const char *)have.ptr, have.size)) return true;
     size_t a = cue_stem_len(named), b = cue_stem_len(have);
-    return a > 0 && a == b && cue_same_ci(named.ptr, have.ptr, a);
+    return a > 0 && a == b && cue_same_ci((const char *)named.ptr, (const char *)have.ptr, a);
 }
 
 int32_t rubraview_cue_track_at(const rubraview_cue_sheet_t *sheet, double time_seconds) {

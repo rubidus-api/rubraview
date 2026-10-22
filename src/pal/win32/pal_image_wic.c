@@ -557,13 +557,13 @@ static IWICBitmapDecoder *decoder_from_other(IWICImagingFactory *factory, const 
     return decoder_from_jxl(factory, data, size);
 }
 
-static IWICBitmapDecoder *decoder_for_path(u8str_t path) {
+static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
     IWICImagingFactory *factory = wic_factory();
-    if (!factory || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+    if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
 
     WCHAR wide[MAX_PATH * 2];
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
@@ -706,10 +706,10 @@ void rubraview_wic_own_tiff_free(void *owner) {
 }
 
 /* One entry point for both: a path when there is one, bytes otherwise. */
-static IWICBitmapDecoder *decoder_for_source(u8str_t path, const uint8_t *data, size_t size,
+static IWICBitmapDecoder *decoder_for_source(proven_u8str_view_t path, const uint8_t *data, size_t size,
                                              IWICStream **out_stream) {
     *out_stream = NULL;
-    if (path.len > 0) return decoder_for_path(path);
+    if (path.size > 0) return decoder_for_path(path);
     return decoder_for_memory(data, size, out_stream);
 }
 
@@ -737,7 +737,7 @@ static double frame_delay_seconds(IWICBitmapDecoder *decoder, UINT frame_index) 
     return seconds;
 }
 
-size_t rubraview_pal_image_frame_info(u8str_t path,
+size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
                                       const uint8_t *data, size_t size,
                                       rubraview_frame_t *out_frames, size_t cap) {
     IWICStream *stream = NULL;
@@ -776,7 +776,7 @@ size_t rubraview_pal_image_frame_info(u8str_t path,
 }
 
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
-                                                             u8str_t path,
+                                                             proven_u8str_view_t path,
                                                              const uint8_t *data, size_t size,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
@@ -888,12 +888,12 @@ static double anim_delay(double seconds) {
 }
 
 /* The file whole, read with full sharing and closed at once (see decoder_for_path). */
-static uint8_t *file_read_whole(u8str_t path, size_t *out_size) {
+static uint8_t *file_read_whole(proven_u8str_view_t path, size_t *out_size) {
     *out_size = 0;
-    if (path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+    if (path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
     WCHAR wide[MAX_PATH * 2];
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return NULL;
 
@@ -963,7 +963,7 @@ static bool anim_open_apng(rubraview_anim_reader_t *reader, size_t size, size_t 
     return true;
 }
 
-rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *data, size_t size,
+rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const uint8_t *data, size_t size,
                                                  const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height) {
     if (!out_frames || !out_count || !out_canvas_width || !out_canvas_height) return NULL;
@@ -974,7 +974,7 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(u8str_t path, const uint8_t *da
     rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)calloc(1, sizeof(*reader));
     if (!reader) return NULL;
     /* The reader reads the bytes for as long as it lives, so it has its own. */
-    if (path.len > 0) {
+    if (path.size > 0) {
         reader->owned = file_read_whole(path, &size);
     } else if (data && size > 0) {
         reader->owned = (uint8_t*)malloc(size);
@@ -1164,7 +1164,7 @@ bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint
 }
 
 rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_renderer_t *renderer,
-                                                               u8str_t path,
+                                                               proven_u8str_view_t path,
                                                                bool apply_exif_orientation) {
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
 
@@ -1207,7 +1207,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
 /* The viewing path never brings pixels to the CPU (§4.1.1). The editing
    workbench has to: its commit layer runs the core engine on a real
    buffer, not on a GPU texture. */
-static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, u8str_t path,
+static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, proven_u8str_view_t path,
                                              const uint8_t *data, size_t size,
                                              bool apply_exif_orientation, int32_t max_w, int32_t max_h) {
     rubraview_pixbuf_t empty = {0};
@@ -1342,7 +1342,7 @@ static bool frame_has_profile(IWICImagingFactory *factory, IWICBitmapFrameDecode
     return found;
 }
 
-bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out) {
+bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out) {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
     IWICImagingFactory *factory = wic_factory();
@@ -1394,7 +1394,7 @@ bool rubraview_pal_image_describe(u8str_t path, const uint8_t *data, size_t size
     return ok;
 }
 
-bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_height) {
+bool rubraview_pal_image_size(proven_u8str_view_t path, int32_t *out_width, int32_t *out_height) {
     if (!out_width || !out_height) return false;
     IWICBitmapDecoder *decoder = decoder_for_path(path);
     if (!decoder) return false;
@@ -1410,14 +1410,14 @@ bool rubraview_pal_image_size(u8str_t path, int32_t *out_width, int32_t *out_hei
 }
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
-                                                   u8str_t path,
+                                                   proven_u8str_view_t path,
                                                    const uint8_t *data, size_t size,
                                                    bool apply_exif_orientation) {
     return read_pixels_within(arena, path, data, size, apply_exif_orientation, 0, 0);
 }
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
-                                                          u8str_t path,
+                                                          proven_u8str_view_t path,
                                                           const uint8_t *data, size_t size,
                                                           bool apply_exif_orientation,
                                                           int32_t max_width, int32_t max_height) {
@@ -1533,12 +1533,12 @@ static const GUID *container_for_format(rubraview_export_format_t format) {
 }
 
 /* Opens a file stream for writing, converting the path at the boundary. */
-static IWICStream *writable_stream(IWICImagingFactory *factory, u8str_t path) {
-    if (!factory || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+static IWICStream *writable_stream(IWICImagingFactory *factory, proven_u8str_view_t path) {
+    if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.len);
-    narrow[path.len] = '\0';
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
 
     WCHAR wide[MAX_PATH * 2];
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
@@ -1733,7 +1733,7 @@ static bool write_frame(IWICImagingFactory *factory, IWICBitmapEncoder *encoder,
     return ok;
 }
 
-static bool save_frames(u8str_t path, const rubraview_pixbuf_t *pixels,
+static bool save_frames(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels,
                         const rubraview_export_options_t *options,
                         rubraview_export_format_t format,
                         const int32_t *sizes, size_t size_count) {
@@ -1780,19 +1780,19 @@ static bool save_frames(u8str_t path, const rubraview_pixbuf_t *pixels,
    coefficients as they are (RV-140: and with its own tables, restart
    markers). A file that cannot be read back or rewritten is left as the
    baseline JPEG it is. */
-static void jpeg_rewrite(u8str_t path, const rubraview_export_options_t *options) {
+static void jpeg_rewrite(proven_u8str_view_t path, const rubraview_export_options_t *options) {
     rubraview_fs_entry_t entry;
     size_t room = 64u * 1024u * 1024u;
     void *memory = malloc(room);
     if (!memory) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = room });
     if (rubraview_pal_fs_stat(&arena, path, &entry) && entry.size_bytes > 0 && entry.size_bytes < room / 4u) {
-        u8str_t bytes = rubraview_pal_fs_read_file(&arena, path, (size_t)entry.size_bytes);
-        if (bytes.len > 0) {
-            rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, (const uint8_t*)bytes.ptr, bytes.len,
+        proven_u8str_view_t bytes = rubraview_pal_fs_read_file(&arena, path, (size_t)entry.size_bytes);
+        if (bytes.size > 0) {
+            rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, (const uint8_t*)bytes.ptr, bytes.size,
                                                                           options->jpeg_progressive, options->jpeg_optimise,
                                                                           options->jpeg_restart_rows, true);
-            if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.len > 0) (void)rubraview_pal_fs_write_file(path, made.data);
+            if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.size > 0) (void)rubraview_pal_fs_write_file(path, made.data);
         }
     }
     free(memory);
@@ -1812,13 +1812,13 @@ static rubraview_webp_options_t webp_options_from(const rubraview_export_options
     };
 }
 
-static bool webp_bytes_to_file(u8str_t path, uint8_t *bytes, size_t len) {
-    bool written = rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = (const char*)bytes, .len = len });
+static bool webp_bytes_to_file(proven_u8str_view_t path, uint8_t *bytes, size_t len) {
+    bool written = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = len });
     rubraview_webp_free(bytes);
     return written;
 }
 
-static bool save_webp(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
+static bool save_webp(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
     if (!rubraview_pixbuf_is_valid(pixels)) return false;
     if (pixels->format != RUBRAVIEW_PIXFMT_BGRA8 && pixels->format != RUBRAVIEW_PIXFMT_RGBA8) return false;
     rubraview_webp_options_t webp = webp_options_from(options);
@@ -1863,7 +1863,7 @@ static bool anim_ffmpeg_picture(void *context, size_t index, uint8_t *bgra, doub
 
 static _Thread_local const char *g_anim_why;
 
-int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_path, const uint8_t *data, size_t size,
+int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, const uint8_t *data, size_t size,
                                               const rubraview_export_options_t *options, bool avif) {
     g_save_why = NULL;
     if (!options) return -1;
@@ -1884,7 +1884,7 @@ int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_p
         size_t len = 0;
         uint8_t *bytes = rubraview_pal_ffmpeg_pictures_encode(width, height, count, anim_ffmpeg_picture, &a, &how, &len, &g_anim_why);
         if (bytes) {
-            if (rubraview_pal_fs_write_file(out_path, (u8str_t){ .ptr = (const char*)bytes, .len = len })) result = 1;
+            if (rubraview_pal_fs_write_file(out_path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = len })) result = 1;
             free(bytes);
         }
         g_save_why = g_anim_why;
@@ -1894,7 +1894,7 @@ int rubraview_pal_image_save_animation_ffmpeg(u8str_t out_path, u8str_t source_p
     return result;
 }
 
-int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_path,
+int rubraview_pal_image_save_animation_webp(proven_u8str_view_t out_path, proven_u8str_view_t source_path,
                                             const uint8_t *data, size_t size,
                                             const rubraview_export_options_t *options) {
     if (!options) return -1;
@@ -1930,7 +1930,7 @@ int rubraview_pal_image_save_animation_webp(u8str_t out_path, u8str_t source_pat
 }
 
 /* 1.17.0: one JPEG written at a quality, as the options ask it rewritten; its size, or 0. */
-static uint64_t jpeg_written_at(u8str_t path, const rubraview_pixbuf_t *pixels, rubraview_export_options_t *o, int32_t quality) {
+static uint64_t jpeg_written_at(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels, rubraview_export_options_t *o, int32_t quality) {
     o->jpeg_quality = quality;
     if (!save_frames(path, pixels, o, RUBRAVIEW_EXPORT_JPEG, NULL, 0)) return 0;
     if (o->jpeg_progressive || o->jpeg_optimise || o->jpeg_restart_rows > 0) jpeg_rewrite(path, o);
@@ -1942,7 +1942,7 @@ static uint64_t jpeg_written_at(u8str_t path, const rubraview_pixbuf_t *pixels, 
 
 /* The best quality, at most the one asked for, whose file is no larger than the target:
    halving the range, eight tries at most; the smallest (quality 1) when none is. */
-static bool save_jpeg_to_size(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
+static bool save_jpeg_to_size(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options) {
     rubraview_export_options_t o = *options;
     uint64_t want = (uint64_t)options->target_kb * 1024u;
     int32_t lo = 1, hi = options->jpeg_quality > 0 ? options->jpeg_quality : 90, best = 0, last = 0;
@@ -1968,18 +1968,18 @@ static rubraview_ffmpeg_still_t ffmpeg_how(const rubraview_export_options_t *opt
                                        .chroma444 = options->avif_chroma == 1, .bits = options->avif_bits == 10 ? 10 : 8 };
 }
 
-static bool save_by_ffmpeg(u8str_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options, bool avif) {
+static bool save_by_ffmpeg(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels, const rubraview_export_options_t *options, bool avif) {
     size_t size = 0;
     rubraview_ffmpeg_still_t how = ffmpeg_how(options, avif);
     uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(pixels, &how, &size, &g_save_why);
     if (!bytes) return false;
-    bool written = rubraview_pal_fs_write_file(path, (u8str_t){ .ptr = (const char*)bytes, .len = size });
+    bool written = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = size });
     free(bytes);
     if (!written) g_save_why = NULL;
     return written;
 }
 
-bool rubraview_pal_image_save(u8str_t path,
+bool rubraview_pal_image_save(proven_u8str_view_t path,
                               const rubraview_pixbuf_t *pixels,
                               const rubraview_export_options_t *options) {
     g_save_why = NULL;
@@ -2010,7 +2010,7 @@ bool rubraview_pal_image_save(u8str_t path,
     return saved;
 }
 
-bool rubraview_pal_image_save_ico(u8str_t path,
+bool rubraview_pal_image_save_ico(proven_u8str_view_t path,
                                   const rubraview_pixbuf_t *pixels,
                                   const int32_t *sizes, size_t size_count) {
     rubraview_export_options_t options = rubraview_export_defaults();
@@ -2031,9 +2031,9 @@ static void diag_add(char *buffer, size_t size, size_t *used, const char *fmt, .
     if (*used >= size) *used = size - 1;
 }
 
-u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t path,
+proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, proven_u8str_view_t path,
                                      char *buffer, size_t buffer_size) {
-    u8str_t empty = { .ptr = "", .len = 0 };
+    proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 128) return empty;
 
     size_t used = 0;
@@ -2041,16 +2041,16 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
 
     IWICImagingFactory *factory = wic_factory();
     diag_add(buffer, buffer_size, &used, "WIC factory: %s\r\n", factory ? "ok" : "FAILED");
-    if (!factory) return (u8str_t){ .ptr = buffer, .len = used };
+    if (!factory) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     ID2D1RenderTarget *rt = rubraview_d2d_render_target(renderer);
     diag_add(buffer, buffer_size, &used, "render target: %s\r\n", rt ? "ok" : "FAILED (no renderer)");
-    if (!rt) return (u8str_t){ .ptr = buffer, .len = used };
+    if (!rt) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     IWICBitmapDecoder *decoder = decoder_for_path(path);
     diag_add(buffer, buffer_size, &used, "opening the file: %s\r\n",
              decoder ? "ok" : "FAILED (no codec for this format, or the path is wrong)");
-    if (!decoder) return (u8str_t){ .ptr = buffer, .len = used };
+    if (!decoder) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     UINT frame_count = 0;
     IWICBitmapDecoder_GetFrameCount(decoder, &frame_count);
@@ -2060,7 +2060,7 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
     HRESULT hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
     diag_add(buffer, buffer_size, &used, "getting frame 0: %s (0x%08lX)\r\n",
              SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
-    if (FAILED(hr) || !frame) { IWICBitmapDecoder_Release(decoder); return (u8str_t){ .ptr = buffer, .len = used }; }
+    if (FAILED(hr) || !frame) { IWICBitmapDecoder_Release(decoder); return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used }; }
 
     UINT w = 0, h = 0;
     IWICBitmapFrameDecode_GetSize(frame, &w, &h);
@@ -2126,32 +2126,32 @@ u8str_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, u8str_t pat
     if (transform) IWICColorTransform_Release(transform);
     IWICBitmapFrameDecode_Release(frame);
     IWICBitmapDecoder_Release(decoder);
-    return (u8str_t){ .ptr = buffer, .len = used };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 }
 
 #endif /* _WIN32 */
 
-static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px, int32_t box_w, int32_t box_h, int weight);
+static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px, int32_t box_w, int32_t box_h, int weight);
 
-rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px) {
+rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px) {
     return text_mask_in(arena, text, font, px, 0, 0, FW_SEMIBOLD);
 }
 
-rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px,
+rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px,
                                                int32_t width, int32_t height) {
     if (width < 8 || height < 8) return (rubraview_pixbuf_t){0};
     return text_mask_in(arena, text, font, px, width, height, FW_NORMAL);
 }
 
-static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, u8str_t text, u8str_t font, int32_t px, int32_t box_w, int32_t box_h, int weight) {
+static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px, int32_t box_w, int32_t box_h, int weight) {
     rubraview_pixbuf_t none = {0};
-    if (!arena || text.len == 0 || text.len > 4000 || px < 4 || px > 2000) return none;
+    if (!arena || text.size == 0 || text.size > 4000 || px < 4 || px > 2000) return none;
     WCHAR wtext[4096], face[LF_FACESIZE] = L"Segoe UI";
-    int wn = MultiByteToWideChar(CP_UTF8, 0, text.ptr, (int)text.len, wtext, 4095);
+    int wn = MultiByteToWideChar(CP_UTF8, 0, (const char *)text.ptr, (int)text.size, wtext, 4095);
     if (wn <= 0) return none;
     wtext[wn] = 0;
-    if (font.len > 0) {
-        int fn = MultiByteToWideChar(CP_UTF8, 0, font.ptr, (int)font.len, face, LF_FACESIZE - 1);
+    if (font.size > 0) {
+        int fn = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)font.ptr, (int)font.size, face, LF_FACESIZE - 1);
         face[fn > 0 ? fn : 0] = 0;
         if (fn <= 0) wcscpy(face, L"Segoe UI");
     }

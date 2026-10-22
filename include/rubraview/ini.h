@@ -39,9 +39,9 @@ typedef enum rubraview_ini_kind {
 } rubraview_ini_kind_t;
 
 typedef struct rubraview_ini_entry {
-    u8str_t section; /* "" for the global section */
-    u8str_t key;
-    u8str_t value;   /* the meaning: quotes removed, escapes undone */
+    proven_u8str_view_t section; /* "" for the global section */
+    proven_u8str_view_t key;
+    proven_u8str_view_t value;   /* the meaning: quotes removed, escapes undone */
     rubraview_ini_kind_t kind;
 } rubraview_ini_entry_t;
 
@@ -58,7 +58,7 @@ typedef struct rubraview_ini_doc {
  * source order; a repeated key keeps every occurrence (last-wins lookup
  * via rubraview_ini_get).
  */
-rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, u8str_t text);
+rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, proven_u8str_view_t text);
 
 /**
  * Look up a key within a section (case-sensitive section/key names,
@@ -66,11 +66,11 @@ rubraview_ini_doc_t rubraview_ini_parse(proven_arena_t *arena, u8str_t text);
  * key appears more than once, the last occurrence wins (later entries in
  * a file override earlier ones, matching typical INI merge semantics).
  */
-const u8str_t *rubraview_ini_get(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key);
+const proven_u8str_view_t *rubraview_ini_get(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key);
 
-bool rubraview_ini_get_bool(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, bool default_value);
-long long rubraview_ini_get_int(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, long long default_value);
-double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double default_value);
+bool rubraview_ini_get_bool(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, bool default_value);
+long long rubraview_ini_get_int(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, long long default_value);
+double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, double default_value);
 
 /**
  * Insert or update (in place, preserving position) a key's value within a
@@ -80,14 +80,14 @@ double rubraview_ini_get_float(const rubraview_ini_doc_t *doc, u8str_t section, 
  * are written bare, anything else quoted. A caller that knows the type
  * says so with a typed setter: a folder named `2024` must stay a string.
  */
-void rubraview_ini_set(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value);
-void rubraview_ini_set_string(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, u8str_t value);
-void rubraview_ini_set_bool(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, bool value);
-void rubraview_ini_set_int(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, long long value);
-void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, u8str_t section, u8str_t key, double value);
+void rubraview_ini_set(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, proven_u8str_view_t value);
+void rubraview_ini_set_string(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, proven_u8str_view_t value);
+void rubraview_ini_set_bool(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, bool value);
+void rubraview_ini_set_int(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, long long value);
+void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, double value);
 
 /** A name the subset allows for a section or a key: `[a-z0-9_-]+`. */
-bool rubraview_ini_name_ok(u8str_t name);
+bool rubraview_ini_name_ok(proven_u8str_view_t name);
 
 /**
  * Serialize a document in the subset, grouping entries by section in
@@ -95,7 +95,7 @@ bool rubraview_ini_name_ok(u8str_t name);
  * subset: they are written first, with no header, only so that nothing
  * a caller put in is lost — the format gate refuses a file that has any.
  */
-u8str_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t *doc);
+proven_u8str_view_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t *doc);
 
 #ifdef __cplusplus
 }

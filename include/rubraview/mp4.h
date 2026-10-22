@@ -124,7 +124,7 @@ typedef struct rubraview_mp4_put {
  * fragmented, or one whose last box runs "to the end of the file".
  */
 bool rubraview_mp4_put_plan(rubraview_mp4_put_t *put, const rubraview_mp4_t *mp4, const rubraview_subtitle_track_t *subtitle,
-                            u8str_t language, u8str_t name, const char **out_why);
+                            proven_u8str_view_t language, proven_u8str_view_t name, const char **out_why);
 void rubraview_mp4_put_free(rubraview_mp4_put_t *put);
 
 typedef bool (*rubraview_mp4_emit_fn)(void *ctx, const void *bytes, size_t size);

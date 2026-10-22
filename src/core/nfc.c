@@ -50,20 +50,20 @@ static bool latin_compose(uint32_t base, uint32_t mark, uint32_t *out_composed) 
     return false;
 }
 
-u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
-    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
-    if (utf8_in.len == 0) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_nfc_fold(proven_arena_t *arena, proven_u8str_view_t utf8_in) {
+    if (!arena) return PROVEN_LIT("");
+    if (utf8_in.size == 0) return PROVEN_LIT("");
 
     /* Pass 1: decode to codepoints. Upper bound: one codepoint per byte. */
-    proven_result_mem_mut_t decoded_res = rubraview_arena_alloc_array(arena, utf8_in.len, sizeof(uint32_t));
-    if (!proven_is_ok(decoded_res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    proven_result_mem_mut_t decoded_res = rubraview_arena_alloc_array(arena, utf8_in.size, sizeof(uint32_t));
+    if (!proven_is_ok(decoded_res.err)) return PROVEN_LIT("");
     uint32_t *decoded = (uint32_t*)(void*)decoded_res.value.ptr;
     size_t decoded_count = 0;
 
     size_t i = 0;
-    while (i < utf8_in.len) {
+    while (i < utf8_in.size) {
         size_t consumed = 1;
-        uint32_t cp = rubraview_utf8_decode((const uint8_t*)utf8_in.ptr + i, utf8_in.len - i, &consumed);
+        uint32_t cp = rubraview_utf8_decode((const uint8_t*)utf8_in.ptr + i, utf8_in.size - i, &consumed);
         if (cp == RUBRAVIEW_UTF8_INVALID) {
             decoded[decoded_count++] = 0xFFFD; /* replacement character */
         } else {
@@ -74,7 +74,7 @@ u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
 
     /* Pass 2: compose. Output is never longer than the input in codepoints. */
     proven_result_mem_mut_t composed_res = rubraview_arena_alloc_array(arena, decoded_count, sizeof(uint32_t));
-    if (!proven_is_ok(composed_res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(composed_res.err)) return PROVEN_LIT("");
     uint32_t *composed = (uint32_t*)(void*)composed_res.value.ptr;
     size_t composed_count = 0;
 
@@ -130,7 +130,7 @@ u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
     /* Pass 3: re-encode to UTF-8. Upper bound: 4 bytes per codepoint + NUL. */
     size_t max_bytes = composed_count * 4 + 1;
     proven_result_mem_mut_t out_res = proven_arena_alloc(arena, max_bytes);
-    if (!proven_is_ok(out_res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(out_res.err)) return PROVEN_LIT("");
 
     size_t pos = 0;
     for (size_t c = 0; c < composed_count; ++c) {
@@ -144,5 +144,5 @@ u8str_t rubraview_nfc_fold(proven_arena_t *arena, u8str_t utf8_in) {
     uint8_t *final_ptr = proven_is_ok(shrunk.err) ? shrunk.value.ptr : out_res.value.ptr;
     final_ptr[pos] = '\0';
 
-    return (u8str_t){ .ptr = (const char*)final_ptr, .len = pos };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)final_ptr, .size = pos };
 }

@@ -159,7 +159,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
                                                  bool optimise, int restart_rows) {
     rubraview_jpegtran_result_t result = {
         .err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT,
-        .data = { .ptr = "", .len = 0 },
+        .data = PROVEN_LIT(""),
         .was_exact = true,
     };
 
@@ -268,7 +268,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     free(out.buffer);
 
     result.err = RUBRAVIEW_JPEGTRAN_OK;
-    result.data = (u8str_t){ .ptr = copy, .len = out_size };
+    result.data = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)copy, .size = out_size };
     return result;
 }
 
@@ -281,7 +281,7 @@ static rubraview_jpegtran_result_t transform(proven_arena_t *arena,
                                              bool copy_markers) {
     rubraview_jpegtran_result_t result = {
         .err = RUBRAVIEW_JPEGTRAN_ERR_NOT_A_JPEG,
-        .data = { .ptr = "", .len = 0 },
+        .data = PROVEN_LIT(""),
         .was_exact = true,
     };
     if (!arena || !data || size < 4) return result;

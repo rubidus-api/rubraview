@@ -17,15 +17,15 @@ extern "C" {
  * whose name has a comma in it is kept whole.
  */
 typedef struct rubraview_font_spec {
-    u8str_t family;   /* points into the text read; empty for the program's face */
+    proven_u8str_view_t family;   /* points into the text read; empty for the program's face */
     int32_t weight;   /* 100..900; 400 when not said */
     bool    italic;
 } rubraview_font_spec_t;
 
-rubraview_font_spec_t rubraview_font_spec_parse(u8str_t text);
+rubraview_font_spec_t rubraview_font_spec_parse(proven_u8str_view_t text);
 
 /** The text for a setting; `buf` holds it. A weight not among the names is the nearest named one. */
-u8str_t rubraview_font_spec_format(char *buf, size_t cap, u8str_t family, int32_t weight, bool italic);
+proven_u8str_view_t rubraview_font_spec_format(char *buf, size_t cap, proven_u8str_view_t family, int32_t weight, bool italic);
 
 /** The named weights, light to heavy, and their English names ("Regular" for 400). */
 #define RUBRAVIEW_FONT_WEIGHTS 9

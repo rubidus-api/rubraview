@@ -13,7 +13,7 @@ extern "C" {
  * none. `src/core/action_words.c` is generated from scripts/check-actions.py
  * (owner, 2026-10-14: the keys page says it when the pointer rests on a row).
  */
-const char *rubraview_action_words(u8str_t action);
+const char *rubraview_action_words(proven_u8str_view_t action);
 
 #ifdef __cplusplus
 }

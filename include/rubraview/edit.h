@@ -248,7 +248,7 @@ bool rubraview_resize_preset_size(rubraview_resize_preset_t preset, int32_t widt
  * a comma works as the decimal point. False when it is not a length, or
  * gives under 1 or over 65535 pixels.
  */
-bool rubraview_resize_parse_length(u8str_t text, int32_t whole_px, double dpi, int32_t *out_px);
+bool rubraview_resize_parse_length(proven_u8str_view_t text, int32_t whole_px, double dpi, int32_t *out_px);
 
 /* ---- preview ---- */
 

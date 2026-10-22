@@ -40,7 +40,7 @@ typedef void (*rubraview_thumbs_wake_fn)(void *context);
 
 /* Filters are glob lists ("*.jpg;*.png"); they are copied. `wake` is
    called from the worker after each result. NULL when no thread could start. */
-rubraview_thumbs_t *rubraview_pal_thumbs_start(u8str_t picture_filter, u8str_t film_filter, u8str_t archive_filter,
+rubraview_thumbs_t *rubraview_pal_thumbs_start(proven_u8str_view_t picture_filter, proven_u8str_view_t film_filter, proven_u8str_view_t archive_filter,
                                                rubraview_thumbs_wake_fn wake, void *context);
 void rubraview_pal_thumbs_stop(rubraview_thumbs_t *thumbs);
 
@@ -51,7 +51,7 @@ void rubraview_pal_thumbs_generation(rubraview_thumbs_t *thumbs, uint32_t genera
 bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
                                         double aspect, uint8_t *bytes, size_t len);
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
-                                  bool folder, double aspect, u8str_t path);
+                                  bool folder, double aspect, proven_u8str_view_t path);
 /* A finished one of the current generation, or false. */
 bool rubraview_pal_thumbs_take(rubraview_thumbs_t *thumbs, rubraview_thumb_result_t *out);
 /* Requests queued or being made. */
@@ -60,7 +60,7 @@ bool rubraview_pal_thumbs_busy(rubraview_thumbs_t *thumbs);
 /* The picture Windows' shell has for a file — a photo's or a film's
    thumbnail, a record's cover — as top-row-first BGRA to free(), or NULL.
    Any thread with COM started. */
-uint8_t *rubraview_pal_shell_thumbnail_bgra(u8str_t path, int32_t side, int32_t *out_w, int32_t *out_h);
+uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t side, int32_t *out_w, int32_t *out_h);
 
 #ifdef __cplusplus
 }

@@ -105,7 +105,7 @@ int rubraview_pal_ffmpeg_jxl_state(void);
  * Each place is taken whole or not at all. While FFmpeg is not loaded the
  * places are looked in again at the next ask; once loaded it stays for the run.
  */
-void rubraview_pal_ffmpeg_set_folders(u8str_t imported, u8str_t chosen);
+void rubraview_pal_ffmpeg_set_folders(proven_u8str_view_t imported, proven_u8str_view_t chosen);
 
 /** Where the FFmpeg in use came from: 0 none, 1 beside the program, 2 imported, 3 the chosen folder. */
 int rubraview_pal_ffmpeg_place(void);
@@ -181,7 +181,7 @@ bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t m
  * Blocks until the backend has said yes or no. The caller tries the
  * backends in rubraview_media_backend_order and reports the last failure.
  */
-rubraview_media_open_result_t rubraview_pal_media_open(u8str_t path, rubraview_media_backend_t backend,
+rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path, rubraview_media_backend_t backend,
                                                        const rubraview_media_gpu_t *gpu);
 
 /** Stops the decode thread and frees everything. NULL is ignored. */
@@ -313,7 +313,7 @@ const rubraview_details_t *rubraview_pal_media_details(rubraview_media_t *media)
  * it has the whole stream: the decode thread's own reading is not
  * disturbed. Long films take a moment.
  */
-u8str_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
+proven_u8str_view_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
                                                  int32_t stream_index);
 
 #ifdef __cplusplus

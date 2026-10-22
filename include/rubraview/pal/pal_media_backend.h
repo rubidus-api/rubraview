@@ -19,7 +19,7 @@ typedef struct rubraview_media_backend_api {
     bool (*available)(void);
 
     /** Opens a file, or returns NULL and says why. */
-    void *(*open)(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+    void *(*open)(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                   const rubraview_media_gpu_t *gpu);
 
     void  (*close)(void *impl);
@@ -53,7 +53,7 @@ typedef struct rubraview_media_backend_api {
     void  (*set_gain)(void *impl, double gain);
 
     /** A subtitle stream inside the file, as SubRip text (D-12). */
-    u8str_t (*read_subtitle_stream)(void *impl, proven_arena_t *arena, int32_t stream_index);
+    proven_u8str_view_t (*read_subtitle_stream)(void *impl, proven_arena_t *arena, int32_t stream_index);
 } rubraview_media_backend_api_t;
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void);

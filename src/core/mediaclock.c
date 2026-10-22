@@ -278,7 +278,7 @@ rubraview_media_failure_t rubraview_media_classify(bool readable, bool container
     return RUBRAVIEW_MEDIA_OPENED;
 }
 
-u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, rubraview_ffmpeg_refusal_t refusal) {
+proven_u8str_view_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, rubraview_ffmpeg_refusal_t refusal) {
     if (refusal == RUBRAVIEW_FFMPEG_NOT_REFUSED) return rubraview_media_failure_text(failure);
     if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) {
         switch (failure) {
@@ -306,7 +306,7 @@ u8str_t rubraview_media_failure_text_with(rubraview_media_failure_t failure, rub
     }
 }
 
-u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t refusal) {
+proven_u8str_view_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t refusal) {
     if (jxl_state == 2) return TU8("JPEG XL: this picture could not be read");
     if (jxl_state == 1) return TU8("JPEG XL: the FFmpeg beside the program has no decoder for it (libjxl)");
     if (refusal == RUBRAVIEW_FFMPEG_NOT_WHOLE) return TU8("JPEG XL: the FFmpeg 9.0 DLLs beside the program could not be loaded (all five are needed)");
@@ -314,7 +314,7 @@ u8str_t rubraview_jxl_failure_text(int jxl_state, rubraview_ffmpeg_refusal_t ref
     return TU8("JPEG XL: no decoder for it in this Windows, and no FFmpeg (Settings › External)");
 }
 
-u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
+proven_u8str_view_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
     switch (failure) {
         case RUBRAVIEW_MEDIA_FAIL_FILE:
             return TU8("could not read that file");
@@ -331,7 +331,7 @@ u8str_t rubraview_media_failure_text(rubraview_media_failure_t failure) {
             return TU8("internet radio is played by FFmpeg, which is not here (Settings › External)");
         case RUBRAVIEW_MEDIA_OPENED:
         default:
-            return U8("");
+            return PROVEN_LIT("");
     }
 }
 

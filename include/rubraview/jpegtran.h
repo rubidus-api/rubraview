@@ -63,7 +63,7 @@ typedef enum rubraview_jpegtran_err {
 
 typedef struct rubraview_jpegtran_result {
     rubraview_jpegtran_err_t err;
-    u8str_t data;      /* the new JPEG, in the caller's arena */
+    proven_u8str_view_t data;      /* the new JPEG, in the caller's arena */
     bool    was_exact; /* false when an edge strip had to be copied rather than rotated */
 } rubraview_jpegtran_result_t;
 

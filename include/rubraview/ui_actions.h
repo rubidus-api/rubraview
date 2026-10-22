@@ -60,7 +60,7 @@ typedef struct rubraview_action_state {
 } rubraview_action_state_t;
 
 /** An action nobody lists here is enabled and unmarked. */
-rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_action_facts_t *facts);
+rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, const rubraview_action_facts_t *facts);
 
 /**
  * The caption a tile shows: "File >" for a submenu, "Order: R>L" when
@@ -68,7 +68,7 @@ rubraview_action_state_t rubraview_action_state(u8str_t action, const rubraview_
  * label itself otherwise. Written into `buffer`; when it does not fit,
  * the plain label is returned instead.
  */
-u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
+proven_u8str_view_t rubraview_tile_caption(proven_u8str_view_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
                                char *buffer, size_t buffer_size);
 
 /**
@@ -77,7 +77,7 @@ u8str_t rubraview_tile_caption(u8str_t label, bool submenu, rubraview_tile_mark_
  * and never less than "1%". Empty when `scale` is not above zero or the
  * buffer is too small.
  */
-u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
+proven_u8str_view_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
 
 /**
  * The icon a toolbox button draws (owner, 2026-09-22): a code point in the
@@ -85,14 +85,14 @@ u8str_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
  * while playing, the play sign while paused). 0 for an action whose short
  * caption says it better ("1x", "1:1", "A-B"); the caller draws that.
  */
-uint32_t rubraview_action_icon(u8str_t action, const rubraview_action_facts_t *facts);
+uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_action_facts_t *facts);
 
 /**
  * What a menu item or a tile does, said when the pointer rests on it, for
  * the ones whose short name does not explain itself (owner, 2026-10-15:
  * Crisp and Grid). NULL for the rest.
  */
-const char *rubraview_action_hint(u8str_t action);
+const char *rubraview_action_hint(proven_u8str_view_t action);
 /** The pin at a box's top-left: an outline when off, filled when on. */
 uint32_t rubraview_pin_icon(bool on);
 

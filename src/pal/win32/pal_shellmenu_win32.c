@@ -109,15 +109,15 @@ static bool korean_ui(void) {
 }
 
 /* The next extension of a `;`-separated list, as ".ext"; false after the last. */
-static bool next_extension(u8str_t list, size_t *at, WCHAR ext[40], u8str_t *out_narrow) {
-    while (*at < list.len) {
+static bool next_extension(proven_u8str_view_t list, size_t *at, WCHAR ext[40], proven_u8str_view_t *out_narrow) {
+    while (*at < list.size) {
         size_t start = *at, end = start;
-        while (end < list.len && list.ptr[end] != ';') end++;
+        while (end < list.size && list.ptr[end] != ';') end++;
         *at = end + 1;
         if (end == start || end - start > 30) continue;
         ext[0] = L'.';
-        widen(list.ptr + start, end - start, ext + 1, 38);
-        if (out_narrow) *out_narrow = (u8str_t){ .ptr = list.ptr + start, .len = end - start };
+        widen((const char *)list.ptr + start, end - start, ext + 1, 38);
+        if (out_narrow) *out_narrow = (proven_u8str_view_t){ .ptr = list.ptr + start, .size = end - start };
         return true;
     }
     return false;
@@ -189,9 +189,9 @@ static void classic_remove(HKEY root, const WCHAR *ext) {
 /* ---- what the Windows 11 item reads ---- */
 
 /* ";jpg;png;" for the extensions of `selection` whose kind is in `kinds`. */
-static void on_list(u8str_t selection, uint32_t kinds, WCHAR *out, size_t cap) {
+static void on_list(proven_u8str_view_t selection, uint32_t kinds, WCHAR *out, size_t cap) {
     WCHAR ext[40];
-    u8str_t narrow;
+    proven_u8str_view_t narrow;
     wcscpy(out, L";");
     for (size_t at = 0; next_extension(selection, &at, ext, &narrow);) {
         if (!(rubraview_shell_kind_of(narrow) & kinds)) continue;
@@ -201,7 +201,7 @@ static void on_list(u8str_t selection, uint32_t kinds, WCHAR *out, size_t cap) {
     }
 }
 
-static bool config_write(HKEY root, u8str_t selection, const WCHAR *exe) {
+static bool config_write(HKEY root, proven_u8str_view_t selection, const WCHAR *exe) {
     WCHAR on[1024], icon[MAX_PATH * 2 + 8], sub[400], text[128], args[96];
     RegDeleteTreeW(root, MENU_CLASS_KEY);
 
@@ -319,16 +319,16 @@ static bool package_shows_in_classic_menu(void) {
     return get && get(&v) == 0 && v.dwBuildNumber >= 22000;
 }
 
-rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(u8str_t selection, bool all_users) {
+rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(proven_u8str_view_t selection, bool all_users) {
     WCHAR exe[MAX_PATH * 2], ext[40];
-    u8str_t narrow;
+    proven_u8str_view_t narrow;
     if (all_users && !can_write_machine()) return RUBRAVIEW_SHELL_MENU_FAILED;
     if (!program_path(exe, MAX_PATH * 2, NULL)) return RUBRAVIEW_SHELL_MENU_FAILED;
     HKEY root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
     /* The registry is made to match the choice: ours is taken off every
        extension we know, then put on the chosen ones. */
-    u8str_t every = rubraview_shell_extensions_all();
+    proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) classic_remove(root, ext);
     bool ok = true;
     for (size_t at = 0; next_extension(selection, &at, ext, &narrow);) {
@@ -369,7 +369,7 @@ bool rubraview_pal_shell_menu_unregister(bool all_users) {
     WCHAR ext[40];
     if (all_users && !can_write_machine()) return false;
     HKEY root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-    u8str_t every = rubraview_shell_extensions_all();
+    proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) classic_remove(root, ext);
     if (all_users) package_remove();
     config_remove(root);
@@ -429,8 +429,8 @@ static bool verb_is_ours(HKEY root, const WCHAR *shell_key, const WCHAR *verb) {
     int n = WideCharToMultiByte(CP_UTF8, 0, verb, -1, name8, sizeof(name8), NULL, NULL);
     int c = WideCharToMultiByte(CP_UTF8, 0, command, -1, command8, sizeof(command8), NULL, NULL);
     if (n <= 0) return false;
-    return rubraview_shell_entry_is_ours((u8str_t){ .ptr = name8, .len = (size_t)n - 1 },
-                                         (u8str_t){ .ptr = command8, .len = c > 0 ? (size_t)c - 1 : 0 });
+    return rubraview_shell_entry_is_ours((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name8, .size = (size_t)n - 1 },
+                                         (proven_u8str_view_t){ .ptr = (const proven_byte_t *)command8, .size = c > 0 ? (size_t)c - 1 : 0 });
 }
 
 /* An extension still pointing at a type of ours — one an older version
@@ -548,7 +548,7 @@ int32_t rubraview_pal_shell_menu_wipe(bool all_users) {
         removed += wipe_verbs(root, sub, true);
     }
     for (size_t i = 0; i < sizeof(EVERYWHERE) / sizeof(EVERYWHERE[0]); ++i) removed += wipe_verbs(root, EVERYWHERE[i], false);
-    u8str_t every = rubraview_shell_extensions_all();
+    proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) {
         wcscpy(sub, L"Software\\Classes\\");
         wcscat(sub, ext);
@@ -625,7 +625,7 @@ static void turn_pixels(const uint32_t *src, int32_t w, int32_t h, int32_t turns
 /* One picture in its cell of the sheet (D-87). A file that cannot be
    read takes no cell: `*on_sheet` counts the pictures on the open sheet,
    and a sheet is begun for the first of them. */
-static bool print_one(HDC dc, u8str_t path, const rubraview_print_options_t *options, int32_t *on_sheet) {
+static bool print_one(HDC dc, proven_u8str_view_t path, const rubraview_print_options_t *options, int32_t *on_sheet) {
     int32_t w = 0, h = 0;
     if (!rubraview_pal_image_size(path, &w, &h) || w <= 0 || h <= 0) return false;
 
@@ -708,7 +708,7 @@ static bool print_one(HDC dc, u8str_t path, const rubraview_print_options_t *opt
 }
 
 /* The pictures onto the DC's sheets, `per_sheet` a sheet: one document. */
-static bool print_on_dc(HDC dc, const u8str_t *paths, size_t count, const rubraview_print_options_t *chosen,
+static bool print_on_dc(HDC dc, const proven_u8str_view_t *paths, size_t count, const rubraview_print_options_t *chosen,
                         const WCHAR *output, size_t *out_printed) {
     DOCINFOW doc = { .cbSize = sizeof(doc), .lpszDocName = L"Rubraview", .lpszOutput = output };
     size_t printed = 0;
@@ -731,7 +731,7 @@ static bool print_on_dc(HDC dc, const u8str_t *paths, size_t count, const rubrav
     return started;
 }
 
-bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *paths, size_t count,
+bool rubraview_pal_print_pictures(void *parent_window_handle, const proven_u8str_view_t *paths, size_t count,
                                   const rubraview_print_options_t *options, size_t *out_printed) {
     if (out_printed) *out_printed = 0;
     if (!paths || count == 0) return false;
@@ -764,24 +764,24 @@ bool rubraview_pal_print_pictures(void *parent_window_handle, const u8str_t *pat
 /* ---- 1.19.0 (owner, 2026-10-18: "인쇄할 때 용지 선택 ... 프리뷰 ... 프린터 선택도"): the printer,
    its paper and the way the sheet lies chosen in Rubraview's own panel, and printed without Windows' dialog ---- */
 
-static bool wide_of(u8str_t s, WCHAR *out, int cap) {
-    if (s.len == 0 || s.len >= (size_t)cap) return false;
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.ptr, (int)s.len, out, cap - 1);
+static bool wide_of(proven_u8str_view_t s, WCHAR *out, int cap) {
+    if (s.size == 0 || s.size >= (size_t)cap) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, (const char *)s.ptr, (int)s.size, out, cap - 1);
     if (n <= 0) return false;
     out[n] = 0;
     return true;
 }
 
-static u8str_t utf8_of(proven_arena_t *arena, const WCHAR *w) {
+static proven_u8str_view_t utf8_of(proven_arena_t *arena, const WCHAR *w) {
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
-    if (n <= 1) return (u8str_t){ .ptr = "", .len = 0 };
+    if (n <= 1) return PROVEN_LIT("");
     proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     WideCharToMultiByte(CP_UTF8, 0, w, -1, (char*)res.value.ptr, n, NULL, NULL);
-    return (u8str_t){ .ptr = (const char*)res.value.ptr, .len = (size_t)n - 1 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n - 1 };
 }
 
-size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capacity, int32_t *out_default) {
+size_t rubraview_pal_printers(proven_arena_t *arena, proven_u8str_view_t *out, size_t capacity, int32_t *out_default) {
     if (out_default) *out_default = -1;
     if (!arena || !out || capacity == 0) return 0;
     DWORD need = 0, got = 0;
@@ -798,8 +798,8 @@ size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capaci
         const PRINTER_INFO_4W *info = (const PRINTER_INFO_4W*)(const void*)buf;
         for (DWORD i = 0; i < got && count < capacity; ++i) {
             if (!info[i].pPrinterName) continue;
-            u8str_t name = utf8_of(arena, info[i].pPrinterName);
-            if (name.len == 0) continue;
+            proven_u8str_view_t name = utf8_of(arena, info[i].pPrinterName);
+            if (name.size == 0) continue;
             if (out_default && def[0] && lstrcmpiW(def, info[i].pPrinterName) == 0) *out_default = (int32_t)count;
             out[count++] = name;
         }
@@ -808,7 +808,7 @@ size_t rubraview_pal_printers(proven_arena_t *arena, u8str_t *out, size_t capaci
     return count;
 }
 
-size_t rubraview_pal_printer_papers(u8str_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id) {
+size_t rubraview_pal_printer_papers(proven_u8str_view_t printer, rubraview_printer_paper_t *out, size_t capacity, int32_t *out_default_id) {
     if (out_default_id) *out_default_id = 0;
     WCHAR name[512];
     if (!out || capacity == 0 || !wide_of(printer, name, 512)) return 0;
@@ -847,7 +847,7 @@ size_t rubraview_pal_printer_papers(u8str_t printer, rubraview_printer_paper_t *
 }
 
 /* A DC for the printer with this paper, this way up and copies; NULL when it cannot. */
-static HDC printer_dc(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies) {
+static HDC printer_dc(proven_u8str_view_t printer, int32_t paper_id, int32_t orientation, int32_t copies) {
     WCHAR name[512];
     if (!wide_of(printer, name, 512)) return NULL;
     HANDLE h = NULL;
@@ -866,7 +866,7 @@ static HDC printer_dc(u8str_t printer, int32_t paper_id, int32_t orientation, in
     return dc;
 }
 
-bool rubraview_pal_printer_sheet(u8str_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out) {
+bool rubraview_pal_printer_sheet(proven_u8str_view_t printer, int32_t paper_id, int32_t orientation, rubraview_print_sheet_t *out) {
     if (!out) return false;
     *out = (rubraview_print_sheet_t){0};
     HDC dc = printer_dc(printer, paper_id, orientation, 1);
@@ -881,8 +881,8 @@ bool rubraview_pal_printer_sheet(u8str_t printer, int32_t paper_id, int32_t orie
     return out->paper_w > 0 && out->paper_h > 0 && out->print_w > 0 && out->print_h > 0 && out->dpi_x > 0 && out->dpi_y > 0;
 }
 
-bool rubraview_pal_print_pictures_on(u8str_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
-                                     const u8str_t *paths, size_t count, const rubraview_print_options_t *options,
+bool rubraview_pal_print_pictures_on(proven_u8str_view_t printer, int32_t paper_id, int32_t orientation, int32_t copies,
+                                     const proven_u8str_view_t *paths, size_t count, const rubraview_print_options_t *options,
                                      size_t *out_printed) {
     if (out_printed) *out_printed = 0;
     if (!paths || count == 0) return false;

@@ -86,7 +86,7 @@ typedef struct rubraview_settings_view {
     int32_t dragging_line;           /* a number being dragged, or -1 */
     int32_t table_rows;              /* how tall a `table` line is, in rows (the key bindings) */
     /* Other tables by name, as tall as the viewer says (owner, 2026-10-16: the folders kept out of Recent). */
-    struct { u8str_t name; int32_t rows; } named_tables[4];
+    struct { proven_u8str_view_t name; int32_t rows; } named_tables[4];
     int32_t named_table_count;
     int32_t focus_row;               /* on a focused table line: which row (1.., row 0 is its heading) */
 
@@ -95,7 +95,7 @@ typedef struct rubraview_settings_view {
     int32_t content_height;          /* rows the page needs */
     /* 1.30.1: what information lines say, so a long one is laid out over as many rows as it needs */
     void *info_user;
-    size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity);
+    size_t (*info)(void *user, proven_u8str_view_t source, char *buffer, size_t capacity);
 } rubraview_settings_view_t;
 
 rubraview_settings_view_t rubraview_settings_view_create(const rubraview_settings_doc_t *doc,
@@ -104,7 +104,7 @@ rubraview_settings_view_t rubraview_settings_view_create(const rubraview_setting
 /** 1.30.1: where information lines' values come from (the same as rubraview_settings_sources_t.info), so the
     layout gives a long one the rows it needs; laid out again. */
 void rubraview_settings_view_set_info(rubraview_settings_view_t *view, void *user,
-                                      size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity));
+                                      size_t (*info)(void *user, proven_u8str_view_t source, char *buffer, size_t capacity));
 
 /** The window changed size: lay the page out again, keeping the focus in sight. */
 void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t cols, int32_t rows);
@@ -117,16 +117,16 @@ void rubraview_settings_view_resize(rubraview_settings_view_t *view, int32_t col
 void rubraview_settings_view_set_table_rows(rubraview_settings_view_t *view, int32_t rows);
 
 /** How tall the table named `name` is (heading included); other tables keep `table_rows`. */
-void rubraview_settings_view_set_named_table_rows(rubraview_settings_view_t *view, u8str_t name, int32_t rows);
+void rubraview_settings_view_set_named_table_rows(rubraview_settings_view_t *view, proven_u8str_view_t name, int32_t rows);
 
 /** The name of the table line in focus (its `source`), empty when the focus is not on a table. */
-u8str_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *view);
+proven_u8str_view_t rubraview_settings_view_focused_table(const rubraview_settings_view_t *view);
 
 /** Focus row `row` (1 = the first below the heading) of the table named `name`, scrolled into sight; false when there is no such table. */
-bool rubraview_settings_view_focus_table_row(rubraview_settings_view_t *view, u8str_t name, int32_t row);
+bool rubraview_settings_view_focus_table_row(rubraview_settings_view_t *view, proven_u8str_view_t name, int32_t row);
 
 /** The screen row of row `row` of the table named `name`, or -1 when it is not on the page or scrolled out of sight. */
-int32_t rubraview_settings_view_table_screen_row(const rubraview_settings_view_t *view, u8str_t name, int32_t row);
+int32_t rubraview_settings_view_table_screen_row(const rubraview_settings_view_t *view, proven_u8str_view_t name, int32_t row);
 
 /** Go to a page; focus its first setting. */
 void rubraview_settings_view_set_page(rubraview_settings_view_t *view, int32_t page);
@@ -171,7 +171,7 @@ typedef enum rubraview_settings_event {
 } rubraview_settings_event_t;
 
 /** 1.24.0: a choice's word `index`, as the settings window shows it (a language by its own name). */
-u8str_t rubraview_settings_choice_word(const rubraview_setting_def_t *def, int32_t index);
+proven_u8str_view_t rubraview_settings_choice_word(const rubraview_setting_def_t *def, int32_t index);
 
 rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t *view,
                                                         rubraview_settings_t *settings,
@@ -208,9 +208,9 @@ rubraview_settings_event_t rubraview_settings_view_scroll(rubraview_settings_vie
 typedef struct rubraview_settings_sources {
     void *user;
     /** Write the value of `source` into `buffer`; return its length. */
-    size_t (*info)(void *user, u8str_t source, char *buffer, size_t capacity);
+    size_t (*info)(void *user, proven_u8str_view_t source, char *buffer, size_t capacity);
     /** Write row `index` of table `source`; return its length, or 0 past the last row. */
-    size_t (*table_row)(void *user, u8str_t source, size_t index, char *buffer, size_t capacity);
+    size_t (*table_row)(void *user, proven_u8str_view_t source, size_t index, char *buffer, size_t capacity);
 } rubraview_settings_sources_t;
 
 /**
@@ -218,14 +218,14 @@ typedef struct rubraview_settings_sources {
  * more bytes), padded with spaces. A preview line is blank here — the
  * viewer paints it. `table_index` picks the row of a table line.
  */
-u8str_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
+proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t *view,
                                       const rubraview_settings_t *settings,
                                       const rubraview_settings_sources_t *sources,
                                       size_t line, int32_t table_index,
                                       char *buffer, size_t capacity);
 
 /** A page's entry in the list on the left, `width` cells, the current one marked. */
-u8str_t rubraview_settings_page_text(const rubraview_settings_view_t *view, int32_t page,
+proven_u8str_view_t rubraview_settings_page_text(const rubraview_settings_view_t *view, int32_t page,
                                      char *buffer, size_t capacity);
 
 /**
@@ -240,7 +240,7 @@ typedef struct rubraview_cell_run {
     size_t  offset, length;   /* bytes of the text */
     int32_t col;              /* the cell it starts in */
 } rubraview_cell_run_t;
-size_t rubraview_cell_runs(u8str_t text, rubraview_cell_run_t *out, size_t capacity);
+size_t rubraview_cell_runs(proven_u8str_view_t text, rubraview_cell_run_t *out, size_t capacity);
 
 /**
  * A block of the window's text marked with the pointer (owner, 2026-09-28:
@@ -263,10 +263,10 @@ bool rubraview_grid_selection_row(const rubraview_grid_selection_t *selection, i
  * spaces go, rows are joined by CRLF. NUL-terminated; returns its length.
  */
 size_t rubraview_grid_selection_copy(const rubraview_grid_selection_t *selection,
-                                     const u8str_t *rows, int32_t row_count, char *out, size_t capacity);
+                                     const proven_u8str_view_t *rows, int32_t row_count, char *out, size_t capacity);
 
 /** A button's label, as drawn: "[ Revert ]". */
-u8str_t rubraview_settings_button_text(rubraview_settings_button_t button);
+proven_u8str_view_t rubraview_settings_button_text(rubraview_settings_button_t button);
 
 #ifdef __cplusplus
 }

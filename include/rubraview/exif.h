@@ -97,7 +97,7 @@ bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t
 bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t *out);
 
 typedef struct rubraview_jpeg_strip_result {
-    u8str_t data;           /* arena-allocated JPEG bytes with the targeted segments removed */
+    proven_u8str_view_t data;           /* arena-allocated JPEG bytes with the targeted segments removed */
     bool    stripped_exif;  /* an APP1 segment with the "Exif\0\0" signature was removed */
     bool    stripped_xmp;   /* an APP1 segment with the XMP "http://ns.adobe.com/xap/1.0/\0" signature was removed */
     bool    stripped_iptc;  /* an APP13 segment (the conventional Photoshop/IPTC marker) was removed */

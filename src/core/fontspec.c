@@ -26,15 +26,10 @@ const char *rubraview_font_weight_name(int32_t weight) {
     return WEIGHTS[nearest(weight)].name;
 }
 
-static u8str_t trim(u8str_t t) {
-    while (t.len > 0 && (t.ptr[0] == ' ' || t.ptr[0] == '\t')) { t.ptr++; t.len--; }
-    while (t.len > 0 && (t.ptr[t.len - 1] == ' ' || t.ptr[t.len - 1] == '\t')) t.len--;
-    return t;
-}
 
-static bool same_word(u8str_t a, const char *b) {
+static bool same_word(proven_u8str_view_t a, const char *b) {
     size_t n = strlen(b);
-    if (a.len != n) return false;
+    if (a.size != n) return false;
     for (size_t i = 0; i < n; ++i) {
         char x = a.ptr[i], y = b[i];
         if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
@@ -45,19 +40,19 @@ static bool same_word(u8str_t a, const char *b) {
 }
 
 /* The part after the last comma, and what comes before it. */
-static bool last_part(u8str_t t, u8str_t *head, u8str_t *tail) {
-    for (size_t i = t.len; i-- > 0;) {
+static bool last_part(proven_u8str_view_t t, proven_u8str_view_t *head, proven_u8str_view_t *tail) {
+    for (size_t i = t.size; i-- > 0;) {
         if (t.ptr[i] != ',') continue;
-        *head = trim((u8str_t){ t.ptr, i });
-        *tail = trim((u8str_t){ t.ptr + i + 1, t.len - i - 1 });
+        *head = proven_u8str_view_trim((proven_u8str_view_t){ t.ptr, i });
+        *tail = proven_u8str_view_trim((proven_u8str_view_t){ t.ptr + i + 1, t.size - i - 1 });
         return true;
     }
     return false;
 }
 
-rubraview_font_spec_t rubraview_font_spec_parse(u8str_t text) {
-    rubraview_font_spec_t spec = { .family = trim(text), .weight = 400, .italic = false };
-    u8str_t head, tail;
+rubraview_font_spec_t rubraview_font_spec_parse(proven_u8str_view_t text) {
+    rubraview_font_spec_t spec = { .family = proven_u8str_view_trim(text), .weight = 400, .italic = false };
+    proven_u8str_view_t head, tail;
     if (last_part(spec.family, &head, &tail) && (same_word(tail, "Italic") || same_word(tail, "Oblique"))) {
         spec.italic = true;
         spec.family = head;
@@ -73,14 +68,14 @@ rubraview_font_spec_t rubraview_font_spec_parse(u8str_t text) {
     return spec;
 }
 
-u8str_t rubraview_font_spec_format(char *buf, size_t cap, u8str_t family, int32_t weight, bool italic) {
-    if (!buf || cap == 0) return (u8str_t){ .ptr = "", .len = 0 };
-    family = trim(family);
+proven_u8str_view_t rubraview_font_spec_format(char *buf, size_t cap, proven_u8str_view_t family, int32_t weight, bool italic) {
+    if (!buf || cap == 0) return PROVEN_LIT("");
+    family = proven_u8str_view_trim(family);
     int32_t w = WEIGHTS[nearest(weight)].weight;
-    int n = family.len == 0 ? 0
-          : snprintf(buf, cap, "%.*s%s%s%s", (int)family.len, family.ptr,
+    int n = family.size == 0 ? 0
+          : snprintf(buf, cap, "%.*s%s%s%s", (int)family.size, family.ptr,
                      w != 400 ? ", " : "", w != 400 ? rubraview_font_weight_name(w) : "", italic ? ", Italic" : "");
     if (n < 0 || (size_t)n >= cap) n = 0;
     buf[n] = '\0';
-    return (u8str_t){ .ptr = buf, .len = (size_t)n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = (size_t)n };
 }

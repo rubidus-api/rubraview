@@ -33,7 +33,7 @@ typedef enum rubraview_aspect {
 
 /* "aspect_16_9"; and the choice an action names (COUNT when it names none). */
 const char *rubraview_aspect_action(rubraview_aspect_t aspect);
-rubraview_aspect_t rubraview_aspect_from_action(u8str_t action);
+rubraview_aspect_t rubraview_aspect_from_action(proven_u8str_view_t action);
 /* "16:9", "1.85:1", "A4 / B4", "original". */
 const char *rubraview_aspect_label(rubraview_aspect_t aspect);
 /* The next choice round, for one key or tile. */

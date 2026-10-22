@@ -231,7 +231,7 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             /* RV-123: a heading stands alone, the paragraph before it ended first */
             /* (a blank line before it, or the file's start, and one after it) */
             bool heading = headings && e > a && run[k] >= 2 && (k == first_line || blank_before(blank, k)) &&
-                           rubraview_text_columns((u8str_t){ .ptr = s + a, .len = e - a }) <= 30 &&
+                           rubraview_text_columns((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s + a, .size = e - a }) <= 30 &&
                            !rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
             if (heading && open) { end_para(&b); open = false; }
             if (!open) {
@@ -322,15 +322,15 @@ static bool match_at(const char *s, size_t len, size_t i, const uint32_t *needle
     return true;
 }
 
-static size_t folded(u8str_t needle, uint32_t *out, size_t cap) {
+static size_t folded(proven_u8str_view_t needle, uint32_t *out, size_t cap) {
     size_t n = 0, i = 0;
-    while (i < needle.len && n < cap) out[n++] = fold(rubraview_text_next_cp(needle.ptr, needle.len, &i));
+    while (i < needle.size && n < cap) out[n++] = fold(rubraview_text_next_cp((const char *)needle.ptr, needle.size, &i));
     return n;
 }
 
-bool rubraview_text_find(const rubraview_text_view_t *view, u8str_t needle, size_t from, bool backward,
+bool rubraview_text_find(const rubraview_text_view_t *view, proven_u8str_view_t needle, size_t from, bool backward,
                          size_t *at, size_t *len) {
-    if (!view || !view->text || needle.len == 0) return false;
+    if (!view || !view->text || needle.size == 0) return false;
     uint32_t want[256];
     size_t n = folded(needle, want, 256);
     if (n == 0) return false;
@@ -362,9 +362,9 @@ bool rubraview_text_find(const rubraview_text_view_t *view, u8str_t needle, size
     return false;
 }
 
-size_t rubraview_text_count(const rubraview_text_view_t *view, u8str_t needle, size_t at, size_t *which) {
+size_t rubraview_text_count(const rubraview_text_view_t *view, proven_u8str_view_t needle, size_t at, size_t *which) {
     if (which) *which = 0;
-    if (!view || !view->text || needle.len == 0) return 0;
+    if (!view || !view->text || needle.size == 0) return 0;
     uint32_t want[256];
     size_t n = folded(needle, want, 256);
     if (n == 0) return 0;

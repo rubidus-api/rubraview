@@ -36,7 +36,7 @@ typedef struct rubraview_vobsub_track {
     rubraview_vobsub_entry_t *entries;   /* in the index's order */
     size_t                    count;
     int32_t                   frame_width, frame_height;  /* the `size:` line, 720x480 and such */
-    u8str_t                   language;                   /* the chosen `id:` block's tag */
+    proven_u8str_view_t                   language;                   /* the chosen `id:` block's tag */
     size_t                    stream_count;               /* how many `id:` blocks the index has */
     uint32_t                  palette[16];                /* the `palette:` line, ARGB */
 } rubraview_vobsub_track_t;
@@ -57,13 +57,13 @@ typedef struct rubraview_vobsub_cue {
 #define RUBRAVIEW_VOBSUB_MAX_PIXELS (720u * 576u)
 
 /** The languages a `.idx` lists, in order; returns how many were written. */
-size_t rubraview_vobsub_languages(u8str_t idx_text, u8str_t *out, size_t max);
+size_t rubraview_vobsub_languages(proven_u8str_view_t idx_text, proven_u8str_view_t *out, size_t max);
 
 /**
  * Read one language's index. `stream` picks an `id:` block (0 is the
  * first). The entries are allocated from `arena`; nothing is decoded yet.
  */
-rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, u8str_t idx_text, size_t stream);
+rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, proven_u8str_view_t idx_text, size_t stream);
 
 /**
  * Decode the `index`-th subtitle out of the `.sub` bytes into `pixels`

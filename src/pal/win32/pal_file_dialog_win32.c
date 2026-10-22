@@ -7,18 +7,18 @@
 #include <stdbool.h>
 #include "rubraview/pal/pal_file_dialog.h"
 
-static u8str_t win32_wstr_to_u8str(proven_arena_t *arena, const WCHAR *wstr) {
-    if (!wstr || !arena) return (u8str_t){0};
+static proven_u8str_view_t win32_wstr_to_u8str(proven_arena_t *arena, const WCHAR *wstr) {
+    if (!wstr || !arena) return (proven_u8str_view_t){0};
     int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
-    if (utf8_len <= 0) return (u8str_t){0};
+    if (utf8_len <= 0) return (proven_u8str_view_t){0};
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, (proven_size_t)utf8_len);
-    if (!proven_is_ok(res.err)) return (u8str_t){0};
+    if (!proven_is_ok(res.err)) return (proven_u8str_view_t){0};
 
     WideCharToMultiByte(CP_UTF8, 0, wstr, -1, (char*)res.value.ptr, utf8_len, NULL, NULL);
-    return (u8str_t){
-        .ptr = (const char*)res.value.ptr,
-        .len = (proven_size_t)(utf8_len - 1), /* Exclude null terminator from length */
+    return (proven_u8str_view_t){
+        .ptr = (const proven_byte_t *)(const char*)res.value.ptr,
+        .size = (proven_size_t)(utf8_len - 1), /* Exclude null terminator from length */
     };
 }
 
@@ -92,9 +92,9 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *ar
             DWORD count = 0;
             IShellItemArray_GetCount(pItems, &count);
             if (count > 0) {
-                proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, count, sizeof(u8str_t));
+                proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, count, sizeof(proven_u8str_view_t));
                 if (proven_is_ok(mres.err)) {
-                    u8str_t *path_arr = (u8str_t*)mres.value.ptr;
+                    proven_u8str_view_t *path_arr = (proven_u8str_view_t*)mres.value.ptr;
                     for (DWORD i = 0; i < count; ++i) {
                         IShellItem *pItem = NULL;
                         if (SUCCEEDED(IShellItemArray_GetItemAt(pItems, i, &pItem))) {
@@ -118,9 +118,9 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_open(proven_arena_t *ar
         if (SUCCEEDED(hr)) {
             LPWSTR pszFilePath = NULL;
             if (SUCCEEDED(IShellItem_GetDisplayName(pItem, SIGDN_FILESYSPATH, &pszFilePath))) {
-                proven_result_mem_mut_t mres = proven_arena_alloc(arena, sizeof(u8str_t));
+                proven_result_mem_mut_t mres = proven_arena_alloc(arena, sizeof(proven_u8str_view_t));
                 if (proven_is_ok(mres.err)) {
-                    u8str_t *path_arr = (u8str_t*)mres.value.ptr;
+                    proven_u8str_view_t *path_arr = (proven_u8str_view_t*)mres.value.ptr;
                     path_arr[0] = win32_wstr_to_u8str(arena, pszFilePath);
                     result.paths = path_arr;
                     result.count = 1;
@@ -162,9 +162,9 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_save(proven_arena_t *ar
     if (SUCCEEDED(hr)) {
         LPWSTR pszFilePath = NULL;
         if (SUCCEEDED(IShellItem_GetDisplayName(pItem, SIGDN_FILESYSPATH, &pszFilePath))) {
-            proven_result_mem_mut_t mres = proven_arena_alloc(arena, sizeof(u8str_t));
+            proven_result_mem_mut_t mres = proven_arena_alloc(arena, sizeof(proven_u8str_view_t));
             if (proven_is_ok(mres.err)) {
-                u8str_t *path_arr = (u8str_t*)mres.value.ptr;
+                proven_u8str_view_t *path_arr = (proven_u8str_view_t*)mres.value.ptr;
                 path_arr[0] = win32_wstr_to_u8str(arena, pszFilePath);
                 result.paths = path_arr;
                 result.count = 1;
@@ -191,18 +191,18 @@ rubraview_file_dialog_result_t rubraview_pal_file_dialog_pick_folder(proven_aren
 }
 #endif /* _WIN32 */
 
-bool rubraview_pal_choose_font(void *parent_window_handle, u8str_t current, char *out, size_t cap) {
+bool rubraview_pal_choose_font(void *parent_window_handle, proven_u8str_view_t current, char *out, size_t cap) {
     if (!out || cap == 0) return false;
     out[0] = '\0';
     LOGFONTW lf = { .lfHeight = -24, .lfWeight = FW_NORMAL, .lfCharSet = DEFAULT_CHARSET };
-    if (current.len > 0) {
-        int n = MultiByteToWideChar(CP_UTF8, 0, current.ptr, (int)current.len, lf.lfFaceName, LF_FACESIZE - 1);
+    if (current.size > 0) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, (const char *)current.ptr, (int)current.size, lf.lfFaceName, LF_FACESIZE - 1);
         lf.lfFaceName[n > 0 ? n : 0] = L'\0';
     }
     /* The face only: the size and the colour have settings of their own. */
     CHOOSEFONTW cf = { .lStructSize = sizeof(cf), .hwndOwner = (HWND)parent_window_handle, .lpLogFont = &lf,
                        .Flags = CF_SCREENFONTS | CF_NOSIZESEL | CF_NOSTYLESEL | CF_NOSCRIPTSEL | CF_FORCEFONTEXIST | CF_NOVERTFONTS |
-                                (current.len > 0 ? CF_INITTOLOGFONTSTRUCT : 0) };
+                                (current.size > 0 ? CF_INITTOLOGFONTSTRUCT : 0) };
     if (!ChooseFontW(&cf) || lf.lfFaceName[0] == L'\0') {
         DWORD err = CommDlgExtendedError();   /* 0: cancelled; else why it could not open */
         if (err != 0) snprintf(out, cap, "#%lu", (unsigned long)err);

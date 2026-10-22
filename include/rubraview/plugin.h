@@ -77,10 +77,10 @@ int32_t rubraview_plugin_choice_count(const char *choices);
 bool rubraview_plugin_choice_word(const char *choices, int32_t index, char *out, size_t capacity);
 
 /** A plug-in's file named as the user names it: "posterise", "Posterise.rvf.dll". */
-bool rubraview_plugin_file_matches(const char *file, u8str_t name);
+bool rubraview_plugin_file_matches(const char *file, proven_u8str_view_t name);
 
 /** `--plugin=NAME[:V1,V2,...]`'s value: the name and up to RUBRAVIEW_PLUGIN_PARAMS numbers. */
-bool rubraview_plugin_arg_parse(u8str_t value, char *name, size_t capacity, double *params, int32_t *count);
+bool rubraview_plugin_arg_parse(proven_u8str_view_t value, char *name, size_t capacity, double *params, int32_t *count);
 
 /** FIPS 180-4 SHA-256. */
 void rubraview_sha256(const uint8_t *data, size_t size, uint8_t out[32]);

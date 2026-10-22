@@ -30,10 +30,10 @@ static char lower(char c) {
     return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
 }
 
-static bool ends_with(u8str_t s, const char *tail) {
+static bool ends_with(proven_u8str_view_t s, const char *tail) {
     size_t n = strlen(tail);
-    if (s.len < n) return false;
-    for (size_t i = 0; i < n; ++i) if (lower(s.ptr[s.len - n + i]) != tail[i]) return false;
+    if (s.size < n) return false;
+    for (size_t i = 0; i < n; ++i) if (lower(s.ptr[s.size - n + i]) != tail[i]) return false;
     return true;
 }
 
@@ -44,57 +44,57 @@ static bool all_digits(const char *p, size_t n) {
 }
 
 /* The name without its extension and without a set's volume mark. */
-static u8str_t book_stem(u8str_t name, bool *out_comic) {
+static proven_u8str_view_t book_stem(proven_u8str_view_t name, bool *out_comic) {
     *out_comic = ends_with(name, ".cbr") || ends_with(name, ".cbz") || ends_with(name, ".cb7");
-    u8str_t s = name;
+    proven_u8str_view_t s = name;
     /* x.7z.001, x.zip.001: the number, then the extension below. */
-    size_t dot = s.len;
+    size_t dot = s.size;
     while (dot > 0 && s.ptr[dot - 1] != '.') dot--;
-    if (dot > 0 && all_digits(s.ptr + dot, s.len - dot) && s.len - dot >= 2) {
-        u8str_t inner = { .ptr = s.ptr, .len = dot - 1 };
+    if (dot > 0 && all_digits((const char *)s.ptr + dot, s.size - dot) && s.size - dot >= 2) {
+        proven_u8str_view_t inner = { .ptr = s.ptr, .size = dot - 1 };
         if (ends_with(inner, ".7z") || ends_with(inner, ".zip")) s = inner;
     }
     /* the extension */
-    dot = s.len;
+    dot = s.size;
     while (dot > 0 && s.ptr[dot - 1] != '.') dot--;
-    if (dot > 1) s.len = dot - 1;
+    if (dot > 1) s.size = dot - 1;
     /* x.part1(.rar), x.vol1(.egg) */
-    dot = s.len;
+    dot = s.size;
     while (dot > 0 && s.ptr[dot - 1] != '.') dot--;
     if (dot > 1) {
-        const char *mark = s.ptr + dot;
-        size_t n = s.len - dot;
+        const char *mark = (const char *)s.ptr + dot;
+        size_t n = s.size - dot;
         bool part = n > 4 && lower(mark[0]) == 'p' && lower(mark[1]) == 'a' && lower(mark[2]) == 'r' && lower(mark[3]) == 't' &&
                     all_digits(mark + 4, n - 4);
         bool vol = n > 3 && lower(mark[0]) == 'v' && lower(mark[1]) == 'o' && lower(mark[2]) == 'l' && all_digits(mark + 3, n - 3);
-        if (part || vol) s.len = dot - 1;
+        if (part || vol) s.size = dot - 1;
     }
     return s;
 }
 
-size_t rubraview_arcedit_converted_name(u8str_t archive_name, rubraview_arcedit_target_t target, char *dst, size_t cap) {
-    if (archive_name.len == 0 || !dst) return 0;
+size_t rubraview_arcedit_converted_name(proven_u8str_view_t archive_name, rubraview_arcedit_target_t target, char *dst, size_t cap) {
+    if (archive_name.size == 0 || !dst) return 0;
     bool comic = false;
-    u8str_t stem = book_stem(archive_name, &comic);
-    if (stem.len == 0) stem = archive_name;
+    proven_u8str_view_t stem = book_stem(archive_name, &comic);
+    if (stem.size == 0) stem = archive_name;
     bool zip = target == RUBRAVIEW_ARCEDIT_ZIP;
     if (target == RUBRAVIEW_ARCEDIT_SAME) zip = !(ends_with(archive_name, ".7z") || ends_with(archive_name, ".cb7"));
     const char *ext = comic ? (zip ? ".cbz" : ".cb7") : (zip ? ".zip" : ".7z");
-    size_t need = stem.len + strlen(ext);
+    size_t need = stem.size + strlen(ext);
     if (need + 1 > cap) return 0;
-    memcpy(dst, stem.ptr, stem.len);
-    memcpy(dst + stem.len, ext, strlen(ext) + 1);
+    memcpy(dst, stem.ptr, stem.size);
+    memcpy(dst + stem.size, ext, strlen(ext) + 1);
     return need;
 }
 
-size_t rubraview_arcedit_sibling_name(u8str_t entry_name, u8str_t new_base, char *dst, size_t cap) {
-    if (new_base.len == 0 || !dst) return 0;
-    size_t dir = entry_name.len;
+size_t rubraview_arcedit_sibling_name(proven_u8str_view_t entry_name, proven_u8str_view_t new_base, char *dst, size_t cap) {
+    if (new_base.size == 0 || !dst) return 0;
+    size_t dir = entry_name.size;
     while (dir > 0 && entry_name.ptr[dir - 1] != '/' && entry_name.ptr[dir - 1] != '\\') dir--;
-    size_t need = dir + new_base.len;
+    size_t need = dir + new_base.size;
     if (need + 1 > cap) return 0;
     for (size_t i = 0; i < dir; ++i) dst[i] = entry_name.ptr[i] == '\\' ? '/' : entry_name.ptr[i];
-    memcpy(dst + dir, new_base.ptr, new_base.len);
+    memcpy(dst + dir, new_base.ptr, new_base.size);
     dst[need] = '\0';
     return need;
 }
@@ -273,7 +273,7 @@ static rubraview_arcedit_result_t result_of(fulta_arc_err_t err, bool writing) {
 /* The new file is not wanted after all. */
 static void discard(const char *path) {
 #ifdef _WIN32
-    (void)rubraview_pal_fs_delete((u8str_t){ .ptr = path, .len = strlen(path) });
+    (void)rubraview_pal_fs_delete(proven_u8str_view_from_cstr(path));
 #else
     (void)remove(path);   /* the host's PAL deletes nothing (pal_fs_posix.c) */
 #endif
@@ -329,15 +329,15 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
             const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
             if (!en || !en->name) continue;
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = scratch, .size = SCRATCH });
-            u8str_t shown = rubraview_page_source_entry_name(&arena, en, format, job->codepage);
-            if (shown.len == 0 || (shown.len == strlen(en->name) && memcmp(shown.ptr, en->name, shown.len) == 0)) continue;
+            proven_u8str_view_t shown = rubraview_page_source_entry_name(&arena, en, format, job->codepage);
+            if (shown.size == 0 || (shown.size == strlen(en->name) && memcmp(shown.ptr, en->name, shown.size) == 0)) continue;
             bool dir = (en->flags & FULTA_ARC_ENTRY_DIR) != 0;
-            bool slash = shown.ptr[shown.len - 1] == '/';
-            names[i] = (char*)malloc(shown.len + 2);
+            bool slash = shown.ptr[shown.size - 1] == '/';
+            names[i] = (char*)malloc(shown.size + 2);
             if (!names[i]) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; break; }
-            memcpy(names[i], shown.ptr, shown.len);
-            names[i][shown.len] = '\0';
-            if (dir && !slash) { names[i][shown.len] = '/'; names[i][shown.len + 1] = '\0'; }
+            memcpy(names[i], shown.ptr, shown.size);
+            names[i][shown.size] = '\0';
+            if (dir && !slash) { names[i][shown.size] = '/'; names[i][shown.size + 1] = '\0'; }
             if (i == job->entry_index && job->op != RUBRAVIEW_ARCEDIT_ADD && job->op != RUBRAVIEW_ARCEDIT_DELETE) continue;
             err = fulta_arc_edit_replace(edit, i, names[i], NULL);
             if (err != FULTA_ARC_OK) result = result_of(err, false);
@@ -354,8 +354,8 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
         size_t room = strlen(beside_name) + strlen(job->name) + 2;
         full = (char*)malloc(room);
         if (!full) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
-        if (rubraview_arcedit_sibling_name((u8str_t){ .ptr = beside_name, .len = strlen(beside_name) },
-                                           (u8str_t){ .ptr = job->name, .len = strlen(job->name) }, full, room) == 0) {
+        if (rubraview_arcedit_sibling_name((proven_u8str_view_t){ .ptr = (const proven_byte_t *)beside_name, .size = strlen(beside_name) },
+                                           (proven_u8str_view_t){ .ptr = (const proven_byte_t *)job->name, .size = strlen(job->name) }, full, room) == 0) {
             result = RUBRAVIEW_ARCEDIT_BAD_NAME;
             goto done;
         }

@@ -20,8 +20,8 @@
 
 static _Thread_local char g_why[300];
 
-static void wide_of(u8str_t s, WCHAR *out, size_t cap) {
-    int n = s.len ? MultiByteToWideChar(CP_UTF8, 0, s.ptr, (int)s.len, out, (int)cap - 1) : 0;
+static void wide_of(proven_u8str_view_t s, WCHAR *out, size_t cap) {
+    int n = s.size ? MultiByteToWideChar(CP_UTF8, 0, (const char *)s.ptr, (int)s.size, out, (int)cap - 1) : 0;
     out[n > 0 ? n : 0] = L'\0';
 }
 
@@ -78,7 +78,7 @@ static bool child_run(HANDLE mapping, rubraview_plugin_shared_t *shared, const c
                       bool (*tick)(void *context, double progress), void *context, const char **why) {
     WCHAR exe[MAX_PATH], dll[MAX_PATH], line[2 * MAX_PATH + 64];
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) { *why = N_("the plug-in could not be started"); return false; }
-    wide_of((u8str_t){ .ptr = dll_utf8, .len = strlen(dll_utf8) }, dll, MAX_PATH);
+    wide_of((proven_u8str_view_t){ .ptr = (const proven_byte_t *)dll_utf8, .size = strlen(dll_utf8) }, dll, MAX_PATH);
     _snwprintf(line, sizeof(line) / sizeof(line[0]), L"\"%ls\" --filter-host %llu \"%ls\"", exe,
                (unsigned long long)(uintptr_t)mapping, dll);
 
@@ -160,8 +160,8 @@ static void describe(rubraview_plugin_t *p) {
     if (g_known_count < RUBRAVIEW_PLUGIN_MAX) g_known[g_known_count++] = *p;
 }
 
-size_t rubraview_pal_plugins_find(u8str_t folder, rubraview_plugin_t *out, size_t capacity) {
-    if (!out || capacity == 0 || folder.len == 0) return 0;
+size_t rubraview_pal_plugins_find(proven_u8str_view_t folder, rubraview_plugin_t *out, size_t capacity) {
+    if (!out || capacity == 0 || folder.size == 0) return 0;
     WCHAR dir[MAX_PATH], pattern[MAX_PATH];
     wide_of(folder, dir, MAX_PATH);
     size_t dn = wcslen(dir);

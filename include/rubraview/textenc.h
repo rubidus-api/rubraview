@@ -46,7 +46,7 @@ const char *rubraview_textenc_short(rubraview_textenc_t enc);
 /** The word settings.ini keeps: "auto", "utf8", "cp949", ... */
 const char *rubraview_textenc_word(rubraview_textenc_t enc);
 /** The encoding a settings word names; AUTO for one not known. */
-rubraview_textenc_t rubraview_textenc_from_word(u8str_t word);
+rubraview_textenc_t rubraview_textenc_from_word(proven_u8str_view_t word);
 
 /**
  * §2.2: which encoding `bytes` (the start of a file; 64 KB is plenty)

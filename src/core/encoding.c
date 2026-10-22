@@ -2,7 +2,7 @@
 #include "rubraview/lang.h"
 #include "rubraview/utf8.h"
 
-rubraview_encoding_verdict_t rubraview_archive_filename_detect(u8str_t raw_name, bool utf8_flag) {
+rubraview_encoding_verdict_t rubraview_archive_filename_detect(proven_u8str_view_t raw_name, bool utf8_flag) {
     if (utf8_flag) {
         return RUBRAVIEW_ENCODING_UTF8_FLAGGED;
     }
@@ -25,7 +25,7 @@ uint32_t rubraview_codepage_id(rubraview_codepage_t codepage) {
     }
 }
 
-u8str_t rubraview_codepage_label(rubraview_codepage_t codepage) {
+proven_u8str_view_t rubraview_codepage_label(rubraview_codepage_t codepage) {
     switch (codepage) {
         case RUBRAVIEW_CODEPAGE_UTF8:                 return TU8("UTF-8");
         case RUBRAVIEW_CODEPAGE_KOREAN:               return TU8("Korean (CP949)");
@@ -38,7 +38,7 @@ u8str_t rubraview_codepage_label(rubraview_codepage_t codepage) {
     }
 }
 
-bool rubraview_archive_filename_plan(u8str_t raw_name, bool utf8_flag,
+bool rubraview_archive_filename_plan(proven_u8str_view_t raw_name, bool utf8_flag,
                                      rubraview_codepage_t override_choice,
                                      uint32_t *out_codepage_id) {
     if (out_codepage_id) *out_codepage_id = 0;

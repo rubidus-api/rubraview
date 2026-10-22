@@ -54,8 +54,8 @@ const rubraview_menu_item_t *rubraview_menu_item_at(const rubraview_menu_state_t
     return &state->tree->items[first + tile_index];
 }
 
-rubraview_menu_result_t rubraview_menu_activate(rubraview_menu_state_t *state, int32_t tile_index, u8str_t *out_action) {
-    if (out_action) *out_action = (u8str_t){ .ptr = "", .len = 0 };
+rubraview_menu_result_t rubraview_menu_activate(rubraview_menu_state_t *state, int32_t tile_index, proven_u8str_view_t *out_action) {
+    if (out_action) *out_action = PROVEN_LIT("");
     if (!state || !state->tree) return RUBRAVIEW_MENU_NOTHING;
 
     if (rubraview_menu_has_back_tile(state) && tile_index == 0) {
@@ -104,8 +104,8 @@ static size_t append_bounded(char *buffer, size_t buffer_size, size_t pos, const
     return pos + copy;
 }
 
-u8str_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size) {
-    if (!buffer || buffer_size == 0) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) return PROVEN_LIT("");
 
     size_t pos = 0;
     const char *ROOT = T("Menu");
@@ -119,10 +119,10 @@ u8str_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buf
             if (index < 0 || (size_t)index >= state->tree->item_count) break;
             const rubraview_menu_item_t *item = &state->tree->items[index];
             pos = append_bounded(buffer, buffer_size, pos, SEPARATOR, sizeof(SEPARATOR) - 1);
-            pos = append_bounded(buffer, buffer_size, pos, item->label.ptr, item->label.len);
+            pos = append_bounded(buffer, buffer_size, pos, (const char *)item->label.ptr, item->label.size);
         }
     }
 
     buffer[pos] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = pos };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = pos };
 }

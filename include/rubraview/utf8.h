@@ -32,7 +32,7 @@ uint32_t rubraview_utf8_decode(const uint8_t *s, size_t len, size_t *out_len);
  * well-formed, minimal-length sequence with no surrogate halves and no
  * codepoint above U+10FFFF. Empty input is valid.
  */
-bool rubraview_utf8_validate(u8str_t bytes);
+bool rubraview_utf8_validate(proven_u8str_view_t bytes);
 
 /**
  * Append the UTF-8 encoding of a codepoint (U+0000..U+10FFFF, excluding

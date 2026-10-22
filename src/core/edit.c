@@ -348,9 +348,9 @@ bool rubraview_resize_preset_size(rubraview_resize_preset_t preset, int32_t w, i
     return true;
 }
 
-bool rubraview_resize_parse_length(u8str_t text, int32_t whole_px, double dpi, int32_t *out_px) {
+bool rubraview_resize_parse_length(proven_u8str_view_t text, int32_t whole_px, double dpi, int32_t *out_px) {
     if (!out_px || !text.ptr) return false;
-    size_t i = 0, n = text.len;
+    size_t i = 0, n = text.size;
     while (i < n && text.ptr[i] == ' ') ++i;
     double v = 0.0, place = 0.0;
     bool digits = false;

@@ -62,13 +62,13 @@ static void out_put(out_buf_t *o, const void *data, size_t n) {
 
 static void out_byte(out_buf_t *o, uint8_t b) { out_put(o, &b, 1); }
 static void out_str(out_buf_t *o, const char *s) { out_put(o, s, strlen(s)); }
-static void out_u8(out_buf_t *o, u8str_t s) { out_put(o, s.ptr, s.len); }
+static void out_u8(out_buf_t *o, proven_u8str_view_t s) { out_put(o, s.ptr, s.size); }
 
-static u8str_t out_done(out_buf_t *o) {
-    if (o->failed) return (u8str_t){ .ptr = "", .len = 0 };
+static proven_u8str_view_t out_done(out_buf_t *o) {
+    if (o->failed) return PROVEN_LIT("");
     out_byte(o, 0);   /* a NUL after it, not counted */
-    if (o->failed) return (u8str_t){ .ptr = "", .len = 0 };
-    return (u8str_t){ .ptr = (const char*)o->p, .len = o->len - 1 };
+    if (o->failed) return PROVEN_LIT("");
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)o->p, .size = o->len - 1 };
 }
 
 static bool valid_utf8(const uint8_t *s, size_t n) {
@@ -83,7 +83,7 @@ static bool valid_utf8(const uint8_t *s, size_t n) {
 }
 
 /* Text as UTF-8: as it is when it is, else read as Latin-1. Trailing NULs and blanks dropped. */
-static u8str_t as_text(proven_arena_t *arena, const uint8_t *s, size_t n) {
+static proven_u8str_view_t as_text(proven_arena_t *arena, const uint8_t *s, size_t n) {
     while (n > 0 && (s[n - 1] == 0 || s[n - 1] == ' ' || s[n - 1] == '\r' || s[n - 1] == '\n')) n--;
     out_buf_t o = { .arena = arena };
     if (valid_utf8(s, n)) {
@@ -100,15 +100,15 @@ static u8str_t as_text(proven_arena_t *arena, const uint8_t *s, size_t n) {
 static void add_comment(proven_arena_t *arena, rubraview_details_src_t *d, const char *key, size_t key_len,
                         const uint8_t *text, size_t n) {
     if (d->comment_count >= RUBRAVIEW_DETAILS_MAX_COMMENTS) return;
-    u8str_t t = as_text(arena, text, n);
-    if (t.len == 0) return;
+    proven_u8str_view_t t = as_text(arena, text, n);
+    if (t.size == 0) return;
     if (key && key_len > 0) {
         out_buf_t o = { .arena = arena };
         out_put(&o, key, key_len);
         out_str(&o, ": ");
         out_u8(&o, t);
         t = out_done(&o);
-        if (t.len == 0) return;
+        if (t.size == 0) return;
     }
     d->comments[d->comment_count++] = t;
 }
@@ -133,12 +133,12 @@ static void read_jpeg(proven_arena_t *arena, const uint8_t *b, size_t size, rubr
         if (len < 2 || at + 2 + len > size) break;
         const uint8_t *p = b + at + 4;
         size_t n = len - 2;
-        if (m == 0xE1 && n > 6 && memcmp(p, "Exif\0\0", 6) == 0 && d->exif.len == 0 && is_tiff(p + 6, n - 6)) {
-            d->exif = (u8str_t){ .ptr = (const char*)p + 6, .len = n - 6 };
-        } else if (m == 0xE1 && n > sizeof(XMP_NS) && memcmp(p, XMP_NS, sizeof(XMP_NS)) == 0 && d->xmp.len == 0) {
-            d->xmp = (u8str_t){ .ptr = (const char*)p + sizeof(XMP_NS), .len = n - sizeof(XMP_NS) };
-        } else if (m == 0xED && n > 14 && memcmp(p, "Photoshop 3.0\0", 14) == 0 && d->iptc_app13.len == 0) {
-            d->iptc_app13 = (u8str_t){ .ptr = (const char*)p, .len = n };
+        if (m == 0xE1 && n > 6 && memcmp(p, "Exif\0\0", 6) == 0 && d->exif.size == 0 && is_tiff(p + 6, n - 6)) {
+            d->exif = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p + 6, .size = n - 6 };
+        } else if (m == 0xE1 && n > sizeof(XMP_NS) && memcmp(p, XMP_NS, sizeof(XMP_NS)) == 0 && d->xmp.size == 0) {
+            d->xmp = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p + sizeof(XMP_NS), .size = n - sizeof(XMP_NS) };
+        } else if (m == 0xED && n > 14 && memcmp(p, "Photoshop 3.0\0", 14) == 0 && d->iptc_app13.size == 0) {
+            d->iptc_app13 = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p, .size = n };
         } else if (m == 0xFE) {
             add_comment(arena, d, NULL, 0, p, n);
         }
@@ -154,8 +154,8 @@ static void read_png(proven_arena_t *arena, const uint8_t *b, size_t size, rubra
         const uint8_t *type = b + at + 4, *p = b + at + 8;
         if (memcmp(type, "IEND", 4) == 0) break;
         bool text = memcmp(type, "tEXt", 4) == 0 || memcmp(type, "zTXt", 4) == 0 || memcmp(type, "iTXt", 4) == 0;
-        if (memcmp(type, "eXIf", 4) == 0 && d->exif.len == 0 && is_tiff(p, len)) {
-            d->exif = (u8str_t){ .ptr = (const char*)p, .len = len };
+        if (memcmp(type, "eXIf", 4) == 0 && d->exif.size == 0 && is_tiff(p, len)) {
+            d->exif = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p, .size = len };
         } else if (text) {
             size_t k = 0;
             while (k < len && k < 80 && p[k]) k++;
@@ -169,18 +169,18 @@ static void read_png(proven_arena_t *arena, const uint8_t *b, size_t size, rubra
                 q++;
                 bool xmp = k == 17 && memcmp(p, "XML:com.adobe.xmp", 17) == 0;
                 if (!compressed && q <= len) {
-                    if (xmp) { if (d->xmp.len == 0) d->xmp = (u8str_t){ .ptr = (const char*)p + q, .len = len - q }; }
+                    if (xmp) { if (d->xmp.size == 0) d->xmp = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p + q, .size = len - q }; }
                     else add_comment(arena, d, (const char*)p, k, p + q, len - q);
                 } else {
                     d->unread++;
                 }
                 if ((!xmp || compressed) && d->png_chunk_count < RUBRAVIEW_DETAILS_MAX_CHUNKS)
-                    d->png_chunks[d->png_chunk_count++] = (u8str_t){ .ptr = (const char*)b + at, .len = (size_t)len + 12u };
+                    d->png_chunks[d->png_chunk_count++] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)b + at, .size = (size_t)len + 12u };
             } else if (keyed) {
                 if (type[0] == 't') add_comment(arena, d, (const char*)p, k, p + k + 1, len - k - 1);
                 else d->unread++;
                 if (d->png_chunk_count < RUBRAVIEW_DETAILS_MAX_CHUNKS)
-                    d->png_chunks[d->png_chunk_count++] = (u8str_t){ .ptr = (const char*)b + at, .len = (size_t)len + 12u };
+                    d->png_chunks[d->png_chunk_count++] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)b + at, .size = (size_t)len + 12u };
             }
         }
         at += 12u + len;
@@ -206,8 +206,8 @@ static void read_gif(proven_arena_t *arena, const uint8_t *b, size_t size, rubra
             }
             at++;
             if (label == 0xFE) {
-                u8str_t t = out_done(&o);
-                if (t.len > 0) add_comment(arena, d, NULL, 0, (const uint8_t*)t.ptr, t.len);
+                proven_u8str_view_t t = out_done(&o);
+                if (t.size > 0) add_comment(arena, d, NULL, 0, (const uint8_t*)t.ptr, t.size);
             }
         } else if (kind == 0x2C && at + 10 <= size) {
             uint8_t flags = b[at + 9];
@@ -228,13 +228,13 @@ static void read_webp(const uint8_t *b, size_t size, rubraview_details_src_t *d)
         uint32_t len = le32(b + at + 4);
         if (len > size - at - 8) break;
         const uint8_t *p = b + at + 8;
-        if (memcmp(b + at, "EXIF", 4) == 0 && d->exif.len == 0) {
+        if (memcmp(b + at, "EXIF", 4) == 0 && d->exif.size == 0) {
             const uint8_t *e = p;
             size_t n = len;
             if (n > 6 && memcmp(e, "Exif\0\0", 6) == 0) { e += 6; n -= 6; }
-            if (is_tiff(e, n)) d->exif = (u8str_t){ .ptr = (const char*)e, .len = n };
-        } else if (memcmp(b + at, "XMP ", 4) == 0 && d->xmp.len == 0) {
-            d->xmp = (u8str_t){ .ptr = (const char*)p, .len = len };
+            if (is_tiff(e, n)) d->exif = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)e, .size = n };
+        } else if (memcmp(b + at, "XMP ", 4) == 0 && d->xmp.size == 0) {
+            d->xmp = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p, .size = len };
         }
         at += 8u + len + (len & 1u);
     }
@@ -243,10 +243,10 @@ static void read_webp(const uint8_t *b, size_t size, rubraview_details_src_t *d)
 /* The words: the information lines as the window lays them out, CRLF. */
 static void build_words(proven_arena_t *arena, rubraview_details_src_t *d) {
     out_buf_t o = { .arena = arena };
-    u8str_t rows[512];
+    proven_u8str_view_t rows[512];
     size_t n = rubraview_info_rows(arena, &d->info, 24, rows, sizeof(rows) / sizeof(rows[0]));
     for (size_t i = 0; i < n; ++i) { out_u8(&o, rows[i]); out_str(&o, "\r\n"); }
-    d->words = n > 0 ? out_done(&o) : (u8str_t){ .ptr = "", .len = 0 };
+    d->words = n > 0 ? out_done(&o) : PROVEN_LIT("");
 }
 
 /* ---- 1.31.0 (RV-139, D-185): ISO BMFF boxes — AVIF's HEIF items and JPEG XL's container ---- */
@@ -351,16 +351,16 @@ static bool iloc_read(proven_arena_t *arena, const uint8_t *b, const bmff_box_t 
 }
 
 /* An item's bytes when they lie in the file in one extent (what the readers here need). */
-static u8str_t iloc_bytes(const iloc_box_t *l, uint32_t id, const uint8_t *b, size_t size) {
+static proven_u8str_view_t iloc_bytes(const iloc_box_t *l, uint32_t id, const uint8_t *b, size_t size) {
     for (size_t i = 0; i < l->item_count; ++i) {
         const iloc_item_t *it = &l->items[i];
         if (it->id != id || it->method != 0 || it->count != 1) continue;
         const iloc_extent_t *x = &l->extents[it->first];
         uint64_t at = it->base + x->offset, len = x->length ? x->length : (at < size ? size - at : 0);
-        if (at > size || len > size - at) return (u8str_t){ .ptr = "", .len = 0 };
-        return (u8str_t){ .ptr = (const char*)b + at, .len = (size_t)len };
+        if (at > size || len > size - at) return PROVEN_LIT("");
+        return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)b + at, .size = (size_t)len };
     }
-    return (u8str_t){ .ptr = "", .len = 0 };
+    return PROVEN_LIT("");
 }
 
 /* An AVIF's (HEIF's) Exif and XMP items. */
@@ -390,16 +390,16 @@ static void read_avif(const uint8_t *b, size_t size, rubraview_details_src_t *d,
         p += 4;
         while (p < e && b[p]) ++p;   /* the item's name */
         ++p;
-        u8str_t data = iloc_bytes(&l, id, b, size);
-        if (memcmp(type, "Exif", 4) == 0 && data.len >= 4) {
+        proven_u8str_view_t data = iloc_bytes(&l, id, b, size);
+        if (memcmp(type, "Exif", 4) == 0 && data.size >= 4) {
             uint32_t skip = be32((const uint8_t*)data.ptr);
-            if (skip <= data.len - 4 && is_tiff((const uint8_t*)data.ptr + 4 + skip, data.len - 4 - skip))
-                d->exif = (u8str_t){ .ptr = data.ptr + 4 + skip, .len = data.len - 4 - skip };
+            if (skip <= data.size - 4 && is_tiff((const uint8_t*)data.ptr + 4 + skip, data.size - 4 - skip))
+                d->exif = (proven_u8str_view_t){ .ptr = data.ptr + 4 + skip, .size = data.size - 4 - skip };
         } else if (memcmp(type, "mime", 4) == 0 && p < e) {
             const char *ct = (const char*)b + p;
             size_t ctl = 0;
             while (p + ctl < e && ct[ctl]) ++ctl;
-            if (ctl == 19 && memcmp(ct, "application/rdf+xml", 19) == 0 && data.len > 0) d->xmp = data;
+            if (ctl == 19 && memcmp(ct, "application/rdf+xml", 19) == 0 && data.size > 0) d->xmp = data;
         }
     }
 }
@@ -412,9 +412,9 @@ static void read_jxl(const uint8_t *b, size_t size, rubraview_details_src_t *d) 
         size_t n = x.size - x.head;
         if (memcmp(x.type, "Exif", 4) == 0 && n >= 4) {
             uint32_t skip = be32(p);
-            if (skip <= n - 4 && is_tiff(p + 4 + skip, n - 4 - skip)) d->exif = (u8str_t){ .ptr = (const char*)p + 4 + skip, .len = n - 4 - skip };
+            if (skip <= n - 4 && is_tiff(p + 4 + skip, n - 4 - skip)) d->exif = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p + 4 + skip, .size = n - 4 - skip };
         } else if (memcmp(x.type, "xml ", 4) == 0 && n > 0) {
-            d->xmp = (u8str_t){ .ptr = (const char*)p, .len = n };
+            d->xmp = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p, .size = n };
         }
     }
 }
@@ -458,7 +458,7 @@ bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size
     out->info = info;
     build_words(arena, out);
 
-    out->any = exif_found || out->exif.len > 0 || out->xmp.len > 0 || out->iptc_app13.len > 0 || out->has_iptc ||
+    out->any = exif_found || out->exif.size > 0 || out->xmp.size > 0 || out->iptc_app13.size > 0 || out->has_iptc ||
                out->comment_count > 0 || out->png_chunk_count > 0 || out->unread > 0;
     return out->any;
 }
@@ -466,12 +466,12 @@ bool rubraview_details_read(proven_arena_t *arena, const uint8_t *b, size_t size
 /* ---- putting ---- */
 
 /* The EXIF block copied, saying orientation 1 (normal): the pixels were turned upright. */
-static u8str_t exif_upright(proven_arena_t *arena, u8str_t exif) {
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, exif.len);
-    if (!proven_is_ok(res.err)) return (u8str_t){ .ptr = "", .len = 0 };
+static proven_u8str_view_t exif_upright(proven_arena_t *arena, proven_u8str_view_t exif) {
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, exif.size);
+    if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     uint8_t *t = (uint8_t*)res.value.ptr;
-    memcpy(t, exif.ptr, exif.len);
-    size_t n = exif.len;
+    memcpy(t, exif.ptr, exif.size);
+    size_t n = exif.size;
     bool le = t[0] == 'I';
     uint32_t ifd = le ? le32(t + 4) : be32(t + 4);
     if (ifd >= 8 && (size_t)ifd + 2 <= n) {
@@ -486,19 +486,19 @@ static u8str_t exif_upright(proven_arena_t *arena, u8str_t exif) {
             }
         }
     }
-    return (u8str_t){ .ptr = (const char*)t, .len = n };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)t, .size = n };
 }
 
 /* Words for what has no block of its own in this file: IPTC read but not copied, an EXIF only read, an XMP left out. */
 static bool words_needed(const rubraview_details_src_t *s, bool exif_in, bool iptc_in, bool xmp_in) {
-    bool exif_words = s->words.len > 0 && !exif_in;
-    return (s->has_iptc && !iptc_in) || exif_words || (s->xmp.len > 0 && !xmp_in) || s->unread > 0;
+    bool exif_words = s->words.size > 0 && !exif_in;
+    return (s->has_iptc && !iptc_in) || exif_words || (s->xmp.size > 0 && !xmp_in) || s->unread > 0;
 }
 
-static void jpeg_segment(out_buf_t *o, uint8_t marker, const char *head, size_t head_len, u8str_t body) {
+static void jpeg_segment(out_buf_t *o, uint8_t marker, const char *head, size_t head_len, proven_u8str_view_t body) {
     out_byte(o, 0xFF);
     out_byte(o, marker);
-    size_t len = 2 + head_len + body.len;
+    size_t len = 2 + head_len + body.size;
     out_byte(o, (uint8_t)(len >> 8));
     out_byte(o, (uint8_t)len);
     out_put(o, head, head_len);
@@ -506,55 +506,55 @@ static void jpeg_segment(out_buf_t *o, uint8_t marker, const char *head, size_t 
 }
 
 /* A comment as COM segments of at most 65533 bytes, cut between characters. */
-static void jpeg_comment(out_buf_t *o, u8str_t text) {
+static void jpeg_comment(out_buf_t *o, proven_u8str_view_t text) {
     size_t at = 0;
-    while (at < text.len) {
-        size_t n = text.len - at;
+    while (at < text.size) {
+        size_t n = text.size - at;
         if (n > 65533) {
             n = 65533;
             while (n > 0 && ((uint8_t)text.ptr[at + n] & 0xC0) == 0x80) n--;
         }
-        jpeg_segment(o, 0xFE, NULL, 0, (u8str_t){ .ptr = text.ptr + at, .len = n });
+        jpeg_segment(o, 0xFE, NULL, 0, (proven_u8str_view_t){ .ptr = text.ptr + at, .size = n });
         at += n;
     }
 }
 
-static u8str_t joined_words(proven_arena_t *arena, const rubraview_details_src_t *s, bool with_comments, bool with_xmp) {
+static proven_u8str_view_t joined_words(proven_arena_t *arena, const rubraview_details_src_t *s, bool with_comments, bool with_xmp) {
     out_buf_t o = { .arena = arena };
     out_str(&o, T("Details kept by Rubraview"));
     out_str(&o, "\r\n");
     out_u8(&o, s->words);   /* the comments are among the words */
     (void)with_comments;
-    if (with_xmp && s->xmp.len > 0) { out_str(&o, "XMP\r\n"); out_u8(&o, s->xmp); out_str(&o, "\r\n"); }
+    if (with_xmp && s->xmp.size > 0) { out_str(&o, "XMP\r\n"); out_u8(&o, s->xmp); out_str(&o, "\r\n"); }
     return out_done(&o);
 }
 
-static rubraview_details_put_t put_jpeg(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_jpeg(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    if (file.len < 4 || b[0] != 0xFF || b[1] != 0xD8) return r;
+    if (file.size < 4 || b[0] != 0xFF || b[1] != 0xD8) return r;
     size_t head = 2;
-    if (file.len >= 6 && b[2] == 0xFF && b[3] == 0xE0) {   /* after JFIF's APP0, which must come first */
+    if (file.size >= 6 && b[2] == 0xFF && b[3] == 0xE0) {   /* after JFIF's APP0, which must come first */
         size_t len = be16(b + 4);
-        if (len >= 2 && 4 + len <= file.len) head = 4 + len;
+        if (len >= 2 && 4 + len <= file.size) head = 4 + len;
     }
     out_buf_t o = { .arena = arena };
     out_put(&o, b, head);
     bool exif_in = false, xmp_in = false, iptc_in = false;
-    if (s->exif.len > 0 && s->exif.len + 6 + 2 <= 65535) {
-        u8str_t e = exif_upright(arena, s->exif);
-        if (e.len > 0) { jpeg_segment(&o, 0xE1, "Exif\0\0", 6, e); exif_in = true; }
+    if (s->exif.size > 0 && s->exif.size + 6 + 2 <= 65535) {
+        proven_u8str_view_t e = exif_upright(arena, s->exif);
+        if (e.size > 0) { jpeg_segment(&o, 0xE1, "Exif\0\0", 6, e); exif_in = true; }
     }
-    if (s->xmp.len > 0 && s->xmp.len + sizeof(XMP_NS) + 2 <= 65535) { jpeg_segment(&o, 0xE1, XMP_NS, sizeof(XMP_NS), s->xmp); xmp_in = true; }
-    if (s->iptc_app13.len > 0 && s->iptc_app13.len + 2 <= 65535) { jpeg_segment(&o, 0xED, NULL, 0, s->iptc_app13); iptc_in = true; }
+    if (s->xmp.size > 0 && s->xmp.size + sizeof(XMP_NS) + 2 <= 65535) { jpeg_segment(&o, 0xE1, XMP_NS, sizeof(XMP_NS), s->xmp); xmp_in = true; }
+    if (s->iptc_app13.size > 0 && s->iptc_app13.size + 2 <= 65535) { jpeg_segment(&o, 0xED, NULL, 0, s->iptc_app13); iptc_in = true; }
     if (words_needed(s, exif_in, iptc_in, xmp_in)) {
         jpeg_comment(&o, joined_words(arena, s, true, !xmp_in));
     } else {
         for (size_t i = 0; i < s->comment_count; ++i) jpeg_comment(&o, s->comments[i]);
     }
-    out_put(&o, b + head, file.len - head);
-    u8str_t made = out_done(&o);
-    if (made.len == 0) return r;
+    out_put(&o, b + head, file.size - head);
+    proven_u8str_view_t made = out_done(&o);
+    if (made.size == 0) return r;
     r.file = made;
     r.all_kept = true;
     return r;
@@ -572,7 +572,7 @@ static void png_chunk(out_buf_t *o, const char *type, const uint8_t *data, size_
 }
 
 /* An iTXt chunk: keyword, uncompressed, no language, the UTF-8 text. */
-static void png_itxt(proven_arena_t *arena, out_buf_t *o, const char *key, u8str_t text) {
+static void png_itxt(proven_arena_t *arena, out_buf_t *o, const char *key, proven_u8str_view_t text) {
     out_buf_t d = { .arena = arena };
     out_str(&d, key);
     out_byte(&d, 0); out_byte(&d, 0); out_byte(&d, 0);   /* NUL, uncompressed, method */
@@ -582,20 +582,20 @@ static void png_itxt(proven_arena_t *arena, out_buf_t *o, const char *key, u8str
     png_chunk(o, "iTXt", d.p, d.len);
 }
 
-static rubraview_details_put_t put_png(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_png(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    if (file.len < 33 || memcmp(b, "\x89PNG\r\n\x1a\n", 8) != 0 || memcmp(b + 12, "IHDR", 4) != 0) return r;
+    if (file.size < 33 || memcmp(b, "\x89PNG\r\n\x1a\n", 8) != 0 || memcmp(b + 12, "IHDR", 4) != 0) return r;
     size_t head = 8 + 12 + be32(b + 8);
-    if (head > file.len) return r;
+    if (head > file.size) return r;
     out_buf_t o = { .arena = arena };
     out_put(&o, b, head);
     bool exif_in = false;
-    if (s->exif.len > 0 && s->exif.len <= 0x7FFFFFFFu) {
-        u8str_t e = exif_upright(arena, s->exif);
-        if (e.len > 0) { png_chunk(&o, "eXIf", (const uint8_t*)e.ptr, e.len); exif_in = true; }
+    if (s->exif.size > 0 && s->exif.size <= 0x7FFFFFFFu) {
+        proven_u8str_view_t e = exif_upright(arena, s->exif);
+        if (e.size > 0) { png_chunk(&o, "eXIf", (const uint8_t*)e.ptr, e.size); exif_in = true; }
     }
-    if (s->xmp.len > 0) png_itxt(arena, &o, "XML:com.adobe.xmp", s->xmp);
+    if (s->xmp.size > 0) png_itxt(arena, &o, "XML:com.adobe.xmp", s->xmp);
     for (size_t i = 0; i < s->png_chunk_count; ++i) out_u8(&o, s->png_chunks[i]);   /* a PNG's own texts, as they were */
     bool words = words_needed(s, exif_in, false, true);
     if (words) {
@@ -603,59 +603,59 @@ static rubraview_details_put_t put_png(proven_arena_t *arena, u8str_t file, cons
     } else if (s->png_chunk_count == 0) {
         for (size_t i = 0; i < s->comment_count; ++i) png_itxt(arena, &o, "Comment", s->comments[i]);
     }
-    out_put(&o, b + head, file.len - head);
-    u8str_t made = out_done(&o);
-    if (made.len == 0) return r;
+    out_put(&o, b + head, file.size - head);
+    proven_u8str_view_t made = out_done(&o);
+    if (made.size == 0) return r;
     r.file = made;
     r.all_kept = true;
     return r;
 }
 
-static rubraview_details_put_t put_gif(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_gif(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    if (file.len < 14 || memcmp(b, "GIF8", 4) != 0 || b[file.len - 1] != 0x3B) return r;
-    u8str_t text = (s->words.len > 0 || s->xmp.len > 0) ? joined_words(arena, s, true, true) : (u8str_t){ .ptr = "", .len = 0 };
-    if (text.len == 0) { r.all_kept = true; return r; }
+    if (file.size < 14 || memcmp(b, "GIF8", 4) != 0 || b[file.size - 1] != 0x3B) return r;
+    proven_u8str_view_t text = (s->words.size > 0 || s->xmp.size > 0) ? joined_words(arena, s, true, true) : PROVEN_LIT("");
+    if (text.size == 0) { r.all_kept = true; return r; }
     out_buf_t o = { .arena = arena };
-    out_put(&o, b, file.len - 1);
+    out_put(&o, b, file.size - 1);
     out_byte(&o, 0x21);
     out_byte(&o, 0xFE);
-    for (size_t at = 0; at < text.len;) {
-        size_t n = text.len - at > 255 ? 255 : text.len - at;
+    for (size_t at = 0; at < text.size;) {
+        size_t n = text.size - at > 255 ? 255 : text.size - at;
         out_byte(&o, (uint8_t)n);
         out_put(&o, text.ptr + at, n);
         at += n;
     }
     out_byte(&o, 0);
     out_byte(&o, 0x3B);
-    u8str_t made = out_done(&o);
-    if (made.len == 0) return r;
+    proven_u8str_view_t made = out_done(&o);
+    if (made.size == 0) return r;
     r.file = made;
     r.all_kept = true;
     return r;
 }
 
-static void riff_chunk(out_buf_t *o, const char *fourcc, u8str_t data) {
+static void riff_chunk(out_buf_t *o, const char *fourcc, proven_u8str_view_t data) {
     uint8_t len[4];
-    put_le32(len, (uint32_t)data.len);
+    put_le32(len, (uint32_t)data.size);
     out_put(o, fourcc, 4);
     out_put(o, len, 4);
     out_u8(o, data);
-    if (data.len & 1u) out_byte(o, 0);
+    if (data.size & 1u) out_byte(o, 0);
 }
 
-static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_webp(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    if (file.len < 20 || memcmp(b, "RIFF", 4) != 0 || memcmp(b + 8, "WEBP", 4) != 0) return r;
-    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.len == 0 && s->words.len > 0);
-    if (s->exif.len == 0 && s->xmp.len == 0) { r.all_kept = !text_left; return r; }
+    if (file.size < 20 || memcmp(b, "RIFF", 4) != 0 || memcmp(b + 8, "WEBP", 4) != 0) return r;
+    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.size == 0 && s->words.size > 0);
+    if (s->exif.size == 0 && s->xmp.size == 0) { r.all_kept = !text_left; return r; }
 
     const uint8_t *first = b + 12;
     uint32_t first_len = le32(first + 4);
     /* RV-156: the chunk and its pad byte inside the file, and a VP8X its ten bytes. */
-    if ((size_t)first_len + (first_len & 1u) > file.len - 20) return r;
+    if ((size_t)first_len + (first_len & 1u) > file.size - 20) return r;
     uint8_t flags = 0;
     uint32_t w = 0, h = 0;
     bool extended = memcmp(first, "VP8X", 4) == 0;
@@ -675,8 +675,8 @@ static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, con
         }
         if (w == 0 || h == 0) return r;
     }
-    bool exif_in = s->exif.len > 0 && s->exif.len < 0xFFFFFFF0u;
-    bool xmp_in = s->xmp.len > 0 && s->xmp.len < 0xFFFFFFF0u;
+    bool exif_in = s->exif.size > 0 && s->exif.size < 0xFFFFFFF0u;
+    bool xmp_in = s->xmp.size > 0 && s->xmp.size < 0xFFFFFFF0u;
     if (exif_in) flags |= 0x08;
     if (xmp_in) flags |= 0x04;
 
@@ -687,24 +687,24 @@ static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, con
         out_byte(&o, (uint8_t)(first[8] | flags));
         out_put(&o, first + 9, (size_t)first_len - 1u + (first_len & 1u));
         size_t rest = 12u + 8u + first_len + (first_len & 1u);
-        if (rest <= file.len) out_put(&o, b + rest, file.len - rest);
+        if (rest <= file.size) out_put(&o, b + rest, file.size - rest);
     } else {
         uint8_t x[10] = { flags, 0, 0, 0,
                           (uint8_t)(w - 1u), (uint8_t)((w - 1u) >> 8), (uint8_t)((w - 1u) >> 16),
                           (uint8_t)(h - 1u), (uint8_t)((h - 1u) >> 8), (uint8_t)((h - 1u) >> 16) };
-        riff_chunk(&o, "VP8X", (u8str_t){ .ptr = (const char*)x, .len = 10 });
-        out_put(&o, b + 12, file.len - 12);
+        riff_chunk(&o, "VP8X", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)x, .size = 10 });
+        out_put(&o, b + 12, file.size - 12);
     }
     if (exif_in) {
-        u8str_t e = exif_upright(arena, s->exif);
-        if (e.len == 0) return r;
+        proven_u8str_view_t e = exif_upright(arena, s->exif);
+        if (e.size == 0) return r;
         riff_chunk(&o, "EXIF", e);
     }
     if (xmp_in) riff_chunk(&o, "XMP ", s->xmp);
     if (o.failed || o.len < 12 || o.len - 8 > 0xFFFFFFFFu) return r;
     put_le32(o.p + 4, (uint32_t)(o.len - 8));
-    u8str_t made = out_done(&o);
-    if (made.len == 0) return r;
+    proven_u8str_view_t made = out_done(&o);
+    if (made.size == 0) return r;
     r.file = made;
     r.all_kept = !text_left;
     return r;
@@ -712,8 +712,8 @@ static rubraview_details_put_t put_webp(proven_arena_t *arena, u8str_t file, con
 
 /* ---- 1.31.0 (RV-139, D-185): into a JPEG XL and an AVIF ---- */
 
-static void bmff_box(out_buf_t *o, const char *type, const uint8_t *head, size_t head_len, u8str_t body) {
-    out_be(o, 8u + head_len + body.len, 4);
+static void bmff_box(out_buf_t *o, const char *type, const uint8_t *head, size_t head_len, proven_u8str_view_t body) {
+    out_be(o, 8u + head_len + body.size, 4);
     out_put(o, type, 4);
     out_put(o, head, head_len);
     out_u8(o, body);
@@ -721,14 +721,14 @@ static void bmff_box(out_buf_t *o, const char *type, const uint8_t *head, size_t
 
 /* A JPEG XL: the bare codestream put in the container (ISO/IEC 18181-2), or a container's boxes kept; the
    Exif and xml boxes right after `ftyp`. */
-static rubraview_details_put_t put_jxl(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_jxl(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.len == 0 && s->words.len > 0);
-    if (s->exif.len == 0 && s->xmp.len == 0) { r.all_kept = !text_left; return r; }
-    bool bare = file.len >= 2 && b[0] == 0xFF && b[1] == 0x0A;
+    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.size == 0 && s->words.size > 0);
+    if (s->exif.size == 0 && s->xmp.size == 0) { r.all_kept = !text_left; return r; }
+    bool bare = file.size >= 2 && b[0] == 0xFF && b[1] == 0x0A;
     bmff_box_t ftyp = {0};
-    if (!bare && !(file.len >= 12 && memcmp(b, JXL_SIGNATURE, 12) == 0 && bmff_at(b, file.len, 12, &ftyp) && memcmp(ftyp.type, "ftyp", 4) == 0))
+    if (!bare && !(file.size >= 12 && memcmp(b, JXL_SIGNATURE, 12) == 0 && bmff_at(b, file.size, 12, &ftyp) && memcmp(ftyp.type, "ftyp", 4) == 0))
         return r;
     out_buf_t o = { .arena = arena };
     if (bare) {
@@ -738,17 +738,17 @@ static rubraview_details_put_t put_jxl(proven_arena_t *arena, u8str_t file, cons
     } else {
         out_put(&o, b, ftyp.at + ftyp.size);
     }
-    if (s->exif.len > 0) {
-        u8str_t e = exif_upright(arena, s->exif);
-        if (e.len == 0) return r;
+    if (s->exif.size > 0) {
+        proven_u8str_view_t e = exif_upright(arena, s->exif);
+        if (e.size == 0) return r;
         static const uint8_t NO_SKIP[4] = { 0, 0, 0, 0 };   /* the TIFF header right after */
         bmff_box(&o, "Exif", NO_SKIP, 4, e);
     }
-    if (s->xmp.len > 0) bmff_box(&o, "xml ", NULL, 0, s->xmp);
+    if (s->xmp.size > 0) bmff_box(&o, "xml ", NULL, 0, s->xmp);
     if (bare) bmff_box(&o, "jxlc", NULL, 0, file);
-    else out_put(&o, b + ftyp.at + ftyp.size, file.len - ftyp.at - ftyp.size);
-    u8str_t made = out_done(&o);
-    if (made.len == 0) return r;
+    else out_put(&o, b + ftyp.at + ftyp.size, file.size - ftyp.at - ftyp.size);
+    proven_u8str_view_t made = out_done(&o);
+    if (made.size == 0) return r;
     r.file = made;
     r.all_kept = !text_left;
     return r;
@@ -819,12 +819,12 @@ static void iloc_write(out_buf_t *o, const iloc_box_t *l, size_t from, size_t de
 
 /* An AVIF (HEIF): an Exif item and an XMP item ("mime", application/rdf+xml) in its meta box, said to describe
    the primary picture (iref cdsc), their bytes in an mdat at the end; what lay past the meta box moved. */
-static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, const rubraview_details_src_t *s) {
+static rubraview_details_put_t put_avif(proven_arena_t *arena, proven_u8str_view_t file, const rubraview_details_src_t *s) {
     rubraview_details_put_t r = { .file = file, .all_kept = false };
     const uint8_t *b = (const uint8_t*)file.ptr;
-    size_t size = file.len;
-    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.len == 0 && s->words.len > 0);
-    if (s->exif.len == 0 && s->xmp.len == 0) { r.all_kept = !text_left; return r; }
+    size_t size = file.size;
+    bool text_left = s->comment_count > 0 || s->has_iptc || s->unread > 0 || (s->exif.size == 0 && s->words.size > 0);
+    if (s->exif.size == 0 && s->xmp.size == 0) { r.all_kept = !text_left; return r; }
     if (!is_avif(b, size)) return r;
     bmff_box_t meta, iinf, iloc, pitm, iref = {0};
     if (!bmff_find(b, 0, size, "meta", &meta) || meta.head != 8) return r;
@@ -843,16 +843,16 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
     for (size_t i = 0; i < l.item_count; ++i) if (l.items[i].id > next) next = l.items[i].id;
     if (next + 2 > 0xFFFFu || l.version >= 2) return r;
 
-    u8str_t exif = s->exif.len > 0 ? exif_upright(arena, s->exif) : (u8str_t){ .ptr = "", .len = 0 };
+    proven_u8str_view_t exif = s->exif.size > 0 ? exif_upright(arena, s->exif) : PROVEN_LIT("");
     uint32_t ids[2];
     uint64_t lengths[2], offsets[2] = { 0, 0 };
     size_t added = 0;
-    if (exif.len > 0) { ids[added] = ++next; lengths[added++] = 4u + exif.len; }
-    if (s->xmp.len > 0) { ids[added] = ++next; lengths[added++] = s->xmp.len; }
+    if (exif.size > 0) { ids[added] = ++next; lengths[added++] = 4u + exif.size; }
+    if (s->xmp.size > 0) { ids[added] = ++next; lengths[added++] = s->xmp.size; }
     if (added == 0) return r;
 
     /* twice: the first time for its size, the second with the offsets that size gives */
-    u8str_t made = { .ptr = "", .len = 0 };
+    proven_u8str_view_t made = PROVEN_LIT("");
     for (int pass = 0; pass < 2; ++pass) {
         out_buf_t m = { .arena = arena };
         out_be(&m, 0, 4); out_str(&m, "meta"); out_put(&m, b + meta.at + 8, 4);
@@ -869,7 +869,7 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
                 out_be(&ib, count + added, v == 0 ? 2 : 4);
                 out_put(&ib, b + body_at, c.at + c.size - body_at);
                 for (size_t k = 0; k < added; ++k) {
-                    bool is_exif = exif.len > 0 && k == 0;
+                    bool is_exif = exif.size > 0 && k == 0;
                     const char *ct = "application/rdf+xml";
                     size_t infe_len = 8u + 4u + 2u + 2u + 4u + 1u + (is_exif ? 0u : strlen(ct) + 1u);
                     out_be(&ib, infe_len, 4); out_str(&ib, "infe");
@@ -891,21 +891,21 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
                 for (size_t k = 0; k < added; ++k) { out_be(&m, 14, 4); out_str(&m, "cdsc"); out_be(&m, ids[k], 2); out_be(&m, 1, 2); out_be(&m, primary, 2); }
             } else if (memcmp(c.type, "iloc", 4) == 0) {
                 /* the second time, how much the meta box grew (its size the first time gave) */
-                iloc_write(&m, &l, end, pass == 0 ? 0 : (size_t)(made.len - meta.size), ids, offsets, lengths, added);
+                iloc_write(&m, &l, end, pass == 0 ? 0 : (size_t)(made.size - meta.size), ids, offsets, lengths, added);
             } else {
                 out_put(&m, b + c.at, c.size);
             }
         }
         if (m.failed || m.len < 8) return r;
         put_be32(m.p, (uint32_t)m.len);
-        made = (u8str_t){ .ptr = (const char*)m.p, .len = m.len };
+        made = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)m.p, .size = m.len };
         if (pass == 0) {   /* the new items' bytes: an mdat at the very end */
-            size_t mdat_at = size - meta.size + made.len;
+            size_t mdat_at = size - meta.size + made.size;
             uint64_t at = mdat_at + 8;
             for (size_t k = 0; k < added; ++k) { offsets[k] = at; at += lengths[k]; }
         }
     }
-    size_t delta = made.len - meta.size;
+    size_t delta = made.size - meta.size;
     out_buf_t o = { .arena = arena };
     out_put(&o, b, meta.at);
     out_u8(&o, made);
@@ -916,19 +916,19 @@ static rubraview_details_put_t put_avif(proven_arena_t *arena, u8str_t file, con
     uint64_t mdat_len = 8;
     for (size_t k = 0; k < added; ++k) mdat_len += lengths[k];
     out_be(&o, mdat_len, 4); out_str(&o, "mdat");
-    if (exif.len > 0) { out_be(&o, 0, 4); out_u8(&o, exif); }
-    if (s->xmp.len > 0) out_u8(&o, s->xmp);
-    u8str_t done = out_done(&o);
-    if (done.len == 0) return r;
+    if (exif.size > 0) { out_be(&o, 0, 4); out_u8(&o, exif); }
+    if (s->xmp.size > 0) out_u8(&o, s->xmp);
+    proven_u8str_view_t done = out_done(&o);
+    if (done.size == 0) return r;
     r.file = done;
     r.all_kept = !text_left;
     return r;
 }
 
 rubraview_details_put_t rubraview_details_put(proven_arena_t *arena, rubraview_export_format_t format,
-                                              u8str_t file, const rubraview_details_src_t *src) {
+                                              proven_u8str_view_t file, const rubraview_details_src_t *src) {
     rubraview_details_put_t none = { .file = file, .all_kept = !src || !src->any };
-    if (!arena || !src || !src->any || file.len == 0) return none;
+    if (!arena || !src || !src->any || file.size == 0) return none;
     switch (format) {
         case RUBRAVIEW_EXPORT_JPEG: return put_jpeg(arena, file, src);
         case RUBRAVIEW_EXPORT_PNG:  return put_png(arena, file, src);
@@ -942,9 +942,9 @@ rubraview_details_put_t rubraview_details_put(proven_arena_t *arena, rubraview_e
 
 /* ---- the .txt: a subset of TOML (1.18.0) ---- */
 
-static void toml_string(out_buf_t *o, u8str_t s) {
+static void toml_string(out_buf_t *o, proven_u8str_view_t s) {
     out_byte(o, '"');
-    for (size_t i = 0; i < s.len; ++i) {
+    for (size_t i = 0; i < s.size; ++i) {
         uint8_t c = (uint8_t)s.ptr[i];
         if (c == '"') out_str(o, "\\\"");
         else if (c == '\\') out_str(o, "\\\\");
@@ -957,10 +957,10 @@ static void toml_string(out_buf_t *o, u8str_t s) {
     out_byte(o, '"');
 }
 
-static bool same_text(u8str_t a, u8str_t b) { return a.len == b.len && memcmp(a.ptr, b.ptr, a.len) == 0; }
+static bool same_text(proven_u8str_view_t a, proven_u8str_view_t b) { return a.size == b.size && memcmp(a.ptr, b.ptr, a.size) == 0; }
 
-u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src_t *src, u8str_t source_name, u8str_t file_name) {
-    if (!arena || !src || !src->any) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src_t *src, proven_u8str_view_t source_name, proven_u8str_view_t file_name) {
+    if (!arena || !src || !src->any) return PROVEN_LIT("");
     out_buf_t o = { .arena = arena };
     out_str(&o, "# Rubraview " RUBRAVIEW_VERSION_STRING " details\r\n# ");
     out_str(&o, T("What this picture said that the file named here cannot hold, kept by Rubraview, which reads it back."));
@@ -974,7 +974,7 @@ u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src
        the comments' own table is written from the comments themselves */
     const rubraview_info_t *info = &src->info;
     for (size_t i = 0; i < info->count;) {
-        u8str_t table = info->lines[i].heading ? info->lines[i].label : U8("Details");
+        proven_u8str_view_t table = info->lines[i].heading ? info->lines[i].label : PROVEN_LIT("Details");
         size_t first = info->lines[i].heading ? i + 1 : i, end = first;
         while (end < info->count && !info->lines[end].heading) end++;
         bool comments = false;
@@ -1014,7 +1014,7 @@ u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src
         }
         out_str(&o, "]\r\n");
     }
-    if (src->xmp.len > 0) {
+    if (src->xmp.size > 0) {
         out_str(&o, "\r\n[xmp]\r\npacket = ");
         toml_string(&o, src->xmp);
         out_str(&o, "\r\n");
@@ -1023,27 +1023,27 @@ u8str_t rubraview_details_txt(proven_arena_t *arena, const rubraview_details_src
 }
 
 /* A basic string at `*at` (on its quote), unescaped; false when it is not one. */
-static bool toml_read_string(proven_arena_t *arena, u8str_t line, size_t *at, u8str_t *out) {
+static bool toml_read_string(proven_arena_t *arena, proven_u8str_view_t line, size_t *at, proven_u8str_view_t *out) {
     size_t i = *at;
-    if (i >= line.len || line.ptr[i] != '"') return false;
+    if (i >= line.size || line.ptr[i] != '"') return false;
     out_buf_t o = { .arena = arena };
-    for (++i; i < line.len; ++i) {
+    for (++i; i < line.size; ++i) {
         char c = line.ptr[i];
         if (c == '"') {
             *at = i + 1;
-            if (o.len == 0) { *out = (u8str_t){ .ptr = "", .len = 0 }; return true; }
+            if (o.len == 0) { *out = PROVEN_LIT(""); return true; }
             *out = out_done(&o);
             return !o.failed;
         }
         if ((uint8_t)c < 0x20 && c != '\t') return false;
         if (c != '\\') { out_byte(&o, (uint8_t)c); continue; }
-        if (++i >= line.len) return false;
+        if (++i >= line.size) return false;
         char e = line.ptr[i];
         if (e == '"' || e == '\\') out_byte(&o, (uint8_t)e);
         else if (e == 'n') out_byte(&o, '\n');
         else if (e == 'r') out_byte(&o, '\r');
         else if (e == 't') out_byte(&o, '\t');
-        else if (e == 'u' && i + 4 < line.len) {
+        else if (e == 'u' && i + 4 < line.size) {
             uint32_t cp = 0;
             for (int k = 1; k <= 4; ++k) {
                 char h = line.ptr[i + k];
@@ -1064,15 +1064,15 @@ static bool toml_read_string(proven_arena_t *arena, u8str_t line, size_t *at, u8
     return false;   /* no closing quote on the line */
 }
 
-static void skip_blanks(u8str_t line, size_t *at) {
-    while (*at < line.len && (line.ptr[*at] == ' ' || line.ptr[*at] == '\t')) (*at)++;
+static void skip_blanks(proven_u8str_view_t line, size_t *at) {
+    while (*at < line.size && (line.ptr[*at] == ' ' || line.ptr[*at] == '\t')) (*at)++;
 }
 
 /* A key: bare (A-Z a-z 0-9 _ -) or quoted; NUL-terminated either way. */
-static bool toml_read_key(proven_arena_t *arena, u8str_t line, size_t *at, u8str_t *out) {
-    if (*at < line.len && line.ptr[*at] == '"') return toml_read_string(arena, line, at, out) && out->len > 0;
+static bool toml_read_key(proven_arena_t *arena, proven_u8str_view_t line, size_t *at, proven_u8str_view_t *out) {
+    if (*at < line.size && line.ptr[*at] == '"') return toml_read_string(arena, line, at, out) && out->size > 0;
     size_t start = *at;
-    while (*at < line.len) {
+    while (*at < line.size) {
         char c = line.ptr[*at];
         if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) break;
         (*at)++;
@@ -1084,14 +1084,14 @@ static bool toml_read_key(proven_arena_t *arena, u8str_t line, size_t *at, u8str
     return !o.failed;
 }
 
-static bool only_comment_left(u8str_t line, size_t at) {
+static bool only_comment_left(proven_u8str_view_t line, size_t at) {
     skip_blanks(line, &at);
-    return at >= line.len || line.ptr[at] == '#';
+    return at >= line.size || line.ptr[at] == '#';
 }
 
-static bool same_name(u8str_t a, u8str_t b) {
-    if (a.len != b.len) return false;
-    for (size_t i = 0; i < a.len; ++i) {
+static bool same_name(proven_u8str_view_t a, proven_u8str_view_t b) {
+    if (a.size != b.size) return false;
+    for (size_t i = 0; i < a.size; ++i) {
         char x = a.ptr[i], y = b.ptr[i];
         if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
         if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
@@ -1100,59 +1100,59 @@ static bool same_name(u8str_t a, u8str_t b) {
     return true;
 }
 
-bool rubraview_details_from_txt(proven_arena_t *arena, u8str_t text, u8str_t picture_name, rubraview_details_src_t *out) {
+bool rubraview_details_from_txt(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t picture_name, rubraview_details_src_t *out) {
     if (!out) return false;
     *out = (rubraview_details_src_t){0};
-    if (!arena || text.len == 0) return false;
-    if (text.len >= 3 && memcmp(text.ptr, "\xEF\xBB\xBF", 3) == 0) { text.ptr += 3; text.len -= 3; }
+    if (!arena || text.size == 0) return false;
+    if (text.size >= 3 && memcmp(text.ptr, "\xEF\xBB\xBF", 3) == 0) { text.ptr += 3; text.size -= 3; }
     static const char ID[] = "# Rubraview ";
-    if (text.len < sizeof(ID) - 1 || memcmp(text.ptr, ID, sizeof(ID) - 1) != 0) return false;
+    if (text.size < sizeof(ID) - 1 || memcmp(text.ptr, ID, sizeof(ID) - 1) != 0) return false;
 
     rubraview_details_src_t d = {0};
-    u8str_t table = { .ptr = "", .len = 0 }, file = { .ptr = "", .len = 0 };
+    proven_u8str_view_t table = PROVEN_LIT(""), file = PROVEN_LIT("");
     bool first = true, heading_put = false;
-    for (size_t at = 0; at < text.len;) {
+    for (size_t at = 0; at < text.size;) {
         size_t end = at;
-        while (end < text.len && text.ptr[end] != '\n') end++;
-        u8str_t line = { .ptr = text.ptr + at, .len = end - at };
-        if (line.len > 0 && line.ptr[line.len - 1] == '\r') line.len--;
+        while (end < text.size && text.ptr[end] != '\n') end++;
+        proven_u8str_view_t line = { .ptr = text.ptr + at, .size = end - at };
+        if (line.size > 0 && line.ptr[line.size - 1] == '\r') line.size--;
         at = end + 1;
         if (first) {   /* "# Rubraview <version> details" */
             first = false;
-            if (line.len < 8 || memcmp(line.ptr + line.len - 8, " details", 8) != 0) return false;
+            if (line.size < 8 || memcmp(line.ptr + line.size - 8, " details", 8) != 0) return false;
             continue;
         }
         size_t i = 0;
         skip_blanks(line, &i);
-        if (i >= line.len || line.ptr[i] == '#') continue;
+        if (i >= line.size || line.ptr[i] == '#') continue;
         if (line.ptr[i] == '[') {
             ++i;
             skip_blanks(line, &i);
             if (!toml_read_key(arena, line, &i, &table)) return false;
             skip_blanks(line, &i);
-            if (i >= line.len || line.ptr[i] != ']' || !only_comment_left(line, i + 1)) return false;
+            if (i >= line.size || line.ptr[i] != ']' || !only_comment_left(line, i + 1)) return false;
             heading_put = false;
             continue;
         }
-        u8str_t key;
+        proven_u8str_view_t key;
         if (!toml_read_key(arena, line, &i, &key)) return false;
         skip_blanks(line, &i);
-        if (i >= line.len || line.ptr[i] != '=') return false;
+        if (i >= line.size || line.ptr[i] != '=') return false;
         ++i;
         skip_blanks(line, &i);
-        u8str_t values[64];
+        proven_u8str_view_t values[64];
         size_t count = 0;
-        if (i < line.len && line.ptr[i] == '[') {
+        if (i < line.size && line.ptr[i] == '[') {
             ++i;
             for (;;) {
                 skip_blanks(line, &i);
-                if (i < line.len && line.ptr[i] == ']') { ++i; break; }
-                u8str_t v;
+                if (i < line.size && line.ptr[i] == ']') { ++i; break; }
+                proven_u8str_view_t v;
                 if (!toml_read_string(arena, line, &i, &v)) return false;
                 if (count < 64) values[count++] = v;
                 skip_blanks(line, &i);
-                if (i < line.len && line.ptr[i] == ',') { ++i; continue; }
-                if (i < line.len && line.ptr[i] == ']') { ++i; break; }
+                if (i < line.size && line.ptr[i] == ',') { ++i; continue; }
+                if (i < line.size && line.ptr[i] == ']') { ++i; break; }
                 return false;
             }
         } else {
@@ -1161,38 +1161,38 @@ bool rubraview_details_from_txt(proven_arena_t *arena, u8str_t text, u8str_t pic
         }
         if (!only_comment_left(line, i)) return false;
 
-        if (table.len == 0) {
-            if (rubraview_u8_eq_lit(key, "file") && count == 1) file = values[0];
+        if (table.size == 0) {
+            if (proven_u8str_view_eq(key, PROVEN_LIT("file")) && count == 1) file = values[0];
             continue;   /* "source", and anything else at the top: not shown */
         }
-        if (rubraview_u8_eq_lit(table, "comments")) {
-            if (rubraview_u8_eq_lit(key, "items"))
+        if (proven_u8str_view_eq(table, PROVEN_LIT("comments"))) {
+            if (proven_u8str_view_eq(key, PROVEN_LIT("items")))
                 for (size_t k = 0; k < count && d.comment_count < RUBRAVIEW_DETAILS_MAX_COMMENTS; ++k)
-                    if (values[k].len > 0) d.comments[d.comment_count++] = values[k];
+                    if (values[k].size > 0) d.comments[d.comment_count++] = values[k];
             continue;
         }
-        if (rubraview_u8_eq_lit(table, "xmp")) {
-            if (rubraview_u8_eq_lit(key, "packet") && count == 1) d.xmp = values[0];
+        if (proven_u8str_view_eq(table, PROVEN_LIT("xmp"))) {
+            if (proven_u8str_view_eq(key, PROVEN_LIT("packet")) && count == 1) d.xmp = values[0];
             continue;
         }
-        if (!heading_put) { rubraview_info_heading(arena, &d.info, table.ptr); heading_put = true; }
-        for (size_t k = 0; k < count; ++k) rubraview_info_add(arena, &d.info, key.ptr, values[k]);
+        if (!heading_put) { rubraview_info_heading(arena, &d.info, (const char *)table.ptr); heading_put = true; }
+        for (size_t k = 0; k < count; ++k) rubraview_info_add(arena, &d.info, (const char *)key.ptr, values[k]);
     }
-    if (file.len == 0 || !same_name(file, rubraview_path_basename(picture_name))) return false;
+    if (file.size == 0 || !same_name(file, rubraview_path_basename(picture_name))) return false;
     if (d.comment_count > 0) rubraview_info_heading(arena, &d.info, T("Comments"));
     for (size_t c = 0; c < d.comment_count; ++c) rubraview_info_add(arena, &d.info, T("Comment"), d.comments[c]);
     build_words(arena, &d);
     d.beside = true;
-    d.any = d.info.count > 0 || d.xmp.len > 0;
+    d.any = d.info.count > 0 || d.xmp.size > 0;
     *out = d;
     return d.any;
 }
 
-u8str_t rubraview_details_txt_candidate(proven_arena_t *arena, u8str_t picture_path, unsigned k) {
-    u8str_t empty = { .ptr = "", .len = 0 };
-    if (!arena || picture_path.len == 0) return empty;
-    u8str_t ext = rubraview_path_ext(picture_path);
-    size_t base = picture_path.len - ext.len;
+proven_u8str_view_t rubraview_details_txt_candidate(proven_arena_t *arena, proven_u8str_view_t picture_path, unsigned k) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
+    if (!arena || picture_path.size == 0) return empty;
+    proven_u8str_view_t ext = rubraview_path_ext(picture_path);
+    size_t base = picture_path.size - ext.size;
     char tail[16];
     int t = k == 0 ? snprintf(tail, sizeof(tail), ".txt") : snprintf(tail, sizeof(tail), "-%u.txt", k);
     if (t <= 0) return empty;
@@ -1201,7 +1201,7 @@ u8str_t rubraview_details_txt_candidate(proven_arena_t *arena, u8str_t picture_p
     char *p = (char*)res.value.ptr;
     memcpy(p, picture_path.ptr, base);
     memcpy(p + base, tail, (size_t)t + 1);
-    return (u8str_t){ .ptr = p, .len = base + (size_t)t };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)p, .size = base + (size_t)t };
 }
 
 void rubraview_details_merge(proven_arena_t *arena, rubraview_details_src_t *into, const rubraview_details_src_t *extra) {
@@ -1217,8 +1217,8 @@ void rubraview_details_merge(proven_arena_t *arena, rubraview_details_src_t *int
         if (!have) {
             for (size_t k = i; k < end; ++k) {
                 const rubraview_info_line_t *l = &extra->info.lines[k];
-                if (l->heading) rubraview_info_heading(arena, &into->info, l->label.ptr);
-                else rubraview_info_add(arena, &into->info, l->label.ptr, l->value);
+                if (l->heading) rubraview_info_heading(arena, &into->info, (const char *)l->label.ptr);
+                else rubraview_info_add(arena, &into->info, (const char *)l->label.ptr, l->value);
             }
         }
         i = end;
@@ -1228,17 +1228,17 @@ void rubraview_details_merge(proven_arena_t *arena, rubraview_details_src_t *int
         for (size_t k = 0; k < into->comment_count && !dup; ++k) dup = same_text(into->comments[k], extra->comments[c]);
         if (!dup) into->comments[into->comment_count++] = extra->comments[c];
     }
-    if (into->xmp.len == 0) into->xmp = extra->xmp;
+    if (into->xmp.size == 0) into->xmp = extra->xmp;
     build_words(arena, into);
     into->any = true;
 }
 
-u8str_t rubraview_details_txt_path(proven_arena_t *arena, u8str_t written,
-                                   bool (*exists)(u8str_t path, void *ctx), void *ctx) {
-    u8str_t empty = { .ptr = "", .len = 0 };
-    if (!arena || written.len == 0 || written.len > 4000) return empty;
-    u8str_t ext = rubraview_path_ext(written);
-    size_t base = written.len - ext.len;
+proven_u8str_view_t rubraview_details_txt_path(proven_arena_t *arena, proven_u8str_view_t written,
+                                   bool (*exists)(proven_u8str_view_t path, void *ctx), void *ctx) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
+    if (!arena || written.size == 0 || written.size > 4000) return empty;
+    proven_u8str_view_t ext = rubraview_path_ext(written);
+    size_t base = written.size - ext.size;
     for (unsigned k = 0; k < 10000; ++k) {
         char tail[16];
         int t = k == 0 ? snprintf(tail, sizeof(tail), ".txt") : snprintf(tail, sizeof(tail), "-%u.txt", k);
@@ -1248,7 +1248,7 @@ u8str_t rubraview_details_txt_path(proven_arena_t *arena, u8str_t written,
         char *p = (char*)res.value.ptr;
         memcpy(p, written.ptr, base);
         memcpy(p + base, tail, (size_t)t + 1);
-        u8str_t path = { .ptr = p, .len = base + (size_t)t };
+        proven_u8str_view_t path = { .ptr = (const proven_byte_t *)p, .size = base + (size_t)t };
         if (!exists || !exists(path, ctx)) return path;
     }
     return empty;

@@ -37,8 +37,8 @@ typedef enum rubraview_page_source_kind {
 } rubraview_page_source_kind_t;
 
 typedef struct rubraview_page_ref {
-    u8str_t name;         /* the page's display name, already UTF-8 */
-    u8str_t path;         /* folder sources: the file to open. Empty for archive pages. */
+    proven_u8str_view_t name;         /* the page's display name, already UTF-8 */
+    proven_u8str_view_t path;         /* folder sources: the file to open. Empty for archive pages. */
     size_t  entry_index;  /* archive sources: the index within the archive */
 } rubraview_page_ref_t;
 
@@ -52,11 +52,11 @@ typedef struct rubraview_page_source {
        mapped for a set), which is why closing a source is not optional. */
     fulta_arc_t *arc;
     struct rubraview_page_source_io *io;
-    u8str_t archive_path;
+    proven_u8str_view_t archive_path;
 
     /* The ComicInfo.xml found in the archive, if any (§3.8.5). */
     bool     has_comicinfo;
-    u8str_t  comicinfo_xml;
+    proven_u8str_view_t  comicinfo_xml;
 
     /* An archive that wants a password (owner, 2026-10-01): its headers or
        its pages are encrypted and none was given (`needs_password`), or the
@@ -72,7 +72,7 @@ typedef struct rubraview_page_source {
  */
 rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena,
                                                             const rubraview_fs_listing_t *listing,
-                                                            u8str_t extension_filter,
+                                                            proven_u8str_view_t extension_filter,
                                                             rubraview_sort_mode_t mode,
                                                             bool ascending);
 
@@ -93,8 +93,8 @@ rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena
  */
 rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
                                                             const uint8_t *data, size_t size,
-                                                            u8str_t archive_path,
-                                                            u8str_t extension_filter,
+                                                            proven_u8str_view_t archive_path,
+                                                            proven_u8str_view_t extension_filter,
                                                             rubraview_codepage_t override_choice,
                                                             uint32_t max_entry_bytes,
                                                             uint64_t max_block_bytes);
@@ -108,15 +108,15 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
  */
 rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
                                                                      const uint8_t *data, size_t size,
-                                                                     u8str_t archive_path,
-                                                                     u8str_t extension_filter,
+                                                                     proven_u8str_view_t archive_path,
+                                                                     proven_u8str_view_t extension_filter,
                                                                      rubraview_codepage_t override_choice,
                                                                      uint32_t max_entry_bytes,
                                                                      uint64_t max_block_bytes,
-                                                                     u8str_t password);
+                                                                     proven_u8str_view_t password);
 
 /** A RAR volume after the first of its set (`x.part2.rar`, `x.r00`): it opens as its set, so lists skip it. */
-bool rubraview_page_source_is_later_volume(u8str_t name);
+bool rubraview_page_source_is_later_volume(proven_u8str_view_t name);
 
 /**
  * Release what an archive source holds. A CBZ holds nothing but arena
@@ -133,7 +133,7 @@ void rubraview_page_source_close(rubraview_page_source_t *source);
  * `pages[index].path` through the image PAL instead.
  */
 typedef struct rubraview_page_bytes {
-    u8str_t data;      /* empty for a folder page, or on failure */
+    proven_u8str_view_t data;      /* empty for a folder page, or on failure */
     bool    from_disk; /* true when the caller should open the path itself */
     bool    ok;
 } rubraview_page_bytes_t;
@@ -170,7 +170,7 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
    before it; whether anything in it is encrypted; how many volumes have
    been read, and their size together (0 and 0 when it is one file). */
 const fulta_arc_entry_t *rubraview_page_source_entry(const rubraview_page_source_t *source, size_t index);
-u8str_t rubraview_page_source_format_name(const rubraview_page_source_t *source);
+proven_u8str_view_t rubraview_page_source_format_name(const rubraview_page_source_t *source);
 bool rubraview_page_source_is_solid(const rubraview_page_source_t *source);
 bool rubraview_page_source_is_encrypted(const rubraview_page_source_t *source);
 size_t rubraview_page_source_volumes(const rubraview_page_source_t *source, uint64_t *out_bytes);
@@ -179,8 +179,8 @@ size_t rubraview_page_source_volumes(const rubraview_page_source_t *source, uint
    it was opened (the archive's own path for one file); an entry's name as
    the viewer reads it, which for names stored in a code page is not
    always FultaArc's reading; the reader's code page as FultaArc's. */
-u8str_t rubraview_page_source_first_volume(const rubraview_page_source_t *source);
-u8str_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
+proven_u8str_view_t rubraview_page_source_first_volume(const rubraview_page_source_t *source);
+proven_u8str_view_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
                                          fulta_arc_format_t format, rubraview_codepage_t override_choice);
 fulta_arc_codepage_t rubraview_page_source_fulta_codepage(rubraview_codepage_t choice);
 
@@ -200,16 +200,16 @@ uint64_t rubraview_page_source_read_cost(const rubraview_page_source_t *source, 
 void rubraview_page_source_cancel(rubraview_page_source_t *source, bool cancel);
 void rubraview_page_source_progress(const rubraview_page_source_t *source, uint64_t *out_done, uint64_t *out_total);
 
-int32_t rubraview_page_source_find(const rubraview_page_source_t *source, u8str_t path);
+int32_t rubraview_page_source_find(const rubraview_page_source_t *source, proven_u8str_view_t path);
 
 /**
  * §3.8.1 point 4: the next or previous archive in the same directory,
  * so reaching the last page of `Vol 01.cbz` continues into `Vol 02.cbz`.
  * Returns an empty slice when there is none in that direction.
  */
-u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
+proven_u8str_view_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
                                               const rubraview_fs_listing_t *listing,
-                                              u8str_t current_archive_path,
+                                              proven_u8str_view_t current_archive_path,
                                               bool forward);
 
 /**
@@ -220,7 +220,7 @@ u8str_t rubraview_page_source_sibling_archive(proven_arena_t *arena,
  * `out`; how many. None when `current_dir` is not among them.
  */
 size_t rubraview_page_source_sibling_folders(proven_arena_t *arena, const rubraview_fs_listing_t *listing,
-                                             u8str_t current_dir, bool forward, u8str_t *out, size_t max);
+                                             proven_u8str_view_t current_dir, bool forward, proven_u8str_view_t *out, size_t max);
 
 #ifdef __cplusplus
 }

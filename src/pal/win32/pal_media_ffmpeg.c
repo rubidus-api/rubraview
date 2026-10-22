@@ -390,15 +390,15 @@ static bool ff_load(void) {
 
 static bool ff_available(void) { return ff_load(); }
 
-static void folder_wide(u8str_t folder, WCHAR wide[MAX_PATH]) {
+static void folder_wide(proven_u8str_view_t folder, WCHAR wide[MAX_PATH]) {
     memset(wide, 0, MAX_PATH * sizeof(WCHAR));
-    int n = folder.len > 0 && folder.len < MAX_PATH
-        ? MultiByteToWideChar(CP_UTF8, 0, folder.ptr, (int)folder.len, wide, MAX_PATH - 1) : 0;
+    int n = folder.size > 0 && folder.size < MAX_PATH
+        ? MultiByteToWideChar(CP_UTF8, 0, (const char *)folder.ptr, (int)folder.size, wide, MAX_PATH - 1) : 0;
     wide[n > 0 ? n : 0] = L'\0';
     for (WCHAR *c = wide; *c; c++) if (*c == L'/') *c = L'\\';
 }
 
-void rubraview_pal_ffmpeg_set_folders(u8str_t imported, u8str_t chosen) {
+void rubraview_pal_ffmpeg_set_folders(proven_u8str_view_t imported, proven_u8str_view_t chosen) {
     WCHAR wide[2][MAX_PATH];
     folder_wide(imported, wide[0]);
     folder_wide(chosen, wide[1]);
@@ -724,14 +724,14 @@ static bool ff_subtitle_is_text(enum AVCodecID id) {
 
 /* ---- what the container holds (§3.16.2) ---- */
 
-static u8str_t ff_copy(char *buffer, size_t capacity, const char *text) {
+static proven_u8str_view_t ff_copy(char *buffer, size_t capacity, const char *text) {
     buffer[0] = '\0';
-    if (!text || !text[0]) return (u8str_t){ .ptr = buffer, .len = 0 };
+    if (!text || !text[0]) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 };
     size_t len = strlen(text);
     if (len >= capacity) len = capacity - 1;
     memcpy(buffer, text, len);
     buffer[len] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
 }
 
 /* Text subtitle streams are deliberately left out: nothing displays
@@ -951,7 +951,7 @@ static bool open_station(ff_media_t *m, ff_decode_t *d) {
     if (!g_ff.avformat_alloc_context || !g_ff.av_dict_set || !g_ff.av_dict_free) return false;
     if (g_ff.avformat_network_init && !atomic_flag_test_and_set(&network_ready)) g_ff.avformat_network_init();
     char urls[2][RUBRAVIEW_STREAM_URL_MAX];
-    size_t n = rubraview_stream_ffmpeg_urls((u8str_t){ .ptr = m->path, .len = strlen(m->path) }, urls);
+    size_t n = rubraview_stream_ffmpeg_urls((proven_u8str_view_t){ .ptr = (const proven_byte_t *)m->path, .size = strlen(m->path) }, urls);
     m->open_deadline_ms = GetTickCount64() + STATION_OPEN_MS;
     for (size_t i = 0; i < n && !d->format && !ff_interrupt(m); ++i) {
         AVFormatContext *format = g_ff.avformat_alloc_context();
@@ -2052,10 +2052,10 @@ static void ff_close(void *handle) {
     free(m);
 }
 
-static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                      const rubraview_media_gpu_t *gpu) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
-    if (!ff_load() || path.len == 0 || path.len >= MAX_PATH * 4) return NULL;
+    if (!ff_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     ff_media_t *m = (ff_media_t*)calloc(1, sizeof(*m));
     if (m) {
@@ -2067,8 +2067,8 @@ static void *ff_open(u8str_t path, rubraview_media_failure_t *out_failure, rubra
     if (gpu) m->gpu = *gpu;
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
     if (m->gpu.shader_device) IUnknown_AddRef((IUnknown*)m->gpu.shader_device);   /* RV-150, the same way */
-    memcpy(m->path, path.ptr, path.len);   /* FFmpeg takes UTF-8 paths on Windows */
-    m->path[path.len] = '\0';
+    memcpy(m->path, path.ptr, path.size);   /* FFmpeg takes UTF-8 paths on Windows */
+    m->path[path.size] = '\0';
     m->station = rubraview_stream_is_address(path);
     m->video_stream = -1;
     m->audio_stream = -1;
@@ -2245,8 +2245,8 @@ static void ff_subtitle_payload(enum AVCodecID id, const uint8_t *data, int size
     }
 }
 
-static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int32_t stream_index) {
-    u8str_t empty = { .ptr = "", .len = 0 };
+static proven_u8str_view_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int32_t stream_index) {
+    proven_u8str_view_t empty = PROVEN_LIT("");
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || !arena || stream_index < 0 || !g_ff.ok || m->station) return empty;   /* RV-157: not a second connection */
 
@@ -2312,7 +2312,7 @@ static u8str_t ff_read_subtitle_stream(void *handle, proven_arena_t *arena, int3
 
     if (used == 0) return empty;
     blob[used] = '\0';   /* §7.2.3: allocated with room for it */
-    return (u8str_t){ .ptr = blob, .len = used };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)blob, .size = used };
 }
 
 static bool ff_select_audio_track(void *handle, int32_t stream_index) {

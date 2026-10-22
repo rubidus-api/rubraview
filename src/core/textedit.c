@@ -43,11 +43,11 @@ bool rubraview_textedit_has_selection(const rubraview_textedit_t *te) {
     return te && te->anchor != te->caret;
 }
 
-u8str_t rubraview_textedit_selection(const rubraview_textedit_t *te) {
-    if (!rubraview_textedit_has_selection(te)) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_textedit_selection(const rubraview_textedit_t *te) {
+    if (!rubraview_textedit_has_selection(te)) return PROVEN_LIT("");
     size_t a = 0, b = 0;
     rubraview_textedit_selection_range(te, &a, &b);
-    return (u8str_t){ .ptr = te->buf + a, .len = b - a };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)te->buf + a, .size = b - a };
 }
 
 /* Removes [a, b) and puts the caret at a. */
@@ -65,20 +65,20 @@ static void remove_selection(rubraview_textedit_t *te) {
     remove_range(te, a, b);
 }
 
-void rubraview_textedit_set(rubraview_textedit_t *te, u8str_t text) {
+void rubraview_textedit_set(rubraview_textedit_t *te, proven_u8str_view_t text) {
     if (!te || !te->buf || te->cap == 0) return;
     te->len = te->caret = te->anchor = 0;
     terminate(te);
     (void)rubraview_textedit_insert(te, text);
 }
 
-size_t rubraview_textedit_insert(rubraview_textedit_t *te, u8str_t text) {
+size_t rubraview_textedit_insert(rubraview_textedit_t *te, proven_u8str_view_t text) {
     if (!te || !te->buf || te->cap == 0) return 0;
     if (rubraview_textedit_has_selection(te)) remove_selection(te);
     size_t room = te->cap - 1 - te->len;
-    size_t n = text.len < room ? text.len : room;
+    size_t n = text.size < room ? text.size : room;
     /* Never half a character: step back to the start of a cut one. */
-    if (n < text.len) {
+    if (n < text.size) {
         while (n > 0 && is_continuation(text.ptr[n])) n--;
     }
     if (n == 0) return 0;

@@ -75,7 +75,7 @@ int32_t rubraview_export_palette_size(const rubraview_export_options_t *options)
     return clampi(options->colours, 2, 256);
 }
 
-uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t source_name) {
+uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, proven_u8str_view_t source_name) {
     if (!o) return 0u;
     uint32_t rows = rubraview_export_rows(o->format, source_name, o->webp_lossless);
     rubraview_export_format_t format = o->format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE
@@ -101,25 +101,25 @@ uint32_t rubraview_export_rows_of(const rubraview_export_options_t *o, u8str_t s
     return rows;
 }
 
-u8str_t rubraview_export_extension(rubraview_export_format_t format) {
+proven_u8str_view_t rubraview_export_extension(rubraview_export_format_t format) {
     switch (format) {
-        case RUBRAVIEW_EXPORT_JPEG: return U8("jpg");
-        case RUBRAVIEW_EXPORT_PNG:  return U8("png");
-        case RUBRAVIEW_EXPORT_WEBP: return U8("webp");
-        case RUBRAVIEW_EXPORT_GIF:  return U8("gif");
-        case RUBRAVIEW_EXPORT_BMP:  return U8("bmp");
-        case RUBRAVIEW_EXPORT_TIFF: return U8("tif");
-        case RUBRAVIEW_EXPORT_ICO:  return U8("ico");
-        case RUBRAVIEW_EXPORT_AVIF: return U8("avif");
-        case RUBRAVIEW_EXPORT_JXL:  return U8("jxl");
+        case RUBRAVIEW_EXPORT_JPEG: return PROVEN_LIT("jpg");
+        case RUBRAVIEW_EXPORT_PNG:  return PROVEN_LIT("png");
+        case RUBRAVIEW_EXPORT_WEBP: return PROVEN_LIT("webp");
+        case RUBRAVIEW_EXPORT_GIF:  return PROVEN_LIT("gif");
+        case RUBRAVIEW_EXPORT_BMP:  return PROVEN_LIT("bmp");
+        case RUBRAVIEW_EXPORT_TIFF: return PROVEN_LIT("tif");
+        case RUBRAVIEW_EXPORT_ICO:  return PROVEN_LIT("ico");
+        case RUBRAVIEW_EXPORT_AVIF: return PROVEN_LIT("avif");
+        case RUBRAVIEW_EXPORT_JXL:  return PROVEN_LIT("jxl");
         case RUBRAVIEW_EXPORT_SAME_AS_SOURCE:
-        default: return (u8str_t){ .ptr = "", .len = 0 };
+        default: return PROVEN_LIT("");
     }
 }
 
-rubraview_export_format_t rubraview_export_format_for_name(u8str_t filename) {
-    u8str_t ext = rubraview_path_ext(filename);
-    if (ext.len > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.len--; }
+rubraview_export_format_t rubraview_export_format_for_name(proven_u8str_view_t filename) {
+    proven_u8str_view_t ext = rubraview_path_ext(filename);
+    if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
 
     if (rubraview_u8_eq_lit_ci(ext, "jpg") || rubraview_u8_eq_lit_ci(ext, "jpeg") || rubraview_u8_eq_lit_ci(ext, "jpe")) return RUBRAVIEW_EXPORT_JPEG;
     if (rubraview_u8_eq_lit_ci(ext, "png") || rubraview_u8_eq_lit_ci(ext, "apng")) return RUBRAVIEW_EXPORT_PNG;
@@ -204,7 +204,7 @@ rubraview_export_route_t rubraview_export_plan(const rubraview_export_options_t 
     return RUBRAVIEW_EXPORT_REENCODE;
 }
 
-uint32_t rubraview_export_rows(rubraview_export_format_t format, u8str_t source_name, bool webp_lossless) {
+uint32_t rubraview_export_rows(rubraview_export_format_t format, proven_u8str_view_t source_name, bool webp_lossless) {
     if (format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) format = rubraview_export_format_for_name(source_name);
     switch (format) {
         case RUBRAVIEW_EXPORT_JPEG:

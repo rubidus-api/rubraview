@@ -26,27 +26,27 @@ static bool entries_reserve(proven_arena_t *arena, rubraview_history_t *history,
 /* Reads one `page:58, total:192, time:172...` value. A field that is
    missing or malformed leaves its default rather than failing the line,
    since a half-written history should still restore what it can. */
-static void parse_position(u8str_t value, int32_t *out_page, int32_t *out_total, int64_t *out_time) {
+static void parse_position(proven_u8str_view_t value, int32_t *out_page, int32_t *out_total, int64_t *out_time) {
     *out_page = 0;
     *out_total = 0;
     *out_time = 0;
 
     size_t i = 0;
-    while (i < value.len) {
-        while (i < value.len && (value.ptr[i] == ' ' || value.ptr[i] == ',')) i++;
+    while (i < value.size) {
+        while (i < value.size && (value.ptr[i] == ' ' || value.ptr[i] == ',')) i++;
         size_t key_start = i;
-        while (i < value.len && value.ptr[i] != ':' && value.ptr[i] != ',') i++;
-        if (i >= value.len || value.ptr[i] != ':') break;
+        while (i < value.size && value.ptr[i] != ':' && value.ptr[i] != ',') i++;
+        if (i >= value.size || value.ptr[i] != ':') break;
 
         size_t key_len = i - key_start;
         i++; /* skip ':' */
 
         bool negative = false;
-        if (i < value.len && value.ptr[i] == '-') { negative = true; i++; }
+        if (i < value.size && value.ptr[i] == '-') { negative = true; i++; }
 
         int64_t number = 0;
         bool any_digit = false;
-        while (i < value.len && value.ptr[i] >= '0' && value.ptr[i] <= '9') {
+        while (i < value.size && value.ptr[i] >= '0' && value.ptr[i] <= '9') {
             number = rubraview_digit_append(number, value.ptr[i]);
             any_digit = true;
             i++;
@@ -54,71 +54,71 @@ static void parse_position(u8str_t value, int32_t *out_page, int32_t *out_total,
         if (!any_digit) continue;
         if (negative) number = -number;
 
-        if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "page")) {
+        if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = value.ptr + key_start, .size = key_len }, PROVEN_LIT("page"))) {
             *out_page = (int32_t)number;
-        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "total")) {
+        } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = value.ptr + key_start, .size = key_len }, PROVEN_LIT("total"))) {
             *out_total = (int32_t)number;
-        } else if (rubraview_u8_eq_lit((u8str_t){ .ptr = value.ptr + key_start, .len = key_len }, "time")) {
+        } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = value.ptr + key_start, .size = key_len }, PROVEN_LIT("time"))) {
             *out_time = number;
         }
     }
 }
 
-static int64_t whole_number(u8str_t v) {
+static int64_t whole_number(proven_u8str_view_t v) {
     int64_t n = 0;
     size_t i = 0;
     bool negative = false;
-    if (v.len > 0 && v.ptr[0] == '-') { negative = true; i = 1; }
-    for (; i < v.len && v.ptr[i] >= '0' && v.ptr[i] <= '9'; ++i) n = rubraview_digit_append(n, v.ptr[i]);
+    if (v.size > 0 && v.ptr[0] == '-') { negative = true; i = 1; }
+    for (; i < v.size && v.ptr[i] >= '0' && v.ptr[i] <= '9'; ++i) n = rubraview_digit_append(n, v.ptr[i]);
     return negative ? -n : n;
 }
 
 static void add_entry(proven_arena_t *arena, rubraview_history_t *history,
-                      u8str_t path, int32_t page, int32_t total, int64_t timestamp) {
-    if (path.len == 0) return;
+                      proven_u8str_view_t path, int32_t page, int32_t total, int64_t timestamp) {
+    if (path.size == 0) return;
     if (!entries_reserve(arena, history, history->count + 1)) return;
     history->entries[history->count++] = (rubraview_history_entry_t){
         .path = path, .page = page, .total = total, .timestamp = timestamp,
     };
 }
 
-rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text) {
+rubraview_history_t rubraview_history_parse(proven_arena_t *arena, proven_u8str_view_t text) {
     rubraview_history_t history = {0};
-    if (!arena || text.len == 0) return history;
+    if (!arena || text.size == 0) return history;
 
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
 
     /* D-13: one `[entry-N]` section per book, its path a quoted string —
        a path cannot be a key in a file that must also be TOML. */
-    u8str_t section = { .ptr = "", .len = 0 };
-    u8str_t path = { .ptr = "", .len = 0 };
+    proven_u8str_view_t section = PROVEN_LIT("");
+    proven_u8str_view_t path = PROVEN_LIT("");
     int32_t page = 0, total = 0;
     int64_t timestamp = 0;
     for (size_t i = 0; i <= doc.count; ++i) {
-        bool boundary = i == doc.count || !rubraview_u8_eq(doc.entries[i].section, section);
+        bool boundary = i == doc.count || !proven_u8str_view_eq(doc.entries[i].section, section);
         if (boundary) {
-            if (rubraview_u8_starts_with(section, "entry-")) add_entry(arena, &history, path, page, total, timestamp);
+            if (proven_u8str_view_starts_with(section, PROVEN_LIT("entry-"))) add_entry(arena, &history, path, page, total, timestamp);
             if (i == doc.count) break;
             section = doc.entries[i].section;
-            path = (u8str_t){ .ptr = "", .len = 0 };
+            path = PROVEN_LIT("");
             page = 0; total = 0; timestamp = 0;
         }
         const rubraview_ini_entry_t *e = &doc.entries[i];
-        if (rubraview_u8_starts_with(e->section, "entry-")) {
-            if (rubraview_u8_eq(e->key, U8("path")))       path = e->value;
-            else if (rubraview_u8_eq(e->key, U8("page")))  page = (int32_t)whole_number(e->value);
-            else if (rubraview_u8_eq(e->key, U8("total"))) total = (int32_t)whole_number(e->value);
-            else if (rubraview_u8_eq(e->key, U8("time")))  timestamp = whole_number(e->value);
+        if (proven_u8str_view_starts_with(e->section, PROVEN_LIT("entry-"))) {
+            if (proven_u8str_view_eq(e->key, PROVEN_LIT("path")))       path = e->value;
+            else if (proven_u8str_view_eq(e->key, PROVEN_LIT("page")))  page = (int32_t)whole_number(e->value);
+            else if (proven_u8str_view_eq(e->key, PROVEN_LIT("total"))) total = (int32_t)whole_number(e->value);
+            else if (proven_u8str_view_eq(e->key, PROVEN_LIT("time")))  timestamp = whole_number(e->value);
             continue;
         }
 
         /* The format before D-13, still read: under [history], the path
            as the key and `page:58, total:192, time:172...` as the value. */
-        if (e->section.len != sizeof(HISTORY_SECTION) - 1 ||
+        if (e->section.size != sizeof(HISTORY_SECTION) - 1 ||
             memcmp(e->section.ptr, HISTORY_SECTION, sizeof(HISTORY_SECTION) - 1) != 0) {
             continue;
         }
-        if (e->key.len == 0) continue;
+        if (e->key.size == 0) continue;
         int32_t old_page = 0, old_total = 0;
         int64_t old_time = 0;
         parse_position(e->value, &old_page, &old_total, &old_time);
@@ -128,7 +128,7 @@ rubraview_history_t rubraview_history_parse(proven_arena_t *arena, u8str_t text)
     return history;
 }
 
-const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_t *history, u8str_t path) {
+const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_t *history, proven_u8str_view_t path) {
     if (!history || !history->entries) return NULL;
     for (size_t i = 0; i < history->count; ++i) {
         if (rubraview_path_same(history->entries[i].path, path)) return &history->entries[i];
@@ -137,8 +137,8 @@ const rubraview_history_entry_t *rubraview_history_find(const rubraview_history_
 }
 
 void rubraview_history_record(proven_arena_t *arena, rubraview_history_t *history,
-                              u8str_t path, int32_t page, int32_t total, int64_t timestamp) {
-    if (!arena || !history || path.len == 0) return;
+                              proven_u8str_view_t path, int32_t page, int32_t total, int64_t timestamp) {
+    if (!arena || !history || path.size == 0) return;
 
     for (size_t i = 0; i < history->count; ++i) {
         if (!rubraview_path_same(history->entries[i].path, path)) continue;
@@ -181,8 +181,8 @@ void rubraview_history_prune(rubraview_history_t *history, size_t max_entries) {
     }
 }
 
-u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history) {
-    if (!arena || !history) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_history_t *history) {
+    if (!arena || !history) return PROVEN_LIT("");
 
     /* Through the configuration writer, so the file is in the INI and
        TOML subset by construction (D-13). */
@@ -195,12 +195,12 @@ u8str_t rubraview_history_serialize(proven_arena_t *arena, const rubraview_histo
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
         memcpy(res.value.ptr, name, (size_t)n + 1);
-        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
+        proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
 
-        rubraview_ini_set_string(arena, &doc, section, U8("path"), e->path);
-        rubraview_ini_set_int(arena, &doc, section, U8("page"), e->page);
-        rubraview_ini_set_int(arena, &doc, section, U8("total"), e->total);
-        rubraview_ini_set_int(arena, &doc, section, U8("time"), e->timestamp);
+        rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), e->path);
+        rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("page"), e->page);
+        rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("total"), e->total);
+        rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("time"), e->timestamp);
     }
     return rubraview_ini_serialize(arena, &doc);
 }
@@ -213,7 +213,7 @@ static void drop_at(rubraview_history_t *history, size_t at) {
 }
 
 /* The removal of `path` that counts, or 0 (none). */
-static int64_t removed_at(const rubraview_recent_t *recent, u8str_t path) {
+static int64_t removed_at(const rubraview_recent_t *recent, proven_u8str_view_t path) {
     int64_t at = 0;
     for (size_t k = 0; k < recent->removed.count; ++k) {
         if (rubraview_path_same(recent->removed.entries[k].path, path) && recent->removed.entries[k].timestamp > at)
@@ -233,38 +233,38 @@ static void recent_drop_cleared(rubraview_recent_t *recent) {
     }
 }
 
-rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, u8str_t text) {
+rubraview_recent_t rubraview_recent_parse(proven_arena_t *arena, proven_u8str_view_t text) {
     rubraview_recent_t recent = { .list = rubraview_history_parse(arena, text), .cleared = 0 };
-    if (!arena || text.len == 0) return recent;
+    if (!arena || text.size == 0) return recent;
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
     for (size_t i = 0; i < doc.count; ++i) {
         const rubraview_ini_entry_t *e = &doc.entries[i];
-        if (rubraview_u8_eq_lit(e->section, "cleared") && rubraview_u8_eq_lit(e->key, "time")) recent.cleared = whole_number(e->value);
+        if (proven_u8str_view_eq(e->section, PROVEN_LIT("cleared")) && proven_u8str_view_eq(e->key, PROVEN_LIT("time"))) recent.cleared = whole_number(e->value);
     }
     /* [removed-N]: path, time */
-    u8str_t section = { .ptr = "", .len = 0 }, path = { .ptr = "", .len = 0 };
+    proven_u8str_view_t section = PROVEN_LIT(""), path = PROVEN_LIT("");
     int64_t when = 0;
     for (size_t i = 0; i <= doc.count; ++i) {
-        bool boundary = i == doc.count || !rubraview_u8_eq(doc.entries[i].section, section);
+        bool boundary = i == doc.count || !proven_u8str_view_eq(doc.entries[i].section, section);
         if (boundary) {
-            if (rubraview_u8_starts_with(section, "removed-") && path.len > 0) rubraview_history_record(arena, &recent.removed, path, 0, 0, when);
+            if (proven_u8str_view_starts_with(section, PROVEN_LIT("removed-")) && path.size > 0) rubraview_history_record(arena, &recent.removed, path, 0, 0, when);
             if (i == doc.count) break;
             section = doc.entries[i].section;
-            path = (u8str_t){ .ptr = "", .len = 0 };
+            path = PROVEN_LIT("");
             when = 0;
         }
         const rubraview_ini_entry_t *e = &doc.entries[i];
-        if (rubraview_u8_eq_lit(e->key, "path")) path = e->value;
-        else if (rubraview_u8_eq_lit(e->key, "time")) when = whole_number(e->value);
+        if (proven_u8str_view_eq(e->key, PROVEN_LIT("path"))) path = e->value;
+        else if (proven_u8str_view_eq(e->key, PROVEN_LIT("time"))) when = whole_number(e->value);
     }
     recent_drop_cleared(&recent);
     return recent;
 }
 
-u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent) {
-    if (!arena || !recent) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent_t *recent) {
+    if (!arena || !recent) return PROVEN_LIT("");
     rubraview_ini_doc_t doc = {0};
-    rubraview_ini_set_int(arena, &doc, U8("cleared"), U8("time"), recent->cleared);
+    rubraview_ini_set_int(arena, &doc, PROVEN_LIT("cleared"), PROVEN_LIT("time"), recent->cleared);
     for (size_t i = 0; i < recent->list.count; ++i) {
         char name[32];
         int n = snprintf(name, sizeof(name), "entry-%zu", i + 1);
@@ -272,9 +272,9 @@ u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
         memcpy(res.value.ptr, name, (size_t)n + 1);
-        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
-        rubraview_ini_set_string(arena, &doc, section, U8("path"), recent->list.entries[i].path);
-        rubraview_ini_set_int(arena, &doc, section, U8("time"), recent->list.entries[i].timestamp);
+        proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
+        rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), recent->list.entries[i].path);
+        rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("time"), recent->list.entries[i].timestamp);
     }
     for (size_t i = 0; i < recent->removed.count; ++i) {
         char name[32];
@@ -283,15 +283,15 @@ u8str_t rubraview_recent_serialize(proven_arena_t *arena, const rubraview_recent
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
         memcpy(res.value.ptr, name, (size_t)n + 1);
-        u8str_t section = { .ptr = (const char*)res.value.ptr, .len = (size_t)n };
-        rubraview_ini_set_string(arena, &doc, section, U8("path"), recent->removed.entries[i].path);
-        rubraview_ini_set_int(arena, &doc, section, U8("time"), recent->removed.entries[i].timestamp);
+        proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
+        rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), recent->removed.entries[i].path);
+        rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("time"), recent->removed.entries[i].timestamp);
     }
     return rubraview_ini_serialize(arena, &doc);
 }
 
-void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path, int64_t timestamp) {
-    if (!arena || !recent || path.len == 0) return;
+void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, proven_u8str_view_t path, int64_t timestamp) {
+    if (!arena || !recent || path.size == 0) return;
     /* never earlier than the entry it removes, so it counts */
     for (size_t i = 0; i < recent->list.count; ++i) {
         if (rubraview_path_same(recent->list.entries[i].path, path) && recent->list.entries[i].timestamp >= timestamp)
@@ -302,9 +302,9 @@ void rubraview_recent_remove(proven_arena_t *arena, rubraview_recent_t *recent, 
     recent_drop_cleared(recent);
 }
 
-void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, u8str_t path,
+void rubraview_recent_add(proven_arena_t *arena, rubraview_recent_t *recent, proven_u8str_view_t path,
                           int64_t timestamp, size_t max_entries) {
-    if (!arena || !recent || path.len == 0) return;
+    if (!arena || !recent || path.size == 0) return;
     /* Opened in the very second the list was emptied, it is still new. */
     if (timestamp <= recent->cleared) timestamp = recent->cleared + 1;
     int64_t gone = removed_at(recent, path);   /* opened again after it was taken off: new again */
@@ -327,11 +327,11 @@ static bool history_rehome(proven_arena_t *arena, rubraview_history_t *h) {
     rubraview_history_entry_t *moved = (rubraview_history_entry_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < h->count; ++i) {
         moved[i] = h->entries[i];
-        if (moved[i].path.len == 0) continue;
-        proven_result_mem_mut_t p = proven_arena_alloc(arena, moved[i].path.len);
+        if (moved[i].path.size == 0) continue;
+        proven_result_mem_mut_t p = proven_arena_alloc(arena, moved[i].path.size);
         if (!proven_is_ok(p.err)) return false;
-        memcpy(p.value.ptr, moved[i].path.ptr, moved[i].path.len);
-        moved[i].path = (u8str_t){ .ptr = (const char*)p.value.ptr, .len = moved[i].path.len };
+        memcpy(p.value.ptr, moved[i].path.ptr, moved[i].path.size);
+        moved[i].path = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p.value.ptr, .size = moved[i].path.size };
     }
     *h = (rubraview_history_t){ .entries = moved, .count = h->count, .capacity = h->count };
     return true;
@@ -374,14 +374,14 @@ size_t rubraview_recent_newest(const rubraview_recent_t *recent, size_t *out_ind
     return n;
 }
 
-bool rubraview_path_is_within(u8str_t path, u8str_t folder) {
-    while (folder.len > 0 && rubraview_path_is_sep(folder.ptr[folder.len - 1])) folder.len--;
-    if (folder.len == 0 || path.len < folder.len) return false;
-    if (!rubraview_path_same((u8str_t){ .ptr = path.ptr, .len = folder.len }, folder)) return false;
-    return path.len == folder.len || rubraview_path_is_sep(path.ptr[folder.len]);
+bool rubraview_path_is_within(proven_u8str_view_t path, proven_u8str_view_t folder) {
+    while (folder.size > 0 && rubraview_path_is_sep(folder.ptr[folder.size - 1])) folder.size--;
+    if (folder.size == 0 || path.size < folder.size) return false;
+    if (!rubraview_path_same((proven_u8str_view_t){ .ptr = path.ptr, .size = folder.size }, folder)) return false;
+    return path.size == folder.size || rubraview_path_is_sep(path.ptr[folder.size]);
 }
 
-bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t count) {
+bool rubraview_recent_is_kept_out(proven_u8str_view_t path, const proven_u8str_view_t *folders, size_t count) {
     if (!folders) return false;
     for (size_t i = 0; i < count; ++i) {
         if (rubraview_path_is_within(path, folders[i])) return true;
@@ -389,15 +389,15 @@ bool rubraview_recent_is_kept_out(u8str_t path, const u8str_t *folders, size_t c
     return false;
 }
 
-bool rubraview_thumb_folder_kept_out(u8str_t path, bool is_directory, const u8str_t *folders, size_t count) {
+bool rubraview_thumb_folder_kept_out(proven_u8str_view_t path, bool is_directory, const proven_u8str_view_t *folders, size_t count) {
     return is_directory && rubraview_recent_is_kept_out(path, folders, count);
 }
 
-size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity) {
+size_t rubraview_folder_list_split(proven_u8str_view_t joined, proven_u8str_view_t *out, size_t capacity) {
     size_t n = 0, start = 0;
-    for (size_t i = 0; i <= joined.len; ++i) {
-        if (i < joined.len && joined.ptr[i] != '|') continue;
-        if (i > start && n < capacity && out) out[n++] = (u8str_t){ .ptr = joined.ptr + start, .len = i - start };
+    for (size_t i = 0; i <= joined.size; ++i) {
+        if (i < joined.size && joined.ptr[i] != '|') continue;
+        if (i > start && n < capacity && out) out[n++] = (proven_u8str_view_t){ .ptr = joined.ptr + start, .size = i - start };
         else if (i > start && !out) n++;
         start = i + 1;
     }
@@ -405,44 +405,44 @@ size_t rubraview_folder_list_split(u8str_t joined, u8str_t *out, size_t capacity
 }
 
 /* Every piece of `joined` but `skip`, with `insert` at `at`, joined again. */
-static u8str_t folder_list_build(char *buffer, size_t capacity, u8str_t joined, size_t skip, u8str_t insert, size_t at) {
-    u8str_t none = { .ptr = buffer ? buffer : "", .len = 0 };
+static proven_u8str_view_t folder_list_build(char *buffer, size_t capacity, proven_u8str_view_t joined, size_t skip, proven_u8str_view_t insert, size_t at) {
+    proven_u8str_view_t none = rubraview_u8(buffer ? buffer : "", 0);
     if (!buffer || capacity == 0) return none;
-    u8str_t parts[256];
+    proven_u8str_view_t parts[256];
     size_t n = rubraview_folder_list_split(joined, parts, 256);
     size_t len = 0;
-    bool placed = insert.len == 0;
+    bool placed = insert.size == 0;
     for (size_t i = 0; i <= n; ++i) {
-        u8str_t piece = { .ptr = "", .len = 0 };
+        proven_u8str_view_t piece = PROVEN_LIT("");
         if (!placed && i == at) { piece = insert; placed = true; --i; }
         else if (i < n && i != skip) piece = parts[i];
         else if (i == n && !placed) { piece = insert; placed = true; }
         else continue;
-        if (piece.len == 0) continue;
-        if (len + (len ? 1 : 0) + piece.len + 1 > capacity) { buffer[0] = '\0'; return none; }
+        if (piece.size == 0) continue;
+        if (len + (len ? 1 : 0) + piece.size + 1 > capacity) { buffer[0] = '\0'; return none; }
         if (len) buffer[len++] = '|';
-        memcpy(buffer + len, piece.ptr, piece.len);
-        len += piece.len;
+        memcpy(buffer + len, piece.ptr, piece.size);
+        len += piece.size;
     }
     buffer[len] = '\0';
-    return (u8str_t){ .ptr = buffer, .len = len };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
 }
 
-u8str_t rubraview_folder_list_put(char *buffer, size_t capacity, u8str_t joined, u8str_t folder, size_t replace) {
-    u8str_t parts[256];
+proven_u8str_view_t rubraview_folder_list_put(char *buffer, size_t capacity, proven_u8str_view_t joined, proven_u8str_view_t folder, size_t replace) {
+    proven_u8str_view_t parts[256];
     size_t n = rubraview_folder_list_split(joined, parts, 256);
     for (size_t i = 0; i < n; ++i) {
-        if (i != replace && rubraview_path_same(parts[i], folder)) return folder_list_build(buffer, capacity, joined, (size_t)-1, (u8str_t){ 0 }, 0);
+        if (i != replace && rubraview_path_same(parts[i], folder)) return folder_list_build(buffer, capacity, joined, (size_t)-1, (proven_u8str_view_t){ 0 }, 0);
     }
     if (replace < n) return folder_list_build(buffer, capacity, joined, replace, folder, replace);
     return folder_list_build(buffer, capacity, joined, (size_t)-1, folder, n);
 }
 
-u8str_t rubraview_folder_list_remove(char *buffer, size_t capacity, u8str_t joined, size_t index) {
-    return folder_list_build(buffer, capacity, joined, index, (u8str_t){ .ptr = "", .len = 0 }, 0);
+proven_u8str_view_t rubraview_folder_list_remove(char *buffer, size_t capacity, proven_u8str_view_t joined, size_t index) {
+    return folder_list_build(buffer, capacity, joined, index, PROVEN_LIT(""), 0);
 }
 
-size_t rubraview_history_drop_within(rubraview_history_t *history, const u8str_t *folders, size_t count) {
+size_t rubraview_history_drop_within(rubraview_history_t *history, const proven_u8str_view_t *folders, size_t count) {
     if (!history || !history->entries) return 0;
     size_t gone = 0;
     for (size_t i = history->count; i-- > 0;) {
@@ -464,12 +464,12 @@ rubraview_config_mode_t rubraview_config_mode_for(bool portable_probe_exists) {
     return portable_probe_exists ? RUBRAVIEW_CONFIG_PORTABLE : RUBRAVIEW_CONFIG_APPDATA;
 }
 
-u8str_t rubraview_config_path(proven_arena_t *arena,
+proven_u8str_view_t rubraview_config_path(proven_arena_t *arena,
                               rubraview_config_mode_t mode,
-                              u8str_t executable_dir,
-                              u8str_t appdata_dir,
-                              u8str_t file_name) {
-    if (!arena || file_name.len == 0) return (u8str_t){ .ptr = "", .len = 0 };
+                              proven_u8str_view_t executable_dir,
+                              proven_u8str_view_t appdata_dir,
+                              proven_u8str_view_t file_name) {
+    if (!arena || file_name.size == 0) return PROVEN_LIT("");
 
     if (mode == RUBRAVIEW_CONFIG_PORTABLE) {
         return rubraview_path_join(arena, executable_dir, file_name);
@@ -477,6 +477,6 @@ u8str_t rubraview_config_path(proven_arena_t *arena,
 
     /* §3.17.2: the standard location is a rubraview folder inside the
        per-user application data directory. */
-    u8str_t app_folder = rubraview_path_join(arena, appdata_dir, U8("rubraview"));
+    proven_u8str_view_t app_folder = rubraview_path_join(arena, appdata_dir, PROVEN_LIT("rubraview"));
     return rubraview_path_join(arena, app_folder, file_name);
 }

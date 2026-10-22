@@ -307,7 +307,7 @@ bool rubraview_box_pin_click(rubraview_box_t *box, const rubraview_tile_metrics_
  * grip, the seek bar. Empty over a button (its name is said in the strip)
  * and away from the box.
  */
-u8str_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, double px, double py);
+proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics, double px, double py);
 
 /** Dragging a detached toolbox back over the canvas docks it again. */
 bool rubraview_box_dock(rubraview_box_t *box);
