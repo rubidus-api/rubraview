@@ -44,6 +44,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_FILTER,     /* the names shown: those holding what is typed */
     RUBRAVIEW_LISTWIN_SORT,       /* the list in another order: by what */
     RUBRAVIEW_LISTWIN_ORDER,      /* rising or falling */
+    RUBRAVIEW_LISTWIN_URL,        /* RV-158, the bar beside Add: a station's address typed joins the list */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {

@@ -64,3 +64,78 @@ proven_u8str_view_t rubraview_stream_display_name(proven_u8str_view_t address) {
     if (end <= start) return address;
     return (proven_u8str_view_t){ .ptr = address.ptr + start, .size = end - start };
 }
+
+/* ---- RV-158 ---- */
+
+bool rubraview_stream_is_list_address(proven_u8str_view_t address) {
+    if (!rubraview_stream_is_address(address)) return false;
+    size_t end = address.size;
+    for (size_t i = scheme_len(address) + 3; i < address.size; ++i) {
+        if (address.ptr[i] == '?' || address.ptr[i] == '#') { end = i; break; }
+    }
+    proven_u8str_view_t path = { .ptr = address.ptr, .size = end };
+    static const char *const LISTS[] = { ".pls", ".m3u", ".asx", ".wax", ".wvx" };
+    for (size_t k = 0; k < sizeof(LISTS) / sizeof(LISTS[0]); ++k) {
+        size_t n = strlen(LISTS[k]);
+        if (path.size > n && proven_u8str_view_eq_ascii_ci((proven_u8str_view_t){ .ptr = path.ptr + path.size - n, .size = n },
+                                                           proven_u8str_view_from_cstr(LISTS[k])))
+            return true;
+    }
+    return false;
+}
+
+static size_t find_from(proven_u8str_view_t s, size_t from, const char *what) {
+    size_t n = strlen(what);
+    for (size_t i = from; i + n <= s.size; ++i) if (memcmp(s.ptr + i, what, n) == 0) return i;
+    return SIZE_MAX;
+}
+
+size_t rubraview_stream_icy_title(proven_u8str_view_t packet, char *out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    out[0] = '\0';
+    if (!packet.ptr) return 0;
+    size_t at = find_from(packet, 0, "StreamTitle='");
+    if (at == SIZE_MAX) return 0;
+    size_t start = at + 13, end = SIZE_MAX;
+    size_t url = find_from(packet, start, "';StreamUrl=");
+    if (url != SIZE_MAX) end = url;
+    else {
+        for (size_t i = start; i + 2 <= packet.size; ++i) if (packet.ptr[i] == '\'' && packet.ptr[i + 1] == ';') end = i;
+        if (end == SIZE_MAX) end = packet.size;
+    }
+    proven_u8str_view_t v = { .ptr = packet.ptr + start, .size = end - start };
+    bool utf8 = proven_utf8_validate(v, NULL) == PROVEN_OK;
+    size_t n = 0;
+    bool space = false;
+    for (size_t i = 0; i < v.size; ++i) {
+        unsigned char c = v.ptr[i];
+        if (c < 0x20 || c == 0x7F) { space = true; continue; }
+        if (c == ' ') { space = true; continue; }
+        /* the next character's bytes, a space before it when one was left out */
+        proven_byte_t ch[4];
+        size_t k = 1;
+        if (!utf8 && c >= 0x80) k = proven_utf8_encode_one(c, ch);   /* Latin-1 */
+        else if (utf8 && c >= 0x80) { proven_utf8_char_t d = proven_utf8_decode_next(v, i); k = d.len; memcpy(ch, v.ptr + i, k); i += k - 1; }
+        else ch[0] = c;
+        size_t need = k + (space && n > 0 ? 1 : 0);
+        if (n + need >= cap) break;
+        if (space && n > 0) out[n++] = ' ';
+        space = false;
+        memcpy(out + n, ch, k);
+        n += k;
+    }
+    out[n] = '\0';
+    return n;
+}
+
+bool rubraview_stream_split_typed(proven_u8str_view_t typed, proven_u8str_view_t *address, proven_u8str_view_t *title) {
+    proven_u8str_view_t t = proven_u8str_view_trim(typed);
+    size_t cut = 0;
+    while (cut < t.size && t.ptr[cut] != ' ' && t.ptr[cut] != '\t') cut++;
+    proven_u8str_view_t a = { .ptr = t.ptr, .size = cut };
+    if (!rubraview_stream_is_address(a)) return false;
+    if (address) *address = a;
+    if (title) *title = cut < t.size ? proven_u8str_view_trim((proven_u8str_view_t){ .ptr = t.ptr + cut, .size = t.size - cut })
+                                     : (proven_u8str_view_t){ 0 };
+    return true;
+}

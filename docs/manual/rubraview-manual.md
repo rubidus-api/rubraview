@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.38.0.exe              the viewer, as built
-dist/rubraview-v1.38.0/                 the release bundle
-dist/rubraview-v1.38.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.0.exe              the viewer, as built
+dist/rubraview-v1.39.0/                 the release bundle
+dist/rubraview-v1.39.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -83,6 +83,17 @@ up after 8 seconds. **Save** in the list window writes the stations and
 their titles as an `.m3u8`. Playing a station connects to it over the
 network; Rubraview lets FFmpeg reach only network addresses for it,
 never a file on your PC.
+
+While a station plays, the title bar shows what it says is on (the song,
+when the station sends it). A station whose address is itself a list —
+`…/listen.pls`, `.m3u`, `.asx`, or an address that answers with a list —
+is read and its stream played; a list that names yet another list is not
+followed. In an `.asx`, the other addresses an entry gives are tried in
+turn when the first does not answer (they are not written again by
+**Save**). To add a station by hand, press **URL** in the list window and
+type its address, then a space and a title if you like:
+
+    http://radio.example.com:8000/live My station
 
 On the command line, `--sort=natural|lexical|modified|created|size|random`
 with `--descending` or `--ascending` orders this run's folders whatever

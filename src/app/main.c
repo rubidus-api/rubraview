@@ -630,6 +630,8 @@ typedef struct app_state {
        hands rather than opened again. */
     rubraview_media_t         *bgm_media;
     struct station_job        *station_job;   /* RV-157: a station being connected to, off this thread */
+    char                      station_title[256];   /* RV-158: what the station playing says is on (ICY); "" none */
+    bool                      rename_is_address;    /* RV-158: the box takes an address and its title for the list */
     rubraview_media_info_t     bgm_info;
     int32_t                    bgm_page;
     double                     bgm_position;
@@ -1498,6 +1500,8 @@ static void edit_value_typed(app_state_t *app);
 static void gmic_typed(app_state_t *app);
 static const char *gmic_step_name(const rubraview_edit_step_t *step);
 static void ffmpeg_typed(app_state_t *app);
+static void address_typed(app_state_t *app);
+static void address_begin(app_state_t *app);
 static void panel_open_export(app_state_t *app);
 static void panel_open_batch(app_state_t *app);
 static void new_window(app_state_t *app);
@@ -2362,8 +2366,10 @@ static void update_window_title(app_state_t *app) {
         /* The name the status line shows, not the path: an archive page
            has no path of its own (found by T037). */
         proven_u8str_view_t name = page_display_name(app, (size_t)page);
-        int n = snprintf(title, sizeof(title), "%.*s (%d/%zu) ",
-                         (int)name.size, name.ptr, (int)page + 1, page_count(app));
+        bool song = app->media && page == app->media_page && app->media_info.live && app->station_title[0];   /* RV-158 */
+        int n = snprintf(title, sizeof(title), "%.*s%s%s (%d/%zu) ",
+                         (int)name.size, name.ptr, song ? " \xE2\x80\x94 " : "", song ? app->station_title : "",
+                         (int)page + 1, page_count(app));
         used = n > 0 ? ((size_t)n < sizeof(title) ? (size_t)n : sizeof(title) - 1) : 0;
         if (app->media && page == app->media_page) {
             /* A video shows where it is, to the millisecond — which is
@@ -3236,12 +3242,104 @@ typedef struct station_job {
     int32_t page;
     rubraview_window_t *wake;
     rubraview_media_open_result_t result;
-    char path[RUBRAVIEW_STREAM_URL_MAX];
+    /* RV-158: the addresses tried, in order: the station's, its list's fall-backs, those of a list one of them names */
+    char tries[RUBRAVIEW_STREAM_MAX_TRIES][RUBRAVIEW_STREAM_URL_MAX];
+    bool fetched[RUBRAVIEW_STREAM_MAX_TRIES];   /* came out of a fetched list: a list it names is not followed */
+    size_t count;
+    bool sniffed, nested;
 } station_job_t;
+
+/* RV-158: the fall-backs an .asx gave a station's address, kept while the program runs (the page has only one). */
+#define STATION_ALTS_MAX 128
+typedef struct station_alts {
+    char *primary;
+    char *alts[RUBRAVIEW_PLAYLIST_MAX_ALTERNATES];
+    size_t count;
+} station_alts_t;
+static station_alts_t g_station_alts[STATION_ALTS_MAX];
+static size_t g_station_alts_next;
+
+static char *dup_view(proven_u8str_view_t v) {
+    char *s = (char *)malloc(v.size + 1);
+    if (s) { memcpy(s, v.ptr, v.size); s[v.size] = '\0'; }
+    return s;
+}
+
+static void station_alts_note(const rubraview_playlist_entry_t *e) {
+    if (e->alternate_count == 0) return;
+    station_alts_t *slot = &g_station_alts[g_station_alts_next++ % STATION_ALTS_MAX];
+    free(slot->primary);
+    for (size_t i = 0; i < slot->count; ++i) free(slot->alts[i]);
+    *slot = (station_alts_t){ .primary = dup_view(e->path) };
+    for (size_t i = 0; i < e->alternate_count && i < RUBRAVIEW_PLAYLIST_MAX_ALTERNATES; ++i)
+        if ((slot->alts[slot->count] = dup_view(e->alternates[i])) != NULL) slot->count++;
+}
+
+static const station_alts_t *station_alts_of(proven_u8str_view_t primary) {
+    for (size_t i = 0; i < STATION_ALTS_MAX; ++i) {
+        const station_alts_t *s = &g_station_alts[i];
+        if (s->primary && proven_u8str_view_eq(proven_u8str_view_from_cstr(s->primary), primary)) return s;
+    }
+    return NULL;
+}
+
+static bool station_try_add(station_job_t *job, proven_u8str_view_t address, bool fetched) {
+    if (job->count >= RUBRAVIEW_STREAM_MAX_TRIES || address.size >= RUBRAVIEW_STREAM_URL_MAX || !rubraview_stream_is_address(address)) return false;
+    for (size_t i = 0; i < job->count; ++i) if (proven_u8str_view_eq(proven_u8str_view_from_cstr(job->tries[i]), address)) return false;
+    memcpy(job->tries[job->count], address.ptr, address.size);
+    job->tries[job->count][address.size] = '\0';
+    job->fetched[job->count++] = fetched;
+    return true;
+}
+
+static char *list_text_decode(proven_u8str_view_t raw, size_t *len);
+
+/* RV-158: the list an address names (or, `sniffing`, what an address that would not play answers with), fetched
+   and read as a list file is; its stations join the tries. A list it names in turn is not followed. */
+static void station_list_take(station_job_t *job, proven_u8str_view_t address, bool sniffing) {
+    uint8_t *raw = (uint8_t *)malloc(RUBRAVIEW_STREAM_LIST_MAX);
+    int64_t got = raw ? rubraview_pal_ffmpeg_fetch(address, raw, RUBRAVIEW_STREAM_LIST_MAX) : -1;
+    size_t room = 1u << 20;
+    void *mem = got > 0 ? malloc(room) : NULL;
+    if (mem) {
+        size_t len = 0;
+        proven_u8str_view_t bytes = proven_u8str_view_from_bytes(raw, (size_t)got);
+        char *text = list_text_decode(bytes, &len);
+        proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = room });
+        /* by its text: the address's name may carry a query, and one that answered a list has none to go by */
+        rubraview_playlist_t pl = rubraview_playlist_parse_named(&arena, sniffing ? PROVEN_LIT("") : rubraview_path_basename(address),
+                                                                 text ? proven_u8str_view_from_bytes(text, len) : bytes);
+        for (size_t i = 0; i < pl.count; ++i) {
+            const rubraview_playlist_entry_t *e = &pl.entries[i];
+            for (size_t k = 0; k <= e->alternate_count; ++k) {
+                proven_u8str_view_t a = k == 0 ? e->path : e->alternates[k - 1];
+                if (rubraview_stream_is_list_address(a)) { job->nested = true; continue; }
+                (void)station_try_add(job, a, true);
+            }
+        }
+        free(text);
+    }
+    free(mem);
+    free(raw);
+}
 
 static DWORD WINAPI station_job_run(LPVOID arg) {
     station_job_t *job = (station_job_t*)arg;
-    job->result = rubraview_pal_media_open((proven_u8str_view_t){ .ptr = (const proven_byte_t *)job->path, .size = strlen(job->path) }, RUBRAVIEW_BACKEND_FFMPEG, NULL);
+    job->result = (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION };
+    for (size_t i = 0; i < job->count && !job->result.media; ++i) {
+        if (InterlockedCompareExchange(&job->state, 2, 2) == 2) break;   /* let go: no more tries */
+        proven_u8str_view_t address = proven_u8str_view_from_cstr(job->tries[i]);
+        if (rubraview_stream_is_list_address(address)) {
+            if (job->fetched[i]) job->nested = true;
+            else station_list_take(job, address, false);
+            continue;
+        }
+        rubraview_media_open_result_t r = rubraview_pal_media_open(address, RUBRAVIEW_BACKEND_FFMPEG, NULL);
+        if (r.media) { job->result = r; break; }
+        if (r.failure != RUBRAVIEW_MEDIA_OPENED) job->result.failure = r.failure;
+        /* the station's own address answered with something that is not a stream: a list, perhaps */
+        if (!job->fetched[i] && !job->sniffed) { job->sniffed = true; station_list_take(job, address, true); }
+    }
     if (InterlockedCompareExchange(&job->state, 1, 0) == 2) {
         if (job->result.media) rubraview_pal_media_close(job->result.media);
         free(job);
@@ -3267,8 +3365,9 @@ static void station_job_leave(app_state_t *app) {
 static void station_job_start(app_state_t *app, int32_t index, proven_u8str_view_t path) {
     station_job_leave(app);
     station_job_t *job = (station_job_t*)calloc(1, sizeof(*job));
-    if (job && path.size < sizeof(job->path)) {
-        memcpy(job->path, path.ptr, path.size);
+    if (job && station_try_add(job, path, false)) {
+        const station_alts_t *alts = station_alts_of(path);   /* RV-158 */
+        for (size_t i = 0; alts && i < alts->count; ++i) (void)station_try_add(job, proven_u8str_view_from_cstr(alts->alts[i]), false);
         job->page = index;
         job->wake = app->window;
         job->thread = CreateThread(NULL, 0, station_job_run, job, 0, NULL);
@@ -3296,12 +3395,23 @@ static void station_job_poll(app_state_t *app) {
     CloseHandle(job->thread);
     rubraview_media_open_result_t opened = job->result;
     int32_t page = job->page;
+    bool nested = job->nested && !opened.media;
     free(job);
+    if (nested) osd_say(app, TU8("the station's list names another list; that one is not followed"));   /* RV-158 */
     if (page != current_page_index(app) || app->media || (size_t)page >= page_count(app)) {
         if (opened.media) rubraview_pal_media_close(opened.media);
         return;
     }
     media_adopt(app, page, app->source.pages[page].path, opened, RUBRAVIEW_MEDIA_FAIL_STATION);
+    update_window_title(app);
+}
+
+/* RV-158: what the station playing says is on, into the title when it changes. */
+static void station_title_poll(app_state_t *app) {
+    char now[sizeof(app->station_title)] = "";
+    if (app->media && app->media_info.live) (void)rubraview_pal_media_stream_title(app->media, now, sizeof(now));
+    if (strcmp(now, app->station_title) == 0) return;
+    memcpy(app->station_title, now, sizeof(now));
     update_window_title(app);
 }
 
@@ -6742,6 +6852,7 @@ static bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, doub
             break;
         }
         case RUBRAVIEW_LISTWIN_ADD: list_add_picked(app, in_files ? app->files_window : app->window); break;
+        case RUBRAVIEW_LISTWIN_URL: address_begin(app); break;   /* RV-158 */
         case RUBRAVIEW_LISTWIN_SAVE: list_save(app); break;
         case RUBRAVIEW_LISTWIN_LOAD: list_load(app); break;
         case RUBRAVIEW_LISTWIN_APPLY: apply_all_begin(app); break;
@@ -11632,6 +11743,7 @@ static void draw_list_bar(app_state_t *app, rubraview_renderer_t *rr, const rubr
     list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL),
                     app->list_checked_count > 0 && checked == app->list_checked_count, checked > 0);
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), T("Add"), small, false, COLOR_TEXT);
+    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_URL), T("URL"), small, false, COLOR_TEXT);   /* RV-158 */
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), T("Save"), small, false, COLOR_TEXT);
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), T("Load"), small, false, COLOR_TEXT);
@@ -13587,6 +13699,7 @@ static void rename_end(app_state_t *app) {
     app->rename_is_value = false;
     app->rename_is_gmic = false;
     app->rename_is_ffmpeg = false;
+    app->rename_is_address = false;
     app->batch_typing = 0;
     app->rename_is_apply = false;
     app->target_offered_len = 0;
@@ -13925,6 +14038,7 @@ static void rename_commit(app_state_t *app) {
     if (app->rename_is_value) { edit_value_typed(app); return; }
     if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
     if (app->rename_is_ffmpeg) { ffmpeg_typed(app); return; }   /* RFC-0009 D */
+    if (app->rename_is_address) { address_typed(app); return; }   /* RV-158 */
     if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_apply) { apply_all_typed(app); return; }
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
@@ -14117,7 +14231,7 @@ static void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, s
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0, added = 0;
     for (size_t i = 0; i < have; ++i) {
-        if (at_end) {
+        if (at_end || is_station_path(app->source.pages[i].path)) {   /* RV-158: a station cannot be asked about */
             /* Kept as they stand: nothing of a file but its name is needed, so none is asked about. */
             entries[n++] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
         } else if (rubraview_pal_fs_stat(app->arena, app->source.pages[i].path, &entries[n]) && !entries[n].is_directory) {
@@ -14178,6 +14292,51 @@ static void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, s
         play_seek(app, position);
         if (paused && !app->media_paused) media_toggle_pause(app);
     }
+}
+
+/* RV-158: a station typed into the list window's box joins the list at its end, by its title, and plays. */
+static void list_add_station(app_state_t *app, proven_u8str_view_t address, proven_u8str_view_t title) {
+    proven_u8str_view_t path = app_keep(app, address);
+    proven_u8str_view_t name = title.size > 0 ? app_keep(app, title) : rubraview_stream_display_name(path);
+    bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
+    size_t have = files_open ? page_count(app) : 0;
+    for (size_t i = 0; i < have; ++i) {
+        if (!proven_u8str_view_eq(app->source.pages[i].path, path)) continue;
+        osd_say(app, TU8("that station is in the list already"));
+        go_to_spread(app, spread_for_chosen_page(app, (int32_t)i));
+        return;
+    }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, have + 1, sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return;
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < have; ++i) entries[i] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
+    entries[have] = (rubraview_fs_entry_t){ .name = name, .path = path };
+    char line[96];
+    snprintf(line, sizeof(line), T("%zu added to the list (%zu in it)"), (size_t)1, have + 1);
+    open_set_ordered(app, entries, have + 1, cstr(line), true, path);
+}
+
+static void address_begin(app_state_t *app) {
+    if (app->rename_active) rename_end(app);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, PROVEN_LIT("http://"));
+    app->rename_active = true;
+    app->rename_is_address = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+    osd_say(app, TU8("a station's address, then a space and its title if you like (Enter adds it, Esc leaves it)"));
+}
+
+static void address_typed(app_state_t *app) {
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t address = {0}, title = {0};
+    bool ok = rubraview_stream_split_typed(text, &address, &title);
+    char a[RUBRAVIEW_STREAM_URL_MAX], t[512];
+    snprintf(a, sizeof(a), "%.*s", ok ? (int)address.size : 0, ok ? (const char *)address.ptr : "");
+    snprintf(t, sizeof(t), "%.*s", ok ? (int)title.size : 0, ok ? (const char *)title.ptr : "");
+    rename_end(app);
+    if (!ok) { osd_say(app, TU8("not a station's address: http, https or mms, then ://")); return; }
+    list_add_station(app, cstr(a), cstr(t));
 }
 
 static void panel_open_print(app_state_t *app);
@@ -27821,19 +27980,23 @@ static bool path_is_playlist(proven_u8str_view_t path) {
 
 /* RV-157: a list's text as UTF-8 — a .pls or .m3u from a station's site is often in its country's code page,
    or UTF-16. Into the arena; empty when it cannot be read. */
-static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_view_t raw) {
+/* The text decoded to UTF-8, malloc'd; NULL when it is UTF-8 already (a BOM is the parser's to pass over) or cannot
+   be. Any thread (RV-158: a list fetched by a station's job). */
+static char *list_text_decode(proven_u8str_view_t raw, size_t *len) {
     size_t bom = 0;
     char tag[96];
     const char *lang = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
     rubraview_textenc_t enc = rubraview_textenc_guess((const uint8_t*)raw.ptr, raw.size, lang, &bom);
-    if (enc == RUBRAVIEW_TEXTENC_UTF8) return raw;   /* a BOM is the parser's to pass over */
-    char *text = NULL;
+    *len = 0;
+    if (enc == RUBRAVIEW_TEXTENC_UTF8) return NULL;
+    if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE)
+        return rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.size - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, len);
+    return rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.size - bom, rubraview_textenc_codepage(enc), len);
+}
+
+static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_view_t raw) {
     size_t len = 0;
-    if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
-        text = rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.size - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, &len);
-    } else {
-        text = rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.size - bom, rubraview_textenc_codepage(enc), &len);
-    }
+    char *text = list_text_decode(raw, &len);
     if (!text) return raw;
     proven_u8str_view_t kept = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = len });
     free(text);
@@ -27856,6 +28019,7 @@ static void open_playlist(app_state_t *app, proven_u8str_view_t path) {
         if (is_station_path(item)) {
             proven_u8str_view_t title = list.entries[i].title;
             entries[n++] = (rubraview_fs_entry_t){ .name = title.size > 0 ? title : rubraview_stream_display_name(item), .path = item };
+            station_alts_note(&list.entries[i]);   /* RV-158: tried when it does not answer */
             stations++;
             continue;
         }
@@ -30901,6 +31065,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             next_spread(&app);
         }
         station_job_poll(&app);
+        station_title_poll(&app);   /* RV-158 */
         gmic_list_poll(&app);   /* RFC-0009 C */
         media_tick(&app);
         bgm_tick(&app);

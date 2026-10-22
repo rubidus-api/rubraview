@@ -122,6 +122,10 @@ typedef struct ff_media {
     /* RV-157: an internet radio station, opened over the network */
     bool station;
     ULONGLONG open_deadline_ms;              /* while opening one: when to give up (the decode thread's own) */
+    /* RV-158: what it says is playing (ICY StreamTitle), written by the decode thread under the lock */
+    SRWLOCK icy_lock;
+    char icy_title[256];
+    ULONGLONG icy_looked_ms;                 /* the decode thread's */
 } ff_media_t;
 
 /* ---- the DLLs ---- */
@@ -148,6 +152,11 @@ typedef struct ff_api {
     int (*avformat_network_init)(void);
     int (*av_dict_set)(AVDictionary**, const char*, const char*, int);
     void (*av_dict_free)(AVDictionary**);
+    /* RV-158: a station's playing title, a list fetched; any may be missing, and then there is neither */
+    int (*av_opt_get)(void*, const char*, int, uint8_t**);
+    int (*avio_open2)(AVIOContext**, const char*, int, const AVIOInterruptCB*, AVDictionary**);
+    int (*avio_read)(AVIOContext*, unsigned char*, int);
+    int (*avio_closep)(AVIOContext**);
     /* avcodec */
     unsigned (*avcodec_version)(void);
     const AVCodec *(*avcodec_find_decoder)(enum AVCodecID);
@@ -315,6 +324,7 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND_OPTIONAL(fmt, avformat_alloc_context); BIND_OPTIONAL(fmt, avio_alloc_context);
     BIND_OPTIONAL(fmt, avio_context_free); BIND_OPTIONAL(util, av_malloc); BIND_OPTIONAL(util, av_free);
     BIND_OPTIONAL(fmt, avformat_network_init); BIND_OPTIONAL(util, av_dict_set); BIND_OPTIONAL(util, av_dict_free);
+    BIND_OPTIONAL(util, av_opt_get); BIND_OPTIONAL(fmt, avio_open2); BIND_OPTIONAL(fmt, avio_read); BIND_OPTIONAL(fmt, avio_closep);
     BIND_OPTIONAL(util, av_hwdevice_ctx_alloc); BIND_OPTIONAL(util, av_hwdevice_ctx_init);
     BIND_OPTIONAL(util, av_buffer_ref); BIND_OPTIONAL(util, av_buffer_unref);
     BIND_OPTIONAL(util, av_hwframe_transfer_data); BIND_OPTIONAL(codec, avcodec_default_get_format);
@@ -970,6 +980,41 @@ static bool open_station(ff_media_t *m, ff_decode_t *d) {
     bool read = d->format && g_ff.avformat_find_stream_info(d->format, NULL) >= 0;
     m->open_deadline_ms = 0;   /* playing: only rw_timeout and closing stop it now */
     return read;
+}
+
+/* RV-158: a list an address names, fetched: the same protocols and limits as a station's, at most `cap` bytes. */
+typedef struct fetch_clock { ULONGLONG deadline_ms; } fetch_clock_t;
+
+static int fetch_interrupt(void *opaque) {
+    return GetTickCount64() > ((const fetch_clock_t *)opaque)->deadline_ms;
+}
+
+int64_t rubraview_pal_ffmpeg_fetch(proven_u8str_view_t address, uint8_t *out, size_t cap) {
+    static atomic_flag network_ready = ATOMIC_FLAG_INIT;
+    if (!out || cap == 0 || !ff_load() || !g_ff.avio_open2 || !g_ff.avio_read || !g_ff.avio_closep || !g_ff.av_dict_set ||
+        !g_ff.av_dict_free) return -1;
+    char urls[2][RUBRAVIEW_STREAM_URL_MAX];
+    if (rubraview_stream_ffmpeg_urls(address, urls) != 1 || strncmp(urls[0], "http", 4) != 0) return -1;   /* http and https only */
+    if (g_ff.avformat_network_init && !atomic_flag_test_and_set(&network_ready)) g_ff.avformat_network_init();
+    fetch_clock_t clock = { GetTickCount64() + STATION_OPEN_MS };
+    AVIOInterruptCB cb = { .callback = fetch_interrupt, .opaque = &clock };
+    AVDictionary *options = NULL;
+    g_ff.av_dict_set(&options, "protocol_whitelist", RUBRAVIEW_STREAM_PROTOCOLS, 0);
+    g_ff.av_dict_set(&options, "rw_timeout", STATION_RW_TIMEOUT_US, 0);
+    g_ff.av_dict_set(&options, "icy", "0", 0);   /* a list, not a stream: no metadata woven into it */
+    AVIOContext *io = NULL;
+    int opened = g_ff.avio_open2(&io, urls[0], AVIO_FLAG_READ, &cb, &options);
+    g_ff.av_dict_free(&options);
+    if (opened < 0 || !io) return -1;
+    size_t got = 0;
+    while (got < cap) {
+        int want = cap - got > 65536 ? 65536 : (int)(cap - got);
+        int n = g_ff.avio_read(io, out + got, want);
+        if (n <= 0) break;
+        got += (size_t)n;
+    }
+    g_ff.avio_closep(&io);
+    return (int64_t)got;
 }
 
 static bool open_input(ff_media_t *m, ff_decode_t *d) {
@@ -1909,6 +1954,21 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
     }
 
     while (!atomic_load_explicit(&m->quit, memory_order_acquire)) {
+        /* RV-158: what a station says is playing, looked at once a second */
+        if (m->station && d->format && d->format->pb && g_ff.av_opt_get && GetTickCount64() - m->icy_looked_ms >= 1000) {
+            m->icy_looked_ms = GetTickCount64();
+            uint8_t *packet = NULL;
+            if (g_ff.av_opt_get(d->format->pb, "icy_metadata_packet", AV_OPT_SEARCH_CHILDREN, &packet) >= 0 && packet) {
+                char title[sizeof(m->icy_title)];
+                size_t n = rubraview_stream_icy_title(proven_u8str_view_from_cstr((const char *)packet), title, sizeof(title));
+                if (n > 0) {
+                    AcquireSRWLockExclusive(&m->icy_lock);
+                    memcpy(m->icy_title, title, n + 1);
+                    ReleaseSRWLockExclusive(&m->icy_lock);
+                }
+            }
+            if (packet && g_ff.av_free) g_ff.av_free(packet);
+        }
         /* §3.16.2: another sound track was asked for. Only this thread
            may touch the decoder, so the request is applied here. */
         int32_t asked = atomic_exchange_explicit(&m->pending_audio_stream, -1, memory_order_acq_rel);
@@ -2060,6 +2120,7 @@ static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     ff_media_t *m = (ff_media_t*)calloc(1, sizeof(*m));
     if (m) {
         InitializeSRWLock(&m->audio_lock);
+        InitializeSRWLock(&m->icy_lock);   /* RV-158 */
         atomic_store_explicit(&m->audio_gain_millionths, 1000000, memory_order_release);
     }
     if (!m) return NULL;
@@ -2095,6 +2156,15 @@ static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     *out_info = m->info;
     rubraview_pal_audio_set_playing(m->audio, true);
     return m;
+}
+
+static bool ff_stream_title(void *handle, char *out, size_t cap) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !m->station || !out || cap == 0) return false;
+    AcquireSRWLockShared(&m->icy_lock);
+    snprintf(out, cap, "%s", m->icy_title);
+    ReleaseSRWLockShared(&m->icy_lock);
+    return out[0] != '\0';
 }
 
 static bool ff_hdr_peak(void *handle, double *out_nits) {
@@ -2371,6 +2441,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .audio_position = ff_audio_position,
     .audio_format = ff_audio_format,
     .hdr_peak = ff_hdr_peak,
+    .stream_title = ff_stream_title,   /* RV-158 */
     .tracks = ff_tracks,
     .details = ff_details,
     .select_audio_track = ff_select_audio_track,

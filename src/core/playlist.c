@@ -306,6 +306,8 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
     entry_buf_t buf = {0};
     bool in_entry = false, have_ref = false;
     proven_u8str_view_t title = PROVEN_LIT(""), ref = PROVEN_LIT("");
+    proven_u8str_view_t others[RUBRAVIEW_PLAYLIST_MAX_ALTERNATES];   /* RV-158: the entry's other refs */
+    size_t other_count = 0;
     const char *s = (const char *)text.ptr;
     size_t len = text.size;
     for (size_t i = 0; i < len;) {
@@ -333,13 +335,24 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
         if (is_entry && !closing) {
             in_entry = true; have_ref = false;
             title = ref = PROVEN_LIT("");
+            other_count = 0;
         } else if (is_entry && closing) {
-            if (in_entry && have_ref && !entry_buf_push(arena, &buf, (rubraview_playlist_entry_t){ .path = ref, .duration_seconds = -1.0, .title = title })) break;
+            rubraview_playlist_entry_t e = { .path = ref, .duration_seconds = -1.0, .title = title };
+            if (in_entry && have_ref && other_count > 0) {
+                proven_result_mem_mut_t m = rubraview_arena_alloc_array(arena, other_count, sizeof(others[0]));
+                if (proven_is_ok(m.err)) {
+                    memcpy(m.value.ptr, others, other_count * sizeof(others[0]));
+                    e.alternates = (proven_u8str_view_t *)m.value.ptr;
+                    e.alternate_count = other_count;
+                }
+            }
+            if (in_entry && have_ref && !entry_buf_push(arena, &buf, e)) break;
             in_entry = false; have_ref = false;
-        } else if (is_ref && !closing && !have_ref) {
+        } else if (is_ref && !closing) {
             proven_u8str_view_t href = xml_attr(arena, word + name_len, wl - name_len, "href");
             if (href.size > 0) {
-                if (in_entry) { ref = href; have_ref = true; }
+                if (in_entry && !have_ref) { ref = href; have_ref = true; }
+                else if (in_entry) { if (other_count < RUBRAVIEW_PLAYLIST_MAX_ALTERNATES) others[other_count++] = href; }
                 else if (!entry_buf_push(arena, &buf, (rubraview_playlist_entry_t){ .path = href, .duration_seconds = -1.0, .title = PROVEN_LIT("") })) break;
             }
         } else if (is_title && !closing && in_entry) {

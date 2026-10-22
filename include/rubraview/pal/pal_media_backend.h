@@ -39,6 +39,8 @@ typedef struct rubraview_media_backend_api {
     bool  (*picture_rate)(void *impl, double *out_rate);
     /** RV-150: the peak an HDR film is tone mapped from. May be NULL. */
     bool  (*hdr_peak)(void *impl, double *out_nits);
+    /** RV-158: what a station says is playing (ICY). May be NULL. */
+    bool  (*stream_title)(void *impl, char *out, size_t cap);
 
     /** The container's tracks, as found while opening (§3.16.2). */
     bool  (*tracks)(void *impl, rubraview_track_set_t *out_set);

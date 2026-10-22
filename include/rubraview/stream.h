@@ -32,6 +32,27 @@ size_t rubraview_stream_ffmpeg_urls(proven_u8str_view_t address, char out[2][RUB
     query and a trailing `/` left out. A view into `address`. */
 proven_u8str_view_t rubraview_stream_display_name(proven_u8str_view_t address);
 
+/* ---- RV-158 ---- */
+
+/** Most addresses tried for one station: its own, its list's fall-backs, those of a list it names. */
+#define RUBRAVIEW_STREAM_MAX_TRIES 8
+/** Most bytes of a list fetched from an address. */
+#define RUBRAVIEW_STREAM_LIST_MAX (64u * 1024u)
+
+/** An address whose path names a list rather than a stream: `.pls`, `.m3u`, `.asx`, `.wax`, `.wvx` (any case), the
+    query and fragment left out. `.m3u8` is not one: it is HLS, which FFmpeg plays itself. */
+bool rubraview_stream_is_list_address(proven_u8str_view_t address);
+
+/** The playing title in an ICY metadata packet (`StreamTitle='...';StreamUrl='...';`): from after `StreamTitle='`
+    to the `';` before `StreamUrl=`, else the last `';` (stations do not escape `'` or `;` in a title). Control
+    characters become spaces, the ends are trimmed, Latin-1 (any text that is not UTF-8) becomes UTF-8, and it is cut
+    on a character to fit `cap`. Its length, 0 (and "") when there is none. */
+size_t rubraview_stream_icy_title(proven_u8str_view_t packet, char *out, size_t cap);
+
+/** An address typed with its title after it, `http://host/live Jazz FM` (an address has no space): the two, trimmed.
+    False when the first word is not an address. */
+bool rubraview_stream_split_typed(proven_u8str_view_t typed, proven_u8str_view_t *address, proven_u8str_view_t *title);
+
 #ifdef __cplusplus
 }
 #endif

@@ -102,6 +102,11 @@ bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate
     return media && media->api->picture_rate && out_rate && media->api->picture_rate(media->impl, out_rate);
 }
 
+bool rubraview_pal_media_stream_title(rubraview_media_t *media, char *out, size_t cap) {
+    if (out && cap) out[0] = '\0';
+    return media && media->api->stream_title && out && cap && media->api->stream_title(media->impl, out, cap);
+}
+
 bool rubraview_pal_media_hdr_peak(rubraview_media_t *media, double *out_nits) {
     return media && media->api->hdr_peak && out_nits && media->api->hdr_peak(media->impl, out_nits);
 }

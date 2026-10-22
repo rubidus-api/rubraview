@@ -110,6 +110,10 @@ void rubraview_pal_ffmpeg_set_folders(proven_u8str_view_t imported, proven_u8str
 /** Where the FFmpeg in use came from: 0 none, 1 beside the program, 2 imported, 3 the chosen folder. */
 int rubraview_pal_ffmpeg_place(void);
 
+/** RV-158: up to `cap` bytes from an http or https `address`, by FFmpeg under a station's protocols and time limits
+    (8 s); how many, or -1 when it could not be read. For a list a station's address names. */
+int64_t rubraview_pal_ffmpeg_fetch(proven_u8str_view_t address, uint8_t *out, size_t cap);
+
 /** The five DLL names this build takes, versioned ("avcodec-63.dll"), in the order they load. */
 const char *rubraview_pal_ffmpeg_dll_name(size_t index);
 #define RUBRAVIEW_FFMPEG_DLLS 5
@@ -267,6 +271,10 @@ bool rubraview_pal_media_picture_rate(rubraview_media_t *media, double *out_rate
 /** RV-150: the peak an HDR film is tone mapped from, in nits — its metadata's, read from its pictures. False
     while it is not tone mapped. */
 bool rubraview_pal_media_hdr_peak(rubraview_media_t *media, double *out_nits);
+
+/** RV-158: what a station says is playing (ICY StreamTitle), NUL-terminated into `out`; false when it says nothing
+    (or it is not a station, or not FFmpeg's). */
+bool rubraview_pal_media_stream_title(rubraview_media_t *media, char *out, size_t cap);
 
 /**
  * §3.16.2 / R135: the tracks the container holds. The set is worked out

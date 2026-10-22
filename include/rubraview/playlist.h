@@ -25,7 +25,13 @@ typedef struct rubraview_playlist_entry {
     proven_u8str_view_t path;             /* as written in the file; the caller resolves relative paths */
     double  duration_seconds; /* from EXTINF; -1 if unknown or absent (.rvlist has no duration concept) */
     proven_u8str_view_t title;            /* from EXTINF; empty if absent */
+    /* RV-158: an .asx entry's other refs, in order: tried when `path` does not answer (not saved again) */
+    proven_u8str_view_t *alternates;
+    size_t alternate_count;
 } rubraview_playlist_entry_t;
+
+/** Fall-backs kept for one entry. */
+#define RUBRAVIEW_PLAYLIST_MAX_ALTERNATES 7
 
 typedef struct rubraview_playlist {
     rubraview_playlist_entry_t *entries;
