@@ -1450,6 +1450,65 @@ typedef enum { SHELL_PART_LEAVE = 0, SHELL_PART_APPLY, SHELL_PART_REMOVE } shell
 /* Shared variables, defined in the file that owns them. */
 extern const char *const LANG_PACKS[];
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+enum { DETAILS_NONE = 0, DETAILS_IN_FILE, DETAILS_TXT, DETAILS_FAILED };
+#define TEXT_KEEP_BLOCKS 400                   /* laid-out paragraphs kept round the view */
+typedef struct text_page {
+    int32_t page;                      /* the page it is */
+    proven_u8str_view_t key;                       /* its path, for the place kept (malloc'd) */
+    char *source;                      /* the file's text, cleaned (§2.3) */
+    size_t source_len;
+    rubraview_textenc_t enc;
+    bool enc_by_hand;
+    rubraview_text_view_t view;
+    int built_breaks;                  /* what the view was built with */
+    bool built_trim;
+    bool built_headings;   /* RV-123 */
+    rubraview_text_block_t **blocks;   /* per paragraph, NULL until laid out */
+    /* 1.25.0 (owner, 2026-10-20: "한줄로 ... 전체가 다 개행이 안되게"): a piece joined to the one before begins with that
+       one's last line, so the run flows on; how many bytes it carries (TEXT_CARRY_UNKNOWN until worked out) */
+    size_t *carry;
+    double *heights;                   /* per paragraph: measured, or guessed until it is */
+    double *tops;                      /* where each begins; `total` is where the last ends */
+    bool tops_dirty;
+    double total;
+    size_t laid_out;                   /* blocks alive */
+    /* what the blocks were laid out for */
+    double lay_width, lay_size, lay_spacing;
+    bool lay_wrap;
+    uint64_t lay_family;
+    /* where the view is: a paragraph and how far into it, so heights
+       measured above or below do not move what is being read */
+    size_t anchor;
+    double anchor_dy;
+    double view_h;
+    double x_scroll;                   /* no wrap: how far to the right */
+    /* auto-scroll (§5): smooth, by pixels; its speed in lines a minute */
+    bool autoscroll;
+    double press_x, press_y;   /* where the last press on the text was: a click in the middle is auto-scroll */
+    double autoscroll_last;
+    double autoscroll_carry;
+    /* the selection, in the view's text: from `sel_a` to `sel_b` */
+    bool selecting;
+    size_t sel_a, sel_b;
+    /* find */
+    char find[256];
+    size_t find_len;
+    size_t match_at, match_len;
+    bool match;
+    /* drawing, for the pointer */
+    double col_x, col_w, top_pad;
+} text_page_t;
+#define TEXT_CARRY_UNKNOWN ((size_t)-1)
+
+/* Shared variables, defined in the file that owns them. */
+extern size_t         g_launch_count;
+extern int32_t        g_launch_page;
+extern const proven_u8str_view_t *g_launch_paths;
+extern rubraview_shell_verb_t g_launch_verb;
+extern bool           g_launch_whole;
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1467,6 +1526,9 @@ int anim_end_mode(const app_state_t *app);
 bool anim_plays(const app_state_t *app);
 rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
+void append_arg(char *buf, size_t cap, size_t *pos, proven_u8str_view_t text);
+void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text);
+void append_number(char *buf, size_t cap, size_t *pos, size_t value);
 void append_text(char *buf, size_t cap, size_t *pos, const char *text);
 void apply_all_begin(app_state_t *app);
 void apply_all_originals(app_state_t *app);
@@ -1499,6 +1561,7 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
 bool chooser_press(app_state_t *app, int where, double x, double y);
 bool chooser_wheel(app_state_t *app, int where, double notches);
 bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches);
+void console_line(const char *text);
 proven_u8str_view_t crop_button_label(const app_state_t *app);
 void ctx_close(app_state_t *app);
 void ctx_open_at(app_state_t *app, double x, double y);
@@ -1510,6 +1573,7 @@ int32_t current_page_index(const app_state_t *app);
 void curve_widget_drag(app_state_t *app, double px, double py);
 bool curve_widget_press(app_state_t *app, double px, double py, bool remove);
 rubraview_pal_rect_t curve_widget_rect(const app_state_t *app);
+bool details_beside(proven_arena_t *arena, proven_u8str_view_t picture, rubraview_details_src_t *out, proven_u8str_view_t *out_path);
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
@@ -1520,6 +1584,8 @@ void draw_edit_preview(app_state_t *app);
 void draw_edit_window(app_state_t *app);
 void draw_favwin(app_state_t *app, double win_w, double win_h);
 void draw_fontpick_window(app_state_t *app);
+void draw_help_window(app_state_t *app);
+void draw_info_window(app_state_t *app);
 void draw_mini_window(app_state_t *app);
 void draw_outlined_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb);
@@ -1610,12 +1676,17 @@ const char *gmic_step_name(const rubraview_edit_step_t *step);
 void gmic_typed(app_state_t *app);
 void go_to_spread(app_state_t *app, size_t index);
 void handle_action(app_state_t *app, proven_u8str_view_t action);
+size_t help_pump(app_state_t *app);
+void help_show(app_state_t *app);
 void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
+size_t info_pump(app_state_t *app);
+void info_show(app_state_t *app);
 void interval_set(app_state_t *app, double seconds);
 bool is_media_path(proven_u8str_view_t path);
 bool is_station_path(proven_u8str_view_t path);
 bool is_text_path(proven_u8str_view_t path);
 bool key_is(rubraview_key_combo_t combo, const char *name);
+void launch_paths_gather(proven_arena_t *arena, const rubraview_cli_result_t *cli);
 const char *layout_said(rubraview_layout_choice_t choice);
 void layout_save(app_state_t *app);
 void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool say);
@@ -1666,6 +1737,7 @@ size_t mini_pump(app_state_t *app);
 void mini_show(app_state_t *app);
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags);
 bool name_holds(proven_u8str_view_t name, proven_u8str_view_t part);
+void new_window(app_state_t *app);
 void note_activity(app_state_t *app);
 bool on_archive_page(const app_state_t *app);
 void open_path(app_state_t *app, proven_u8str_view_t path);
@@ -1689,6 +1761,7 @@ void panel_open_batch(app_state_t *app);
 void panel_open_edit(app_state_t *app);
 void panel_open_export(app_state_t *app);
 void panel_relayout(app_state_t *app);
+void panel_run_batch(app_state_t *app);
 bool path_is_listed_kind(proven_u8str_view_t path);
 bool path_is_playlist(proven_u8str_view_t path);
 void picker_activate(app_state_t *app, size_t index);
@@ -1756,6 +1829,7 @@ void px_edit_fill_crop(app_state_t *app);
 bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
 void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
 void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
+bool recent_kept_out(const app_state_t *app, proven_u8str_view_t path);
 void recent_sync(app_state_t *app, proven_u8str_view_t opened, bool clear);
 void recentwin_build(app_state_t *app);
 void recentwin_motion(app_state_t *app, double x, double y);
@@ -1772,6 +1846,7 @@ void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback)
 rubraview_repeat_mode_t repeat_mode(const app_state_t *app);
 void reset_view(app_state_t *app);
 void restart_now(app_state_t *app);
+int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
 void sel_drag_to(app_state_t *app, int32_t ix, int32_t iy);
@@ -1827,11 +1902,30 @@ void takeout_begin(app_state_t *app);
 void takeout_end(app_state_t *app);
 void takeout_step(app_state_t *app);
 void target_begin(app_state_t *app, bool moving, bool from_picker);
+bool text_active(const app_state_t *app);
+size_t text_block_start(const text_page_t *t, size_t i);
+void text_close(app_state_t *app);
 uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback);
+double text_dpi(app_state_t *app);
 int text_enc_now(const app_state_t *app);
 void text_encoding_set(app_state_t *app, rubraview_textenc_t next);
+void text_free_blocks(text_page_t *t);
+uint32_t text_ink(app_state_t *app, uint32_t *paper);
+double text_line_h(app_state_t *app);
+bool text_next_joined(const text_page_t *t, size_t i);
+size_t text_para_at_y(text_page_t *t, double y);
 void text_prepare(app_state_t *app);
+double text_px(app_state_t *app);
 bool text_rebuild(app_state_t *app);
+void text_reset_heights(app_state_t *app, text_page_t *t);
+void text_scroll_by(app_state_t *app, double dy);
+double text_scroll_max(text_page_t *t);
+void text_scroll_to(text_page_t *t, double y);
+double text_scroll_y(text_page_t *t);
+double text_spacing(app_state_t *app);
+void text_tops(text_page_t *t);
+bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, bool by_hand);
+bool text_wraps(app_state_t *app);
 void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text);
 bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo);
 void thumbs_wake(void *context);
