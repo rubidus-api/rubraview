@@ -1312,6 +1312,85 @@ extern uint32_t g_subs_generation;
 #define AB_UNIT_W 14.0
 #define FILES_BACKGROUND 0xFF181818u
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+enum {
+    PANEL_EXPOSURE = 1, PANEL_BRIGHTNESS, PANEL_CONTRAST, PANEL_SATURATION,
+    PANEL_TEMPERATURE, PANEL_TINT, PANEL_BLACK, PANEL_WHITE, PANEL_GAMMA,
+    PANEL_BLUR, PANEL_SHARPEN, PANEL_CROP_RATIO, PANEL_RESET, PANEL_APPLY, PANEL_SAVE_COPY, PANEL_SAVE_OVER,
+    /* RV-108: the adjust panel's second page, and two more of Export's rows. */
+    PANEL_EDIT_PAGE, PANEL_BLUR_KIND, PANEL_SHARPEN_KIND, PANEL_SHARPEN_RADIUS, PANEL_SHARPEN_THRESHOLD,
+    PANEL_RESIZE, PANEL_RESIZE_PX, PANEL_CROP_PX, PANEL_TRIM, PANEL_PROGRESSIVE, PANEL_PNG_DEPTH, PANEL_WEBP_LOSSLESS, PANEL_WEBP_EFFORT,
+    PANEL_FORMAT, PANEL_QUALITY, PANEL_PNG_LEVEL, PANEL_PRIVACY, PANEL_EXPORT_NOW,
+    /* RV-140: Export's rows for what the writers take */
+    PANEL_JPEG_SUBSAMPLING, PANEL_JPEG_GREY, PANEL_JPEG_OPTIMISE, PANEL_JPEG_RESTART, PANEL_PNG_FILTER, PANEL_PNG_INTERLACE,
+    PANEL_COLOURS, PANEL_DITHER, PANEL_TIFF_COMPRESSION, PANEL_BMP_DEPTH, PANEL_WEBP_NEAR, PANEL_WEBP_ALPHA, PANEL_WEBP_SHARP,
+    PANEL_KEEP_DETAILS, PANEL_WEBP_PRESET, PANEL_TARGET_KB, PANEL_TIFF_CMYK,   /* 1.17.0 */
+    PANEL_AVIF_CHROMA, PANEL_AVIF_BITS,   /* 1.31.0 */
+    PANEL_BATCH_RESIZE, PANEL_BATCH_FILTER, PANEL_BATCH_FORMAT, PANEL_BATCH_GRAY, PANEL_BATCH_RUN,
+    /* RV-129 */
+    PANEL_BATCH_SIZE_BY, PANEL_BATCH_BOX_H, PANEL_BATCH_LINEAR, PANEL_BATCH_NO_ENLARGE, PANEL_BATCH_SHARPEN,
+    PANEL_BATCH_ROTATE, PANEL_BATCH_FLIP, PANEL_BATCH_CROP, PANEL_BATCH_AUTOCROP, PANEL_BATCH_AUTOCOLOUR, PANEL_BATCH_NEGATIVE,
+    PANEL_BATCH_EFFECT, PANEL_BATCH_EFFECT_AMOUNT, PANEL_BATCH_CANVAS, PANEL_BATCH_BORDER, PANEL_BATCH_FRAME_COLOUR,
+    PANEL_BATCH_MARK, PANEL_BATCH_MARK_CORNER, PANEL_BATCH_MARK_OPACITY, PANEL_BATCH_QUALITY,
+    PANEL_BATCH_NAME, PANEL_BATCH_START, PANEL_BATCH_REPLACE, PANEL_BATCH_EXISTS, PANEL_BATCH_KEEP_DATES,
+    PANEL_BATCH_RECURSIVE, PANEL_BATCH_SUBFOLDERS, PANEL_BATCH_OUT, PANEL_BATCH_TEST, PANEL_BATCH_SAVE, PANEL_BATCH_LOAD,
+    PANEL_BATCH_TEXT, PANEL_BATCH_TEXT_CORNER, PANEL_BATCH_TEXT_SIZE, PANEL_BATCH_TEXT_COLOUR, PANEL_BATCH_DPI,   /* RV-134 */
+    PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
+    PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
+    PANEL_PRINT_PRINTER, PANEL_PRINT_PAPER, PANEL_PRINT_ORIENT, PANEL_PRINT_COPIES, PANEL_PRINT_SHEET, PANEL_PRINT_DIALOG,   /* 1.19.0 */
+    PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
+    /* The owner's edit (2026-10-17) */
+    PANEL_APPLY_SEL, PANEL_CROP_SEL, PANEL_RESIZE_APPLY, PANEL_UNDO, PANEL_REDO, PANEL_STEPS, PANEL_SEL_BOX,
+    PANEL_SAVE_ORIGINAL, PANEL_SEL_SHAPE, PANEL_SEL_X, PANEL_SEL_Y, PANEL_SEL_W, PANEL_SEL_H, PANEL_SEL_FEATHER,
+    PANEL_SEL_ALL, PANEL_SEL_TYPE,
+    PANEL_BAL_R, PANEL_BAL_G, PANEL_BAL_B, PANEL_AUTO_COLOUR, PANEL_EFFECT, PANEL_EFFECT_AMOUNT, PANEL_EFFECT_APPLY, PANEL_COMPARE,
+    /* RV-128 */
+    PANEL_RESIZE_PRESET, PANEL_RESIZE_LOCK, PANEL_RESIZE_FILTER, PANEL_RESIZE_LINEAR, PANEL_RESIZE_SHARPEN, PANEL_RESIZE_DPI,
+    /* RV-133 */
+    PANEL_CLS_HERE, PANEL_CLS_COPY, PANEL_CLS_MOVE, PANEL_CLS_CLEAR, PANEL_CLS_SETTINGS,
+    /* RV-137: the Edit window's rooms and the change list's buttons */
+    PANEL_SP_CURVE, PANEL_SP_SEL, PANEL_SP_CHANGES, PANEL_CHANGES_REMOVE, PANEL_ALL_COPIES, PANEL_ALL_ORIGINALS,
+    PANEL_SEL_MODE, PANEL_SEL_COPY, PANEL_EFFECT_GROUP,
+    PANEL_PLUGIN, PANEL_PLUGIN_P0, PANEL_PLUGIN_P1, PANEL_PLUGIN_P2, PANEL_PLUGIN_P3,   /* RFC-0007 */
+    PANEL_PLUGIN_P4, PANEL_PLUGIN_P5, PANEL_PLUGIN_P6, PANEL_PLUGIN_P7, PANEL_PLUGIN_APPLY,
+    PANEL_GMIC_CATEGORY, PANEL_GMIC_FILTER, PANEL_GMIC_TYPE, PANEL_GMIC_APPLY,   /* RFC-0009 C */
+    PANEL_FFMPEG_GROUP, PANEL_FFMPEG_FILTER, PANEL_FFMPEG_TYPE, PANEL_FFMPEG_APPLY,   /* RFC-0009 D */
+    PANEL_GMIC_P0 = 800,       /* + the parameter's row, below PANEL_FFMPEG_P0 */
+    PANEL_FFMPEG_P0 = 850,     /* + the option's row, below PANEL_CLS_FOLDER */
+    PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
+    PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
+};
+#define PANEL_GMIC_ROWS 24   /* parameters shown; the rest run at their defaults */
+typedef struct gmic_list_job {
+    HANDLE thread;
+    volatile LONG done;
+    rubraview_window_t *wake;
+    char exe[520], out[600];
+    bool ok;
+    char said[512];
+} gmic_list_job_t;
+#define PANEL_FFMPEG_ROWS 24   /* options shown; the rest keep FFmpeg's defaults */
+typedef struct batch_tokens {
+    const char *v[64];
+    size_t      n;
+    char        store[8192];
+    size_t      used;
+} batch_tokens_t;
+#define SETTINGS_ACCENT      0xFFE0B46Au   /* headings: warm, so that blue means "press it" (owner, 2026-10-17) */
+
+/* Shared variables, defined in the file that owns them. */
+extern rubraview_ffilter_catalog_t g_ffm;
+extern rubraview_gmic_catalog_t g_gmic;
+extern char g_gmic_exe[520];
+extern gmic_list_job_t *g_gmic_job;
+extern const char *g_gmic_list_why;
+extern char g_gmic_where[520];
+extern size_t g_plugin_count;
+extern char g_plugin_folder[520];
+extern _Thread_local const char *g_plugin_why;
+extern rubraview_plugin_t g_plugins[RUBRAVIEW_PLUGIN_MAX];
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1323,22 +1402,80 @@ void ab_edit_take(app_state_t *app, int32_t f);
 void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
 proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part);
 rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t part);
+proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size);
 bool anim_plays(const app_state_t *app);
 rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
+void apply_all_begin(app_state_t *app);
+void apply_all_originals(app_state_t *app);
+void apply_all_poll(app_state_t *app, bool quitting);
+void apply_all_start(app_state_t *app, apply_all_job_t *job);
+void apply_all_typed(app_state_t *app);
 void audio_chain_update(app_state_t *app);
+void batch_save_or_load(app_state_t *app, bool saving);
+proven_u8str_view_t batch_text(app_state_t *app);
+void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk);
+void batch_try_names(app_state_t *app);
+void batch_type_begin(app_state_t *app, int32_t id);
+void batch_typed(app_state_t *app);
 void bgm_close(app_state_t *app);
 void bgm_do(app_state_t *app, rubraview_bgm_action_t action);
 bool bgm_pause_for_sound(const app_state_t *app);
 void bgm_tick(app_state_t *app);
+size_t bytes_scaled(size_t n, size_t k, size_t extra);
+void changes_remove_checked(app_state_t *app);
+bool chooser_key(app_state_t *app, int where, rubraview_key_combo_t combo);
+bool chooser_press(app_state_t *app, int where, double x, double y);
+bool chooser_wheel(app_state_t *app, int where, double notches);
+proven_u8str_view_t crop_button_label(const app_state_t *app);
 proven_u8str_view_t cue_audio_path(app_state_t *app, proven_u8str_view_t cue_path);
 bool cue_step(app_state_t *app, int direction);
 int32_t current_page_index(const app_state_t *app);
+void curve_widget_drag(app_state_t *app, double px, double py);
+bool curve_widget_press(app_state_t *app, double px, double py, bool remove);
+rubraview_pal_rect_t curve_widget_rect(const app_state_t *app);
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+void draw_chooser(app_state_t *app, rubraview_renderer_t *r, int where, double px, double py);
+void draw_crop_overlay(app_state_t *app);
+void draw_curve_widget(app_state_t *app);
+void draw_edit_preview(app_state_t *app);
+void draw_edit_window(app_state_t *app);
 void draw_mini_window(app_state_t *app);
+void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
+void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 void draw_subs_window(app_state_t *app);
+bool edit_apply_pending(app_state_t *app, bool say);
+void edit_auto_colour(app_state_t *app);
+void edit_crop_to_selection(app_state_t *app);
+void edit_cur_size(const app_state_t *app, int32_t *w, int32_t *h);
+void edit_effect_apply(app_state_t *app);
+void edit_live_close(app_state_t *app);
+void edit_live_update(app_state_t *app, int32_t kind);
+bool edit_panel_open(const app_state_t *app);
+rubraview_edit_step_t edit_pending(const app_state_t *app);
+void edit_plugin_apply(app_state_t *app);
+void edit_preview_close(app_state_t *app);
+void edit_preview_open(app_state_t *app);
+void edit_preview_update(app_state_t *app);
+size_t edit_pump(app_state_t *app);
+void edit_resize_apply(app_state_t *app);
+void edit_sel_apply_row(app_state_t *app, int32_t index);
+void edit_sel_sync(app_state_t *app);
+void edit_sel_toggle(app_state_t *app);
+bool edit_side_press(app_state_t *app, double px, double py);
+void edit_steps_changed(app_state_t *app);
+void edit_steps_toggle(app_state_t *app);
+void edit_undo(app_state_t *app, bool redo);
+void edit_values_fresh(app_state_t *app);
+bool edit_view_rect(app_state_t *app, rubraview_pal_rect_t *out, double *out_scale, bool *changed);
+rubraview_edit_session_t edit_whole(const app_state_t *app);
+void edit_window_close(app_state_t *app);
+void edit_window_layout(app_state_t *app);
+void edit_window_show(app_state_t *app);
+const char *effect_word(int32_t e);
 double eq_band_db(const app_state_t *app, size_t band);
 proven_u8str_view_t eq_band_key(size_t band);
 proven_u8str_view_t eq_preset_label(int preset);
@@ -1348,13 +1485,30 @@ bool eqwin_press(app_state_t *app, double x, double y, bool right);
 void eqwin_set_band(app_state_t *app, size_t band, double db);
 void eqwin_toggle(app_state_t *app);
 bool eqwin_wheel(app_state_t *app, double x, double y, double delta);
+bool export_more_apply(rubraview_export_options_t *o, int32_t id, double v);
+void export_more_rows(rubraview_panel_t *pn, const rubraview_export_options_t *o, uint32_t rows);
+bool ffmpeg_button(app_state_t *app, int32_t id);
+bool ffmpeg_list_ready(void);
+bool ffmpeg_row_changed(app_state_t *app, int32_t id, double v);
+void ffmpeg_typed(app_state_t *app);
 proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
+bool filing_exists(void *ctx, proven_u8str_view_t path);
 void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride);
+bool gmic_button(app_state_t *app, int32_t id);
+void gmic_from_settings(app_state_t *app);
+void gmic_list_make(app_state_t *app);
+void gmic_list_poll(app_state_t *app);
+bool gmic_row_changed(app_state_t *app, int32_t id, double v);
+const char *gmic_step_name(const rubraview_edit_step_t *step);
+void gmic_typed(app_state_t *app);
 void go_to_spread(app_state_t *app, size_t index);
 void handle_action(app_state_t *app, proven_u8str_view_t action);
 bool is_media_path(proven_u8str_view_t path);
 bool is_station_path(proven_u8str_view_t path);
 bool key_is(rubraview_key_combo_t combo, const char *name);
+void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_t r, const char *label, double size,
+                        bool on, uint32_t color);
+void list_check_mark(rubraview_renderer_t *rr, rubraview_rect_t c, bool every, bool some);
 char *list_text_decode(proven_u8str_view_t raw, size_t *len);
 void media_ab_check(app_state_t *app);
 void media_close(app_state_t *app);
@@ -1368,20 +1522,53 @@ bool mini_paused(const app_state_t *app);
 size_t mini_pump(app_state_t *app);
 void mini_show(app_state_t *app);
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags);
+bool on_archive_page(const app_state_t *app);
 void osd_say(app_state_t *app, proven_u8str_view_t text);
 size_t page_count(const app_state_t *app);
+proven_u8str_view_t page_display_name(const app_state_t *app, size_t index);
+uint64_t page_read_cost(app_state_t *app, size_t index);
+bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale);
 bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
+void panel_apply_row(app_state_t *app, int32_t index);
+void panel_build_edit(app_state_t *app);
+void panel_close(app_state_t *app);
+bool panel_handle_press(app_state_t *app, double px, double py);
+void panel_open_batch(app_state_t *app);
+void panel_open_edit(app_state_t *app);
+void panel_open_export(app_state_t *app);
+void panel_relayout(app_state_t *app);
+size_t picture_bytes(size_t w, size_t h, size_t per_pixel, size_t extra);
 double play_duration(const app_state_t *app);
 double play_position(const app_state_t *app);
 void play_seek(app_state_t *app, double seconds);
+rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src);
+void plugins_from_settings(app_state_t *app);
+void plugins_look(proven_u8str_view_t folder);
+size_t plugins_usable(const rubraview_plugin_t **out, size_t capacity);
+bool point_in_curve_widget(const app_state_t *app, double px, double py);
 void putin_end(app_state_t *app, bool swapped);
 void putin_step(app_state_t *app);
 rubraview_pal_rect_t px_box_rect(const app_state_t *app);
+proven_u8str_view_t px_button_label(const app_state_t *app);
+void px_edit_begin(app_state_t *app);
+void px_edit_begin_crop(app_state_t *app);
+void px_edit_close(app_state_t *app);
+int32_t px_edit_fields(const app_state_t *app);
+void px_edit_fill_crop(app_state_t *app);
+bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
+void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
+bool rename_box_press(app_state_t *app, double x, double y);
+void rename_end(app_state_t *app);
+void rename_text(app_state_t *app, const rubraview_window_event_t *event);
 void reopen_after_removal(app_state_t *app, size_t removed_index);
 void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
 rubraview_repeat_mode_t repeat_mode(const app_state_t *app);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
+void sel_drag_to(app_state_t *app, int32_t ix, int32_t iy);
+int32_t sel_hit(app_state_t *app, double px, double py);
+void sel_mode_set(app_state_t *app, bool on);
+void settings_say(app_state_t *app, const char *text);
 size_t spread_for_chosen_page(app_state_t *app, int32_t page);
 size_t spread_index_for_page(const app_state_t *app, int32_t page_index);
 void station_alts_note(const rubraview_playlist_entry_t *e);
@@ -1408,9 +1595,12 @@ void subtitles_toggle(app_state_t *app);
 void takeout_begin(app_state_t *app);
 void takeout_end(app_state_t *app);
 void takeout_step(app_state_t *app);
+uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback);
 void text_prepare(app_state_t *app);
+void toolbox_refresh(app_state_t *app);
 void tracks_prepare(app_state_t *app, proven_u8str_view_t video_path);
 void ui_font_apply_all(app_state_t *app);
+void unload_all_pages(app_state_t *app);
 void update_precache(app_state_t *app);
 void update_window_title(app_state_t *app);
 proven_arena_t *window_block_arena(app_state_t *app, struct window_block *wb);
