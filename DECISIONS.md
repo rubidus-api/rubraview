@@ -2037,3 +2037,36 @@ Do not store credentials, private infrastructure details, personal data, private
   - A list an address names: `rubraview_stream_is_list_address` (`.pls`, `.m3u`, `.asx`, `.wax`, `.wvx` before any `?`; not `.m3u8`, which is HLS) is fetched by `rubraview_pal_ffmpeg_fetch` (FFmpeg's avio, the station whitelist, 8 s, 64 KB, http and https only), decoded as a list file is, and its stations join the tries; an address that will not play is fetched once and read the same way (a list served without an extension). A list named by a fetched list is not followed (said on screen). At most 8 tries a station.
   - The list window's bar: **URL** beside Add; `address title` typed (`rubraview_stream_split_typed`) joins the list at its end and plays. Adding with "sorted" kept no station before (they cannot be `stat`ed); they are kept now.
 - Consequences: `test_playlist` (alternates, list addresses, ICY titles, the typed split), `test_ui_listwin` (seven buttons); fuzz target `icy`. Seen on the VM with the loopback server: `listen.pls` read and its stream played with the ICY title changing every five seconds; a list served as `/bare` read after the open failed; `nest.pls` stopped at the second list; an `.asx` whose first ref is a closed port played its second; an address typed with its title joined the list and played; a public Icecast station (SomaFM Groove Salad) showed its song in the title.
+
+## 2026-10-23: D-196 Tests by area, the changed areas run on their own; objects built once (RV-161, RV-162)
+
+- Status: Accepted (owner 2026-10-23: "대소문자 비교 코드를 proven 쪽으로 옮기고 테스트 목록 문서도 분할 및 정리합시다";
+  "테스트는 종류에 따라 나누면 좋겠네요 ... 코드 변경된 영역만 새로 수행하게"). Plan `docs/plans/archive/2026-10-23-RV-162-test-areas.md`.
+- Decision:
+  - Case-blind comparisons (RV-161, after D-194): every ASCII equality or prefix that ignores case is proven's
+    `proven_u8str_view_eq_ascii_ci` / `_starts_with_ascii_ci`, about thirty places in twenty files. What stays ours:
+    - ordering (`sort.c`, font names);
+    - wildcards (`glob.c`);
+    - folding that also folds separators (`rubraview_path_same`, the picker's archive paths);
+    - Unicode folding (the text viewer's find);
+    - `rubraview_ascii_lower` for writing lower case.
+  - Six test areas in `tests/areas.mk`: base, image, files, media, text, ui. Every test and every core module is in
+    exactly one area. `scripts/test-changed.sh --check` says so.
+  - The core and the host PAL are compiled once into `build/host/` with header dependencies (`-MMD -MP`). Each test links
+    those objects; before, each test compiled all hundred sources itself, and no header was a dependency.
+  - `make test-area AREA=...` runs the tests of some areas.
+  - `scripts/test-changed.sh` picks the areas and tests from the changed files:
+    - a module's area;
+    - the tests whose dependency files name its header;
+    - everything for `core.h`, the host PAL, `vendor/`, the Makefile or the areas.
+  - `make test`, and so the gate and every release, still runs every test. Area runs are the working loop, not the proof.
+  - The test catalog is split the same way: `docs/tests/index/<area>.md`, plus `vm.md` for checks that are not a host unit
+    test and `retired.md` for superseded ones. `docs/tests/test-index.md` keeps the rules and the routing. Every row has
+    six cells again (95 had lost the Detail cell). The tests that had no row got one (T238 `test_pgs`, T239 `test_music`,
+    T240 `test_classify`). The two rows for removed archive tests are retired.
+  - Next (RV-163): `src/app/main.c` split by the same areas, one area a release, media first.
+- Consequences:
+  - The run after one changed core file: 297 s before, 90 s after with every test.
+  - The media area alone: 5 s.
+  - A cold `make test`: 134 s.
+  - The pass count is unchanged: 91 test programs and the fuzz smoke.
