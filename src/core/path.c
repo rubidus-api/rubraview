@@ -87,15 +87,7 @@ bool rubraview_path_has_ext(proven_u8str_view_t path, const char *ext) {
         p_len--;
     }
 
-    size_t ext_len = strlen(ext);
-    if (p_len != ext_len) return false;
-
-    for (size_t i = 0; i < ext_len; ++i) {
-        if (tolower((unsigned char)p_comp[i]) != tolower((unsigned char)ext[i])) {
-            return false;
-        }
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(p_comp, p_len), proven_u8str_view_from_cstr(ext));
 }
 
 proven_u8str_view_t rubraview_path_with_ext(proven_arena_t *arena, proven_u8str_view_t path, const char *new_ext) {

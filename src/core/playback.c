@@ -217,14 +217,7 @@ static bool language_matches(proven_u8str_view_t a, proven_u8str_view_t b) {
 
     /* Containers write "kor", "ko", "kor-KR" for the same thing, so the
        shorter tag is compared as a prefix of the longer. */
-    size_t n = a.size < b.size ? a.size : b.size;
-    for (size_t i = 0; i < n; ++i) {
-        char x = a.ptr[i], y = b.ptr[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
+    return a.size < b.size ? proven_u8str_view_starts_with_ascii_ci(b, a) : proven_u8str_view_starts_with_ascii_ci(a, b);
 }
 
 int32_t rubraview_tracks_choose(const rubraview_track_set_t *set, rubraview_track_kind_t kind,

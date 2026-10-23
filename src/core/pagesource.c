@@ -12,16 +12,9 @@
 
 static bool name_is_comicinfo(proven_u8str_view_t name) {
     proven_u8str_view_t base = rubraview_path_basename(name);
-    if (base.size != sizeof(COMICINFO_NAME) - 1) return false;
     /* The manifest sits in the archive root but archivers differ on
        case, so match it case-insensitively. */
-    for (size_t i = 0; i < base.size; ++i) {
-        char a = base.ptr[i], b = COMICINFO_NAME[i];
-        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-        if (a != b) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(base, PROVEN_LIT(COMICINFO_NAME));
 }
 
 typedef struct ref_buf {
@@ -173,12 +166,7 @@ static void ps_io_free(struct rubraview_page_source_io *io) {
    `x.part2.rar` is a later volume of `x.part1.rar` (the digits keep their
    width); `x.r00`, `x.r01`, ... `x.s00` follow `x.rar`. */
 static bool ext_is(proven_u8str_view_t name, size_t at, const char *lower3) {
-    for (size_t i = 0; i < 3; ++i) {
-        char c = name.ptr[at + i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-        if (c != lower3[i]) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, at, 3), proven_u8str_view_from_bytes(lower3, 3));
 }
 
 /* Where the digits of `.partN.rar` are, or false. */
@@ -187,12 +175,7 @@ static bool rar_part_digits(proven_u8str_view_t name, size_t *out_at, size_t *ou
     size_t end = name.size - 4, at = end;
     while (at > 0 && name.ptr[at - 1] >= '0' && name.ptr[at - 1] <= '9') at--;
     if (at == end || at < 5 || name.ptr[at - 5] != '.') return false;
-    static const char part[4] = { 'p', 'a', 'r', 't' };
-    for (size_t i = 0; i < 4; ++i) {
-        char c = name.ptr[at - 4 + i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-        if (c != part[i]) return false;
-    }
+    if (!proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, at - 4, 4), PROVEN_LIT("part"))) return false;
     *out_at = at;
     *out_len = end - at;
     return true;
@@ -201,8 +184,7 @@ static bool rar_part_digits(proven_u8str_view_t name, size_t *out_at, size_t *ou
 /* `.r00` to `.z99` after a `.rar`: the old numbering's later volumes. */
 static bool rar_old_later(proven_u8str_view_t name) {
     if (name.size < 5 || name.ptr[name.size - 4] != '.') return false;
-    char c = name.ptr[name.size - 3];
-    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    char c = rubraview_ascii_lower(name.ptr[name.size - 3]);
     char d1 = name.ptr[name.size - 2], d2 = name.ptr[name.size - 1];
     return c >= 'r' && c <= 'z' && d1 >= '0' && d1 <= '9' && d2 >= '0' && d2 <= '9';
 }

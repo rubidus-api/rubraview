@@ -156,14 +156,9 @@ proven_u8str_view_t rubraview_playlist_serialize_m3u8(proven_arena_t *arena, con
 
 /* ---- RV-157: .pls and .asx, read only ---- */
 
-static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
-
 /* `s` starts with `word`, ASCII case aside. */
 static bool starts_nocase(const char *s, size_t len, const char *word) {
-    size_t n = strlen(word);
-    if (len < n) return false;
-    for (size_t i = 0; i < n; ++i) if (lower(s[i]) != word[i]) return false;
-    return true;
+    return proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(s, len), proven_u8str_view_from_cstr(word));
 }
 
 typedef struct pls_item {

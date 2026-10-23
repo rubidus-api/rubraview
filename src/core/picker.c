@@ -329,14 +329,7 @@ size_t rubraview_picker_select_extension(rubraview_picker_t *picker, proven_u8st
         if (!pickable(picker, i)) continue;
         proven_u8str_view_t name = picker->listing->entries[i].name;
         if (name.size < ext.size) continue;
-        const char *tail = (const char *)name.ptr + (name.size - ext.size);
-        bool same = true;
-        for (size_t k = 0; k < ext.size && same; ++k) {
-            char a = tail[k], b = ext.ptr[k];
-            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-            same = a == b;
-        }
+        bool same = proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, name.size - ext.size, ext.size), ext);
         if (!same || picker->selected[i] == on) continue;
         picker->selected[i] = on;
         changed++;

@@ -119,11 +119,7 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, proven_u8str_vi
 
 static bool combo_matches(rubraview_key_combo_t a, rubraview_key_combo_t b) {
     if (a.modifiers != b.modifiers) return false;
-    if (a.key_name.size != b.key_name.size) return false;
-    for (size_t i = 0; i < a.key_name.size; ++i) {
-        if (tolower((unsigned char)a.key_name.ptr[i]) != tolower((unsigned char)b.key_name.ptr[i])) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(a.key_name, b.key_name);
 }
 
 static proven_u8str_view_t find_action_in_context(const rubraview_keymap_t *keymap, proven_u8str_view_t context, rubraview_key_combo_t combo) {

@@ -28,15 +28,7 @@ const char *rubraview_font_weight_name(int32_t weight) {
 
 
 static bool same_word(proven_u8str_view_t a, const char *b) {
-    size_t n = strlen(b);
-    if (a.size != n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char x = a.ptr[i], y = b[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x + 32);
-        if (y >= 'A' && y <= 'Z') y = (char)(y + 32);
-        if (x != y) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(a, proven_u8str_view_from_cstr(b));
 }
 
 /* The part after the last comma, and what comes before it. */

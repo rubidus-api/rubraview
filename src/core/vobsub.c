@@ -6,12 +6,7 @@
 
 static bool line_starts(proven_u8str_view_t line, const char *word, proven_u8str_view_t *rest) {
     size_t n = strlen(word);
-    if (line.size < n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char a = line.ptr[i], b = word[i];
-        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-        if (a != b) return false;
-    }
+    if (!proven_u8str_view_starts_with_ascii_ci(line, proven_u8str_view_from_bytes(word, n))) return false;
     *rest = (proven_u8str_view_t){ .ptr = line.ptr + n, .size = line.size - n };
     while (rest->size > 0 && (rest->ptr[0] == ' ' || rest->ptr[0] == '\t')) { rest->ptr++; rest->size--; }
     return true;

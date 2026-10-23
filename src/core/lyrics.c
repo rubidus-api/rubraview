@@ -366,13 +366,7 @@ static size_t cue_stem_len(proven_u8str_view_t s) {
 }
 
 static bool cue_same_ci(const char *a, const char *b, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        char x = a[i], y = b[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(a, n), proven_u8str_view_from_bytes(b, n));
 }
 
 bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, proven_u8str_view_t audio_name) {

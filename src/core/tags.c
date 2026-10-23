@@ -403,12 +403,7 @@ static void id3_sylt(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
 static bool key_is(const uint8_t *p, size_t len, const char *key) {
     size_t n = strlen(key);
     if (len < n + 1 || p[n] != '=') return false;
-    for (size_t i = 0; i < n; ++i) {
-        uint8_t a = p[i];
-        if (a >= 'a' && a <= 'z') a = (uint8_t)(a - 'a' + 'A');
-        if (a != (uint8_t)key[i]) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(p, n), proven_u8str_view_from_bytes(key, n));
 }
 
 static void picture_block(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
@@ -770,15 +765,7 @@ bool rubraview_tags_is_music_name(proven_u8str_view_t filename) {
     proven_u8str_view_t ext = rubraview_path_ext(filename);
     if (ext.size == 0) return false;
     for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); ++i) {
-        size_t n = strlen(EXTS[i]);
-        if (ext.size != n) continue;
-        bool same = true;
-        for (size_t k = 0; k < n && same; ++k) {
-            char a = ext.ptr[k];
-            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-            same = a == EXTS[i][k];
-        }
-        if (same) return true;
+        if (proven_u8str_view_eq_ascii_ci(ext, proven_u8str_view_from_cstr(EXTS[i]))) return true;
     }
     return false;
 }

@@ -5497,14 +5497,7 @@ static void picker_filter_forget(app_state_t *app) {
 static bool name_holds(proven_u8str_view_t name, proven_u8str_view_t part) {
     if (part.size == 0) return true;
     for (size_t i = 0; i + part.size <= name.size; ++i) {
-        size_t k = 0;
-        for (; k < part.size; ++k) {
-            char a = name.ptr[i + k], b = part.ptr[k];
-            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-            if (a != b) break;
-        }
-        if (k == part.size) return true;
+        if (proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, i, part.size), part)) return true;
     }
     return false;
 }
@@ -6429,10 +6422,7 @@ static void listwin_sync(app_state_t *app) {
 static bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext) {
     for (size_t k = 0; k < app->list_ext_off_n; ++k) {
         proven_u8str_view_t off = cstr(app->list_ext_off[k]);
-        if (off.size != ext.size) continue;
-        bool same = true;
-        for (size_t i = 0; i < ext.size && same; ++i) same = rubraview_ascii_lower(off.ptr[i]) == rubraview_ascii_lower(ext.ptr[i]);
-        if (same) return true;
+        if (proven_u8str_view_eq_ascii_ci(off, ext)) return true;
     }
     return false;
 }
@@ -13898,15 +13888,7 @@ static void rename_begin(app_state_t *app) {
    (a click on a row, Tab or Enter goes to another), and Apply (Enter on the last) renames them all.
    A row left as it was leaves its files alone. */
 static bool ext_same(const char *a, proven_u8str_view_t b) {
-    size_t n = strlen(a);
-    if (n != b.size) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char x = a[i], y = b.ptr[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_cstr(a), b);
 }
 
 static void ext_store(app_state_t *app) {
@@ -22327,14 +22309,7 @@ static size_t fontpick_rows(const app_state_t *app) {
 static bool fontpick_finds(proven_u8str_view_t name, const char *find, size_t len) {
     if (len == 0) return true;
     for (size_t i = 0; i + len <= name.size; ++i) {
-        size_t k = 0;
-        for (; k < len; ++k) {
-            int a = (unsigned char)name.ptr[i + k], b = (unsigned char)find[k];
-            if (a >= 'A' && a <= 'Z') a += 32;
-            if (b >= 'A' && b <= 'Z') b += 32;
-            if (a != b) break;
-        }
-        if (k == len) return true;
+        if (proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, i, len), proven_u8str_view_from_bytes(find, len))) return true;
     }
     return false;
 }
@@ -24609,9 +24584,7 @@ static void chooser_open_listext(app_state_t *app, int where, double x, double y
         size_t k = 0;
         for (; k < kinds; ++k) {
             proven_u8str_view_t have = cstr(seen[k]);
-            bool same = have.size == e.size;
-            for (size_t j = 0; j < e.size && same; ++j) same = rubraview_ascii_lower(have.ptr[j]) == rubraview_ascii_lower(e.ptr[j]);
-            if (same) break;
+            if (proven_u8str_view_eq_ascii_ci(have, e)) break;
         }
         if (k == kinds) {
             if (kinds + 1 >= CHOOSE_MAX) continue;

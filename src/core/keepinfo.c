@@ -1090,14 +1090,7 @@ static bool only_comment_left(proven_u8str_view_t line, size_t at) {
 }
 
 static bool same_name(proven_u8str_view_t a, proven_u8str_view_t b) {
-    if (a.size != b.size) return false;
-    for (size_t i = 0; i < a.size; ++i) {
-        char x = a.ptr[i], y = b.ptr[i];
-        if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
-        if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
-        if (x != y) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(a, b);
 }
 
 bool rubraview_details_from_txt(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t picture_name, rubraview_details_src_t *out) {

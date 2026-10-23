@@ -371,7 +371,7 @@ bool rubraview_resize_parse_length(proven_u8str_view_t text, int32_t whole_px, d
     for (; i < n && u < 3; ++i) {
         char c = text.ptr[i];
         if (c == ' ') break;
-        unit[u++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+        unit[u++] = rubraview_ascii_lower(c);
     }
     while (i < n && text.ptr[i] == ' ') ++i;
     if (i < n) return false;

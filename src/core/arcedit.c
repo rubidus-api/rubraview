@@ -32,9 +32,7 @@ static char lower(char c) {
 
 static bool ends_with(proven_u8str_view_t s, const char *tail) {
     size_t n = strlen(tail);
-    if (s.size < n) return false;
-    for (size_t i = 0; i < n; ++i) if (lower(s.ptr[s.size - n + i]) != tail[i]) return false;
-    return true;
+    return s.size >= n && proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(s, s.size - n, n), proven_u8str_view_from_bytes(tail, n));
 }
 
 static bool all_digits(const char *p, size_t n) {
@@ -64,9 +62,8 @@ static proven_u8str_view_t book_stem(proven_u8str_view_t name, bool *out_comic) 
     if (dot > 1) {
         const char *mark = (const char *)s.ptr + dot;
         size_t n = s.size - dot;
-        bool part = n > 4 && lower(mark[0]) == 'p' && lower(mark[1]) == 'a' && lower(mark[2]) == 'r' && lower(mark[3]) == 't' &&
-                    all_digits(mark + 4, n - 4);
-        bool vol = n > 3 && lower(mark[0]) == 'v' && lower(mark[1]) == 'o' && lower(mark[2]) == 'l' && all_digits(mark + 3, n - 3);
+        bool part = n > 4 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("part")) && all_digits(mark + 4, n - 4);
+        bool vol = n > 3 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("vol")) && all_digits(mark + 3, n - 3);
         if (part || vol) s.size = dot - 1;
     }
     return s;

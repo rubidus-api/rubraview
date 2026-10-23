@@ -336,9 +336,7 @@ const char *rubraview_lang_native_name(const char *code) {
 }
 
 static bool tag_eq(const char *a, size_t n, const char *b) {
-    if (strlen(b) != n) return false;
-    for (size_t i = 0; i < n; i++) if (rubraview_ascii_lower(a[i]) != rubraview_ascii_lower(b[i])) return false;
-    return true;
+    return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(a, n), proven_u8str_view_from_cstr(b));
 }
 
 const char *rubraview_lang_pick(const char *tag, const char *const *available, size_t count) {

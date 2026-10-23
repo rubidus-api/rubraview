@@ -100,16 +100,7 @@ static bool choice_index(const rubraview_setting_def_t *def, proven_u8str_view_t
 
 static bool choice_index_exact(const rubraview_setting_def_t *def, proven_u8str_view_t word, double *out) {
     for (int32_t i = 0; i < def->choice_count && def->choices[i]; ++i) {
-        size_t n = strlen(def->choices[i]);
-        if (word.size != n) continue;
-
-        bool equal = true;
-        for (size_t k = 0; k < n; ++k) {
-            char a = word.ptr[k];
-            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
-            if (a != def->choices[i][k]) { equal = false; break; }
-        }
-        if (equal) { *out = (double)i; return true; }
+        if (proven_u8str_view_eq_ascii_ci(word, proven_u8str_view_from_cstr(def->choices[i]))) { *out = (double)i; return true; }
     }
     return false;
 }

@@ -456,13 +456,8 @@ bool rubraview_print_preview_region(const rubraview_print_placement_t *pl, int32
     return true;
 }
 
-static char entry_lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
-
 static bool entry_starts(proven_u8str_view_t text, size_t at, const char *word) {
-    for (size_t i = 0; word[i]; ++i) {
-        if (at + i >= text.size || entry_lower(text.ptr[at + i]) != word[i]) return false;
-    }
-    return true;
+    return at <= text.size && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_slice(text, at, text.size - at), proven_u8str_view_from_cstr(word));
 }
 
 bool rubraview_shell_entry_is_ours(proven_u8str_view_t key_name, proven_u8str_view_t command) {

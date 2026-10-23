@@ -114,8 +114,6 @@ void rubraview_plugin_params_clamp(const rubraview_plugin_t *plugin, double *val
     for (int32_t i = plugin->param_count; i < RUBRAVIEW_PLUGIN_PARAMS; ++i) values[i] = 0.0;
 }
 
-static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
-
 bool rubraview_plugin_file_matches(const char *file, proven_u8str_view_t name) {
     if (!file || name.size == 0) return false;
     size_t n = strlen(file);
@@ -123,10 +121,7 @@ bool rubraview_plugin_file_matches(const char *file, proven_u8str_view_t name) {
     size_t stem = n >= sizeof(SUFFIX) - 1 && strcmp(file + n - (sizeof(SUFFIX) - 1), SUFFIX) == 0 ? n - (sizeof(SUFFIX) - 1) : n;
     for (size_t k = 0; k < 2; ++k) {
         size_t want = k == 0 ? n : stem;
-        if (name.size != want) continue;
-        bool same = true;
-        for (size_t i = 0; i < want && same; ++i) same = lower(file[i]) == lower(name.ptr[i]);
-        if (same) return true;
+        if (proven_u8str_view_eq_ascii_ci(name, proven_u8str_view_from_bytes(file, want))) return true;
     }
     return false;
 }

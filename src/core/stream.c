@@ -9,13 +9,7 @@ static size_t scheme_len(proven_u8str_view_t text) {
     for (size_t s = 0; s < sizeof(SCHEMES) / sizeof(SCHEMES[0]); ++s) {
         size_t n = strlen(SCHEMES[s]);
         if (text.size < n + 3 || memcmp(text.ptr + n, "://", 3) != 0) continue;
-        bool same = true;
-        for (size_t i = 0; i < n && same; ++i) {
-            char c = text.ptr[i];
-            if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-            same = c == SCHEMES[s][i];
-        }
-        if (same) return n;
+        if (proven_u8str_view_starts_with_ascii_ci(text, proven_u8str_view_from_cstr(SCHEMES[s]))) return n;
     }
     return 0;
 }
@@ -45,7 +39,7 @@ size_t rubraview_stream_ffmpeg_urls(proven_u8str_view_t address, char out[2][RUB
     }
     memcpy(out[0], address.ptr, address.size);
     out[0][address.size] = '\0';
-    for (size_t i = 0; i < n; ++i) if (out[0][i] >= 'A' && out[0][i] <= 'Z') out[0][i] = (char)(out[0][i] - 'A' + 'a');
+    for (size_t i = 0; i < n; ++i) out[0][i] = rubraview_ascii_lower(out[0][i]);
     return 1;
 }
 

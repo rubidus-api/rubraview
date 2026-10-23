@@ -319,9 +319,7 @@ proven_u8str_view_t rubraview_shell_progid(proven_arena_t *arena, proven_u8str_v
     char *out = (char*)(void*)res.value.ptr;
     memcpy(out, PREFIX, prefix_len);
     for (size_t i = 0; i < extension.size; ++i) {
-        char c = extension.ptr[i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-        out[prefix_len + i] = c;
+        out[prefix_len + i] = rubraview_ascii_lower(extension.ptr[i]);
     }
     out[total] = '\0';
 
@@ -401,13 +399,7 @@ static bool next_word(proven_u8str_view_t list, char separator, size_t *at, prov
 }
 
 static bool word_is(proven_u8str_view_t word, const char *text, size_t n) {
-    if (word.size != n) return false;
-    for (size_t i = 0; i < n; ++i) {
-        char c = word.ptr[i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-        if (c != text[i]) return false;
-    }
-    return true;
+    return proven_u8str_view_eq_ascii_ci(word, proven_u8str_view_from_bytes(text, n));
 }
 
 static bool list_has(const char *list, proven_u8str_view_t word) {
