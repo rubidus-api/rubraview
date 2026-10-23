@@ -2070,3 +2070,36 @@ Do not store credentials, private infrastructure details, personal data, private
   - The media area alone: 5 s.
   - A cold `make test`: 134 s.
   - The pass count is unchanged: 91 test programs and the fuzz smoke.
+
+## 2026-10-23: D-197 The program's files by area: app.h shared, media.c the first (RV-163)
+
+- Status: Accepted (owner 2026-10-23: "다음 진행 바랍니다", RV-163 as recommended after D-196). Plan
+  `docs/plans/archive/2026-10-23-RV-163-app-media.md`.
+- Decision:
+  - `src/app/main.c` stops being one translation unit:
+    - `src/app/app.h` holds what every file of the program shares: its first 1,300 lines as they were (includes,
+      macros, page and job types, `app_state_t`), its sixteen file-scope variables declared `extern` (defined in
+      `main.c`), its small helpers `static inline`, and the prototypes of the 51 functions called across files.
+    - `src/app/media.c` holds the first media run, moved as it was: video and sound pages, music that outlives its page,
+      stations, what plays after an end, a track into the next.
+    - The rest stays in `main.c` until its area moves.
+  - A move is pure. The only edits allowed are:
+    - `static` dropped on a function another file calls;
+    - a definition two files need moved into `app.h` (two macros and the `FRAME_*` enum here).
+    - An audit rebuilds the old file from the new ones and names every other difference.
+  - The next runs move one area a release: the rest of media (the Sub tile, playlist window, equaliser, A-B, mini
+    player, subtitle windows), then edit, the picker, settings.
+  - `scripts/check-actions.py` and `check-settings.py` read every `src/app/*.c`.
+  - Four scripts had become unlinked copies in the public tree, newer than the private ones and in no history:
+    - `check-actions.py`, `check-conf-format.py`, `make-icon.py` and `scripts/README.md`;
+    - each copy was taken into the private tree and its link put back.
+- Consequences:
+  - `main.c` went from 31,217 to 28,333 lines. `media.c` is 1,619 lines and `app.h` 1,359.
+  - Audit: 73 lines with `static` dropped and 5 lines moved to `app.h`; the only other differences are two blank
+    lines at the ends of files.
+  - The Windows build is clean under `-Werror`, and gate t2 passes.
+  - On the VM:
+    - a film played, paused, sought and stopped at its end;
+    - a song handed on to the next (2/3 to 3/3), and the last one stopped, as 1.39.0 does;
+    - a `.pls` station's ICY title changed;
+    - an `.asx` fell back to its second ref.
