@@ -1391,6 +1391,57 @@ extern char g_plugin_folder[520];
 extern _Thread_local const char *g_plugin_why;
 extern rubraview_plugin_t g_plugins[RUBRAVIEW_PLUGIN_MAX];
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+enum { PF_NONE = 0, PF_TITLE, PF_MENU, PF_NAME, PF_LIST, PF_BUTTONS };
+#define PICKER_CRUMB_HEIGHT 44.0
+#define PICKER_PLACES_HEIGHT 40.0   /* the places bar under the path (owner, 2026-09-28) */
+#define PICKER_HEADER_HEIGHT (PICKER_CRUMB_HEIGHT + PICKER_PLACES_HEIGHT)
+#define PICKER_TOOL_HEIGHT 42.0     /* 1.24.0: all, Individual, Range, Same type, Media, Sort, Order, the view */
+#define PICKER_NAV_W 40.0           /* 1.24.0: back, up and forward at the path bar's left, a finger wide */
+#define PICKER_DETAIL_ROW 30.0
+#define PICKER_DETAIL_HEAD 26.0   /* the line naming the columns */
+#define PICKER_HEAD_CHECK_ROOM 30.0   /* 1.23.0: the heads' check box, before Name */
+#define PICKER_TILE 160.0
+#define PICKER_TILE_WIDE 230.0
+typedef struct picker_bar_item { proven_u8str_view_t label, path; bool favorite; } picker_bar_item_t;
+#define PICKER_ACTION_HEIGHT 76.0   /* two rows: the buttons, then what is picked */
+#define PICKER_BUTTON_ROW 48.0
+typedef enum picker_button {
+    PICKER_BTN_OPEN = 0,     /* 1.23.0: what is picked, or the one with the focus */
+    PICKER_BTN_INDIVIDUAL,
+    PICKER_BTN_RANGE,
+    PICKER_BTN_SAME_TYPE,
+    PICKER_BTN_MEDIA,        /* 1.22.0: the pictures, films, music and text here, picked at once or let go */
+    PICKER_BTN_EXTENSION,
+    PICKER_BTN_PLAYLIST,
+    PICKER_BTN_RECYCLE,
+    PICKER_BTN_MOVE,
+    PICKER_BTN_COPY,
+    PICKER_BTN_CLEAR,
+    PICKER_BTN_VIEW,         /* D-110: tiles or details */
+    PICKER_BTN_CANCEL,       /* 1.25.0: back to what was on screen before */
+    PICKER_BTN_COUNT,
+} picker_button_t;
+
+static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
+    N_("Open"), N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
+    N_("Playlist"), N_("Recycle"), N_("Move to"), N_("Copy to"), N_("Deselect all"), N_("Details"), N_("Cancel"),
+};
+static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN_RECYCLE, PICKER_BTN_MOVE, PICKER_BTN_COPY,
+                                                 PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
+#define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
+#define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
+enum { PICKER_TOOL_ALL = 0, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
+       PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW, PICKER_TOOL_COUNT };
+enum {
+    FILES_PREVIEW_NONE = 0,   /* nothing asked for yet */
+    FILES_PREVIEW_SHOWN,
+    FILES_PREVIEW_FAILED,     /* it could not be read or is not a picture */
+    FILES_PREVIEW_FAR,        /* deep in a solid archive: read only when it is opened */
+    FILES_PREVIEW_MEDIA,      /* a film or a sound */
+};
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1402,6 +1453,7 @@ void ab_edit_take(app_state_t *app, int32_t f);
 void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
 proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part);
 rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t part);
+void address_begin(app_state_t *app);
 proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size);
 bool anim_plays(const app_state_t *app);
 rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
@@ -1425,11 +1477,17 @@ void bgm_tick(app_state_t *app);
 size_t bytes_scaled(size_t n, size_t k, size_t extra);
 void changes_remove_checked(app_state_t *app);
 bool chooser_key(app_state_t *app, int where, rubraview_key_combo_t combo);
+void chooser_open_listext(app_state_t *app, int where, double x, double y, double above_y);
+void chooser_open_listsort(app_state_t *app, int where, double x, double y, double above_y);
 bool chooser_press(app_state_t *app, int where, double x, double y);
 bool chooser_wheel(app_state_t *app, int where, double notches);
 proven_u8str_view_t crop_button_label(const app_state_t *app);
+void ctx_close(app_state_t *app);
+void ctx_open_at(app_state_t *app, double x, double y);
 proven_u8str_view_t cue_audio_path(app_state_t *app, proven_u8str_view_t cue_path);
 bool cue_step(app_state_t *app, int direction);
+bool curation_has_numbers(const app_state_t *app);
+proven_u8str_view_t current_file_path(app_state_t *app);
 int32_t current_page_index(const app_state_t *app);
 void curve_widget_drag(app_state_t *app, double px, double py);
 bool curve_widget_press(app_state_t *app, double px, double py, bool remove);
@@ -1442,9 +1500,12 @@ void draw_crop_overlay(app_state_t *app);
 void draw_curve_widget(app_state_t *app);
 void draw_edit_preview(app_state_t *app);
 void draw_edit_window(app_state_t *app);
+void draw_favwin(app_state_t *app, double win_w, double win_h);
 void draw_mini_window(app_state_t *app);
 void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
+void draw_picker_check(app_state_t *app, size_t index, double win_w, double dpi);
 void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_recentwin(app_state_t *app, double win_w, double win_h);
 void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
 void draw_subs_window(app_state_t *app);
 bool edit_apply_pending(app_state_t *app, bool say);
@@ -1487,11 +1548,29 @@ void eqwin_toggle(app_state_t *app);
 bool eqwin_wheel(app_state_t *app, double x, double y, double delta);
 bool export_more_apply(rubraview_export_options_t *o, int32_t id, double v);
 void export_more_rows(rubraview_panel_t *pn, const rubraview_export_options_t *o, uint32_t rows);
+size_t favorite_drop_index(const app_state_t *app, double x, double dpi, double win_w);
+void favorite_rename_begin(app_state_t *app, size_t index);
+void favorite_rename_commit(app_state_t *app);
+bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path);
+void favorites_save(app_state_t *app);
+void favwin_build(app_state_t *app);
+void favwin_motion(app_state_t *app, double x, double y);
+bool favwin_press(app_state_t *app, double x, double y);
+bool favwin_release(app_state_t *app);
+void favwin_toggle(app_state_t *app);
 bool ffmpeg_button(app_state_t *app, int32_t id);
 bool ffmpeg_list_ready(void);
 bool ffmpeg_row_changed(app_state_t *app, int32_t id, double v);
 void ffmpeg_typed(app_state_t *app);
+void files_close(app_state_t *app);
 proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
+void files_go_to(app_state_t *app, int32_t index);
+void files_layout(app_state_t *app);
+void files_preview_drop(app_state_t *app);
+void files_preview_step(app_state_t *app, double now);
+void files_show(app_state_t *app);
+int files_size_text(char *buf, size_t cap, uint64_t bytes);
+int32_t files_target(const app_state_t *app);
 bool filing_exists(void *ctx, proven_u8str_view_t path);
 void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride);
 bool gmic_button(app_state_t *app, int32_t id);
@@ -1503,13 +1582,41 @@ const char *gmic_step_name(const rubraview_edit_step_t *step);
 void gmic_typed(app_state_t *app);
 void go_to_spread(app_state_t *app, size_t index);
 void handle_action(app_state_t *app, proven_u8str_view_t action);
+void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
 bool is_media_path(proven_u8str_view_t path);
 bool is_station_path(proven_u8str_view_t path);
 bool key_is(rubraview_key_combo_t combo, const char *name);
+void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview_fs_entry_t *added, const char *said);
 void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_t r, const char *label, double size,
                         bool on, uint32_t color);
 void list_check_mark(rubraview_renderer_t *rr, rubraview_rect_t c, bool every, bool some);
+size_t list_checked_total(const app_state_t *app);
+void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner);
+bool list_editable(const app_state_t *app);
+bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext);
+void list_filter_files_end(app_state_t *app);
+void list_filter_follow(app_state_t *app);
+void list_filter_set(app_state_t *app, proven_u8str_view_t text);
+void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, size_t to);
+void list_motion(app_state_t *app, double x, double y, bool in_files);
+size_t list_page(app_state_t *app, size_t row);
+bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, bool right, bool in_files);
+void list_remove(app_state_t *app, const bool *gone);
+void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files);
+size_t list_row_of(app_state_t *app, size_t page);
+size_t list_rows(app_state_t *app);
+bool list_saves_whole_paths(const app_state_t *app);
+void list_sort(app_state_t *app, int key, bool desc);
 char *list_text_decode(proven_u8str_view_t raw, size_t *len);
+void list_view_changed(app_state_t *app);
+bool list_viewed(const app_state_t *app);
+void listwin_button(app_state_t *app, rubraview_rect_t r, const char *label, double size, bool on, uint32_t color);
+void listwin_motion(app_state_t *app, double x, double y);
+void listwin_place_clear(app_state_t *app, double win_w, double win_h);
+bool listwin_press(app_state_t *app, double x, double y, bool right);
+bool listwin_release(app_state_t *app);
+void listwin_sync(app_state_t *app);
+void listwin_toggle(app_state_t *app);
 void media_ab_check(app_state_t *app);
 void media_close(app_state_t *app);
 void media_prepare(app_state_t *app);
@@ -1517,16 +1624,25 @@ void media_seek_to(app_state_t *app, double seconds);
 void media_step(app_state_t *app, bool forward);
 void media_tick(app_state_t *app);
 void media_toggle_pause(app_state_t *app);
+void menu_rebuild(app_state_t *app);
 void mini_close(app_state_t *app);
 bool mini_paused(const app_state_t *app);
 size_t mini_pump(app_state_t *app);
 void mini_show(app_state_t *app);
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags);
+bool name_holds(proven_u8str_view_t name, proven_u8str_view_t part);
+void note_activity(app_state_t *app);
 bool on_archive_page(const app_state_t *app);
+void open_path(app_state_t *app, proven_u8str_view_t path);
+void open_playlist(app_state_t *app, proven_u8str_view_t path);
+void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said);
+void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t said,
+                             bool as_given, proven_u8str_view_t start);
 void osd_say(app_state_t *app, proven_u8str_view_t text);
 size_t page_count(const app_state_t *app);
 proven_u8str_view_t page_display_name(const app_state_t *app, size_t index);
 uint64_t page_read_cost(app_state_t *app, size_t index);
+rubraview_page_bytes_t page_read_owned(rubraview_page_source_t *source, SRWLOCK *lock, size_t index, void **out_mem);
 bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale);
 bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
 void panel_apply_row(app_state_t *app, int32_t index);
@@ -1537,7 +1653,50 @@ void panel_open_batch(app_state_t *app);
 void panel_open_edit(app_state_t *app);
 void panel_open_export(app_state_t *app);
 void panel_relayout(app_state_t *app);
+bool path_is_listed_kind(proven_u8str_view_t path);
+bool path_is_playlist(proven_u8str_view_t path);
+void picker_activate(app_state_t *app, size_t index);
+void picker_add_to_list(app_state_t *app);
+bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out);
+void picker_button(app_state_t *app, picker_button_t button);
+rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index);
+rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t index, double win_w, double dpi);
+bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w);
+double picker_chip_width(proven_u8str_view_t label, double dpi);
+int32_t picker_columns(const app_state_t *app);
+void picker_context(app_state_t *app, size_t index, double x, double y);
+void picker_copy_paths(app_state_t *app);
+bool picker_details(const app_state_t *app);
+bool picker_enter_book(app_state_t *app, size_t index);
+rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w);
+void picker_filter_begin(app_state_t *app);
+rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap);
+void picker_filter_follow(app_state_t *app);
+void picker_filter_forget(app_state_t *app);
+void picker_filter_set(app_state_t *app, proven_u8str_view_t text);
+proven_u8str_view_t picker_focus_extension(const app_state_t *app);
+double picker_grid_top(const app_state_t *app, double dpi);
+void picker_hold_tick(app_state_t *app);
+bool picker_is_up(const app_state_t *app, size_t index);
+void picker_layout(app_state_t *app);
+rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int which);
+void picker_navigate(app_state_t *app, proven_u8str_view_t dir);
+void picker_open(app_state_t *app);
+size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
+void picker_recycle(app_state_t *app);
+void picker_select_everything(app_state_t *app);
+proven_u8str_view_t picker_star_label(const app_state_t *app);
+void picker_thumbs_free(app_state_t *app);
+int32_t picker_tile_columns(const app_state_t *app);
+void picker_tile_size(app_state_t *app, double *out_w, double *out_h);
+void picker_toggle_favorite(app_state_t *app);
+proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *buf, size_t cap);
+rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int which);
+double picker_top(const app_state_t *app);
 size_t picture_bytes(size_t w, size_t h, size_t per_pixel, size_t extra);
+int place_font_begin(app_state_t *app, int which, double *size);
+void place_font_end(app_state_t *app, int before);
+double place_size(app_state_t *app, int which);
 double play_duration(const app_state_t *app);
 double play_position(const app_state_t *app);
 void play_seek(app_state_t *app, double seconds);
@@ -1557,8 +1716,17 @@ int32_t px_edit_fields(const app_state_t *app);
 void px_edit_fill_crop(app_state_t *app);
 bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
 void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
+void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
+void recent_sync(app_state_t *app, proven_u8str_view_t opened, bool clear);
+void recentwin_build(app_state_t *app);
+void recentwin_motion(app_state_t *app, double x, double y);
+bool recentwin_press(app_state_t *app, double x, double y);
+bool recentwin_release(app_state_t *app);
+void recentwin_toggle(app_state_t *app);
 bool rename_box_press(app_state_t *app, double x, double y);
 void rename_end(app_state_t *app);
+void rename_extension_begin(app_state_t *app);
+void rename_insert(app_state_t *app, proven_u8str_view_t text);
 void rename_text(app_state_t *app, const rubraview_window_event_t *event);
 void reopen_after_removal(app_state_t *app, size_t removed_index);
 void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
@@ -1569,6 +1737,7 @@ void sel_drag_to(app_state_t *app, int32_t ix, int32_t iy);
 int32_t sel_hit(app_state_t *app, double px, double py);
 void sel_mode_set(app_state_t *app, bool on);
 void settings_say(app_state_t *app, const char *text);
+void slidepop_close(app_state_t *app);
 size_t spread_for_chosen_page(app_state_t *app, int32_t page);
 size_t spread_index_for_page(const app_state_t *app, int32_t page_index);
 void station_alts_note(const rubraview_playlist_entry_t *e);
@@ -1595,14 +1764,17 @@ void subtitles_toggle(app_state_t *app);
 void takeout_begin(app_state_t *app);
 void takeout_end(app_state_t *app);
 void takeout_step(app_state_t *app);
+void target_begin(app_state_t *app, bool moving, bool from_picker);
 uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback);
 void text_prepare(app_state_t *app);
+void thumbs_wake(void *context);
 void toolbox_refresh(app_state_t *app);
 void tracks_prepare(app_state_t *app, proven_u8str_view_t video_path);
 void ui_font_apply_all(app_state_t *app);
 void unload_all_pages(app_state_t *app);
 void update_precache(app_state_t *app);
 void update_window_title(app_state_t *app);
+void view_hold_tick(app_state_t *app);
 proven_arena_t *window_block_arena(app_state_t *app, struct window_block *wb);
 void window_block_give(app_state_t *app, struct window_block *wb);
 proven_arena_t *window_block_take(app_state_t *app, struct window_block *wb);
