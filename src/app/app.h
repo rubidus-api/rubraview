@@ -1304,8 +1304,27 @@ enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE, FRAME_EDIT };   /* FRAME_EDIT: sav
 /* Defined in media.c. */
 extern uint32_t g_subs_generation;
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+#define SUB_LIST_MAX 16
+#define SUB_LIST_ROW 40.0
+#define AB_LABEL_W 28.0
+#define AB_UNIT_W 14.0
+#define FILES_BACKGROUND 0xFF181818u
+
 /* ---- functions called across files ---- */
+rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
+rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
+void ab_edit_begin(app_state_t *app);
 void ab_edit_close(app_state_t *app);
+void ab_edit_goto(app_state_t *app, int32_t side, int32_t part);
+bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
+void ab_edit_take(app_state_t *app, int32_t f);
+void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
+proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part);
+rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t part);
+bool anim_plays(const app_state_t *app);
+rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
 void audio_chain_update(app_state_t *app);
 void bgm_close(app_state_t *app);
@@ -1313,18 +1332,29 @@ void bgm_do(app_state_t *app, rubraview_bgm_action_t action);
 bool bgm_pause_for_sound(const app_state_t *app);
 void bgm_tick(app_state_t *app);
 proven_u8str_view_t cue_audio_path(app_state_t *app, proven_u8str_view_t cue_path);
+bool cue_step(app_state_t *app, int direction);
 int32_t current_page_index(const app_state_t *app);
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
+void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+void draw_mini_window(app_state_t *app);
+void draw_subs_window(app_state_t *app);
 double eq_band_db(const app_state_t *app, size_t band);
 proven_u8str_view_t eq_band_key(size_t band);
 proven_u8str_view_t eq_preset_label(int preset);
 int eq_preset_now(const app_state_t *app);
 void eq_shown_gains(const app_state_t *app, float *out);
+bool eqwin_press(app_state_t *app, double x, double y, bool right);
+void eqwin_set_band(app_state_t *app, size_t band, double db);
+void eqwin_toggle(app_state_t *app);
+bool eqwin_wheel(app_state_t *app, double x, double y, double delta);
+proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
 void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride);
 void go_to_spread(app_state_t *app, size_t index);
+void handle_action(app_state_t *app, proven_u8str_view_t action);
 bool is_media_path(proven_u8str_view_t path);
 bool is_station_path(proven_u8str_view_t path);
+bool key_is(rubraview_key_combo_t combo, const char *name);
 char *list_text_decode(proven_u8str_view_t raw, size_t *len);
 void media_ab_check(app_state_t *app);
 void media_close(app_state_t *app);
@@ -1333,9 +1363,22 @@ void media_seek_to(app_state_t *app, double seconds);
 void media_step(app_state_t *app, bool forward);
 void media_tick(app_state_t *app);
 void media_toggle_pause(app_state_t *app);
+void mini_close(app_state_t *app);
+bool mini_paused(const app_state_t *app);
+size_t mini_pump(app_state_t *app);
+void mini_show(app_state_t *app);
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags);
 void osd_say(app_state_t *app, proven_u8str_view_t text);
 size_t page_count(const app_state_t *app);
+bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
+double play_duration(const app_state_t *app);
+double play_position(const app_state_t *app);
+void play_seek(app_state_t *app, double seconds);
+void putin_end(app_state_t *app, bool swapped);
+void putin_step(app_state_t *app);
+rubraview_pal_rect_t px_box_rect(const app_state_t *app);
+void reopen_after_removal(app_state_t *app, size_t removed_index);
+void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
 rubraview_repeat_mode_t repeat_mode(const app_state_t *app);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
@@ -1345,13 +1388,29 @@ void station_alts_note(const rubraview_playlist_entry_t *e);
 int32_t station_connecting_page(const app_state_t *app);
 void station_job_poll(app_state_t *app);
 void station_title_poll(app_state_t *app);
+void sub_list_choose(app_state_t *app, int32_t row);
+void sub_list_open_at(app_state_t *app, double x, double y);
+rubraview_rect_t sub_list_rect(const app_state_t *app, size_t *out_rows);
+bool sub_tile_anchor(app_state_t *app, double *x, double *y);
+void sub_tile_result(app_state_t *app, rubraview_tap_result_t r);
 proven_arena_t *subs_arena(app_state_t *app, size_t need);
+void subs_close(app_state_t *app);
 size_t subs_edit_room(const app_state_t *app);
+bool subs_may_leave(app_state_t *app);
+size_t subs_pump(app_state_t *app);
+void subs_show(app_state_t *app);
 rubraview_subtitle_track_t subtitle_find(proven_arena_t *arena, proven_u8str_view_t video_path,
                                                 proven_u8str_view_t *out_name, const char **out_why);
+void subtitle_say(app_state_t *app);
 void subtitle_select(app_state_t *app, int32_t index);
+size_t subtitle_track_indices(const app_state_t *app, int32_t *out, size_t capacity);
+void subtitles_toggle(app_state_t *app);
+void takeout_begin(app_state_t *app);
+void takeout_end(app_state_t *app);
+void takeout_step(app_state_t *app);
 void text_prepare(app_state_t *app);
 void tracks_prepare(app_state_t *app, proven_u8str_view_t video_path);
+void ui_font_apply_all(app_state_t *app);
 void update_precache(app_state_t *app);
 void update_window_title(app_state_t *app);
 proven_arena_t *window_block_arena(app_state_t *app, struct window_block *wb);
