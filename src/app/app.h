@@ -1510,6 +1510,21 @@ extern rubraview_shell_verb_t g_launch_verb;
 extern bool           g_launch_whole;
 
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+#define TITLEBAR_ON 0xFF2D4A6Eu   /* 1.25.0: the ground of a title bar or widget button that is on */
+typedef struct picker_columns {
+    double name_x;
+    double x[RUBRAVIEW_PICKER_SORT_COUNT];      /* where each begins; Name's end is x[TYPE] */
+    double w[RUBRAVIEW_PICKER_SORT_COUNT];      /* how wide, 0 when let go */
+} picker_columns_t;
+#define SUBBOX_BUTTON 30.0
+#define SUBBOX_GAP 4.0
+
+/* Shared variables, defined in the file that owns them. */
+extern const app_state_t *g_caption_app;
+extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1521,6 +1536,7 @@ void ab_edit_take(app_state_t *app, int32_t f);
 void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
 proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part);
 rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t part);
+rubraview_action_facts_t action_facts(const app_state_t *app);
 void address_begin(app_state_t *app);
 proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size);
 int anim_end_mode(const app_state_t *app);
@@ -1537,6 +1553,7 @@ void apply_all_originals(app_state_t *app);
 void apply_all_poll(app_state_t *app, bool quitting);
 void apply_all_start(app_state_t *app, apply_all_job_t *job);
 void apply_all_typed(app_state_t *app);
+void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent);
 void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage);
 bool at_real_size(const app_state_t *app);
 void audio_chain_update(app_state_t *app);
@@ -1551,12 +1568,17 @@ void bgm_close(app_state_t *app);
 void bgm_do(app_state_t *app, rubraview_bgm_action_t action);
 bool bgm_pause_for_sound(const app_state_t *app);
 void bgm_tick(app_state_t *app);
+double box_opacity(const app_state_t *app, const rubraview_box_t *box);
+bool box_wheel_opacity(app_state_t *app, double x, double y, double notches, uint32_t modifiers);
+void boxes_apply_size(app_state_t *app);
 void boxes_place(app_state_t *app);
 void build_slides(app_state_t *app);
 size_t bytes_scaled(size_t n, size_t k, size_t extra);
 void changes_remove_checked(app_state_t *app);
 void chooser_close(app_state_t *app);
 bool chooser_key(app_state_t *app, int where, rubraview_key_combo_t combo);
+double chooser_main_x(app_state_t *app);
+double chooser_main_y(app_state_t *app);
 void chooser_open_listext(app_state_t *app, int where, double x, double y, double above_y);
 void chooser_open_listsort(app_state_t *app, int where, double x, double y, double above_y);
 void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, double y, double above_y);
@@ -1582,25 +1604,55 @@ bool details_beside(proven_arena_t *arena, proven_u8str_view_t picture, rubravie
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                     const char *const *captions, int32_t caption_count,
+                     const rubraview_menu_state_t *menu);
+void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
+                          uint32_t fill, uint32_t border);
 void draw_chooser(app_state_t *app, rubraview_renderer_t *r, int where, double px, double py);
+void draw_chrome(app_state_t *app, double win_w, double win_h);
+void draw_chrome_answers(app_state_t *app, double win_w, double win_h);
 void draw_crop_overlay(app_state_t *app);
+void draw_ctxmenu(app_state_t *app);
 void draw_curve_widget(app_state_t *app);
 void draw_edit_preview(app_state_t *app);
 void draw_edit_window(app_state_t *app);
 void draw_favwin(app_state_t *app, double win_w, double win_h);
 void draw_fontpick_window(app_state_t *app);
 void draw_help_window(app_state_t *app);
+void draw_hint(app_state_t *app, double win_w, double win_h);
 void draw_info_window(app_state_t *app);
 void draw_mini_window(app_state_t *app);
+void draw_music_backdrop(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi);
 void draw_outlined_text(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
                                double size, double outline, uint32_t argb);
+void draw_outlined_text_aligned(rubraview_renderer_t *renderer, proven_u8str_view_t text, rubraview_pal_rect_t rect,
+                                       double size, double outline, uint32_t argb, rubraview_text_align_t align);
+void draw_panel(app_state_t *app);
 void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
 void draw_picker_check(app_state_t *app, size_t index, double win_w, double dpi);
+void draw_print_preview(app_state_t *app);
 void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 void draw_recentwin(app_state_t *app, double win_w, double win_h);
 void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detached);
 void draw_settings_window(app_state_t *app);
+void draw_slidepop(app_state_t *app);
+void draw_spread(app_state_t *app, size_t spread_index, double opacity,
+                        int32_t win_w, int32_t win_h);
+void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_strip_button(app_state_t *app, rubraview_renderer_t *r, rubraview_pal_rect_t tile, int32_t i,
+                              const rubraview_action_facts_t *facts, bool hovered, uint32_t fill, uint32_t border);
+void draw_strip_head(app_state_t *app, rubraview_renderer_t *r, const rubraview_toolbox_layout_t *l,
+                            double ox, double oy, int32_t hovered, double opacity);
 void draw_subs_window(app_state_t *app);
+void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h);
+void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold);
+void draw_titlebar(app_state_t *app, double win_w);
 bool edit_apply_pending(app_state_t *app, bool say);
 void edit_auto_colour(app_state_t *app);
 void edit_crop_to_selection(app_state_t *app);
@@ -1685,6 +1737,7 @@ void go_to_spread(app_state_t *app, size_t index);
 void handle_action(app_state_t *app, proven_u8str_view_t action);
 size_t help_pump(app_state_t *app);
 void help_show(app_state_t *app);
+bool hint_shown(const app_state_t *app);
 void history_load(app_state_t *app);
 void history_remember(app_state_t *app);
 void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
@@ -1736,17 +1789,21 @@ void load_keymap(app_state_t *app);
 void media_ab_check(app_state_t *app);
 void media_close(app_state_t *app);
 void media_prepare(app_state_t *app);
+void media_reopen_on_new_device(app_state_t *app);
 void media_seek_to(app_state_t *app, double seconds);
 void media_step(app_state_t *app, bool forward);
 void media_tick(app_state_t *app);
 void media_toggle_pause(app_state_t *app);
 void menu_rebuild(app_state_t *app);
+proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+                                 bool *out_enabled, bool *out_current);
 void mini_close(app_state_t *app);
 bool mini_paused(const app_state_t *app);
 size_t mini_pump(app_state_t *app);
 void mini_show(app_state_t *app);
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags);
 bool name_holds(proven_u8str_view_t name, proven_u8str_view_t part);
+double name_scale(const app_state_t *app);
 void new_window(app_state_t *app);
 void note_activity(app_state_t *app);
 bool on_archive_page(const app_state_t *app);
@@ -1763,10 +1820,14 @@ void osd_say(app_state_t *app, proven_u8str_view_t text);
 size_t page_count(const app_state_t *app);
 proven_u8str_view_t page_display_name(const app_state_t *app, size_t index);
 void page_failure_notice(app_state_t *app);
+rubraview_interpolation_t page_interpolation(const app_state_t *app);
 void page_job_stop(app_state_t *app);
 uint64_t page_read_cost(app_state_t *app, size_t index);
 rubraview_page_bytes_t page_read_owned(rubraview_page_source_t *source, SRWLOCK *lock, size_t index, void **out_mem);
 bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *out_scale);
+void pagebar_drag(app_state_t *app, double x, bool released);
+void pagebar_press(app_state_t *app, double bar_x, double bar_width, double x, bool detached);
+bool pagebar_shown(const app_state_t *app);
 bool pal_rect_has(rubraview_pal_rect_t r, double x, double y);
 void panel_apply_row(app_state_t *app, int32_t index);
 void panel_build_edit(app_state_t *app);
@@ -1790,10 +1851,15 @@ rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, 
 rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t index, double win_w, double dpi);
 bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w);
 double picker_chip_width(proven_u8str_view_t label, double dpi);
+int picker_column_at(const picker_columns_t *c, double x);
+int picker_column_edge(const picker_columns_t *c, double x, double dpi);
 int32_t picker_columns(const app_state_t *app);
+void picker_columns_motion(app_state_t *app, double x, double y);
 void picker_columns_read(proven_u8str_view_t text);
+bool picker_columns_release(app_state_t *app, double x);
 void picker_context(app_state_t *app, size_t index, double x, double y);
 void picker_copy_paths(app_state_t *app);
+picker_columns_t picker_detail_columns(double win_w, double dpi);
 bool picker_details(const app_state_t *app);
 bool picker_enter_book(app_state_t *app, size_t index);
 rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w);
@@ -1813,6 +1879,7 @@ void picker_open(app_state_t *app);
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
 void picker_recycle(app_state_t *app);
 void picker_select_everything(app_state_t *app);
+void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
 proven_u8str_view_t picker_star_label(const app_state_t *app);
 void picker_thumbs_free(app_state_t *app);
@@ -1863,12 +1930,14 @@ void rename_end(app_state_t *app);
 void rename_extension_begin(app_state_t *app);
 void rename_insert(app_state_t *app, proven_u8str_view_t text);
 void rename_text(app_state_t *app, const rubraview_window_event_t *event);
+void render_frame(app_state_t *app);
 void reopen_after_removal(app_state_t *app, size_t removed_index);
 void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
 rubraview_repeat_mode_t repeat_mode(const app_state_t *app);
 void reset_view(app_state_t *app);
 void restart_now(app_state_t *app);
 int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli);
+uint64_t scene_signature(const app_state_t *app);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
 void secure_wipe(void *p, size_t n);
@@ -1899,19 +1968,28 @@ void skip_dirs_take_old(app_state_t *app);
 void slidepop_close(app_state_t *app);
 void source_close(app_state_t *app);
 void speed_set(app_state_t *app, double speed);
+int speed_text(char *buffer, size_t size, double speed);
+void speed_tile_move(app_state_t *app, double y, bool detached);
+void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);
+void speed_tile_release(app_state_t *app, bool detached);
 size_t spread_for_chosen_page(app_state_t *app, int32_t page);
 size_t spread_index_for_page(const app_state_t *app, int32_t page_index);
 void station_alts_note(const rubraview_playlist_entry_t *e);
 int32_t station_connecting_page(const app_state_t *app);
 void station_job_poll(app_state_t *app);
 void station_title_poll(app_state_t *app);
+bool strip_active(const app_state_t *app);
 void strip_cells_reset(app_state_t *app);
 void strip_follow(app_state_t *app, size_t page);
+void strip_title_plan(app_state_t *app);
 void sub_list_choose(app_state_t *app, int32_t row);
 void sub_list_open_at(app_state_t *app, double x, double y);
 rubraview_rect_t sub_list_rect(const app_state_t *app, size_t *out_rows);
 bool sub_tile_anchor(app_state_t *app, double *x, double *y);
 void sub_tile_result(app_state_t *app, rubraview_tap_result_t r);
+rubraview_rect_t subbox_geometry(app_state_t *app, double win_w, double win_h, double *out_font);
+bool subbox_live(app_state_t *app);
+rubraview_subbox_place_t subbox_place(app_state_t *app);
 proven_arena_t *subs_arena(app_state_t *app, size_t need);
 void subs_close(app_state_t *app);
 size_t subs_edit_room(const app_state_t *app);
@@ -1928,33 +2006,45 @@ void takeout_begin(app_state_t *app);
 void takeout_end(app_state_t *app);
 void takeout_step(app_state_t *app);
 void target_begin(app_state_t *app, bool moving, bool from_picker);
+bool text_action(app_state_t *app, proven_u8str_view_t action);
 bool text_active(const app_state_t *app);
 size_t text_block_start(const text_page_t *t, size_t i);
 void text_close(app_state_t *app);
 uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback);
 double text_dpi(app_state_t *app);
+void text_drag(app_state_t *app, double x, double y);
 int text_enc_now(const app_state_t *app);
 void text_encoding_set(app_state_t *app, rubraview_textenc_t next);
+const char *text_encoding_shown(const app_state_t *app);
+void text_find_step(app_state_t *app, bool forward);
 void text_free_blocks(text_page_t *t);
 uint32_t text_ink(app_state_t *app, uint32_t *paper);
 double text_line_h(app_state_t *app);
+bool text_moving(const app_state_t *app);
 bool text_next_joined(const text_page_t *t, size_t i);
+bool text_pages_mode(const app_state_t *app);
 size_t text_para_at_y(text_page_t *t, double y);
+int text_percent(const app_state_t *app);
 void text_prepare(app_state_t *app);
+bool text_press(app_state_t *app, double x, double y, uint32_t mods);
 double text_px(app_state_t *app);
 bool text_rebuild(app_state_t *app);
+bool text_release(app_state_t *app, double x, double y);
 void text_reset_heights(app_state_t *app, text_page_t *t);
 void text_scroll_by(app_state_t *app, double dy);
 double text_scroll_max(text_page_t *t);
 void text_scroll_to(text_page_t *t, double y);
 double text_scroll_y(text_page_t *t);
 double text_spacing(app_state_t *app);
+void text_tick(app_state_t *app, double now);
 void text_tops(text_page_t *t);
+bool text_wheel(app_state_t *app, double notches, uint32_t mods);
 bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, bool by_hand);
 bool text_wraps(app_state_t *app);
 void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text);
 bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo);
 void thumbs_wake(void *context);
+proven_u8str_view_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);
 void toolbox_refresh(app_state_t *app);
 void tracks_prepare(app_state_t *app, proven_u8str_view_t video_path);
 void ui_font_apply_all(app_state_t *app);
@@ -1967,5 +2057,7 @@ void window_block_give(app_state_t *app, struct window_block *wb);
 proven_arena_t *window_block_take(app_state_t *app, struct window_block *wb);
 void zoom_leave_real_fit(app_state_t *app);
 void zoom_say(app_state_t *app);
+void zoom_step(app_state_t *app, bool larger);
+bool zoom_tile_wheel(app_state_t *app, double x, double y, double notches);
 
 #endif
