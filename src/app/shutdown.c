@@ -9,10 +9,18 @@ void app_end(app_state_t *app) {
     proven_arena_t *const arena = app->arena;
 
     /* §3.22: closing the viewer with the settings window open still
-       writes what was changed in it. */
+       writes what was changed in it. Every other window of the viewer's
+       goes as its own X takes it, before the viewer's renderer does
+       (owner, 2026-10-24): the font picker before the settings it belongs
+       to, Edit's window with its panel. */
+    fontpick_close(app);
     settings_close(app);
     files_close(app);
     subs_close(app);
+    if (app->panel.open || app->edit_window) panel_close(app);
+    info_close(app);
+    help_close(app);
+    mini_close(app);
     takeout_end(app);
     putin_end(app, false);
     settings_write_if_changed(app, false);   /* a volume or opacity changed with the window shut */

@@ -422,7 +422,7 @@ static int64_t info_key_now(const app_state_t *app) {
     return (page + 1) * 4 + (app->media ? 2 : 0) + loaded + (int64_t)app->source.page_count * 1000003;
 }
 
-static void info_close(app_state_t *app) {
+void info_close(app_state_t *app) {
     if (!app->info_open) return;
     rubraview_pal_window_get_frame(app->info_window, &app->info_frame[0], &app->info_frame[1],
                                    &app->info_frame[2], &app->info_frame[3]);
@@ -682,7 +682,7 @@ static void help_rebuild(app_state_t *app) {
     app->help_dirty = true;
 }
 
-static void help_close(app_state_t *app) {
+void help_close(app_state_t *app) {
     if (!app->help_open) return;
     rubraview_pal_window_get_frame(app->help_window, &app->help_frame[0], &app->help_frame[1],
                                    &app->help_frame[2], &app->help_frame[3]);
