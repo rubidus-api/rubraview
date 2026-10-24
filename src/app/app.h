@@ -1595,7 +1595,10 @@ void bgm_close(app_state_t *app);
 void bgm_do(app_state_t *app, rubraview_bgm_action_t action);
 bool bgm_pause_for_sound(const app_state_t *app);
 void bgm_tick(app_state_t *app);
+void box_drag_motion(app_state_t *app, double x, double y);
 double box_opacity(const app_state_t *app, const rubraview_box_t *box);
+bool box_press(app_state_t *app, double x, double y);
+void box_release(app_state_t *app, double x, double y);
 bool box_wheel_opacity(app_state_t *app, double x, double y, double notches, uint32_t modifiers);
 void boxes_apply_size(app_state_t *app);
 void boxes_place(app_state_t *app);
@@ -1625,6 +1628,7 @@ rubraview_composition_t compose_view(app_state_t *app, const rubraview_spread_t 
                                             double win_w, double win_h);
 void console_line(const char *text);
 proven_u8str_view_t crop_button_label(const app_state_t *app);
+bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x, int32_t *out_y);
 void crop_shown_again(app_state_t *app);
 void ctx_close(app_state_t *app);
 void ctx_open_at(app_state_t *app, double x, double y);
@@ -1640,6 +1644,7 @@ bool details_beside(proven_arena_t *arena, proven_u8str_view_t picture, rubravie
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+bool drain_one_pending_decode(app_state_t *app);
 void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
@@ -1739,6 +1744,7 @@ void edit_window_layout(app_state_t *app);
 void edit_window_show(app_state_t *app);
 const char *effect_word(int32_t e);
 app_page_t *ensure_page_loaded(app_state_t *app, int32_t index);
+app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool on_screen);
 double eq_band_db(const app_state_t *app, size_t band);
 proven_u8str_view_t eq_band_key(size_t band);
 proven_u8str_view_t eq_preset_label(int preset);
@@ -2088,6 +2094,7 @@ void speed_tile_release(app_state_t *app, bool detached);
 bool spread_composition(app_state_t *app, rubraview_composition_t *out);
 size_t spread_for_chosen_page(app_state_t *app, int32_t page);
 size_t spread_index_for_page(const app_state_t *app, int32_t page_index);
+void startup_without_file(app_state_t *app, bool no_file);
 void station_alts_note(const rubraview_playlist_entry_t *e);
 int32_t station_connecting_page(const app_state_t *app);
 void station_job_poll(app_state_t *app);
