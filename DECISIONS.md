@@ -2139,3 +2139,8 @@ Do not store credentials, private infrastructure details, personal data, private
   - 1.39.19: `shutdown.c` (`app_end`, 60 lines moved; 42 changed by the `app` edit alone, one line added).
   - The VM smoke for the end, against 1.39.18: a book left at a page, closed with Esc (exit 0), opened again at that
     page. The settings folder's files were alike in name and size.
+  - 1.39.21: `frame.c`. `frame_fit_boxes` takes 17 lines (13 changed by the named edits) and `frame_tick` 165 (111
+    changed). In `wWinMain` the five `last_*` declarations became one `frame_clock_t frame_clock` initialiser; the
+    comment of `last_scene_signature` went with its field into `app.h`. The VM smoke against 1.39.20 compared turning
+    pages, the files window, a GIF played, paused and stepped, a film to its end, a song into the next, and the CPU
+    time in each. Each pair was within the spread between the two runs of the same build.

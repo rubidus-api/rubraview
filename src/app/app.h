@@ -1538,6 +1538,15 @@ extern bool g_edit_page_two;
 /* Moved from main.c: more than one file uses them (RV-163). */
 #define TILE_SETS 2
 
+/* The loop's clock (D-198): kept by wWinMain, seen only by frame_tick. */
+typedef struct frame_clock {
+    double   last_busy_seconds;
+    double   last_idle_frame_seconds;
+    uint64_t last_scene_signature;   /* the settled screen last drawn (see scene_signature) */
+    double   last_render_seconds;
+    double   last_input_seconds;
+} frame_clock_t;
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1793,7 +1802,9 @@ void fontpick_close(app_state_t *app);
 size_t fontpick_pump(app_state_t *app);
 void fontpick_reveal(app_state_t *app);
 void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_view_t key);
+void frame_fit_boxes(app_state_t *app);
 void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride);
+void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled);
 bool gmic_button(app_state_t *app, int32_t id);
 void gmic_from_settings(app_state_t *app);
 void gmic_list_make(app_state_t *app);
