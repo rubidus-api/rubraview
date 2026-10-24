@@ -2107,11 +2107,16 @@ proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer,
                 IWICFormatConverter_GetSize(converter, &cw, &ch);
                 diag_add(buffer, buffer_size, &used, "size from WIC converter: %ux%u\r\n", cw, ch);
 
-                D2D1_SIZE_U by_value = ID2D1Bitmap_GetPixelSize(bitmap);
+                /* RV-164: the method takes a hidden pointer to its result,
+                   whatever the C header says; called by value it wrote
+                   through a stray register and this report crashed. */
+                typedef D2D1_SIZE_U *(STDMETHODCALLTYPE *pixel_size_fn)(ID2D1Bitmap *, D2D1_SIZE_U *);
+                D2D1_SIZE_U by_pointer = {0};
+                ((pixel_size_fn)(void (*)(void))bitmap->lpVtbl->GetPixelSize)(bitmap, &by_pointer);
                 diag_add(buffer, buffer_size, &used,
-                         "size from D2D GetPixelSize (returns a struct by value): %ux%u%s\r\n",
-                         by_value.width, by_value.height,
-                         (by_value.width == cw && by_value.height == ch)
+                         "size from D2D GetPixelSize (its result by pointer): %ux%u%s\r\n",
+                         by_pointer.width, by_pointer.height,
+                         (by_pointer.width == cw && by_pointer.height == ch)
                            ? "" : "   <-- DISAGREES, this call's ABI is wrong here");
 
                 ID2D1Bitmap_Release(bitmap);
