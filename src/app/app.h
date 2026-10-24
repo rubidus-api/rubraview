@@ -1534,6 +1534,10 @@ enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK 
 extern bool g_conv_is_7z;
 extern bool g_edit_page_two;
 
+
+/* Moved from main.c: more than one file uses them (RV-163). */
+#define TILE_SETS 2
+
 /* ---- functions called across files ---- */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which);
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app);
@@ -1552,6 +1556,7 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
 int anim_end_mode(const app_state_t *app);
 bool anim_plays(const app_state_t *app);
 void animation_prepare(app_state_t *app);
+void animation_tick(app_state_t *app, double dt);
 rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
 void append_arg(char *buf, size_t cap, size_t *pos, proven_u8str_view_t text);
@@ -1793,6 +1798,7 @@ void go_to_spread(app_state_t *app, size_t index);
 void handle_action(app_state_t *app, proven_u8str_view_t action);
 bool handle_chrome_click(app_state_t *app, double x, double y);
 void handle_drop(app_state_t *app, const rubraview_window_event_t *event);
+void hdr_screen_tick(app_state_t *app, double dt);
 size_t help_pump(app_state_t *app);
 void help_show(app_state_t *app);
 bool hint_shown(const app_state_t *app);
@@ -1954,6 +1960,7 @@ void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
 proven_u8str_view_t picker_star_label(const app_state_t *app);
 void picker_thumbs_free(app_state_t *app);
+void picker_thumbs_step(app_state_t *app);
 int32_t picker_tile_columns(const app_state_t *app);
 void picker_tile_size(app_state_t *app, double *out_w, double *out_h);
 void picker_toggle_favorite(app_state_t *app);
@@ -2069,7 +2076,9 @@ int shell_wipe(bool all_users);
 void show_frame(app_state_t *app, size_t frame_index);
 void skip_dirs_table_rows(app_state_t *app);
 void skip_dirs_take_old(app_state_t *app);
+bool slide_ready(const app_state_t *app);
 void slidepop_close(app_state_t *app);
+void slides_follow_screen(app_state_t *app);
 void source_close(app_state_t *app);
 void speed_set(app_state_t *app, double speed);
 int speed_text(char *buffer, size_t size, double speed);
@@ -2084,13 +2093,17 @@ int32_t station_connecting_page(const app_state_t *app);
 void station_job_poll(app_state_t *app);
 void station_title_poll(app_state_t *app);
 bool strip_active(const app_state_t *app);
+void strip_cells_free(app_state_t *app);
 void strip_cells_reset(app_state_t *app);
 uint32_t strip_fade(uint32_t argb, double k);
 void strip_follow(app_state_t *app, size_t page);
 double strip_page_height(void *context, size_t index);
+void strip_peek(app_state_t *app);
+bool strip_press(app_state_t *app, double x, double y);
 rubraview_pal_rect_t strip_rect(const app_state_t *app);
 double strip_scroll_by(app_state_t *app, double delta);
 double strip_shown(const app_state_t *app);
+void strip_step(app_state_t *app, double dt);
 void strip_title_plan(app_state_t *app);
 double strip_width(app_state_t *app, double win_w);
 void sub_list_choose(app_state_t *app, int32_t row);
@@ -2160,6 +2173,9 @@ bool text_wraps(app_state_t *app);
 void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text);
 bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo);
 void thumbs_wake(void *context);
+void tick_timers(app_state_t *app, double dt);
+void tiles_reset(app_state_t *app);
+void tiles_take_all(app_state_t *app);
 bool titlebar_click(app_state_t *app, double x, double y);
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo);
 bool tmenu_press(app_state_t *app, double x, double y);
