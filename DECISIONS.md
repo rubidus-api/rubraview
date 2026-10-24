@@ -2103,3 +2103,39 @@ Do not store credentials, private infrastructure details, personal data, private
     - a song handed on to the next (2/3 to 3/3), and the last one stopped, as 1.39.0 does;
     - a `.pls` station's ICY title changed;
     - an `.asx` fell back to its second ref.
+
+## 2026-10-24: D-198 `wWinMain` cut into its start, its loop and its end, by a named list of edits (RV-163)
+
+- Status: Accepted (owner 2026-10-24: "Q1 받아들이고 진행", then "Q2-A, Q3-B"). Plan
+  `docs/plans/active/2026-10-24-RV-163-wwinmain.md`.
+- Context: after 1.39.18, `main.c` is its globals and `wWinMain` (1,351 lines). D-197's pure move cannot take a part
+  of one function out: every line names the local `app` as `app.x` or `&app`, and inside a function that takes
+  `app_state_t *app` each becomes `app->x` or `app`.
+- Decision:
+  - Five parts, one a release: the end (`shutdown.c`), the loop's pass (`frame.c`), the event switch (`events.c`),
+    the command line (`cmdline.c`) and the start (`appstart.c`). The `while` stays in `wWinMain`, which keeps
+    `app_state_t app` and `static rubraview_mem_t mem`.
+  - Allowed edits, applied in this order to the old lines:
+    - moved left to a function body's depth;
+    - `app.` becomes `app->` and `&app` (not before `->`) becomes `app`;
+    - in the event switch, `event.` becomes `event->` and `&event` becomes `event`;
+    - where the memory is passed, `mem.` becomes `mem->` and `&mem` becomes `mem`;
+    - each function's header and closing brace, and the call that takes the part's place;
+    - only the lines named here.
+  - Named here:
+    - `app_end` takes `arena` again from `app->arena` (one line).
+    - The loop's five `last_*` locals become a `frame_clock_t` in `wWinMain`, passed by pointer (Q2-A), so only the
+      loop sees them, as now.
+    - The command line's nine early exits each lose their `rubraview_mem_release(&mem); CoUninitialize();` and say
+      "ended, with this code". `wWinMain`, which set both up, releases them once (Q3-B). The start's two failure
+      exits are not alike (one destroys the window first), so they keep their own.
+  - The audit rebuilds `main.c` from the new one with each call put back to the old lines, and puts the old lines
+    through these edits to compare with the new body. Every other difference is named.
+  - Not taken:
+    - `app` as a file-scope global, so lines keep `app.`: every function has a parameter `app` that would hide it,
+      and it would move RFC-0006's state out of `wWinMain`'s frame.
+    - Cutting the event switch into a function a case: a case's `break` would become `return`.
+- Consequences:
+  - 1.39.19: `shutdown.c` (`app_end`, 60 lines moved; 42 changed by the `app` edit alone, one line added).
+  - The VM smoke for the end, against 1.39.18: a book left at a page, closed with Esc (exit 0), opened again at that
+    page. The settings folder's files were alike in name and size.
