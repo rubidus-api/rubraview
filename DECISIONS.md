@@ -2107,7 +2107,7 @@ Do not store credentials, private infrastructure details, personal data, private
 ## 2026-10-24: D-198 `wWinMain` cut into its start, its loop and its end, by a named list of edits (RV-163)
 
 - Status: Accepted (owner 2026-10-24: "Q1 받아들이고 진행", then "Q2-A, Q3-B"). Plan
-  `docs/plans/active/2026-10-24-RV-163-wwinmain.md`.
+  `docs/plans/archive/2026-10-24-RV-163-wwinmain.md`.
 - Context: after 1.39.18, `main.c` is its globals and `wWinMain` (1,351 lines). D-197's pure move cannot take a part
   of one function out: every line names the local `app` as `app.x` or `&app`, and inside a function that takes
   `app_state_t *app` each becomes `app->x` or `app`.
@@ -2159,6 +2159,18 @@ Do not store credentials, private infrastructure details, personal data, private
     `--version`, `--diag` on a photo, `--batch` (the two PNGs alike byte for byte), `--register-shell --types=wmv`
     and `--unregister-shell`, a second launch handing its file to the open window (exit 0, one process) and
     `--open-only` to it: the same codes, lines and windows in both.
+  - 1.39.27: `appstart.c` (`app_start(&app, &mem)`, the last part: 111 lines moved, 61 changed by the `app` and
+    `mem` edits alone). Added: `arena` taken again as `&mem->persist.arena`, as in `shutdown.c`, and the closing
+    `return true;`. The two failures (no window; no renderer, after its report and the window let go) each lost
+    `rubraview_mem_release(mem); CoUninitialize();` and return false; `wWinMain` releases the memory and COM and
+    returns 1, in the old order. `win_w`, `win_h` and `dpi` went with it: nothing after it read them. The loop's
+    clock stays in `wWinMain`. `wWinMain` is now 86 lines, not the plan's 40: the error mode, the plug-in child and
+    the loop keep their comments. The VM smoke against 1.39.26: a plain launch, a picture, a film, a book, the book
+    at `--page=3` (3/4) and `--page=99` (1/4), and the book opened again where `--page=3` left it. Each gave the same
+    title and exit 0 on close in both, and the same settings files by name and size. The screens were the same
+    apart from the taskbar's clock and the film's frame. On the very first launch the release build's title bar
+    was hidden; three launches more of each showed it in both, alike pixel for pixel. The two failures were not
+    provoked.
 
 ## 2026-10-25: D-199 A settled page drawn from a copy of the window on a software adapter (RV-166)
 

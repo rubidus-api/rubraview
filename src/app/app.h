@@ -1570,6 +1570,7 @@ void animation_tick(app_state_t *app, double dt);
 rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 void app_end(app_state_t *app);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
+bool app_start(app_state_t *app, rubraview_mem_t *mem);
 void append_arg(char *buf, size_t cap, size_t *pos, proven_u8str_view_t text);
 void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text);
 void append_number(char *buf, size_t cap, size_t *pos, size_t value);
