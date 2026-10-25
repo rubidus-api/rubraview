@@ -2229,3 +2229,12 @@ Do not store credentials, private infrastructure details, personal data, private
     the open folder again.
   - `rubraview_folder_show_for(show, opened_kind, same_kind)` decides; the kind is kept while that folder is listed
     again.
+
+## 2026-10-25: D-202 `.8bf` filters are not built (RFC-0008 withdrawn, RV-138 closed)
+
+- Status: Accepted (owner 2026-10-25: ".8bf는 구현하지 않습니다.").
+- Decision: Rubraview hosts no Photoshop-compatible `.8bf` plug-ins. RFC-0008's clean-room host is not built, and its
+  three questions are moot. Filters from outside stay what RFC-0007 phase 1 (D-186), G'MIC (D-192) and FFmpeg's
+  filters (D-193) give.
+- Consequences: RFC-0008 is withdrawn; its licence research stays in it for whoever looks again. RV-138 is closed
+  with phase 1 as its result.
