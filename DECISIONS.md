@@ -2258,9 +2258,9 @@ Do not store credentials, private infrastructure details, personal data, private
   - The bar's strip is taken from the rows under it: a press there no longer reaches a row (1.39.27 started a
     row's drag there, which could reorder the list).
 - Consequences: the settings page's own track press (1.25.0, a jump to the place pressed) is the screenful now, as
-  everywhere. VM against 1.39.27 (T253). Not tried on the VM: the subtitle window, recent, favourites, the font
-  list and a list of choices (the same code as the playlist's and the settings page's). Edit's panels and a text
-  file's page have no bar yet.
+  everywhere. VM against 1.39.27 (T253), every one of the ten lists (the subtitle window, recent, favourites,
+  the font list and a list of choices on a second pass the same day). Edit's panels and a text file's page have no
+  bar yet.
 
 ## 2026-10-25: D-204 The wheel over F turns the files; over R, the buttons a row (RV-171)
 
