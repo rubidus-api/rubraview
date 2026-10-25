@@ -1803,6 +1803,7 @@ void fontpick_close(app_state_t *app);
 size_t fontpick_pump(app_state_t *app);
 void fontpick_reveal(app_state_t *app);
 void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_view_t key);
+void frame_event(app_state_t *app, const rubraview_window_event_t *event);
 void frame_fit_boxes(app_state_t *app);
 void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t height, size_t stride);
 void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled);

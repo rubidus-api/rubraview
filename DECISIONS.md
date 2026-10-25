@@ -2144,6 +2144,13 @@ Do not store credentials, private infrastructure details, personal data, private
     comment of `last_scene_signature` went with its field into `app.h`. The VM smoke against 1.39.20 compared turning
     pages, the files window, a GIF played, paused and stepped, a film to its end, a song into the next, and the CPU
     time in each. Each pair was within the spread between the two runs of the same build.
+  - 1.39.25: `events.c` (`frame_event`, the whole switch: 749 lines moved, 422 changed by the `app` and `event` edits
+    alone, nothing else). It takes the event as `const`, and it built so: no case writes it. Of `wWinMain`'s locals
+    only `app` reaches it; its 27 `dpi` are its own (a local of one case and `event->dpi`), there being no `dpi` at
+    file scope. The VM smoke against 1.39.24: turning pages and Home/End, rotating, zooming out, the wheel, a click on
+    the page, the toolbox, the open-file screen and a click in it, the files window and the information window, each
+    the same title and window in both, and the same screen apart from the window's 1-pixel frame. A file dropped from
+    Explorer was not tried: the drop helper could not find the file in Explorer with either build.
 
 ## 2026-10-25: D-199 A settled page drawn from a copy of the window on a software adapter (RV-166)
 
