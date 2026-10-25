@@ -1727,15 +1727,10 @@ size_t settings_pump(app_state_t *app) {
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (chooser_press(app, CHOOSE_IN_SETTINGS, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
-                {   /* 1.25.0: a press on the scroll bar's track brings that part of the page */
-                    rubraview_pal_rect_t track, thumb;
-                    if (settings_scrollbar(app, &track, &thumb) && pal_rect_has(track, event.mouse.x, event.mouse.y)) {
-                        double share = (event.mouse.y - track.y) / track.height;
-                        int32_t want = (int32_t)(share * (double)view->content_height) - rubraview_settings_view_visible_rows(view) / 2;
-                        settings_event(app, rubraview_settings_view_scroll(view, want - view->scroll));
-                        app->settings_dirty = true;
-                        break;
-                    }
+                /* RV-170: the scroll bar: its thumb dragged, its track a page, its buttons a row */
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) {
+                    app->settings_dirty = true;
+                    break;
                 }
                 if (app->spath_active) {   /* 1.24.0: the box's own buttons */
                     int32_t hit = -1;
@@ -1808,6 +1803,8 @@ size_t settings_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 app->settings_px = event.mouse.x;
                 app->settings_py = event.mouse.y;
+                if (scrollbar_motion(app, app->settings_window, event.mouse.x, event.mouse.y)) { app->settings_dirty = true; break; }   /* RV-170 */
+                if (scrollbar_hover(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) app->settings_dirty = true;   /* its parts light */
                 if (app->spath_active) app->settings_dirty = true;   /* its buttons light under the pointer */
                 int32_t tip = rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w),
                                                                    (int32_t)(event.mouse.y / app->settings_cell_h));
@@ -1856,6 +1853,7 @@ size_t settings_pump(app_state_t *app) {
                 }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->settings_window)) { app->settings_dirty = true; break; }   /* RV-170 */
                 if (app->settings_selecting) {
                     app->settings_selecting = false;
                     /* A click that did not move marks nothing. */
@@ -2245,12 +2243,7 @@ void draw_fontpick_window(app_state_t *app) {
         rubraview_pal_render_draw_text(r, TU8("no font has those letters"), (rubraview_pal_rect_t){ 0.0, top, (double)w, rh * 2.0 },
                                        font, 0xFF909090u, RUBRAVIEW_TEXT_CENTER);
     }
-    if (app->fontpick_list_count > rows && rows > 0) {   /* where the rows on screen are in the list */
-        double track = rh * (double)rows, bar = track * (double)rows / (double)app->fontpick_list_count;
-        if (bar < rh * 0.5) bar = rh * 0.5;
-        double y = top + (track - bar) * (double)app->fontpick_first / (double)(app->fontpick_list_count - rows);
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ (double)w - 5.0 * d, y, 3.0 * d, bar }, COLOR_BOX_BORDER | 0x60000000u, 1.5);
-    }
+    draw_scrollbar(app, r, RVSB_FONTPICK, app->fontpick_px, app->fontpick_py);   /* RV-170: where the rows are, and it moves them */
 
     /* The preview, the weight and italic, and the buttons. */
     double by = (double)h - fontpick_bottom_h(app);
@@ -2281,6 +2274,23 @@ static int32_t fontpick_row_at(const app_state_t *app, double y) {
     size_t k = (size_t)((y - top) / fontpick_row_h(app));
     if (k >= fontpick_rows(app) || app->fontpick_first + k >= app->fontpick_list_count) return -1;
     return (int32_t)(app->fontpick_first + k);
+}
+
+/* RV-170: the list's scroll bar, at the window's right edge beside the rows. */
+bool fontpick_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    if (!app->fontpick_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->fontpick_window, &w, &h);
+    size_t rows = fontpick_rows(app);
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, fontpick_top(app), bw, fontpick_row_h(app) * (double)rows },
+                                   .button = bw, .total = (double)app->fontpick_list_count, .shown = (double)rows,
+                                   .first = (double)app->fontpick_first, .step = 1.0, .min_thumb = 16.0 * dpi };
+    return true;
+}
+
+static void fontpick_scroll(app_state_t *app, long rows);
+void fontpick_sb_to(app_state_t *app, size_t first) {
+    fontpick_scroll(app, (long)first - (long)app->fontpick_first);
 }
 
 static void fontpick_scroll(app_state_t *app, long rows) {
@@ -2317,10 +2327,14 @@ size_t fontpick_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED:
                 app->fontpick_dirty = true;
                 break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->fontpick_window)) app->fontpick_dirty = true;   /* RV-170 */
+                break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 int32_t was = app->fontpick_hover;
                 app->fontpick_px = event.mouse.x;
                 app->fontpick_py = event.mouse.y;
+                if (scrollbar_motion(app, app->fontpick_window, event.mouse.x, event.mouse.y)) { app->fontpick_dirty = true; break; }   /* RV-170 */
                 app->fontpick_hover = fontpick_row_at(app, event.mouse.y);
                 if (app->fontpick_hover != was || event.mouse.y > (double)fontpick_top(app)) app->fontpick_dirty = true;
                 break;
@@ -2331,6 +2345,7 @@ size_t fontpick_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (scrollbar_press(app, RVSB_FONTPICK, event.mouse.x, event.mouse.y)) { app->fontpick_dirty = true; break; }   /* RV-170 */
                 int32_t row = fontpick_row_at(app, event.mouse.y);
                 if (row >= 0) {
                     static double last_click = -1.0;   /* a second click on the chosen row soon after keeps it */
@@ -2861,10 +2876,34 @@ bool chooser_press(app_state_t *app, int where, double x, double y) {
     chooser_t *c = &app->chooser;
     if (!c->open) return false;
     if (c->where != where) { chooser_close(app); return false; }
+    if (scrollbar_press(app, RVSB_CHOOSER, x, y)) { chooser_dirty(app); return true; }   /* RV-170 */
     int32_t row = rubraview_chooser_row_at(&c->layout, x, y);
     if (row >= 0) chooser_pick(app, row);
     else if (row == -2) chooser_close(app);
     return true;
+}
+
+/* RV-170: the list's scroll bar, inside its frame at the right, under its title row. */
+bool chooser_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    const chooser_t *c = &app->chooser;
+    if (!c->open) return false;
+    const rubraview_chooser_layout_t *l = &c->layout;
+    *sb = (rubraview_scrollbar_t){ .area = { l->frame.x + l->frame.width - bw - 3.0 * dpi, l->frame.y + l->row_h + 2.0 * dpi,
+                                             bw, l->frame.height - l->row_h - 4.0 * dpi },
+                                   .button = bw, .total = (double)l->rows, .shown = (double)l->shown, .first = (double)l->first,
+                                   .step = 1.0, .min_thumb = 16.0 * dpi };
+    return true;
+}
+
+void chooser_sb_to(app_state_t *app, size_t first) {
+    rubraview_chooser_layout_t *l = &app->chooser.layout;
+    size_t last = l->rows > l->shown ? l->rows - l->shown : 0;
+    l->first = first > last ? last : first;
+    chooser_dirty(app);
+}
+
+rubraview_window_t *chooser_sb_window(app_state_t *app) {
+    return app->chooser.open ? chooser_window(app, app->chooser.where) : NULL;
 }
 
 bool chooser_key(app_state_t *app, int where, rubraview_key_combo_t combo) {
@@ -2909,6 +2948,7 @@ void draw_chooser(app_state_t *app, rubraview_renderer_t *r, int where, double p
             snprintf(line, sizeof(line), "%s %s", (int32_t)i == c->current ? "\xE2\x97\x8F" : " ", c->words[i]);
             rubraview_pal_render_draw_text_mono(r, cstr(line), row.x + cw, row.y, fs, SETTINGS_TEXT);
         }
+        draw_scrollbar(app, r, RVSB_CHOOSER, px, py);   /* RV-170 */
         return;
     }
     double dpi = rubraview_pal_window_dpi_scale(chooser_window(app, where));
@@ -2924,26 +2964,27 @@ void draw_chooser(app_state_t *app, rubraview_renderer_t *r, int where, double p
         rubraview_pal_rect_t words = { cell.x + 12.0 * dpi, cell.y, cell.width - 20.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, cstr(c->words[i]), words, 16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
-    if (l->rows > l->shown) {   /* more above or below: a thin bar says where */
-        double track = l->frame.height - l->row_h, bar = track * (double)l->shown / (double)l->rows;
-        double top = l->frame.y + l->row_h + track * (double)l->first / (double)l->rows;
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x + f.width - 5.0 * dpi, top, 3.0 * dpi, bar }, 0x80FFFFFFu, 1.5 * dpi);
-    }
+    draw_scrollbar(app, r, RVSB_CHOOSER, px, py);   /* more above or below: where, and RV-170 it moves them */
 }
 
-/* 1.25.0: the settings page's scroll bar, at the window's right edge; false while all of the page shows. */
-bool settings_scrollbar(const app_state_t *app, rubraview_pal_rect_t *track, rubraview_pal_rect_t *thumb) {
+/* 1.25.0: the settings page's scroll bar, at the window's right edge; RV-170: it moves the page. */
+bool settings_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    if (!app->settings_open) return false;
     const rubraview_settings_view_t *v = &app->settings_view;
     int32_t visible = rubraview_settings_view_visible_rows(v);
-    if (v->content_height <= visible || visible <= 0) return false;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
-    double cw = app->settings_cell_w, ch = app->settings_cell_h;
-    *track = (rubraview_pal_rect_t){ (double)w - cw * 0.9, ch * RUBRAVIEW_SETTINGS_TOP_ROWS, cw * 0.7, ch * (double)visible };
-    double share = (double)visible / (double)v->content_height;
-    double at = (double)v->scroll / (double)v->content_height;
-    *thumb = (rubraview_pal_rect_t){ track->x, track->y + track->height * at, track->width, fmax(track->height * share, ch) };
+    double ch = app->settings_cell_h;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bw, ch * (double)visible },
+                                   .button = bw, .total = (double)v->content_height, .shown = (double)visible,
+                                   .first = (double)v->scroll, .step = 1.0, .min_thumb = ch };
     return true;
+}
+
+void settings_sb_to(app_state_t *app, size_t first) {
+    rubraview_settings_view_t *view = &app->settings_view;
+    settings_event(app, rubraview_settings_view_scroll(view, (int32_t)first - view->scroll));
+    app->settings_dirty = true;
 }
 
 void draw_settings_window(app_state_t *app) {
@@ -3106,13 +3147,8 @@ void draw_settings_window(app_state_t *app) {
         rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0, 3.0);
         rubraview_pal_render_draw_text(r, help, (rubraview_pal_rect_t){ x + cw, y, tw - cw * 2.0, th }, fs, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
-    {   /* 1.25.0 (owner, 2026-10-20: "가로 세로 스크롤바가 생기거나"): a bar at the right while the page is taller */
-        rubraview_pal_rect_t track = { 0 }, thumb = { 0 };
-        if (settings_scrollbar(app, &track, &thumb)) {
-            rubraview_pal_render_fill_rect(r, track, 0xFF242424u, 2.0);
-            rubraview_pal_render_fill_rect(r, thumb, pal_rect_has(track, app->settings_px, app->settings_py) ? 0xFF7A7A7Au : 0xFF5A5A5Au, 2.0);
-        }
-    }
+    /* 1.25.0 (owner, 2026-10-20: "가로 세로 스크롤바가 생기거나"): a bar at the right while the page is taller; RV-170 */
+    draw_scrollbar(app, r, RVSB_SETTINGS, app->settings_px, app->settings_py);
     draw_chooser(app, r, CHOOSE_IN_SETTINGS, -1.0, -1.0);   /* 1.24.0 */
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }

@@ -46,26 +46,39 @@ double box_opacity(const app_state_t *app, const rubraview_box_t *box) {
 }
 
 /* D-15: Alt + wheel over a box. Returns true when the wheel was spent on it. */
-/* 1.25.0 (owner, 2026-10-20; by the anchors' old names): the wheel over F makes the Floating Widget wider or
-   narrower (its buttons a row), with Alt more or less see-through; over T its buttons bigger or smaller. */
+/* 1.25.0 (owner, 2026-10-20; by the anchors' old names): the wheel over F with Alt makes the Floating Widget more
+   or less see-through; over T its buttons bigger or smaller. RV-171 (owner, 2026-10-25): the plain wheel over F
+   goes through the file list as the wheel over the picture does, the strip below shown as Settings say; the
+   buttons a row, which it set before, are R's (the grip). */
 static bool box_anchor_wheel(app_state_t *app, double x, double y, double notches, uint32_t modifiers) {
     if (app->toolbox.state == RUBRAVIEW_BOX_DETACHED || notches == 0.0) return false;
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
-    rubraview_anchor_half_t half = rubraview_box_anchor_half_at(&app->toolbox, &metrics, x, y);
-    if (half == RUBRAVIEW_ANCHOR_NONE) return false;
     rubraview_box_t *b = &app->toolbox;
     char line[64];
     int n = 0;
+    if (rubraview_rect_contains(rubraview_box_grip_rect(b, &metrics), x, y)) {   /* RV-171: R, the buttons a row */
+        rubraview_tile_metrics_t sized = rubraview_box_metrics(b, &metrics);
+        rubraview_box_set_size(b, sized.strip_columns + (notches > 0.0 ? 1 : -1), b->scale > 0.0 ? b->scale : 1.0);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_columns"), (double)b->columns);
+        n = snprintf(line, sizeof(line), T("%d buttons a row"), rubraview_box_metrics(b, &metrics).strip_columns);
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+        note_activity(app);
+        return true;
+    }
+    rubraview_anchor_half_t half = rubraview_box_anchor_half_at(&app->toolbox, &metrics, x, y);
+    if (half == RUBRAVIEW_ANCHOR_NONE) return false;
+    if (half == RUBRAVIEW_ANCHOR_CLICK && !(modifiers & RUBRAVIEW_MOD_ALT)) {   /* RV-171: F, the file before or after */
+        if (page_count(app) < 2) return true;
+        apply_intent(app, notches > 0.0 ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE);
+        strip_peek(app);   /* shown or not as Settings › Viewer says */
+        note_activity(app);
+        return true;
+    }
     if (half == RUBRAVIEW_ANCHOR_CLICK && (modifiers & RUBRAVIEW_MOD_ALT)) {
         double next = rubraview_box_opacity_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity")), notches);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity"), next);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"), next);   /* its toolbar with it */
         n = snprintf(line, sizeof(line), T("Floating Widget %d%%"), (int)next);
-    } else if (half == RUBRAVIEW_ANCHOR_CLICK) {
-        rubraview_tile_metrics_t sized = rubraview_box_metrics(b, &metrics);
-        rubraview_box_set_size(b, sized.strip_columns + (notches > 0.0 ? 1 : -1), b->scale > 0.0 ? b->scale : 1.0);
-        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_columns"), (double)b->columns);
-        n = snprintf(line, sizeof(line), T("%d buttons a row"), rubraview_box_metrics(b, &metrics).strip_columns);
     } else {
         double scale = (b->scale > 0.0 ? b->scale : 1.0) + (notches > 0.0 ? 0.1 : -0.1);
         rubraview_box_set_size(b, b->columns, scale);
@@ -1046,6 +1059,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                            PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi }, COLOR_TILE_CURRENT, 0.0);
         }
     }
+
+    draw_scrollbar(app, app->renderer, RVSB_PICKER, app->pointer_x, app->pointer_y);   /* RV-170: where the tiles are; it moves them */
 
     /* Action bar: the buttons, then the selection metrics (§3.15.2 tier three). */
     rubraview_pal_rect_t bar = { 0.0, win_h - action_h, win_w, action_h };

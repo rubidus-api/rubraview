@@ -54,6 +54,7 @@
 #include "rubraview/subtitle.h"
 #include "rubraview/encoding.h"
 #include "rubraview/glob.h"
+#include "rubraview/ui_scrollbar.h"
 #include "rubraview/shellreq.h"
 #include "rubraview/arcedit.h"
 #include "rubraview/ui_input.h"
@@ -394,6 +395,9 @@ typedef struct chooser {
     rubraview_chooser_layout_t layout;
 } chooser_t;
 
+/* RV-170 (owner, 2026-10-25): the lists whose scroll bar moves them, each in its own window. */
+enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO };
+
 typedef struct app_state {
     proven_arena_t *arena;    /* RFC-0006: &mem->persist.arena, the region of what lasts */
     rubraview_mem_t *mem;
@@ -692,6 +696,12 @@ typedef struct app_state {
     size_t                     subs_anchor;        /* the row last clicked */
     int32_t                    subs_hover, subs_now;
     double                     subs_scrolled_at;   /* the reader moved the list: it does not follow for a while */
+    /* RV-170: the scroll bar held (`sb_which`, RVSB_NONE for none), by what, and the pointer in its window */
+    int32_t                    sb_which;
+    double                     info_px, info_py;   /* the pointer over the information window */
+    double                     subs_px, subs_py;   /* and over the subtitle window */
+    rubraview_scrollbar_hold_t sb_hold;
+    double                     sb_x, sb_y;
     char                       subs_amount[16];    /* the seconds a press of Earlier / Later moves */
     size_t                     subs_amount_len;
     bool                       subs_amount_focus;
@@ -2087,7 +2097,24 @@ size_t settings_pump(app_state_t *app);
 void settings_read_file(app_state_t *app);
 bool settings_row_is_text(const app_state_t *app, int32_t row);
 void settings_say(app_state_t *app, const char *text);
-bool settings_scrollbar(const app_state_t *app, rubraview_pal_rect_t *track, rubraview_pal_rect_t *thumb);
+bool settings_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void settings_sb_to(app_state_t *app, size_t first);
+/* RV-170: the lists' scroll bars (scrollbars.c) and what each list says of its own */
+bool scrollbar_of(app_state_t *app, int which, rubraview_scrollbar_t *sb);
+bool scrollbar_press(app_state_t *app, int which, double x, double y);
+bool scrollbar_motion(app_state_t *app, rubraview_window_t *win, double x, double y);
+bool scrollbar_release(app_state_t *app, rubraview_window_t *win);
+void scrollbar_tick(app_state_t *app);
+bool scrollbar_held(const app_state_t *app);
+bool scrollbar_hover(app_state_t *app, int which, double x, double y);
+void draw_scrollbar(app_state_t *app, rubraview_renderer_t *r, int which, double px, double py);
+bool chooser_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void chooser_sb_to(app_state_t *app, size_t first);
+rubraview_window_t *chooser_sb_window(app_state_t *app);
+bool fontpick_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void fontpick_sb_to(app_state_t *app, size_t first);
+bool info_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void info_sb_to(app_state_t *app, size_t first);
 void settings_share(app_state_t *app, double now);
 void settings_took_effect(app_state_t *app);
 void settings_write_if_changed(app_state_t *app, bool say);

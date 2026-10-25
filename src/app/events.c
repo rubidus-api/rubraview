@@ -46,6 +46,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+            if (scrollbar_motion(app, app->window, event->mouse.x, event->mouse.y)) break;   /* RV-170: a list's bar held */
             if (app->text && app->text->selecting) { text_drag(app, event->mouse.x, event->mouse.y); break; }
             if (!app->seekfan_detached) seekfan_pointer(app, event->mouse.x, event->mouse.y);
             speed_tile_move(app, event->mouse.y, false);
@@ -198,6 +199,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
                 if (titlebar_click(app, event->mouse.x, event->mouse.y)) break;
                 if (event->mouse.y < top) break;   /* the band holds nothing to press */
+                if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_PICKER, event->mouse.x, event->mouse.y)) break;   /* RV-170 */
                 if (event->mouse.y < crumb_h && !app->picker_in_book) {   /* 1.22.0: the filter's chip */
                     int32_t fw = 0, fh = 0;
                     rubraview_pal_window_get_size(app->window, &fw, &fh);
@@ -508,6 +510,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+            if (scrollbar_release(app, app->window)) break;   /* RV-170 */
             if (app->col_drag && picker_columns_release(app, event->mouse.x)) break;   /* 1.25.0 */
             if (app->picker_hold && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* 1.22.0: the tap, now it is one */
                 app->picker_hold = false;

@@ -369,7 +369,7 @@ static const char *const PARTS[] = {
 "  int    ui.menubox_size          \"Menu box tile size\"      75..200 step 5 unit \"%\" = 100 hidden wired\n"
 "  int    ui.toolbox_columns       \"Toolbar buttons a row\"   2..24 step 1 = 8 wired\n"
 "  int    ui.toolbox_size          \"Toolbar button size\"     75..200 step 5 unit \"%\" = 100 wired\n"
-"  note \"R beside P sets these too: drag it sideways or up and down. The wheel over F: buttons a row (with Alt, the opacity); over T: their size.\"\n"
+"  note \"R beside P sets these too: drag it sideways or up and down, or turn the wheel over it (buttons a row). The wheel over T: their size; over F with Alt: the opacity (the plain wheel over F turns the files).\"\n"
 "  section \"Tiles and colour\"\n"
 "  choice display.tile_base_px     \"Touch tile size\"         48 | 64 | 96 = 64 wired\n"
 "  int    display.name_scale       \"Name and message size\"   60..200 step 10 unit \"%\" = 100 wired\n"

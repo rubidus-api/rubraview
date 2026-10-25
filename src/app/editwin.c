@@ -2955,6 +2955,7 @@ size_t edit_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->edit_px = event.mouse.x;
                 app->edit_py = event.mouse.y;
+                if (scrollbar_motion(app, app->edit_window, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-170: a list's bar */
                 if (app->change_press >= 0) { changes_motion(app, event.mouse.y); break; }
                 if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
                 if (app->panel.active_row >= 0) {
@@ -2980,6 +2981,7 @@ size_t edit_pump(app_state_t *app) {
                 (void)panel_handle_press(app, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->edit_window)) { app->edit_dirty = true; break; }   /* RV-170 */
                 changes_release(app, event.mouse.y);
                 app->curve_dragging = -1;
                 rubraview_panel_release(&app->panel);

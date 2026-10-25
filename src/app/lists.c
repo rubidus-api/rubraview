@@ -418,6 +418,10 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
     listwin_sync(app);
     lw->editable = list_editable(app);
     lw->tools = true;
+    if (!right && scrollbar_press(app, in_files ? RVSB_FILES : RVSB_LIST, x, y)) {   /* RV-170: its scroll bar moves it */
+        if (in_files) app->files_dirty = true;
+        return true;
+    }
     rubraview_listwin_part_t part = rubraview_listwin_hit(lw, x, y, list_rows(app), &row);
     if (part == RUBRAVIEW_LISTWIN_NONE) return false;
     note_activity(app);
@@ -692,18 +696,14 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_rect_t empty = { lw->x, lw->y + head_h, lw->width, lw->row_height * 2.0 };
         rubraview_pal_render_draw_text(rr, TU8("nothing opened lately"), empty, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
     }
-    if (count > rows && rows > 0) {
-        double track = lw->height - head_h, h = track * (double)rows / (double)count;
-        if (h < lw->row_height * 0.5) h = lw->row_height * 0.5;
-        double y = lw->y + head_h + (track - h) * (double)lw->first / (double)(count - rows);
-        rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ lw->x + lw->width - 4.0, y, 3.0, h }, COLOR_BOX_BORDER | 0x60000000u, 1.5);
-    }
+    draw_scrollbar(app, rr, RVSB_RECENT, app->pointer_x, app->pointer_y);   /* RV-170: where the rows are, and it moves them */
 }
 
 /* A press on the recent window: true when it took it. */
 bool recentwin_press(app_state_t *app, double x, double y) {
     rubraview_listwin_t *lw = &app->recentwin;
     if (!lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), x, y)) return false;
+    if (scrollbar_press(app, RVSB_RECENT, x, y)) return true;   /* RV-170 */
     size_t count = app->recent_row_count, index = 0;
     switch (rubraview_listwin_hit(lw, x, y, count, &index)) {
         case RUBRAVIEW_LISTWIN_CLOSE:  lw->open = false; break;
@@ -912,11 +912,13 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_draw_text(rr, TU8("no favourites yet: Add this file, the open-file screen's star, or a right click there"),
                                        empty, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_CENTER);
     }
+    draw_scrollbar(app, rr, RVSB_FAVS, app->pointer_x, app->pointer_y);   /* RV-170 */
 }
 
 bool favwin_press(app_state_t *app, double x, double y) {
     rubraview_listwin_t *lw = &app->favwin;
     if (!lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), x, y)) return false;
+    if (scrollbar_press(app, RVSB_FAVS, x, y)) return true;   /* RV-170 */
     size_t count = app->favorites.count, index = 0;
     switch (rubraview_listwin_hit(lw, x, y, count, &index)) {
         case RUBRAVIEW_LISTWIN_CLOSE:  lw->open = false; break;

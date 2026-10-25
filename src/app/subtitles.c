@@ -1232,14 +1232,7 @@ void draw_subs_window(app_state_t *app) {
         if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
                                                              kind == SUBS_TEXT ? COLOR_TEXT : 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
-    if (count > rows && rows > 0) {              /* where in a long list the rows are */
-        double track = lw->height - lw->title_height;
-        double bh = track * (double)rows / (double)count;
-        if (bh < lw->row_height * 0.5) bh = lw->row_height * 0.5;
-        double by = lw->y + lw->title_height + (track - bh) * (double)lw->first / (double)(count - rows);
-        rubraview_pal_rect_t bar = { lw->x + lw->width - 5.0, by, 3.0, bh };
-        rubraview_pal_render_fill_rect(r, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
-    }
+    draw_scrollbar(app, r, RVSB_SUBS, app->subs_px, app->subs_py);   /* where in a long list the rows are; RV-170: it moves them */
     if (!rubraview_pal_render_end(r)) subs_close(app);   /* its device went: the key opens it again */
 }
 
@@ -1321,6 +1314,10 @@ size_t subs_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 int32_t was = app->subs_hover;
+                app->subs_px = event.mouse.x;
+                app->subs_py = event.mouse.y;
+                if (scrollbar_motion(app, app->subs_window, event.mouse.x, event.mouse.y)) { app->subs_dirty = true; break; }   /* RV-170 */
+                if (scrollbar_hover(app, RVSB_SUBS, event.mouse.x, event.mouse.y)) app->subs_dirty = true;
                 app->subs_hover = rubraview_listwin_hit(&app->subs_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
                                     ? (int32_t)index : -1;
                 if (app->subs_hover != was) app->subs_dirty = true;
@@ -1330,7 +1327,14 @@ size_t subs_pump(app_state_t *app) {
                 if (app->subs_hover != -1) { app->subs_hover = -1; app->subs_dirty = true; }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_SUBS, event.mouse.x, event.mouse.y)) {   /* RV-170 */
+                    app->subs_dirty = true;
+                    break;
+                }
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) subs_press(app, event.mouse.x, event.mouse.y, event.mouse.modifiers);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->subs_window)) app->subs_dirty = true;   /* RV-170 */
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 rubraview_listwin_scroll(&app->subs_list, event.mouse.wheel_delta > 0 ? -3 : 3, count);

@@ -53,7 +53,6 @@ void draw_files_window(app_state_t *app) {
         draw_list_bar(app, r, lw, app->files_px, app->files_py);
         draw_list_tools(app, r, lw, app->files_px, app->files_py, true);
     }
-    double head_h = rubraview_listwin_head_height(lw);
 
     size_t rows = rubraview_listwin_rows_visible(lw);
     for (size_t at = lw->first; at < shown && at < lw->first + rows; ++at) {
@@ -89,14 +88,7 @@ void draw_files_window(app_state_t *app) {
                                                   text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     draw_list_drop_line(app, r, lw, true);
-    if (shown > rows && rows > 0) {              /* where in a long list the rows are */
-        double track = lw->height - head_h;
-        double bh = track * (double)rows / (double)shown;
-        if (bh < lw->row_height * 0.5) bh = lw->row_height * 0.5;
-        double by = lw->y + head_h + (track - bh) * (double)lw->first / (double)(shown - rows);
-        rubraview_pal_rect_t bar = { lw->x + lw->width - 5.0, by, 3.0, bh };
-        rubraview_pal_render_fill_rect(r, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
-    }
+    draw_scrollbar(app, r, RVSB_FILES, app->files_px, app->files_py);   /* where in a long list the rows are; RV-170: it moves them */
 
     /* The preview: the picture fitted above two lines that say what it is. */
     rubraview_rect_t pv = app->files_preview_rect;
@@ -184,6 +176,8 @@ size_t files_pump(app_state_t *app) {
                 int32_t was = app->files_hover;
                 app->files_px = event.mouse.x;
                 app->files_py = event.mouse.y;
+                if (scrollbar_motion(app, app->files_window, event.mouse.x, event.mouse.y)) { app->files_dirty = true; break; }   /* RV-170 */
+                if (scrollbar_hover(app, RVSB_FILES, event.mouse.x, event.mouse.y)) app->files_dirty = true;
                 app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
                                      ? (int32_t)list_page(app, index) : -1;
                 if (app->files_hover != was) app->files_dirty = true;
@@ -193,6 +187,7 @@ size_t files_pump(app_state_t *app) {
                 break;
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->files_window)) { app->files_dirty = true; break; }   /* RV-170 */
                 if (app->list_held_in_files && listwin_release(app)) app->files_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_DROP:

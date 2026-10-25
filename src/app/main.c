@@ -183,7 +183,8 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
 bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches);
 void ctx_open_at(app_state_t *app, double x, double y);
 double name_scale(const app_state_t *app);
-bool settings_scrollbar(const app_state_t *app, rubraview_pal_rect_t *track, rubraview_pal_rect_t *thumb);
+bool settings_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void settings_sb_to(app_state_t *app, size_t first);
 int place_font_begin(app_state_t *app, int which, double *size);
 void place_font_end(app_state_t *app, int before);
 double place_size(app_state_t *app, int which);

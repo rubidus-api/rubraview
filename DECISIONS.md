@@ -2238,3 +2238,38 @@ Do not store credentials, private infrastructure details, personal data, private
   filters (D-193) give.
 - Consequences: RFC-0008 is withdrawn; its licence research stays in it for whoever looks again. RV-138 is closed
   with phase 1 as its result.
+
+## 2026-10-25: D-203 A list's scroll bar moves it; its two buttons together at its foot (RV-170)
+
+- Status: Accepted (owner 2026-10-25: "재생목록이나 각종 창에서, 스크롤바로도 이동할 수 있게 해 주세요. 클릭을 하거나
+  스크롤바를 드래그해도 목록에서 이동 가능하게 해 주세요."; asked, "막대 있는 곳 + 열기 화면·정보 창 (권장)" and
+  "한 화면씩 이동"; then "스크롤바에서 위아래 이동 버튼은 아래쪽에 한곳에 몰아서 표시해 주세요.").
+- Decision:
+  - Every list that showed a thin bar (the playlist, the files window, recent files, favourites, the subtitle
+    window, the settings page, the font list, a list of choices) and the open-file screen and the information
+    window have a bar 12 px (at 100 %) wide at the list's right edge: the track, then ▲ over ▼ at its foot.
+  - The thumb dragged moves the list with the pointer (also when the pointer leaves the bar sideways). A press on
+    the track beside the thumb moves a screenful toward it; held, it goes on after 0.4 s every 0.05 s until the
+    thumb reaches the pointer. A button moves a row (a row of tiles on the open-file screen); held, likewise, while
+    the pointer stays on it.
+  - `rubraview_scrollbar_*` (`ui_scrollbar.c`) holds the arithmetic and is tested on the host (T252);
+    `scrollbars.c` holds the press, the drag, the held part (`sb_which`, kept awake by the loop while held) and the
+    look for all; each list says where its bar is and how it is moved.
+  - The bar's strip is taken from the rows under it: a press there no longer reaches a row (1.39.27 started a
+    row's drag there, which could reorder the list).
+- Consequences: the settings page's own track press (1.25.0, a jump to the place pressed) is the screenful now, as
+  everywhere. VM against 1.39.27 (T253). Not tried on the VM: the subtitle window, recent, favourites, the font
+  list and a list of choices (the same code as the playlist's and the settings page's). Edit's panels and a text
+  file's page have no bar yet.
+
+## 2026-10-25: D-204 The wheel over F turns the files; over R, the buttons a row (RV-171)
+
+- Status: Accepted (owner 2026-10-25: "F 버튼 위에서 휠을 돌리면 아래에 미리보기 막대바가 옵션에 따라 보이거나
+  안보이거나 하면서 파일목록에서 앞뒤로 움직이게 해 주세요. 툴바 크기 조정은 R 위에서의 드래그나 휠 조작으로
+  옮겨갔으니까요.").
+- Decision: the plain wheel over F goes to the file before (up) or after (down), as the wheel over a picture does,
+  and brings up the thumbnail strip only while Settings › Viewer › Wheel strip is on. The buttons a row, which the
+  wheel over F set since 1.25.0, are set by the wheel over R (R had only its drag). Alt + wheel over F (see-through)
+  and the wheel over T (the buttons' size) stay. The hints of F and R, the settings page's note and the manual say
+  so, in the five language packs too.
+- Consequences: VM against 1.39.27 (T254).

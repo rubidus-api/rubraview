@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.27.exe              the viewer, as built
-dist/rubraview-v1.39.27/                 the release bundle
-dist/rubraview-v1.39.27.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.28.exe              the viewer, as built
+dist/rubraview-v1.39.28/                 the release bundle
+dist/rubraview-v1.39.28.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1073,9 +1073,10 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
 
 - **F** — a click opens or folds the **Toolbar** (it never pins it);
   dragged, the widget moves, and past the window's edge the Toolbar gets
-  a window of its own. The wheel over F sets the buttons a row;
-  `Alt` + wheel how see-through the widget and the Toolbar are (never
-  below 30 %).
+  a window of its own. The wheel over F goes to the file before or
+  after, as the wheel over the picture does (the thumbnails come up
+  below as **Wheel strip** says); `Alt` + wheel how see-through the
+  widget and the Toolbar are (never below 30 %).
 - **T** — rest the pointer on it and the Toolbar opens, folding again
   when the pointer leaves. Dragged up or down it goes through the files,
   a step every few millimetres; sideways, through the folders (or the
@@ -1083,7 +1084,7 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
 - **P** — while the Toolbar is open: on, it stays open when the pointer
   leaves; off, it folds.
 - **R** — dragged sideways, more or fewer buttons a row; away or back,
-  bigger or smaller buttons.
+  bigger or smaller buttons. The wheel over R sets the buttons a row.
 
 The Toolbar changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or
@@ -1329,6 +1330,15 @@ the buttons and the settings window (with its line spacing); an empty
 face is the UI font. The settings window is best in a face whose letters
 are all one width, so its columns stay lined up; it has a scroll bar when
 the page is longer than the window.
+
+**Scroll bars.** A list longer than its window — the playlist, the files
+window, recent files, favourites, the subtitle window, the settings page,
+the font list, a list of choices, the open-file screen and the
+information window — has a bar at its right edge. Drag its thumb and the
+list follows; press the track above or below it and the list moves a
+screenful that way, again and again while held, until the thumb reaches
+the pointer. The two buttons together at the bar's foot, ▲ over ▼, move
+it a row (a row of tiles on the open-file screen), again while held.
 
 `F10` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says

@@ -62,6 +62,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     if (dt < 0.0) dt = 0.0;
     app->last_frame_seconds = now;
     tick_timers(app, dt);
+    scrollbar_tick(app);   /* RV-170: a scroll bar's track or button held goes on */
     sub_tile_result(app, rubraview_tap_tick(&app->sub_tap, now));   /* D-33: a tap decided, or a hold */
     if (rubraview_seekfan_tick(&app->seekfan, now)) app->toolbox_window_drawn = 0.0;   /* held: its choices open */
     /* D-34: thumbnails for the picker's tiles, a few a pass; given back when it closes. */
@@ -119,6 +120,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
                          app->rename_active ||   /* the caret blinks (owner, 2026-09-23) */
                          rubraview_tap_waiting(&app->sub_tap) ||   /* D-33: a tap or a hold being decided */
                          app->seekfan.down ||                      /* a seek button held: its choices open and light up */
+                         scrollbar_held(app) ||                    /* RV-170: a scroll bar held goes on moving its list */
                          app->subbox.dragging != RUBRAVIEW_SUBBOX_NONE ||
                          app->picker_thumbs_arrived ||   /* D-34: a picture came in; the thread wakes the loop */
                          app->strip_arrived ||           /* a strip thumbnail came in */

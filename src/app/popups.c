@@ -1079,7 +1079,6 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     }
     rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 
-    double head_h = rubraview_listwin_head_height(lw);
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     if (lw->editable) {
         /* D-111: R sizes the window when dragged; the bar acts on the list. */
@@ -1115,15 +1114,8 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
                                                   text, small, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     draw_list_drop_line(app, app->renderer, lw, false);   /* a row being carried */
-    /* A thin bar says where in a long list the rows are. */
-    if (count > rows && rows > 0) {
-        double track = lw->height - head_h;
-        double h = track * (double)rows / (double)count;
-        if (h < lw->row_height * 0.5) h = lw->row_height * 0.5;
-        double y = lw->y + head_h + (track - h) * (double)lw->first / (double)(count - rows);
-        rubraview_pal_rect_t bar = { lw->x + lw->width - 4.0, y, 3.0, h };
-        rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BOX_BORDER | 0x60000000u, 1.5);
-    }
+    /* A bar says where in a long list the rows are; RV-170: dragged, pressed or by its buttons it moves them. */
+    draw_scrollbar(app, app->renderer, RVSB_LIST, app->pointer_x, app->pointer_y);
     if (hovered != SIZE_MAX && !app->list_row_dragging && !app->chooser.open) draw_list_tip(app, lw, list_page(app, hovered), win_w, win_h);
 }
 

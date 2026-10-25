@@ -491,6 +491,23 @@ static void info_scroll_by(app_state_t *app, int32_t lines) {
     app->info_dirty = true;
 }
 
+/* RV-170: the rows' scroll bar, at the window's right edge. */
+bool info_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    if (!app->info_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->info_window, &w, &h);
+    int32_t rows = info_visible_rows(app);
+    double ch = app->info_cell_h;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, ch * (double)rows },
+                                   .button = bw, .total = (double)app->info_count, .shown = (double)rows,
+                                   .first = (double)app->info_scroll, .step = 1.0, .min_thumb = ch };
+    return true;
+}
+
+void info_sb_to(app_state_t *app, size_t first) {
+    info_scroll_by(app, (int32_t)first - app->info_scroll);
+}
+
 #define INFO_BACKGROUND 0xFF16181Cu
 #define INFO_HEADING    0xFF7FB2E5u
 #define INFO_TEXT       0xFFE8E8E8u
@@ -538,6 +555,7 @@ void draw_info_window(app_state_t *app) {
                      app->info_message, app->info_message[0] ? "   |   " : "");
     if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
                                                    0.0, (double)h - ch * 1.2, app->info_font, INFO_DIM);
+    draw_scrollbar(app, r, RVSB_INFO, app->info_px, app->info_py);   /* RV-170 */
     if (!rubraview_pal_render_end(r)) app->info_dirty = true;
 }
 
@@ -584,18 +602,24 @@ size_t info_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (scrollbar_press(app, RVSB_INFO, event.mouse.x, event.mouse.y)) { app->info_dirty = true; break; }   /* RV-170 */
                 app->info_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
                 app->info_selecting = true;
                 app->info_message[0] = '\0';
                 app->info_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+                app->info_px = event.mouse.x;
+                app->info_py = event.mouse.y;
+                if (scrollbar_motion(app, app->info_window, event.mouse.x, event.mouse.y)) { app->info_dirty = true; break; }   /* RV-170 */
+                if (scrollbar_hover(app, RVSB_INFO, event.mouse.x, event.mouse.y)) app->info_dirty = true;
                 if (!app->info_selecting) break;
                 app->info_sel.end_row = row;
                 app->info_sel.end_col = col;
                 app->info_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->info_window)) { app->info_dirty = true; break; }   /* RV-170 */
                 if (!app->info_selecting) break;
                 app->info_selecting = false;
                 if (app->info_sel.anchor_row == app->info_sel.end_row && app->info_sel.anchor_col == app->info_sel.end_col) {
