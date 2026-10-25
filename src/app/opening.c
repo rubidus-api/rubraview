@@ -444,8 +444,9 @@ static bool folder_lists(const app_state_t *app, proven_u8str_view_t name, bool 
     const char *const KINDS[] = { (const char *)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER };
     name = rubraview_path_basename(name);
     if (!filtered) return rubraview_glob_match_list(name, cstr(KINDS[0]));
-    int show = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("show")));
-    if (!rubraview_glob_match_list(name, cstr(KINDS[show >= 0 && show < 4 ? show : 0]))) return false;
+    int show = (int)rubraview_folder_show_for((int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("show"))),
+                                              app->folder_from_picture);
+    if (!rubraview_glob_match_list(name, cstr(KINDS[show]))) return false;
     proven_u8str_view_t pattern = rubraview_settings_get_text(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
     return pattern.size == 0 || rubraview_glob_match_list(name, pattern);
 }
@@ -717,6 +718,7 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
        with rubraview_path_same, never byte for byte. */
     proven_u8str_view_t key = entry.path;
 
+    app->folder_from_picture = false;
     if (entry.is_directory) {
         opened = open_folder(app, entry.path);
         key = entry.path;
@@ -728,6 +730,7 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
            command was run in. */
         proven_u8str_view_t folder = rubraview_path_dirname(entry.path);
         if (folder.size == 0) folder = PROVEN_LIT(".");
+        app->folder_from_picture = rubraview_glob_match_list(rubraview_path_basename(entry.path), PROVEN_LIT(IMAGE_FILTER));
         opened = open_folder_keeping(app, folder, entry.path);
         key = folder;
     }

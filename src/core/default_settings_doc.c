@@ -120,6 +120,14 @@ static const char *const PARTS[] = {
 "  pair   shell.menu_avi      \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_mov        \".mov\" = true wired\n"
 "  pair   shell.menu_mov      \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_wmv        \".wmv\" = true wired\n"
+"  pair   shell.menu_wmv      \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_asf        \".asf\" = true wired\n"
+"  pair   shell.menu_asf      \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_mpg        \".mpg\" = true wired\n"
+"  pair   shell.menu_mpg      \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_mpeg       \".mpeg\" = true wired\n"
+"  pair   shell.menu_mpeg     \"Open with\" \"Right-click menu\" = true wired\n"
 "  section \"Music\"\n"
 "  toggle shell.ext_mp3        \".mp3\" = true wired\n"
 "  pair   shell.menu_mp3      \"Open with\" \"Right-click menu\" = true wired\n"
@@ -479,7 +487,7 @@ static const char *const PARTS[] = {
 "help text.autoscroll_mode \"smooth: the text glides at the speed below. pages: it moves a screen at a time (one line kept), every so many seconds.\"\n",
 };
 
-static char g_document[32768];
+static char g_document[49152];   /* RV-167: 32 KB was full, and the help lines at the end were cut off */
 static size_t g_document_len;
 
 proven_u8str_view_t rubraview_default_settings_document(void) {

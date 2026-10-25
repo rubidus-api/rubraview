@@ -103,7 +103,7 @@ proven_u8str_view_t rubraview_settings_tab_name(rubraview_settings_tab_t tab);
 
 /* ---- values ---- */
 
-#define RUBRAVIEW_SETTINGS_MAX 256
+#define RUBRAVIEW_SETTINGS_MAX 320   /* RV-167: 256 was full */
 
 typedef struct rubraview_settings {
     double   values[RUBRAVIEW_SETTINGS_MAX];   /* numeric and boolean settings */

@@ -977,6 +977,11 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
         { "webm", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_webm")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_webm")) > 0.5 },
         { "avi",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_avi")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_avi")) > 0.5 },
         { "mov",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mov")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mov")) > 0.5 },
+        /* RV-167 */
+        { "wmv",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_wmv")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_wmv")) > 0.5 },
+        { "asf",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_asf")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_asf")) > 0.5 },
+        { "mpg",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mpg")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mpg")) > 0.5 },
+        { "mpeg", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mpeg")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mpeg")) > 0.5 },
         { "mp3",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_mp3")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_mp3")) > 0.5 },
         { "flac", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_flac")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_flac")) > 0.5 },
         { "wav",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_wav")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_wav")) > 0.5 },

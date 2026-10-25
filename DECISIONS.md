@@ -2174,3 +2174,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: up to two window-sized bitmaps more in memory on a software adapter (3.3 MB each at 1100x760).
   On the VM, the 3 s after a pointer move on the photo went from 1.7 s of CPU a second to 0.03; settled screens are
   identical to 1.39.21's.
+
+## 2026-10-25: D-200 A picture opened on its own brings only its folder's pictures (RV-168)
+
+- Status: Accepted (owner 2026-10-25: "이미지 파일 열을 때 같은 폴더 사진들 자동으로 같이 목록에 추가해서 열게",
+  "단, 이미지만요", then "처음 열 때 이미지만").
+- Context: a file opened by name lists its folder through Settings › Files › Show, "all" as it comes, so a photo
+  brought the folder's films and songs into the list too. A file sent to a window already open joins its list on its
+  own (D-100); that stays.
+- Decision: when the file opened is a picture and Show is "all", the folder is listed with "pictures"
+  (`rubraview_folder_show_for`). The choice holds while that folder is listed again (a sort, a file removed or
+  added). A film, a song, a folder, an archive or a playlist opened lists as before; a Show the reader chose is
+  kept. The file opened is always in the list.
+- Not taken: a setting of its own. The owner asked for this behaviour, and opening a film, a song or the folder still
+  gives the mixed list.

@@ -217,6 +217,30 @@ prog-id = "Rubraview.Video"
 description = "Video"
 target = "file:App"
 
+[assoc.Video_wmv]
+extension = ".wmv"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_asf]
+extension = ".asf"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_mpg]
+extension = ".mpg"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
+[assoc.Video_mpeg]
+extension = ".mpeg"
+prog-id = "Rubraview.Video"
+description = "Video"
+target = "file:App"
+
 # music
 
 [assoc.Music_mp3]
@@ -296,8 +320,8 @@ target = "file:App"
 on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
-    ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open"
 text-ko = "열기"
@@ -311,8 +335,8 @@ hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
-    ".mkv", ".webm", ".avi", ".mov", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open in a new window"
 text-ko = "새 창에서 열기"
@@ -326,7 +350,8 @@ hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
-    ".mov", ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a",
+    ".mov", ".wmv", ".asf", ".mpg", ".mpeg", ".mp3", ".flac", ".wav", ".ogg",
+    ".opus", ".m4a",
 ]
 text = "Open these only"
 text-ko = "이것만 열기"
@@ -340,7 +365,8 @@ hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
 on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
-    ".mov", ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a",
+    ".mov", ".wmv", ".asf", ".mpg", ".mpeg", ".mp3", ".flac", ".wav", ".ogg",
+    ".opus", ".m4a",
 ]
 text = "Add to the list"
 text-ko = "재생목록에 넣기"

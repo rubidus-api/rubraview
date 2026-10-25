@@ -383,7 +383,7 @@ rubraview_settings_doc_t rubraview_settings_doc_parse(proven_arena_t *arena, pro
 
 /* ---- the built-in document ---- */
 
-static unsigned char g_doc_memory[128u * 1024u];
+static unsigned char g_doc_memory[192u * 1024u];   /* RV-167: 320 settings and 448 lines */
 static proven_arena_t g_doc_arena;
 static rubraview_settings_doc_t g_doc;
 static bool g_doc_ready;

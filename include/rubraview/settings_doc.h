@@ -69,7 +69,7 @@ typedef struct rubraview_settings_node {
     int32_t  rows;      /* PREVIEW: how many rows tall */
 } rubraview_settings_node_t;
 
-#define RUBRAVIEW_SETTINGS_DOC_MAX_NODES 384
+#define RUBRAVIEW_SETTINGS_DOC_MAX_NODES 448   /* RV-167: room again after .wmv .asf .mpg .mpeg */
 #define RUBRAVIEW_SETTINGS_DOC_MAX_PAGES 16
 
 typedef struct rubraview_settings_doc {
