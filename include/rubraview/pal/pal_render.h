@@ -75,6 +75,7 @@ typedef struct rubraview_render_facts {
     uint32_t decoder_profiles;      /* the video decoders that device offers */
     bool     hdr_output;            /* RV-153: the window goes out as scRGB (FP16) to an HDR screen */
     double   hdr_sdr_white;         /* ...the nits SDR's white is shown at */
+    bool     screen_copies;         /* RV-166: a settled page drawn from a copy at screen size (software adapter) */
 } rubraview_render_facts_t;
 
 bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render_facts_t *out);

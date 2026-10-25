@@ -320,8 +320,14 @@ static void info_gather(app_state_t *app) {
                         rubraview_info_addf(a, &info, T("Compression"), T("%s, at %u bits a pixel"), ratio, (unsigned)(raw_bits ? raw_bits : 24));
                     }
                 }
-                if (known) info_add_details(a, &info, &details);
             }
+            {
+                /* RV-166 (D-199): how a settled page reaches the screen without a graphics card */
+                rubraview_render_facts_t rf;
+                if (rubraview_pal_render_facts(app->renderer, &rf) && rf.screen_copies)
+                    rubraview_info_add(a, &info, T("Settled pages"), cstr(T("drawn from a copy at screen size (software adapter)")));
+            }
+            if (bytes && known) info_add_details(a, &info, &details);
             if (bytes) {
                 rubraview_exif_info_t exif;
                 if (rubraview_exif_read(bytes, size, &exif)) rubraview_info_add_exif(a, &info, &exif);

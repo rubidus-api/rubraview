@@ -39,6 +39,7 @@ static const GUID RV_IID_IDXGISurface =
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/pal/pal_hdr.h"
 #include "rubraview/lang.h"
+#include "rubraview/screencopy.h"
 
 #define VIDEO_SOURCES 8   /* the decoder's slot textures a film's texture has opened (4 slots, a spare) */
 
@@ -49,6 +50,7 @@ struct rubraview_texture {
     /* RV-062: the decoder's shared slot textures, opened on this device. */
     struct { const void *source; ID3D11Texture2D *opened; IDXGIKeyedMutex *mutex; } sources[VIDEO_SOURCES];
     int32_t width, height;
+    uint64_t content;                    /* RV-166: a new value at every write into it (screencopy.h's key) */
     struct rubraview_renderer *owner;    /* so destroy can recycle without a global */
     struct rubraview_texture *next_free; /* recycled struct free list */
 };
@@ -120,6 +122,11 @@ struct rubraview_renderer {
     int32_t width, height;
     bool drawing;
     struct rubraview_texture *free_textures;
+    /* RV-166 (D-199): without a card, a settled page is drawn from a copy at screen size */
+    bool software;                 /* WARP or Microsoft's Basic Render Driver */
+    uint64_t content_serial;       /* the last value handed to a texture's `content` */
+    rubraview_screencopy_t screencopy;
+    ID2D1Bitmap1 *copies[RUBRAVIEW_SCREENCOPY_SLOTS];
 };
 
 /* ---- internal accessors shared with the WIC image backend ---- */
@@ -153,6 +160,7 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
     memset(tex->sources, 0, sizeof(tex->sources));
     tex->width = width;
     tex->height = height;
+    tex->content = ++renderer->content_serial;
     tex->owner = renderer;
     tex->next_free = NULL;
     return tex;
@@ -164,6 +172,23 @@ static void texture_recycle(rubraview_renderer_t *renderer, struct rubraview_tex
     tex->bitmap = NULL;
     tex->next_free = renderer->free_textures;
     renderer->free_textures = tex;
+}
+
+/* RV-166: the copies screencopy.c let go of. */
+static void free_copies(rubraview_renderer_t *renderer, const bool drop[RUBRAVIEW_SCREENCOPY_SLOTS]) {
+    for (int i = 0; i < RUBRAVIEW_SCREENCOPY_SLOTS; ++i) {
+        if (drop[i] && renderer->copies[i]) {
+            ID2D1Bitmap_Release((ID2D1Bitmap*)renderer->copies[i]);
+            renderer->copies[i] = NULL;
+        }
+    }
+}
+
+static void drop_all_copies(rubraview_renderer_t *renderer) {
+    bool drop[RUBRAVIEW_SCREENCOPY_SLOTS];
+    rubraview_screencopy_reset(&renderer->screencopy, drop);
+    for (int i = 0; i < RUBRAVIEW_SCREENCOPY_SLOTS; ++i) drop[i] = true;   /* whatever is held goes */
+    free_copies(renderer, drop);
 }
 
 /* ---- lifecycle ---- */
@@ -241,6 +266,7 @@ static bool bind_back_buffer(struct rubraview_renderer *r) {
 }
 
 static void release_back_buffer(struct rubraview_renderer *r) {
+    drop_all_copies(r);   /* RV-166: a resize, an HDR switch, a lost device or the end */
     if (r->target) ID2D1DeviceContext_SetTarget(r->target, NULL);
     if (r->back_buffer) {
         /* MinGW's C headers do not chain the inherited methods on the
@@ -305,7 +331,11 @@ static bool create_device(struct rubraview_renderer *r) {
 
     IDXGIAdapter *adapter = NULL;
     IDXGIFactory2 *dxgi_factory = NULL;
+    r->software = g_used_warp;
     if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi_device, &adapter)) && adapter) {
+        /* RV-166: the hardware path can land on Microsoft's Basic Render Driver (vendor 0x1414), software too */
+        DXGI_ADAPTER_DESC desc;
+        if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc)) && desc.VendorId == 0x1414) r->software = true;
         IDXGIAdapter_GetParent(adapter, &RV_IID_IDXGIFactory2, (void**)&dxgi_factory);
         IDXGIAdapter_Release(adapter);
     }
@@ -466,6 +496,9 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     if (!renderer || !renderer->target) return;
 
     ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    bool drop[RUBRAVIEW_SCREENCOPY_SLOTS];
+    rubraview_screencopy_frame(&renderer->screencopy, drop);   /* RV-166: copies not drawn last frame go */
+    free_copies(renderer, drop);
     ID2D1RenderTarget_BeginDraw(rt);
     renderer->drawing = true;
     /* RV-153: ClearType is not promised on a float target */
@@ -563,6 +596,8 @@ static void draw_region_opacity(rubraview_renderer_t *renderer,
                                 rubraview_mat3x2_t transform,
                                 rubraview_interpolation_t interpolation,
                                 FLOAT opacity);
+static bool draw_from_copy(rubraview_renderer_t *renderer, const rubraview_texture_t *texture,
+                           rubraview_mat3x2_t transform, rubraview_interpolation_t interpolation, double opacity);
 
 void rubraview_pal_render_draw_texture(rubraview_renderer_t *renderer,
                                        const rubraview_texture_t *texture,
@@ -584,6 +619,7 @@ void rubraview_pal_render_draw_texture_opacity(rubraview_renderer_t *renderer,
     if (opacity > 1.0) opacity = 1.0;
 
     rubraview_src_rect_t src = { 0.0, 0.0, (double)texture->width, (double)texture->height };
+    if (draw_from_copy(renderer, texture, transform, interpolation, opacity)) return;
     draw_region_opacity(renderer, texture, src, transform, interpolation, (FLOAT)opacity);
 }
 
@@ -623,6 +659,79 @@ static void draw_region_opacity(rubraview_renderer_t *renderer,
 
     D2D1_MATRIX_3X2_F identity = to_d2d_matrix(rubraview_mat3x2_identity());
     ID2D1RenderTarget_SetTransform(rt, &identity);
+}
+
+/* RV-166 (D-199): on a software adapter, a page drawn the same way two frames running is drawn once into a
+   bitmap the size of the target, at its own place with the same filter, and from then on the page's rectangle
+   of that bitmap is copied 1:1 (Direct2D's high-quality cubic reduction of a 12-megapixel picture took some
+   180 ms of CPU a frame on the VM). True when the copy drew it. */
+static bool draw_from_copy(rubraview_renderer_t *renderer, const rubraview_texture_t *texture,
+                           rubraview_mat3x2_t transform, rubraview_interpolation_t interpolation, double opacity) {
+    rubraview_screencopy_key_t key = {
+        .texture = texture, .content = texture->content,
+        .a = transform.a, .b = transform.b, .c = transform.c, .d = transform.d, .e = transform.e, .f = transform.f,
+        .src_w = (double)texture->width, .src_h = (double)texture->height,
+        .filter = (int32_t)interpolation, .target_w = renderer->width, .target_h = renderer->height,
+    };
+    if (!renderer->drawing ||
+        !rubraview_screencopy_eligible(&key, renderer->software, texture->d3d != NULL, renderer->hdr, opacity,
+                                       interpolation != RUBRAVIEW_INTERP_NEAREST)) return false;
+    int slot = -1;
+    bool evict = false;
+    rubraview_screencopy_action_t action = rubraview_screencopy_step(&renderer->screencopy, &key, &slot, &evict);
+    if (evict && slot >= 0 && renderer->copies[slot]) {
+        ID2D1Bitmap_Release((ID2D1Bitmap*)renderer->copies[slot]);
+        renderer->copies[slot] = NULL;
+    }
+    if (action == RUBRAVIEW_SCREENCOPY_DIRECT || slot < 0) return false;
+
+    if (action == RUBRAVIEW_SCREENCOPY_MAKE) {
+        int32_t x = 0, y = 0, w = 0, h = 0;
+        bool ok = rubraview_screencopy_bounds(&key, &x, &y, &w, &h);
+        ID2D1Bitmap1 *copy = NULL;
+        if (ok) {
+            D2D1_BITMAP_PROPERTIES1 props = {
+                .pixelFormat = { .format = DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED },
+                .dpiX = 96.0f, .dpiY = 96.0f,
+                .bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET,
+                .colorContext = NULL,
+            };
+            /* The whole target, so the page is drawn at the very place it has on screen: a copy moved by whole
+               pixels came out up to 2 levels off with high-quality cubic (T245). */
+            D2D1_SIZE_U size = { .width = (UINT32)renderer->width, .height = (UINT32)renderer->height };
+            /* mingw's ID2D1DeviceContext_CreateBitmap names a vtable member that does not exist. */
+            ok = SUCCEEDED(renderer->target->lpVtbl->CreateBitmap(renderer->target, size, NULL, 0, &props, &copy)) && copy;
+        }
+        if (ok) {
+            /* Drawn into the copy as it would be on screen. */
+            struct ID2D1Image *screen = NULL;
+            ID2D1DeviceContext_GetTarget(renderer->target, &screen);
+            ID2D1DeviceContext_SetTarget(renderer->target, (struct ID2D1Image*)copy);
+            D2D1_COLOR_F clear = { 0.0f, 0.0f, 0.0f, 0.0f };
+            ID2D1RenderTarget_Clear((ID2D1RenderTarget*)renderer->target, &clear);
+            rubraview_src_rect_t src = { 0.0, 0.0, (double)texture->width, (double)texture->height };
+            draw_region_opacity(renderer, texture, src, transform, interpolation, 1.0f);
+            ID2D1DeviceContext_SetTarget(renderer->target, screen);
+            if (screen) IUnknown_Release((IUnknown*)screen);
+            renderer->copies[slot] = copy;
+        } else if (copy) {
+            ID2D1Bitmap_Release((ID2D1Bitmap*)copy);
+        }
+        rubraview_screencopy_made(&renderer->screencopy, slot, ok, x, y, w, h);
+        if (!ok) return false;
+    }
+
+    const rubraview_screencopy_slot_t *held = &renderer->screencopy.slots[slot];
+    ID2D1Bitmap1 *copy = renderer->copies[slot];
+    if (!copy) return false;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    D2D1_MATRIX_3X2_F identity = to_d2d_matrix(rubraview_mat3x2_identity());
+    ID2D1RenderTarget_SetTransform(rt, &identity);
+    /* Only the page's own rectangle is copied, 1:1. */
+    D2D1_RECT_F rect = { (FLOAT)held->x, (FLOAT)held->y, (FLOAT)(held->x + held->w), (FLOAT)(held->y + held->h) };
+    renderer->target->lpVtbl->DrawBitmap(renderer->target, (ID2D1Bitmap*)copy, &rect, 1.0f,
+                                         D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &rect, NULL);
+    return true;
 }
 
 void rubraview_pal_render_draw_texture_region(rubraview_renderer_t *renderer,
@@ -703,6 +812,11 @@ void rubraview_pal_texture_size(const rubraview_texture_t *texture, int32_t *out
 
 void rubraview_pal_texture_destroy(rubraview_texture_t *texture) {
     if (!texture) return;
+    if (texture->owner) {   /* RV-166: a copy made from it goes with it */
+        bool drop[RUBRAVIEW_SCREENCOPY_SLOTS];
+        rubraview_screencopy_forget(&texture->owner->screencopy, texture, drop);
+        free_copies(texture->owner, drop);
+    }
     if (texture->bitmap) {
         ID2D1Bitmap_Release(texture->bitmap);
         texture->bitmap = NULL;
@@ -1363,6 +1477,7 @@ static uint16_t u8_to_half(uint8_t v);
 
 bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture, const uint8_t *pixels, int32_t stride) {
     if (!texture || !texture->bitmap || !pixels || stride <= 0) return false;
+    if (texture->owner) texture->content = ++texture->owner->content_serial;   /* RV-166: no copy of what it held */
     if (texture->fp16) {   /* RV-153: a picture the film's shader did not draw, into its FP16 texture */
         size_t row = (size_t)texture->width * 8u;
         uint16_t *half = (uint16_t*)rubraview_malloc_product(row, (size_t)texture->height, 1);
@@ -1453,6 +1568,7 @@ bool rubraview_pal_render_facts(rubraview_renderer_t *renderer, rubraview_render
     if (!out) return false;
     *out = (rubraview_render_facts_t){ .warp = g_used_warp, .feature_level = (uint32_t)g_feature_level, .buffers = 2, .vsync = true };
     if (!renderer || !renderer->d3d) return false;
+    out->screen_copies = renderer->software;
     out->present_model = renderer->present_model;
     IDXGIDevice *dxgi = NULL;
     IDXGIAdapter *adapter = NULL;
@@ -1664,6 +1780,7 @@ static const GUID RV_IID_ID3D11Texture2D =
 bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
                                             uint32_t subresource) {
     if (!texture || !texture->d3d || !texture->owner || !frame_texture) return false;
+    texture->content = ++texture->owner->content_serial;   /* RV-166 */
     ID3D11Device *device = texture->owner->d3d;
     /* The decoder's slot texture, opened here once through its shared handle. */
     int slot = -1, free_slot = -1;

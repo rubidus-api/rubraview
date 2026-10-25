@@ -2144,3 +2144,33 @@ Do not store credentials, private infrastructure details, personal data, private
     comment of `last_scene_signature` went with its field into `app.h`. The VM smoke against 1.39.20 compared turning
     pages, the files window, a GIF played, paused and stepped, a film to its end, a song into the next, and the CPU
     time in each. Each pair was within the spread between the two runs of the same build.
+
+## 2026-10-25: D-199 A settled page drawn from a copy of the window on a software adapter (RV-166)
+
+- Status: Accepted (owner 2026-10-25: "A 화면 크기 사본 (권장)", then "모두 추천대로 해 주세요": only on a software
+  adapter, the plan as written). Plan `docs/plans/archive/2026-10-25-RV-166-screen-copy.md`.
+- Context: at rest the loop sleeps and the process uses no CPU. In the 3 s after an input (`IDLE_REDRAW_GRACE`) every
+  pass draws, and without a graphics card Direct2D's high-quality cubic reduction of a 12-megapixel photo cost about
+  a core (1.8 s of CPU a second after a pointer move on the VM; 0.01 with the page not drawn, 0 drawn bilinear).
+- Decision:
+  - Only on a software adapter: WARP, or the hardware path landing on Microsoft's Basic Render Driver (DXGI vendor
+    0x1414). Elsewhere nothing changes.
+  - A page draw is keyed by its texture, the texture's content generation (bumped on every upload and video copy),
+    the exact transform, the whole source, the filter and the target's size. Eligible only at full opacity, with a
+    smoothing filter, for a reduction, never a film's texture or an HDR target.
+  - Drawn with the same key in two frames running, it is drawn once more into a bitmap the size of the target, at
+    its own place, and from then on the page's rectangle of that bitmap is copied 1:1 (nearest). Two slots, one per
+    page of a spread.
+  - Copies go when not drawn in the frame before, when the texture is destroyed or uploaded again, and with the
+    back buffer (resize, HDR switch, device loss, close). A pan or a zoom changes the key; a copy is made again once
+    it stops.
+  - The decision is `src/core/screencopy.c` (host-tested); the drawing is the Direct2D backend's. The information
+    window says "Settled pages: drawn from a copy at screen size" when it is on.
+- Not taken:
+  - A copy the size of the page's place on screen, moved by whole pixels: high-quality cubic came out up to 2 levels
+    off on some 30 000 pixels (T246). The copy of the whole target is identical.
+  - (B) drawing in the 3 s only when something changed: the hover, the boxes', title bar's fades and the pointer
+    hiding are not in the scene summary; (C) keeping it as designed.
+- Consequences: up to two window-sized bitmaps more in memory on a software adapter (3.3 MB each at 1100x760).
+  On the VM, the 3 s after a pointer move on the photo went from 1.7 s of CPU a second to 0.03; settled screens are
+  identical to 1.39.21's.
