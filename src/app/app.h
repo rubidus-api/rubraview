@@ -2063,6 +2063,7 @@ void report_startup_failure(void);
 void reset_view(app_state_t *app);
 void restart_now(app_state_t *app);
 int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli);
+bool run_command_line(proven_arena_t *arena, int *exit_code);
 int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path);
 void save_job_poll(app_state_t *app, bool wait);
 uint64_t scene_signature(const app_state_t *app);

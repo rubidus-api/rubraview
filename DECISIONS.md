@@ -2151,6 +2151,14 @@ Do not store credentials, private infrastructure details, personal data, private
     the page, the toolbox, the open-file screen and a click in it, the files window and the information window, each
     the same title and window in both, and the same screen apart from the window's 1-pixel frame. A file dropped from
     Explorer was not tried: the drop helper could not find the file in Explorer with either build.
+  - 1.39.26: `cmdline.c` (`run_command_line(arena, &exit_code)`: 178 lines moved, none changed by a rule; the nine
+    early ends, each `rubraview_mem_release(&mem); CoUninitialize(); return N;`, became `*exit_code = N; return
+    true;`, and `return false;` closes it). The out parameter is `exit_code`, not `code`: five of the blocks have an
+    `int code` of their own. Every `return` in it is `true` or the last `false`. `wWinMain` releases the memory and
+    COM once when it returns true, in the old order. The VM smoke against 1.39.25: a bad argument (2 and its line),
+    `--version`, `--diag` on a photo, `--batch` (the two PNGs alike byte for byte), `--register-shell --types=wmv`
+    and `--unregister-shell`, a second launch handing its file to the open window (exit 0, one process) and
+    `--open-only` to it: the same codes, lines and windows in both.
 
 ## 2026-10-25: D-199 A settled page drawn from a copy of the window on a software adapter (RV-166)
 
