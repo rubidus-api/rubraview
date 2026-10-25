@@ -527,7 +527,7 @@ typedef struct app_state {
     proven_u8str_view_t               *cue_scan_paths;
     size_t                 cue_scan_count;
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
-    bool                   folder_from_picture;  /* RV-168: the folder came with a picture opened on its own: pictures only while Show is all */
+    int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
     proven_u8str_view_t               *batch_list;           /* "Convert..." on chosen files: the batch panel runs on these */

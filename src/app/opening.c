@@ -445,7 +445,8 @@ static bool folder_lists(const app_state_t *app, proven_u8str_view_t name, bool 
     name = rubraview_path_basename(name);
     if (!filtered) return rubraview_glob_match_list(name, cstr(KINDS[0]));
     int show = (int)rubraview_folder_show_for((int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("show"))),
-                                              app->folder_from_picture);
+                                              app->folder_opened_kind,
+                                              rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("same_kind")) > 0.5);
     if (!rubraview_glob_match_list(name, cstr(KINDS[show]))) return false;
     proven_u8str_view_t pattern = rubraview_settings_get_text(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
     return pattern.size == 0 || rubraview_glob_match_list(name, pattern);
@@ -718,7 +719,7 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
        with rubraview_path_same, never byte for byte. */
     proven_u8str_view_t key = entry.path;
 
-    app->folder_from_picture = false;
+    app->folder_opened_kind = 0;
     if (entry.is_directory) {
         opened = open_folder(app, entry.path);
         key = entry.path;
@@ -730,7 +731,11 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
            command was run in. */
         proven_u8str_view_t folder = rubraview_path_dirname(entry.path);
         if (folder.size == 0) folder = PROVEN_LIT(".");
-        app->folder_from_picture = rubraview_glob_match_list(rubraview_path_basename(entry.path), PROVEN_LIT(IMAGE_FILTER));
+        /* RV-169: Show's numbers; an animated picture is a picture (its extension is among IMAGE_FILTER's). */
+        proven_u8str_view_t base = rubraview_path_basename(entry.path);
+        app->folder_opened_kind = rubraview_glob_match_list(base, PROVEN_LIT(IMAGE_FILTER)) ? 1
+                                : rubraview_glob_match_list(base, PROVEN_LIT(VIDEO_FILTER)) ? 2
+                                : rubraview_glob_match_list(base, PROVEN_LIT(AUDIO_FILTER)) ? 3 : 0;
         opened = open_folder_keeping(app, folder, entry.path);
         key = folder;
     }

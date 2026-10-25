@@ -702,8 +702,8 @@ static void settings_apply_rest(app_state_t *app) {
         proven_u8str_view_t pattern = rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
         uint64_t listing = 1469598103934665603ull;
         for (size_t i = 0; i < pattern.size; ++i) listing = (listing ^ (uint8_t)pattern.ptr[i]) * 1099511628211ull;
-        static const char *const KEYS[] = { "sort_mode", "sort_ascending", "subfolders", "show" };
-        for (size_t i = 0; i < 4; ++i) {
+        static const char *const KEYS[] = { "sort_mode", "sort_ascending", "subfolders", "show", "same_kind" };   /* RV-169 */
+        for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); ++i) {
             listing = (listing ^ (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("files"), cstr(KEYS[i])) + 1.0)) * 1099511628211ull;
         }
         if (listing != last_listing && !first) folder_relist(app);

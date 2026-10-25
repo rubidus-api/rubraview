@@ -2188,3 +2188,17 @@ Do not store credentials, private infrastructure details, personal data, private
   kept. The file opened is always in the list.
 - Not taken: a setting of its own. The owner asked for this behaviour, and opening a film, a song or the folder still
   gives the mixed list.
+
+## 2026-10-25: D-201 A file opened brings its own kind, a folder everything; a setting decides (RV-169)
+
+- Status: Accepted (owner 2026-10-25: "폴더를 열 때는 폴더 안의 등록된 미디어 다 추가, 음악이나 영상도 음악이면 같은 폴더 내
+  음악만, 동영상도 같은 폴더 내 영상만, 움직이는 그림은 그림취급으로 처리. 그리고 설정옵션으로 조절 가능하게."). Widens D-200.
+- Decision:
+  - A file opened on its own lists its folder with its own kind: a picture the pictures (an animated GIF, APNG or
+    WebP is a picture: its extension is among the pictures'), a film the films, a song the songs. A folder opened
+    lists every kind Show lets in. An archive or a playlist is unchanged.
+  - Settings › Files › "A file opened brings its own kind" (`files.same_kind`, on as it comes). Off, Show alone
+    decides, as before 1.39.23. A Show the reader chose (pictures, films, music) is kept either way. A change lists
+    the open folder again.
+  - `rubraview_folder_show_for(show, opened_kind, same_kind)` decides; the kind is kept while that folder is listed
+    again.

@@ -537,7 +537,7 @@ void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const ru
     free(tmp);
 }
 
-int32_t rubraview_folder_show_for(int32_t show, bool opened_picture) {
+int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_kind) {
     if (show < 0 || show > 3) show = 0;
-    return show == 0 && opened_picture ? 1 : show;
+    return show == 0 && same_kind && opened_kind >= 1 && opened_kind <= 3 ? opened_kind : show;
 }
