@@ -352,6 +352,16 @@ bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace
  */
 double rubraview_box_opacity_step(double percent, double notches);
 
+/* The Floating Widget's own buttons (F, T, P, R), as a percent of their size (owner, 2026-10-26, RV-178). */
+#define RUBRAVIEW_WIDGET_SIZE_MIN 50.0
+#define RUBRAVIEW_WIDGET_SIZE_MAX 250.0
+#define RUBRAVIEW_WIDGET_SIZE_STEP 10.0
+
+/** The wheel over R: `notches` (positive away from the reader, larger) from `percent`, on the 10 % grid, 50–250 %. */
+double rubraview_box_widget_size_step(double percent, double notches);
+/** A saved or typed size kept within 50–250 % (100 for anything that is not a number). */
+double rubraview_box_widget_size_clamp(double percent);
+
 /** A colour with its alpha scaled by `percent` (of what it had); red, green and blue untouched. */
 uint32_t rubraview_box_fade(uint32_t argb, double percent);
 

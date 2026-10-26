@@ -543,6 +543,18 @@ bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace
     return true;
 }
 
+double rubraview_box_widget_size_clamp(double percent) {
+    if (!(percent == percent)) return 100.0;   /* NaN */
+    return percent < RUBRAVIEW_WIDGET_SIZE_MIN ? RUBRAVIEW_WIDGET_SIZE_MIN : percent > RUBRAVIEW_WIDGET_SIZE_MAX ? RUBRAVIEW_WIDGET_SIZE_MAX : percent;
+}
+
+double rubraview_box_widget_size_step(double percent, double notches) {
+    long steps = (long)(notches > 0.0 ? notches + 0.5 : notches - 0.5);
+    double value = round(rubraview_box_widget_size_clamp(percent) / RUBRAVIEW_WIDGET_SIZE_STEP) * RUBRAVIEW_WIDGET_SIZE_STEP
+                   + (double)steps * RUBRAVIEW_WIDGET_SIZE_STEP;
+    return rubraview_box_widget_size_clamp(value);
+}
+
 double rubraview_box_opacity_step(double percent, double notches) {
     if (!(percent == percent)) percent = RUBRAVIEW_BOX_OPACITY_MAX;   /* NaN */
     long steps = (long)(notches > 0.0 ? notches + 0.5 : notches - 0.5);
@@ -763,7 +775,7 @@ proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubravi
     } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
         text = T("P (Pin): on, the toolbar stays open; off, it folds when the pointer leaves");
     } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {
-        text = T("R (Resize): drag sideways for more or fewer buttons a row, away or back for bigger or smaller. Wheel: buttons a row");
+        text = T("R (Resize): drag sideways for more or fewer buttons a row, away or back for bigger or smaller. Wheel: the Floating Widget's size");
     } else if (!menu && hint_in(rubraview_box_timeline_rect(box, m), px, py)) {
         text = T("Click or drag: go to that moment (or page)");
     }

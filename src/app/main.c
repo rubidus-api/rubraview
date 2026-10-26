@@ -31,6 +31,7 @@ unsigned g_subtitle_style = 0;      /* stepped when the subtitle's font changes:
 double g_gutter = 8.0;
 uint32_t g_accent = 0xFFC0304Au;
 double g_tile_base = 64.0;
+double g_widget_scale = 1.0;   /* RV-178 */
 double g_view_ratio = 0.0;
 bool g_view_turned = false;
 

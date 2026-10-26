@@ -2393,3 +2393,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: a playlist pays the child's start once; the in-process path is now only isolation off. On the VM,
   HDR output on a screen that is not HDR (`always`) passed this film by in 1.39.30 and 1.39.31 and plays in the
   child (T260); why the in-process path refused it there was not looked into.
+
+## 2026-10-26: D-211 The wheel over R sizes the Floating Widget itself (RV-178; changes D-204)
+
+- Status: Accepted (owner 2026-10-26: "플로팅 박스의 R버튼 위에서 휠을 돌리면, 플로팅 박스 버튼 자체가 크기가 변하게 해 주세요.
+  이것도 설정으로 조절 가능하고 또 설정파일에 저장해서 관리할 수 있게 해 주세요.").
+- Decision: `ui.widget_size` (Settings › Display › Floating Widget size, 50–250 %, 10 % steps, 100 as it comes)
+  scales F, T, P and R; the wheel over R steps it and it is written to settings.ini at once. The buttons a row,
+  D-204's wheel over R, stay R's drag and the setting; the Toolbar's button size stays the wheel over T.
+- Consequences: R's hint, the settings note, the manual and the five language packs say so; T261 (host), T262 (VM).

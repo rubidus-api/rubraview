@@ -56,11 +56,11 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
     rubraview_box_t *b = &app->toolbox;
     char line[64];
     int n = 0;
-    if (rubraview_rect_contains(rubraview_box_grip_rect(b, &metrics), x, y)) {   /* RV-171: R, the buttons a row */
-        rubraview_tile_metrics_t sized = rubraview_box_metrics(b, &metrics);
-        rubraview_box_set_size(b, sized.strip_columns + (notches > 0.0 ? 1 : -1), b->scale > 0.0 ? b->scale : 1.0);
-        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_columns"), (double)b->columns);
-        n = snprintf(line, sizeof(line), T("%d buttons a row"), rubraview_box_metrics(b, &metrics).strip_columns);
+    if (rubraview_rect_contains(rubraview_box_grip_rect(b, &metrics), x, y)) {   /* RV-178: R, the Floating Widget's own size */
+        double size = rubraview_box_widget_size_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size")), notches);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size"), size);
+        g_widget_scale = size / 100.0;   /* at once; the settings file keeps it */
+        n = snprintf(line, sizeof(line), T("Floating Widget size %d%%"), (int)lround(size));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         note_activity(app);
         return true;

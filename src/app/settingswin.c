@@ -748,6 +748,7 @@ static void settings_apply_rest(app_state_t *app) {
     static const double TILE[] = { 48.0, 64.0, 96.0 };
     int tile = (int)lround(rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("tile_base_px")));
     g_tile_base = TILE[tile >= 0 && tile < 3 ? tile : 1];
+    g_widget_scale = rubraview_box_widget_size_clamp(rubraview_settings_get(st, PROVEN_LIT("ui"), PROVEN_LIT("widget_size"))) / 100.0;   /* RV-178 */
     double color = rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("color_management"));
     if (color != last_color) {
         rubraview_pal_image_set_color_management(color > 0.5);

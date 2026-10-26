@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.32.exe              the viewer, as built
-dist/rubraview-v1.39.32/                 the release bundle
-dist/rubraview-v1.39.32.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.33.exe              the viewer, as built
+dist/rubraview-v1.39.33/                 the release bundle
+dist/rubraview-v1.39.33.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1087,7 +1087,10 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
 - **P** — while the Toolbar is open: on, it stays open when the pointer
   leaves; off, it folds.
 - **R** — dragged sideways, more or fewer buttons a row; away or back,
-  bigger or smaller buttons. The wheel over R sets the buttons a row.
+  bigger or smaller buttons. The wheel over R makes the Floating Widget
+  itself — F, T, P and R — bigger or smaller, 10 % a notch from 50 % to
+  250 %; Settings › Display › Floating Widget size holds the same number,
+  and settings.ini keeps it (`[ui] widget_size`).
 
 The Toolbar changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or
