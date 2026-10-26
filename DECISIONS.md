@@ -2330,3 +2330,25 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: written against the code, it records what SPEC does not say: the application includes
   `windows.h` and calls Windows directly in places (RK-8), the read-ahead decodes on the UI thread a page a pass,
   and the speed goals have no automated measurement (RK-9).
+
+## 2026-10-26: D-208 FFmpeg in a process of its own: every use, on as it comes (RV-176)
+
+- Status: Accepted (owner 2026-10-26, the plan's four questions: "모든 용도 한 번에", "기본으로 켬 (권장)",
+  "Windows 디코더로 다시 열기 (권장)", "SDR 다음 릴리스로 (권장)"). Plan
+  `docs/plans/active/2026-10-26-RV-176-ffmpeg-process.md`.
+- Decision:
+  - FFmpeg's DLLs are loaded only by `rubraview.exe --media-host`, children in a job object: one per film or
+    station, and one long-lived service child for the one-shot uses, so a bad picture cannot end a film. Each shares
+    one file mapping with the viewer, as the plug-in host does: a control block the viewer writes (wanted: pause,
+    seek, gain, track, quit) and the child writes (observed: position, end, rates, titles), the decoder's frame ring
+    and slot pictures inside it, and a mailbox with two events for the few real requests (open, close, a
+    subtitle stream, a one-shot job). Pictures on the card cross as the slot textures' shared handles. The child
+    plays the sound itself. The viewer reads all the child wrote as hostile: every count, offset, index and length
+    checked by a core module that is unit-tested and fuzzed.
+  - Every use goes through it in the first release: playback, stations, JPEG XL read, AVIF / JPEG XL written,
+    filter graphs, lists fetched, encoder lists.
+  - `video.ffmpeg_isolated`, on as it comes; off loads FFmpeg into the viewer as before.
+  - A child that dies or does not answer in time ends; the film is reopened with Media Foundation at its place
+    when it can play it, else the page says FFmpeg stopped on it.
+  - HDR output (FP16 to an HDR screen) through the child follows in its own release; until then such a film is
+    decoded in the viewer as before.
