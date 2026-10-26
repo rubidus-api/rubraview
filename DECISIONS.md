@@ -2366,3 +2366,17 @@ Do not store credentials, private infrastructure details, personal data, private
   JPEG XL read whole before the viewer takes its pictures), a child whose loop stands 5 s ended. `--batch` runs
   FFmpeg apart always; `--diag` and `--probe-media` read `video.ffmpeg_isolated`. The Store's copy starting
   `--media-host` from its package is not checked yet (RV-113).
+
+## 2026-10-26: D-209 The product design is part of SPEC; SPEC follows every requirement (supersedes D-207's file)
+
+- Status: Accepted (owner 2026-10-26: "spec 문서가 이미 있었나요? 그렇다면 설계서는 기존 spec에 통합하고, 앞으로도 계속
+  요구사항이 생기면 spec를 갱신하고 추가하게 해 주세요."; also "store는 그대로 유지. rubrapack에 요청할 것은 없습니다.").
+- Decision:
+  - D-207's document is SPEC's last part, Product and Architecture: its sections numbered §D1–§D18 (D7 points to
+    SPEC's Constraints, which took its table), its references to the Functional Specification by §1–§29. The
+    separate file is gone; AGENTS routes those triggers to SPEC.
+  - AGENTS' hard rules: a requirement added or changed updates SPEC in the same commit — the behaviour, and Product
+    and Architecture where it touches it.
+  - The Store package keeps its Korean description (RV-113 (5)); nothing is asked of rubrapack.
+- Consequences: one place for behaviour and design; the standards' structure (42010, arc42, C4, 25010, 29148) kept
+  inside SPEC.
