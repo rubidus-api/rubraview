@@ -272,6 +272,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
             return code;
         }
+        if (wargv && argc == 5 && wcscmp(wargv[1], L"--media-host") == 0) {   /* RV-176: FFmpeg's child (D-208) */
+            int code = rubraview_pal_media_host_main(wargv[2], wargv[3], wargv[4]);
+            LocalFree(wargv);
+            return code;
+        }
         if (wargv) LocalFree(wargv);
     }
     rubraview_edit_set_plugin_runner(plugin_runner, NULL);

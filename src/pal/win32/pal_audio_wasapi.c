@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "rubraview/pal/pal_audio.h"
+#include "rubraview/pal/pal_media_host.h"
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/audio_dsp.h"
 
@@ -54,9 +55,12 @@ void rubraview_pal_audio_set_chain(const rubraview_audio_chain_config_t *config)
     g_chain_config = *config;
     ReleaseSRWLockExclusive(&g_chain_lock);
     InterlockedIncrement(&g_chain_version);
+    rubraview_mhost_note_chain(config);   /* RV-176: FFmpeg's children play with it too */
 }
 
 size_t rubraview_pal_audio_tap_read(float *out, size_t count) {
+    size_t remote = 0;
+    if (rubraview_mhost_remote_tap(out, count, &remote)) return remote;   /* RV-176: a film's child plays the sound */
     AcquireSRWLockShared(&g_tap_lock);
     size_t n = rubraview_audio_tap_latest(&g_tap, out, count);
     ReleaseSRWLockShared(&g_tap_lock);
@@ -67,6 +71,7 @@ void rubraview_pal_audio_set_latency_ms(uint32_t milliseconds) {
     if (milliseconds < 20) milliseconds = 20;
     if (milliseconds > 100) milliseconds = 100;
     InterlockedExchange(&g_device_buffer_100ns, (LONG)(milliseconds * 10000u));
+    rubraview_mhost_note_latency(milliseconds);
 }
 #define OPEN_TIMEOUT_MS 3000
 #define FLUSH_TIMEOUT_MS 2000
@@ -84,6 +89,7 @@ void rubraview_pal_audio_set_speed(double speed) {
     if (!(speed >= 0.25)) speed = 0.25;
     if (speed > 4.0) speed = 4.0;
     atomic_store_explicit(&speed_permille, (uint32_t)lround(speed * 1000.0), memory_order_release);
+    rubraview_mhost_note_speed(speed);
 }
 
 void rubraview_pal_audio_set_volume(double volume, bool muted) {
@@ -92,6 +98,7 @@ void rubraview_pal_audio_set_volume(double volume, bool muted) {
     atomic_store_explicit(&volume_permille, (uint32_t)lround(volume * 1000.0), memory_order_relaxed);
     atomic_store_explicit(&volume_muted, muted, memory_order_relaxed);
     atomic_fetch_add_explicit(&volume_generation, 1, memory_order_release);
+    rubraview_mhost_note_volume(volume, muted);
 }
 
 struct rubraview_audio_out {

@@ -2310,7 +2310,7 @@ Do not store credentials, private infrastructure details, personal data, private
   - RFC-0005, RFC-0006 and RFC-0009 are marked implemented; RFC-0007's "outside program" row points at RFC-0009 C.
 - Consequences: BACKLOGS RV-173, RV-174, RV-176. RV-174 in 1.39.30: each registered type also under
   `Software\Rubraview\Capabilities\FileAssociations` and the program in `RegisteredApplications`, both gone with the
-  last type (R222; VM T257 against 1.39.29). RV-176's plan: `docs/plans/active/2026-10-26-RV-176-ffmpeg-process.md`.
+  last type (R222; VM T257 against 1.39.29). RV-176's plan: `docs/plans/archive/2026-10-26-RV-176-ffmpeg-process.md`.
 
 ## 2026-10-26: D-207 A product design document, pointing rather than copying (RV-173)
 
@@ -2335,7 +2335,7 @@ Do not store credentials, private infrastructure details, personal data, private
 
 - Status: Accepted (owner 2026-10-26, the plan's four questions: "모든 용도 한 번에", "기본으로 켬 (권장)",
   "Windows 디코더로 다시 열기 (권장)", "SDR 다음 릴리스로 (권장)"). Plan
-  `docs/plans/active/2026-10-26-RV-176-ffmpeg-process.md`.
+  `docs/plans/archive/2026-10-26-RV-176-ffmpeg-process.md`.
 - Decision:
   - FFmpeg's DLLs are loaded only by `rubraview.exe --media-host`, children in a job object: one per film or
     station, and one long-lived service child for the one-shot uses, so a bad picture cannot end a film. Each shares
@@ -2352,3 +2352,17 @@ Do not store credentials, private infrastructure details, personal data, private
     when it can play it, else the page says FFmpeg stopped on it.
   - HDR output (FP16 to an HDR screen) through the child follows in its own release; until then such a film is
     decoded in the viewer as before.
+- Consequences: built in 1.39.31 as decided (`media_host.c`, `pal_media_host.c`, the FFmpeg module's `_host_` and
+  `_local_` functions, the filter module's likewise). On the VM against 1.39.30 (T259): the viewer holds no FFmpeg,
+  the children do; pictures, subtitles, HDR and the batch's files as before; a crash and a hang go on with Windows'
+  decoder. A stop is judged before the film's end (a crashed child had first read as "finished", which left the
+  reopened film paused at its end). Not seen on the VM: the card's own decoders and a station.
+- After review, before release: the viewer's process-wide sound settings (speed, volume and mute, the device's
+  latency, the equaliser, night mode, the gain) are written into each film child's block and applied there, and
+  the analyser reads the newest film child's own sound (`rubraview_mhost_audio_take`, `_tap_take`, checked like the
+  rest); a service failure's words outlive the calling thread; the probe's answer is read without waiting on a job
+  the service runs; a slot texture with no shared handle is never shown as one. Known costs, kept: a child per film
+  (about 0.2 s at its start, none reused), the service's jobs one at a time (JPEG XL thumbnails in turn, a moving
+  JPEG XL read whole before the viewer takes its pictures), a child whose loop stands 5 s ended. `--batch` runs
+  FFmpeg apart always; `--diag` and `--probe-media` read `video.ffmpeg_isolated`. The Store's copy starting
+  `--media-host` from its package is not checked yet (RV-113).

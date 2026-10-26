@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.30.exe              the viewer, as built
-dist/rubraview-v1.39.30/                 the release bundle
-dist/rubraview-v1.39.30.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.31.exe              the viewer, as built
+dist/rubraview-v1.39.31/                 the release bundle
+dist/rubraview-v1.39.31.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1455,6 +1455,15 @@ filename code page, the memory cap). Some worth knowing:
     five DLLs. Empty, or when that folder does not hold them: beside
     `rubraview.exe`, then the settings folder's `ffmpeg`, where versions
     before 1.33.0 imported a copy. The line above says which was found.
+    **In a process of its own** (on as it comes) runs FFmpeg apart from
+    Rubraview: a film, a song or a station each in a second
+    `rubraview.exe`, the pictures and filters in another, all of them
+    ending with the viewer. A damaged file that breaks FFmpeg ends only
+    that process; a film then goes on with Windows' decoder from where it
+    was, and the viewer says so ("FFmpeg stopped on this file: it was
+    opened with Windows' decoder"). Off, FFmpeg is loaded into Rubraview
+    itself, as before 1.39.31. A film shown in HDR on an HDR screen is
+    still decoded inside for now.
   - **Rubraview plug-ins** — see "Plug-ins: filters from outside".
 - **Viewer › Behind and between pages** — dark, black, grey or white.
 - **General › Open with Windows' own dialog** — `Ctrl+O` then opens

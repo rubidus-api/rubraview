@@ -818,9 +818,10 @@ void bgm_tick(app_state_t *app) {
         /* The backend says "finished" before the device has been heard
            out (the same early word the crossfade ran into, T084), so the
            track is only let go once it has actually reached its end. */
-        if (rubraview_pal_media_finished(app->bgm_media) &&
-            (app->bgm_info.duration_seconds <= 0.0 ||
-             app->bgm_position >= app->bgm_info.duration_seconds - 0.25)) {
+        if (rubraview_pal_media_stopped(app->bgm_media) ||   /* RV-176: its FFmpeg stopped: on to the next */
+            (rubraview_pal_media_finished(app->bgm_media) &&
+             (app->bgm_info.duration_seconds <= 0.0 ||
+              app->bgm_position >= app->bgm_info.duration_seconds - 0.25))) {
             bgm_close(app);
         }
     }
@@ -1047,8 +1048,9 @@ void media_prepare(app_state_t *app) {
 
     /* D-9: the preferred backend first, the other one when it cannot. */
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(app->media_preferred,
-                                                 rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
+    bool no_ffmpeg = app->media_no_ffmpeg_page == index + 1;   /* RV-176: it stopped on this one */
+    size_t count = rubraview_media_backend_order(no_ffmpeg ? RUBRAVIEW_BACKEND_MEDIA_FOUNDATION : app->media_preferred,
+                                                 !no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                  order);
     rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     rubraview_media_failure_t why = RUBRAVIEW_MEDIA_FAIL_FILE;
@@ -1079,7 +1081,7 @@ void media_prepare(app_state_t *app) {
     app->media_hdr_handed = 0;
     if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
         rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
-        gpu.tone_mapping > 0 && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
+        gpu.tone_mapping > 0 && !no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
         rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
         /* not when FFmpeg would lose the sound Windows plays */
         if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
@@ -1297,6 +1299,7 @@ void media_tick(app_state_t *app) {
        takes over when it is due. */
     music_transition_tick(app);
     if (app->media != m) return;      /* it took over; the rest is the new track's */
+    if (rubraview_pal_media_stopped(m)) { media_stopped_tick(app); return; }   /* RV-176: before its end is judged */
 
     if (app->media_paused) app->media_progress_at = now;   /* 1.25.2: a pause is no stall */
     if (!app->media_paused) {

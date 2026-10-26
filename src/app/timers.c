@@ -8,6 +8,7 @@
 void tick_timers(app_state_t *app, double dt) {
     rubraview_osd_tick(&app->osd, dt);
     hdr_screen_tick(app, dt);   /* RV-153 */
+    media_stopped_tick(app);    /* RV-176 */
     picker_hold_tick(app);   /* 1.22.0 */
     view_hold_tick(app);     /* 1.25.0 */
     /* Where the pointer is now, not where it last moved — the same reason

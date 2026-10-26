@@ -191,6 +191,10 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
 /** Stops the decode thread and frees everything. NULL is ignored. */
 void rubraview_pal_media_close(rubraview_media_t *media);
 
+/** RV-176: the process decoding it (FFmpeg's child) ended or stopped answering; the film is to be opened again
+    another way, or said to have stopped. */
+bool rubraview_pal_media_stopped(rubraview_media_t *media);
+
 /** A decoded picture: 32-bit BGRA rows, top row first. */
 typedef struct rubraview_video_frame {
     const uint8_t *pixels;

@@ -1,6 +1,7 @@
 #ifdef _WIN32
 #include <stdlib.h>
 #include "rubraview/pal/pal_media_backend.h"
+#include "rubraview/pal/pal_media_host.h"
 #include "rubraview/stream.h"
 
 /*
@@ -20,7 +21,9 @@ static const rubraview_media_backend_api_t *backend_api(rubraview_media_backend_
 }
 
 bool rubraview_pal_media_backend_available(rubraview_media_backend_t backend) {
-    const rubraview_media_backend_api_t *api = backend_api(backend);
+    /* RV-176: with FFmpeg in a child, whether the child found it */
+    const rubraview_media_backend_api_t *api = backend == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote()
+                                             ? rubraview_media_backend_remote() : backend_api(backend);
     return api && api->available && api->available();
 }
 
@@ -28,6 +31,9 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
                                                        const rubraview_media_gpu_t *gpu) {
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     const rubraview_media_backend_api_t *api = backend_api(backend);
+    /* RV-176 (D-208): FFmpeg plays in a child, but for a film for an HDR screen in HDR output (for now) */
+    if (backend == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && !(gpu && gpu->hdr_screen_peak > 0.0))
+        api = rubraview_media_backend_remote();
     if (!api || !api->open) return result;
     /* RV-157: a station is FFmpeg's alone, which opens it with only the network's protocols allowed */
     if (backend != RUBRAVIEW_BACKEND_FFMPEG && rubraview_stream_is_address(path)) return result;
@@ -71,6 +77,10 @@ size_t rubraview_pal_media_frames_ready(rubraview_media_t *media) {
 
 void rubraview_pal_media_seek(rubraview_media_t *media, double seconds) {
     if (media) media->api->seek(media->impl, seconds);
+}
+
+bool rubraview_pal_media_stopped(rubraview_media_t *media) {
+    return media && media->api->stopped && media->api->stopped(media->impl);
 }
 
 bool rubraview_pal_media_finished(rubraview_media_t *media) {

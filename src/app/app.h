@@ -123,6 +123,7 @@
 #include "rubraview/plugin.h"
 #include "rubraview/plugin_filter.h"
 #include "rubraview/pal/pal_plugin.h"
+#include "rubraview/pal/pal_media_host.h"
 #include "rubraview/pal/pal_gmic.h"
 #include "rubraview/gmic.h"
 #include "rubraview/pal/pal_ffilter.h"
@@ -462,6 +463,7 @@ typedef struct app_state {
     const char             *hdr_output_why;    /* the window could not go out as HDR (an N_ literal) */
     bool                    hdr_output_refused;/* ...so films open for SDR until the screen changes */
     double                  hdr_screen_check;  /* seconds since the screen was last looked at */
+    int32_t                 media_no_ffmpeg_page;   /* RV-176: page + 1 whose FFmpeg stopped: Windows' decoder only; 0 none */
     int32_t                 media_hdr_handed;  /* RV-150: 1 Windows' decoder found it HDR and FFmpeg took it, to tone map it;
                                                   RV-152: 2 Windows named nothing (VP9, AV1) and FFmpeg found it HDR */
     rubraview_media_clock_t media_clock;
@@ -1834,6 +1836,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action);
 bool handle_chrome_click(app_state_t *app, double x, double y);
 void handle_drop(app_state_t *app, const rubraview_window_event_t *event);
 void hdr_screen_tick(app_state_t *app, double dt);
+void media_stopped_tick(app_state_t *app);   /* RV-176 */
 void help_close(app_state_t *app);
 size_t help_pump(app_state_t *app);
 void help_show(app_state_t *app);

@@ -13,6 +13,7 @@
 #include <libavfilter/buffersink.h>
 #include "rubraview/pal/pal_ffilter.h"
 #include "rubraview/pal/pal_media.h"
+#include "rubraview/pal/pal_media_host.h"
 
 /*
  * RFC-0009 D: avfilter, the sixth DLL of the FFmpeg the user named, loaded from the folder its avutil was
@@ -131,7 +132,7 @@ static rubraview_ffilter_state_t ffl_load_locked(void) {
     return g_ffl.state;
 }
 
-rubraview_ffilter_state_t rubraview_pal_ffilter_state(void) {
+rubraview_ffilter_state_t rubraview_ffilter_local_state(void) {
     AcquireSRWLockExclusive(&g_ffl_lock);
     rubraview_ffilter_state_t s = ffl_load_locked();
     ReleaseSRWLockExclusive(&g_ffl_lock);
@@ -229,9 +230,9 @@ static bool option_of(proven_arena_t *arena, const AVFilter *f, const AVOption *
     }
 }
 
-bool rubraview_pal_ffilter_list(proven_arena_t *arena, rubraview_ffilter_catalog_t *out) {
+bool rubraview_ffilter_local_list(proven_arena_t *arena, rubraview_ffilter_catalog_t *out) {
     *out = (rubraview_ffilter_catalog_t){0};
-    if (rubraview_pal_ffilter_state() != RUBRAVIEW_FFILTER_READY) return false;
+    if (rubraview_ffilter_local_state() != RUBRAVIEW_FFILTER_READY) return false;
     int32_t count = 0;
     void *it = NULL;
     for (const AVFilter *f; (f = g_ffl.av_filter_iterate(&it));) if (video_one_to_one(f)) count++;
@@ -284,12 +285,12 @@ static void say_error(char *said, size_t size, int err) {
     snprintf(said, size, "%s", text);
 }
 
-bool rubraview_pal_ffilter_run(const char *graph_text, const uint8_t *bgra, int32_t width, int32_t height,
+bool rubraview_ffilter_local_run(const char *graph_text, const uint8_t *bgra, int32_t width, int32_t height,
                                uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size) {
     *out = NULL;
     *out_width = *out_height = 0;
     if (said && said_size) said[0] = '\0';
-    if (rubraview_pal_ffilter_state() != RUBRAVIEW_FFILTER_READY) { say(said, said_size, "avfilter is not loaded"); return false; }
+    if (rubraview_ffilter_local_state() != RUBRAVIEW_FFILTER_READY) { say(said, said_size, "avfilter is not loaded"); return false; }
     const char *refused = rubraview_ffilter_refused(proven_u8str_view_from_cstr(graph_text));
     if (refused) { snprintf(said, said_size, "the filter %s is not allowed here", refused); return false; }
     if (width <= 0 || height <= 0 || width > MAX_SIDE || height > MAX_SIDE) { say(said, said_size, "the picture is too large"); return false; }
@@ -361,6 +362,22 @@ end:
     g_ffl.avfilter_inout_free(&outs);
     g_ffl.avfilter_graph_free(&graph);
     return ok;
+}
+
+/* RV-176 (D-208): with FFmpeg in a child, the filters run there too. */
+rubraview_ffilter_state_t rubraview_pal_ffilter_state(void) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_filter_state() : rubraview_ffilter_local_state();
+}
+
+bool rubraview_pal_ffilter_list(proven_arena_t *arena, rubraview_ffilter_catalog_t *out) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_filter_list(arena, out) : rubraview_ffilter_local_list(arena, out);
+}
+
+bool rubraview_pal_ffilter_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
+                               uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size) {
+    if (rubraview_pal_ffmpeg_remote())
+        return rubraview_mhost_remote_filter_run(graph, bgra, width, height, out, out_width, out_height, said, said_size);
+    return rubraview_ffilter_local_run(graph, bgra, width, height, out, out_width, out_height, said, said_size);
 }
 
 #endif /* _WIN32 */

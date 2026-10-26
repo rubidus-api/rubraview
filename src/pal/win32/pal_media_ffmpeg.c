@@ -26,6 +26,7 @@
 #include "rubraview/pal/pal_hdr.h"
 #include "rubraview/export.h"
 #include "rubraview/stream.h"
+#include "rubraview/pal/pal_media_host.h"
 
 /*
  * The FFmpeg backend (D-8, RV-016). The DLLs are loaded at run time and
@@ -61,6 +62,7 @@ typedef struct ff_slot {
     IDXGIKeyedMutex *mutex;
     ID3D11VideoProcessorOutputView *vp_out;   /* the decode thread's, released when it ends */
     bool on_gpu;
+    uint64_t shared;   /* RV-176: the texture's shared handle, for a viewer in another process */
 } ff_slot_t;
 
 #define VP_INPUTS 48   /* the decoder's pool slices a view was made for */
@@ -78,7 +80,11 @@ typedef struct ff_media {
     uint32_t audio_rate, audio_channels;
 
     rubraview_spsc_t ring;
+    rubraview_spsc_t *ringp;                 /* RV-176: `ring`, or the one in the block a viewer reads */
     ff_slot_t slots[SLOT_COUNT];
+    rubraview_ffmpeg_hosting_t host;         /* RV-176: in a child, where the pictures go; zero in the viewer */
+    bool hosted, pixels_shared;
+    _Atomic uint64_t pictures;               /* stored so far */
     rubraview_pcm_ring_t pcm;
     float *pcm_storage;
     rubraview_audio_out_t *audio;
@@ -409,6 +415,7 @@ static void folder_wide(proven_u8str_view_t folder, WCHAR wide[MAX_PATH]) {
 }
 
 void rubraview_pal_ffmpeg_set_folders(proven_u8str_view_t imported, proven_u8str_view_t chosen) {
+    rubraview_mhost_remote_folders(imported, chosen);   /* RV-176: the children are told; a changed place starts them again */
     WCHAR wide[2][MAX_PATH];
     folder_wide(imported, wide[0]);
     folder_wide(chosen, wide[1]);
@@ -424,7 +431,7 @@ const char *rubraview_pal_ffmpeg_dll_name(size_t index) {
     return index < FF_DLLS ? FF_VERSIONED[index] : NULL;
 }
 
-int rubraview_pal_ffmpeg_place(void) {
+int rubraview_ffmpeg_local_place(void) {
     return ff_load() ? g_ff_place : 0;
 }
 
@@ -445,7 +452,7 @@ static rubraview_ffmpeg_refusal_t refusal_in(WCHAR *path, size_t n) {
     return state;
 }
 
-rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void) {
+rubraview_ffmpeg_refusal_t rubraview_ffmpeg_local_refused(void) {
     if (ff_load()) return RUBRAVIEW_FFMPEG_NOT_REFUSED;
     WCHAR path[MAX_PATH + 32];
     rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
@@ -499,7 +506,7 @@ static int64_t ff_bytes_seek(void *opaque, int64_t offset, int whence) {
     return to;
 }
 
-int rubraview_pal_ffmpeg_jxl_state(void) {
+int rubraview_ffmpeg_local_jxl_state(void) {
     if (!ff_load() || !g_ff.avformat_alloc_context || !g_ff.avio_alloc_context || !g_ff.avio_context_free ||
         !g_ff.av_malloc || !g_ff.av_free) return 0;
     return g_ff.avcodec_find_decoder(AV_CODEC_ID_JPEGXL) ? 2 : 1;
@@ -518,7 +525,7 @@ static bool jxl_read(const uint8_t *data, size_t size, int32_t max_side, bool al
                      uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                      void *context, int32_t *out_width, int32_t *out_height) {
     enum { IO_BYTES = 64 * 1024 };
-    if (!data || size == 0 || !room || rubraview_pal_ffmpeg_jxl_state() != 2) return false;
+    if (!data || size == 0 || !room || rubraview_ffmpeg_local_jxl_state() != 2) return false;
 
     bool ok = false;
     ff_bytes_t bytes = { .data = data, .size = size, .at = 0 };
@@ -625,6 +632,7 @@ static uint8_t *jxl_one_room(void *context, int32_t width, int32_t height, doubl
 bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                      void *context, int32_t *out_width, int32_t *out_height) {
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_decode(data, size, max_side, room, context, out_width, out_height);
     jxl_one_t one = { .room = room, .context = context };
     if (!room) return false;
     return jxl_read(data, size, max_side, false, jxl_one_room, &one, out_width, out_height);
@@ -633,6 +641,7 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
 bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                                      void *context) {
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_frames(data, size, max_side, room, context);
     int32_t width = 0, height = 0;
     return jxl_read(data, size, max_side, true, room, context, &width, &height);
 }
@@ -990,6 +999,7 @@ static int fetch_interrupt(void *opaque) {
 }
 
 int64_t rubraview_pal_ffmpeg_fetch(proven_u8str_view_t address, uint8_t *out, size_t cap) {
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_fetch(address, out, cap);
     static atomic_flag network_ready = ATOMIC_FLAG_INIT;
     if (!out || cap == 0 || !ff_load() || !g_ff.avio_open2 || !g_ff.avio_read || !g_ff.avio_closep || !g_ff.av_dict_set ||
         !g_ff.av_dict_free) return -1;
@@ -1097,7 +1107,14 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         }
         m->width = par->width;
         m->height = par->height;
-        for (int i = 0; i < SLOT_COUNT; ++i) {
+        if (m->hosted && m->host.pixels) {   /* RV-176: the four pictures in memory the viewer maps too */
+            size_t each = 0;
+            uint8_t *base = rubraview_size_product(&each, (size_t)m->width, (size_t)m->height, 4u) ? m->host.pixels(m->host.context, each) : NULL;
+            if (!base) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
+            for (int i = 0; i < SLOT_COUNT; ++i) m->slots[i].pixels = base + (size_t)i * each;
+            m->pixels_shared = true;
+        }
+        for (int i = 0; i < SLOT_COUNT && !m->pixels_shared; ++i) {
             m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)m->width, (size_t)m->height, 4u);
             if (!m->slots[i].pixels) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
         }
@@ -1215,7 +1232,7 @@ static const AVCodec *ff_av1_encoder(bool needs_aom) {
     return NULL;
 }
 
-uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size) {
+uint32_t rubraview_ffmpeg_local_image_encoders(char *names, size_t size) {
     if (names && size) names[0] = '\0';
     if (!ff_available() || !ff_encode_api()) return 0;
     uint32_t found = 0;
@@ -1342,6 +1359,7 @@ uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, siz
                                               bool (*picture)(void *context, size_t index, uint8_t *bgra, double *seconds),
                                               void *context, const rubraview_ffmpeg_still_t *how,
                                               size_t *out_size, const char **why) {
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_pictures_encode(width, height, count, picture, context, how, out_size, why);
     const char *dummy;
     if (!why) why = &dummy;
     *why = NULL;
@@ -1495,6 +1513,7 @@ static bool ff_one_picture(void *context, size_t index, uint8_t *bgra, double *s
 
 uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *px, const rubraview_ffmpeg_still_t *how,
                                            size_t *out_size, const char **why) {
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_image_encode(px, how, out_size, why);
     if (!px || !px->pixels || px->width <= 0 || px->height <= 0 ||
         (px->format != RUBRAVIEW_PIXFMT_BGRA8 && px->format != RUBRAVIEW_PIXFMT_RGBA8)) {
         if (why) *why = N_("no picture to write");
@@ -1507,6 +1526,7 @@ uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *px, const r
 /* ---- RV-149: decoding on the graphics card (D3D11VA) ---- */
 
 static const GUID FF_IID_IDXGIKeyedMutex = { 0x9d8e1289, 0xd7b3, 0x465f, { 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d } };
+static const GUID FF_IID_IDXGIResource = { 0x035f3ab4, 0x482e, 0x4e50, { 0xb4, 0x1f, 0x8a, 0x7f, 0x8b, 0xd8, 0x96, 0x0b } };
 
 /* The decoder offers its formats: the card's when it is among them, else what it would pick itself. */
 static enum AVPixelFormat ff_get_format(struct AVCodecContext *c, const enum AVPixelFormat *formats) {
@@ -1570,7 +1590,7 @@ static int ff_frame_space(const AVFrame *f) {
 
 /* The slot's texture: shared with the renderer's device, ordered by the keyed mutex; made on first use. */
 static bool ff_slot_texture(ff_media_t *m, ff_slot_t *s, ID3D11Device *device) {
-    if (s->texture) return s->mutex != NULL;
+    if (s->texture) return s->mutex != NULL && (!m->hosted || s->shared != 0);   /* RV-176: one a viewer can open */
     D3D11_TEXTURE2D_DESC own = {
         .Width = (UINT)m->width, .Height = (UINT)m->height, .MipLevels = 1, .ArraySize = 1,
         .Format = m->tone.screen_peak_nits > 0.0 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM,   /* RV-153 */
@@ -1580,6 +1600,16 @@ static bool ff_slot_texture(ff_media_t *m, ff_slot_t *s, ID3D11Device *device) {
     };
     if (FAILED(ID3D11Device_CreateTexture2D(device, &own, NULL, &s->texture))) s->texture = NULL;
     if (s->texture && FAILED(ID3D11Texture2D_QueryInterface(s->texture, &FF_IID_IDXGIKeyedMutex, (void**)&s->mutex))) s->mutex = NULL;
+    if (s->texture && m->hosted) {   /* RV-176: the handle the viewer opens it by, in its own process */
+        IDXGIResource *resource = NULL;
+        HANDLE shared = NULL;
+        if (SUCCEEDED(ID3D11Texture2D_QueryInterface(s->texture, &FF_IID_IDXGIResource, (void**)&resource)) && resource) {
+            IDXGIResource_GetSharedHandle(resource, &shared);
+            IDXGIResource_Release(resource);
+        }
+        s->shared = (uint64_t)(uintptr_t)shared;
+        if (!s->shared) return false;   /* a picture the viewer could not open: turned in memory instead */
+    }
     return s->texture && s->mutex;
 }
 
@@ -1788,7 +1818,7 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
 
 static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation) {
     size_t slot = 0;
-    for (int waited = 0; !rubraview_spsc_acquire_write(&m->ring, &slot); waited += 5) {
+    for (int waited = 0; !rubraview_spsc_acquire_write(m->ringp, &slot); waited += 5) {
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
             atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) return false;
         bool paused = atomic_load_explicit(&m->paused, memory_order_acquire);
@@ -1835,7 +1865,14 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     m->slots[slot].pts = pts;
     m->slots[slot].duration = duration;
     m->slots[slot].generation = generation;
-    rubraview_spsc_commit_write(&m->ring);
+    if (m->hosted && m->host.slots) {   /* RV-176: what the viewer reads of it, before it is published */
+        m->host.slots[slot] = (rubraview_mhost_slot_t){
+            .pts = pts, .duration = duration, .generation = generation,
+            .on_gpu = m->slots[slot].on_gpu ? 1u : 0u, .shared_handle = m->slots[slot].on_gpu ? m->slots[slot].shared : 0,
+        };
+    }
+    atomic_fetch_add_explicit(&m->pictures, 1, memory_order_relaxed);
+    rubraview_spsc_commit_write(m->ringp);
     return true;
 }
 
@@ -2039,7 +2076,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
            the thread waited on them while the sound it had not reached ran
            out (and with the sound, the clock the pictures waited for). */
         if (waiting > 0) {
-            bool room = rubraview_spsc_count(&m->ring) < SLOT_COUNT;
+            bool room = rubraview_spsc_count(m->ringp) < SLOT_COUNT;
             if (room || waiting == PENDING_PICTURES || read_out) {
                 decode_packet(m, d, pending[first], &skip_video, &skip_audio, generation);
                 g_ff.av_packet_unref(pending[first]);
@@ -2103,7 +2140,7 @@ static void ff_close(void *handle) {
     rubraview_pal_audio_close(m->audio);
     free(m->pcm_storage);
     for (int i = 0; i < SLOT_COUNT; ++i) {
-        free(m->slots[i].pixels);
+        if (!m->pixels_shared) free(m->slots[i].pixels);
         if (m->slots[i].mutex) IDXGIKeyedMutex_Release(m->slots[i].mutex);
         if (m->slots[i].texture) ID3D11Texture2D_Release(m->slots[i].texture);
     }
@@ -2112,8 +2149,8 @@ static void ff_close(void *handle) {
     free(m);
 }
 
-static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
-                     const rubraview_media_gpu_t *gpu) {
+static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+                          const rubraview_media_gpu_t *gpu, const rubraview_ffmpeg_hosting_t *hosting) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!ff_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
@@ -2140,7 +2177,12 @@ static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
     atomic_init(&m->pending_audio_stream, -1);
-    rubraview_spsc_init(&m->ring, SLOT_COUNT);
+    if (hosting) {   /* RV-176: a child's: the ring and the pictures where the viewer reads them */
+        m->host = *hosting;
+        m->hosted = true;
+    }
+    m->ringp = hosting && hosting->ring ? hosting->ring : &m->ring;
+    rubraview_spsc_init(m->ringp, SLOT_COUNT);
 
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
@@ -2156,6 +2198,11 @@ static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     *out_info = m->info;
     rubraview_pal_audio_set_playing(m->audio, true);
     return m;
+}
+
+static void *ff_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
+                     const rubraview_media_gpu_t *gpu) {
+    return ff_open_with(path, out_failure, out_info, gpu, NULL);
 }
 
 static bool ff_stream_title(void *handle, char *out, size_t cap) {
@@ -2179,10 +2226,10 @@ static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
     if (!m || !out_frame) return false;
     for (;;) {
         size_t slot;
-        if (!rubraview_spsc_peek_read(&m->ring, &slot)) return false;
+        if (!rubraview_spsc_peek_read(m->ringp, &slot)) return false;
         const ff_slot_t *s = &m->slots[slot];
         if (s->generation != m->consumer_generation) {
-            rubraview_spsc_release_read(&m->ring);   /* decoded before the latest seek */
+            rubraview_spsc_release_read(m->ringp);   /* decoded before the latest seek */
             continue;
         }
         *out_frame = (rubraview_video_frame_t){
@@ -2198,12 +2245,12 @@ static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
 static void ff_pop_frame(void *handle) {
     ff_media_t *m = (ff_media_t*)handle;
     size_t slot;
-    if (m && rubraview_spsc_peek_read(&m->ring, &slot)) rubraview_spsc_release_read(&m->ring);
+    if (m && rubraview_spsc_peek_read(m->ringp, &slot)) rubraview_spsc_release_read(m->ringp);
 }
 
 static size_t ff_frames_ready(void *handle) {
     ff_media_t *m = (ff_media_t*)handle;
-    return m ? rubraview_spsc_count(&m->ring) : 0;
+    return m ? rubraview_spsc_count(m->ringp) : 0;
 }
 
 static void ff_seek(void *handle, double seconds) {
@@ -2425,6 +2472,76 @@ static void ff_set_gain(void *handle, double gain) {
     atomic_store_explicit(&m->audio_gain_millionths, (int32_t)(gain * 1e6), memory_order_release);
     rubraview_pal_audio_set_gain(m->audio, gain);
     ReleaseSRWLockShared(&m->audio_lock);
+}
+
+/* ---- RV-176 (D-208): in a child, for a viewer in another process ---- */
+
+bool rubraview_ffmpeg_local_available(void) { return ff_load(); }
+
+int rubraview_pal_ffmpeg_place(void) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_place() : rubraview_ffmpeg_local_place();
+}
+
+rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_refused() : rubraview_ffmpeg_local_refused();
+}
+
+int rubraview_pal_ffmpeg_jxl_state(void) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_jxl_state() : rubraview_ffmpeg_local_jxl_state();
+}
+
+uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size) {
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_image_encoders(names, size) : rubraview_ffmpeg_local_image_encoders(names, size);
+}
+
+void *rubraview_ffmpeg_host_open(proven_u8str_view_t path, const rubraview_media_gpu_t *gpu,
+                                 const rubraview_ffmpeg_hosting_t *hosting, rubraview_media_failure_t *out_failure,
+                                 rubraview_media_info_t *out_info) {
+    return ff_open_with(path, out_failure, out_info, gpu, hosting);
+}
+
+void rubraview_ffmpeg_host_apply(void *handle, rubraview_mhost_wanted_t *wanted, rubraview_ffmpeg_applied_t *applied) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !wanted || !applied) return;
+    int32_t paused = atomic_load_explicit(&wanted->paused, memory_order_acquire) != 0;
+    if (paused != applied->paused) { ff_set_paused(m, paused); applied->paused = paused; }
+    int32_t gain = atomic_load_explicit(&wanted->gain_millionths, memory_order_acquire);
+    if (gain != applied->gain_millionths && gain >= 0 && gain <= 4000000) { ff_set_gain(m, gain / 1e6); applied->gain_millionths = gain; }
+    uint32_t audio = atomic_load_explicit(&wanted->audio_serial, memory_order_acquire);
+    if (audio != applied->audio_serial) {
+        applied->audio_serial = audio;
+        (void)ff_select_audio_track(m, atomic_load_explicit(&wanted->audio_stream, memory_order_acquire));
+    }
+    uint64_t generation = atomic_load_explicit(&wanted->seek_generation, memory_order_acquire);
+    if (generation != applied->seek_generation && !m->station) {
+        int64_t target = atomic_load_explicit(&wanted->seek_100ns, memory_order_acquire);
+        atomic_store_explicit(&m->seek_target_100ns, target > 0 ? target : 0, memory_order_relaxed);
+        atomic_store_explicit(&m->seek_generation, generation, memory_order_release);   /* the viewer's own number */
+        applied->seek_generation = generation;
+    }
+}
+
+void rubraview_ffmpeg_host_observe(void *handle, rubraview_mhost_seen_t *out) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (!m || !out) return;
+    *out = (rubraview_mhost_seen_t){ 0 };
+    double position = 0.0, wall = 0.0;
+    out->position_known = ff_audio_position(m, &position, &wall);
+    out->position = position;
+    out->wall = wall;
+    out->end_generation = atomic_load_explicit(&m->end_generation, memory_order_acquire);
+    AcquireSRWLockShared(&m->audio_lock);
+    out->drained = rubraview_pal_audio_drained(m->audio);
+    ReleaseSRWLockShared(&m->audio_lock);
+    (void)ff_audio_format(m, &out->played_rate, &out->played_channels);
+    double peak = 0.0;
+    if (ff_hdr_peak(m, &peak)) out->tone_peak = peak;
+    if (ff_stream_title(m, out->icy_title, sizeof out->icy_title)) out->icy_serial = 1;
+}
+
+uint64_t rubraview_ffmpeg_host_pictures(void *handle) {
+    ff_media_t *m = (ff_media_t*)handle;
+    return m ? atomic_load_explicit(&m->pictures, memory_order_relaxed) : 0;
 }
 
 static const rubraview_media_backend_api_t FFMPEG_API = {

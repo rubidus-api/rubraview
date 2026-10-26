@@ -77,6 +77,8 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
         rubraview_ini_doc_t doc = rubraview_ini_parse(arena, ini);
         const proven_u8str_view_t *dir = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir"));
         if (dir) chosen = rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir));
+        const proven_u8str_view_t *apart = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_isolated"));
+        if (apart) rubraview_pal_ffmpeg_set_isolated(!proven_u8str_view_eq(*apart, PROVEN_LIT("false")));   /* RV-176 */
     }
     rubraview_pal_ffmpeg_set_folders(rubraview_path_join(arena, rubraview_path_dirname(settings), PROVEN_LIT("ffmpeg")), chosen);
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
@@ -107,6 +109,10 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
             proven_u8str_view_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
             snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.size, why.ptr);
             console_line(line);
+            if (order[i] == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && rubraview_pal_media_host_why()[0]) {
+                snprintf(line, sizeof(line), "FFmpeg's process (RV-176): %s", rubraview_pal_media_host_why());   /* why, for a report */
+                console_line(line);
+            }
             continue;
         }
 

@@ -56,6 +56,8 @@ typedef struct rubraview_media_backend_api {
 
     /** A subtitle stream inside the file, as SubRip text (D-12). */
     proven_u8str_view_t (*read_subtitle_stream)(void *impl, proven_arena_t *arena, int32_t stream_index);
+    /** RV-176: the process that decodes it ended or stopped answering. May be NULL (never). */
+    bool  (*stopped)(void *impl);
 } rubraview_media_backend_api_t;
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void);

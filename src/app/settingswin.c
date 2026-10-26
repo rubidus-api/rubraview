@@ -688,6 +688,8 @@ static void settings_apply_rest(app_state_t *app) {
         for (size_t i = 0; i < face.size; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
         if (h != last_face) { g_subtitle_style++; last_face = h; }
     }
+    /* RV-176 (D-208): FFmpeg in a process of its own, or inside, before anything asks for it */
+    rubraview_pal_ffmpeg_set_isolated(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_isolated")) > 0.5);
     /* Before anything asks for FFmpeg, and again on a change: while it is
        not loaded, the new folder is tried at the next ask. */
     rubraview_pal_ffmpeg_set_folders(imported_folder(app, "ffmpeg"), rubraview_pal_fs_expand_env(app->arena,

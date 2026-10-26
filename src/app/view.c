@@ -128,6 +128,22 @@ void media_reopen_on_new_device(app_state_t *app) {
     osd_say(app, TU8("the graphics device was reset: the film was opened again"));
 }
 
+/* RV-176 (D-208): FFmpeg's child ended or stopped answering on the film on screen. It is opened again with
+   Windows' decoder at the same place where Windows can play it; else, and for a station, it is said. */
+void media_stopped_tick(app_state_t *app) {
+    if (!app->media || !rubraview_pal_media_stopped(app->media)) return;
+    int32_t page = app->media_page;
+    if (app->media_info.live || page < 0) {
+        media_close(app);
+        if (page >= 0 && (size_t)page < page_count(app)) app->pages[page].failed = true;
+        osd_say(app, TU8("FFmpeg stopped on this station"));
+        return;
+    }
+    app->media_no_ffmpeg_page = page + 1;
+    media_reopen(app);
+    osd_say(app, app->media ? TU8("FFmpeg stopped on this file: it was opened with Windows' decoder") : TU8("FFmpeg stopped on this file"));
+}
+
 /* RV-153: once a second while an HDR film is tone mapped, whether its screen is still the one it was opened
    for (moved to another screen, Windows' HDR switched, the SDR brightness moved); if not, it is opened again. */
 void hdr_screen_tick(app_state_t *app, double dt) {
