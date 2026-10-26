@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.31.exe              the viewer, as built
-dist/rubraview-v1.39.31/                 the release bundle
-dist/rubraview-v1.39.31.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.32.exe              the viewer, as built
+dist/rubraview-v1.39.32/                 the release bundle
+dist/rubraview-v1.39.32.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1462,8 +1462,9 @@ filename code page, the memory cap). Some worth knowing:
     that process; a film then goes on with Windows' decoder from where it
     was, and the viewer says so ("FFmpeg stopped on this file: it was
     opened with Windows' decoder"). Off, FFmpeg is loaded into Rubraview
-    itself, as before 1.39.31. A film shown in HDR on an HDR screen is
-    still decoded inside for now.
+    itself, as before 1.39.31. The process of a film that ends waits half
+    a minute for the next film or song, so a playlist does not start one
+    for every track.
   - **Rubraview plug-ins** — see "Plug-ins: filters from outside".
 - **Viewer › Behind and between pages** — dark, black, grey or white.
 - **General › Open with Windows' own dialog** — `Ctrl+O` then opens

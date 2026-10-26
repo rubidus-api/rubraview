@@ -2380,3 +2380,16 @@ Do not store credentials, private infrastructure details, personal data, private
   - The Store package keeps its Korean description (RV-113 (5)); nothing is asked of rubrapack.
 - Consequences: one place for behaviour and design; the standards' structure (42010, arc42, C4, 25010, 29148) kept
   inside SPEC.
+
+## 2026-10-26: D-210 HDR output in FFmpeg's child, and a film's child kept for the next (RV-177)
+
+- Status: Accepted (owner 2026-10-26: "rv177 진행 바람"; RV-177 from D-208's known costs).
+- Decision:
+  - A film for an HDR screen in HDR output goes to a child as every other: the handshake carries the screen's peak
+    and SDR white, the child tone maps into FP16 slot textures, the viewer takes an FP16 texture for such a film.
+  - A film's child whose film closed cleanly is kept (one), its film's state reset at the next open; it is taken for
+    the next film or song when the card, the hardware decoding, the tone mapping and the screen's numbers are the
+    same; the viewer ends it past 25 s, the child itself past 30 s with nothing open. Its card device is kept with it.
+- Consequences: a playlist pays the child's start once; the in-process path is now only isolation off. On the VM,
+  HDR output on a screen that is not HDR (`always`) passed this film by in 1.39.30 and 1.39.31 and plays in the
+  child (T260); why the in-process path refused it there was not looked into.

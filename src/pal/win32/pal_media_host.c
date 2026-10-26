@@ -266,6 +266,8 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
         b->gpu_mode = gpu->mode;
         b->tone_mapping = gpu->tone_mapping;
         b->adapter_luid = device_luid(gpu->device ? gpu->device : gpu->shader_device);
+        b->hdr_screen_peak = gpu->hdr_screen_peak > 0.0 && gpu->hdr_screen_peak < 100000.0 ? gpu->hdr_screen_peak : 0.0;   /* RV-177 */
+        b->hdr_sdr_white = gpu->hdr_sdr_white > 0.0 && gpu->hdr_sdr_white < 10000.0 ? gpu->hdr_sdr_white : 0.0;
     }
     if (mode == RUBRAVIEW_MHOST_PLAYBACK) {
         AcquireSRWLockShared(&g_audio_lock);
@@ -345,14 +347,6 @@ static int32_t child_call(mh_child_t *c, uint32_t kind, DWORD wait_ms) {
     }
 }
 
-static void child_end(mh_child_t *c) {
-    if (c->block && child_alive(c)) {
-        atomic_store_explicit(&c->block->wanted.quit, 1, memory_order_release);
-        (void)child_call(c, RUBRAVIEW_MHOST_REQ_CLOSE, CLOSE_WAIT_MS);
-    }
-    child_free(c);
-}
-
 /* The reply's mapping, opened when its name and size are in order. */
 static bool reply_map(mh_child_t *c, uint64_t limit, mh_map_t *m) {
     char name[RUBRAVIEW_MHOST_NAME];
@@ -429,13 +423,77 @@ static bool play_alive(mh_play_t *p) {
     return true;
 }
 
+/* RV-177: a film's child kept, its film closed, for the next film or song on the same card (it ends itself after
+   POOL_SECONDS without one). One is enough: the next track is the common case. */
+#define POOL_SECONDS 25.0
+static SRWLOCK g_pool_lock = SRWLOCK_INIT;
+static mh_child_t g_pool;
+static double g_pool_at;
+
+static bool pool_same(const mh_child_t *c, const rubraview_media_gpu_t *gpu) {
+    const rubraview_mhost_block_t *b = c->block;
+    rubraview_media_gpu_t none = { 0 };
+    if (!gpu) gpu = &none;
+    double peak = gpu->hdr_screen_peak > 0.0 && gpu->hdr_screen_peak < 100000.0 ? gpu->hdr_screen_peak : 0.0;
+    double white = gpu->hdr_sdr_white > 0.0 && gpu->hdr_sdr_white < 10000.0 ? gpu->hdr_sdr_white : 0.0;
+    return b->gpu_mode == gpu->mode && b->tone_mapping == gpu->tone_mapping && b->hdr_screen_peak == peak && b->hdr_sdr_white == white &&
+           b->adapter_luid == device_luid(gpu->device ? gpu->device : gpu->shader_device);
+}
+
+/* The kept child when it fits and lives, made ready for a new film; false: start one. */
+static bool pool_take(mh_child_t *out, const rubraview_media_gpu_t *gpu) {
+    AcquireSRWLockExclusive(&g_pool_lock);
+    bool got = false;
+    if (g_pool.process) {
+        if (child_alive(&g_pool) && now_seconds() - g_pool_at < POOL_SECONDS && pool_same(&g_pool, gpu)) {
+            *out = g_pool;
+            got = true;
+        } else {
+            child_free(&g_pool);
+        }
+        g_pool = (mh_child_t){ 0 };
+    }
+    ReleaseSRWLockExclusive(&g_pool_lock);
+    if (!got) return false;
+    rubraview_mhost_block_t *b = out->block;   /* what the film before left: as a new child's */
+    atomic_store(&b->wanted.paused, 0);
+    atomic_store(&b->wanted.quit, 0);
+    atomic_store(&b->wanted.seek_100ns, 0);
+    atomic_store(&b->wanted.seek_generation, 0);
+    atomic_store(&b->wanted.gain_millionths, 1000000);
+    atomic_store(&b->wanted.audio_stream, -1);
+    atomic_store(&b->wanted.audio_serial, 0);
+    memset(b->slots, 0, sizeof b->slots);
+    memset(b->frame_map, 0, sizeof b->frame_map);
+    b->frame_bytes = 0;
+    b->open_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+    AcquireSRWLockShared(&g_audio_lock);
+    audio_write(&b->audio);
+    ReleaseSRWLockShared(&g_audio_lock);
+    out->beat_at = now_seconds();
+    return true;
+}
+
+/* A child whose film is closed, kept when it closed it cleanly; else ended. */
+static void pool_give(mh_child_t *c) {
+    if (!child_alive(c)) { child_free(c); return; }
+    c->block->request_args[0] = 1;   /* keep the process */
+    if (child_call(c, RUBRAVIEW_MHOST_REQ_CLOSE, CLOSE_WAIT_MS) != RUBRAVIEW_MHOST_OK) { child_free(c); return; }
+    AcquireSRWLockExclusive(&g_pool_lock);
+    if (g_pool.process) child_free(&g_pool);
+    g_pool = *c;
+    g_pool_at = now_seconds();
+    ReleaseSRWLockExclusive(&g_pool_lock);
+    *c = (mh_child_t){ 0 };
+}
+
 static void remote_close(void *handle) {
     mh_play_t *p = (mh_play_t *)handle;
     if (!p) return;
     plays_remove(p);
     for (int i = 0; i < RUBRAVIEW_MHOST_SLOTS; ++i) if (p->textures[i].texture) ID3D11Texture2D_Release(p->textures[i].texture);
     map_close(&p->frames);
-    if (p->stopped) child_free(&p->child); else child_end(&p->child);
+    if (p->stopped) child_free(&p->child); else pool_give(&p->child);
     if (p->device) ID3D11Device_Release(p->device);
     free(p);
 }
@@ -467,7 +525,11 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
     if (!rubraview_mhost_remote_available()) { snprintf(g_open_why, sizeof g_open_why, "the service process found no FFmpeg"); return NULL; }
     mh_play_t *p = (mh_play_t *)calloc(1, sizeof(*p));
     if (!p) return NULL;
-    if (!child_start(&p->child, RUBRAVIEW_MHOST_PLAYBACK, gpu)) { free(p); snprintf(g_open_why, sizeof g_open_why, "the process could not be started"); return NULL; }
+    if (!pool_take(&p->child, gpu) && !child_start(&p->child, RUBRAVIEW_MHOST_PLAYBACK, gpu)) {
+        free(p);
+        snprintf(g_open_why, sizeof g_open_why, "the process could not be started");
+        return NULL;
+    }
     rubraview_mhost_block_t *b = p->child.block;
     memcpy(b->inline_data, path.ptr, path.size);
     b->inline_data[path.size] = 0;
@@ -506,7 +568,8 @@ static const void *remote_texture(mh_play_t *p, size_t slot, uint64_t handle) {
     if (FAILED(ID3D11Device_OpenSharedResource(p->device, (HANDLE)(uintptr_t)handle, &MH_IID_ID3D11Texture2D, (void **)&t)) || !t) return NULL;
     D3D11_TEXTURE2D_DESC d;
     ID3D11Texture2D_GetDesc(t, &d);
-    if (d.Width < (UINT)p->opened.info.width || d.Height < (UINT)p->opened.info.height || d.Format != DXGI_FORMAT_B8G8R8A8_UNORM ||
+    DXGI_FORMAT want = p->opened.info.hdr_output ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;   /* RV-177 */
+    if (d.Width < (UINT)p->opened.info.width || d.Height < (UINT)p->opened.info.height || d.Format != want ||
         d.ArraySize != 1) {
         ID3D11Texture2D_Release(t);
         return NULL;
@@ -1071,6 +1134,7 @@ static uint8_t *child_reply_room(uint64_t bytes) {
 
 static uint8_t *child_frames_room(void *context, size_t bytes_each) {
     (void)context;
+    map_close(&g_child_frames);   /* the film before's (RV-177) */
     char name[RUBRAVIEW_MHOST_NAME];
     if (!map_make(&g_child_frames, (uint64_t)bytes_each * RUBRAVIEW_MHOST_SLOTS, name)) return NULL;
     memcpy(g_child_block->frame_map, name, sizeof name);
@@ -1119,7 +1183,8 @@ static ID3D11Device *child_device(uint64_t luid, uint32_t *profiles) {
 
 typedef struct child_play {
     void *media;
-    ID3D11Device *device;
+    ID3D11Device *device;                    /* made once, kept for the next film (RV-177) */
+    uint32_t profiles;
     rubraview_ffmpeg_applied_t applied;
 } child_play_t;
 
@@ -1127,8 +1192,10 @@ static int32_t child_open(child_play_t *cp) {
     rubraview_mhost_block_t *b = g_child_block;
     size_t n = b->request_inline_bytes < RUBRAVIEW_MHOST_INLINE - 1 ? (size_t)b->request_inline_bytes : RUBRAVIEW_MHOST_INLINE - 1;
     proven_u8str_view_t path = { .ptr = b->inline_data, .size = n };
-    rubraview_media_gpu_t gpu = { .mode = b->gpu_mode, .tone_mapping = b->tone_mapping };
-    if (b->gpu_mode > 0 || b->tone_mapping > 0) cp->device = child_device(b->adapter_luid, &gpu.decoder_profiles);
+    rubraview_media_gpu_t gpu = { .mode = b->gpu_mode, .tone_mapping = b->tone_mapping,
+                                  .hdr_screen_peak = b->hdr_screen_peak, .hdr_sdr_white = b->hdr_sdr_white };   /* RV-177 */
+    if ((b->gpu_mode > 0 || b->tone_mapping > 0) && !cp->device) cp->device = child_device(b->adapter_luid, &cp->profiles);
+    gpu.decoder_profiles = cp->profiles;
     if (cp->device) {
         if (b->gpu_mode > 0) gpu.device = cp->device;
         if (b->tone_mapping > 0) gpu.shader_device = cp->device;
@@ -1397,6 +1464,7 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
     bool playback = b->mode == RUBRAVIEW_MHOST_PLAYBACK;
     child_play_t cp = { 0 };
     uint32_t handled = 0, audio_applied = 0, tap_tick = 0;
+    ULONGLONG idle_since = 0;
     for (;;) {
         DWORD r = WaitForSingleObject(g_child_request, playback ? 4 : 1000);
         atomic_store_explicit(&b->heartbeat, atomic_load(&b->heartbeat) + 1, memory_order_release);
@@ -1432,6 +1500,7 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
             }
         }
         if (atomic_load_explicit(&b->wanted.quit, memory_order_acquire) && r != WAIT_OBJECT_0) break;
+        if (playback && !cp.media && idle_since && GetTickCount64() - idle_since > 30000) break;   /* RV-177: not taken again */
         uint32_t serial = atomic_load_explicit(&b->request_serial, memory_order_acquire);
         if (serial == handled) continue;
         handled = serial;
@@ -1439,8 +1508,15 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
         child_say("");
         int32_t status = RUBRAVIEW_MHOST_FAILED;
         bool close = false;
-        if (kind == RUBRAVIEW_MHOST_REQ_OPEN && playback && !cp.media) status = child_open(&cp);
+        if (kind == RUBRAVIEW_MHOST_REQ_OPEN && playback && !cp.media) { status = child_open(&cp); idle_since = cp.media ? 0 : GetTickCount64(); }
         else if (kind == RUBRAVIEW_MHOST_REQ_SUBTITLE && playback) status = child_subtitle(&cp);
+        else if (kind == RUBRAVIEW_MHOST_REQ_CLOSE && playback && b->request_args[0] == 1) {   /* RV-177: kept for the next */
+            if (cp.media) rubraview_media_backend_ffmpeg()->close(cp.media);
+            cp.media = NULL;
+            map_close(&g_child_frames);
+            idle_since = GetTickCount64();
+            status = RUBRAVIEW_MHOST_OK;
+        }
         else if (kind == RUBRAVIEW_MHOST_REQ_CLOSE) { status = RUBRAVIEW_MHOST_OK; close = true; }
         else if (!playback) { map_close(&g_child_reply_map); status = child_service(kind, &serial); handled = serial; }
         if (close) {

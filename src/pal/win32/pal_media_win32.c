@@ -31,8 +31,8 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
                                                        const rubraview_media_gpu_t *gpu) {
     rubraview_media_open_result_t result = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
     const rubraview_media_backend_api_t *api = backend_api(backend);
-    /* RV-176 (D-208): FFmpeg plays in a child, but for a film for an HDR screen in HDR output (for now) */
-    if (backend == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && !(gpu && gpu->hdr_screen_peak > 0.0))
+    /* RV-176 (D-208): FFmpeg plays in a child; RV-177: a film for HDR output too */
+    if (backend == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote())
         api = rubraview_media_backend_remote();
     if (!api || !api->open) return result;
     /* RV-157: a station is FFmpeg's alone, which opens it with only the network's protocols allowed */
