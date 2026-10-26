@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.34** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.34/rubraview-v1.39.34.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.34/rubraview-v1.39.34.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.35** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -109,13 +109,13 @@ ships with, so it cannot drift from them.
 | `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
-| `Shift+Right` | Ten pages on |
-| `Shift+Left` | Ten pages back |
+| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
+| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
-| `Ctrl+]`, `Ctrl+PageDown` | Next folder or archive |
-| `Ctrl+[`, `Ctrl+PageUp` | Previous folder or archive |
+| `Ctrl+]` | Next folder or archive |
+| `Ctrl+[` | Previous folder or archive |
 
 **The view**
 

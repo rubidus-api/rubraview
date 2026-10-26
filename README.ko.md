@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.34** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.34/rubraview-v1.39.34.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.34/rubraview-v1.39.34.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.35** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -108,13 +108,13 @@
 | `PageUp`, `Backspace`, `Shift+Space`, `,` | 이전 장 |
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |
-| `Shift+Right` | 열 장 뒤로 |
-| `Shift+Left` | 열 장 앞으로 |
+| `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |
+| `Shift+Left`, `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 (툴바 버튼을 누르면 목록에서 고름) |
 | `Shift+B` | 펼침면 자동 인식 |
-| `Ctrl+]`, `Ctrl+PageDown` | 다음 폴더 또는 압축 |
-| `Ctrl+[`, `Ctrl+PageUp` | 이전 폴더 또는 압축 |
+| `Ctrl+]` | 다음 폴더 또는 압축 |
+| `Ctrl+[` | 이전 폴더 또는 압축 |
 
 **보기**
 

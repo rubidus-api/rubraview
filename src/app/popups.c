@@ -870,12 +870,12 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
     bool media = app->media != NULL;
     /* [media][side][slot]: an icon of Segoe MDL2 Assets, or 0 and the sign. */
     static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {   /* RV-179: the fourth, the folder or archive beside */
-        { { 0xE76B, 0, 0xE892, 0xEB9E }, { 0xE76C, 0, 0xE893, 0xEB9D } },
-        { { 0, 0, 0xE892, 0xEB9E },      { 0, 0, 0xE893, 0xEB9D } },
+        { { 0xE76B, 0, 0xEB9E, 0xE892 }, { 0xE76C, 0, 0xEB9D, 0xE893 } },   /* RV-180: pages ◁◁ ▷▷, the folder |◁ ▷| */
+        { { 0, 0, 0xEB9E, 0xE892 },      { 0, 0, 0xEB9D, 0xE893 } },
     };
     static const char *const SIGN[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-        { { "<", "-10", "|<", "<<" }, { ">", "+10", ">|", ">>" } },
-        { { "-5s", "-30s", "|<", "<<" }, { "+5s", "+30s", ">|", ">>" } },
+        { { "<", "-10", "<<", "|<" }, { ">", "+10", ">>", ">|" } },
+        { { "-5s", "-30s", "<<", "|<" }, { "+5s", "+30s", ">>", ">|" } },
     };
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
     rubraview_edge_hit_t hit = rubraview_edgenav_hit(&nav, app->pointer_x, app->pointer_y, win_w, win_h);

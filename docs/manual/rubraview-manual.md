@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.34.exe              the viewer, as built
-dist/rubraview-v1.39.34/                 the release bundle
-dist/rubraview-v1.39.34.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.35.exe              the viewer, as built
+dist/rubraview-v1.39.35/                 the release bundle
+dist/rubraview-v1.39.35.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1178,10 +1178,11 @@ At the middle of each side of the window, pointing near the edge shows
 four buttons. For pictures the left ones go to the previous file, ten back
 and the first, the right ones to the next, ten on and the last; for a film
 or a song they go 5 s and 30 s back or on, and to the previous or next file
-(`Shift` + `Left`/`Right` also go 30 s). The fourth, ◁◁ or ▷▷, opens the
+(`Shift` + `Left`/`Right` also go 30 s). The fourth, |◁ or ▷|, opens the
 archive before or after this one in its folder — or, for files in a
-folder, the folder before or after — as `Ctrl+PageUp` / `Ctrl+PageDown`
-and `Ctrl+[` / `Ctrl+]` do, and the Toolbar's ◁◁ ▷▷ for a comic.
+folder, the folder before or after — as `Ctrl+[` / `Ctrl+]` do, and the
+Toolbar's |◁ ▷|, which stand beside its page buttons (◁◁ ▷▷) for every
+kind of file.
 
 `P` or the playlist button shows what is open as a list
 floating over the picture: the playlist, or the folder's or the archive's
@@ -1690,13 +1691,13 @@ listed under a later heading only means that while that is on screen.
 | `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
-| `Shift+Right` | Ten pages on |
-| `Shift+Left` | Ten pages back |
+| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
+| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
-| `Ctrl+]`, `Ctrl+PageDown` | Next folder or archive |
-| `Ctrl+[`, `Ctrl+PageUp` | Previous folder or archive |
+| `Ctrl+]` | Next folder or archive |
+| `Ctrl+[` | Previous folder or archive |
 
 **The view**
 

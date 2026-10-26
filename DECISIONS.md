@@ -2417,3 +2417,17 @@ Do not store credentials, private infrastructure details, personal data, private
   - `Ctrl+PageDown` / `Ctrl+PageUp` move from `skip_forward` / `skip_backward` (which keep `Shift+Right` / `Left`)
     to `next_archive` / `prev_archive`; the actions' words are "Next / Previous folder or archive".
 - Consequences: a keymap.ini that bound Ctrl+PageDown to skipping by hand keeps it. T263 (host), T264 (VM).
+
+## 2026-10-27: D-213 Pages ◁◁ ▷▷, the folder or archive |◁ ▷| beside them; Ctrl+PageUp/PageDown skip again (RV-180; changes D-212)
+
+- Status: Accepted (owner 2026-10-27: "페이지 이동 아이콘과 압축파일/폴더 이동 아이콘을 모양을 서로 바꿔야 말이 될 듯합니다.
+  그리고 압축파일/폴더 아이콘도 툴바에서 이동 관련 아이콘 쪽으로 같이 묶여야"; then "Ctrl+PgUp PgDn은 10장 건너뛰기가
+  맞는 것 같아요. Ctrl+[ 또는 ] 가 폴더 또는 압축파일 이동이 맞는 듯").
+- Decision:
+  - `prev_page` / `next_page` take EB9E / EB9D (◁◁ ▷▷), `prev_archive` / `next_archive` E892 / E893 (|◁ ▷|); the edge
+    buttons likewise (the third, first / last or the file before / after, ◁◁ ▷▷; the fourth |◁ ▷|). The 5 s seeks,
+    which had ◁◁ ▷▷, are shown by their words ("-5 s" / "+5 s") so a film's Toolbar has no two alike.
+  - `prev_archive` / `next_archive` follow the page tiles in the first group of every toolbox profile (image,
+    multipage, animation, video, music, text, as the archive's had them), since they step the folder too (D-212).
+  - `Ctrl+PageDown` / `Ctrl+PageUp` are skipping's again; the folder or archive is `Ctrl+]` / `Ctrl+[`.
+- Consequences: T263, T265 (host), T266 (VM).

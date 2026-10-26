@@ -162,10 +162,8 @@ proven_u8str_view_t rubraview_scale_caption(char *buffer, size_t buffer_size, do
 uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_action_facts_t *f) {
     static const struct { const char *action; uint32_t icon; } ICONS[] = {
         { "media_stop", 0xE71A },            /* Stop */
-        { "prev_page", 0xE892 },             /* Previous */
-        { "next_page", 0xE893 },             /* Next */
-        { "media_seek_back", 0xEB9E },       /* Rewind */
-        { "media_seek_forward", 0xEB9D },    /* FastForward */
+        { "prev_page", 0xEB9E },             /* RV-180: ◁◁, a page or a file (owner: the shapes swapped with the folder's) */
+        { "next_page", 0xEB9D },             /* ▷▷; the 5 s seeks say "-5 s" / "+5 s" in words, not to look the same */
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
         { "next_subtitle_track", 0xE7F0 },   /* ClosedCaption */
@@ -179,8 +177,8 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "anim_step_forward", 0xE76C },     /* ChevronRight */
         { "subpage_prev", 0xE76B },
         { "subpage_next", 0xE76C },
-        { "prev_archive", 0xEB9E },          /* RV-179: ◁◁, a whole book or folder back (E8AC was Rename's) */
-        { "next_archive", 0xEB9D },          /* ▷▷ */
+        { "prev_archive", 0xE892 },          /* RV-180: |◁, the folder or archive before (RV-179: E8AC was Rename's) */
+        { "next_archive", 0xE893 },          /* ▷| */
         { "fit_window", 0xE9A6 },            /* FitPage */
         /* The fuller toolbox (owner, 2026-09-29). */
         { "toggle_info", 0xE946 },           /* Info */
