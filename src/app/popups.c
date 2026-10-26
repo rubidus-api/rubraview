@@ -869,13 +869,13 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
     if (side == RUBRAVIEW_EDGE_NONE) return;
     bool media = app->media != NULL;
     /* [media][side][slot]: an icon of Segoe MDL2 Assets, or 0 and the sign. */
-    static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-        { { 0xE76B, 0, 0xE892 }, { 0xE76C, 0, 0xE893 } },
-        { { 0, 0, 0xE892 },      { 0, 0, 0xE893 } },
+    static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {   /* RV-179: the fourth, the folder or archive beside */
+        { { 0xE76B, 0, 0xE892, 0xEB9E }, { 0xE76C, 0, 0xE893, 0xEB9D } },
+        { { 0, 0, 0xE892, 0xEB9E },      { 0, 0, 0xE893, 0xEB9D } },
     };
     static const char *const SIGN[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-        { { "<", "-10", "|<" }, { ">", "+10", ">|" } },
-        { { "-5s", "-30s", "|<" }, { "+5s", "+30s", ">|" } },
+        { { "<", "-10", "|<", "<<" }, { ">", "+10", ">|", ">>" } },
+        { { "-5s", "-30s", "|<", "<<" }, { "+5s", "+30s", ">|", ">>" } },
     };
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
     rubraview_edge_hit_t hit = rubraview_edgenav_hit(&nav, app->pointer_x, app->pointer_y, win_w, win_h);
@@ -892,7 +892,7 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
                                            COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         if (hovered) {
-            double cw = r.height * 4.0;
+            double cw = r.height * (slot == 3 ? 5.5 : 4.0);   /* RV-179: the longer caption */
             rubraview_pal_rect_t cap = { side == RUBRAVIEW_EDGE_LEFT ? r.x + r.width + nav.gap : r.x - nav.gap - cw,
                                          r.y + r.height * 0.2, cw, r.height * 0.6 };
             rubraview_pal_render_fill_rect(app->renderer, cap, rubraview_box_fade(COLOR_BOX_FILL, opacity), 3.0);

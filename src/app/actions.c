@@ -147,6 +147,7 @@ rubraview_action_facts_t action_facts(const app_state_t *app) {
     return (rubraview_action_facts_t){
         .has_page = page_count(app) > 0,
         .archive_series = app->source.archive_path.size > 0,
+        .folder_series = app->source.archive_path.size == 0 && !app->list_is_set && page_count(app) > 0,
         .media = app->media != NULL,
         .video = app->media != NULL && app->media_info.has_video,
         .frames = app->anim_active,
@@ -1176,9 +1177,14 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         int now = app->names_codepage >= 0 ? app->names_codepage : (int)app->archive_codepage;
         archive_names_reread(app, (rubraview_codepage_t)((now + 1) % ((int)RUBRAVIEW_CODEPAGE_WESTERN + 1)));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_archive"))) {
-        if (!open_sibling_archive(app, true)) osd_say(app, TU8("no next archive beside this one"));
+        /* RV-179: in an archive the next archive, in a folder the next folder (as T's drag and the ends do) */
+        bool archive = app->source.archive_path.size > 0;
+        if (!(archive ? open_sibling_archive(app, true) : !app->list_is_set && open_sibling_folder(app, true)))
+            osd_say(app, archive ? TU8("no next archive beside this one") : TU8("no next folder beside this one"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_archive"))) {
-        if (!open_sibling_archive(app, false)) osd_say(app, TU8("no previous archive beside this one"));
+        bool archive = app->source.archive_path.size > 0;
+        if (!(archive ? open_sibling_archive(app, false) : !app->list_is_set && open_sibling_folder(app, false)))
+            osd_say(app, archive ? TU8("no previous archive beside this one") : TU8("no previous folder beside this one"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("resume_accept"))) {
         /* §3.17.1: the prompt is answered by opening the remembered page. */
         if (app->resume_offer) {

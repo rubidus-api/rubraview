@@ -55,16 +55,16 @@ rubraview_edge_hit_t rubraview_edgenav_hit(const rubraview_edgenav_t *nav, doubl
 
 /* [media][side][slot] */
 static const char *const ACTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-    { { "prev_page", "skip_backward", "first_page" },
-      { "next_page", "skip_forward", "last_page" } },
-    { { "media_seek_back", "media_seek_back_long", "prev_page" },
-      { "media_seek_forward", "media_seek_forward_long", "next_page" } },
+    { { "prev_page", "skip_backward", "first_page", "prev_archive" },
+      { "next_page", "skip_forward", "last_page", "next_archive" } },
+    { { "media_seek_back", "media_seek_back_long", "prev_page", "prev_archive" },
+      { "media_seek_forward", "media_seek_forward_long", "next_page", "next_archive" } },
 };
 static const char *const CAPTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-    { { N_("Previous"), N_("10 back"), N_("First") },
-      { N_("Next"), N_("10 on"), N_("Last") } },
-    { { N_("Back 5 s"), N_("Back 30 s"), N_("Previous file") },
-      { N_("On 5 s"), N_("On 30 s"), N_("Next file") } },
+    { { N_("Previous"), N_("10 back"), N_("First"), N_("Folder or archive before") },
+      { N_("Next"), N_("10 on"), N_("Last"), N_("Folder or archive after") } },
+    { { N_("Back 5 s"), N_("Back 30 s"), N_("Previous file"), N_("Folder or archive before") },
+      { N_("On 5 s"), N_("On 30 s"), N_("Next file"), N_("Folder or archive after") } },
 };
 
 const char *rubraview_edgenav_action(rubraview_edge_side_t side, int32_t slot, bool media) {

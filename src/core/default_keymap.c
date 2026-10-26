@@ -90,18 +90,18 @@ const char *rubraview_default_keymap(void) {
     "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
-    "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
-    "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"
+    "skip_forward = \"Shift+Right\"\n"
+    "skip_backward = \"Shift+Left\"\n"
     /* §3.7.2 gives "up to folder" Backspace and Alt+Up; Backspace turns a
        page (owner, 2026-09-09), Alt+Up moves the window and Ctrl+Up sizes
        it (D-16). Ctrl+Backspace: back, one step wider. */
     "up_to_folder = \"Ctrl+Backspace\"\n"
     "toggle_layout = \"B\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
-    /* §3.8.1 point 4. §3.7.2 also offers Ctrl+PageDown/PageUp here, but
-       those are skipping's primary and skipping keeps them. */
-    "next_archive = \"Ctrl+BracketRight\"\n"
-    "prev_archive = \"Ctrl+BracketLeft\"\n"
+    /* §3.8.1 point 4; §3.7.2's Ctrl+PageDown/PageUp too (owner, 2026-10-26, RV-179: they were skipping's, which
+       keeps Shift+Right/Left). In a folder, the folder beside. */
+    "next_archive = \"Ctrl+BracketRight, Ctrl+PageDown\"\n"
+    "prev_archive = \"Ctrl+BracketLeft, Ctrl+PageUp\"\n"
     "\n"
     "[view]\n"
     "fit_window = \"1\"\n"
@@ -158,7 +158,7 @@ const char *rubraview_default_keymap(void) {
     "media_seek_forward = \"Right\"\n"
     "media_seek_back = \"Left\"\n"
     /* 30 s, as the edge buttons' second step (owner, 2026-09-29). Shift +
-       an arrow skips ten files elsewhere; Ctrl+PageDown/PageUp still do. */
+       an arrow skips ten files elsewhere; Ctrl+PageDown/PageUp go to the folder or archive beside (RV-179). */
     "media_seek_forward_long = \"Shift+Right\"\n"
     "media_seek_forward_fine = \"Ctrl+Shift+Right\"\n"
     "media_seek_back_fine = \"Ctrl+Shift+Left\"\n"

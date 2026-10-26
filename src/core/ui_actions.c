@@ -24,7 +24,8 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
     for (size_t i = 0; i < sizeof(NEEDS_PAGE) / sizeof(NEEDS_PAGE[0]); ++i) {
         if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(NEEDS_PAGE[i]))) st.enabled = f->has_page;
     }
-    if (proven_u8str_view_eq(action, PROVEN_LIT("next_archive")) || proven_u8str_view_eq(action, PROVEN_LIT("prev_archive"))) st.enabled = f->archive_series;
+    if (proven_u8str_view_eq(action, PROVEN_LIT("next_archive")) || proven_u8str_view_eq(action, PROVEN_LIT("prev_archive")))
+        st.enabled = f->archive_series || f->folder_series;   /* RV-179: the folder beside too */
     /* A page inside an archive is not a file to take away: it can be copied out, not moved. */
     if (proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"))) st.enabled = f->has_page && !f->archive_series;
     /* Export writes a picture: a film or a sound has none to write. */
@@ -178,8 +179,8 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "anim_step_forward", 0xE76C },     /* ChevronRight */
         { "subpage_prev", 0xE76B },
         { "subpage_next", 0xE76C },
-        { "prev_archive", 0xE8AC },          /* folder with a way back: "Back" to the previous book */
-        { "next_archive", 0xE8AD },
+        { "prev_archive", 0xEB9E },          /* RV-179: ◁◁, a whole book or folder back (E8AC was Rename's) */
+        { "next_archive", 0xEB9D },          /* ▷▷ */
         { "fit_window", 0xE9A6 },            /* FitPage */
         /* The fuller toolbox (owner, 2026-09-29). */
         { "toggle_info", 0xE946 },           /* Info */

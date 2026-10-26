@@ -2402,3 +2402,18 @@ Do not store credentials, private infrastructure details, personal data, private
   scales F, T, P and R; the wheel over R steps it and it is written to settings.ini at once. The buttons a row,
   D-204's wheel over R, stay R's drag and the setting; the Toolbar's button size stays the wheel over T.
 - Consequences: R's hint, the settings note, the manual and the five language packs say so; T261 (host), T262 (VM).
+
+## 2026-10-26: D-212 The folder or archive beside: right icons, a fourth edge button, Ctrl+PageUp/PageDown (RV-179)
+
+- Status: Accepted (owner 2026-10-26: "만화보기 화면에서 툴바의 다음 압축파일/이전 압축파일 아이콘이 이상합니다 ... 다음/이전
+  압축파일 또는 폴더 버튼을 페이지 양 옆 호버링되는 이동 버튼에 추가하여 4개의 버튼으로 ... 컨트롤 버튼 더하기 PgUp PgDn
+  단축키를 다음/이전 폴더 또는 압축파일 단축키로").
+- Decision:
+  - `prev_archive` / `next_archive` take Segoe MDL2's EB9E / EB9D (◁◁ ▷▷); E8AC is Rename's and E8AD an arrow up
+    and right. Chosen from the font drawn on the VM beside the page buttons (E892 / E893).
+  - The two actions step the folder beside when no archive is read and the files are a folder's, the rule T's
+    drag and `files.at_ends` = next already follow; they are enabled for either.
+  - The edge buttons are four a side; the fourth is these two for pictures, books and films alike.
+  - `Ctrl+PageDown` / `Ctrl+PageUp` move from `skip_forward` / `skip_backward` (which keep `Shift+Right` / `Left`)
+    to `next_archive` / `prev_archive`; the actions' words are "Next / Previous folder or archive".
+- Consequences: a keymap.ini that bound Ctrl+PageDown to skipping by hand keeps it. T263 (host), T264 (VM).

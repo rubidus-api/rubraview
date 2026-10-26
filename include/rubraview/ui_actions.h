@@ -31,6 +31,7 @@ typedef enum rubraview_tile_mark {
 typedef struct rubraview_action_facts {
     bool has_page;            /* something is shown */
     bool archive_series;      /* reading an archive: there are archives to step through */
+    bool folder_series;       /* RV-179: reading a folder (not a set of files): there are folders to step through */
     bool media;               /* a film or a sound is open */
     bool video;               /* ... and it has pictures */
     bool frames;              /* an animation or a multi-page file */

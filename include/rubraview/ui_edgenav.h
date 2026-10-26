@@ -25,7 +25,7 @@ typedef enum rubraview_edge_side {
     RUBRAVIEW_EDGE_RIGHT = 1,
 } rubraview_edge_side_t;
 
-#define RUBRAVIEW_EDGE_SLOTS 3
+#define RUBRAVIEW_EDGE_SLOTS 4   /* RV-179: the folder or archive beside, under the three */
 
 typedef struct rubraview_edge_hit {
     rubraview_edge_side_t side;
