@@ -433,6 +433,7 @@ bool edit_side_press(app_state_t *app, double px, double py) {
     for (int b = 0; b < 2; ++b) {
         rubraview_panel_t *box = boxes[b];
         if (!box->open || !rubraview_rect_contains(box->bounds, px, py)) continue;
+        if (scrollbar_press_panel(app, box, px, py)) return true;   /* RV-172 */
         if (rubraview_panel_title_hit(box, px, py)) { rubraview_panel_move_begin(box, px, py); return true; }
         if (box == &app->sel_panel && edit_type_value_at(app, box, 2, px, py)) return true;
         int32_t row = -1;
@@ -471,6 +472,7 @@ bool panel_handle_press(app_state_t *app, double px, double py) {
        rule below ("a click outside closes it") would shut the workbench
        the moment a point was grabbed. It is asked first. */
     if (curve_widget_press(app, px, py, false)) return true;
+    if (scrollbar_press_panel(app, &app->panel, px, py)) return true;   /* RV-172: a column's bar */
 
     /* The owner's edit: taken by its title, it moves. */
     if (rubraview_panel_title_hit(&app->panel, px, py)) { rubraview_panel_move_begin(&app->panel, px, py); return true; }
@@ -642,4 +644,5 @@ rows:
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
     }
+    draw_panel_scrollbars(app, panel);   /* RV-172: where its rows are, and moved there */
 }

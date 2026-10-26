@@ -13,6 +13,7 @@ rubraview_panel_t rubraview_panel_create(proven_u8str_view_t title, double dpi_s
     panel.row_height = 28.0 * dpi_scale;
     panel.padding = 10.0 * dpi_scale;
     panel.label_width = 110.0 * dpi_scale;
+    panel.bar_width = 12.0 * dpi_scale;
     panel.bounds = (rubraview_rect_t){ .x = 0.0, .y = 0.0, .width = 320.0 * dpi_scale, .height = 0.0 };
     panel.active_row = -1;
     panel.hover_row = -1;
@@ -231,6 +232,50 @@ void rubraview_panel_scroll_by(rubraview_panel_t *panel, double dy) {
     panel->scroll = clampd(panel->scroll + dy, 0.0, most > 0.0 ? most : 0.0);
 }
 
+/* ---- RV-172: the scroll bars ---- */
+
+/* The rows' room and how much they need: a column's of a bare panel, the whole panel's of one with a title. */
+static double scroll_room(const rubraview_panel_t *panel) {
+    return panel->bare ? column_room(panel) : panel->bounds.height - panel->row_height - panel->padding * 2.0;
+}
+
+static double scroll_content(const rubraview_panel_t *panel, int32_t c) {
+    return panel->bare ? panel->column_content[c] : panel->content_height;
+}
+
+static bool column_has_bar(const rubraview_panel_t *panel, int32_t c) {
+    return panel->bar_width > 0.0 && scroll_content(panel, c) > scroll_room(panel) + 0.5;
+}
+
+/* What a row gives up to its column's bar. */
+static double bar_room(const rubraview_panel_t *panel, int32_t c) {
+    return column_has_bar(panel, c) ? panel->bar_width + panel->padding * 0.5 : 0.0;
+}
+
+static bool column_ok(const rubraview_panel_t *panel, int32_t column) {
+    return panel && column >= 0 && (panel->bare ? column < panel->columns : column == 0);
+}
+
+rubraview_scrollbar_t rubraview_panel_scrollbar(const rubraview_panel_t *panel, int32_t column) {
+    if (!column_ok(panel, column) || !panel->open) return (rubraview_scrollbar_t){ 0 };
+    double right = panel->bare ? panel->bounds.x + panel->padding + (panel->column_width + panel->column_gap) * (double)column + panel->column_width
+                               : panel->bounds.x + panel->bounds.width - panel->padding;
+    double top = panel->bounds.y + panel->padding + (panel->bare ? 0.0 : panel->row_height);
+    return (rubraview_scrollbar_t){
+        .area = { right - panel->bar_width, top, panel->bar_width, scroll_room(panel) },
+        .button = panel->bar_width, .total = scroll_content(panel, column), .shown = scroll_room(panel),
+        .first = panel->bare ? panel->column_scroll[column] : panel->scroll,
+        .step = panel->row_height, .min_thumb = panel->row_height,
+    };
+}
+
+void rubraview_panel_scroll_to(rubraview_panel_t *panel, int32_t column, double first) {
+    if (!column_ok(panel, column)) return;
+    double most = scroll_content(panel, column) - scroll_room(panel);
+    first = clampd(first, 0.0, most > 0.0 ? most : 0.0);
+    if (panel->bare) panel->column_scroll[column] = first; else panel->scroll = first;
+}
+
 rubraview_rect_t rubraview_panel_row_rect(const rubraview_panel_t *panel, size_t index) {
     rubraview_rect_t empty = {0};
     if (!panel || index >= panel->row_count) return empty;
@@ -245,7 +290,7 @@ rubraview_rect_t rubraview_panel_row_rect(const rubraview_panel_t *panel, size_t
         if (spacer ? (y + h <= top || y >= bottom) : (y < top - 0.5 || y + h > bottom + 0.5)) return empty;
         return (rubraview_rect_t){
             .x = panel->bounds.x + panel->padding + (panel->column_width + panel->column_gap) * (double)c,
-            .y = y, .width = panel->column_width, .height = h,
+            .y = y, .width = panel->column_width - bar_room(panel, c), .height = h,
         };
     }
 
@@ -259,7 +304,7 @@ rubraview_rect_t rubraview_panel_row_rect(const rubraview_panel_t *panel, size_t
     return (rubraview_rect_t){
         .x = panel->bounds.x + panel->padding,
         .y = y,
-        .width = panel->bounds.width - panel->padding * 2.0,
+        .width = panel->bounds.width - panel->padding * 2.0 - bar_room(panel, 0),
         .height = row_extent(panel, &panel->rows[index]),
     };
 }

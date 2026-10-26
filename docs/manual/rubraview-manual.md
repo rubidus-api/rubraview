@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.28.exe              the viewer, as built
-dist/rubraview-v1.39.28/                 the release bundle
-dist/rubraview-v1.39.28.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.29.exe              the viewer, as built
+dist/rubraview-v1.39.29/                 the release bundle
+dist/rubraview-v1.39.29.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1339,6 +1339,10 @@ list follows; press the track above or below it and the list moves a
 screenful that way, again and again while held, until the thumb reaches
 the pointer. The two buttons together at the bar's foot, ▲ over ▼, move
 it a row (a row of tiles on the open-file screen), again while held.
+Edit's panel has one to each of its columns, and its list of edits one;
+so does every other panel taller than the window (Export, Print, Batch,
+Classify), and a text file's page, where the bar also says where in the
+file you are.
 
 `F10` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says

@@ -3,6 +3,7 @@
 
 #include "rubraview/core.h"
 #include "rubraview/ui_box.h"
+#include "rubraview/ui_scrollbar.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,6 +79,8 @@ typedef struct rubraview_panel {
     double  column_scroll[RUBRAVIEW_PANEL_MAX_COLUMNS];
     double  column_content[RUBRAVIEW_PANEL_MAX_COLUMNS];
     double  column_width, column_gap;
+    /* RV-172: the scroll bar's width; rows beside a bar (more rows than room) leave it room */
+    double  bar_width;
 } rubraview_panel_t;
 
 /**
@@ -173,6 +176,15 @@ void rubraview_panel_move_begin(rubraview_panel_t *panel, double px, double py);
 void rubraview_panel_move_to(rubraview_panel_t *panel, double px, double py, double window_width, double window_height);
 /** Its rows scrolled by `dy` pixels (down for a positive one), kept within them. */
 void rubraview_panel_scroll_by(rubraview_panel_t *panel, double dy);
+
+/**
+ * RV-172: the scroll bar of a column (of the whole panel when it is not bare,
+ * column 0), in pixels: at the column's right edge, under the title of a panel
+ * that has one. Not needed (`rubraview_scrollbar_needed`) when its rows all show.
+ */
+rubraview_scrollbar_t rubraview_panel_scrollbar(const rubraview_panel_t *panel, int32_t column);
+/** That column (or the panel) scrolled to `first` pixels, kept within its rows. */
+void rubraview_panel_scroll_to(rubraview_panel_t *panel, int32_t column, double first);
 
 #ifdef __cplusplus
 }

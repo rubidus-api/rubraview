@@ -70,7 +70,8 @@ static void text_column(app_state_t *app, double win_w, double *x, double *w) {
     if (chars >= 10.0 && chars * text_px(app) * 0.55 < width) width = chars * text_px(app) * 0.55;
     if (width < 80.0 * dpi) width = win_w - 16.0 * dpi;
     *x = (win_w - width) * 0.5;
-    *w = width;
+    double right = win_w - 16.0 * dpi;   /* RV-172: clear of the scroll bar */
+    *w = *x + width > right && right - *x > 40.0 * dpi ? right - *x : width;
 }
 
 void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
@@ -159,15 +160,12 @@ void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
         }
     }
 
-    /* Where in the file: a thin bar at the right. */
-    double max = text_scroll_max(t);
-    if (max > 1.0) {
-        double track = t->view_h - 8.0 * dpi;
-        double thumb = track * (t->view_h / (t->total + 1.0));
-        if (thumb < 24.0 * dpi) thumb = 24.0 * dpi;
-        double at = t->top_pad + (track - thumb) * (y0 / max);
-        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ (double)win_w - 6.0 * dpi, at, 4.0 * dpi, thumb },
-                                       (ink & 0x00FFFFFFu) | 0x60000000u, 2.0 * dpi);
+    /* Where in the file, and moved there (RV-172): the lists' scroll bar, on a dark strip that any paper shows. */
+    rubraview_scrollbar_t sb;
+    if (scrollbar_of(app, RVSB_TEXT, &sb)) {
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ sb.area.x, sb.area.y, sb.area.width, sb.area.height },
+                                       0x90303030u, sb.area.width * 0.5);
+        draw_scrollbar(app, app->renderer, RVSB_TEXT, app->pointer_x, app->pointer_y);
     }
     if (t->autoscroll) {
         char line[64];
@@ -181,6 +179,26 @@ void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
 }
 
 /* ---- moving ---- */
+
+/* RV-172: the text's bar, in pixels; the end is where scrolling stops (half a screen past the last line). */
+bool text_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    text_page_t *t = app->text;
+    if (!text_active(app) || t->view.count == 0 || t->view_h <= 0.0) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, t->top_pad + 2.0 * dpi, bw, t->view_h - 4.0 * dpi },
+                                   .button = bw, .total = text_scroll_max(t) + t->view_h, .shown = t->view_h,
+                                   .first = text_scroll_y(t), .step = text_line_h(app), .min_thumb = 24.0 * dpi };
+    return true;
+}
+
+/* Moved by its bar: auto-scroll goes on from there, as after the wheel (owner, 2026-10-18). */
+void text_sb_to(app_state_t *app, double first) {
+    text_page_t *t = app->text;
+    if (!t) return;
+    text_scroll_to(t, first);
+    t->autoscroll_carry = 0.0;
+}
 
 static bool text_at_end(text_page_t *t) { return text_scroll_y(t) >= text_scroll_max(t) - 0.5; }
 
@@ -458,6 +476,7 @@ static size_t text_offset_at(app_state_t *app, double x, double y) {
    the window starts or stops auto-scroll (owner, 2026-10-18); a drag stops it. */
 bool text_press(app_state_t *app, double x, double y, uint32_t mods) {
     if (!text_active(app)) return false;
+    if (scrollbar_press(app, RVSB_TEXT, x, y)) return true;   /* RV-172: its bar */
     text_page_t *t = app->text;
     t->press_x = x;
     t->press_y = y;

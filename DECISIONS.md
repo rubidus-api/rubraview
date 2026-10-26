@@ -2273,3 +2273,24 @@ Do not store credentials, private infrastructure details, personal data, private
   and the wheel over T (the buttons' size) stay. The hints of F and R, the settings page's note and the manual say
   so, in the five language packs too.
 - Consequences: VM against 1.39.27 (T254).
+
+## 2026-10-26: D-205 Panels and a text page have the lists' scroll bar, from one path (RV-172)
+
+- Status: Accepted (owner 2026-10-26: "Edit 패널과 텍스트 보기에도 스크롤바 넣어 주세요. 공통된 gui 코드로 처리하도록
+  하여 코드의 중복을 줄이고 효과적으로 돌아가게 해 주세요.").
+- Decision:
+  - The panel model says where a panel's bars are: `rubraview_panel_scrollbar(panel, column)` (pixels; for a bare
+    panel one to each column, at its right edge; for a panel with a title, under it) and
+    `rubraview_panel_scroll_to`. A column (or panel) with more rows than room narrows its rows by the bar's width
+    (`bar_width`, 12 px at 100 %) and a half padding, so no row, slider or button is under the bar (T255).
+  - `scrollbars.c` has one panel path: `scrollbar_press_panel` and `draw_panel_scrollbars` take any panel, so
+    every panel gets the bar where it is pressed and drawn (`panel_handle_press`, `edit_side_press`,
+    `classify_press`, `draw_panel_of`): Edit's (in its window or in the viewer), its selection box, the steps,
+    Classify, and `app->panel` as Export, Print, Batch or Write the archive again. The bar's window follows Edit's.
+  - Edit's list of edits is a list like the others (`list_bar`), its words clear of the bar. The text page's thin
+    place bar is the full bar, on a dark strip that shows on any paper; its end is where scrolling stops, a step
+    is a line, and moving it leaves auto-scroll running, as the wheel does. The text column keeps clear of it.
+  - Moving a bar of Edit's window marks it to be drawn again (it is drawn only when told or when what it shows
+    changes); one in the viewer notes activity, as the lists did.
+- Consequences: D-203's "Edit's panels and a text file's page have no bar yet" is done. VM against 1.39.28 (T256);
+  Edit's list of edits not on the VM (it needs more than eight edits).

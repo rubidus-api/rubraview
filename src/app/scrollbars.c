@@ -2,6 +2,8 @@
  * The lists' scroll bars (RV-170, owner 2026-10-25: "클릭을 하거나 스크롤바를 드래그해도 목록에서 이동 가능하게";
  * "위아래 이동 버튼은 아래쪽에 한곳에 몰아서"). Each list says where its bar is and where it stands (`scrollbar_of`)
  * and is moved (`scrollbar_to`); the press, the drag, the held track or button and the look are the same for all.
+ * RV-172 (owner, 2026-10-26: "Edit 패널과 텍스트 보기에도 스크롤바 ... 공통된 gui 코드로"): every panel goes one way,
+ * the panel model saying where its bars are (`rubraview_panel_scrollbar`), one to each column of Edit's.
  */
 #include "app.h"
 
@@ -20,8 +22,26 @@ static rubraview_scrollbar_t list_bar(const rubraview_listwin_t *lw, size_t coun
 
 static size_t whole(double first) { return first > 0.0 ? (size_t)(first + 0.5) : 0; }
 
+/* RV-172: the panel a bar is of, and its column. */
+static rubraview_panel_t *bar_panel(app_state_t *app, int which, int32_t *column) {
+    *column = 0;
+    if (which >= RVSB_PANEL && which < RVSB_PANEL_END) { *column = which - RVSB_PANEL; return &app->panel; }
+    return which == RVSB_SEL ? &app->sel_panel : which == RVSB_STEPS ? &app->steps_panel : which == RVSB_CLASSIFY ? &app->classify_panel : NULL;
+}
+
+static int panel_which(app_state_t *app, const rubraview_panel_t *panel) {
+    return panel == &app->panel ? RVSB_PANEL : panel == &app->sel_panel ? RVSB_SEL : panel == &app->steps_panel ? RVSB_STEPS
+         : panel == &app->classify_panel ? RVSB_CLASSIFY : RVSB_NONE;
+}
+
+/* Edit's own window, while it has one; its panels are drawn in the viewer otherwise (and Export's, Print's, ...). */
+static bool edit_windowed(const app_state_t *app) { return app->edit_window && edit_panel_open(app); }
+
 static rubraview_window_t *scrollbar_window(app_state_t *app, int which) {
+    if (which >= RVSB_PANEL && which < RVSB_PANEL_END) return edit_windowed(app) ? app->edit_window : app->window;
     switch (which) {
+        case RVSB_SEL: case RVSB_CHANGES: return edit_windowed(app) ? app->edit_window : app->window;
+        case RVSB_TEXT: case RVSB_STEPS: case RVSB_CLASSIFY: return app->window;
         case RVSB_LIST: case RVSB_RECENT: case RVSB_FAVS: case RVSB_PICKER: return app->window;
         case RVSB_CHOOSER:  return chooser_sb_window(app);
         case RVSB_FILES:    return app->files_window;
@@ -77,7 +97,18 @@ bool scrollbar_of(app_state_t *app, int which, rubraview_scrollbar_t *sb) {
         case RVSB_SETTINGS: if (!settings_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_FONTPICK: if (!fontpick_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_INFO:     if (!info_sb(app, sb, bar_width(dpi), dpi)) return false; break;
-        default: return false;
+        case RVSB_TEXT:     if (!text_sb(app, sb, bar_width(dpi), dpi)) return false; break;
+        case RVSB_CHANGES:
+            if (!edit_windowed(app) || app->changes.height <= 0.0) return false;
+            *sb = list_bar(&app->changes, app->edit_steps.count, 0.0, dpi);
+            break;
+        default: {
+            int32_t column = 0;
+            const rubraview_panel_t *panel = bar_panel(app, which, &column);
+            if (!panel) return false;
+            *sb = rubraview_panel_scrollbar(panel, column);
+            break;
+        }
     }
     return rubraview_scrollbar_needed(sb);
 }
@@ -101,9 +132,18 @@ static void scrollbar_to(app_state_t *app, int which, double first) {
         case RVSB_SETTINGS: settings_sb_to(app, whole(first)); break;
         case RVSB_FONTPICK: fontpick_sb_to(app, whole(first)); break;
         case RVSB_INFO:     info_sb_to(app, whole(first)); break;
-        default: break;
+        case RVSB_TEXT:     text_sb_to(app, first); break;
+        case RVSB_CHANGES:  app->changes.first = whole(first); break;
+        default: {
+            int32_t column = 0;
+            rubraview_panel_t *panel = bar_panel(app, which, &column);
+            if (panel) rubraview_panel_scroll_to(panel, column, first);
+            break;
+        }
     }
-    if (which == RVSB_LIST || which == RVSB_RECENT || which == RVSB_FAVS || which == RVSB_PICKER) note_activity(app);
+    rubraview_window_t *win = scrollbar_window(app, which);
+    if (win == app->window) note_activity(app);
+    else if (win && win == app->edit_window) app->edit_dirty = true;   /* its picture is drawn again only when told */
 }
 
 bool scrollbar_press(app_state_t *app, int which, double x, double y) {
@@ -153,8 +193,8 @@ bool scrollbar_held(const app_state_t *app) { return app->sb_which != RVSB_NONE;
 
 /* The pointer moved over a window: true when the part of `which`'s bar under it is another one (it is lit). */
 bool scrollbar_hover(app_state_t *app, int which, double x, double y) {
-    static rubraview_scrollbar_part_t was[RVSB_INFO + 1];
-    if (which <= RVSB_NONE || which > RVSB_INFO) return false;
+    static rubraview_scrollbar_part_t was[RVSB_COUNT];
+    if (which <= RVSB_NONE || which >= RVSB_COUNT) return false;
     rubraview_scrollbar_t sb;
     rubraview_scrollbar_part_t now = scrollbar_of(app, which, &sb) ? rubraview_scrollbar_hit(&sb, x, y) : RUBRAVIEW_SCROLLBAR_NONE;
     bool changed = now != was[which];
@@ -183,4 +223,20 @@ void draw_scrollbar(app_state_t *app, rubraview_renderer_t *r, int which, double
         rubraview_pal_render_draw_text(r, i == 0 ? PROVEN_LIT("\xE2\x96\xB2") : PROVEN_LIT("\xE2\x96\xBC"), box, b.width * 0.62,
                                        0xE0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
     }
+}
+
+/* RV-172: a press on any of a panel's bars (each column's, for Edit's). */
+bool scrollbar_press_panel(app_state_t *app, const rubraview_panel_t *panel, double x, double y) {
+    int which = panel_which(app, panel);
+    if (which == RVSB_NONE || !panel->open) return false;
+    int32_t columns = which == RVSB_PANEL && panel->bare ? panel->columns : 1;
+    for (int32_t c = 0; c < columns; ++c) if (scrollbar_press(app, which + c, x, y)) return true;
+    return false;
+}
+
+void draw_panel_scrollbars(app_state_t *app, const rubraview_panel_t *panel) {
+    int which = panel_which(app, panel);
+    if (which == RVSB_NONE) return;
+    int32_t columns = which == RVSB_PANEL && panel->bare ? panel->columns : 1;
+    for (int32_t c = 0; c < columns; ++c) draw_scrollbar(app, app->renderer, which + c, app->pointer_x, app->pointer_y);
 }

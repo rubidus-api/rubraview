@@ -1216,6 +1216,7 @@ static void classify_run(app_state_t *app, bool moving) {
 bool classify_press(app_state_t *app, double px, double py) {
     rubraview_panel_t *box = &app->classify_panel;
     if (!box->open || !rubraview_rect_contains(box->bounds, px, py)) return false;
+    if (scrollbar_press_panel(app, box, px, py)) return true;   /* RV-172 */
     if (rubraview_panel_title_hit(box, px, py)) { rubraview_panel_move_begin(box, px, py); return true; }
     int32_t row = -1;
     rubraview_panel_event_t ev = rubraview_panel_press(box, px, py, &row);

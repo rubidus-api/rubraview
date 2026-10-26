@@ -2842,6 +2842,8 @@ static void draw_changes(app_state_t *app) {
     rubraview_listwin_scroll(lw, 0, count);
     size_t rows = rubraview_listwin_rows_visible(lw);
     double small = lw->row_height * 0.5, text_x = rubraview_listwin_row_text_x(lw);
+    rubraview_scrollbar_t sb;   /* RV-172: its bar, and the words clear of it */
+    double clear = scrollbar_of(app, RVSB_CHANGES, &sb) ? lw->x + lw->width - sb.area.x : 0.0;
     for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
         rubraview_rect_t r0 = rubraview_listwin_row_rect(lw, i, count);
         bool in_force = i < app->edit_steps.cursor;
@@ -2855,7 +2857,7 @@ static void draw_changes(app_state_t *app) {
                     i + 1 < app->edit_steps.cursor ? COLOR_TEXT : COLOR_BOX_BORDER);
         char line[96], fit[200];
         proven_u8str_view_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
-        rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - text_x - 4.0, r0.height };
+        rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - clear - text_x - 4.0, r0.height };
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
                                        in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
     }
@@ -2870,6 +2872,7 @@ static void draw_changes(app_state_t *app) {
         rubraview_pal_render_draw_text(rr, TU8("no edit yet: move a slider or choose an effect"),
                                        (rubraview_pal_rect_t){ lw->x, lw->y, lw->width, lw->row_height }, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
     }
+    draw_scrollbar(app, rr, RVSB_CHANGES, app->pointer_x, app->pointer_y);
 }
 
 static void edit_heading(app_state_t *app, int32_t id, const char *words, size_t number) {
@@ -2976,6 +2979,7 @@ size_t edit_pump(app_state_t *app) {
                 if (chooser_press(app, CHOOSE_IN_EDIT, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
                 if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (scrollbar_press(app, RVSB_CHANGES, event.mouse.x, event.mouse.y)) break;   /* RV-172: the list of edits' bar */
                 if (changes_press(app, event.mouse.x, event.mouse.y)) break;
                 if (edit_side_press(app, event.mouse.x, event.mouse.y)) break;
                 (void)panel_handle_press(app, event.mouse.x, event.mouse.y);

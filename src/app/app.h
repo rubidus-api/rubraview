@@ -395,8 +395,12 @@ typedef struct chooser {
     rubraview_chooser_layout_t layout;
 } chooser_t;
 
-/* RV-170 (owner, 2026-10-25): the lists whose scroll bar moves them, each in its own window. */
-enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO };
+/* RV-170 (owner, 2026-10-25): the lists whose scroll bar moves them, each in its own window. RV-172 (owner,
+   2026-10-26): the panels too — Edit's (a bar to each of its columns), its selection box and its list of edits,
+   Export, Print, Batch, the steps, Classify — and the text page. */
+enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO,
+       RVSB_TEXT, RVSB_CHANGES, RVSB_SEL, RVSB_STEPS, RVSB_CLASSIFY,
+       RVSB_PANEL, RVSB_PANEL_END = RVSB_PANEL + RUBRAVIEW_PANEL_MAX_COLUMNS, RVSB_COUNT = RVSB_PANEL_END };
 
 typedef struct app_state {
     proven_arena_t *arena;    /* RFC-0006: &mem->persist.arena, the region of what lasts */
@@ -2108,6 +2112,11 @@ void scrollbar_tick(app_state_t *app);
 bool scrollbar_held(const app_state_t *app);
 bool scrollbar_hover(app_state_t *app, int which, double x, double y);
 void draw_scrollbar(app_state_t *app, rubraview_renderer_t *r, int which, double px, double py);
+/* RV-172: a panel's bars, whichever panel and window it is: pressed, and drawn */
+bool scrollbar_press_panel(app_state_t *app, const rubraview_panel_t *panel, double x, double y);
+void draw_panel_scrollbars(app_state_t *app, const rubraview_panel_t *panel);
+bool text_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void text_sb_to(app_state_t *app, double first);
 bool chooser_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
 void chooser_sb_to(app_state_t *app, size_t first);
 rubraview_window_t *chooser_sb_window(app_state_t *app);
