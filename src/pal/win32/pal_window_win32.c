@@ -1514,6 +1514,12 @@ static HKEY g_shell_root = HKEY_CURRENT_USER;   /* where the next registration w
 
 #define SHELL_WAS L"Rubraview.Was"   /* the type's default before us, kept under the extension */
 
+/* RV-174 (RFC-0004 §4, owner 2026-10-26): Windows' Default apps lists the program by its capabilities, each type
+   it registered named there with its ProgID; RegisteredApplications points at them. */
+#define SHELL_CAPS  L"Software\\Rubraview\\Capabilities"
+#define SHELL_ASSOC SHELL_CAPS L"\\FileAssociations"
+#define SHELL_APPS  L"Software\\RegisteredApplications"
+
 /* A key's default string; false when it has none. */
 static bool read_default(HKEY root, const WCHAR *subkey, WCHAR *out, DWORD out_bytes) {
     HKEY key = NULL;
@@ -1586,6 +1592,7 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     wcscat(subkey, ext);
     wcscat(subkey, L"\\OpenWithProgids");
     write_key(g_shell_root, subkey, progid, L"");
+    write_key(g_shell_root, SHELL_ASSOC, ext, progid);   /* RV-174: among Default apps' types */
 
     /* The extension points at the ProgID. Under HKCU no administrator
        rights are needed and nothing another user relies on is touched;
@@ -1646,7 +1653,43 @@ static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
     }
     delete_if_empty(g_shell_root, with);
     delete_if_empty(g_shell_root, subkey);
+
+    HKEY assoc = NULL;   /* RV-174 */
+    if (RegOpenKeyExW(g_shell_root, SHELL_ASSOC, 0, KEY_SET_VALUE, &assoc) == ERROR_SUCCESS) {
+        RegDeleteValueW(assoc, ext);
+        RegCloseKey(assoc);
+    }
     return true;
+}
+
+/* RV-174: the program among Default apps while it has a type registered; gone with its last. */
+static void shell_capabilities(bool any) {
+    if (any) {
+        WCHAR exe[MAX_PATH * 2], icon[MAX_PATH * 2 + 4];
+        if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return;
+        wcscpy(icon, exe);
+        wcscat(icon, L",0");
+        write_key(g_shell_root, SHELL_CAPS, L"ApplicationName", L"Rubraview");
+        write_key(g_shell_root, SHELL_CAPS, L"ApplicationDescription", L"Pictures, books, films, music and text in one viewer");
+        write_key(g_shell_root, SHELL_CAPS, L"ApplicationIcon", icon);
+        write_key(g_shell_root, SHELL_APPS, L"Rubraview", SHELL_CAPS);
+        return;
+    }
+    HKEY key = NULL;
+    DWORD values = 1;
+    if (RegOpenKeyExW(g_shell_root, SHELL_ASSOC, 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        RegQueryInfoKeyW(key, NULL, NULL, NULL, NULL, NULL, NULL, &values, NULL, NULL, NULL, NULL);
+        RegCloseKey(key);
+    } else {
+        values = 0;
+    }
+    if (values > 0) return;   /* a type of ours is left */
+    delete_tree(g_shell_root, SHELL_CAPS);
+    delete_if_empty(g_shell_root, L"Software\\Rubraview");
+    if (RegOpenKeyExW(g_shell_root, SHELL_APPS, 0, KEY_SET_VALUE, &key) == ERROR_SUCCESS) {
+        RegDeleteValueW(key, L"Rubraview");
+        RegCloseKey(key);
+    }
 }
 
 /* Is this process allowed to write under HKLM? */
@@ -1661,6 +1704,7 @@ bool rubraview_pal_shell_register_for(proven_u8str_view_t extensions_semicolon_l
     if (all_users && !shell_can_write_machine()) return false;
     g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, register_one);
+    shell_capabilities(true);
     g_shell_root = HKEY_CURRENT_USER;
     /* Explorer caches associations; without this the change does not
        show until the next sign-in. */
@@ -1672,6 +1716,7 @@ bool rubraview_pal_shell_unregister_for(proven_u8str_view_t extensions_semicolon
     if (all_users && !shell_can_write_machine()) return false;
     g_shell_root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     bool ok = for_each_extension(extensions_semicolon_list, unregister_one);
+    shell_capabilities(false);
     g_shell_root = HKEY_CURRENT_USER;
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);
     return ok;

@@ -2294,3 +2294,39 @@ Do not store credentials, private infrastructure details, personal data, private
     changes); one in the viewer notes activity, as the lists did.
 - Consequences: D-203's "Edit's panels and a text file's page have no bar yet" is done. VM against 1.39.28 (T256);
   Edit's list of edits not on the VM (it needs more than eight edits).
+
+## 2026-10-26: D-206 RFC-0004 §4 ruled; the RFCs' states brought up to date
+
+- Status: Accepted (owner 2026-10-26: "다음 진행. 백로그 및 RFC 탐색, 안된 것들 처리 바람"; asked which of RFC-0004
+  §4 to build: "기본 앱 목록 등록 (권장), FFmpeg 하드웨어 디코딩, FFmpeg를 별도 프로세스로"; RV-113 (5): "설명·형식 이름만
+  한국어 (권장)").
+- Decision:
+  - Built next: Default apps (RV-174) and FFmpeg in a process of its own (RV-176, T3: a plan first). FFmpeg on the
+    card was already built (1.26.0, D-178); §4's line had not been struck, and the question offered it again.
+  - Linux and macOS back ends and `nob.c` stay unscheduled.
+  - RV-113 (5): the Store package's description in Korean (`description-ko`); its display name stays "Rubraview",
+    the name reserved in Partner Center. A package naming Korean is one more language in its manifest, so Partner
+    Center may ask for a Korean Store listing with the next submission. The types' names wait for rubrapack.
+  - RFC-0005, RFC-0006 and RFC-0009 are marked implemented; RFC-0007's "outside program" row points at RFC-0009 C.
+- Consequences: BACKLOGS RV-173, RV-174, RV-176. RV-174 in 1.39.30: each registered type also under
+  `Software\Rubraview\Capabilities\FileAssociations` and the program in `RegisteredApplications`, both gone with the
+  last type (R222; VM T257 against 1.39.29). RV-176's plan: `docs/plans/active/2026-10-26-RV-176-ffmpeg-process.md`.
+
+## 2026-10-26: D-207 A product design document, pointing rather than copying (RV-173)
+
+- Status: Accepted (owner 2026-10-26: "제품 설계서를 지금이라도 만드는 것이 좋을 듯 함. 널리 사용되는 형식이나 산업
+  표준, 각종 문서등을 참조해서 제품 설계서 작성 바람.").
+- Decision:
+  - `docs/design/rubraview-product-design.md` (PDD-RUBRAVIEW-001): an ISO/IEC/IEEE 42010:2022 architecture
+    description in arc42's twelve sections, C4-model views drawn as plain text, ISO/IEC 25010:2023 quality goals as
+    scenarios, use cases traced to requirements (ISO/IEC/IEEE 29148:2018); Appendix A maps each standard (IEEE
+    1016-2009's viewpoints too) to its sections.
+  - It owns only what no other file holds: stakeholders and concerns, vision, personas, use cases, quality goals,
+    the context, container, component, runtime and deployment views, cross-cutting concepts as a whole, the risk
+    register. Behaviour stays in SPEC, requirements in REQUIREMENTS, rationale in DECISIONS; it cites them by ID.
+  - Kept current in the commit that changes a fact it states (a container, a thread, a layer rule, a state file,
+    an outside tool, a quality goal); AGENTS routes to it on those triggers. It lives with SPEC and the RFCs
+    among the working documents (not published); publishing it is the owner's call.
+- Consequences: written against the code, it records what SPEC does not say: the application includes
+  `windows.h` and calls Windows directly in places (RK-8), the read-ahead decodes on the UI thread a page a pass,
+  and the speed goals have no automated measurement (RK-9).

@@ -44,6 +44,7 @@ min-version = "10.0.19041.0"
 executable = "App"
 display-name = "Rubraview"
 description = "A fast viewer for pictures, comic archives, video and music."
+description-ko = "그림, 만화 압축 파일, 동영상, 음악을 빠르게 보는 뷰어."   # RV-113 (5): the name stays the one reserved in Partner Center
 logo-150 = "menu/Square150x150Logo.png"
 logo-44 = "menu/Square44x44Logo.png"
 store-logo = "menu/StoreLogo.png"

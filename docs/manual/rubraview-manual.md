@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.29.exe              the viewer, as built
-dist/rubraview-v1.39.29/                 the release bundle
-dist/rubraview-v1.39.29.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.30.exe              the viewer, as built
+dist/rubraview-v1.39.30/                 the release bundle
+dist/rubraview-v1.39.30.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -141,6 +141,9 @@ rows take everything back: only what Rubraview wrote goes, and a type that
 was another program's before is that program's again. Windows keeps the
 last word on a default it has been told by hand; **Open Windows' Default
 apps** is where to change that.
+Registered, Rubraview is also listed there by name, with the file types it
+registered, so it can be made the default for each of them in one place;
+removing the last of them takes it off the list.
 
 The menu is a **Rubraview** item with these under it:
 
