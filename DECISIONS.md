@@ -2547,3 +2547,21 @@ Do not store credentials, private infrastructure details, personal data, private
     has them. The crop and effect rows leave the panel; saved choices that hold them keep them, shown by a row that
     drops them.
 - Consequences: T273 (host), T274 (VM).
+
+## 2026-10-29: D-221 The Edit window in tabs, its parts named (RV-188; changes D-163's three-column order)
+
+- Status: Accepted (owner 2026-10-29: "편집 화면 좀 예쁘게 다듬어 주는걸 ... 각 항목들의 구분이 화면 공간을 효과적으로
+  쓰면서도 가독성이 좋고 단순하면서도 기능적으로 편리해야"; of three layouts offered — three columns by the order of
+  work, tabs, the layout kept and tidied — the owner chose tabs).
+- Decision:
+  - Four tabs: Adjust (Where, Light, Colour, Levels and curve, Blur and sharpness), Effects (Where, Effects,
+    Plug-ins, G'MIC, FFmpeg filters), Size (Area with the selection's box, Crop, Resize), Edits (the list, Many
+    pictures: copies, originals, the steps saved and loaded). The tab kept while the program runs.
+  - The bar: the tabs at the left (the one in hand underlined in the accent colour, Edits with its count), Undo,
+    Redo, Save a copy and Save at the right — Segoe MDL2 icons when the words do not fit beside the tabs.
+  - A section is a heading row (`RUBRAVIEW_ROW_HEADING`, in the headings' colour with a rule, never pressed) over its
+    rows; a section with nothing in it is left out, and a column is not begun after an empty one.
+  - The label column is measured: the longest name and the number box beside it ("Sharpen after", "DPI (cm, in)"
+    no longer under their boxes); the "Done" button's words shortened.
+  - The viewer's docked panel (no window) keeps its one column as before.
+- Consequences: T275 (host), T276 (VM).

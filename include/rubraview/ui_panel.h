@@ -31,6 +31,7 @@ typedef enum rubraview_row_kind {
     RUBRAVIEW_ROW_BUTTON,
     RUBRAVIEW_ROW_SEPARATOR,
     RUBRAVIEW_ROW_SPACER,   /* RV-137: room of a given height the caller draws in (the curve, a box); never hit */
+    RUBRAVIEW_ROW_HEADING,  /* RV-188: a section's name over its rows; never hit */
 } rubraview_row_kind_t;
 
 typedef struct rubraview_panel_row {
@@ -98,6 +99,8 @@ bool rubraview_panel_add_choice(rubraview_panel_t *panel, int32_t id, proven_u8s
                                 int32_t index, int32_t choice_count);
 bool rubraview_panel_add_button(rubraview_panel_t *panel, int32_t id, proven_u8str_view_t label);
 bool rubraview_panel_add_separator(rubraview_panel_t *panel);
+/** RV-188: a section's name, a little shorter than a row, over the rows it names; never hit. */
+bool rubraview_panel_add_heading(rubraview_panel_t *panel, proven_u8str_view_t label);
 /** RV-137: room `height` tall for the caller to draw in, found by its id. */
 bool rubraview_panel_add_spacer(rubraview_panel_t *panel, int32_t id, double height);
 /** A spacer's height changed (the box it holds grew or shrank). */

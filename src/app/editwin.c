@@ -894,8 +894,9 @@ static void edit_rows_detail(app_state_t *app) {
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, PROVEN_LIT("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, PROVEN_LIT("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
     /* Changes are on the picture at once (owner, 2026-10-18): this only ends the step, so the next change is one of its own. */
-    rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
-                                                                            : TU8("Done: next change a new step (Enter)"));
+    rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, app->edit_window ? TU8("Done: the next change a new step (Enter)")   /* RV-188 */
+                                                         : e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
+                                                                          : TU8("Done: next change a new step (Enter)"));
 }
 
 static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_pixbuf_t *src);
@@ -1054,7 +1055,7 @@ static void edit_rows_effect(app_state_t *app) {
     size_t n = rubraview_effect_group_members((rubraview_effect_group_t)app->effect_group, members, RUBRAVIEW_EFFECT_COUNT);
     int32_t at = 0;
     for (size_t i = 0; i < n; ++i) if ((int32_t)members[i] == app->effect_choice) at = (int32_t)i + 1;
-    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT_GROUP, TU8("Effects"), app->effect_group, RUBRAVIEW_EFFECT_GROUPS);
+    rubraview_panel_add_choice(&app->panel, PANEL_EFFECT_GROUP, app->edit_window ? TU8("Kind") : TU8("Effects"), app->effect_group, RUBRAVIEW_EFFECT_GROUPS);
     rubraview_panel_add_choice(&app->panel, PANEL_EFFECT, TU8("Effect"), at, (int32_t)n + 1);
     {
         double lo = 0.0, hi = 1.0;
@@ -1062,6 +1063,10 @@ static void edit_rows_effect(app_state_t *app) {
         rubraview_panel_add_slider(&app->panel, PANEL_EFFECT_AMOUNT, TU8("  amount"), app->effect_amount, lo, hi, 1.0);
     }
     rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
+    if (app->edit_window) {   /* RV-188: in the window, the outside tools are sections of their own */
+        rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
+        return;
+    }
     edit_rows_plugins(app);   /* RFC-0007 */
     edit_rows_gmic(app);      /* RFC-0009 C */
     edit_rows_ffmpeg(app);    /* RFC-0009 D */
@@ -1875,10 +1880,19 @@ static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_e
     return done;
 }
 
-static void edit_rows_resize(app_state_t *app) {
-    const rubraview_edit_session_t *e = &app->edit;
+static void edit_rows_crop(app_state_t *app) {
     rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, TU8("Crop to the selection"));
     rubraview_panel_add_button(&app->panel, PANEL_TRIM, TU8("Select the plain margins' inside"));
+}
+
+static void edit_rows_resize_only(app_state_t *app);
+static void edit_rows_resize(app_state_t *app) {
+    edit_rows_crop(app);
+    edit_rows_resize_only(app);
+}
+
+static void edit_rows_resize_only(app_state_t *app) {
+    const rubraview_edit_session_t *e = &app->edit;
     int32_t cw = 0, ch = 0;
     edit_cur_size(app, &cw, &ch);
     double percent = e->resize_width > 0 && cw > 0 ? 100.0 * (double)e->resize_width / (double)cw : 100.0;
@@ -1909,54 +1923,90 @@ static void edit_rows_choose(app_state_t *app) {
                                                                                   : TU8("Copy the picture to the clipboard"));
 }
 
-/* RV-137: Edit's rows in its own window, in the order its width wants
-   (the owner, 2026-10-18, chose these three): one column scrolled; two;
-   three. A column begins at a section, never inside one. */
+/* RV-188 (owner, 2026-10-29: "편집 화면 좀 예쁘게 ... 탭으로"): Edit's window in four tabs — adjust, effects, size,
+   the edits — each in sections with a heading, flowed into the columns its width has (RV-137: one, two, three);
+   a section begins a column, never inside one. Undo, redo and saving are on the tab bar, always there. */
+static void edit_section_heading(app_state_t *app, const char *words) { rubraview_panel_add_heading(&app->panel, cstr(words)); }
+
 static void edit_rows_windowed(app_state_t *app) {
-    enum { CHOOSE, CURVE, SEL, TONE, LEVELS, DETAIL, EFFECT, RESIZE, HISTORY, SAVE, NEXT, END };
-    /* The change list near the top of its column: it is what the window is for (VM, 2026-10-18:
-       under the selection's numbers it was below a 680-pixel window's bottom). */
-    /* The owner (2026-10-18): first of all, top left, the button that chooses an area; then the
-       edits; then the curve. */
-    static const int ORDER[3][14] = {
-        { CHOOSE, HISTORY, CURVE, TONE, LEVELS, DETAIL, EFFECT, SEL, RESIZE, SAVE, END },
-        { CHOOSE, HISTORY, CURVE, TONE, LEVELS, NEXT, SEL, DETAIL, EFFECT, RESIZE, SAVE, END },
-        { CHOOSE, HISTORY, CURVE, SEL, NEXT, TONE, LEVELS, DETAIL, NEXT, EFFECT, RESIZE, SAVE, END },
+    enum { CHOOSE, LIGHT, COLOUR, LEVELS, DETAIL, EFFECT, PLUGINS, GMIC, FFMPEG, AREA, CROP, RESIZE, HISTORY, MANY, NEXT, END };
+    static const int ORDER[EDIT_TABS][3][12] = {
+        [EDIT_TAB_ADJUST]  = { { CHOOSE, LIGHT, COLOUR, LEVELS, DETAIL, END },
+                               { CHOOSE, LIGHT, COLOUR, NEXT, LEVELS, DETAIL, END },
+                               { CHOOSE, LIGHT, COLOUR, NEXT, LEVELS, NEXT, DETAIL, END } },
+        [EDIT_TAB_EFFECTS] = { { CHOOSE, EFFECT, PLUGINS, GMIC, FFMPEG, END },
+                               { CHOOSE, EFFECT, PLUGINS, NEXT, GMIC, FFMPEG, END },
+                               { CHOOSE, EFFECT, PLUGINS, NEXT, GMIC, NEXT, FFMPEG, END } },
+        [EDIT_TAB_SIZE]    = { { AREA, CROP, RESIZE, END },
+                               { AREA, NEXT, CROP, RESIZE, END },
+                               { AREA, NEXT, CROP, NEXT, RESIZE, END } },
+        [EDIT_TAB_EDITS]   = { { HISTORY, MANY, END },
+                               { HISTORY, NEXT, MANY, END },
+                               { HISTORY, NEXT, MANY, END } },
     };
-    const rubraview_edit_session_t *e = &app->edit;
     rubraview_panel_t *p = &app->panel;
     double dpi = rubraview_pal_window_dpi_scale(app->edit_window);
     int32_t mode = app->edit_mode >= 0 && app->edit_mode <= 2 ? app->edit_mode : 2, column = 0;
+    int32_t tab = app->edit_tab >= 0 && app->edit_tab < EDIT_TABS ? app->edit_tab : EDIT_TAB_ADJUST;
     app->edit_firsts[0] = app->edit_firsts[1] = app->edit_firsts[2] = 0;
-    for (int k = 0; ORDER[mode][k] != END; ++k) {
-        switch (ORDER[mode][k]) {
-            case NEXT: app->edit_firsts[++column] = p->row_count; continue;
-            case CHOOSE: edit_rows_choose(app); break;
-            case CURVE: rubraview_panel_add_spacer(p, PANEL_SP_CURVE, 184.0 * dpi); break;
-            case SEL:
-                rubraview_panel_add_spacer(p, PANEL_SP_SEL, 200.0 * dpi);   /* as tall as its box, set when laid out */
-                rubraview_panel_add_choice(p, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)e->crop_ratio, 5);
+    for (int k = 0; ORDER[tab][mode][k] != END; ++k) {
+        size_t before = p->row_count;
+        switch (ORDER[tab][mode][k]) {
+            case NEXT:   /* a column is not begun after one left empty (a section with nothing in it) */
+                if (p->row_count > app->edit_firsts[column]) app->edit_firsts[++column] = p->row_count;
+                continue;
+            case CHOOSE: edit_section_heading(app, T("Where")); edit_rows_choose(app); break;
+            case LIGHT:
+                edit_section_heading(app, T("Light"));
+                rubraview_panel_add_slider(p, PANEL_EXPOSURE, TU8("Exposure"), app->edit.params.exposure_ev, -3.0, 3.0, 0.0);
+                rubraview_panel_add_slider(p, PANEL_BRIGHTNESS, TU8("Brightness"), app->edit.params.brightness, -100.0, 100.0, 0.0);
+                rubraview_panel_add_slider(p, PANEL_CONTRAST, TU8("Contrast"), app->edit.params.contrast, -100.0, 100.0, 0.0);
                 break;
-            case TONE: edit_rows_tone(app); break;
-            case LEVELS: edit_rows_levels(app); break;
-            case DETAIL: edit_rows_detail(app); break;
-            case EFFECT: edit_rows_effect(app); break;
-            case RESIZE: edit_rows_resize(app); break;
-            case HISTORY:   /* undo and redo are Ctrl+Z / Ctrl+Y and a click on a change */
+            case COLOUR:
+                edit_section_heading(app, T("Colour"));
+                rubraview_panel_add_slider(p, PANEL_SATURATION, TU8("Saturation"), app->edit.params.saturation, -100.0, 100.0, 0.0);
+                rubraview_panel_add_slider(p, PANEL_TEMPERATURE, TU8("Temperature"), app->edit.params.temperature, -100.0, 100.0, 0.0);
+                rubraview_panel_add_slider(p, PANEL_TINT, TU8("Tint"), app->edit.params.tint, -100.0, 100.0, 0.0);
+                rubraview_panel_add_slider(p, PANEL_BAL_R, TU8("Red"), app->edit.params.balance_r, -100.0, 100.0, 1.0);
+                rubraview_panel_add_slider(p, PANEL_BAL_G, TU8("Green"), app->edit.params.balance_g, -100.0, 100.0, 1.0);
+                rubraview_panel_add_slider(p, PANEL_BAL_B, TU8("Blue"), app->edit.params.balance_b, -100.0, 100.0, 1.0);
+                rubraview_panel_add_button(p, PANEL_AUTO_COLOUR, TU8("Automatic colour correction"));
+                break;
+            case LEVELS:
+                edit_section_heading(app, T("Levels and curve"));
+                rubraview_panel_add_spacer(p, PANEL_SP_CURVE, 184.0 * dpi);
+                edit_rows_levels(app);
+                break;
+            case DETAIL: edit_section_heading(app, T("Blur and sharpness")); edit_rows_detail(app); break;
+            case EFFECT: edit_section_heading(app, T("Effects")); edit_rows_effect(app); break;
+            case PLUGINS: edit_section_heading(app, T("Plug-ins")); edit_rows_plugins(app); break;
+            case GMIC: edit_section_heading(app, "G'MIC"); edit_rows_gmic(app); break;
+            case FFMPEG: edit_section_heading(app, T("FFmpeg filters")); edit_rows_ffmpeg(app); break;
+            case AREA:
+                edit_section_heading(app, T("Area"));
+                edit_rows_choose(app);
+                rubraview_panel_add_spacer(p, PANEL_SP_SEL, 200.0 * dpi);   /* as tall as its box, set when laid out */
+                rubraview_panel_add_choice(p, PANEL_CROP_RATIO, TU8("Crop ratio"), (int32_t)app->edit.crop_ratio, 5);
+                break;
+            case CROP: edit_section_heading(app, T("Crop")); edit_rows_crop(app); break;
+            case RESIZE: edit_section_heading(app, T("Resize")); edit_rows_resize_only(app); break;
+            case HISTORY:   /* the list draws its own heading */
                 rubraview_panel_add_spacer(p, PANEL_SP_CHANGES, 160.0 * dpi);
                 rubraview_panel_add_button(p, PANEL_CHANGES_REMOVE, TU8("Remove the ticked edits"));
+                rubraview_panel_add_button(p, PANEL_RESET, TU8("Reset: back to the picture as it was"));
+                break;
+            case MANY:
+                edit_section_heading(app, T("Many pictures"));
                 rubraview_panel_add_button(p, PANEL_ALL_COPIES, TU8("Copies of every picture in the list..."));
                 rubraview_panel_add_button(p, PANEL_ALL_ORIGINALS, TU8("Apply to every original in the list..."));
                 rubraview_panel_add_button(p, PANEL_STEPS_SAVE, TU8("Save the steps (for Batch)..."));   /* RV-187 */
                 rubraview_panel_add_button(p, PANEL_STEPS_LOAD, TU8("Load steps..."));
-                rubraview_panel_add_button(p, PANEL_RESET, TU8("Reset: back to the picture as it was"));
                 break;
-            case SAVE: edit_rows_save(app); break;
             default: break;
         }
-        int next = ORDER[mode][k + 1];
-        if (next != NEXT && next != END) rubraview_panel_add_separator(p);
+        if (p->row_count == before + 1 && p->rows[before].kind == RUBRAVIEW_ROW_HEADING) p->row_count = before;   /* a section with nothing in it */
     }
+    for (int32_t c = column + 1; c < 3; ++c) app->edit_firsts[c] = p->row_count;   /* columns not begun stay empty, at the right */
 }
 
 void panel_build_edit(app_state_t *app) {
@@ -1980,6 +2030,17 @@ void panel_build_edit(app_state_t *app) {
     if (app->edit_window) {
         memcpy(app->panel.column_scroll, column_scroll, sizeof(column_scroll));
         edit_rows_windowed(app);
+        if (app->edit_renderer) {   /* RV-188: the label column as wide as its longest name and the number box beside it */
+            double size = app->panel.row_height * 0.45, most = 0.0;
+            for (size_t i = 0; i < app->panel.row_count; ++i) {
+                const rubraview_panel_row_t *row = &app->panel.rows[i];
+                if (row->kind != RUBRAVIEW_ROW_SLIDER && row->kind != RUBRAVIEW_ROW_TOGGLE && row->kind != RUBRAVIEW_ROW_CHOICE) continue;
+                double tw = 0.0;
+                if (rubraview_pal_render_measure_text(app->edit_renderer, row->label, size, &tw) && tw > most) most = tw;
+            }
+            double want = most + size * 4.2 + app->panel.padding * 1.6;   /* the name, the number's box, a gap */
+            if (want > app->panel.label_width) app->panel.label_width = want;
+        }
         app->panel.open = true;
         panel_relayout(app);
         return;
@@ -2852,6 +2913,133 @@ static bool edit_windowed(const app_state_t *app) {
     return app->edit_window != NULL && edit_panel_open(app);
 }
 
+/* ---- RV-188: the Edit window's tab bar — the tabs at the left, undo, redo and saving at the right ---- */
+
+enum { EDIT_BAR_UNDO = EDIT_TABS, EDIT_BAR_REDO, EDIT_BAR_SAVE_COPY, EDIT_BAR_SAVE, EDIT_BAR_PARTS };
+
+static double edit_bar_height(const app_state_t *app) { return 40.0 * rubraview_pal_window_dpi_scale(app->edit_window); }
+
+static proven_u8str_view_t edit_bar_word(const app_state_t *app, int32_t part, char *buf, size_t cap) {
+    static const char *const WORDS[EDIT_BAR_PARTS] = { N_("Adjust"), N_("Effects"), N_("Size"), N_("Edits"),
+                                                       N_("Undo"), N_("Redo"), N_("Save a copy"), N_("Save") };
+    int n = part == EDIT_TAB_EDITS && app->edit_steps.count > 0
+          ? snprintf(buf, cap, "%s  %zu", rubraview_tr(WORDS[part]), app->edit_steps.count)
+          : snprintf(buf, cap, "%s", rubraview_tr(WORDS[part]));
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
+}
+
+static const uint32_t EDIT_BAR_ICONS[EDIT_BAR_PARTS - EDIT_TABS] = { 0xE7A7u, 0xE7A6u, 0xE792u, 0xE74Eu };   /* undo, redo, save as, save */
+
+/* Whether the four buttons take only their icons: the tabs' words and theirs do not fit side by side. */
+static bool edit_bar_icons(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi, pad = 16.0 * dpi, gap = 4.0 * dpi, need = 16.0 * dpi;
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+    char buf[64];
+    for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k) {
+        double tw = 60.0 * dpi;
+        if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size, &tw);
+        need += tw + (k < EDIT_TABS ? 2.0 * pad : 1.5 * pad) + gap;
+    }
+    return need > (double)ww;
+}
+
+/* A part's rectangle: tabs from the left, the four buttons from the right, each as wide as its word (its icon
+   alone when the window is narrow). */
+static rubraview_rect_t edit_bar_rect(app_state_t *app, int32_t part) {
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi, pad = 16.0 * dpi, gap = 4.0 * dpi;
+    double bar = edit_bar_height(app), top = 6.0 * dpi, h = bar - 10.0 * dpi;
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+    char buf[64];
+    double x = 8.0 * dpi;
+    if (part < EDIT_TABS) {
+        for (int32_t k = 0; k <= part; ++k) {
+            double tw = 60.0 * dpi;
+            if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size, &tw);
+            if (k == part) return (rubraview_rect_t){ x, top, tw + 2.0 * pad, h };
+            x += tw + 2.0 * pad + gap;
+        }
+    }
+    x = (double)ww - 8.0 * dpi;
+    bool icons = edit_bar_icons(app);
+    for (int32_t k = EDIT_BAR_PARTS - 1; k >= part && k >= EDIT_TABS; --k) {
+        double tw = 60.0 * dpi;
+        if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size * 0.95, &tw);
+        double bw = icons ? h - 6.0 * dpi + 6.0 * dpi : tw + 1.5 * pad;
+        x -= bw;
+        if (k == part) return (rubraview_rect_t){ x, top + 3.0 * dpi, bw, h - 6.0 * dpi };
+        x -= gap;
+    }
+    return (rubraview_rect_t){0};
+}
+
+static int32_t edit_bar_part_at(app_state_t *app, double x, double y) {
+    if (y >= edit_bar_height(app)) return -1;
+    for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k) if (rubraview_rect_contains(edit_bar_rect(app, k), x, y)) return k;
+    return -1;
+}
+
+static void draw_edit_bar(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi;
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+    double bar = edit_bar_height(app);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, bar - 1.0, (double)ww, 1.0 }, COLOR_BOX_BORDER, 0.0);
+    int32_t hover = edit_bar_part_at(app, app->edit_px, app->edit_py);
+    char buf[64];
+    for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k) {
+        rubraview_rect_t r = edit_bar_rect(app, k);
+        if (r.width <= 0.0) continue;
+        rubraview_pal_rect_t b = { r.x, r.y, r.width, r.height };
+        bool tab = k < EDIT_TABS, on = tab && k == app->edit_tab;
+        if (tab) {   /* the tab in hand joins the area under it; the others are words to press */
+            if (on) {
+                rubraview_pal_render_fill_rect(app->renderer, b, 0xFF2A2A2Au, 3.0);
+                rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ r.x + 6.0 * dpi, r.y + r.height - 3.0 * dpi, r.width - 12.0 * dpi, 3.0 * dpi },
+                                               COLOR_TILE_CURRENT, 1.0);
+            } else if (k == hover) {
+                rubraview_pal_render_fill_rect(app->renderer, b, 0xFF222222u, 3.0);
+            }
+        } else {
+            rubraview_pal_render_fill_rect(app->renderer, b, k == hover ? 0xFF3A3A3Au : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+        }
+        if (!tab && edit_bar_icons(app)) { draw_sign(app->renderer, EDIT_BAR_ICONS[k - EDIT_TABS], k == EDIT_BAR_UNDO ? "<" : k == EDIT_BAR_REDO ? ">" : "S", b, size, COLOR_TEXT); continue; }
+        rubraview_pal_render_draw_text(app->renderer, edit_bar_word(app, k, buf, sizeof(buf)), b, tab ? size : size * 0.95,
+                                       on ? COLOR_TEXT : tab ? 0xFFB0B0B0u : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
+/* A press on the bar: a tab, undo, redo, a copy saved or the original saved over (it asks for a second press). */
+static bool edit_bar_press(app_state_t *app, double x, double y) {
+    if (y >= edit_bar_height(app)) return false;
+    int32_t part = edit_bar_part_at(app, x, y);
+    if (part < 0) return true;   /* the bar itself takes the press */
+    if (part < EDIT_TABS) {
+        if (part != app->edit_tab) {
+            edit_live_close(app);
+            app->edit_tab = part;
+            memset(app->panel.column_scroll, 0, sizeof(app->panel.column_scroll));
+            panel_build_edit(app);
+        }
+    } else if (part == EDIT_BAR_UNDO) {
+        edit_undo(app, false);
+    } else if (part == EDIT_BAR_REDO) {
+        edit_undo(app, true);
+    } else if (part == EDIT_BAR_SAVE_COPY) {
+        (void)edit_apply_pending(app, false);
+        panel_write_current(app, true);
+        panel_close(app);
+    } else if (part == EDIT_BAR_SAVE) {
+        (void)edit_apply_pending(app, false);
+        if (on_archive_page(app)) panel_write_archive_page(app, true);
+        else edit_save_over(app);
+    }
+    app->edit_dirty = true;
+    return true;
+}
+
 static rubraview_rect_t edit_room(const app_state_t *app, int32_t id) {
     int32_t i = rubraview_panel_find(&app->panel, id);
     return i >= 0 ? rubraview_panel_row_rect(&app->panel, (size_t)i) : (rubraview_rect_t){0};
@@ -2873,7 +3061,8 @@ void edit_window_layout(app_state_t *app) {
         rubraview_panel_set_spacer(&app->panel, PANEL_SP_SEL, head + (double)app->sel_panel.row_count * app->sel_panel.row_height + app->sel_panel.padding * 2.0);
     size_t shown = app->edit_steps.count < 3 ? 3 : app->edit_steps.count > 8 ? 8 : app->edit_steps.count;
     rubraview_panel_set_spacer(&app->panel, PANEL_SP_CHANGES, head + (double)shown * app->changes.row_height + 4.0 * dpi);
-    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, (double)w, (double)h }, mode + 1, app->edit_firsts);
+    double bar = edit_bar_height(app);   /* RV-188: the tab bar over the rows */
+    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, bar, (double)w, (double)h - bar }, mode + 1, app->edit_firsts);
     rubraview_rect_t r = edit_room(app, PANEL_SP_SEL);
     if (app->sel_panel.open) {
         if (r.width > 0.0) rubraview_panel_layout_columns(&app->sel_panel, (rubraview_rect_t){ r.x, r.y + head, r.width, r.height - head }, 1, NULL);
@@ -3073,7 +3262,7 @@ static uint64_t edit_window_signature(const app_state_t *app) {
     uint64_t h = 1469598103934665603ull;
     double v[] = { (double)app->edit_rev, (double)app->edit_steps.count, (double)app->edit_steps.cursor, (double)app->edit.crop_active,
                    app->edit.crop.x, app->edit.crop.y, app->edit.crop.width, app->edit.crop.height, (double)app->panel.row_count,
-                   (double)app->sel_panel.row_count, (double)app->edit.active_channel };
+                   (double)app->sel_panel.row_count, (double)app->edit.active_channel, (double)app->edit_tab, (double)app->edit_tab_hover };
     for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i) { uint64_t b; memcpy(&b, &v[i], 8); h = (h ^ b) * 1099511628211ull; }
     for (size_t i = 0; i < app->panel.row_count; ++i) { uint64_t b; memcpy(&b, &app->panel.rows[i].value, 8); h = (h ^ b) * 1099511628211ull; }
     return h;
@@ -3097,6 +3286,7 @@ void draw_edit_window(app_state_t *app) {
     app->pointer_x = app->edit_px;
     app->pointer_y = app->edit_py;
     rubraview_pal_render_begin(app->renderer, EDIT_BACKGROUND);
+    draw_edit_bar(app);   /* RV-188 */
     draw_panel_of(app, &app->panel, true);
     if (app->sel_panel.open && edit_room(app, PANEL_SP_SEL).width > 0.0) {
         edit_heading(app, PANEL_SP_SEL, T("Selection"), 0);
@@ -3139,9 +3329,13 @@ size_t edit_pump(app_state_t *app) {
                 rubraview_pal_render_resize(app->edit_renderer, event.resize.width, event.resize.height);
                 edit_window_layout(app);
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+                int32_t was = app->edit_tab_hover;   /* RV-188: the bar lights the part under the pointer */
                 app->edit_px = event.mouse.x;
                 app->edit_py = event.mouse.y;
+                app->edit_tab_hover = edit_bar_part_at(app, event.mouse.x, event.mouse.y);
+                if (app->edit_tab_hover != was) app->edit_dirty = true;
+                }
                 if (scrollbar_motion(app, app->edit_window, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-170: a list's bar */
                 if (app->change_press >= 0) { changes_motion(app, event.mouse.y); break; }
                 if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
@@ -3164,6 +3358,7 @@ size_t edit_pump(app_state_t *app) {
                 if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (px_box_press(app, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-187: its box is here too */
+                if (edit_bar_press(app, event.mouse.x, event.mouse.y)) break;   /* RV-188: the tabs, undo, redo, saving */
                 if (scrollbar_press(app, RVSB_CHANGES, event.mouse.x, event.mouse.y)) break;   /* RV-172: the list of edits' bar */
                 if (changes_press(app, event.mouse.x, event.mouse.y)) break;
                 if (edit_side_press(app, event.mouse.x, event.mouse.y)) break;

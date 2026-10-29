@@ -106,10 +106,21 @@ bool rubraview_panel_add_separator(rubraview_panel_t *panel) {
     return true;
 }
 
+bool rubraview_panel_add_heading(rubraview_panel_t *panel, proven_u8str_view_t label) {
+    rubraview_panel_row_t *row = push_row(panel);
+    if (!row) return false;
+    row->kind = RUBRAVIEW_ROW_HEADING;
+    row->id = -1;
+    row->label = label;
+    row->enabled = false;
+    return true;
+}
+
 /* A separator is a thin rule rather than a full row: it groups without
-   costing the vertical space a row does. */
+   costing the vertical space a row does. A heading is a little less than a row. */
 static double row_extent(const rubraview_panel_t *panel, const rubraview_panel_row_t *row) {
     if (row->kind == RUBRAVIEW_ROW_SPACER) return row->extent;
+    if (row->kind == RUBRAVIEW_ROW_HEADING) return panel->row_height * 0.85;
     return row->kind == RUBRAVIEW_ROW_SEPARATOR ? panel->row_height * 0.4 : panel->row_height;
 }
 
@@ -334,7 +345,8 @@ int32_t rubraview_panel_row_at(const rubraview_panel_t *panel, double px, double
     if (!rubraview_rect_contains(panel->bounds, px, py)) return -1;
 
     for (size_t i = 0; i < panel->row_count; ++i) {
-        if (panel->rows[i].kind == RUBRAVIEW_ROW_SEPARATOR || panel->rows[i].kind == RUBRAVIEW_ROW_SPACER) continue;
+        if (panel->rows[i].kind == RUBRAVIEW_ROW_SEPARATOR || panel->rows[i].kind == RUBRAVIEW_ROW_SPACER ||
+            panel->rows[i].kind == RUBRAVIEW_ROW_HEADING) continue;
         if (!panel->rows[i].enabled) continue;
         rubraview_rect_t r = rubraview_panel_row_rect(panel, i);
         if (rubraview_rect_contains(r, px, py)) return (int32_t)i;
@@ -437,7 +449,8 @@ double rubraview_panel_fill_fraction(const rubraview_panel_t *panel, size_t inde
 int32_t rubraview_panel_find(const rubraview_panel_t *panel, int32_t id) {
     if (!panel) return -1;
     for (size_t i = 0; i < panel->row_count; ++i) {
-        if (panel->rows[i].kind != RUBRAVIEW_ROW_SEPARATOR && panel->rows[i].id == id) return (int32_t)i;   /* a spacer too */
+        if (panel->rows[i].kind != RUBRAVIEW_ROW_SEPARATOR && panel->rows[i].kind != RUBRAVIEW_ROW_HEADING &&
+            panel->rows[i].id == id) return (int32_t)i;   /* a spacer too */
     }
     return -1;
 }

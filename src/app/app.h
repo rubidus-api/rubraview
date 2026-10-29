@@ -580,6 +580,8 @@ typedef struct app_state {
     double                 unit_frac[6];
     int32_t                unit_frac_px[6];
     uint32_t               unit_frac_set;
+    int32_t                edit_tab;          /* RV-188: the Edit window's tab — adjust, effects, size, the edits */
+    int32_t                edit_tab_hover;    /* a tab bar's part under the pointer, -1 none */
     size_t                 px_edit_length[4];
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
@@ -1393,6 +1395,7 @@ enum {
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
     PANEL_STEP_FIRST = 1000,   /* the undo list's rows: PANEL_STEP_FIRST + how many steps are in force */
 };
+enum { EDIT_TAB_ADJUST = 0, EDIT_TAB_EFFECTS, EDIT_TAB_SIZE, EDIT_TAB_EDITS, EDIT_TABS };   /* RV-188 */
 #define PANEL_GMIC_ROWS 24   /* parameters shown; the rest run at their defaults */
 typedef struct gmic_list_job {
     HANDLE thread;

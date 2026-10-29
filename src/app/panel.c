@@ -608,6 +608,12 @@ rows:
             rubraview_pal_render_fill_rect(app->renderer, rule, COLOR_BOX_BORDER, 0.0);
             continue;
         }
+        if (row->kind == RUBRAVIEW_ROW_HEADING) {   /* RV-188: a section's name, in the headings' colour, a rule under it */
+            rubraview_pal_rect_t words = { r.x, r.y, r.width, r.height - 3.0 };
+            rubraview_pal_render_draw_text(app->renderer, rubraview_tr_u8(row->label), words, text_size * 1.02, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ r.x, r.y + r.height - 2.0, r.width, 1.0 }, 0x80E0B46Au, 0.0);
+            continue;
+        }
 
         rubraview_rect_t c = rubraview_panel_control_rect(panel, i);
 

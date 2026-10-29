@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.39.exe              the viewer, as built
-dist/rubraview-v1.39.39/                 the release bundle
-dist/rubraview-v1.39.39.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.40.exe              the viewer, as built
+dist/rubraview-v1.39.40/                 the release bundle
+dist/rubraview-v1.39.40.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -385,15 +385,22 @@ through its pages, and opens an `.ico` at its largest layer.
 `E` opens Edit, a window of its own beside the viewer, as the settings
 window is: everything that changes the picture is there, while the
 picture, the selection drawn on it and the preview stay in the viewer.
-Its layout follows its width: one column that scrolls on a narrow window,
-two on a middle one, three on a wide one (each column scrolls on its own).
+Its tabs say what you are doing: **Adjust** (where, light, colour, levels
+and the curve, blur and sharpness), **Effects** (effects, plug-ins, G'MIC,
+FFmpeg filters), **Size** (the area, cropping, resizing) and **Edits**
+(the list of edits, and doing them to many pictures). At the right of the
+tabs **Undo**, **Redo**, **Save a copy** and **Save** (over the original;
+it asks for a second press) are always there — on a narrow window as
+icons. In a tab each part has its name over it; the parts follow the
+width: one column that scrolls on a narrow window, two on a middle one,
+three on a wide one (each column scrolls on its own).
 Its size and place are kept while the program runs; its `X` or `Esc`
 closes Edit, and the viewer's keys work from it. Drag a slider and the
 picture follows; press a slider's name to type its value. The curve box
 shows the histogram behind the curve; its corner button (**RGB >**) picks
 which curve you edit.
 
-**An area first.** At the top left of the Edit window, **Choose an area
+**An area first.** At the top left of the Adjust and Effects tabs, and in Size, **Choose an area
 on the picture**: the pointer becomes a cross over the picture, and a
 drag there marks a part of it — a rectangle, or an ellipse (**Shape** in
 the selection's box), with a soft edge if you give it a **Feather**. Drag
